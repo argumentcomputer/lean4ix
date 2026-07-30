@@ -293,7 +293,13 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
     | .error e => throw <| .userError <| ← (e.toMessageData {}).toString
   let mut newConstants := {}
   for name in mod.constNames, ci in mod.constants do
-    newConstants := newConstants.insert name ci
+    -- Multi-part oleans can materialize the same auto-generated lemma
+    -- (`*.eq_1`, `*.congr_simp`, ...) in several modules' parts; a real
+    -- import dedups those realizations in `finalizeImport`, so the replay
+    -- must skip names the imported env already provides instead of
+    -- re-declaring them (and spuriously rejecting, e.g. on Std).
+    if (env.constants.find? name).isNone then
+      newConstants := newConstants.insert name ci
   let (n, env') ← replay { newConstants, verbose, compare, fuel } env
   -- Free the import closure's regions (the memory that scales with a
   -- multi-module run), but deliberately leak this module's own `parts`
