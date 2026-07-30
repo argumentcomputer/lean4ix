@@ -295,8 +295,14 @@ unsafe def replayFromImports (module : Name) (verbose := false) (compare := fals
   for name in mod.constNames, ci in mod.constants do
     newConstants := newConstants.insert name ci
   let (n, env') ← replay { newConstants, verbose, compare, fuel } env
+  -- Free the import closure's regions (the memory that scales with a
+  -- multi-module run), but deliberately leak this module's own `parts`
+  -- regions: `parts`, `mod`, and the replayed constants are ordinary RC'd
+  -- objects pointing into those mmapped regions, so freeing them here makes
+  -- the reference-count walk at scope exit read unmapped headers and
+  -- segfault (`lean_dec_ref_cold`). The leak is one module's olean parts,
+  -- bounded until process exit.
   (Environment.ofKernelEnv env').freeRegions
-  parts.forM fun (_, region) => region.free
   pure n
 
 unsafe def replayFromFresh (module : Name)
