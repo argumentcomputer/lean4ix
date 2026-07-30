@@ -156,7 +156,7 @@ def rule (ty : VInductiveType) (i : Nat) (c : VConstVal) : VDefEq :=
     Bs.map (VExpr.instL (VLevel.params' U 1))
   let fieldArgs := VExpr.bvarRevRange 0 m
   let recBase := VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
-    (.bvar (k+m) :: VExpr.bvarRevRange m k)
+    (VExpr.bvarRevRange m (k+1))
   let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1)) fieldArgs
   let ihs := rs.map fun j => recBase.app (.bvar (m-1-j))
   { uvars := U + 1

@@ -1,5 +1,6 @@
 import Lean4Lean.Theory.Inductive
 import Lean4Lean.Theory.Meta
+import Lean4Lean.Theory.Typing.InductiveLemmas
 
 /-! Adequacy fixtures for `VEnv.addInduct` (stage 1): run the generator on
 hand-written declarations and check the output against the real kernel's
@@ -77,3 +78,9 @@ example :
       uvars := 0
       type := vexpr(Type → Type)
       ctors := [] }]⟩ = none := rfl
+
+/-! ## The M1 axiom gate: `addInduct_WF` is proven without `sorry`. -/
+
+/-- info: 'Lean4Lean.VEnv.addInduct_WF' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms VEnv.addInduct_WF

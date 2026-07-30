@@ -43,7 +43,7 @@ my %expected = (
   # (VInductDecl.WF and VEnv.addInduct became real stage-1 definitions)
   "Lean4Lean/Verify/Typing/Expr.lean\0def TrProj"          => 1,
   # Tier P - blocked only on Tier S
-  "Lean4Lean/Theory/Typing/InductiveLemmas.lean\0addInduct_WF" => 1,
+  # (addInduct_WF proven for the stage-1 class, 2026-07-30)
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.weak'"      => 1,
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.weak'_inv"  => 1,
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.defeqDFC"   => 1,
