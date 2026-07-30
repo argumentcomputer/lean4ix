@@ -1,0 +1,11 @@
+name = "consumer"
+defaultTargets = ["consumer"]
+
+[[require]]
+name = "lean4lean"
+git = "https://github.com/digama0/lean4lean"
+rev = "master"
+
+[[lean_exe]]
+name = "consumer"
+root = "Main"

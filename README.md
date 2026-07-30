@@ -25,6 +25,33 @@ This builds all components but you can also build them separately:
 * `lake build Lean4Lean.Theory` contains the Lean metatheory and properties.
 * `lake build Lean4Lean.Verify` is the proof that the `Lean4Lean` implementation satisfies the `Lean4Lean.Theory` abstract specification.
 
+### Building with Nix
+
+Alternatively, if you use [Nix](https://nixos.org/) with flakes enabled, you can
+build the `lean4lean` CLI (including the Lean toolchain pinned by
+[lean-toolchain](lean-toolchain), via [lean4-nix](https://github.com/lenianiva/lean4-nix))
+with:
+
+```
+nix build .#
+```
+
+The wrapped binary in `./result/bin/lean4lean` (also `nix run .# -- <args>`)
+pins its own Lean sysroot and prepends this package's search path to
+`LEAN_PATH`, so it works standalone while still honoring the target project's
+paths under `lake env` (see below). Other outputs:
+
+* `nix build .#lake-dependency` builds the `Lean4Lean` library artifact
+  (oleans, `.export` files, static/shared libraries — no CLI or proofs) that
+  downstream Lake packages can consume via lean4-nix's
+  `depOverrideDeriv.lean4lean`.
+* `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
+  proof libraries (`checks.proofs`) and builds and runs a minimal downstream
+  consumer of the library artifact (`checks.downstream-consumer`).
+* `nix develop` provides a shell with the pinned `lean`/`lake` toolchain, and
+  the checked-in [.envrc](.envrc) loads it automatically for
+  [direnv](https://direnv.net/) users (run `direnv allow` once).
+
 ## Running
 
 After `lake build lean4lean`, the executable will be in `.lake/build/bin/lean4lean`. Because it requires some environment variables to be set for search paths which are provided by lake, you should evaluate it like `lake env .lake/build/bin/lean4lean`.
