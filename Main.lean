@@ -327,11 +327,23 @@ def getCurrentModule : IO Name := do
     -- TODO: should this be caught?
     pure .anonymous
   | some manifest =>
-    -- TODO: This assumes that the `package` and the default `lean_lib`
-    -- have the same name up to capitalisation.
+    -- The package name and its default `lean_lib` usually agree only up to
+    -- case (`batteries`/`Batteries`, `lean4lean`/`Lean4Lean`), and not
+    -- necessarily just in the first letter, so the caller matches this
+    -- name case-insensitively rather than guessing a capitalization here.
     -- Would be better to read the `.defaultTargets` from the
     -- `← getRootPackage` from `Lake`, but I can't make that work with the monads involved.
-    return manifest.name.capitalize
+    return manifest.name
+
+/-- Case-insensitively test whether `target` is `mod` itself or a namespace
+prefix of it. Used only for the module root inferred from the package name in
+`lake-manifest.json` (e.g. package `lean4lean` vs library `Lean4Lean`, which
+differ beyond capitalizing the first letter); explicit command-line targets
+keep exact matching. -/
+def isModulePrefixOfCI (target mod : Name) : Bool :=
+  let t := target.toString.toLower
+  let m := mod.toString.toLower
+  m == t || (t ++ ".").isPrefixOf m
 
 namespace Lean4Lean.FuelConfig
 
@@ -409,22 +421,24 @@ unsafe def main (args : List String) : IO UInt32 := do
       match fuel.applyFlag field value with
       | .ok f => fuel := f
       | .error e => throw <| IO.userError e
-  let targets ← do
+  let (targets, inferred) ← do
     match args with
-    | [] => pure [← getCurrentModule]
-    | args => args.mapM fun arg => do
-      let mod := arg.toName
-      if mod.isAnonymous then
-        throw <| IO.userError s!"Could not resolve module: {arg}"
-      else
-        pure mod
+    | [] => pure ([← getCurrentModule], true)
+    | args => do
+      let targets ← args.mapM fun arg => do
+        let mod := arg.toName
+        if mod.isAnonymous then
+          throw <| IO.userError s!"Could not resolve module: {arg}"
+        else
+          pure mod
+      pure (targets, false)
   let mut targetModules := []
   let sp ← searchPathRef.get
   for target in targets do
     let mut found := false
     for path in (← SearchPath.findAllWithExt sp "olean") do
       if let some m := (← searchModuleNameOfFileName path sp) then
-        if target.isPrefixOf m then
+        if if inferred then isModulePrefixOfCI target m else target.isPrefixOf m then
           targetModules := targetModules.insert m
           found := true
     if not found then
