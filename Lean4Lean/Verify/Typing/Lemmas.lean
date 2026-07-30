@@ -561,6 +561,60 @@ theorem TrProj.weakN (W : Ctx.LiftN n k Γ Γ')
     (H : TrProj Γ s i e e') : TrProj Γ' s i (e.liftN n k) (e'.liftN n k) := by
   simpa [VExpr.lift'_consN_skipN] using H.weak' <| Ctx.liftN_iff_lift'.1 W
 
+/-! ## Replaying closed metadata types -/
+
+variable (env : VEnv) (Us : List Name) in
+/-- The syntax-directed fragment used by kernel declaration types. Unlike
+`TrExprS`, this relation records only the representation translation; the
+typing premises are recovered from a well-formed Theory expression by
+`TrTypeExpr.to_trExprS`. Keeping the two concerns separate lets replay
+fixtures reuse the declaration's real `WF` proof instead of re-running a
+fragile type-synthesis tactic at every application and pi node. -/
+inductive TrTypeExpr : VLCtx → Expr → VExpr → Prop where
+  | bvar : Δ.find? (.inl i) = some (e, A) → TrTypeExpr Δ (.bvar i) e
+  | sort : VLevel.ofLevel Us u = some u' → TrTypeExpr Δ (.sort u) (.sort u')
+  | const :
+    env.constants c = some ci →
+    us.mapM (VLevel.ofLevel Us) = some us' →
+    us.length = ci.uvars →
+    TrTypeExpr Δ (.const c us) (.const c us')
+  | app : TrTypeExpr Δ f f' → TrTypeExpr Δ a a' →
+      TrTypeExpr Δ (.app f a) (.app f' a')
+  | forallE : TrTypeExpr Δ ty ty' →
+      TrTypeExpr ((none, .vlam ty') :: Δ) body body' →
+      TrTypeExpr Δ (.forallE name ty body bi) (.forallE ty' body')
+
+/-- Add the `TrExprS` typing premises to a structural metadata translation.
+The source grammar is deliberately restricted to the forms that can occur in
+the normalized types of constants emitted by the inductive compiler. -/
+theorem TrTypeExpr.to_trExprS
+    (H : TrTypeExpr env Us Δ e e')
+    (henv : env.Ordered)
+    (hΔ : OnCtx Δ.toCtx (env.IsType Us.length))
+    (hwf : e'.WF env Us.length Δ.toCtx) : TrExprS env Us Δ e e' := by
+  induction H with
+  | bvar h => exact .bvar h
+  | sort h => exact .sort h
+  | const h1 h2 h3 => exact .const h1 h2 h3
+  | app _ _ ihf iha =>
+    obtain ⟨A, B, htf, hta⟩ := hwf.app_inv henv hΔ
+    exact .app htf hta (ihf hΔ ⟨_, htf⟩) (iha hΔ ⟨_, hta⟩)
+  | forallE _ _ ihty ihbody =>
+    obtain ⟨_, hwf⟩ := hwf
+    obtain ⟨hty, hbody⟩ := VEnv.HasType.forallE_inv henv hwf
+    obtain ⟨u, hty⟩ := hty
+    obtain ⟨v, hbody⟩ := hbody
+    exact .forallE ⟨u, hty⟩ ⟨v, hbody⟩
+      (ihty hΔ ⟨_, hty⟩) (ihbody ⟨hΔ, ⟨u, hty⟩⟩ ⟨_, hbody⟩)
+
+/- `TrExprS` still contains the sorried `TrProj` branch, so even this
+projection-free fragment inherits that dependency through its result type. -/
+/--
+info: 'Lean4Lean.TrTypeExpr.to_trExprS' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrTypeExpr.to_trExprS
+
 variable! (henv : Ordered env) in
 theorem TrExprS.weakFV' (W : VLCtx.FVLift' Δ Δ' dk n k) (hΔ' : Δ'.WF env Us.length)
     (H : TrExprS env Us Δ e e') : TrExprS env Us Δ' e (e'.lift' (n.consN k)) := by

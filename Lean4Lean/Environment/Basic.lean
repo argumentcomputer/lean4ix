@@ -80,6 +80,32 @@ def empty (mainModule : Name) (trustLevel : UInt32 := 0) : Environment :=
       (importAllModules := #[])
       (moduleData := #[]))
 
+/-- A minimal kernel environment backed by an explicit constant map.
+
+This is used by verified staged checks (for example, while an inductive family
+has been inserted but its constructors have not). Such states are real kernel
+checking stages but are not importable modules, so they intentionally carry no
+extensions or module metadata. -/
+def ofConstants (mainModule : Name) (constants : ConstMap)
+    (quotInit := false) (trustLevel : UInt32 := 0) : Environment :=
+  Kernel.Environment.mk
+    (constants := constants)
+    (quotInit := quotInit)
+    (diagnostics := {})
+    (const2ModIdx := {})
+    (extensions := #[])
+    (irBaseExts := #[])
+    (header := EnvironmentHeader.mk
+      (mainModule := mainModule)
+      (trustLevel := trustLevel)
+      (isModule := false)
+      (imports := #[])
+      (regions := #[])
+      (modules := #[])
+      (moduleName2Idx := {})
+      (importAllModules := #[])
+      (moduleData := #[]))
+
 def throwAlreadyImported (s : ImportState) (const2ModIdx : Std.HashMap Name ModuleIdx)
     (modIdx : Nat) (cname : Name) : Except Exception α := do
   let modName := (moduleNames s)[modIdx]!

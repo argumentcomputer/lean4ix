@@ -40,10 +40,10 @@ my @exclude_prefixes = (
 
 my %expected = (
   # Tier S - missing specification
-  # (VInductDecl.WF and VEnv.addInduct became real stage-1 definitions)
+  # (VInductDecl.WF and VEnv.addInduct are real staged definitions)
   "Lean4Lean/Verify/Typing/Expr.lean\0def TrProj"          => 1,
   # Tier P - blocked only on Tier S
-  # (addInduct_WF proven for the stage-1 class, 2026-07-30)
+  # (addInduct_WF proven for the stage-3 direct-indexed class, 2026-07-30)
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.weak'"      => 1,
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.weak'_inv"  => 1,
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.defeqDFC"   => 1,

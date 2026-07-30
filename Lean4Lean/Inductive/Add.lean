@@ -37,6 +37,15 @@ structure Context where
   allowPrimitive : Bool
   fuel : FuelConfig := {}
 
+/-- Checker context represented by an inductive-add context. Candidate traces
+retain the latter so Verify can recover this exact former value. -/
+def Context.toTypeChecker (context : Context) : TypeChecker.Context where
+  env := context.env
+  lctx := context.lctx
+  safety := context.safety
+  lparams := context.lparams
+  fuel := context.fuel
+
 abbrev M := ReaderT Context <| Except Exception
 
 instance : MonadLocalNameGenerator M where
@@ -44,6 +53,11 @@ instance : MonadLocalNameGenerator M where
 
 instance (priority := low) : MonadLift TypeChecker.M M where
   monadLift x c := x.run c.env c.safety c.lctx c.lparams (fuel := c.fuel)
+
+@[simp] theorem liftTypeChecker_apply (x : TypeChecker.M α) (c : Context) :
+    (liftM x : M α) c =
+      x.run c.env c.safety c.lctx c.lparams (fuel := c.fuel) :=
+  rfl
 
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
@@ -233,6 +247,547 @@ def checkConstructors (indTypes : Array InductiveType)
         else if !isValidIndAppIdx stats t idx then
           throw <| .other s!"invalid return type for '{n}'"
       loop t 0 (← readThe Context).fuel.inductiveFuel
+
+/-- One observed WHNF node in the executable normalization-candidate pass.
+The complete `AddInductive.Context` is retained because Verify must replay the
+same environment, safety mode, local context, level parameters, transparency,
+and checker fuel before the observation acquires semantic authority. -/
+structure CandidateWhnfStep where
+  context : Context
+  source : Expr
+  result : Expr
+
+/-- Exact ordinary-checker execution represented by one retained step. -/
+def CandidateWhnfStep.Valid (step : CandidateWhnfStep) : Prop :=
+  TypeChecker.M.run step.context.env step.context.safety
+      step.context.lctx step.context.lparams step.context.fuel
+      (TypeChecker.whnf step.source) =
+    .ok step.result
+
+/-- The result of evaluating one WHNF step together with the equality that
+certifies the observation. -/
+structure CandidateWhnfObservation (context : Context) (source : Expr) where
+  result : Expr
+  valid : CandidateWhnfStep.Valid ⟨context, source, result⟩
+
+def observeCandidateWhnf (context : Context) (source : Expr) :
+    Except Exception (CandidateWhnfObservation context source) :=
+  match hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.whnf source) with
+  | .error err => .error err
+  | .ok result => .ok ⟨result, hrun⟩
+
+theorem observeCandidateWhnf_of_run
+    (context : Context) (source result : Expr)
+    (hrun : CandidateWhnfStep.Valid ⟨context, source, result⟩) :
+    observeCandidateWhnf context source = .ok ⟨result, hrun⟩ := by
+  change
+    TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.whnf source) =
+      .ok result at hrun
+  unfold observeCandidateWhnf
+  split
+  · simp_all
+  · rename_i observed hobserved
+    have : observed = result := by simp_all
+    subst observed
+    rfl
+
+/-- Recover the state-bearing recursive checker execution erased by
+`TypeChecker.M.run`. This is the exact `WhnfRun.run_eq` boundary used by
+Verify; no final state is guessed or chosen. -/
+theorem CandidateWhnfStep.innerRun
+    (step : CandidateWhnfStep) (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel + 1)
+    (hvalid : step.Valid) :
+    ∃ state : TypeChecker.State,
+      TypeChecker.Inner.whnf' step.source
+          (TypeChecker.Methods.withFuel recursionFuel)
+          step.context.toTypeChecker
+          ({} : TypeChecker.State) =
+        .ok (step.result, state) := by
+  unfold CandidateWhnfStep.Valid at hvalid
+  unfold TypeChecker.M.run TypeChecker.whnf TypeChecker.RecM.run at hvalid
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+    StateT.pure, Except.pure, Pure.pure,
+    StateT.run', Functor.map, Except.map] at hvalid
+  rw [hdepth] at hvalid
+  simp only [TypeChecker.Methods.withFuel,
+    TypeChecker.Inner.whnf] at hvalid
+  cases hinner :
+      TypeChecker.Inner.whnf' step.source
+        (TypeChecker.Methods.withFuel recursionFuel)
+        { env := step.context.env
+          lctx := step.context.lctx
+          safety := step.context.safety
+          lparams := step.context.lparams
+          fuel := step.context.fuel }
+        ({} : TypeChecker.State) with
+  | error err => simp [hinner] at hvalid
+  | ok pair =>
+    rcases pair with ⟨observed, state⟩
+    have : observed = step.result := by
+      simpa [hinner] using hvalid
+    subst observed
+    exact ⟨state, by
+      simpa [Context.toTypeChecker] using hinner⟩
+
+/-- One full, non-inference-only type-check observation retained by the
+candidate producer. -/
+structure CandidateCheckTypeStep where
+  context : Context
+  source : Expr
+  inferred : Expr
+
+def CandidateCheckTypeStep.Valid
+    (step : CandidateCheckTypeStep) : Prop :=
+  TypeChecker.M.run step.context.env step.context.safety
+      step.context.lctx step.context.lparams step.context.fuel
+      (TypeChecker.checkType step.source) =
+    .ok step.inferred
+
+structure CandidateCheckTypeObservation
+    (context : Context) (source : Expr) where
+  inferred : Expr
+  valid : CandidateCheckTypeStep.Valid ⟨context, source, inferred⟩
+
+def observeCandidateCheckType (context : Context) (source : Expr) :
+    Except Exception (CandidateCheckTypeObservation context source) :=
+  match hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.checkType source) with
+  | .error err => .error err
+  | .ok inferred => .ok ⟨inferred, hrun⟩
+
+theorem observeCandidateCheckType_of_run
+    (context : Context) (source inferred : Expr)
+    (hrun : CandidateCheckTypeStep.Valid
+      ⟨context, source, inferred⟩) :
+    observeCandidateCheckType context source =
+      .ok ⟨inferred, hrun⟩ := by
+  change
+    TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.checkType source) =
+      .ok inferred at hrun
+  unfold observeCandidateCheckType
+  split
+  · simp_all
+  · rename_i observed hobserved
+    have : observed = inferred := by simp_all
+    subst observed
+    rfl
+
+/-- Recover the state-bearing full-check execution erased by `M.run`. -/
+theorem CandidateCheckTypeStep.innerRun
+    (step : CandidateCheckTypeStep) (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel)
+    (hvalid : step.Valid) :
+    ∃ state : TypeChecker.State,
+      TypeChecker.Inner.inferType step.source false
+          (TypeChecker.Methods.withFuel recursionFuel)
+          step.context.toTypeChecker
+          ({} : TypeChecker.State) =
+        .ok (step.inferred, state) := by
+  unfold CandidateCheckTypeStep.Valid at hvalid
+  unfold TypeChecker.M.run TypeChecker.checkType
+    TypeChecker.RecM.run at hvalid
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+    StateT.pure, Except.pure, Pure.pure,
+    StateT.run', Functor.map, Except.map] at hvalid
+  rw [hdepth] at hvalid
+  cases hinner :
+      TypeChecker.Inner.inferType step.source false
+        (TypeChecker.Methods.withFuel recursionFuel)
+        { env := step.context.env
+          lctx := step.context.lctx
+          safety := step.context.safety
+          lparams := step.context.lparams
+          fuel := step.context.fuel }
+        ({} : TypeChecker.State) with
+  | error err => simp [hinner] at hvalid
+  | ok pair =>
+    rcases pair with ⟨observed, state⟩
+    have : observed = step.inferred := by
+      simpa [hinner] using hvalid
+    subst observed
+    exact ⟨state, by
+      simpa [Context.toTypeChecker] using hinner⟩
+
+/-- Source-indexed retained full-check execution. -/
+structure CandidateCheckTypeRun (source : Expr) where
+  step : CandidateCheckTypeStep
+  source_eq : step.source = source
+  valid : step.Valid
+
+def buildCandidateCheckType
+    (source : Expr) : M (CandidateCheckTypeRun source) := do
+  let context ← readThe Context
+  match observeCandidateCheckType context source with
+  | .error err => throw err
+  | .ok ⟨inferred, valid⟩ =>
+    return ⟨⟨context, source, inferred⟩, rfl, valid⟩
+
+/-- Source-indexed tree underlying one candidate expression.  The recursive
+indices are important: a Pi-domain trace can only describe the exposed raw
+domain, and its body trace can only describe the body instantiated with the
+exact fresh free variable retained by the parent node.  Thus positional
+provenance is enforced by the type rather than being an invariant of the
+producer alone. -/
+inductive CandidateExprTrace : Expr → Type where
+  | terminal (context : Context) (source inferred result : Expr)
+      (checked : CandidateCheckTypeStep.Valid
+        ⟨context, source, inferred⟩)
+      (valid : CandidateWhnfStep.Valid ⟨context, source, result⟩) :
+      CandidateExprTrace source
+  | forallE (context : Context) (source : Expr)
+      (inferred : Expr)
+      (name : Name) (domain body : Expr)
+      (binderInfo : BinderInfo) (arg : Expr)
+      (checked : CandidateCheckTypeStep.Valid
+        ⟨context, source, inferred⟩)
+      (valid : CandidateWhnfStep.Valid
+        ⟨context, source, .forallE name domain body binderInfo⟩)
+      (domainCandidate : CandidateExprTrace domain)
+      (bodyCandidate : CandidateExprTrace (body.instantiate1 arg)) :
+      CandidateExprTrace source
+
+namespace CandidateExprTrace
+
+/-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
+def view : CandidateExprTrace source → Expr
+  | .terminal _ _ _ result _ _ => result
+  | .forallE _ _ _ name _ _ binderInfo arg _ _ domain body =>
+    .forallE name domain.view (body.view.abstract #[arg]) binderInfo
+
+/-- Preorder list of all retained checker observations. -/
+def steps : CandidateExprTrace source → List CandidateWhnfStep
+  | .terminal context source _ result _ _ => [{ context, source, result }]
+  | .forallE context source _ name domain body binderInfo _ _ _
+      domainCandidate bodyCandidate =>
+    { context, source,
+      result := .forallE name domain body binderInfo } ::
+      domainCandidate.steps ++ bodyCandidate.steps
+
+/-- Preorder list of all retained full-check observations. -/
+def checkSteps : CandidateExprTrace source → List CandidateCheckTypeStep
+  | .terminal context source inferred _ _ _ =>
+    [{ context, source, inferred }]
+  | .forallE context source inferred _ _ _ _ _ _ _
+      domainCandidate bodyCandidate =>
+    { context, source, inferred } ::
+      domainCandidate.checkSteps ++ bodyCandidate.checkSteps
+
+/-- Every retained WHNF observation is an exact checker execution. -/
+def allValid : (candidate : CandidateExprTrace source) →
+    ∀ step ∈ candidate.steps, step.Valid
+  | .terminal context source _ result _ valid, step, h => by
+    simp only [steps, List.mem_singleton] at h
+    subst step
+    exact valid
+  | .forallE _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
+    simp only [steps, List.mem_cons, List.mem_append] at h
+    rcases h with (rfl | h) | h
+    · exact valid
+    · exact domain.allValid step h
+    · exact body.allValid step h
+
+/-- Every retained full-check observation is an exact checker execution. -/
+def allChecksValid : (candidate : CandidateExprTrace source) →
+    ∀ step ∈ candidate.checkSteps, step.Valid
+  | .terminal context source inferred _ checked _, step, h => by
+    simp only [checkSteps, List.mem_singleton] at h
+    subst step
+    exact checked
+  | .forallE _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
+    simp only [checkSteps, List.mem_cons, List.mem_append] at h
+    rcases h with (rfl | h) | h
+    · exact checked
+    · exact domain.allChecksValid step h
+    · exact body.allChecksValid step h
+
+end CandidateExprTrace
+
+/-- Source-indexed trace for one candidate expression. The tree records the
+full-check and WHNF observations at every inspected node and retains the exact
+positional split through Pi domains and instantiated bodies. Every node
+carries the exact checker-run equalities produced by
+`observeCandidateCheckType` and `observeCandidateWhnf`; Theory translation and
+semantic refinement are intentionally separate. -/
+structure CandidateExpr (source : Expr) where
+  trace : CandidateExprTrace source
+
+def CandidateExpr.view (candidate : CandidateExpr source) : Expr :=
+  candidate.trace.view
+
+def CandidateExpr.steps
+    (candidate : CandidateExpr source) : List CandidateWhnfStep :=
+  candidate.trace.steps
+
+def CandidateExpr.checkSteps
+    (candidate : CandidateExpr source) :
+    List CandidateCheckTypeStep :=
+  candidate.trace.checkSteps
+
+theorem CandidateExpr.step_valid
+    (candidate : CandidateExpr source)
+    (hstep : step ∈ candidate.steps) :
+    step.Valid :=
+  candidate.trace.allValid step hstep
+
+theorem CandidateExpr.checkStep_valid
+    (candidate : CandidateExpr source)
+    (hstep : step ∈ candidate.checkSteps) :
+    step.Valid :=
+  candidate.trace.allChecksValid step hstep
+
+/-- Normalize exactly the expression positions inspected by inductive
+analysis. Each node is fully checked and then exposed with the ordinary
+checker `whnf`; Pi domains and bodies are traversed under the same raw local
+declarations used by kernel checking. The recursion budget is the configured
+inductive fuel, while every checker run uses the configured
+transparency/fuel.
+
+The returned trace is only a candidate analysis view and operational
+provenance. It is not stored in the kernel environment and acquires semantic
+authority only after Verify reconstructs and refines every retained checker
+run. -/
+def buildCandidateExpr (e : Expr) : M (CandidateExpr e) := do
+  loop e (← readThe Context).fuel.inductiveFuel
+where
+  loop (e : Expr) : Nat → M (CandidateExpr e)
+    | 0 => throw .deepRecursion
+    | fuel + 1 => do
+      let context ← readThe Context
+      match observeCandidateCheckType context e with
+      | .error err => throw err
+      | .ok ⟨inferred, checked⟩ =>
+        match observeCandidateWhnf context e with
+        | .error err => throw err
+        | .ok ⟨view, valid⟩ =>
+          match view with
+          | .forallE name domain body binderInfo =>
+            let domainCandidate ← loop domain fuel
+            withLocalDecl name binderInfo
+                domain.consumeTypeAnnotations fun arg => do
+              let bodyCandidate ← loop (body.instantiate1 arg) fuel
+              return ⟨.forallE context e inferred name domain body
+                binderInfo arg checked valid
+                domainCandidate.trace bodyCandidate.trace⟩
+          | result =>
+            return ⟨.terminal context e inferred result checked valid⟩
+
+/-- Erase the operational trace and retain only the analysis expression. -/
+def normalizeCandidateExpr (e : Expr) : M Expr := do
+  return (← buildCandidateExpr e).view
+
+/-- A successful ordinary WHNF run to a non-Pi expression is exactly one
+terminal step of the candidate traversal. This exposes the operational seam
+used by Verify without duplicating the `ReaderT`/checker lift plumbing in
+every certificate. -/
+theorem buildCandidateExpr_of_whnf_nonForall
+    (context : Context) (e inferred view : Expr)
+    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hcheck :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.checkType e) =
+        .ok inferred)
+    (hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.whnf e) =
+        .ok view)
+    (hview : view.isForall = false) :
+    buildCandidateExpr e context =
+      .ok ⟨.terminal context e inferred view hcheck hrun⟩ := by
+  cases hf : context.fuel.inductiveFuel with
+  | zero => omega
+  | succ fuel =>
+    cases hresult :
+        TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.whnf e) with
+    | error err => simp [hresult] at hrun
+    | ok result =>
+      have : result = view := by simpa [hresult] using hrun
+      subst result
+      unfold buildCandidateExpr
+      unfold buildCandidateExpr.loop
+      simp [readThe, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, Pure.pure, Except.bind, Except.pure,
+        hf, observeCandidateCheckType_of_run context e inferred hcheck,
+        observeCandidateWhnf_of_run context e view hrun]
+      cases view <;>
+        simp_all [ReaderT.pure, Pure.pure, Except.pure, Expr.isForall]
+
+theorem normalizeCandidateExpr_of_whnf_nonForall
+    (context : Context) (e inferred view : Expr)
+    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hcheck :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.checkType e) =
+        .ok inferred)
+    (hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.whnf e) =
+        .ok view)
+    (hview : view.isForall = false) :
+    normalizeCandidateExpr e context = .ok view := by
+  simp [normalizeCandidateExpr, ReaderT.bind, Bind.bind,
+    ReaderT.pure, Pure.pure, Except.bind, Except.pure,
+    CandidateExpr.view, CandidateExprTrace.view,
+    buildCandidateExpr_of_whnf_nonForall context e inferred view
+      hfuel hcheck hrun hview]
+
+/-- A dependent list retains the exact source position of each candidate. -/
+inductive CandidateList {α : Type} (F : α → Type) : List α → Type
+  | nil : CandidateList F []
+  | cons : F a → CandidateList F as → CandidateList F (a :: as)
+
+namespace CandidateList
+
+def toList (f : (a : α) → F a → β) :
+    CandidateList F source → List β
+  | .nil => []
+  | .cons head tail => f _ head :: tail.toList f
+
+end CandidateList
+
+/-- Candidate for one constructor; its header is always taken from `source`. -/
+structure CandidateConstructor (source : Constructor) where
+  type : CandidateExpr source.type
+
+def CandidateConstructor.view
+    (candidate : CandidateConstructor source) : Constructor :=
+  { source with type := candidate.type.view }
+
+/-- Candidate for one family type, computed before raw family insertion. -/
+structure CandidateFamilyType (source : InductiveType) where
+  type : CandidateExpr source.type
+
+/-- Complete candidate for one family, with constructor traces computed only
+after raw family insertion. -/
+structure CandidateFamily (source : InductiveType) where
+  familyType : CandidateFamilyType source
+  constructors :
+    CandidateList CandidateConstructor source.ctors
+
+def CandidateFamily.view (candidate : CandidateFamily source) : InductiveType :=
+  { source with
+    type := candidate.familyType.type.view
+    ctors := candidate.constructors.toList fun _ ctor => ctor.view }
+
+def normalizeCandidateConstructor
+    (ctor : Constructor) : M (CandidateConstructor ctor) := do
+  return ⟨← buildCandidateExpr ctor.type⟩
+
+def normalizeCandidateFamilyType
+    (indType : InductiveType) : M (CandidateFamilyType indType) := do
+  return ⟨← buildCandidateExpr indType.type⟩
+
+def normalizeCandidateConstructorList :
+    (ctors : List Constructor) →
+      M (CandidateList CandidateConstructor ctors)
+  | [] => return .nil
+  | ctor :: ctors => do
+    return .cons (← normalizeCandidateConstructor ctor)
+      (← normalizeCandidateConstructorList ctors)
+
+def normalizeCandidateFamilyTypeList :
+    (types : List InductiveType) →
+      M (CandidateList CandidateFamilyType types)
+  | [] => return .nil
+  | indType :: types => do
+    return .cons (← normalizeCandidateFamilyType indType)
+      (← normalizeCandidateFamilyTypeList types)
+
+def normalizeCandidateFamilyList :
+    {types : List InductiveType} →
+      CandidateList CandidateFamilyType types →
+      M (CandidateList CandidateFamily types)
+  | [], .nil => return .nil
+  | indType :: _, .cons familyType tail => do
+    return .cons
+      { familyType,
+        constructors := ←
+          normalizeCandidateConstructorList indType.ctors }
+      (← normalizeCandidateFamilyList tail)
+
+/-- Shape-preserving output of the executable normalization-candidate pass.
+The dependent family/constructor lists prevent positional provenance from
+being silently reused for a different inductive request. Names, ordering, and
+record headers come from the indexed source; only expression payloads are
+reconstructed from candidate traces. -/
+structure NormalizationCandidate (source : List InductiveType) where
+  families : CandidateList CandidateFamily source
+
+def NormalizationCandidate.view
+    (candidate : NormalizationCandidate source) : List InductiveType :=
+  candidate.families.toList fun _ family => family.view
+
+/-- Run the generic one-pass candidate producer at the same two environments
+as kernel inductive checking: family types in the input environment, then
+constructor types after insertion of every raw family constant.
+
+This repeats the ordinary family/constructor validity checks so a candidate
+cannot be obtained from metadata already rejected at those stages. The Theory
+analyzer and Verify semantic certificate remain separate downstream gates. -/
+def buildNormalizationCandidate
+    (nparams : Nat) (types : List InductiveType)
+    (numNested : Nat) (isUnsafe : Bool) :
+    M (NormalizationCandidate types) := do
+  let indTypes := types.toArray
+  checkInductiveTypes nparams indTypes fun stats => do
+    let familyTypes ←
+      withReader (fun c : Context => { c with lctx := {} }) do
+        normalizeCandidateFamilyTypeList types
+    let familyEnv ←
+      declareInductiveTypes stats nparams indTypes numNested isUnsafe
+    withEnv familyEnv do
+      checkConstructors indTypes stats isUnsafe
+      return ⟨← normalizeCandidateFamilyList familyTypes⟩
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateExpr
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateCheckType' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateCheckType
+
+/--
+info: 'Lean4Lean.AddInductive.buildNormalizationCandidate' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildNormalizationCandidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExpr.step_valid
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExpr.checkStep_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExpr.checkStep_valid
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateWhnfStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateWhnfStep.innerRun
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateCheckTypeStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateCheckTypeStep.innerRun
 
 def declareConstructors (stats : InductiveStats)
     (indTypes : Array InductiveType) (isUnsafe : Bool) : M Environment :=

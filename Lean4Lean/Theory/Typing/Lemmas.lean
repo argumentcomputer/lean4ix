@@ -191,6 +191,39 @@ theorem addConst_self {env env' : VEnv} (h : env.addConst n ci = some env') :
     env'.constants n = some ci := by
   unfold addConst at h; split at h <;> cases h; simp
 
+/-- A successful insertion certifies that its name was fresh in the input
+environment. -/
+theorem addConst_fresh {env env' : VEnv} (h : env.addConst n ci = some env') :
+    env.constants n = none := by
+  unfold addConst at h
+  split at h <;> simp_all
+
+/-- Environment inclusion is preserved when the same fresh constant is
+inserted on both sides. This is the commuting square needed to replay a
+declaration after an unrelated prefix environment. -/
+theorem LE.addConst {env₁ env₂ env₁' env₂' : VEnv} (henv : env₁ ≤ env₂)
+    (h₁ : env₁.addConst n ci = some env₁')
+    (h₂ : env₂.addConst n ci = some env₂') : env₁' ≤ env₂' := by
+  unfold VEnv.addConst at h₁ h₂
+  split at h₁ <;> cases h₁
+  split at h₂ <;> cases h₂
+  exact {
+    constants := fun h => by
+      simp at h ⊢
+      split at h <;> split <;> simp_all
+      exact henv.constants h
+    defeqs := henv.defeqs }
+
+/-- Absence of a constant pulls back along environment growth. -/
+theorem LE.constants_none {env env' : VEnv} (henv : env ≤ env')
+    (h : env'.constants n = none) : env.constants n = none := by
+  cases h₀ : env.constants n with
+  | none => rfl
+  | some ci =>
+    have := henv.constants h₀
+    rw [h] at this
+    contradiction
+
 theorem addDefEq_le {env : VEnv} : env ≤ env.addDefEq df := ⟨id, .inr⟩
 
 theorem addDefEq_self {env : VEnv} : (env.addDefEq df).defeqs df := .inl rfl

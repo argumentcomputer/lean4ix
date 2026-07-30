@@ -9,6 +9,30 @@ theorem TrConstant.sf_mono (hsf : safety ≤ safety')
     (H : TrConstant safety' env ci ci') : TrConstant safety env ci ci' :=
   ⟨safety.le_trans hsf H.1, H.2⟩
 
+theorem TrConstVal.sf_mono (hsf : safety ≤ safety')
+    (H : TrConstVal safety' env ci ci') : TrConstVal safety env ci ci' :=
+  ⟨H.1.sf_mono hsf, H.2⟩
+
+theorem TrDefVal.sf_mono (hsf : safety ≤ safety')
+    (H : TrDefVal safety' env ci ci') : TrDefVal safety env ci ci' :=
+  ⟨H.1.sf_mono hsf, H.2⟩
+
+theorem TrEnv'.sf_mono (hsf : safety ≤ safety') :
+    TrEnv' safety' C Q env → TrEnv' safety C Q env
+  | .empty => .empty
+  | .axiom htr hfresh hwf hadd H =>
+    .axiom (htr.sf_mono hsf) hfresh hwf hadd (H.sf_mono hsf)
+  | .defn htr hfresh hwf hadd H =>
+    .defn (htr.sf_mono hsf) hfresh hwf hadd (H.sf_mono hsf)
+  | .opaque htr hfresh hwf hadd H =>
+    .opaque (htr.sf_mono hsf) hfresh hwf hadd (H.sf_mono hsf)
+  | .quot hready hadd H =>
+    .quot hready hadd (H.sf_mono hsf)
+  | .inductStaging hadd hwf H =>
+    .inductStaging hadd hwf (H.sf_mono hsf)
+  | .induct hadd H =>
+    .induct hadd (H.sf_mono hsf)
+
 theorem TrConstant.mono {env env' : VEnv} (henv : env ≤ env')
     (H : TrConstant safety env ci ci') : TrConstant safety env' ci ci' :=
   ⟨H.1, H.2.1, H.2.2.mono henv⟩
@@ -62,9 +86,84 @@ nonrec theorem Aligned.addQuot (H : AddQuot C₁ C₂ venv₁ venv₂)
   refine (addQuot1 <| addQuot1 <| addQuot1 <| addQuot1 ?_) _ _ wf H
   rintro _ _ h ⟨rfl, rfl⟩; exact h.defeq
 
-theorem Aligned.addInduct (H : AddInduct C₁ venv₁ decl C₂ venv₂) :
-    Aligned safety C₁ env₁ → Aligned safety C₂ env₂ :=
-  nomatch H
+theorem AddInductConstant.map_wf
+    (H : AddInductConstant kind C₁ env₁ ci C₂ env₂) (wf : C₁.WF) : C₂.WF := by
+  rw [H.map_add]
+  exact wf.insert _ _ H.map_fresh
+
+/-- An inductive metadata insertion cannot introduce a declaration body.
+Consequently, any value-bearing entry in the result map was already present
+in the input map. -/
+theorem AddInductConstant.old_of_value
+    (H : AddInductConstant kind C₁ env₁ ci' C₂ env₂) (wf : C₁.WF)
+    (hout : C₂.find? name = some ci) (hv : ci.value? = some v) :
+    C₁.find? name = some ci := by
+  rw [H.map_add, wf.find?_insert] at hout
+  split at hout
+  · cases hout
+    have hnone := InductConstantKind.Matches.value?_eq_none H.kind_eq
+    simp_all
+  · exact hout
+
+theorem AddInductConstants.map_wf :
+    AddInductConstants kind C₁ env₁ cis C₂ env₂ → C₁.WF → C₂.WF
+  | .nil, wf => wf
+  | .cons h hrest, wf => hrest.map_wf (h.map_wf wf)
+
+theorem AddInductConstants.old_of_value :
+    (H : AddInductConstants kind C₁ env₁ cis C₂ env₂) → C₁.WF →
+    C₂.find? name = some ci → ci.value? = some v → C₁.find? name = some ci
+  | .nil, _, hout, _ => hout
+  | .cons h hrest, wf, hout, hv =>
+    h.old_of_value wf (hrest.old_of_value (h.map_wf wf) hout hv) hv
+
+theorem AddInduct.map_wf (H : AddInduct C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) : C₂.WF := by
+  rcases H with ⟨H⟩
+  exact H.addRec.map_wf <| H.addCtors.map_wf <| H.addType.map_wf wf
+
+theorem AddInduct.old_of_value (H : AddInduct C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) (hout : C₂.find? name = some ci) (hv : ci.value? = some v) :
+    C₁.find? name = some ci := by
+  rcases H with ⟨H⟩
+  have wfType := H.addType.map_wf wf
+  have wfCtors := H.addCtors.map_wf wfType
+  exact H.addType.old_of_value wf
+    (H.addCtors.old_of_value wfType (H.addRec.old_of_value wfCtors hout hv) hv) hv
+
+theorem Aligned.addInductConstant
+    (wf : Aligned safety C₁ env₁)
+    (H : AddInductConstant kind C₁ env₁ ci C₂ env₂) : Aligned safety C₂ env₂ := by
+  rw [H.map_add]
+  exact wf.const H.map_fresh (H.tr.1.sf_mono DefinitionSafety.le_safe)
+    H.env_add H.tr.2
+
+theorem Aligned.addInductConstants :
+    AddInductConstants kind C₁ env₁ cis C₂ env₂ →
+      Aligned safety C₁ env₁ → Aligned safety C₂ env₂
+  | .nil, wf => wf
+  | .cons h hrest, wf =>
+    Aligned.addInductConstants hrest (wf.addInductConstant h)
+
+theorem Aligned.addDefEqFold : ∀ (dfs : List VDefEq),
+    Aligned safety C env → Aligned safety C (dfs.foldl VEnv.addDefEq env)
+  | [], wf => wf
+  | _ :: dfs, wf => addDefEqFold dfs wf.defeq
+
+theorem Aligned.addInduct (H : AddInduct C₁ env₁ decl C₂ env₂)
+    (wf : Aligned safety C₁ env₁) : Aligned safety C₂ env₂ := by
+  rcases H with ⟨H⟩
+  rw [← H.addRules.to_add]
+  have wfType := wf.addInductConstant H.addType
+  have wfCtors := wfType.addInductConstants H.addCtors
+  have wfRec := wfCtors.addInductConstant H.addRec
+  exact wfRec.addDefEqFold _
+
+/--
+info: 'Lean4Lean.Aligned.addInduct' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Aligned.addInduct
 
 theorem TrEnv'.aligned (H : TrEnv' safety C Q venv) : Aligned safety C venv := by
   induction H with
@@ -73,7 +172,14 @@ theorem TrEnv'.aligned (H : TrEnv' safety C Q venv) : Aligned safety C venv := b
   | «opaque» h1 h2 _ h _ ih => exact ih.const h2 h1.1.1 h rfl
   | defn h1 h2 _ h _ ih => exact (ih.const h2 h1.1.1 h rfl).defeq
   | quot _ h _ ih => exact ih.addQuot h
-  | induct _ h _ ih => exact ih.addInduct h
+  | inductStaging h _ _ ih => exact ih.addInductConstant h
+  | induct h _ ih => exact ih.addInduct h
+
+/--
+info: 'Lean4Lean.TrEnv'.aligned' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrEnv'.aligned
 
 theorem TrEnv'.map_wf (H : TrEnv' safety C Q venv) : C.WF := H.aligned.map_wf
 
@@ -169,7 +275,10 @@ theorem TrEnv'.of_value (H : TrEnv' safety C Q venv) (h : C.find? name = some ci
     obtain h | ⟨rfl, rfl⟩ := this wf.map_wf (ih _ _ wf' h5)
     · exact h
     · contradiction
-  | induct _ h1 H ih => cases h1
+  | inductStaging h1 _ H ih =>
+    exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
+  | induct h1 H ih =>
+    exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
 
 nonrec theorem TrEnv.of_value (H : TrEnv safety env venv) (h : env.find? name = some ci)
     (hs : safety ≤ ci.safety) (hv : ci.value? = some v) :

@@ -27,9 +27,9 @@ inductive VDecl.WF : VEnv → VDecl → VEnv → Prop where
     env.QuotReady →
     env.addQuot = some env' →
     VDecl.WF env .quot env'
-  | induct :
-    decl.WF env →
-    env.addInduct decl = some env' →
+  | induct {gen : decl.GenerationChecked} :
+    gen.WF env →
+    env.addInductGeneration gen = some env' →
     VDecl.WF env (.induct decl) env'
 
 inductive VEnv.WF' : List VDecl → VEnv → Prop where
@@ -37,3 +37,12 @@ inductive VEnv.WF' : List VDecl → VEnv → Prop where
   | decl {env} : VDecl.WF env d env' → env.WF' ds → env'.WF' (d::ds)
 
 def VEnv.WF (env : VEnv) : Prop := ∃ ds, VEnv.WF' ds env
+
+/- A normalized inductive history entry carries only the standard Theory
+logical baseline; in particular it cannot import Verify's implementation
+axioms into `VEnv.WF`. -/
+/--
+info: 'Lean4Lean.VDecl.WF.induct' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VDecl.WF.induct
