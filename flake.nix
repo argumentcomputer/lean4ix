@@ -17,8 +17,9 @@
     # Lean 4 & Lake
     lean4-nix.url = "github:lenianiva/lean4-nix";
 
-    # Helper: flake-parts for easier outputs
-    flake-parts.url = "github:hercules-ci/flake-parts";
+    # Helper: flake-parts for easier outputs; follows the copy lean4-nix
+    # already locks so the lock file carries a single flake-parts node
+    flake-parts.follows = "lean4-nix/flake-parts";
   };
 
   outputs = inputs @ {
