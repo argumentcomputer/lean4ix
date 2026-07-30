@@ -46,18 +46,42 @@ def VExpr.forallN : List VExpr → VExpr → VExpr
   | [], e => e
   | A :: As, e => .forallE A (forallN As e)
 
+/-- Insert `n` binders below a telescope at depth `k`: the entry at depth
+`j` within the telescope lifts by `n` at cutoff `k+j`. -/
+def VExpr.liftTelN (n : Nat) : List VExpr → Nat → List VExpr
+  | [], _ => []
+  | A :: As, k => A.liftN n k :: liftTelN n As (k+1)
+
+/-- The first `n` binder types of an iterated pi, outermost first. -/
+def VExpr.telN : Nat → VExpr → List VExpr
+  | 0, _ => []
+  | n+1, .forallE A rest => A :: telN n rest
+  | _+1, _ => []
+
+/-- Strip `n` binders from an iterated pi. -/
+def VExpr.dropN : Nat → VExpr → VExpr
+  | 0, e => e
+  | n+1, .forallE _ rest => dropN n rest
+  | _+1, e => e
+
 /-- The levels `[.param k, ..., .param (n+k-1)]`; `VLevel.params` shifted by `k`.
 The recursor universe list is the elimination level (`.param 0`) followed by
 the declaration's levels shifted by one, so declaration-world expressions
 enter the recursor's universe context via `instL (params' n 1)`. -/
 def VLevel.params' (n k : Nat) : List VLevel := (List.range n).map fun i => .param (i + k)
 
+/-- Well-formedness of a binder telescope over a context. -/
+def VEnv.OnTel (env : VEnv) (U : Nat) : List VExpr → List VExpr → Prop
+  | _, [] => True
+  | Γ, A :: As => env.IsType U Γ A ∧ OnTel env U (A :: Γ) As
+
 namespace VInductDecl
 
-/-- The result sort of an inductive type (stage 1 requires the type to be a
-literal sort: no indices, no parameters). -/
+variable (U : Nat) (T : Name) (np : Nat)
+
+/-- The result sort of an inductive type past its parameters. -/
 def sortLevel (ty : VInductiveType) : VLevel :=
-  match ty.type with
+  match VExpr.dropN np ty.type with
   | .sort l => l
   | _ => .zero
 
@@ -66,13 +90,17 @@ def ctorFields : VExpr → List VExpr
   | .forallE B rest => B :: ctorFields rest
   | _ => []
 
-variable (U : Nat) (T : Name)
+/-- The block type applied to its parameters, seen from `off` binders past
+the parameter telescope (declaration universes). -/
+def recApp (off : Nat) : VExpr :=
+  VExpr.appN (.const T (VLevel.params U)) (VExpr.bvarRevRange off np)
 
-/-- Positions of the directly recursive fields. -/
+/-- Positions of the directly recursive fields (`j` counts binders past the
+parameters). -/
 def recIdxs : List VExpr → (j : Nat := 0) → List Nat
   | [], _ => []
   | B :: Bs, j =>
-    if B = .const T (VLevel.params U) then j :: recIdxs Bs (j+1) else recIdxs Bs (j+1)
+    if B = recApp U T np j then j :: recIdxs Bs (j+1) else recIdxs Bs (j+1)
 
 /-- Induction-hypothesis binder types for the recursive field positions
 `rs`, at depth `p` past the `m` field binders (in context `[motive]`):
@@ -81,116 +109,144 @@ def ihsFrom (m : Nat) : List Nat → Nat → List VExpr
   | [], _ => []
   | j :: rs, p => .app (.bvar (m+p)) (.bvar (m-1-j+p)) :: ihsFrom m rs (p+1)
 
-/-- A stage-1 field is either a direct recursive occurrence (exactly the
-block's type constant at the identity levels) or a closed type not
-mentioning the block at all. This builds in strict positivity for the
-stage-1 class. -/
-def stage1Field (B : VExpr) : Bool :=
-  B == .const T (VLevel.params U) || (decide (B.ClosedN 0) && !B.hasConst T)
+/-- A stage-2 field is either a direct recursive occurrence (exactly the
+block's type constant applied to the parameters) or a type not mentioning
+the block at all. This builds in strict positivity for the stage-2 class. -/
+def stage2Field (j : Nat) (B : VExpr) : Bool :=
+  B == recApp U T np j || !B.hasConst T
 
-/-- Stage-1 constructor type: a non-dependent telescope of stage-1 fields
-ending in exactly the block's type constant. -/
-def stage1Ctor : VExpr → Bool
-  | .forallE B rest => stage1Field U T B && stage1Ctor rest
-  | e => e == .const T (VLevel.params U)
+/-- Stage-2 constructor type past the parameters: a telescope of stage-2
+fields ending in exactly the block's type constant applied to the
+parameters. -/
+def stage2Ctor : Nat → VExpr → Bool
+  | j, .forallE B rest => stage2Field U T np j B && stage2Ctor (j+1) rest
+  | j, e => e == recApp U T np j
 
-/-- The stage-1 restriction: a single non-indexed inductive type with no
-parameters, in a syntactically never-zero sort (so large elimination is
-unconditional), whose constructors take only closed non-recursive or
-directly recursive arguments. Later stages will widen this class; the
-public entry points (`WF`, `addInduct`) are guarded by it rather than
-sorried for the general case. -/
-def stage1 : VInductDecl → Bool
-  | ⟨U, 0, [ty]⟩ =>
+/-- The stage-2 restriction: a single non-indexed inductive type, in a
+syntactically never-zero sort (so large elimination is unconditional),
+whose constructors share the type's parameter telescope syntactically and
+whose fields are non-recursive types not mentioning the block, or direct
+recursive occurrences. Later stages will widen this class; the public
+entry points (`WF`, `addInduct`) are guarded by it rather than sorried for
+the general case. -/
+def stage2 : VInductDecl → Bool
+  | ⟨U, np, [ty]⟩ =>
     ty.uvars == U &&
-    (match ty.type with
+    (VExpr.telN np ty.type).length == np &&
+    (match VExpr.dropN np ty.type with
       | .sort l => decide (l.WF U) && l.isNeverZero
       | _ => false) &&
-    ty.ctors.all fun c => c.uvars == U && stage1Ctor U ty.name c.type
+    ty.ctors.all fun c => c.uvars == U &&
+      VExpr.telN np c.type == VExpr.telN np ty.type &&
+      stage2Ctor U ty.name np 0 (VExpr.dropN np c.type)
   | _ => false
 
-/-- `motive : T → Sort u` in the recursor's universe context. -/
+/-- The parameter telescope in the recursor's universe context. -/
+def paramsTel (ty : VInductiveType) : List VExpr :=
+  (VExpr.telN np ty.type).map (VExpr.instL (VLevel.params' U 1))
+
+/-- `recApp` in the recursor's universe context. -/
+def recApp' (off : Nat) : VExpr :=
+  VExpr.appN (.const T (VLevel.params' U 1)) (VExpr.bvarRevRange off np)
+
+/-- `motive : T params → Sort u`, in context `params`. -/
 def motiveType : VExpr :=
-  .forallE (.const T (VLevel.params' U 1)) (.sort (.param 0))
+  .forallE (recApp' U T np 0) (.sort (.param 0))
 
-/-- The minor premise for one constructor, in context `[motive]`:
-`∀ fields, ∀ ihs, motive (ctor fields)`, with one induction hypothesis per
-directly recursive field. Field types are closed, so they need no lifting;
-only the universe shift into the recursor context applies. -/
+/-- Constructor fields in the recursor's universe context (still at
+parameter depth, no motive shift). -/
+def ctorFieldsR (c : VConstVal) : List VExpr :=
+  (ctorFields (VExpr.dropN np c.type)).map (VExpr.instL (VLevel.params' U 1))
+
+/-- The minor premise for one constructor, in context `params ++ [motive]`:
+`∀ fields, ∀ ihs, motive (ctor params fields)`, with one induction
+hypothesis per directly recursive field. The fields shift by one for the
+interposed motive. -/
 def minorType (c : VConstVal) : VExpr :=
-  let Bs := ctorFields c.type
+  let Bs := ctorFieldsR U np c
   let m := Bs.length
-  let rs := recIdxs U T Bs
+  let rs := recIdxs U T np (ctorFields (VExpr.dropN np c.type))
   let r := rs.length
-  let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1)) (VExpr.bvarRevRange r m)
-  VExpr.forallN (Bs.map (VExpr.instL (VLevel.params' U 1)))
-    (VExpr.forallN (ihsFrom m rs 0) (.app (.bvar (m+r)) ctorApp))
+  VExpr.forallN (VExpr.liftTelN 1 Bs 0)
+    (VExpr.forallN (ihsFrom m rs 0)
+      (.app (.bvar (m+r))
+        (VExpr.appN (.const c.name (VLevel.params' U 1))
+          (VExpr.bvarRevRange (r+m+1) np ++ VExpr.bvarRevRange r m))))
 
-/-- Minor premise types in position: the `i`-th lives under `motive` and the
-previous `i` minors. -/
+/-- Minor premise types in position: the `i`-th lives under
+`params ++ motive` and the previous `i` minors. -/
 def minorTypes : List VConstVal → (i : Nat := 0) → List VExpr
   | [], _ => []
-  | c :: cs, i => VExpr.liftN i (minorType U T c) :: minorTypes cs (i+1)
+  | c :: cs, i => VExpr.liftN i (minorType U T np c) :: minorTypes cs (i+1)
 
 /-- The recursor type
-`∀ (motive : T → Sort u) (minors..) (t : T), motive t`. -/
+`∀ params, ∀ (motive : T params → Sort u) (minors..) (t : T params), motive t`. -/
 def recType (ty : VInductiveType) : VExpr :=
   let k := ty.ctors.length
-  .forallE (motiveType U T) <|
-    VExpr.forallN (minorTypes U T ty.ctors) <|
-      .forallE (.const T (VLevel.params' U 1)) (.app (.bvar (k+1)) (.bvar 0))
+  VExpr.forallN (paramsTel U np ty) <|
+    .forallE (motiveType U T np) <|
+      VExpr.forallN (minorTypes U T np ty.ctors) <|
+        .forallE (recApp' U T np (k+1)) (.app (.bvar (k+1)) (.bvar 0))
 
-def recConst (ty : VInductiveType) : VConstant := ⟨U + 1, recType U T ty⟩
+def recConst (ty : VInductiveType) : VConstant := ⟨U + 1, recType U T np ty⟩
 
 /-- The iota rule for the `i`-th constructor, as a closed defeq between
-lambda telescopes over `motive :: minors ++ fields` (the same shape as
-`quotDefEq`, and the same telescope the kernel's `RecursorRule.rhs` binds).
-The left body is the `SimplePattern.iota` spine: the recursor applied to
-`motive` and the minors, with a constructor-headed major. -/
+lambda telescopes over `params ++ motive :: minors ++ fields` (the same
+shape as `quotDefEq`, and the same telescope the kernel's
+`RecursorRule.rhs` binds). The left body is the `SimplePattern.iota`
+spine: the recursor applied to the parameters, motive and minors, with a
+constructor-headed major. -/
 def rule (ty : VInductiveType) (i : Nat) (c : VConstVal) : VDefEq :=
   let k := ty.ctors.length
-  let Bs := ctorFields c.type
+  let Bs := ctorFieldsR U np c
   let m := Bs.length
-  let rs := recIdxs U T Bs
-  let binders := motiveType U T :: minorTypes U T ty.ctors ++
-    Bs.map (VExpr.instL (VLevel.params' U 1))
-  let fieldArgs := VExpr.bvarRevRange 0 m
+  let rs := recIdxs U T np (ctorFields (VExpr.dropN np c.type))
+  let binders := paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors ++
+    VExpr.liftTelN (k+1) Bs 0
   let recBase := VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
-    (VExpr.bvarRevRange m (k+1))
-  let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1)) fieldArgs
+    (VExpr.bvarRevRange m (np+k+1))
+  let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1))
+    (VExpr.bvarRevRange (m+k+1) np ++ VExpr.bvarRevRange 0 m)
   let ihs := rs.map fun j => recBase.app (.bvar (m-1-j))
   { uvars := U + 1
     lhs := VExpr.lamN binders (recBase.app ctorApp)
-    rhs := VExpr.lamN binders (VExpr.appN (.bvar (k-1-i+m)) (fieldArgs ++ ihs))
+    rhs := VExpr.lamN binders
+      (VExpr.appN (.bvar (k-1-i+m)) (VExpr.bvarRevRange 0 m ++ ihs))
     type := VExpr.forallN binders (.app (.bvar (k+m)) ctorApp) }
 
 def rules (ty : VInductiveType) : List VDefEq :=
-  ty.ctors.zipIdx.map fun (c, i) => rule U T ty i c
+  ty.ctors.zipIdx.map fun (c, i) => rule U T np ty i c
 
-/-- Semantic well-formedness of one stage-1 constructor type over the
-pre-environment: each non-recursive field is a type whose universe is
-bounded by the block's result level (the kernel's
-`checkConstructors` universe condition). Recursive fields refer to the
-block constant, which is not yet in `env`, so they carry no side condition
-here; their typing is established inside `addInduct_WF` after the type
-constant is added. -/
-def ctorWF (env : VEnv) (l : VLevel) : VExpr → Prop
-  | .forallE B rest =>
-    (B = .const T (VLevel.params U) ∨
-      ∃ u, env.HasType U [] B (.sort u) ∧ u ≤ l) ∧ ctorWF env l rest
-  | _ => True
+/-- Semantic well-formedness of the stage-2 constructor fields over the
+pre-environment, in the growing context (parameters first): each
+non-recursive field is a type whose universe is bounded by the block's
+result level (the kernel's `checkConstructors` universe condition).
+Recursive fields refer to the block constant, which is not yet in `env`,
+so they carry no side condition here; their typing is established inside
+`addInduct_WF` after the type constant is added. -/
+def fieldsWF (env : VEnv) (l : VLevel) : List VExpr → Nat → List VExpr → Prop
+  | _, _, [] => True
+  | Γ, j, B :: Bs =>
+    (B = recApp U T np j ∨ ∃ u, env.HasType U Γ B (.sort u) ∧ u ≤ l) ∧
+    fieldsWF env l (B :: Γ) (j+1) Bs
 
 end VInductDecl
 
 def VInductDecl.WF (env : VEnv) (decl : VInductDecl) : Prop :=
-  decl.stage1 ∧
-  ∀ ty ∈ decl.types, ∀ c ∈ ty.ctors,
-    VInductDecl.ctorWF decl.uvars ty.name env (VInductDecl.sortLevel ty) c.type
+  decl.stage2 ∧
+  ∀ ty ∈ decl.types,
+    VEnv.OnTel env decl.uvars [] (VExpr.telN decl.nparams ty.type) ∧
+    ∀ c ∈ ty.ctors,
+      VInductDecl.fieldsWF decl.uvars ty.name decl.nparams env
+        (VInductDecl.sortLevel decl.nparams ty)
+        (VExpr.telN decl.nparams ty.type).reverse 0
+        (VInductDecl.ctorFields (VExpr.dropN decl.nparams c.type))
 
 def VEnv.addInduct (env : VEnv) (decl : VInductDecl) : Option VEnv := do
-  guard decl.stage1
+  guard decl.stage2
   let [ty] := decl.types | none
   let env ← env.addConst ty.name ty.toVConstant
   let env ← ty.ctors.foldlM (fun env c => env.addConst c.name c.toVConstant) env
-  let env ← env.addConst (.str ty.name "rec") (VInductDecl.recConst decl.uvars ty.name ty)
-  return (VInductDecl.rules decl.uvars ty.name ty).foldl VEnv.addDefEq env
+  let env ← env.addConst (.str ty.name "rec")
+    (VInductDecl.recConst decl.uvars ty.name decl.nparams ty)
+  return (VInductDecl.rules decl.uvars ty.name decl.nparams ty).foldl VEnv.addDefEq env

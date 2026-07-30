@@ -141,50 +141,97 @@ theorem liftN_forallN_closed : ∀ {As : List VExpr}, (∀ A ∈ As, A.ClosedN 0
       show k+1+As.length = k+(As.length+1) from by omega]
     rfl
 
+/-- Lifting through a dependent telescope. -/
+theorem liftN_forallN (n : Nat) : ∀ (tel : List VExpr) (X : VExpr) (k : Nat),
+    (forallN tel X).liftN n k = forallN (liftTelN n tel k) (X.liftN n (k + tel.length))
+  | [], _, _ => rfl
+  | A :: tel, X, k => by
+    show VExpr.forallE _ _ = VExpr.forallE _ _
+    rw [liftN_forallN n tel X (k+1),
+      show k+1+tel.length = k+(tel.length+1) from by omega]
+    rfl
+
+theorem liftTelN_length (n : Nat) : ∀ (tel : List VExpr) (k : Nat),
+    (liftTelN n tel k).length = tel.length
+  | [], _ => rfl
+  | _ :: tel, k => by simp [liftTelN, liftTelN_length n tel (k+1)]
+
+theorem liftTelN_liftTelN (a b : Nat) : ∀ (tel : List VExpr) (k : Nat),
+    liftTelN b (liftTelN a tel k) k = liftTelN (a+b) tel k
+  | [], _ => rfl
+  | A :: tel, k => by
+    show _ :: _ = _ :: _
+    rw [liftN'_liftN_hi, liftTelN_liftTelN a b tel (k+1)]
+
+theorem liftTelN_getElem? (n : Nat) : ∀ (tel : List VExpr) (k q : Nat),
+    (liftTelN n tel k)[q]? = tel[q]?.map fun A => A.liftN n (k+q)
+  | [], _, q => by simp [liftTelN]
+  | A :: tel, k, 0 => by simp [liftTelN]
+  | A :: tel, k, q+1 => by
+    simp only [liftTelN, List.getElem?_cons_succ]
+    rw [liftTelN_getElem? n tel (k+1) q, show k+1+q = k+(q+1) from by omega]
+
 end VExpr
 
 /-! ## Anatomy of the stage-1 predicate -/
 
 namespace VInductDecl
 
-theorem stage1Field_iff {U T B} : stage1Field U T B ↔
-    B = .const T (VLevel.params U) ∨ (B.ClosedN 0 ∧ B.hasConst T = false) := by
-  simp [stage1Field, Bool.or_eq_true, Bool.and_eq_true]
+theorem stage2Field_iff {U T np j B} : stage2Field U T np j B ↔
+    B = recApp U T np j ∨ B.hasConst T = false := by
+  simp [stage2Field, Bool.or_eq_true]
 
-theorem stage1Ctor_eq {U T} {e : VExpr} (h : stage1Ctor U T e) :
-    e = VExpr.forallN (ctorFields e) (.const T (VLevel.params U)) ∧
-    ∀ B ∈ ctorFields e, stage1Field U T B := by
-  induction e with
+theorem stage2Ctor_eq {U T np} : ∀ {j₀ : Nat} {e : VExpr}, stage2Ctor U T np j₀ e →
+    e = VExpr.forallN (ctorFields e) (recApp U T np (j₀ + (ctorFields e).length)) ∧
+    ∀ q B, (ctorFields e)[q]? = some B → stage2Field U T np (j₀ + q) B := by
+  intro j₀ e h
+  induction e generalizing j₀ with
   | forallE B rest _ ih =>
-    simp only [stage1Ctor, Bool.and_eq_true] at h
+    simp only [stage2Ctor, Bool.and_eq_true] at h
     have ⟨ih1, ih2⟩ := ih h.2
-    refine ⟨congrArg (VExpr.forallE B) ih1, ?_⟩
-    intro B' hB'
-    simp only [ctorFields] at hB'
-    rcases List.mem_cons.1 hB' with rfl | hB'
-    · exact h.1
-    · exact ih2 _ hB'
+    refine ⟨?_, ?_⟩
+    · show VExpr.forallE _ _ = VExpr.forallE _ _
+      conv => lhs; rw [ih1]
+      rw [show j₀+1+(ctorFields rest).length = j₀+((ctorFields rest).length+1) from by omega]
+      rfl
+    · intro q B' hB'
+      match q, hB' with
+      | 0, hB' =>
+        obtain rfl : B = B' := by simpa [ctorFields] using hB'
+        exact h.1
+      | q+1, hB' =>
+        have := ih2 q B' (by simpa [ctorFields] using hB')
+        rwa [show j₀+1+q = j₀+(q+1) from by omega] at this
+  | bvar i =>
+    simp only [stage2Ctor, beq_iff_eq] at h
+    exact ⟨h, fun q B h' => by simp [ctorFields] at h'⟩
+  | sort l =>
+    simp only [stage2Ctor, beq_iff_eq] at h
+    exact ⟨h, fun q B h' => by simp [ctorFields] at h'⟩
   | const c ls =>
-    simp only [stage1Ctor, beq_iff_eq, VExpr.const.injEq] at h
-    obtain ⟨rfl, rfl⟩ := h
-    exact ⟨rfl, by simp [ctorFields]⟩
-  | _ => simp [stage1Ctor] at h
+    simp only [stage2Ctor, beq_iff_eq] at h
+    exact ⟨h, fun q B h' => by simp [ctorFields] at h'⟩
+  | app f a _ _ =>
+    simp only [stage2Ctor, beq_iff_eq] at h
+    exact ⟨h, fun q B h' => by simp [ctorFields] at h'⟩
+  | lam A b _ _ =>
+    simp only [stage2Ctor, beq_iff_eq] at h
+    exact ⟨h, fun q B h' => by simp [ctorFields] at h'⟩
 
-/-- Unpack `stage1` for a declaration already known (from `addInduct`
+/-- Unpack `stage2` for a declaration already known (from `addInduct`
 success) to have a singleton type list. -/
-theorem stage1_anatomy {U np ty} (h : stage1 ⟨U, np, [ty]⟩) :
-    np = 0 ∧ ty.uvars = U ∧
-    (∃ l, ty.type = .sort l ∧ l.WF U ∧ l.isNeverZero) ∧
-    ∀ c ∈ ty.ctors, c.uvars = U ∧ stage1Ctor U ty.name c.type := by
-  cases np with
-  | succ np => exact Bool.noConfusion h
-  | zero =>
-    simp only [stage1, Bool.and_eq_true, beq_iff_eq, List.all_eq_true] at h
-    obtain ⟨⟨h1, h2⟩, h3⟩ := h
-    refine ⟨rfl, h1, ?_, fun c hc => by simpa using h3 c hc⟩
-    split at h2
-    · next l heq => exact ⟨l, heq, by simpa [Bool.and_eq_true] using h2⟩
-    · exact Bool.noConfusion h2
+theorem stage2_anatomy {U np ty} (h : stage2 ⟨U, np, [ty]⟩) :
+    ty.uvars = U ∧ (VExpr.telN np ty.type).length = np ∧
+    (∃ l, VExpr.dropN np ty.type = .sort l ∧ l.WF U ∧ l.isNeverZero) ∧
+    ∀ c ∈ ty.ctors, c.uvars = U ∧
+      VExpr.telN np c.type = VExpr.telN np ty.type ∧
+      stage2Ctor U ty.name np 0 (VExpr.dropN np c.type) := by
+  simp only [stage2, Bool.and_eq_true, beq_iff_eq, List.all_eq_true] at h
+  obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := h
+  refine ⟨h1, h2, ?_, fun c hc => by simpa [and_assoc] using h4 c hc⟩
+  split at h3
+  · next l heq => exact ⟨l, heq, by simpa [Bool.and_eq_true] using h3⟩
+  · exact Bool.noConfusion h3
 
 end VInductDecl
 
@@ -347,11 +394,6 @@ theorem isType_forallN_free {env : VEnv} {U : Nat} {As : List VExpr}
     exact fun Γ => (hAs _ (.head _) Γ).forallE
       (ih (fun A h => hAs _ (.tail _ h)) (A :: Γ))
 
-/-- Well-formedness of a binder telescope over a context. -/
-def OnTel (env : VEnv) (U : Nat) : List VExpr → List VExpr → Prop
-  | _, [] => True
-  | Γ, A :: As => env.IsType U Γ A ∧ OnTel env U (A :: Γ) As
-
 theorem HasType.lamN {env : VEnv} {U : Nat} : ∀ {As Γ body B},
     OnTel env U Γ As → env.HasType U (As.reverse ++ Γ) body B →
     env.HasType U Γ (VExpr.lamN As body) (VExpr.forallN As B)
@@ -378,6 +420,24 @@ theorem OnTel.append {env : VEnv} {U : Nat} : ∀ {As Bs Γ},
   | _ :: As, Bs, Γ, ⟨hA, h1⟩, h2 =>
     ⟨hA, OnTel.append h1 (by simpa [List.append_assoc] using h2)⟩
 
+/-- Weakening a telescope: inserting binders at depth `k` of the context
+shifts each entry at its own depth. -/
+theorem OnTel.weakN {env : VEnv} {U n : Nat} (henv : env.Ordered) :
+    ∀ {As Γ Γ' k}, Ctx.LiftN n k Γ Γ' → OnTel env U Γ As →
+    OnTel env U Γ' (VExpr.liftTelN n As k)
+  | [], _, _, _, _, _ => trivial
+  | _ :: As, _, _, _, W, ⟨hA, hT⟩ =>
+    ⟨hA.weakN henv W, OnTel.weakN henv W.succ hT⟩
+
+/-- Universe instantiation of a telescope. -/
+theorem OnTel.instL {env : VEnv} {U U' : Nat} {ls : List VLevel}
+    (hls : ∀ l ∈ ls, l.WF U') :
+    ∀ {As Γ}, OnTel env U Γ As →
+    OnTel env U' (Γ.map (VExpr.instL ls)) (As.map (VExpr.instL ls))
+  | [], _, _ => trivial
+  | _ :: As, Γ, ⟨hA, hT⟩ =>
+    ⟨hA.instL hls, by simpa using OnTel.instL hls (As := As) (Γ := _ :: Γ) hT⟩
+
 end VEnv
 
 /-! ## The induction-hypothesis telescope under lifting -/
@@ -390,8 +450,8 @@ def ihsR (m k : Nat) : List Nat → Nat → List VExpr
   | j :: rs, p => .app (.bvar (k + (m + p))) (.bvar (m-1-j+p)) :: ihsR m k rs (p+1)
 
 /-- Recursive-field positions are bounded by the field count. -/
-theorem recIdxs_lt {U : Nat} {T : Name} : ∀ {Bs : List VExpr} {j₀ : Nat},
-    ∀ j ∈ recIdxs U T Bs j₀, j < j₀ + Bs.length
+theorem recIdxs_lt {U : Nat} {T : Name} {np : Nat} : ∀ {Bs : List VExpr} {j₀ : Nat},
+    ∀ j ∈ recIdxs U T np Bs j₀, j < j₀ + Bs.length
   | B :: Bs, j₀, j, h => by
     unfold recIdxs at h
     split at h
@@ -446,13 +506,13 @@ theorem ihsFrom_length (m : Nat) : ∀ (rs : List Nat) (p : Nat),
   | [], _ => rfl
   | _ :: rs, p => by simp [ihsFrom, ihsFrom_length m rs (p+1)]
 
-theorem minorTypes_length (U : Nat) (T : Name) : ∀ (cs : List VConstVal) (i : Nat),
-    (minorTypes U T cs i).length = cs.length
+theorem minorTypes_length (U : Nat) (T : Name) (np : Nat) : ∀ (cs : List VConstVal) (i : Nat),
+    (minorTypes U T np cs i).length = cs.length
   | [], _ => rfl
-  | _ :: cs, i => by simp [minorTypes, minorTypes_length U T cs (i+1)]
+  | _ :: cs, i => by simp [minorTypes, minorTypes_length U T np cs (i+1)]
 
-theorem recIdxs_ge {U : Nat} {T : Name} : ∀ {Bs : List VExpr} {j₀ : Nat},
-    ∀ j ∈ recIdxs U T Bs j₀, j₀ ≤ j
+theorem recIdxs_ge {U : Nat} {T : Name} {np : Nat} : ∀ {Bs : List VExpr} {j₀ : Nat},
+    ∀ j ∈ recIdxs U T np Bs j₀, j₀ ≤ j
   | _ :: Bs, j₀, j, h => by
     unfold recIdxs at h
     split at h
@@ -461,9 +521,10 @@ theorem recIdxs_ge {U : Nat} {T : Name} : ∀ {Bs : List VExpr} {j₀ : Nat},
       · exact Nat.le_of_succ_le (recIdxs_ge _ h)
     · exact Nat.le_of_succ_le (recIdxs_ge _ h)
 
-/-- Recursive-field positions really hold the type constant. -/
-theorem recIdxs_getElem {U : Nat} {T : Name} : ∀ {Bs : List VExpr} {j₀ : Nat},
-    ∀ j ∈ recIdxs U T Bs j₀, Bs[j - j₀]? = some (.const T (VLevel.params U))
+/-- Recursive-field positions really hold the block type applied to the
+parameters at their depth. -/
+theorem recIdxs_getElem {U : Nat} {T : Name} {np : Nat} : ∀ {Bs : List VExpr} {j₀ : Nat},
+    ∀ j ∈ recIdxs U T np Bs j₀, Bs[j - j₀]? = some (recApp U T np j)
   | B :: Bs, j₀, j, h => by
     unfold recIdxs at h
     split at h
@@ -479,6 +540,52 @@ theorem recIdxs_getElem {U : Nat} {T : Name} : ∀ {Bs : List VExpr} {j₀ : Nat
       have h2 := recIdxs_getElem _ h
       rw [show j - j₀ = (j - (j₀+1)) + 1 from by omega]
       simpa using h2
+
+theorem bvarRevRange_liftN_ge : ∀ (m off n k : Nat), k ≤ off →
+    (VExpr.bvarRevRange off m).map (VExpr.liftN n · k) = VExpr.bvarRevRange (n + off) m
+  | 0, _, _, _, _ => rfl
+  | m+1, off, n, k, h => by
+    show VExpr.bvar _ :: _ = VExpr.bvar _ :: _
+    rw [bvarRevRange_liftN_ge m off n k h]
+    congr 2
+    show liftVar n (off + m) k = n + off + m
+    rw [liftVar_le (by omega)]; omega
+
+theorem bvarRevRange_instL : ∀ (m off : Nat) (ls : List VLevel),
+    (VExpr.bvarRevRange off m).map (VExpr.instL ls) = VExpr.bvarRevRange off m
+  | 0, _, _ => rfl
+  | m+1, off, ls => by
+    show _ :: _ = _ :: _
+    rw [bvarRevRange_instL m off ls]
+    rfl
+
+/-- The key normalization: lifting a parameter spine past `off` binders. -/
+theorem recApp'_liftN {U : Nat} {T : Name} {np : Nat} {n k off : Nat} (h : k ≤ off) :
+    (recApp' U T np off).liftN n k = recApp' U T np (n + off) := by
+  simp only [recApp', VExpr.liftN_appN]
+  rw [bvarRevRange_liftN_ge _ _ _ _ h]
+  rfl
+
+theorem recApp_liftN {U : Nat} {T : Name} {np : Nat} {n k off : Nat} (h : k ≤ off) :
+    (recApp U T np off).liftN n k = recApp U T np (n + off) := by
+  simp only [recApp, VExpr.liftN_appN]
+  rw [bvarRevRange_liftN_ge _ _ _ _ h]
+  rfl
+
+theorem recApp_instL {U : Nat} {T : Name} {np off : Nat} :
+    (recApp U T np off).instL (VLevel.params' U 1) = recApp' U T np off := by
+  simp only [recApp, recApp', VExpr.instL_appN]
+  rw [bvarRevRange_instL]
+  simp [VExpr.instL, VLevel.params_map_inst_params']
+
+theorem recApp'_congr {U : Nat} {T : Name} {np : Nat} {off off' : Nat}
+    (h : off = off') : recApp' U T np off = recApp' U T np off' := h ▸ rfl
+
+theorem _root_.Lean4Lean.VExpr.bvarRevRange_congr {off off' : Nat} (m : Nat)
+    (h : off = off') : VExpr.bvarRevRange off m = VExpr.bvarRevRange off' m := h ▸ rfl
+
+theorem _root_.Lean4Lean.VExpr.bvarRevRange_congr' {m m' : Nat} (off : Nat)
+    (h : m = m') : VExpr.bvarRevRange off m = VExpr.bvarRevRange off m' := h ▸ rfl
 
 theorem bvarRevRange_closedN : ∀ (m off k : Nat), off + m ≤ k →
     ∀ e ∈ VExpr.bvarRevRange off m, e.ClosedN k
@@ -524,102 +631,102 @@ theorem ihsFrom_closedN {m : Nat} : ∀ (rs : List Nat) (p : Nat) {X : VExpr} {k
         (X := X) (k := k)
         (by rw [show k+(p+1)+rs.length = k+p+(rs.length+1) from by omega]; exact hX)⟩
 
-theorem stage1Field_closed {U : Nat} {T : Name} {B : VExpr}
-    (h : stage1Field U T B) : B.ClosedN 0 := by
-  rcases stage1Field_iff.1 h with rfl | ⟨h, -⟩
-  · trivial
-  · exact h
+theorem stage2Field_recApp {U T np j B} (h : stage2Field U T np j B)
+    (hB : B.hasConst T = true) : B = recApp U T np j := by
+  rcases stage2Field_iff.1 h with rfl | h'
+  · rfl
+  · exact absurd hB (by simp [h'])
 
-theorem minorType_closedN1 {U : Nat} {T : Name} {c : VConstVal}
-    (h : stage1Ctor U T c.type) : (minorType U T c).ClosedN 1 := by
-  have hBs := (stage1Ctor_eq h).2
-  simp only [minorType]
-  refine VExpr.ClosedN.forallN_closed_binders (fun B hB => ?_) ?_
-  · obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-    exact (stage1Field_closed (hBs _ hB₀)).instL
-  · rw [List.length_map]
-    exact ihsFrom_closedN (m := (ctorFields c.type).length)
-      (recIdxs U T (ctorFields c.type)) 0
-      (X := .app (.bvar ((ctorFields c.type).length + (recIdxs U T (ctorFields c.type)).length))
-        (VExpr.appN (.const c.name (VLevel.params' U 1))
-          (VExpr.bvarRevRange (recIdxs U T (ctorFields c.type)).length
-            (ctorFields c.type).length)))
-      (k := 1 + (ctorFields c.type).length)
-      (by omega)
-      ⟨show _ < _ by omega,
-        VExpr.ClosedN.appN (f := .const c.name (VLevel.params' U 1)) trivial
-          (bvarRevRange_closedN _ _ _ (by omega))⟩
+end VInductDecl
 
-theorem minorTypes_closedN {U : Nat} {T : Name} : ∀ {cs : List VConstVal} {i : Nat},
-    (∀ c ∈ cs, (minorType U T c).ClosedN 1) →
-    ∀ {X : VExpr}, X.ClosedN (1 + i + cs.length) →
-    (VExpr.forallN (minorTypes U T cs i) X).ClosedN (1 + i)
-  | [], _, _, _, hX => hX
-  | _ :: cs, i, hcs, X, hX =>
-    ⟨(hcs _ (.head _)).liftN,
-      minorTypes_closedN (i := i+1) (fun c h => hcs _ (.tail _ h))
-        (X := X)
-        (by rw [show 1+(i+1)+cs.length = 1+i+(cs.length+1) from by omega]; exact hX)⟩
+namespace VExpr
 
-theorem motiveType_closedN {U : Nat} {T : Name} {k : Nat} :
-    (motiveType U T).ClosedN k := ⟨trivial, trivial⟩
+theorem forallN_telN_dropN : ∀ (n : Nat) (e : VExpr),
+    forallN (telN n e) (dropN n e) = e
+  | 0, _ => rfl
+  | n+1, .forallE A rest => congrArg (VExpr.forallE A) (forallN_telN_dropN n rest)
+  | _+1, .bvar _ | _+1, .sort _ | _+1, .const _ _ | _+1, .app _ _ | _+1, .lam _ _ => rfl
 
-theorem recType_closedN {U : Nat} {T : Name} {ty : VInductiveType}
-    (hcs : ∀ c ∈ ty.ctors, stage1Ctor U T c.type) : (recType U T ty).ClosedN 0 := by
-  refine ⟨motiveType_closedN, ?_⟩
-  apply minorTypes_closedN (fun c h => minorType_closedN1 (hcs c h))
-  exact ⟨trivial, show _ < _ by omega, show _ < _ by omega⟩
+end VExpr
 
-theorem minorTypes_getElem? {U : Nat} {T : Name} : ∀ (cs : List VConstVal) (i₀ q : Nat),
-    (minorTypes U T cs i₀)[q]? = cs[q]?.map fun c => VExpr.liftN (i₀+q) (minorType U T c)
+namespace VEnv
+
+theorem OnTel.mono {env env' : VEnv} {U : Nat} (henv : env ≤ env') :
+    ∀ {As Γ}, OnTel env U Γ As → OnTel env' U Γ As
+  | [], _, _ => trivial
+  | _ :: _, _, ⟨hA, hT⟩ => ⟨hA.mono henv, OnTel.mono henv hT⟩
+
+end VEnv
+
+namespace VInductDecl
+open VEnv
+
+theorem fieldsWF_mono {U : Nat} {T : Name} {np : Nat} {env env' : VEnv} {l : VLevel}
+    (henv : env ≤ env') : ∀ {Γ j Bs}, fieldsWF U T np env l Γ j Bs →
+    fieldsWF U T np env' l Γ j Bs
+  | _, _, [], _ => trivial
+  | _, _, _ :: _, ⟨hB, hT⟩ =>
+    ⟨hB.imp_right fun ⟨u, h, hu⟩ => ⟨u, h.mono henv, hu⟩, fieldsWF_mono henv hT⟩
+
+theorem minorTypes_getElem? {U : Nat} {T : Name} {np : Nat} :
+    ∀ (cs : List VConstVal) (i₀ q : Nat),
+    (minorTypes U T np cs i₀)[q]? = cs[q]?.map fun c => VExpr.liftN (i₀+q) (minorType U T np c)
   | [], _, q => by simp [minorTypes]
   | c :: cs, i₀, 0 => by simp [minorTypes]
   | c :: cs, i₀, q+1 => by
     simp only [minorTypes, List.getElem?_cons_succ]
     rw [minorTypes_getElem? cs (i₀+1) q, show i₀+1+q = i₀+(q+1) from by omega]
 
-/-- `ctorType_isType` without the `Stage1Env` bundle: only the parts
-available before the constructor has itself been added. -/
-theorem ctorType_isType' {env : VEnv} {U : Nat} {T : Name} {l : VLevel} {ct : VExpr}
-    (ord : env.Ordered) (hT : env.constants T = some ⟨U, .sort l⟩) (hl : l.WF U)
-    (hs1c : stage1Ctor U T ct)
-    (hfield : ∀ B ∈ ctorFields ct, B.ClosedN 0 → ∃ u, env.HasType U [] B (.sort u)) :
-    env.IsType U [] ct := by
-  have tconst : ∀ Γ, env.HasType U Γ (.const T (VLevel.params U)) (.sort l) := fun Γ => by
-    have := VEnv.HasType.const (Γ := Γ) hT VLevel.params_wf VLevel.params_length
-    simpa [VExpr.instL, VLevel.inst_id hl] using this
-  obtain ⟨he, hBs⟩ := stage1Ctor_eq hs1c
-  rw [he]
-  refine VEnv.isType_forallN_free (fun B hB Γ => ?_) (fun Γ => ⟨_, tconst Γ⟩) []
-  rcases stage1Field_iff.1 (hBs B hB) with rfl | ⟨hcl, -⟩
-  · exact ⟨_, tconst Γ⟩
-  · have ⟨u, h⟩ := hfield B hB hcl
-    exact ⟨_, h.weak0 ord⟩
+theorem recApp'_levelWF {U : Nat} {T : Name} {np off : Nat} :
+    (recApp' U T np off).LevelWF (U+1) :=
+  VExpr.LevelWF.appN (f := .const T (VLevel.params' U 1)) VLevel.params'_one_wf
+    (bvarRevRange_levelWF _ _)
 
-theorem motiveType_levelWF {U : Nat} {T : Name} : (motiveType U T).LevelWF (U+1) :=
-  ⟨VLevel.params'_one_wf, Nat.succ_pos U⟩
+theorem motiveType_levelWF {U : Nat} {T : Name} {np : Nat} :
+    (motiveType U T np).LevelWF (U+1) :=
+  ⟨recApp'_levelWF, Nat.succ_pos U⟩
 
-theorem minorType_levelWF {U : Nat} {T : Name} {c : VConstVal} :
-    (minorType U T c).LevelWF (U+1) := by
+theorem motiveType_liftN {U : Nat} {T : Name} {np n : Nat} :
+    (motiveType U T np).liftN n = .forallE (recApp' U T np n) (.sort (.param 0)) := by
+  show VExpr.forallE ((recApp' U T np 0).liftN n) _ = _
+  rw [recApp'_liftN (Nat.le_refl 0)]
+  rfl
+
+theorem liftTelN_levelWF {Uv n : Nat} : ∀ {tel : List VExpr} {k : Nat},
+    (∀ A ∈ tel, A.LevelWF Uv) → ∀ A ∈ VExpr.liftTelN n tel k, A.LevelWF Uv
+  | [], _, _, _, h => nomatch h
+  | _ :: tel, k, hAs, A', h => by
+    rcases List.mem_cons.1 h with rfl | h
+    · exact (hAs _ (.head _)).liftN
+    · exact liftTelN_levelWF (fun A h => hAs _ (.tail _ h)) A' h
+
+theorem minorType_levelWF {U : Nat} {T : Name} {np : Nat} {c : VConstVal} :
+    (minorType U T np c).LevelWF (U+1) := by
   simp only [minorType]
-  refine VExpr.LevelWF.forallN (fun B hB => ?_)
+  refine VExpr.LevelWF.forallN (liftTelN_levelWF fun B hB => ?_)
     (VExpr.LevelWF.forallN (ihsFrom_levelWF _ _) ⟨trivial, ?_⟩)
   · obtain ⟨B₀, _, rfl⟩ := List.mem_map.1 hB
     exact VExpr.LevelWF.instL VLevel.params'_one_wf
-  · exact VExpr.LevelWF.appN (f := .const c.name (VLevel.params' U 1))
-      VLevel.params'_one_wf (bvarRevRange_levelWF _ _)
+  · refine VExpr.LevelWF.appN (f := .const c.name (VLevel.params' U 1))
+      VLevel.params'_one_wf fun e h => ?_
+    rcases List.mem_append.1 h with h | h
+    · exact bvarRevRange_levelWF _ _ _ h
+    · exact bvarRevRange_levelWF _ _ _ h
 
-theorem minorTypes_levelWF {U : Nat} {T : Name} : ∀ (cs : List VConstVal) (i : Nat),
-    ∀ e ∈ minorTypes U T cs i, e.LevelWF (U+1)
+theorem minorTypes_levelWF {U : Nat} {T : Name} {np : Nat} :
+    ∀ (cs : List VConstVal) (i : Nat), ∀ e ∈ minorTypes U T np cs i, e.LevelWF (U+1)
   | _ :: cs, i, e, h => by
     rcases List.mem_cons.1 h with rfl | h
     · exact minorType_levelWF.liftN
     · exact minorTypes_levelWF cs (i+1) e h
 
-theorem recType_levelWF {U : Nat} {T : Name} {ty : VInductiveType} :
-    (recType U T ty).LevelWF (U+1) :=
-  ⟨motiveType_levelWF, VExpr.LevelWF.forallN (minorTypes_levelWF _ _)
-    ⟨VLevel.params'_one_wf, trivial, trivial⟩⟩
+theorem recType_levelWF {U : Nat} {T : Name} {np : Nat} {ty : VInductiveType} :
+    (recType U T np ty).LevelWF (U+1) := by
+  refine VExpr.LevelWF.forallN (fun A hA => ?_)
+    ⟨motiveType_levelWF, VExpr.LevelWF.forallN (minorTypes_levelWF _ _)
+      ⟨recApp'_levelWF, trivial, trivial⟩⟩
+  obtain ⟨A₀, _, rfl⟩ := List.mem_map.1 hA
+  exact VExpr.LevelWF.instL VLevel.params'_one_wf
 
 /-- Consume the induction-hypothesis telescope with well-typed values. -/
 theorem hasType_appN_ihs {env : VEnv} {U : Nat} {Γ : List VExpr} {m k : Nat}
@@ -639,285 +746,510 @@ theorem hasType_appN_ihs {env : VEnv} {U : Nat} {Γ : List VExpr} {m k : Nat}
       VExpr.inst_liftN1] at happ
     exact hasType_appN_ihs (rs := rs) (fun j h => hargs j (.tail _ h)) happ
 
-open VEnv
+theorem liftTelN_congr {a a' : Nat} (tel : List VExpr) (k : Nat) (h : a = a') :
+    VExpr.liftTelN a tel k = VExpr.liftTelN a' tel k := h ▸ rfl
 
-variable {env : VEnv} {U : Nat} {T : Name} {l : VLevel} {cs : List VConstVal}
+theorem ctorFieldsR_length {U np : Nat} {c : VConstVal} :
+    (ctorFieldsR U np c).length = (ctorFields (VExpr.dropN np c.type)).length :=
+  List.length_map ..
+
+theorem ctorFieldsR_getElem? {U np : Nat} {c : VConstVal} {q : Nat} :
+    (ctorFieldsR U np c)[q]? =
+    (ctorFields (VExpr.dropN np c.type))[q]?.map (VExpr.instL (VLevel.params' U 1)) :=
+  List.getElem?_map ..
+
+/-! ## The stage-2 environment invariant -/
 
 /-- Everything the piece-typing lemmas need about an environment that
-already contains the block's type constant and constructors. Holds of the
-intermediate environment of `addInduct` after those `addConst`s, and is
-monotone in the environment. -/
-structure Stage1Env (env : VEnv) (U : Nat) (T : Name) (l : VLevel) (cs : List VConstVal) : Prop where
+already contains the block's type constant and constructors. -/
+structure Stage2Env (env : VEnv) (U : Nat) (T : Name) (np : Nat) (l : VLevel)
+    (ty : VInductiveType) : Prop where
   ord : env.Ordered
   hl : l.WF U
-  hT : env.constants T = some ⟨U, .sort l⟩
-  hcs : ∀ c ∈ cs, env.constants c.name = some ⟨U, c.type⟩
-  hs1 : ∀ c ∈ cs, stage1Ctor U T c.type
-  hfield : ∀ c ∈ cs, ∀ B ∈ ctorFields c.type, B.ClosedN 0 →
-    ∃ u, env.HasType U [] B (.sort u)
+  hsort : VExpr.dropN np ty.type = .sort l
+  hlen : (VExpr.telN np ty.type).length = np
+  hT : env.constants T = some ⟨U, ty.type⟩
+  hcs : ∀ c ∈ ty.ctors, env.constants c.name = some ⟨U, c.type⟩
+  htel : ∀ c ∈ ty.ctors, VExpr.telN np c.type = VExpr.telN np ty.type
+  hs2 : ∀ c ∈ ty.ctors, stage2Ctor U T np 0 (VExpr.dropN np c.type)
+  hparams : OnTel env U [] (VExpr.telN np ty.type)
+  hfields : ∀ c ∈ ty.ctors, fieldsWF U T np env l
+    (VExpr.telN np ty.type).reverse 0 (ctorFields (VExpr.dropN np c.type))
 
-theorem Stage1Env.mono {env' : VEnv} (S : Stage1Env env U T l cs)
-    (henv : env ≤ env') (ord' : env'.Ordered) : Stage1Env env' U T l cs where
-  ord := ord'
-  hl := S.hl
-  hT := henv.constants S.hT
-  hcs := fun c hc => henv.constants (S.hcs c hc)
-  hs1 := S.hs1
-  hfield := fun c hc B hB hcl =>
-    let ⟨u, h⟩ := S.hfield c hc B hB hcl; ⟨u, h.mono henv⟩
-
-variable (S : Stage1Env env U T l cs)
+variable {env : VEnv} {U : Nat} {T : Name} {np : Nat} {l : VLevel} {ty : VInductiveType}
+  (S : Stage2Env env U T np l ty)
 include S
 
-/-- The type constant at the declaration's own universes. -/
-theorem Stage1Env.tconst_decl {Γ} :
-    env.HasType U Γ (.const T (VLevel.params U)) (.sort l) := by
-  have := HasType.const (Γ := Γ) S.hT VLevel.params_wf VLevel.params_length
-  simpa [VExpr.instL, VLevel.inst_id S.hl] using this
+theorem Stage2Env.mono {env' : VEnv} (henv : env ≤ env') (ord' : env'.Ordered) :
+    Stage2Env env' U T np l ty where
+  ord := ord'
+  hl := S.hl
+  hsort := S.hsort
+  hlen := S.hlen
+  hT := henv.constants S.hT
+  hcs := fun c hc => henv.constants (S.hcs c hc)
+  htel := S.htel
+  hs2 := S.hs2
+  hparams := S.hparams.mono henv
+  hfields := fun c hc => fieldsWF_mono henv (S.hfields c hc)
 
-/-- The type constant in the recursor's universe context. -/
-theorem Stage1Env.tconst {Γ} :
-    env.HasType (U+1) Γ (.const T (VLevel.params' U 1))
+/-- The type of the block constant is a type. -/
+theorem Stage2Env.tyType_isType : env.IsType U [] ty.type := by
+  rw [show ty.type = VExpr.forallN (VExpr.telN np ty.type) (.sort l) from by
+    conv => lhs; rw [← VExpr.forallN_telN_dropN np ty.type]
+    rw [S.hsort]]
+  exact IsType.forallN S.hparams ⟨_, HasType.sort S.hl⟩
+
+/-- The block constant at the declaration universes, in any context. -/
+theorem Stage2Env.tconst_decl {Γ} :
+    env.HasType U Γ (.const T (VLevel.params U)) ty.type :=
+  (HasType.const0 S.hT S.tyType_isType).weak0 S.ord
+
+/-- The type of the block constant, instantiated to the recursor universes. -/
+theorem Stage2Env.tyType_instL :
+    ty.type.instL (VLevel.params' U 1) =
+    VExpr.forallN (paramsTel U np ty) (.sort (l.inst (VLevel.params' U 1))) := by
+  conv => lhs; rw [← VExpr.forallN_telN_dropN np ty.type]
+  rw [S.hsort, VExpr.instL_forallN]
+  rfl
+
+/-- The block constant at the recursor universes, in any context. -/
+theorem Stage2Env.tconst {Γ} :
+    env.HasType (U+1) Γ (.const T (VLevel.params' U 1)) (ty.type.instL (VLevel.params' U 1)) := by
+  have := (S.tconst_decl (Γ := [])).instL (U' := U+1) VLevel.params'_one_wf
+  rw [show (VExpr.const T (VLevel.params U)).instL (VLevel.params' U 1) =
+    .const T (VLevel.params' U 1) from by
+      simp [VExpr.instL, VLevel.params_map_inst_params']] at this
+  exact this.weak0 S.ord
+
+/-- The parameter spine applied to the block constant is a sort, below any
+`Δ` on top of the parameter telescope (recursor universes). -/
+theorem Stage2Env.recApp'_hasType (Δ : List VExpr) :
+    env.HasType (U+1) (Δ ++ (paramsTel U np ty).reverse) (recApp' U T np Δ.length)
       (.sort (l.inst (VLevel.params' U 1))) := by
-  have := HasType.const (Γ := Γ) S.hT VLevel.params'_one_wf VLevel.params'_length
-  simpa [VExpr.instL] using this
+  have hcl : (VExpr.forallN (paramsTel U np ty)
+      (.sort (l.inst (VLevel.params' U 1)))).ClosedN 0 := by
+    rw [← S.tyType_instL]
+    exact (Ordered.closedC (ci := ⟨U, ty.type⟩) S.ord S.hT).instL
+  have hf : env.HasType (U+1) (Δ ++ (paramsTel U np ty).reverse ++ [])
+      (.const T (VLevel.params' U 1))
+      (VExpr.forallN (paramsTel U np ty) (.sort (l.inst (VLevel.params' U 1)))) := by
+    rw [← S.tyType_instL]; exact S.tconst
+  have := HasType.appN_selfSpine' (Δ := Δ) (Γ := []) hcl hf
+  rw [show (paramsTel U np ty).length = np from by
+    simp [paramsTel, List.length_map, S.hlen]] at this
+  simpa [List.append_nil] using this
 
-/-- Any stage-1 field, shifted into the recursor's universe context, is a
-type in any context. -/
-theorem Stage1Env.field_isType (hc : c ∈ cs) (hB : B ∈ ctorFields c.type) (Γ) :
-    env.IsType (U+1) Γ (B.instL (VLevel.params' U 1)) := by
-  rcases stage1Field_iff.1 ((stage1Ctor_eq (S.hs1 c hc)).2 B hB) with rfl | ⟨hcl, -⟩
-  · rw [show (VExpr.const T (VLevel.params U)).instL (VLevel.params' U 1) =
-      .const T (VLevel.params' U 1) by
-        simp [VExpr.instL, VLevel.params_map_inst_params']]
-    exact ⟨_, S.tconst⟩
-  · have ⟨u, h⟩ := S.hfield c hc B hB hcl
-    have := h.instL (U' := U+1) VLevel.params'_one_wf
-    exact ⟨_, (this.weak0 S.ord : env.HasType _ Γ _ _)⟩
+/-- The parameter spine at the declaration universes. -/
+theorem Stage2Env.recApp_hasType_decl (Δ : List VExpr) :
+    env.HasType U (Δ ++ (VExpr.telN np ty.type).reverse) (recApp U T np Δ.length)
+      (.sort l) := by
+  have hcl : (VExpr.forallN (VExpr.telN np ty.type) (.sort l)).ClosedN 0 := by
+    rw [show VExpr.forallN (VExpr.telN np ty.type) (.sort l) = ty.type from by
+      conv => rhs; rw [← VExpr.forallN_telN_dropN np ty.type]
+      rw [S.hsort]]
+    exact Ordered.closedC (ci := ⟨U, ty.type⟩) S.ord S.hT
+  have hf : env.HasType U (Δ ++ (VExpr.telN np ty.type).reverse ++ [])
+      (.const T (VLevel.params U))
+      (VExpr.forallN (VExpr.telN np ty.type) (.sort l)) := by
+    rw [show VExpr.forallN (VExpr.telN np ty.type) (.sort l) = ty.type from by
+      conv => rhs; rw [← VExpr.forallN_telN_dropN np ty.type]
+      rw [S.hsort]]
+    exact S.tconst_decl
+  have := HasType.appN_selfSpine' (Δ := Δ) (Γ := []) hcl hf
+  rw [S.hlen] at this
+  simpa [List.append_nil] using this
 
-/-- Any stage-1 field at the declaration's own universes is a type in any
-context. -/
-theorem Stage1Env.field_isType_decl (hc : c ∈ cs) (hB : B ∈ ctorFields c.type) (Γ) :
-    env.IsType U Γ B := by
-  rcases stage1Field_iff.1 ((stage1Ctor_eq (S.hs1 c hc)).2 B hB) with rfl | ⟨hcl, -⟩
-  · exact ⟨_, S.tconst_decl⟩
-  · have ⟨u, h⟩ := S.hfield c hc B hB hcl
-    exact ⟨_, h.weak0 S.ord⟩
+/-- Field telescopes are well-formed in context, at the declaration
+universes (recursive fields via the block constant, which is present). -/
+theorem Stage2Env.fieldsWF_onTel_decl :
+    ∀ (Bs : List VExpr) (Δd : List VExpr) (j : Nat), Δd.length = j →
+    fieldsWF U T np env l (Δd ++ (VExpr.telN np ty.type).reverse) j Bs →
+    OnTel env U (Δd ++ (VExpr.telN np ty.type).reverse) Bs
+  | [], _, _, _, _ => trivial
+  | B :: Bs, Δd, j, hΔ, ⟨hB, hT⟩ => by
+    refine ⟨?_, ?_⟩
+    · rcases hB with rfl | ⟨u, h, -⟩
+      · rw [← hΔ]
+        exact ⟨_, S.recApp_hasType_decl Δd⟩
+      · exact ⟨u, h⟩
+    · exact Stage2Env.fieldsWF_onTel_decl Bs (B :: Δd) (j+1) (by simp [hΔ]) hT
 
-/-- A constructor's declared type is well-formed over any stage-1
-environment containing the block head (used at its `addConst` step, where
-`cs` is the list of previously added constructors). -/
-theorem Stage1Env.ctorType_isType (hc : c ∈ cs) : env.IsType U [] c.type := by
-  obtain ⟨he, -⟩ := stage1Ctor_eq (S.hs1 c hc)
-  rw [he]
-  exact isType_forallN_free (fun B hB Γ => S.field_isType_decl hc hB Γ)
-    (fun Γ => ⟨_, S.tconst_decl⟩) []
+/-- Field telescopes are well-formed in context, at the recursor
+universes. -/
+theorem Stage2Env.fieldsWF_onTel :
+    ∀ (Bs : List VExpr) (Δd : List VExpr) (j : Nat), Δd.length = j →
+    fieldsWF U T np env l (Δd ++ (VExpr.telN np ty.type).reverse) j Bs →
+    OnTel env (U+1)
+      ((Δd ++ (VExpr.telN np ty.type).reverse).map (VExpr.instL (VLevel.params' U 1)))
+      (Bs.map (VExpr.instL (VLevel.params' U 1)))
+  | [], _, _, _, _ => trivial
+  | B :: Bs, Δd, j, hΔ, ⟨hB, hT⟩ => by
+    refine ⟨?_, ?_⟩
+    · rcases hB with rfl | ⟨u, h, -⟩
+      · rw [recApp_instL]
+        have := S.recApp'_hasType (Δd.map (VExpr.instL (VLevel.params' U 1)))
+        rw [show (Δd.map (VExpr.instL (VLevel.params' U 1))).length = j from by
+          simp [hΔ]] at this
+        exact ⟨_, by simpa [List.map_append, List.map_reverse, paramsTel] using this⟩
+      · exact ⟨_, h.instL VLevel.params'_one_wf⟩
+    · have := Stage2Env.fieldsWF_onTel Bs (B :: Δd) (j+1) (by simp [hΔ]) hT
+      simpa using this
 
-theorem Stage1Env.fields_closed (hc : c ∈ cs) :
-    ∀ B ∈ ctorFields c.type, B.ClosedN 0 :=
-  fun _ hB => stage1Field_closed ((stage1Ctor_eq (S.hs1 c hc)).2 _ hB)
+/-- The constructor's type, split at the parameters. -/
+theorem Stage2Env.ctorType_eq {c : VConstVal} (hc : c ∈ ty.ctors) :
+    c.type = VExpr.forallN (VExpr.telN np ty.type)
+      (VExpr.forallN (ctorFields (VExpr.dropN np c.type))
+        (recApp U T np (0 + (ctorFields (VExpr.dropN np c.type)).length))) := by
+  conv => lhs; rw [← VExpr.forallN_telN_dropN np c.type, S.htel c hc,
+    (stage2Ctor_eq (S.hs2 c hc)).1]
 
-/-- The constructor's type in the recursor's universe context. -/
-theorem Stage1Env.ctorType_instL (hc : c ∈ cs) :
+theorem Stage2Env.ctorType_instL {c : VConstVal} (hc : c ∈ ty.ctors) :
     c.type.instL (VLevel.params' U 1) =
-    VExpr.forallN ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-      (.const T (VLevel.params' U 1)) := by
-  conv => lhs; rw [(stage1Ctor_eq (S.hs1 c hc)).1]
-  rw [VExpr.instL_forallN]
-  simp [VExpr.instL, VLevel.params_map_inst_params']
+    VExpr.forallN (paramsTel U np ty)
+      (VExpr.forallN (ctorFieldsR U np c)
+        (recApp' U T np (0 + (ctorFields (VExpr.dropN np c.type)).length))) := by
+  conv => lhs; rw [S.ctorType_eq hc, VExpr.instL_forallN, VExpr.instL_forallN,
+    recApp_instL]
+  rfl
 
-theorem Stage1Env.ctorConst (hc : c ∈ cs) {Γ} :
+/-- A constructor's declared type is well-formed (declaration universes). -/
+theorem Stage2Env.ctorType_isType {c : VConstVal} (hc : c ∈ ty.ctors) :
+    env.IsType U [] c.type := by
+  rw [S.ctorType_eq hc]
+  refine IsType.forallN S.hparams ?_
+  simp only [List.append_nil]
+  refine IsType.forallN
+    (S.fieldsWF_onTel_decl _ [] 0 rfl (by simpa using S.hfields c hc)) ?_
+  have := S.recApp_hasType_decl
+    ((ctorFields (VExpr.dropN np c.type)).reverse)
+  rw [List.length_reverse] at this
+  exact ⟨_, by simpa using this⟩
+
+/-- The constructor constant at the recursor universes, any context. -/
+theorem Stage2Env.cConst {c : VConstVal} (hc : c ∈ ty.ctors) {Γ} :
     env.HasType (U+1) Γ (.const c.name (VLevel.params' U 1))
-      (VExpr.forallN ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-        (.const T (VLevel.params' U 1))) := by
-  have := HasType.const (Γ := Γ) (S.hcs c hc)
-    VLevel.params'_one_wf VLevel.params'_length
-  rwa [S.ctorType_instL hc] at this
+      (c.type.instL (VLevel.params' U 1)) := by
+  have h0 := HasType.const0 (S.hcs c hc) (S.ctorType_isType hc)
+  have := h0.instL (U' := U+1) VLevel.params'_one_wf
+  rw [show (VExpr.const c.name (VLevel.params U)).instL (VLevel.params' U 1) =
+    .const c.name (VLevel.params' U 1) from by
+      simp [VExpr.instL, VLevel.params_map_inst_params']] at this
+  exact this.weak0 S.ord
 
-theorem Stage1Env.motive_isType (Γ) : env.IsType (U+1) Γ (motiveType U T) :=
-  ⟨_, HasType.forallE S.tconst (HasType.sort (Nat.succ_pos U))⟩
+theorem Stage2Env.motive_isType :
+    env.IsType (U+1) (paramsTel U np ty).reverse (motiveType U T np) := by
+  have h1 := S.recApp'_hasType []
+  simp only [List.nil_append] at h1
+  exact ⟨_, HasType.forallE h1 (HasType.sort (Nat.succ_pos U))⟩
 
-/-- Well-formedness of the induction-hypothesis telescope, at any suffix
-of the recursive positions and any depth. -/
-theorem Stage1Env.ihs_onTel (hc : c ∈ cs) :
+/-- Well-formedness of the induction-hypothesis telescope of a minor
+premise, at any suffix of the recursive positions and any depth. -/
+theorem Stage2Env.ihs_onTel {c : VConstVal} :
     ∀ (rsSuf : List Nat),
-    (∀ j ∈ rsSuf, ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))[j]? =
-      some (.const T (VLevel.params' U 1))) →
+    (∀ j ∈ rsSuf, (ctorFields (VExpr.dropN np c.type))[j]? = some (recApp U T np j)) →
     ∀ (Δ : List VExpr) (p : Nat), Δ.length = p →
     OnTel env (U+1)
-      (Δ ++ ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse
-        ++ [motiveType U T])
-      (ihsFrom (ctorFields c.type).length rsSuf p)
+      (Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+        (motiveType U T np :: (paramsTel U np ty).reverse))
+      (ihsFrom (ctorFieldsR U np c).length rsSuf p)
   | [], _, _, _, _ => trivial
   | j :: rsSuf, hjs, Δ, p, hΔ => by
     have hj := hjs j (.head _)
-    have hjlt : j < (ctorFields c.type).length := by
+    have hjlt : j < (ctorFields (VExpr.dropN np c.type)).length := by
       have := (List.getElem?_eq_some_iff.1 hj).1
       simpa using this
     have hM := getElem?_stack3 Δ
-      ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse []
-      (motiveType U T)
-      (i := (ctorFields c.type).length + p)
-      (by simp only [hΔ, List.length_reverse, List.length_map]; omega)
+      ((VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse)
+      (paramsTel U np ty).reverse (motiveType U T np)
+      (i := (ctorFieldsR U np c).length + p)
+      (by simp only [hΔ, List.length_reverse, VExpr.liftTelN_length]; omega)
+    have hmlu := Lookup.of_getElem? hM
+    rw [motiveType_liftN] at hmlu
+    have hml : (ctorFieldsR U np c).length =
+        (ctorFields (VExpr.dropN np c.type)).length := ctorFieldsR_length
     have hF := getElem?_stack_mid Δ
-      ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse
-      [motiveType U T]
-      (i := (ctorFields c.type).length - 1 - j + p)
+      ((VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse)
+      (motiveType U T np :: (paramsTel U np ty).reverse)
+      (i := (ctorFieldsR U np c).length - 1 - j + p)
       (by rw [hΔ]; omega)
-      (by simp only [hΔ, List.length_reverse, List.length_map]; omega)
-    rw [show (ctorFields c.type).length - 1 - j + p - Δ.length =
-        (ctorFields c.type).length - 1 - j from by rw [hΔ]; omega,
-      List.getElem?_reverse (by simp only [List.length_map]; omega),
-      show ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).length - 1 -
-        ((ctorFields c.type).length - 1 - j) = j from by
-          simp only [List.length_map]; omega,
-      hj] at hF
-    refine ⟨⟨_, HasType.app
-      (.bvar (Lookup.of_getElem?_closed hM motiveType_closedN))
-      (.bvar (Lookup.of_getElem?_closed hF trivial))⟩, ?_⟩
-    exact Stage1Env.ihs_onTel hc rsSuf (fun j h => hjs j (.tail _ h)) (_ :: Δ) (p+1)
+      (by simp only [hΔ, List.length_reverse, VExpr.liftTelN_length]; omega)
+    rw [show (ctorFieldsR U np c).length - 1 - j + p - Δ.length =
+        (ctorFieldsR U np c).length - 1 - j from by rw [hΔ]; omega,
+      List.getElem?_reverse (by simp only [VExpr.liftTelN_length]; omega),
+      VExpr.liftTelN_length,
+      show (ctorFieldsR U np c).length - 1 -
+        ((ctorFieldsR U np c).length - 1 - j) = j from by omega,
+      VExpr.liftTelN_getElem?, ctorFieldsR_getElem?, hj] at hF
+    simp only [Option.map_some] at hF
+    have hflu := Lookup.of_getElem? hF
+    rw [show ((recApp U T np j).instL (VLevel.params' U 1)).liftN 1 (0+j) =
+        recApp' U T np (1+j) from by
+        rw [recApp_instL, recApp'_liftN (by omega)],
+      recApp'_liftN (Nat.zero_le _),
+      recApp'_congr (show (ctorFieldsR U np c).length - 1 - j + p + 1 + (1+j) =
+        (ctorFieldsR U np c).length + p + 1 from by omega)] at hflu
+    refine ⟨⟨_, HasType.app (.bvar hmlu) (.bvar hflu)⟩, ?_⟩
+    exact Stage2Env.ihs_onTel rsSuf (fun j h => hjs j (.tail _ h)) (_ :: Δ) (p+1)
       (by simp [hΔ])
 
-/-- The minor premise for a constructor is a type over `[motive]`. -/
-theorem Stage1Env.minor_isType (hc : c ∈ cs) :
-    env.IsType (U+1) [motiveType U T] (minorType U T c) := by
-  simp only [minorType]
-  refine IsType.forallN (onTel_of_free fun B hB Γ' => ?_) ?_
-  · obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-    exact S.field_isType hc hB₀ Γ'
-  · refine IsType.forallN
-      (S.ihs_onTel hc _ (fun j hj => ?_) [] 0 rfl) ?_
-    · have h0 := recIdxs_getElem _ hj
-      rw [Nat.sub_zero] at h0
-      rw [List.getElem?_map, h0]
-      simp [VExpr.instL, VLevel.params_map_inst_params']
-    · rw [← List.append_assoc]
-      refine ⟨_, HasType.app (.bvar (Lookup.of_getElem?_closed
-        (getElem?_stack3 _ _ [] _ (by
-          simp only [List.length_reverse, ihsFrom_length, List.length_map]; omega))
-        motiveType_closedN)) ?_⟩
-      have hcl : (VExpr.forallN
-          ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-          (.const T (VLevel.params' U 1))).ClosedN 0 :=
-        ClosedN.forallN_of_all
-          (fun B hB => by
-            obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-            exact (S.fields_closed hc _ hB₀).instL)
-          (B := .const T (VLevel.params' U 1)) trivial
-      have := HasType.appN_selfSpine'
-        (Δ := (ihsFrom (ctorFields c.type).length
-          (recIdxs U T (ctorFields c.type)) 0).reverse)
-        (Γ := [motiveType U T]) hcl (S.ctorConst hc)
-      simpa only [List.length_reverse, ihsFrom_length, List.length_map] using this
+/-- The constructor applied to the parameter and field variables, `off`
+binders past the fields (which sit `foff` binders past the motive), is the
+block type at the parameters. This is the two-step self-application:
+first the parameter spine, then the field spine. -/
+theorem Stage2Env.ctorAppMin_hasType {c : VConstVal} (hc : c ∈ ty.ctors)
+    (Δ : List VExpr) :
+    env.HasType (U+1)
+      (Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+        (motiveType U T np :: (paramsTel U np ty).reverse))
+      (VExpr.appN (.const c.name (VLevel.params' U 1))
+        (VExpr.bvarRevRange (Δ.length + (ctorFieldsR U np c).length + 1) np ++
+          VExpr.bvarRevRange Δ.length (ctorFieldsR U np c).length))
+      (recApp' U T np (Δ.length + (ctorFieldsR U np c).length + 1)) := by
+  have hml : (ctorFieldsR U np c).length =
+      (ctorFields (VExpr.dropN np c.type)).length := ctorFieldsR_length
+  have hml2 : (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
+      (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
+  have hcl : (c.type.instL (VLevel.params' U 1)).ClosedN 0 :=
+    (Ordered.closedC (ci := ⟨U, c.type⟩) S.ord (S.hcs c hc)).instL
+  -- step A: consume the parameter telescope
+  have hfA : env.HasType (U+1)
+      ((Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++ [motiveType U T np]) ++
+        (paramsTel U np ty).reverse ++ [])
+      (.const c.name (VLevel.params' U 1))
+      ((VExpr.forallN (paramsTel U np ty)
+        (VExpr.forallN (ctorFieldsR U np c)
+          (recApp' U T np (0 + (ctorFields (VExpr.dropN np c.type)).length)))).liftN
+        ((Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+          [motiveType U T np]).length + (paramsTel U np ty).length)) := by
+    rw [← S.ctorType_instL hc, hcl.liftN_eq (Nat.zero_le _)]
+    exact S.cConst hc
+  have hA := HasType.appN_selfSpine (env := env) (U := U+1) hfA
+  -- step B: consume the field telescope
+  rw [VExpr.liftN_forallN] at hA
+  have hBeq : VExpr.forallN
+      (VExpr.liftTelN ((Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+          [motiveType U T np]).length) (ctorFieldsR U np c) 0)
+      ((recApp' U T np (0 + (ctorFields (VExpr.dropN np c.type)).length)).liftN
+        ((Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+          [motiveType U T np]).length) (0 + (ctorFieldsR U np c).length)) =
+      (VExpr.forallN (VExpr.liftTelN 1 (ctorFieldsR U np c) 0)
+        (recApp' U T np ((ctorFieldsR U np c).length + 1))).liftN
+        (Δ.length + (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length) := by
+    rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
+      liftTelN_congr _ _ (show (1:Nat) + (Δ.length +
+        (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length) =
+        (Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+          [motiveType U T np]).length from by
+        simp only [List.length_append, List.length_reverse, VExpr.liftTelN_length,
+          List.length_singleton]
+        omega),
+      recApp'_liftN (by omega),
+      recApp'_liftN (by omega),
+      recApp'_congr (show (Δ ++ (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse ++
+          [motiveType U T np]).length + (0 + (ctorFields (VExpr.dropN np c.type)).length) =
+        Δ.length + (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length +
+          ((ctorFieldsR U np c).length + 1) from by
+        simp only [List.length_append, List.length_reverse, VExpr.liftTelN_length,
+          List.length_singleton]
+        omega)]
+  rw [hBeq] at hA
+  have hB := HasType.appN_selfSpine (env := env) (U := U+1)
+    (Δ := Δ) (Γ := motiveType U T np :: (paramsTel U np ty).reverse)
+    (As := VExpr.liftTelN 1 (ctorFieldsR U np c) 0)
+    (B := recApp' U T np ((ctorFieldsR U np c).length + 1))
+    (by simpa [List.append_assoc, List.append_nil] using hA)
+  rw [recApp'_liftN (Nat.zero_le _),
+    show (paramsTel U np ty).length = np from by
+      simp [paramsTel, List.length_map, S.hlen],
+    VExpr.bvarRevRange_congr np (show Δ.length +
+      ((VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length + 1) =
+      Δ.length + (ctorFieldsR U np c).length + 1 from by omega),
+    VExpr.liftTelN_length,
+    recApp'_congr (show Δ.length + ((ctorFieldsR U np c).length + 1) =
+      Δ.length + (ctorFieldsR U np c).length + 1 from by omega)] at hB
+  rw [show VExpr.appN (.const c.name (VLevel.params' U 1))
+      (VExpr.bvarRevRange (Δ.length + (ctorFieldsR U np c).length + 1) np ++
+        VExpr.bvarRevRange Δ.length (ctorFieldsR U np c).length) =
+    (VExpr.appN (.const c.name (VLevel.params' U 1))
+      (VExpr.bvarRevRange (Δ.length + (ctorFieldsR U np c).length + 1) np)).appN
+      (VExpr.bvarRevRange Δ.length (ctorFieldsR U np c).length) from
+    VExpr.appN_append ..]
+  exact hB
 
-/-- The minor premises, in position, are a telescope over `[motive]`. -/
-theorem Stage1Env.minorTypes_onTel :
-    ∀ (cs' : List VConstVal), (∀ c ∈ cs', c ∈ cs) →
+/-- The minor premise for a constructor is a type over
+`params ++ [motive]`. -/
+theorem Stage2Env.minor_isType {c : VConstVal} (hc : c ∈ ty.ctors) :
+    env.IsType (U+1) (motiveType U T np :: (paramsTel U np ty).reverse)
+      (minorType U T np c) := by
+  simp only [minorType]
+  refine IsType.forallN ?_ ?_
+  · have h0 := S.fieldsWF_onTel _ [] 0 rfl (by simpa using S.hfields c hc)
+    have h1 := h0.weakN S.ord (.zero [motiveType U T np])
+    simpa [List.map_reverse, paramsTel] using h1
+  · refine IsType.forallN (S.ihs_onTel _ (fun j hj => by
+      have h0 := recIdxs_getElem _ hj
+      rwa [Nat.sub_zero] at h0) [] 0 rfl) ?_
+    have hM := getElem?_rstack3 ((ihsFrom (ctorFieldsR U np c).length
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))) 0).reverse)
+      ((VExpr.liftTelN 1 (ctorFieldsR U np c) 0).reverse)
+      (motiveType U T np) (paramsTel U np ty).reverse
+      (i := (ctorFieldsR U np c).length +
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length)
+      (by simp only [List.length_reverse, ihsFrom_length, VExpr.liftTelN_length]; omega)
+    have hmlu := Lookup.of_getElem? hM
+    rw [motiveType_liftN] at hmlu
+    have hctor := S.ctorAppMin_hasType hc
+      ((ihsFrom (ctorFieldsR U np c).length
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))) 0).reverse)
+    rw [show ((ihsFrom (ctorFieldsR U np c).length
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))) 0).reverse).length =
+      (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length from by
+      simp [ihsFrom_length],
+      recApp'_congr (show (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+        (ctorFieldsR U np c).length + 1 =
+        (ctorFieldsR U np c).length +
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length + 1 from by
+        omega)] at hctor
+    exact ⟨_, HasType.app (.bvar hmlu) (by simpa [List.append_assoc] using hctor)⟩
+
+/-- The minor premises, in position, are a telescope over
+`params ++ [motive]`. -/
+theorem Stage2Env.minorTypes_onTel :
+    ∀ (cs' : List VConstVal), (∀ c ∈ cs', c ∈ ty.ctors) →
     ∀ (Δ : List VExpr) (i : Nat), Δ.length = i →
-    OnTel env (U+1) (Δ ++ [motiveType U T]) (minorTypes U T cs' i)
+    OnTel env (U+1) (Δ ++ (motiveType U T np :: (paramsTel U np ty).reverse))
+      (minorTypes U T np cs' i)
   | [], _, _, _, _ => trivial
   | c :: cs', hsub, Δ, i, hΔ =>
     ⟨by
       rw [← hΔ]
       exact (S.minor_isType (hsub c (.head _))).weakN S.ord (.zero Δ),
-    Stage1Env.minorTypes_onTel cs' (fun c h => hsub c (.tail _ h)) (_ :: Δ) (i+1)
+    Stage2Env.minorTypes_onTel cs' (fun c h => hsub c (.tail _ h)) (_ :: Δ) (i+1)
       (by simp [hΔ])⟩
 
-end VInductDecl
+/-- The generated recursor type is well-formed. -/
+theorem Stage2Env.recType_isType : env.IsType (U+1) [] (recType U T np ty) := by
+  have hP : OnTel env (U+1) [] (paramsTel U np ty) := by
+    have := S.hparams.instL (U' := U+1) VLevel.params'_one_wf
+    simpa [paramsTel] using this
+  refine IsType.forallN hP ?_
+  simp only [List.append_nil]
+  refine IsType.forallE S.motive_isType ?_
+  refine IsType.forallN
+    (by simpa using S.minorTypes_onTel ty.ctors (fun _ h => h) [] 0 rfl) ?_
+  have hmaj := S.recApp'_hasType
+    ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])
+  rw [show ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np]).length =
+    ty.ctors.length + 1 from by
+    simp [minorTypes_length]] at hmaj
+  refine IsType.forallE ⟨_, by simpa [List.append_assoc] using hmaj⟩ ?_
+  have hM := getElem?_rstack3 [recApp' U T np (ty.ctors.length + 1)]
+    (minorTypes U T np ty.ctors).reverse
+    (motiveType U T np) (paramsTel U np ty).reverse
+    (i := ty.ctors.length + 1)
+    (by simp only [List.length_singleton, List.length_reverse, minorTypes_length]; omega)
+  have hmlu := Lookup.of_getElem? (by
+    simpa only [List.singleton_append, List.append_assoc] using hM)
+  rw [motiveType_liftN] at hmlu
+  have harg : env.HasType (U+1)
+      (recApp' U T np (ty.ctors.length + 1) ::
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))
+      (.bvar 0) (recApp' U T np (ty.ctors.length + 1 + 1)) := by
+    have h0 : (recApp' U T np (ty.ctors.length + 1) ::
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))[0]? =
+        some (recApp' U T np (ty.ctors.length + 1)) := rfl
+    have hlu := Lookup.of_getElem? h0
+    rw [recApp'_liftN (Nat.zero_le _)] at hlu
+    exact .bvar (by
+      rwa [recApp'_congr (show (0:Nat) + 1 + (ty.ctors.length + 1) =
+        ty.ctors.length + 1 + 1 from by omega)] at hlu)
+  exact ⟨_, HasType.app (.bvar hmlu) harg⟩
 
-namespace VInductDecl
-open VEnv
-
-/-- The generated recursor type is well-formed once the block's type and
-constructors are present. -/
-theorem Stage1Env.recType_isType {env : VEnv} {U : Nat} {T : Name} {l : VLevel}
-    {ty : VInductiveType} (S : Stage1Env env U T l ty.ctors) :
-    env.IsType (U+1) [] (recType U T ty) := by
-  refine IsType.forallE (S.motive_isType []) ?_
-  refine IsType.forallN (S.minorTypes_onTel ty.ctors (fun c h => h) [] 0 rfl) ?_
-  refine IsType.forallE ⟨_, S.tconst⟩
-    ⟨_, HasType.app (.bvar (Lookup.of_getElem?_closed ?_ motiveType_closedN))
-      (.bvar (Lookup.of_getElem?_closed rfl trivial))⟩
-  show (VExpr.const T (VLevel.params' U 1) ::
-    ((minorTypes U T ty.ctors).reverse ++ ([] ++ [motiveType U T])))[ty.ctors.length + 1]? =
-    some (motiveType U T)
-  rw [List.getElem?_cons_succ]
-  exact getElem?_stack3 [] (minorTypes U T ty.ctors).reverse []
-    (motiveType U T)
-    (by simp only [List.length_reverse, minorTypes_length, List.length_nil]; omega)
-
-theorem Stage1Env.recConst_wf {env : VEnv} {U : Nat} {T : Name} {l : VLevel}
-    {ty : VInductiveType} (S : Stage1Env env U T l ty.ctors) :
-    (recConst U T ty).WF env :=
+theorem Stage2Env.recConst_wf : (recConst U T np ty).WF env :=
   S.recType_isType
-
-end VInductDecl
 
 /-! ## The iota rules -/
 
-namespace VInductDecl
-open VEnv
-
-variable {env : VEnv} {U : Nat} {T : Name} {l : VLevel} {ty : VInductiveType}
-  (S : Stage1Env env U T l ty.ctors)
-include S
+/-- The recursor type is closed, by well-formedness. -/
+theorem Stage2Env.recType_closedN : (recType U T np ty).ClosedN 0 := by
+  obtain ⟨u, h⟩ := S.recType_isType
+  exact VExpr.WF.closedN S.ord ⟨_, h⟩ trivial
 
 /-- The recursor constant at its own (identity) universe list. -/
-theorem Stage1Env.recConst_hasType
-    (hrec : env.constants (.str T "rec") = some (recConst U T ty)) {Γ} :
+theorem Stage2Env.recConst_hasType
+    (hrec : env.constants (.str T "rec") = some (recConst U T np ty)) {Γ} :
     env.HasType (U+1) Γ (.const (.str T "rec") (VLevel.params (U+1)))
-      (recType U T ty) := by
+      (recType U T np ty) := by
   have := HasType.const (Γ := Γ) hrec VLevel.params_wf VLevel.params_length
-  rw [show (recConst U T ty).uvars = U + 1 from rfl,
-    show (recConst U T ty).type = recType U T ty from rfl] at this
+  rw [show (recConst U T np ty).uvars = U + 1 from rfl,
+    show (recConst U T np ty).type = recType U T np ty from rfl] at this
   rwa [recType_levelWF.instL_id] at this
 
 /-- The recursor spine of an iota rule, applied to one major argument, in
 the rule's binder context. -/
-theorem Stage1Env.recApp_hasType
-    (hrec : env.constants (.str T "rec") = some (recConst U T ty))
-    {c : VConstVal} (hc : c ∈ ty.ctors) {a : VExpr}
+theorem Stage2Env.recApp_hasType {c : VConstVal}
+    (hrec : env.constants (.str T "rec") = some (recConst U T np ty)) {a : VExpr}
     (ha : env.HasType (U+1)
-      (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse ++
-        ((minorTypes U T ty.ctors).reverse ++ [motiveType U T])) a
-      (.const T (VLevel.params' U 1))) :
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse))) a
+      (recApp' U T np ((ctorFieldsR U np c).length + ty.ctors.length + 1))) :
     env.HasType (U+1)
-      (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse ++
-        ((minorTypes U T ty.ctors).reverse ++ [motiveType U T]))
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))
       ((VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
-        (VExpr.bvarRevRange (ctorFields c.type).length (ty.ctors.length + 1))).app a)
-      (.app (.bvar (ty.ctors.length + (ctorFields c.type).length)) a) := by
-  have hspine := HasType.appN_selfSpine (env := env) (U := U + 1)
-    (As := motiveType U T :: minorTypes U T ty.ctors)
-    (B := .forallE (.const T (VLevel.params' U 1))
-      (.app (.bvar (ty.ctors.length + 1)) (.bvar 0)))
-    (Δ := ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse)
-    (Γ := []) (f := .const (.str T "rec") (VLevel.params (U+1))) ?hf
-  case hf =>
-    rw [show VExpr.forallN (motiveType U T :: minorTypes U T ty.ctors)
-        (.forallE (.const T (VLevel.params' U 1))
-          (.app (.bvar (ty.ctors.length + 1)) (.bvar 0))) = recType U T ty from rfl,
-      (recType_closedN fun c h => S.hs1 c h).liftN_eq (Nat.zero_le _)]
+        (VExpr.bvarRevRange (ctorFieldsR U np c).length
+          (np + ty.ctors.length + 1))).app a)
+      (.app (.bvar (ty.ctors.length + (ctorFieldsR U np c).length)) a) := by
+  have hf : env.HasType (U+1)
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors).reverse ++ [])
+      (.const (.str T "rec") (VLevel.params (U+1)))
+      ((VExpr.forallN
+        (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors)
+        (.forallE (recApp' U T np (ty.ctors.length + 1))
+          (.app (.bvar (ty.ctors.length + 1)) (.bvar 0)))).liftN
+        (((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse).length +
+          (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors).length)) := by
+    rw [show VExpr.forallN
+        (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors)
+        (.forallE (recApp' U T np (ty.ctors.length + 1))
+          (.app (.bvar (ty.ctors.length + 1)) (.bvar 0))) = recType U T np ty from by
+      rw [VExpr.forallN_append]; rfl,
+      S.recType_closedN.liftN_eq (Nat.zero_le _)]
     exact S.recConst_hasType hrec
-  simp only [List.reverse_cons, List.append_nil, List.append_assoc, List.length_reverse,
-    List.length_map, List.length_cons, minorTypes_length] at hspine
-  rw [show (VExpr.forallE (.const T (VLevel.params' U 1))
-      (.app (.bvar (ty.ctors.length + 1)) (.bvar 0))).liftN (ctorFields c.type).length =
-    .forallE (.const T (VLevel.params' U 1))
-      (.app (.bvar (ty.ctors.length + 1 + (ctorFields c.type).length)) (.bvar 0))
-    from ?hB] at hspine
+  have hspine := HasType.appN_selfSpine (env := env) (U := U+1) hf
+  simp only [List.reverse_append, List.reverse_cons, List.append_nil, List.append_assoc,
+    List.singleton_append, List.length_reverse, VExpr.liftTelN_length,
+    List.length_append, List.length_cons, minorTypes_length] at hspine
+  rw [show (paramsTel U np ty).length = np from by
+      simp [paramsTel, List.length_map, S.hlen],
+    VExpr.bvarRevRange_congr' _ (show np + (ty.ctors.length + 1) =
+      np + ty.ctors.length + 1 from by omega),
+    show (VExpr.forallE (recApp' U T np (ty.ctors.length + 1))
+      (.app (.bvar (ty.ctors.length + 1)) (.bvar 0))).liftN
+        (ctorFieldsR U np c).length =
+    .forallE (recApp' U T np ((ctorFieldsR U np c).length + ty.ctors.length + 1))
+      (.app (.bvar (ty.ctors.length + 1 + (ctorFieldsR U np c).length)) (.bvar 0)) from ?hB]
+    at hspine
   case hB =>
     show VExpr.forallE _ _ = _
     congr 1
-    show VExpr.app _ _ = _
-    congr 1
-    show VExpr.bvar (liftVar _ _ _) = _
-    rw [liftVar_le (by omega)]
-    congr 1; omega
+    · rw [recApp'_liftN (Nat.zero_le _)]
+      exact recApp'_congr (by omega)
+    · show VExpr.app _ _ = _
+      congr 1
+      show VExpr.bvar (liftVar _ _ _) = _
+      rw [liftVar_le (by omega)]
+      congr 1; omega
   have happ := HasType.app hspine ha
   rwa [show (VExpr.app
-      (.bvar (ty.ctors.length + 1 + (ctorFields c.type).length)) (.bvar 0)).inst a =
-    .app (.bvar (ty.ctors.length + (ctorFields c.type).length)) a from ?hinst] at happ
+      (.bvar (ty.ctors.length + 1 + (ctorFieldsR U np c).length)) (.bvar 0)).inst a =
+    .app (.bvar (ty.ctors.length + (ctorFieldsR U np c).length)) a from ?hinst] at happ
   case hinst =>
     show VExpr.app _ _ = _
     congr 1
@@ -927,202 +1259,392 @@ theorem Stage1Env.recApp_hasType
       congr 1; omega
     · exact VExpr.instVar_zero
 
-/-- The constructor-headed major, in the rule's binder context. -/
-theorem Stage1Env.ctorApp_hasType {c : VConstVal} (hc : c ∈ ty.ctors) :
+/-- The constructor-headed major of an iota rule, in the rule's binder
+context (parameter spine past the motive, minors and fields). -/
+theorem Stage2Env.ctorAppRule_hasType {c : VConstVal} (hc : c ∈ ty.ctors) :
     env.HasType (U+1)
-      (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse ++
-        ((minorTypes U T ty.ctors).reverse ++ [motiveType U T]))
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))
       (VExpr.appN (.const c.name (VLevel.params' U 1))
-        (VExpr.bvarRevRange 0 (ctorFields c.type).length))
-      (.const T (VLevel.params' U 1)) := by
-  have hcl : (VExpr.forallN ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-      (.const T (VLevel.params' U 1))).ClosedN 0 :=
-    ClosedN.forallN_of_all
-      (fun B hB => by
-        obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-        exact (S.fields_closed hc _ hB₀).instL)
-      (B := .const T (VLevel.params' U 1)) trivial
-  have := HasType.appN_selfSpine' (Δ := [])
-    (Γ := (minorTypes U T ty.ctors).reverse ++ [motiveType U T])
-    hcl (S.ctorConst hc)
-  simpa [List.length_map] using this
+        (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np ++
+          VExpr.bvarRevRange 0 (ctorFieldsR U np c).length))
+      (recApp' U T np ((ctorFieldsR U np c).length + ty.ctors.length + 1)) := by
+  have hml : (ctorFieldsR U np c).length =
+      (ctorFields (VExpr.dropN np c.type)).length := ctorFieldsR_length
+  have hml2 : (VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).length =
+      (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
+  have hcl : (c.type.instL (VLevel.params' U 1)).ClosedN 0 :=
+    (Ordered.closedC (ci := ⟨U, c.type⟩) S.ord (S.hcs c hc)).instL
+  have hfA : env.HasType (U+1)
+      (((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])) ++
+        (paramsTel U np ty).reverse ++ [])
+      (.const c.name (VLevel.params' U 1))
+      ((VExpr.forallN (paramsTel U np ty)
+        (VExpr.forallN (ctorFieldsR U np c)
+          (recApp' U T np (0 + (ctorFields (VExpr.dropN np c.type)).length)))).liftN
+        (((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+          ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])).length +
+          (paramsTel U np ty).length)) := by
+    rw [← S.ctorType_instL hc, hcl.liftN_eq (Nat.zero_le _)]
+    exact S.cConst hc
+  have hA := HasType.appN_selfSpine (env := env) (U := U+1) hfA
+  rw [VExpr.liftN_forallN] at hA
+  have hBeq : VExpr.forallN
+      (VExpr.liftTelN (((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+          ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])).length)
+        (ctorFieldsR U np c) 0)
+      ((recApp' U T np (0 + (ctorFields (VExpr.dropN np c.type)).length)).liftN
+        (((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+          ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])).length)
+        (0 + (ctorFieldsR U np c).length)) =
+      (VExpr.forallN (VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0)
+        (recApp' U T np ((ctorFieldsR U np c).length + (ty.ctors.length + 1)))).liftN
+        (ctorFieldsR U np c).length := by
+    rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
+      liftTelN_congr _ _ (show ty.ctors.length + 1 + (ctorFieldsR U np c).length =
+        ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+          ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])).length from by
+        simp only [List.length_append, List.length_reverse, VExpr.liftTelN_length,
+          List.length_singleton, minorTypes_length]
+        omega),
+      recApp'_liftN (by omega),
+      recApp'_liftN (by omega),
+      recApp'_congr (show ((VExpr.liftTelN (ty.ctors.length + 1)
+          (ctorFieldsR U np c) 0).reverse ++
+          ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np])).length +
+          (0 + (ctorFields (VExpr.dropN np c.type)).length) =
+        (ctorFieldsR U np c).length +
+          ((ctorFieldsR U np c).length + (ty.ctors.length + 1)) from by
+        simp only [List.length_append, List.length_reverse, VExpr.liftTelN_length,
+          List.length_singleton, minorTypes_length]
+        omega)]
+  rw [hBeq] at hA
+  have hB := HasType.appN_selfSpine (env := env) (U := U+1)
+    (Δ := []) (Γ := (minorTypes U T np ty.ctors).reverse ++
+      (motiveType U T np :: (paramsTel U np ty).reverse))
+    (As := VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0)
+    (B := recApp' U T np ((ctorFieldsR U np c).length + (ty.ctors.length + 1)))
+    (by simpa [List.append_assoc, List.append_nil, VExpr.liftTelN_length] using hA)
+  rw [recApp'_liftN (Nat.zero_le _)] at hB
+  have hB2 : env.HasType (U+1)
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))
+      ((VExpr.appN (.const c.name (VLevel.params' U 1))
+        (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np)).appN
+        (VExpr.bvarRevRange 0 (ctorFieldsR U np c).length))
+      (recApp' U T np ((ctorFieldsR U np c).length + ty.ctors.length + 1)) := by
+    have := hB
+    rw [show (paramsTel U np ty).length = np from by
+        simp [paramsTel, List.length_map, S.hlen],
+      VExpr.bvarRevRange_congr np (show (ctorFieldsR U np c).length +
+        ((minorTypes U T np ty.ctors).length + 1) =
+        (ctorFieldsR U np c).length + ty.ctors.length + 1 from by
+        simp only [minorTypes_length]; omega),
+      recApp'_congr (show List.length ([] : List VExpr) +
+          ((ctorFieldsR U np c).length + (ty.ctors.length + 1)) =
+        (ctorFieldsR U np c).length + ty.ctors.length + 1 from by
+        simp only [List.length_nil]; omega)] at this
+    simpa [VExpr.liftTelN_length] using this
+  rw [show VExpr.appN (.const c.name (VLevel.params' U 1))
+      (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np ++
+        VExpr.bvarRevRange 0 (ctorFieldsR U np c).length) =
+    (VExpr.appN (.const c.name (VLevel.params' U 1))
+      (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np)).appN
+      (VExpr.bvarRevRange 0 (ctorFieldsR U np c).length) from
+    VExpr.appN_append ..]
+  exact hB2
 
-theorem Stage1Env.ruleBinders_onTel {c : VConstVal} (hc : c ∈ ty.ctors) :
+theorem Stage2Env.ruleBinders_onTel {c : VConstVal} (hc : c ∈ ty.ctors) :
     OnTel env (U+1) []
-      (motiveType U T :: minorTypes U T ty.ctors ++
-        (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))) :=
-  ⟨S.motive_isType [], OnTel.append
-    (S.minorTypes_onTel ty.ctors (fun _ h => h) [] 0 rfl)
-    (onTel_of_free fun B hB Γ' => by
-      obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-      exact S.field_isType hc hB₀ Γ')⟩
+      (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors ++
+        VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0) := by
+  have hP : OnTel env (U+1) [] (paramsTel U np ty) := by
+    have := S.hparams.instL (U' := U+1) VLevel.params'_one_wf
+    simpa [paramsTel] using this
+  have hF : OnTel env (U+1)
+      ((minorTypes U T np ty.ctors).reverse ++
+        (motiveType U T np :: (paramsTel U np ty).reverse))
+      (VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0) := by
+    have h0 := S.fieldsWF_onTel _ [] 0 rfl (by simpa using S.hfields c hc)
+    have h1 := h0.weakN S.ord
+      (.zero ((minorTypes U T np ty.ctors).reverse ++ [motiveType U T np]))
+    rw [liftTelN_congr _ _ (show ((minorTypes U T np ty.ctors).reverse ++
+        [motiveType U T np]).length = ty.ctors.length + 1 from by
+      simp only [List.length_append, List.length_reverse, minorTypes_length,
+        List.length_singleton])] at h1
+    simpa [List.map_reverse, paramsTel, List.append_assoc] using h1
+  refine OnTel.append (OnTel.append hP ⟨?_, ?_⟩) ?_
+  · simpa only [List.append_nil] using S.motive_isType
+  · have := S.minorTypes_onTel ty.ctors (fun _ h => h) [] 0 rfl
+    simpa only [List.nil_append, List.append_nil] using this
+  · simpa only [List.append_nil, List.append_assoc, List.reverse_append,
+      List.reverse_cons, List.singleton_append] using hF
 
-theorem Stage1Env.ruleType_isType {i : Nat} {c : VConstVal}
+theorem Stage2Env.ruleType_isType {i : Nat} {c : VConstVal}
     (hci : ty.ctors[i]? = some c) :
-    env.IsType (U+1) [] ((rule U T ty i c).type) := by
+    env.IsType (U+1) [] ((rule U T np ty i c).type) := by
   have hc := List.mem_of_getElem? hci
   show env.IsType (U+1) [] (VExpr.forallN
-    (motiveType U T :: minorTypes U T ty.ctors ++
-      (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-    (.app (.bvar (ty.ctors.length + (ctorFields c.type).length))
+    (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors ++
+      VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0)
+    (.app (.bvar (ty.ctors.length + (ctorFieldsR U np c).length))
       (VExpr.appN (.const c.name (VLevel.params' U 1))
-        (VExpr.bvarRevRange 0 (ctorFields c.type).length))))
+        (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np ++
+          VExpr.bvarRevRange 0 (ctorFieldsR U np c).length))))
   refine IsType.forallN (S.ruleBinders_onTel hc) ?_
-  simp only [List.reverse_cons, List.reverse_append, List.append_nil, List.append_assoc]
-  refine ⟨_, HasType.app (.bvar (Lookup.of_getElem?_closed
-    (getElem?_rstack3 _ _ (motiveType U T) [] ?_) motiveType_closedN))
-    (S.ctorApp_hasType hc)⟩
-  simp only [List.length_reverse, List.length_map, minorTypes_length]
-  omega
+  simp only [List.reverse_append, List.reverse_cons, List.append_nil, List.append_assoc,
+    List.singleton_append]
+  have hM := getElem?_rstack3
+    ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse)
+    ((minorTypes U T np ty.ctors).reverse)
+    (motiveType U T np) (paramsTel U np ty).reverse
+    (i := ty.ctors.length + (ctorFieldsR U np c).length)
+    (by simp only [List.length_reverse, VExpr.liftTelN_length, minorTypes_length]; omega)
+  have hmlu := Lookup.of_getElem? hM
+  rw [motiveType_liftN] at hmlu
+  have hctor := S.ctorAppRule_hasType hc
+  rw [recApp'_congr (show (ctorFieldsR U np c).length + ty.ctors.length + 1 =
+    ty.ctors.length + (ctorFieldsR U np c).length + 1 from by omega)] at hctor
+  exact ⟨_, HasType.app (.bvar hmlu) hctor⟩
 
 /-- The right-hand side of an iota rule: the constructor's minor premise
 applied to the fields and the recursive calls, in the rule's binder
 context. -/
-theorem Stage1Env.minorApp_hasType {i : Nat} {c : VConstVal}
+theorem Stage2Env.minorApp_hasType {i : Nat} {c : VConstVal}
     (hci : ty.ctors[i]? = some c)
-    (hrec : env.constants (.str T "rec") = some (recConst U T ty)) :
+    (hrec : env.constants (.str T "rec") = some (recConst U T np ty)) :
     env.HasType (U+1)
-      (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse ++
-        ((minorTypes U T ty.ctors).reverse ++ [motiveType U T]))
-      (VExpr.appN (.bvar (ty.ctors.length - 1 - i + (ctorFields c.type).length))
-        (VExpr.bvarRevRange 0 (ctorFields c.type).length ++
-          (recIdxs U T (ctorFields c.type)).map fun j =>
+      ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+        ((minorTypes U T np ty.ctors).reverse ++
+          (motiveType U T np :: (paramsTel U np ty).reverse)))
+      (VExpr.appN (.bvar (ty.ctors.length - 1 - i + (ctorFieldsR U np c).length))
+        (VExpr.bvarRevRange 0 (ctorFieldsR U np c).length ++
+          (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).map fun j =>
             (VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
-              (VExpr.bvarRevRange (ctorFields c.type).length (ty.ctors.length + 1))).app
-              (.bvar ((ctorFields c.type).length - 1 - j))))
-      (.app (.bvar (ty.ctors.length + (ctorFields c.type).length))
+              (VExpr.bvarRevRange (ctorFieldsR U np c).length
+                (np + ty.ctors.length + 1))).app
+              (.bvar ((ctorFieldsR U np c).length - 1 - j))))
+      (.app (.bvar (ty.ctors.length + (ctorFieldsR U np c).length))
         (VExpr.appN (.const c.name (VLevel.params' U 1))
-          (VExpr.bvarRevRange 0 (ctorFields c.type).length))) := by
+          (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np ++
+            VExpr.bvarRevRange 0 (ctorFieldsR U np c).length))) := by
   obtain ⟨hik, -⟩ := List.getElem?_eq_some_iff.1 hci
   have hc := List.mem_of_getElem? hci
-  have hBs' : ∀ B ∈ (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)),
-      B.ClosedN 0 := fun B hB => by
-    obtain ⟨B₀, hB₀, rfl⟩ := List.mem_map.1 hB
-    exact (S.fields_closed hc _ hB₀).instL
+  have hml : (ctorFieldsR U np c).length =
+      (ctorFields (VExpr.dropN np c.type)).length := ctorFieldsR_length
+  have hml2 : (VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).length =
+      (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
   rw [VExpr.appN_append]
-  -- the minor premise variable, at its lifted type
-  have hlu0 : ((((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse ++
-      ((minorTypes U T ty.ctors).reverse ++ [motiveType U T])))[
-        ty.ctors.length - 1 - i + (ctorFields c.type).length]? =
-      some (VExpr.liftN i (minorType U T c)) := by
+  have hlu0 : ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+      ((minorTypes U T np ty.ctors).reverse ++
+        (motiveType U T np :: (paramsTel U np ty).reverse)))[
+      ty.ctors.length - 1 - i + (ctorFieldsR U np c).length]? =
+      some (VExpr.liftN i (minorType U T np c)) := by
     rw [getElem?_rstack_mid _ _ _
-        (by simp only [List.length_reverse, List.length_map]; omega)
-        (by simp only [List.length_reverse, List.length_map, minorTypes_length]; omega),
-      show ty.ctors.length - 1 - i + (ctorFields c.type).length -
-        (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).reverse).length =
+        (by simp only [List.length_reverse, VExpr.liftTelN_length]; omega)
+        (by simp only [List.length_reverse, VExpr.liftTelN_length, minorTypes_length]
+            omega),
+      show ty.ctors.length - 1 - i + (ctorFieldsR U np c).length -
+        ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse).length =
         ty.ctors.length - 1 - i from by
-          simp only [List.length_reverse, List.length_map]; omega,
+          simp only [List.length_reverse, VExpr.liftTelN_length]; omega,
       List.getElem?_reverse (by simp only [minorTypes_length]; omega),
-      show (minorTypes U T ty.ctors).length - 1 - (ty.ctors.length - 1 - i) = i from by
+      show (minorTypes U T np ty.ctors).length - 1 - (ty.ctors.length - 1 - i) = i from by
         simp only [minorTypes_length]; omega,
       minorTypes_getElem?, hci, Nat.zero_add]
     rfl
   have hlu := Lookup.of_getElem? hlu0
   rw [VExpr.liftN_liftN,
-    show i + (ty.ctors.length - 1 - i + (ctorFields c.type).length + 1) =
-      (ctorFields c.type).length + ty.ctors.length from by omega] at hlu
+    show i + (ty.ctors.length - 1 - i + (ctorFieldsR U np c).length + 1) =
+      (ctorFieldsR U np c).length + ty.ctors.length from by omega] at hlu
   -- phase 1: consume the field binders by self-application
-  have hminorEq : (minorType U T c).liftN
-      ((ctorFields c.type).length + ty.ctors.length) =
-      (VExpr.forallN ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-        ((VExpr.forallN
-          (ihsFrom (ctorFields c.type).length (recIdxs U T (ctorFields c.type)) 0)
-          (.app (.bvar ((ctorFields c.type).length +
-              (recIdxs U T (ctorFields c.type)).length))
+  have hminorEq : (minorType U T np c).liftN
+      ((ctorFieldsR U np c).length + ty.ctors.length) =
+      (VExpr.forallN (VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0)
+        ((VExpr.forallN (ihsFrom (ctorFieldsR U np c).length
+          (recIdxs U T np (ctorFields (VExpr.dropN np c.type))) 0)
+          (.app (.bvar ((ctorFieldsR U np c).length +
+              (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length))
             (VExpr.appN (.const c.name (VLevel.params' U 1))
-              (VExpr.bvarRevRange (recIdxs U T (ctorFields c.type)).length
-                (ctorFields c.type).length)))).liftN
-          ty.ctors.length (ctorFields c.type).length)).liftN
-        (ctorFields c.type).length := by
+              (VExpr.bvarRevRange
+                ((recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+                  (ctorFieldsR U np c).length + 1) np ++
+                VExpr.bvarRevRange
+                  (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length
+                  (ctorFieldsR U np c).length)))).liftN
+          ty.ctors.length (ctorFieldsR U np c).length)).liftN
+        (ctorFieldsR U np c).length := by
     simp only [minorType]
-    rw [VExpr.liftN_forallN_closed hBs', VExpr.liftN_forallN_closed hBs']
-    congr 1
-    rw [show (0:Nat) + ((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).length =
-      (ctorFields c.type).length from by simp [List.length_map],
+    conv => lhs; rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
+      liftTelN_congr _ _ (show (1:Nat) +
+        ((ctorFieldsR U np c).length + ty.ctors.length) =
+        ty.ctors.length + 1 + (ctorFieldsR U np c).length from by omega),
+      show (0:Nat) + (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
+        (ctorFieldsR U np c).length from by simp [VExpr.liftTelN_length]]
+    conv => rhs; rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
+      show (0:Nat) + (VExpr.liftTelN (ty.ctors.length + 1)
+        (ctorFieldsR U np c) 0).length =
+        (ctorFieldsR U np c).length from by simp [VExpr.liftTelN_length],
       VExpr.liftN'_liftN_hi,
-      Nat.add_comm ty.ctors.length (ctorFields c.type).length]
+      Nat.add_comm ty.ctors.length (ctorFieldsR U np c).length]
   have hspine1 := HasType.appN_selfSpine (env := env) (U := U + 1)
-    (As := (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1)))
-    (B := (VExpr.forallN
-        (ihsFrom (ctorFields c.type).length (recIdxs U T (ctorFields c.type)) 0)
-        (.app (.bvar ((ctorFields c.type).length +
-            (recIdxs U T (ctorFields c.type)).length))
+    (As := VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0)
+    (B := (VExpr.forallN (ihsFrom (ctorFieldsR U np c).length
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))) 0)
+        (.app (.bvar ((ctorFieldsR U np c).length +
+            (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length))
           (VExpr.appN (.const c.name (VLevel.params' U 1))
-            (VExpr.bvarRevRange (recIdxs U T (ctorFields c.type)).length
-              (ctorFields c.type).length)))).liftN
-        ty.ctors.length (ctorFields c.type).length)
-    (Δ := []) (Γ := (minorTypes U T ty.ctors).reverse ++ [motiveType U T])
-    (f := .bvar (ty.ctors.length - 1 - i + (ctorFields c.type).length)) ?hf1
+            (VExpr.bvarRevRange
+              ((recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+                (ctorFieldsR U np c).length + 1) np ++
+              VExpr.bvarRevRange
+                (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length
+                (ctorFieldsR U np c).length)))).liftN
+        ty.ctors.length (ctorFieldsR U np c).length)
+    (Δ := []) (Γ := (minorTypes U T np ty.ctors).reverse ++
+      (motiveType U T np :: (paramsTel U np ty).reverse))
+    (f := .bvar (ty.ctors.length - 1 - i + (ctorFieldsR U np c).length)) ?hf1
   case hf1 =>
     have hb := VEnv.HasType.bvar (env := env) (U := U+1) hlu
     rw [hminorEq] at hb
-    simpa [List.length_map] using hb
-  simp only [List.length_nil, List.length_map, VExpr.liftN_zero] at hspine1
-  rw [ihsFrom_liftN' (ctorFields c.type).length ty.ctors.length
-    (recIdxs U T (ctorFields c.type))
+    simpa [VExpr.liftTelN_length] using hb
+  simp only [List.length_nil, VExpr.liftTelN_length, VExpr.liftN_zero] at hspine1
+  rw [ihsFrom_liftN' (ctorFieldsR U np c).length ty.ctors.length
+    (recIdxs U T np (ctorFields (VExpr.dropN np c.type)))
     (fun j hj => by have := recIdxs_lt _ hj; omega) 0
-    (.app (.bvar ((ctorFields c.type).length + (recIdxs U T (ctorFields c.type)).length))
+    (.app (.bvar ((ctorFieldsR U np c).length +
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length))
       (VExpr.appN (.const c.name (VLevel.params' U 1))
-        (VExpr.bvarRevRange (recIdxs U T (ctorFields c.type)).length
-          (ctorFields c.type).length)))
-    (cut := (ctorFields c.type).length) rfl] at hspine1
-  -- rewrite the instantiated result into the final form, lifted past the ihs
-  rw [show (VExpr.app (.bvar ((ctorFields c.type).length +
-        (recIdxs U T (ctorFields c.type)).length))
+        (VExpr.bvarRevRange
+          ((recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+            (ctorFieldsR U np c).length + 1) np ++
+          VExpr.bvarRevRange
+            (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length
+            (ctorFieldsR U np c).length)))
+    (cut := (ctorFieldsR U np c).length) rfl] at hspine1
+  rw [show (VExpr.app (.bvar ((ctorFieldsR U np c).length +
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length))
       (VExpr.appN (.const c.name (VLevel.params' U 1))
-        (VExpr.bvarRevRange (recIdxs U T (ctorFields c.type)).length
-          (ctorFields c.type).length))).liftN ty.ctors.length
-      ((ctorFields c.type).length + 0 + (recIdxs U T (ctorFields c.type)).length) =
-    (VExpr.app (.bvar (ty.ctors.length + (ctorFields c.type).length))
+        (VExpr.bvarRevRange
+          ((recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+            (ctorFieldsR U np c).length + 1) np ++
+          VExpr.bvarRevRange
+            (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length
+            (ctorFieldsR U np c).length))).liftN ty.ctors.length
+      ((ctorFieldsR U np c).length + 0 +
+        (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length) =
+    (VExpr.app (.bvar (ty.ctors.length + (ctorFieldsR U np c).length))
       (VExpr.appN (.const c.name (VLevel.params' U 1))
-        (VExpr.bvarRevRange 0 (ctorFields c.type).length))).liftN
-      (recIdxs U T (ctorFields c.type)).length from ?hres] at hspine1
+        (VExpr.bvarRevRange ((ctorFieldsR U np c).length + ty.ctors.length + 1) np ++
+          VExpr.bvarRevRange 0 (ctorFieldsR U np c).length))).liftN
+      (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length from ?hres]
+    at hspine1
   case hres =>
     show VExpr.app _ _ = VExpr.app _ _
     congr 1
     · show VExpr.bvar (liftVar _ _ _) = VExpr.bvar (liftVar _ _ _)
       rw [liftVar_le (by omega), liftVar_le (Nat.zero_le _)]
       congr 1; omega
-    · rw [VExpr.liftN_appN, VExpr.liftN_appN,
+    · rw [VExpr.liftN_appN, VExpr.liftN_appN, List.map_append, List.map_append,
+        bvarRevRange_liftN_ge _ _ _ _ (by omega),
         VExpr.bvarRevRange_liftN_high _ _ _ _ (by omega),
-        VExpr.bvarRevRange_liftN_low]
+        bvarRevRange_liftN_ge _ _ _ _ (Nat.zero_le _),
+        bvarRevRange_liftN_ge _ _ _ _ (Nat.zero_le _),
+        VExpr.bvarRevRange_congr _ (show ty.ctors.length +
+          ((recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+            (ctorFieldsR U np c).length + 1) =
+          (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length +
+            ((ctorFieldsR U np c).length + ty.ctors.length + 1) from by omega),
+        VExpr.bvarRevRange_congr _ (show
+          (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length =
+          (recIdxs U T np (ctorFields (VExpr.dropN np c.type))).length + 0 from by
+            omega)]
       rfl
   -- phase 2: consume the induction hypotheses
   refine hasType_appN_ihs (fun j hj => ?_) hspine1
   have hjm := recIdxs_lt _ hj
-  refine S.recApp_hasType hrec hc (.bvar (Lookup.of_getElem?_closed ?_ trivial))
-  rw [List.getElem?_append_left
-      (by simp only [List.length_reverse, List.length_map]; omega),
-    List.getElem?_reverse (by simp only [List.length_map]; omega),
-    show (((ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))).length - 1 -
-      ((ctorFields c.type).length - 1 - j)) = j from by
-        simp only [List.length_map]; omega]
-  have h0 := recIdxs_getElem _ hj
-  rw [Nat.sub_zero] at h0
-  rw [List.getElem?_map, h0]
-  simp [VExpr.instL, VLevel.params_map_inst_params']
+  have hF0 : ((VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0).reverse ++
+      ((minorTypes U T np ty.ctors).reverse ++
+        (motiveType U T np :: (paramsTel U np ty).reverse)))[
+      (ctorFieldsR U np c).length - 1 - j]? =
+      some (VExpr.liftN (ty.ctors.length + 1)
+        ((recApp U T np j).instL (VLevel.params' U 1)) (0 + j)) := by
+    rw [List.getElem?_append_left
+        (by simp only [List.length_reverse, VExpr.liftTelN_length]; omega),
+      List.getElem?_reverse (by simp only [VExpr.liftTelN_length]; omega),
+      VExpr.liftTelN_length,
+      show (ctorFieldsR U np c).length - 1 -
+        ((ctorFieldsR U np c).length - 1 - j) = j from by omega,
+      VExpr.liftTelN_getElem?, ctorFieldsR_getElem?]
+    have h0 := recIdxs_getElem _ hj
+    rw [Nat.sub_zero] at h0
+    rw [h0]
+    simp only [Option.map_some]
+  have hflu := Lookup.of_getElem? hF0
+  rw [show VExpr.liftN (ty.ctors.length + 1)
+      ((recApp U T np j).instL (VLevel.params' U 1)) (0 + j) =
+      recApp' U T np (ty.ctors.length + 1 + j) from by
+      rw [recApp_instL, recApp'_liftN (by omega)],
+    recApp'_liftN (Nat.zero_le _),
+    recApp'_congr (show (ctorFieldsR U np c).length - 1 - j + 1 +
+        (ty.ctors.length + 1 + j) =
+      (ctorFieldsR U np c).length + ty.ctors.length + 1 from by omega)] at hflu
+  exact S.recApp_hasType hrec (.bvar hflu)
 
 /-- Well-formedness of the iota rule for the `i`-th constructor. -/
-theorem Stage1Env.rule_WF {i : Nat} {c : VConstVal}
+theorem Stage2Env.rule_WF {i : Nat} {c : VConstVal}
     (hci : ty.ctors[i]? = some c)
-    (hrec : env.constants (.str T "rec") = some (recConst U T ty)) :
-    (rule U T ty i c).WF env := by
+    (hrec : env.constants (.str T "rec") = some (recConst U T np ty)) :
+    (rule U T np ty i c).WF env := by
   have hc := List.mem_of_getElem? hci
   refine ⟨?_, ?_⟩
   · show env.HasType (U+1) [] (VExpr.lamN
-      (motiveType U T :: minorTypes U T ty.ctors ++
-        (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))) _)
+      (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors ++
+        VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0) _)
       (VExpr.forallN _ _)
     refine HasType.lamN (S.ruleBinders_onTel hc) ?_
-    simp only [List.reverse_cons, List.reverse_append, List.append_nil, List.append_assoc]
-    exact S.recApp_hasType hrec hc (S.ctorApp_hasType hc)
+    simp only [List.reverse_append, List.reverse_cons, List.append_nil,
+      List.append_assoc, List.singleton_append]
+    exact S.recApp_hasType hrec (S.ctorAppRule_hasType hc)
   · show env.HasType (U+1) [] (VExpr.lamN
-      (motiveType U T :: minorTypes U T ty.ctors ++
-        (ctorFields c.type).map (VExpr.instL (VLevel.params' U 1))) _)
+      (paramsTel U np ty ++ motiveType U T np :: minorTypes U T np ty.ctors ++
+        VExpr.liftTelN (ty.ctors.length + 1) (ctorFieldsR U np c) 0) _)
       (VExpr.forallN _ _)
     refine HasType.lamN (S.ruleBinders_onTel hc) ?_
-    simp only [List.reverse_cons, List.reverse_append, List.append_nil, List.append_assoc]
+    simp only [List.reverse_append, List.reverse_cons, List.append_nil,
+      List.append_assoc, List.singleton_append]
     exact S.minorApp_hasType hci hrec
+
+/-- `ctorType_eq` from the per-constructor facts directly (for use before
+the constructor is in the environment). -/
+theorem Stage2Env.ctorType_eq' {c : VConstVal}
+    (htelc : VExpr.telN np c.type = VExpr.telN np ty.type)
+    (hs2c : stage2Ctor U T np 0 (VExpr.dropN np c.type)) :
+    c.type = VExpr.forallN (VExpr.telN np ty.type)
+      (VExpr.forallN (ctorFields (VExpr.dropN np c.type))
+        (recApp U T np (0 + (ctorFields (VExpr.dropN np c.type)).length))) := by
+  conv => lhs; rw [← VExpr.forallN_telN_dropN np c.type, htelc,
+    (stage2Ctor_eq hs2c).1]
+
+/-- `ctorType_isType` from the per-constructor facts directly. -/
+theorem Stage2Env.ctorType_isType' {c : VConstVal}
+    (htelc : VExpr.telN np c.type = VExpr.telN np ty.type)
+    (hs2c : stage2Ctor U T np 0 (VExpr.dropN np c.type))
+    (hfc : fieldsWF U T np env l (VExpr.telN np ty.type).reverse 0
+      (ctorFields (VExpr.dropN np c.type))) :
+    env.IsType U [] c.type := by
+  rw [S.ctorType_eq' htelc hs2c]
+  refine IsType.forallN S.hparams ?_
+  simp only [List.append_nil]
+  refine IsType.forallN
+    (S.fieldsWF_onTel_decl _ [] 0 rfl (by simpa using hfc)) ?_
+  have := S.recApp_hasType_decl
+    ((ctorFields (VExpr.dropN np c.type)).reverse)
+  rw [List.length_reverse] at this
+  exact ⟨_, by simpa using this⟩
 
 end VInductDecl
 
@@ -1142,60 +1664,6 @@ theorem _root_.List.mem_zipIdx_getElem? {α} : ∀ {l : List α} {n : Nat} {a : 
 
 namespace VInductDecl
 
-/-- Unpack the semantic constructor conditions over an extension containing
-the block's type constant. -/
-theorem ctorWF_fields {env env' : VEnv} {U : Nat} {T : Name} {l : VLevel}
-    (hle : env ≤ env') (hT : env'.constants T = some ⟨U, .sort l⟩) (hl : l.WF U) :
-    ∀ {ct : VExpr}, ctorWF U T env l ct →
-    ∀ B ∈ ctorFields ct, B.ClosedN 0 → ∃ u, env'.HasType U [] B (.sort u)
-  | .forallE B rest, ⟨hB, hrest⟩, B', hB', hcl => by
-    simp only [ctorFields] at hB'
-    rcases List.mem_cons.1 hB' with rfl | h'
-    · rcases hB with rfl | ⟨u, h, -⟩
-      · refine ⟨l, ?_⟩
-        have := VEnv.HasType.const (Γ := []) hT VLevel.params_wf VLevel.params_length
-        simpa [VExpr.instL, VLevel.inst_id hl] using this
-      · exact ⟨u, h.mono hle⟩
-    · exact ctorWF_fields hle hT hl hrest B' h' hcl
-
-/-- Adding the constructors of a stage-1 block preserves order and records
-their lookups. -/
-theorem ctorFold_WF {U : Nat} {T : Name} {l : VLevel} :
-    ∀ (cs' : List VConstVal) {env₀ env₁ : VEnv},
-    env₀.Ordered → env₀.constants T = some ⟨U, .sort l⟩ → l.WF U →
-    (∀ c ∈ cs', c.uvars = U ∧ stage1Ctor U T c.type ∧
-      ∀ B ∈ ctorFields c.type, B.ClosedN 0 → ∃ u, env₀.HasType U [] B (.sort u)) →
-    List.foldlM (fun env (c : VConstVal) => env.addConst c.name c.toVConstant) env₀ cs' =
-      some env₁ →
-    env₁.Ordered ∧ env₀ ≤ env₁ ∧
-      ∀ c ∈ cs', env₁.constants c.name = some ⟨U, c.type⟩
-  | [], env₀, env₁, ord, _, _, _, hfold => by
-    cases hfold
-    exact ⟨ord, .rfl, nofun⟩
-  | c :: cs', env₀, env₁, ord, hT, hl, hcs, hfold => by
-    rw [List.foldlM_cons] at hfold
-    obtain ⟨env₀', hadd, hrest⟩ := Option.bind_eq_some_iff.1 hfold
-    obtain ⟨hcU, hs1c, hfields⟩ := hcs c (.head _)
-    have hwfc : c.toVConstant.WF env₀ := by
-      show env₀.IsType c.toVConstant.uvars [] c.toVConstant.type
-      rw [show c.toVConstant.uvars = c.uvars from rfl, hcU]
-      exact ctorType_isType' ord hT hl hs1c hfields
-    have ord' : env₀'.Ordered := .const ord hwfc hadd
-    have hle' := VEnv.addConst_le hadd
-    obtain ⟨ord₁, hle₁, hlook⟩ := ctorFold_WF cs' ord'
-      (hle'.constants hT) hl
-      (fun c' hc' => by
-        obtain ⟨h1, h2, h3⟩ := hcs c' (.tail _ hc')
-        exact ⟨h1, h2, fun B hB hcl =>
-          let ⟨u, h⟩ := h3 B hB hcl; ⟨u, h.mono hle'⟩⟩)
-      hrest
-    refine ⟨ord₁, hle'.trans hle₁, fun c' hc' => ?_⟩
-    rcases List.mem_cons.1 hc' with rfl | hc'
-    · have hself := VEnv.addConst_self hadd
-      rw [show c'.toVConstant = ⟨U, c'.type⟩ from by rw [← hcU]] at hself
-      exact hle₁.constants hself
-    · exact hlook c' hc'
-
 theorem rulesFold_WF : ∀ (dfs : List VDefEq) {env₃ : VEnv},
     env₃.Ordered → (∀ df ∈ dfs, df.WF env₃) →
     (dfs.foldl VEnv.addDefEq env₃).Ordered
@@ -1205,6 +1673,50 @@ theorem rulesFold_WF : ∀ (dfs : List VDefEq) {env₃ : VEnv},
     exact rulesFold_WF dfs (.defeq ord (hdfs df (.head _)))
       (fun df' hdf' => (hdfs df' (.tail _ hdf')).mono VEnv.addDefEq_le)
 
+/-- Adding the constructors of a stage-2 block preserves order and records
+their lookups. -/
+theorem ctorFold_WF {U : Nat} {T : Name} {np : Nat} {l : VLevel} {ty : VInductiveType}
+    (hsort : VExpr.dropN np ty.type = .sort l)
+    (hlen : (VExpr.telN np ty.type).length = np) (hl : l.WF U) :
+    ∀ (cs' : List VConstVal) {env₀ env₁ : VEnv},
+    env₀.Ordered → env₀.constants T = some ⟨U, ty.type⟩ →
+    VEnv.OnTel env₀ U [] (VExpr.telN np ty.type) →
+    (∀ c ∈ cs', c.uvars = U ∧ VExpr.telN np c.type = VExpr.telN np ty.type ∧
+      stage2Ctor U T np 0 (VExpr.dropN np c.type) ∧
+      fieldsWF U T np env₀ l (VExpr.telN np ty.type).reverse 0
+        (ctorFields (VExpr.dropN np c.type))) →
+    List.foldlM (fun env (c : VConstVal) => env.addConst c.name c.toVConstant) env₀ cs' =
+      some env₁ →
+    env₁.Ordered ∧ env₀ ≤ env₁ ∧
+      ∀ c ∈ cs', env₁.constants c.name = some ⟨U, c.type⟩
+  | [], env₀, env₁, ord, _, _, _, hfold => by
+    cases hfold
+    exact ⟨ord, .rfl, nofun⟩
+  | c :: cs', env₀, env₁, ord, hT, hpar, hcs, hfold => by
+    rw [List.foldlM_cons] at hfold
+    obtain ⟨env₀', hadd, hrest⟩ := Option.bind_eq_some_iff.1 hfold
+    obtain ⟨hcU, htelc, hs2c, hfc⟩ := hcs c (.head _)
+    have S₀ : Stage2Env env₀ U T np l ⟨⟨⟨ty.uvars, ty.type⟩, ty.name⟩, []⟩ :=
+      ⟨ord, hl, hsort, hlen, hT, nofun, nofun, nofun, hpar, nofun⟩
+    have hwfc : c.toVConstant.WF env₀ := by
+      show env₀.IsType c.toVConstant.uvars [] c.toVConstant.type
+      rw [show c.toVConstant.uvars = c.uvars from rfl, hcU]
+      exact S₀.ctorType_isType' htelc hs2c hfc
+    have ord' : env₀'.Ordered := .const ord hwfc hadd
+    have hle' := VEnv.addConst_le hadd
+    obtain ⟨ord₁, hle₁, hlook⟩ := ctorFold_WF hsort hlen hl cs' ord'
+      (hle'.constants hT) (hpar.mono hle')
+      (fun c' hc' => by
+        obtain ⟨h1, h2, h3, h4⟩ := hcs c' (.tail _ hc')
+        exact ⟨h1, h2, h3, fieldsWF_mono hle' h4⟩)
+      hrest
+    refine ⟨ord₁, hle'.trans hle₁, fun c' hc' => ?_⟩
+    rcases List.mem_cons.1 hc' with rfl | hc'
+    · have hself := VEnv.addConst_self hadd
+      rw [show c'.toVConstant = ⟨U, c'.type⟩ from by rw [← hcU]] at hself
+      exact hle₁.constants hself
+    · exact hlook c' hc'
+
 end VInductDecl
 
 namespace VEnv
@@ -1212,54 +1724,49 @@ open VInductDecl
 
 theorem addInduct_WF (henv : Ordered env) (hdecl : decl.WF env)
     (henv' : addInduct env decl = some env') : Ordered env' := by
-  obtain ⟨hs1, hwf⟩ := hdecl
+  obtain ⟨hs2, hwf⟩ := hdecl
   obtain ⟨U, np, tys⟩ := decl
   unfold addInduct at henv'
   obtain ⟨-, -, henv'⟩ := Option.bind_eq_some_iff.1 henv'
-  match tys, hs1, hwf, henv' with
-  | [ty], hs1, hwf, henv' => ?_
+  match tys, hs2, hwf, henv' with
+  | [ty], hs2, hwf, henv' => ?_
   obtain ⟨env₁, hadd1, henv'⟩ := Option.bind_eq_some_iff.1 henv'
   obtain ⟨env₂, hfold, henv'⟩ := Option.bind_eq_some_iff.1 henv'
   obtain ⟨env₃, hadd3, henv'⟩ := Option.bind_eq_some_iff.1 henv'
   cases henv'
-  obtain ⟨-, htyU, ⟨l, hsort, hlWF, -⟩, hctors⟩ := stage1_anatomy hs1
-  have hsl : sortLevel ty = l := by simp only [sortLevel, hsort]
-  -- the type constant
+  obtain ⟨htyU, hlen, ⟨l, hsort, hlWF, -⟩, hctors⟩ := stage2_anatomy hs2
+  obtain ⟨hparams₀, hfields₀⟩ := hwf ty (.head _)
+  have hsl : sortLevel np ty = l := by simp only [sortLevel, hsort]
+  rw [hsl] at hfields₀
   have hwfT : ty.toVConstant.WF env := by
     show env.IsType ty.toVConstant.uvars [] ty.toVConstant.type
     rw [show ty.toVConstant.uvars = ty.uvars from rfl, htyU,
-      show ty.toVConstant.type = ty.type from rfl, hsort]
-    exact ⟨_, HasType.sort hlWF⟩
+      show ty.toVConstant.type = ty.type from rfl,
+      show ty.type = VExpr.forallN (VExpr.telN np ty.type) (.sort l) from by
+        conv => lhs; rw [← VExpr.forallN_telN_dropN np ty.type]
+        rw [hsort]]
+    exact IsType.forallN hparams₀ ⟨_, HasType.sort hlWF⟩
   have ord₁ : env₁.Ordered := .const henv hwfT hadd1
-  have hT₁ : env₁.constants ty.name = some ⟨U, .sort l⟩ := by
+  have hT₁ : env₁.constants ty.name = some ⟨U, ty.type⟩ := by
     have := addConst_self hadd1
-    rwa [show ty.toVConstant = ⟨U, .sort l⟩ from by
+    rwa [show ty.toVConstant = ⟨U, ty.type⟩ from by
       show (⟨ty.uvars, ty.type⟩ : VConstant) = _
-      rw [htyU, hsort]] at this
-  -- the constructors
-  obtain ⟨ord₂, hle₂, hlook₂⟩ := ctorFold_WF ty.ctors ord₁ hT₁ hlWF
-    (fun c hc => ⟨(hctors c hc).1, (hctors c hc).2,
-      ctorWF_fields (addConst_le hadd1) hT₁ hlWF
-        (by
-          have := hwf ty (.head _) c hc
-          rwa [hsl] at this)⟩)
+      rw [htyU]] at this
+  obtain ⟨ord₂, hle₂, hlook₂⟩ := ctorFold_WF hsort hlen hlWF ty.ctors ord₁ hT₁
+    (hparams₀.mono (addConst_le hadd1))
+    (fun c hc => ⟨(hctors c hc).1, (hctors c hc).2.1, (hctors c hc).2.2,
+      fieldsWF_mono (addConst_le hadd1) (hfields₀ c hc)⟩)
     hfold
-  -- the stage-1 environment invariant at env₂
-  have S₂ : Stage1Env env₂ U ty.name l ty.ctors := by
-    refine ⟨ord₂, hlWF, hle₂.constants hT₁, hlook₂, fun c hc => (hctors c hc).2,
-      fun c hc B hB hcl => ?_⟩
-    have := ctorWF_fields ((addConst_le hadd1).trans hle₂) (hle₂.constants hT₁) hlWF
-      (by
-        have := hwf ty (.head _) c hc
-        rwa [hsl] at this) B hB hcl
-    exact this
-  -- the recursor
+  have S₂ : Stage2Env env₂ U ty.name np l ty :=
+    ⟨ord₂, hlWF, hsort, hlen, hle₂.constants hT₁, hlook₂,
+      fun c hc => (hctors c hc).2.1, fun c hc => (hctors c hc).2.2,
+      hparams₀.mono ((addConst_le hadd1).trans hle₂),
+      fun c hc => fieldsWF_mono ((addConst_le hadd1).trans hle₂) (hfields₀ c hc)⟩
   have ord₃ : env₃.Ordered := .const ord₂ S₂.recConst_wf hadd3
-  have S₃ : Stage1Env env₃ U ty.name l ty.ctors :=
+  have S₃ : Stage2Env env₃ U ty.name np l ty :=
     S₂.mono (addConst_le hadd3) ord₃
-  have hrec₃ : env₃.constants (.str ty.name "rec") = some (recConst U ty.name ty) :=
+  have hrec₃ : env₃.constants (.str ty.name "rec") = some (recConst U ty.name np ty) :=
     addConst_self hadd3
-  -- the iota rules
   refine rulesFold_WF _ ord₃ fun df hdf => ?_
   obtain ⟨⟨c, i⟩, hmem, rfl⟩ := List.mem_map.1 hdf
   obtain ⟨-, hci⟩ := List.mem_zipIdx_getElem? hmem
