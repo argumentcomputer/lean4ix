@@ -93,6 +93,28 @@
           }
         );
 
+        # Like lake-dependency, but additionally builds the Theory and
+        # Verify proof libraries (default facets), for consumers that
+        # import the metatheory too — Ix's IxTcVerify imports both
+        # Lean4Lean.Theory.* and Lean4Lean.Verify.*, so the plain
+        # implementation-only artifact is not enough for it.
+        lean4leanLakeDependencyFull = lake2nix.mkPackage (
+          lakeBuildArgs
+          // {
+            name = "Lean4Lean-full";
+            lakeArtifacts = lean4leanLakeDependency;
+            buildPhase = ''
+              runHook preBuild
+              lake build Lean4Lean Lean4Lean.Theory Lean4Lean.Verify
+              lake build Lean4Lean:shared Lean4Lean:static
+              runHook postBuild
+            '';
+            meta = {
+              description = "Lean4Lean library artifact including the Theory and Verify proof libraries";
+            };
+          }
+        );
+
         # Search path covering the library and its Lake deps (batteries).
         leanPath = pkgs.lib.concatStringsSep ":" (
           map (d: "${d}/.lake/build/lib/lean") (
@@ -189,6 +211,32 @@
             grep -Eq "^checked [0-9]+ declarations" out
             touch $out
           '';
+
+        # The external-project case: with an ambient LEAN_PATH already set
+        # (as `lake env` sets one for a target project), the wrapper must
+        # prepend its package paths rather than lose them or clobber the
+        # ambient value — a --set/--set-default wrapper fails this check.
+        cliSmokeExternal =
+          pkgs.runCommand "lean4lean-cli-smoke-external" {}
+          ''
+            mkdir ambient
+            LEAN_PATH=$PWD/ambient ${lean4leanCLI}/bin/lean4lean Lean4Lean.Declaration > out
+            grep -Eq "^checked [0-9]+ declarations" out
+            touch $out
+          '';
+
+        # No-argument mode: with only the repo's lake-manifest.json in the
+        # working directory, the CLI must infer the package (matching the
+        # manifest name case-insensitively against the Lean4Lean module
+        # root) and check the whole library.
+        cliNoArg =
+          pkgs.runCommand "lean4lean-cli-noarg" {}
+          ''
+            cp ${./lake-manifest.json} lake-manifest.json
+            ${lean4leanCLI}/bin/lean4lean > out
+            grep -Eq "^checked [0-9]+ declarations" out
+            touch $out
+          '';
       in {
         # Lean overlay
         _module.args.pkgs = import nixpkgs {
@@ -200,6 +248,7 @@
           default = lean4leanCLI;
           lean4lean = lean4leanCLI;
           lake-dependency = lean4leanLakeDependency;
+          lake-dependency-full = lean4leanLakeDependencyFull;
           # Compatibility alias for early users of the staged flake.
           lib = lean4leanLakeDependency;
         };
@@ -219,6 +268,8 @@
           inherit proofs;
           downstream-consumer = consumer;
           cli-smoke = cliSmoke;
+          cli-smoke-external = cliSmokeExternal;
+          cli-noarg = cliNoArg;
         };
 
         devShells.default = pkgs.mkShell {

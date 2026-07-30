@@ -44,7 +44,9 @@ paths under `lake env` (see below). Other outputs:
 * `nix build .#lake-dependency` builds the `Lean4Lean` library artifact
   (oleans, `.export` files, static/shared libraries — no CLI or proofs) that
   downstream Lake packages can consume via lean4-nix's
-  `depOverrideDeriv.lean4lean`.
+  `depOverrideDeriv.lean4lean`; `.#lake-dependency-full` additionally
+  includes the `Theory` and `Verify` proof libraries for consumers that
+  import the metatheory.
 * `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
   proof libraries (`checks.proofs`) and builds and runs a minimal downstream
   consumer of the library artifact (`checks.downstream-consumer`).
