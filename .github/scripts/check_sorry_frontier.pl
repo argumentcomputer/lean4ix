@@ -40,8 +40,7 @@ my @exclude_prefixes = (
 
 my %expected = (
   # Tier S - missing specification
-  "Lean4Lean/Theory/Inductive.lean\0def VInductDecl.WF"    => 1,
-  "Lean4Lean/Theory/Inductive.lean\0def VEnv.addInduct"    => 1,
+  # (VInductDecl.WF and VEnv.addInduct became real stage-1 definitions)
   "Lean4Lean/Verify/Typing/Expr.lean\0def TrProj"          => 1,
   # Tier P - blocked only on Tier S
   "Lean4Lean/Theory/Typing/InductiveLemmas.lean\0addInduct_WF" => 1,
