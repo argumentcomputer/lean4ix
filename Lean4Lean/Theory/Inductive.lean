@@ -74,6 +74,13 @@ def recIdxs : List VExpr → (j : Nat := 0) → List Nat
   | B :: Bs, j =>
     if B = .const T (VLevel.params U) then j :: recIdxs Bs (j+1) else recIdxs Bs (j+1)
 
+/-- Induction-hypothesis binder types for the recursive field positions
+`rs`, at depth `p` past the `m` field binders (in context `[motive]`):
+the `p`-th is `motive xⱼ` for `j = rs[p]`. -/
+def ihsFrom (m : Nat) : List Nat → Nat → List VExpr
+  | [], _ => []
+  | j :: rs, p => .app (.bvar (m+p)) (.bvar (m-1-j+p)) :: ihsFrom m rs (p+1)
+
 /-- A stage-1 field is either a direct recursive occurrence (exactly the
 block's type constant at the identity levels) or a closed type not
 mentioning the block at all. This builds in strict positivity for the
@@ -116,21 +123,21 @@ def minorType (c : VConstVal) : VExpr :=
   let rs := recIdxs U T Bs
   let r := rs.length
   let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1)) (VExpr.bvarRevRange r m)
-  let ihs := rs.zipIdx.map fun (j, p) => VExpr.app (.bvar (m+p)) (.bvar (m-1-j+p))
   VExpr.forallN (Bs.map (VExpr.instL (VLevel.params' U 1)))
-    (VExpr.forallN ihs (.app (.bvar (m+r)) ctorApp))
+    (VExpr.forallN (ihsFrom m rs 0) (.app (.bvar (m+r)) ctorApp))
 
 /-- Minor premise types in position: the `i`-th lives under `motive` and the
 previous `i` minors. -/
-def minorTypes (ty : VInductiveType) : List VExpr :=
-  ty.ctors.zipIdx.map fun (c, i) => VExpr.liftN i (minorType U T c)
+def minorTypes : List VConstVal → (i : Nat := 0) → List VExpr
+  | [], _ => []
+  | c :: cs, i => VExpr.liftN i (minorType U T c) :: minorTypes cs (i+1)
 
 /-- The recursor type
 `∀ (motive : T → Sort u) (minors..) (t : T), motive t`. -/
 def recType (ty : VInductiveType) : VExpr :=
   let k := ty.ctors.length
   .forallE (motiveType U T) <|
-    VExpr.forallN (minorTypes U T ty) <|
+    VExpr.forallN (minorTypes U T ty.ctors) <|
       .forallE (.const T (VLevel.params' U 1)) (.app (.bvar (k+1)) (.bvar 0))
 
 def recConst (ty : VInductiveType) : VConstant := ⟨U + 1, recType U T ty⟩
@@ -145,7 +152,7 @@ def rule (ty : VInductiveType) (i : Nat) (c : VConstVal) : VDefEq :=
   let Bs := ctorFields c.type
   let m := Bs.length
   let rs := recIdxs U T Bs
-  let binders := motiveType U T :: minorTypes U T ty ++
+  let binders := motiveType U T :: minorTypes U T ty.ctors ++
     Bs.map (VExpr.instL (VLevel.params' U 1))
   let fieldArgs := VExpr.bvarRevRange 0 m
   let recBase := VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
