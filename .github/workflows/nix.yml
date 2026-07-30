@@ -1,0 +1,61 @@
+name: Nix
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap gates first: formatting and whole-flake evaluation for every
+  # declared system, without building anything.
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v20
+      - name: Check formatting
+        run: nix fmt --accept-flake-config -- --check flake.nix
+      - name: Evaluate all systems
+        run: nix flake check --all-systems --no-build --accept-flake-config
+
+  # Build the shipped outputs and run every check (proofs, the
+  # downstream-consumer fixture, and the CLI smoke/no-arg regression
+  # tests) on Linux.
+  check-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v20
+      - uses: cachix/cachix-action@v16
+        with:
+          name: argumentcomputer
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Only push from trusted master builds; PRs stay read-only.
+          skipPush: ${{ github.ref != 'refs/heads/master' }}
+      - name: Build packages
+        run: nix build --accept-flake-config --no-link --print-build-logs .#lake-dependency .#lake-dependency-full .#lean4lean
+      - name: Flake checks
+        run: nix flake check --accept-flake-config --print-build-logs
+
+  # One Darwin runner exercising the wrapper and the consumer fixture,
+  # per the improvement plan; the full check matrix stays on Linux.
+  build-darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v20
+      - uses: cachix/cachix-action@v16
+        with:
+          name: argumentcomputer
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.ref != 'refs/heads/master' }}
+      - name: Build wrapper and consumer check
+        run: nix build --accept-flake-config --no-link --print-build-logs .#lean4lean .#checks.aarch64-darwin.downstream-consumer .#checks.aarch64-darwin.cli-smoke
