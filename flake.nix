@@ -238,6 +238,18 @@
             grep -Eq "^checked [0-9]+ declarations" out
             touch $out
           '';
+        # Sorry-frontier audit: every real `sorry` token outside
+        # Lean4Lean/Experimental/ must match the script's exact allowlist
+        # (the upstream-gaps plan's Tier S/P/V/R inventory), so progress
+        # shrinks the allowlist and regressions fail loudly. Pure text
+        # audit — no Lean toolchain involved.
+        sorryFrontier =
+          pkgs.runCommand "lean4lean-sorry-frontier" {}
+          ''
+            ${pkgs.perl}/bin/perl \
+              ${./.github/scripts/check_sorry_frontier.pl} ${leanSrc} \
+              | tee $out
+          '';
       in {
         # Lean overlay
         _module.args.pkgs = import nixpkgs {
@@ -267,6 +279,7 @@
 
         checks = {
           inherit proofs;
+          sorry-frontier = sorryFrontier;
           downstream-consumer = consumer;
           cli-smoke = cliSmoke;
           cli-smoke-external = cliSmokeExternal;

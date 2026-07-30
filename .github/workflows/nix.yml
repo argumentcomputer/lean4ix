@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Sorry frontier
+        run: perl .github/scripts/check_sorry_frontier.pl
       - uses: DeterminateSystems/nix-installer-action@v20
       - name: Check formatting
         run: nix fmt --accept-flake-config -- --check flake.nix

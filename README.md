@@ -48,8 +48,12 @@ paths under `lake env` (see below). Other outputs:
   includes the `Theory` and `Verify` proof libraries for consumers that
   import the metatheory.
 * `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
-  proof libraries (`checks.proofs`) and builds and runs a minimal downstream
-  consumer of the library artifact (`checks.downstream-consumer`).
+  proof libraries (`checks.proofs`), builds and runs a minimal downstream
+  consumer of the library artifact (`checks.downstream-consumer`), and
+  audits that the `sorry` tokens in the tree exactly match the known
+  frontier pinned in
+  [.github/scripts/check_sorry_frontier.pl](.github/scripts/check_sorry_frontier.pl)
+  (`checks.sorry-frontier`).
 * `nix develop` provides a shell with the pinned `lean`/`lake` toolchain, and
   the checked-in [.envrc](.envrc) loads it automatically for
   [direnv](https://direnv.net/) users (run `direnv allow` once).
