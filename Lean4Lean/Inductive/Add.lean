@@ -622,6 +622,29 @@ inductive CandidateExprTrace : Context → Expr → Type where
 
 namespace CandidateExprTrace
 
+/-- The main Pi spine exposed by candidate WHNF was already present in the
+stored source syntax at every traversed body position.
+
+This is the structural precondition needed by mixed generation: it permits
+normalization inside binder domains and at the terminal result, but it does
+not let WHNF invent or remove the raw binders that generation must emit. -/
+def storedSpine :
+    {context : Context} → {source : Expr} →
+      CandidateExprTrace context source → Bool
+  | _, _, .terminal .. => true
+  | _, _, .forallE _ source _ name domain body binderInfo _ _ _ _ _ _
+      bodyCandidate =>
+    (source == .forallE name domain body binderInfo) &&
+      storedSpine bodyCandidate
+
+/-- Number of stored Pi binders on the main (body) path of a candidate. -/
+def spineLength :
+    {context : Context} → {source : Expr} →
+      CandidateExprTrace context source → Nat
+  | _, _, .terminal .. => 0
+  | _, _, .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.spineLength + 1
+
 /-- The exact full-check observation at the root of a candidate trace. -/
 def rootCheck :
     CandidateExprTrace context source →
@@ -1008,6 +1031,18 @@ info: 'Lean4Lean.AddInductive.CandidateList.singleton' does not depend on any ax
 -/
 #guard_msgs in
 #print axioms CandidateList.singleton
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.storedSpine' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.storedSpine
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.spineLength' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.spineLength
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]

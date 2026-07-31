@@ -3844,6 +3844,36 @@ def aliasFormerCtorCheckTypeRun :
     (.const rfl rfl rfl) (.const rfl rfl rfl)
     10000 (by rfl)
 
+/-- Paired full-check/WHNF interpretation of the retained constructor leaf.
+This is the post-family terminal used by the generic constructor-spine
+assembler. -/
+private def aliasFormerCtorCandidateNodeRun :
+    TypeChecker.CandidateNodeRun aliasFormerTypeEnv [] []
+      aliasFormerCtorCandidateContext aliasFormerMkInfo.type
+      (.const ``TypeFamilyAlias []) (.const ``AliasFormer [])
+      aliasFormerRawType.ctors[0].type
+      aliasFormerRawType.ctors[0].type
+      (.const ``TypeFamilyAlias []) := by
+  exact TypeChecker.CandidateNodeRun.ofCandidate
+    aliasFormerCtorCandidateContext aliasFormerMkInfo.type
+    (.const ``TypeFamilyAlias []) (.const ``AliasFormer [])
+    aliasFormerCtorCheckTypeStep_valid
+    aliasFormerCtorCandidateStep_valid
+    aliasFormerCtorNormalizationContext (by rfl)
+    rfl rfl rfl TypeChecker.VState.WF.empty
+    aliasFormerCtorCheckTypeRun.expr_tr (.const rfl rfl rfl)
+    ⟨_, aliasFormerCtorCheckTypeRun.expr_tr,
+      ⟨_, aliasFormerCtorCheckTypeRun.hasType⟩⟩
+    10000 9999 (by rfl) (by rfl)
+
+private def aliasFormerCtorCandidateRun :
+    TypeChecker.CandidateExprRun aliasFormerTypeEnv []
+      aliasFormerCtorCandidate.trace []
+      aliasFormerRawType.ctors[0].type
+      aliasFormerRawType.ctors[0].type
+      (.const ``TypeFamilyAlias []) :=
+  .terminal aliasFormerCtorCandidateNodeRun
+
 /-- Constructor endpoint certificate in the exact post-family context. -/
 private def aliasFormerCtorRootRun :
     TypeChecker.CandidateExprRootRun aliasFormerTypeEnv []
@@ -3873,6 +3903,18 @@ actually accepted it and inferred a sort. -/
 theorem aliasFormerFamily_isType_checked :
     typeFamilyAliasEnv.IsType 0 [] aliasFormerRawType.type :=
   aliasFormerFamilyCheckTypeRun.isType
+
+private def aliasFormerFamilySpineRun :
+    TypeChecker.CandidateExprSpineRun typeFamilyAliasEnv []
+      aliasFormerFamilyCandidate aliasFormerRawType.type
+      aliasFormerViewType.type :=
+  ⟨rfl, ⟨_, aliasFormerFamilyCandidateRun⟩⟩
+
+private def aliasFormerCtorSpineRun :
+    TypeChecker.CandidateExprSpineRun aliasFormerTypeEnv []
+      aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
+      aliasFormerRawType.ctors[0].type :=
+  ⟨rfl, ⟨_, aliasFormerCtorCandidateRun⟩⟩
 
 /-- Verified delta-normalization leaf for `RecAlias.{1}`. -/
 def recAliasWhnfRun :
@@ -4094,31 +4136,62 @@ theorem aliasFormerCtor_isType_checked :
       aliasFormerRawType.ctors[0].type :=
   ⟨.succ .zero, aliasFormerCtor_hasSort_checked⟩
 
-/-- Complete checker-side AliasFormer generation run. The family result is the
-verified WHNF step, while the unchanged constructor result is staged in the
-exact environment produced by inserting the raw family. -/
+private def aliasFormerCandidateFamilyGenerationRun :
+    VInductDecl.CandidateFamilyGenerationRun
+      aliasFormerNormalizationCandidateRun
+      aliasFormerGenerationChecked where
+  spine := aliasFormerFamilySpineRun
+  rawTel := rfl
+  viewTel := rfl
+  rawResult := rfl
+  viewResult := rfl
+  rightType := VEnv.HasType.sort (by decide)
+
+private def aliasFormerNormalizedCtor : VInductDecl.NormalizedCtor :=
+  ⟨aliasFormerRawType.ctors[0],
+    aliasFormerViewChecked.constructors[0]⟩
+
+private def aliasFormerCandidateNormalizedCtorRun :
+    VInductDecl.CandidateNormalizedCtorRun aliasFormerGenerationChecked.block
+      aliasFormerTypeEnv [] aliasFormerCandidateConstructorRun
+      aliasFormerNormalizedCtor where
+  raw_eq := rfl
+  view_eq := rfl
+  spine := aliasFormerCtorSpineRun
+  rawTel := rfl
+  viewTel := rfl
+  rawResult := rfl
+  viewResult := rfl
+  rightType := by
+    simpa [aliasFormerNormalizedCtor] using aliasFormerCtor_hasSort_checked
+
+private def aliasFormerCandidateNormalizedCtorListRun :
+    VInductDecl.CandidateNormalizedCtorListRun
+      aliasFormerGenerationChecked.block aliasFormerTypeEnv []
+      aliasFormerCandidateConstructorListRun
+      aliasFormerGenerationChecked.block.ctorPairs := by
+  exact .cons aliasFormerCandidateNormalizedCtorRun .nil
+
+/-- Complete source-indexed candidate certificate for the non-identity
+AliasFormer generation transaction. -/
+def aliasFormerGenerationCandidateRun :
+    VInductDecl.GenerationCandidateRun
+      aliasFormerNormalizationCandidateRun
+      aliasFormerGenerationChecked where
+  normalization_eq := rfl
+  checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
+  family := aliasFormerCandidateFamilyGenerationRun
+  typeEnv_wf := by
+    simpa using aliasFormerCtorCandidateContextRun.context.Ewf
+  constructors := aliasFormerCandidateNormalizedCtorListRun
+
+/-- Complete checker-side AliasFormer generation run, now derived by the
+generic family/constructor spine assembler from the executable singleton
+candidate rather than assembled field-by-field by the fixture. -/
 def aliasFormerGenerationRun :
     VInductDecl.GenerationRun aliasFormerGenerationChecked
-      typeFamilyAliasEnv := by
-  refine {
-    normalization := aliasFormerNormalizationRun
-    checked :=
-      aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
-    familyTel := .nil
-    familyResult := aliasFormerFamilyCandidateRun.evidence
-    typeEnv := aliasFormerTypeEnv
-    addType := rfl
-    constructors := ?_ }
-  intro ctor hctor
-  change ctor ∈
-    [⟨aliasFormerRawType.ctors[0],
-      aliasFormerViewChecked.constructors[0]⟩] at hctor
-  obtain rfl := List.mem_singleton.1 hctor
-  exact {
-    declaredTel := .nil
-    declaredResult := .refl aliasFormerCtor_hasSort_checked
-    emittedTel := .nil
-    emittedResult := .refl aliasFormerCtor_hasSort_checked }
+      typeFamilyAliasEnv :=
+  aliasFormerGenerationCandidateRun.generationRun
 
 /-- Generation-ready AliasFormer certificate whose raw/view family equality
 comes from the verified checker execution rather than the fixture's explicit
@@ -4727,6 +4800,40 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerBlock_wf_checked' depends on
 -/
 #guard_msgs in
 #print axioms aliasFormerBlock_wf_checked
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerGenerationCandidateRun
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationChecked_wf_checked' depends on axioms: [propext,
