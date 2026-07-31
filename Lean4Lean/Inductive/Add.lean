@@ -46,6 +46,23 @@ def Context.toTypeChecker (context : Context) : TypeChecker.Context where
   lparams := context.lparams
   fuel := context.fuel
 
+/-- The exact free variable allocated by the next `withLocalDecl` in an
+inductive-add context. -/
+def Context.freshFVarId (context : Context) : FVarId :=
+  ⟨context.ngen.curr⟩
+
+def Context.freshExpr (context : Context) : Expr :=
+  .fvar context.freshFVarId
+
+/-- Context seen by the body of the next `withLocalDecl`.  Naming this update
+lets candidate traces index a Pi body by the actual reader context used by the
+producer, rather than retaining an unrelated context as unchecked data. -/
+def Context.pushLocalDecl (context : Context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr) : Context :=
+  { context with
+    lctx := context.lctx.mkLocalDecl context.freshFVarId name type binderInfo
+    ngen := context.ngen.next }
+
 abbrev M := ReaderT Context <| Except Exception
 
 instance : MonadLocalNameGenerator M where
@@ -430,64 +447,67 @@ def buildCandidateCheckType
   | .ok ⟨inferred, valid⟩ =>
     return ⟨⟨context, source, inferred⟩, rfl, valid⟩
 
-/-- Source-indexed tree underlying one candidate expression.  The recursive
-indices are important: a Pi-domain trace can only describe the exposed raw
-domain, and its body trace can only describe the body instantiated with the
-exact fresh free variable retained by the parent node.  Thus positional
-provenance is enforced by the type rather than being an invariant of the
-producer alone. -/
-inductive CandidateExprTrace : Expr → Type where
+/-- Context- and source-indexed tree underlying one candidate expression.
+The recursive indices are important: a Pi-domain trace uses the exact parent
+context, while its body trace uses precisely `Context.pushLocalDecl` and the
+corresponding fresh free variable. Thus both expression position and checker
+context provenance are enforced by the type rather than being invariants of
+the producer alone. -/
+inductive CandidateExprTrace : Context → Expr → Type where
   | terminal (context : Context) (source inferred result : Expr)
       (checked : CandidateCheckTypeStep.Valid
         ⟨context, source, inferred⟩)
       (valid : CandidateWhnfStep.Valid ⟨context, source, result⟩) :
-      CandidateExprTrace source
+      CandidateExprTrace context source
   | forallE (context : Context) (source : Expr)
       (inferred : Expr)
       (name : Name) (domain body : Expr)
-      (binderInfo : BinderInfo) (arg : Expr)
+      (binderInfo : BinderInfo)
       (checked : CandidateCheckTypeStep.Valid
         ⟨context, source, inferred⟩)
       (valid : CandidateWhnfStep.Valid
         ⟨context, source, .forallE name domain body binderInfo⟩)
-      (domainCandidate : CandidateExprTrace domain)
-      (bodyCandidate : CandidateExprTrace (body.instantiate1 arg)) :
-      CandidateExprTrace source
+      (domainCandidate : CandidateExprTrace context domain)
+      (bodyCandidate : CandidateExprTrace
+        (context.pushLocalDecl name binderInfo domain.consumeTypeAnnotations)
+        (body.instantiate1 context.freshExpr)) :
+      CandidateExprTrace context source
 
 namespace CandidateExprTrace
 
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
-def view : CandidateExprTrace source → Expr
+def view : CandidateExprTrace context source → Expr
   | .terminal _ _ _ result _ _ => result
-  | .forallE _ _ _ name _ _ binderInfo arg _ _ domain body =>
-    .forallE name domain.view (body.view.abstract #[arg]) binderInfo
+  | .forallE context _ _ name _ _ binderInfo _ _ domain body =>
+    .forallE name domain.view
+      (body.view.abstract #[context.freshExpr]) binderInfo
 
 /-- Preorder list of all retained checker observations. -/
-def steps : CandidateExprTrace source → List CandidateWhnfStep
+def steps : CandidateExprTrace context source → List CandidateWhnfStep
   | .terminal context source _ result _ _ => [{ context, source, result }]
-  | .forallE context source _ name domain body binderInfo _ _ _
+  | .forallE context source _ name domain body binderInfo _ _
       domainCandidate bodyCandidate =>
     { context, source,
       result := .forallE name domain body binderInfo } ::
       domainCandidate.steps ++ bodyCandidate.steps
 
 /-- Preorder list of all retained full-check observations. -/
-def checkSteps : CandidateExprTrace source → List CandidateCheckTypeStep
+def checkSteps : CandidateExprTrace context source → List CandidateCheckTypeStep
   | .terminal context source inferred _ _ _ =>
     [{ context, source, inferred }]
-  | .forallE context source inferred _ _ _ _ _ _ _
+  | .forallE context source inferred _ _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source, inferred } ::
       domainCandidate.checkSteps ++ bodyCandidate.checkSteps
 
 /-- Every retained WHNF observation is an exact checker execution. -/
-def allValid : (candidate : CandidateExprTrace source) →
+def allValid : (candidate : CandidateExprTrace context source) →
     ∀ step ∈ candidate.steps, step.Valid
   | .terminal context source _ result _ valid, step, h => by
     simp only [steps, List.mem_singleton] at h
     subst step
     exact valid
-  | .forallE _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ valid domain body, step, h => by
     simp only [steps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact valid
@@ -495,13 +515,13 @@ def allValid : (candidate : CandidateExprTrace source) →
     · exact body.allValid step h
 
 /-- Every retained full-check observation is an exact checker execution. -/
-def allChecksValid : (candidate : CandidateExprTrace source) →
+def allChecksValid : (candidate : CandidateExprTrace context source) →
     ∀ step ∈ candidate.checkSteps, step.Valid
   | .terminal context source inferred _ checked _, step, h => by
     simp only [checkSteps, List.mem_singleton] at h
     subst step
     exact checked
-  | .forallE _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ checked _ domain body, step, h => by
     simp only [checkSteps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact checked
@@ -517,7 +537,8 @@ carries the exact checker-run equalities produced by
 `observeCandidateCheckType` and `observeCandidateWhnf`; Theory translation and
 semantic refinement are intentionally separate. -/
 structure CandidateExpr (source : Expr) where
-  trace : CandidateExprTrace source
+  context : Context
+  trace : CandidateExprTrace context source
 
 def CandidateExpr.view (candidate : CandidateExpr source) : Expr :=
   candidate.trace.view
@@ -555,12 +576,13 @@ provenance. It is not stored in the kernel environment and acquires semantic
 authority only after Verify reconstructs and refines every retained checker
 run. -/
 def buildCandidateExpr (e : Expr) : M (CandidateExpr e) := do
-  loop e (← readThe Context).fuel.inductiveFuel
+  let context ← readThe Context
+  return ⟨context, ← loop context e context.fuel.inductiveFuel⟩
 where
-  loop (e : Expr) : Nat → M (CandidateExpr e)
+  loop (context : Context) (e : Expr) :
+      Nat → Except Exception (CandidateExprTrace context e)
     | 0 => throw .deepRecursion
     | fuel + 1 => do
-      let context ← readThe Context
       match observeCandidateCheckType context e with
       | .error err => throw err
       | .ok ⟨inferred, checked⟩ =>
@@ -569,15 +591,16 @@ where
         | .ok ⟨view, valid⟩ =>
           match view with
           | .forallE name domain body binderInfo =>
-            let domainCandidate ← loop domain fuel
-            withLocalDecl name binderInfo
-                domain.consumeTypeAnnotations fun arg => do
-              let bodyCandidate ← loop (body.instantiate1 arg) fuel
-              return ⟨.forallE context e inferred name domain body
-                binderInfo arg checked valid
-                domainCandidate.trace bodyCandidate.trace⟩
+            let domainCandidate ← loop context domain fuel
+            let bodyContext :=
+              context.pushLocalDecl name binderInfo
+                domain.consumeTypeAnnotations
+            let bodyCandidate ← loop bodyContext
+              (body.instantiate1 context.freshExpr) fuel
+            return .forallE context e inferred name domain body
+              binderInfo checked valid domainCandidate bodyCandidate
           | result =>
-            return ⟨.terminal context e inferred result checked valid⟩
+            return .terminal context e inferred result checked valid
 
 /-- Erase the operational trace and retain only the analysis expression. -/
 def normalizeCandidateExpr (e : Expr) : M Expr := do
@@ -600,7 +623,7 @@ theorem buildCandidateExpr_of_whnf_nonForall
         .ok view)
     (hview : view.isForall = false) :
     buildCandidateExpr e context =
-      .ok ⟨.terminal context e inferred view hcheck hrun⟩ := by
+      .ok ⟨context, .terminal context e inferred view hcheck hrun⟩ := by
   cases hf : context.fuel.inductiveFuel with
   | zero => omega
   | succ fuel =>

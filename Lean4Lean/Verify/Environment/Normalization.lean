@@ -353,6 +353,58 @@ def CandidateNodeRun.ofCandidate
     venv_eq lparams_eq vlctx_eq state_wf source_tr result_tr
     whnfFuel whnfDepth
 
+/-- Recover all output translations for one retained candidate node from the
+verified checker refinements themselves.
+
+Unlike `ofCandidate`, this theorem does not ask the caller to identify the
+kernel expressions returned by `checkType` and `whnf` with preselected Theory
+terms.  It extracts strict translations of both results from the two exact
+executions, then packages those witnesses in the ordinary paired-node API.
+Only the root source translation and matching verified context remain input. -/
+theorem CandidateNodeRun.exists_ofCandidate
+    (candidateContext : AddInductive.Context)
+    (source inferred result : Expr)
+    (checked : AddInductive.CandidateCheckTypeStep.Valid
+      ⟨candidateContext, source, inferred⟩)
+    (normalized : AddInductive.CandidateWhnfStep.Valid
+      ⟨candidateContext, source, result⟩)
+    (context : VContext)
+    (context_eq : context.toContext = candidateContext.toTypeChecker)
+    (state_wf : VState.WF context {})
+    (source' : VExpr) (source_tr : context.TrExprS source source')
+    (checkFuel whnfFuel : Nat)
+    (checkDepth : candidateContext.fuel.recDepth = checkFuel)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    ∃ inferred' result',
+      context.TrExprS inferred inferred' ∧
+      context.TrExprS result result' ∧
+      Nonempty (CandidateNodeRun context.venv context.lparams context.vlctx
+        candidateContext source inferred result source' result' inferred') := by
+  obtain ⟨checkState, checkRun⟩ :=
+    AddInductive.CandidateCheckTypeStep.innerRun
+      ⟨candidateContext, source, inferred⟩ checkFuel checkDepth checked
+  rw [← context_eq] at checkRun
+  obtain ⟨_, _, _, _, checkedSource', inferred', checkedTyping⟩ :=
+    (Inner.checkType.WF source_tr.fvarsIn
+      (Methods.withFuel checkFuel) Methods.withFuel.WF)
+      state_wf inferred checkState checkRun
+  obtain ⟨whnfState, whnfRun⟩ :=
+    AddInductive.CandidateWhnfStep.innerRun
+      ⟨candidateContext, source, result⟩ whnfFuel whnfDepth normalized
+  rw [← context_eq] at whnfRun
+  obtain ⟨_, _, _, _, _, resultTranslation⟩ :=
+    (Inner.whnf'.WF source_tr
+      (Methods.withFuel whnfFuel) Methods.withFuel.WF)
+      state_wf result whnfState whnfRun
+  obtain ⟨result', result_tr, _⟩ := resultTranslation
+  refine ⟨inferred', result', checkedTyping.2.2.1, result_tr, ⟨?_⟩⟩
+  exact CandidateNodeRun.ofCandidate
+    candidateContext source inferred result checked normalized
+    context context_eq rfl rfl rfl state_wf source_tr
+    checkedTyping.2.2.1
+    (result_tr.trExpr context.Ewf context.Δwf)
+    checkFuel whnfFuel checkDepth whnfDepth
+
 /-- Compositional evidence for a normalization comparison.
 
 Leaves are either reflexive, already typed syntax or exact verified WHNF
@@ -378,6 +430,10 @@ inductive DefEqEvidence (env : VEnv) :
       (left : DefEqEvidence env U Γ lhs mid A)
       (right : DefEqEvidence env U Γ mid rhs A) :
       DefEqEvidence env U Γ lhs rhs A
+  | change
+      (type : env.IsDefEq U Γ A B (.sort u))
+      (term : DefEqEvidence env U Γ lhs rhs A) :
+      DefEqEvidence env U Γ lhs rhs B
   | forallE
       (domain : DefEqEvidence env U Γ A A' (.sort u))
       (body : DefEqEvidence env U (A :: Γ) B B' (.sort v)) :
@@ -394,6 +450,7 @@ theorem DefEqEvidence.isDefEq :
   | .app fn arg => .appDF fn.isDefEq arg.isDefEq
   | .beta body arg => .beta body arg
   | .trans left right => .trans left.isDefEq right.isDefEq
+  | .change type term => .defeqDF type term.isDefEq
   | .forallE domain body =>
       .forallEDF domain.isDefEq body.isDefEq
 
@@ -413,7 +470,8 @@ the candidate view.  The body context equation makes the raw-binder discipline
 explicit and prevents evidence checked under a different telescope from being
 reused here. -/
 inductive CandidateExprRun (env : VEnv) (Us : List Name) :
-    {source : Expr} → AddInductive.CandidateExprTrace source →
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      AddInductive.CandidateExprTrace candidateContext source →
       (Δ : VLCtx) → VExpr → VExpr → VExpr → Prop where
   | terminal
       (node : CandidateNodeRun env Us Δ context source inferred result
@@ -422,43 +480,73 @@ inductive CandidateExprRun (env : VEnv) (Us : List Name) :
         (.terminal context source inferred result checked normalized)
         Δ source' result' inferred'
   | forallE
-      (domainCandidate : AddInductive.CandidateExprTrace domain)
+      (domainCandidate : AddInductive.CandidateExprTrace context domain)
       (bodyCandidate : AddInductive.CandidateExprTrace
-        (body.instantiate1 arg))
+        (context.pushLocalDecl name binderInfo domain.consumeTypeAnnotations)
+        (body.instantiate1 context.freshExpr))
       (node : CandidateNodeRun env Us Δ context source inferred
         (.forallE name domain body binderInfo)
-        source' (.forallE domain' body') (.sort (.imax u v)))
+        source' (.forallE domain' body') inferred')
       (domainRun : CandidateExprRun env Us domainCandidate Δ
-        domain' domainView' (.sort u))
+        domain' domainView' domainInferred')
       (bodyRun : CandidateExprRun env Us bodyCandidate bodyΔ
-        body' bodyView' (.sort v))
-      (argId : FVarId) (deps : List FVarId)
-      (arg_eq : arg = .fvar argId)
+        body' bodyView' bodyInferred')
+      (domainType : env.HasType Us.length Δ.toCtx domain' (.sort u))
+      (bodyType : env.HasType Us.length
+        (domain' :: Δ.toCtx) body' (.sort v))
       (bodyContext :
-        bodyΔ = (some (argId, deps), .vlam domain') :: Δ) :
+        bodyΔ =
+          (some (context.freshFVarId,
+            domain.consumeTypeAnnotations.fvarsList),
+            .vlam domain') :: Δ) :
       CandidateExprRun env Us
-        (.forallE context source inferred name domain body binderInfo arg
+        (.forallE context source inferred name domain body binderInfo
           checked normalized domainCandidate bodyCandidate)
-        Δ source' (.forallE domainView' bodyView') (.sort (.imax u v))
+        Δ source' (.forallE domainView' bodyView') inferred'
 
 /-- Fold a complete candidate trace into the compositional equality language
 consumed by `NormalizationRun` and `GenerationRun`. -/
 def CandidateExprRun.evidence
-    {env : VEnv} {Us : List Name} {source : Expr}
-    {trace : AddInductive.CandidateExprTrace source}
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
     {Δ : VLCtx} {source' view' inferred' : VExpr} :
     CandidateExprRun env Us trace Δ source' view' inferred' →
       DefEqEvidence env Us.length Δ.toCtx source' view' inferred'
   | .terminal node => node.evidence
-  | .forallE _ _ node domainRun bodyRun _ _ _ bodyContext =>
-    .trans node.evidence <| .forallE domainRun.evidence <| by
-      simpa only [bodyContext, VLCtx.toCtx] using bodyRun.evidence
+  | .forallE _ _ node domainRun bodyRun domainType bodyType bodyContext => by
+    have henv : VEnv.WF env := by
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    have hΓ : OnCtx Δ.toCtx (env.IsType Us.length) := by
+      simpa only [node.check.venv_eq, node.check.lparams_eq,
+        node.check.vlctx_eq] using node.check.context.Δwf.toCtx
+    have domainEvidence := domainRun.evidence
+    obtain ⟨_, domainTypeEq⟩ :=
+      domainType.uniq henv hΓ domainEvidence.isDefEq
+    have domainAtSort : DefEqEvidence env Us.length Δ.toCtx
+        _ _ (.sort _) :=
+      .change domainTypeEq.symm domainEvidence
+    have bodyEvidence := bodyRun.evidence
+    rw [bodyContext] at bodyEvidence
+    simp only [VLCtx.toCtx] at bodyEvidence
+    have hBodyΓ : OnCtx (_ :: Δ.toCtx) (env.IsType Us.length) :=
+      ⟨hΓ, ⟨_, domainType⟩⟩
+    obtain ⟨_, bodyTypeEq⟩ :=
+      bodyType.uniq henv hBodyΓ bodyEvidence.isDefEq
+    have bodyAtSort : DefEqEvidence env Us.length
+        (_ :: Δ.toCtx) _ _ (.sort _) :=
+      .change bodyTypeEq.symm bodyEvidence
+    have piEvidence := DefEqEvidence.forallE domainAtSort bodyAtSort
+    obtain ⟨_, nodeTypeEq⟩ :=
+      node.evidence.isDefEq.uniq henv hΓ (domainType.forallE bodyType)
+    exact .trans node.evidence (.change nodeTypeEq.symm piEvidence)
 
 /-- The raw root of a recursively interpreted trace has the strict Theory
 translation retained by its paired full-check run. -/
 theorem CandidateExprRun.source_tr
-    {env : VEnv} {Us : List Name} {source : Expr}
-    {trace : AddInductive.CandidateExprTrace source}
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
     {Δ : VLCtx} {source' view' inferred' : VExpr}
     (run : CandidateExprRun env Us trace Δ source' view' inferred') :
     TrExprS env Us Δ source source' := by
@@ -488,24 +576,32 @@ definitionally equal normalized-domain context.  This closes the provenance
 loop: the emitted Theory equality is not only between two well-typed terms;
 both endpoints are translations of the source-indexed candidate syntax. -/
 theorem CandidateExprRun.view_tr
-    {env : VEnv} {Us : List Name} {source : Expr}
-    {trace : AddInductive.CandidateExprTrace source}
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
     {Δ : VLCtx} {source' view' inferred' : VExpr}
     (run : CandidateExprRun env Us trace Δ source' view' inferred') :
     TrExpr env Us Δ trace.view view' := by
   induction run with
   | terminal node => exact node.whnf.rhs_tr
-  | @forallE domain Δ context source inferred name body binderInfo
-      source' domain' body' u v domainView' bodyΔ bodyView' arg
+  | @forallE context domain name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred' bodyΔ
+      bodyView' bodyInferred' u v
       checked normalized domainCandidate bodyCandidate node domainRun bodyRun
-      argId deps arg_eq bodyContext domainIH bodyIH =>
+      domainType bodyType bodyContext domainIH bodyIH =>
     have henv : VEnv.WF env := by
       simpa only [node.check.venv_eq] using node.check.context.Ewf
     have hΔ : VLCtx.WF env Us.length Δ := by
       simpa only [node.check.venv_eq, node.check.lparams_eq,
         node.check.vlctx_eq] using node.check.context.Δwf
+    obtain ⟨_, domainTypeEq⟩ :=
+      domainType.uniq henv hΔ.toCtx domainRun.evidence.isDefEq
+    have domainDef : env.IsDefEq Us.length Δ.toCtx
+        domain' domainView' (.sort u) :=
+      (DefEqEvidence.change domainTypeEq.symm domainRun.evidence).isDefEq
     have bodyIH' : TrExpr env Us
-        ((some (argId, deps), .vlam domain') :: Δ)
+        ((some (context.freshFVarId,
+          domain.consumeTypeAnnotations.fvarsList), .vlam domain') :: Δ)
         bodyCandidate.view bodyView' := by
       simpa only [bodyContext] using bodyIH
     have bodyAbstract := bodyIH'.abstract VLCtx.Abstract.zero
@@ -513,25 +609,31 @@ theorem CandidateExprRun.view_tr
         ((none, .vlam domain') :: Δ)
         ((none, .vlam domainView') :: Δ) :=
       .cons (.refl henv hΔ) (by nofun)
-        (.vlam domainRun.evidence.isDefEq)
+        (.vlam domainDef)
     have bodyMoved := candidateTrExpr_moveCtx henv hctx bodyAbstract
+    have bodyEvidence := bodyRun.evidence
+    rw [bodyContext] at bodyEvidence
+    simp only [VLCtx.toCtx] at bodyEvidence
+    have hBodyΓ : OnCtx (domain' :: Δ.toCtx)
+        (env.IsType Us.length) := ⟨hΔ.toCtx, ⟨_, domainType⟩⟩
+    obtain ⟨_, bodyTypeEq⟩ :=
+      bodyType.uniq henv hBodyΓ bodyEvidence.isDefEq
     have bodyDefRaw : env.IsDefEq Us.length
-        (domain' :: Δ.toCtx) body' bodyView' (.sort v) := by
-      simpa only [bodyContext, VLCtx.toCtx] using
-        bodyRun.evidence.isDefEq
+        (domain' :: Δ.toCtx) body' bodyView' (.sort v) :=
+      (DefEqEvidence.change bodyTypeEq.symm bodyEvidence).isDefEq
     have bodyDefMoved :=
       bodyDefRaw.defeqDFC henv hctx.defeqCtx
     have habstract :
-        bodyCandidate.view.abstract #[.fvar argId] =
-          Expr.abstract1 argId bodyCandidate.view := by
-      rw [show #[.fvar argId] =
-        ⟨[argId].map Expr.fvar⟩ by rfl]
+        bodyCandidate.view.abstract #[context.freshExpr] =
+          Expr.abstract1 context.freshFVarId bodyCandidate.view := by
+      rw [show #[context.freshExpr] =
+        ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
       simp only [Expr.abstract_eq, Expr.abstractList]
     apply TrExpr.forallE henv hΔ
-    · exact ⟨_, domainRun.evidence.isDefEq.hasType.2⟩
+    · exact ⟨_, domainDef.hasType.2⟩
     · exact ⟨_, bodyDefMoved.hasType.2⟩
     · exact domainIH
-    · simpa only [AddInductive.CandidateExprTrace.view, arg_eq,
+    · simpa only [AddInductive.CandidateExprTrace.view,
         habstract] using bodyMoved
 
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
@@ -690,6 +792,40 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.ofCandidate' depends on axioms: [p
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateNodeRun.ofCandidate
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateNodeRun.exists_ofCandidate' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateNodeRun.exists_ofCandidate
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateNodeRun.evidence' depends on axioms: [propext,

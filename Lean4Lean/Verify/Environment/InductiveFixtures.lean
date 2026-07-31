@@ -3210,7 +3210,8 @@ private theorem aliasFormerCtorCheckTypeStep_valid :
 
 private def aliasFormerFamilyCandidate :
     AddInductive.CandidateExpr aliasFormerInfo.type :=
-  ⟨.terminal aliasFormerCandidateContext aliasFormerInfo.type
+  ⟨aliasFormerCandidateContext,
+    .terminal aliasFormerCandidateContext aliasFormerInfo.type
       (.sort (.succ (.succ .zero))) (.sort (.succ .zero))
       aliasFormerFamilyCheckTypeStep_valid
       aliasFormerFamilyCandidateStep_valid⟩
