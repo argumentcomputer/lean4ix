@@ -2691,6 +2691,16 @@ private def aliasFormerCtorCandidateContext : AddInductive.Context where
   allowPrimitive := false
   fuel := { whnf := 2 }
 
+/-- Exact kernel request indexed by the singleton normalization candidate. -/
+private def aliasFormerKernelCtor : Constructor where
+  name := aliasFormerMkInfo.name
+  type := aliasFormerMkInfo.type
+
+private def aliasFormerKernelType : InductiveType where
+  name := aliasFormerInfo.name
+  type := aliasFormerInfo.type
+  ctors := [aliasFormerKernelCtor]
+
 private theorem aliasFormerNormalization_lookup :
     aliasFormerNormalizationKernelEnv.find? ``TypeFamilyAlias =
       some typeFamilyAliasInfo := by
@@ -3115,6 +3125,20 @@ private theorem unfoldTypeFamilyAlias (methods state) :
     ConstantInfo.value!, ConstantInfo.toConstantVal,
     Expr.instantiateLevelParams]
 
+private theorem unfoldAliasFormer (methods state) :
+    TypeChecker.Inner.unfoldDefinition (.const ``AliasFormer [])
+        methods aliasFormerCtorNormalizationRawContext state =
+      .ok (none, state) := by
+  change
+    TypeChecker.Inner.unfoldDefinitionCore (.const ``AliasFormer [])
+        methods aliasFormerCtorNormalizationRawContext state =
+      .ok (none, state)
+  simp [TypeChecker.Inner.unfoldDefinitionCore, TypeChecker.Inner.isDelta,
+    Expr.getAppFn, aliasFormerCtorNormalizationRawContext,
+    aliasFormerCtorNormalization_lookup, Bind.bind, ReaderT.bind,
+    StateT.bind, Except.bind, aliasFormerInfo,
+    ConstantInfo.hasValue]
+
 private theorem unfoldRecAliasInitial (methods) :
     TypeChecker.Inner.unfoldDefinition
         (.const ``RecAlias [.succ .zero])
@@ -3180,6 +3204,13 @@ private theorem whnfLoopTypeFamilyAlias (methods state) :
   unfold TypeChecker.Inner.whnf'.loop
   simp
 
+private theorem whnfLoopAliasFormer (methods state) :
+    TypeChecker.Inner.whnf'.loop (.const ``AliasFormer []) 2
+        methods aliasFormerCtorNormalizationRawContext state =
+      .ok (.const ``AliasFormer [], state) := by
+  unfold TypeChecker.Inner.whnf'.loop
+  simp [unfoldAliasFormer]
+
 private theorem whnfLoopRecAlias (methods) :
     TypeChecker.Inner.whnf'.loop
         (.const ``RecAlias [.succ .zero]) 2
@@ -3205,6 +3236,24 @@ theorem aliasFormerFamily_whnf :
       aliasFormerNormalizationRawContext.fuel.whnfEager
     else aliasFormerNormalizationRawContext.fuel.whnf) = 2 by rfl]
   rw [whnfLoopTypeFamilyAlias]
+  simp [Functor.map, StateT.map, Except.map]
+
+/-- Constructor normalization is staged after inserting the raw family. The
+family constant is opaque, so this exact checker run retains the constructor
+type unchanged. -/
+theorem aliasFormerCtor_whnf :
+    ∃ state : TypeChecker.State,
+      TypeChecker.Inner.whnf' (.const ``AliasFormer [])
+          (TypeChecker.Methods.withFuel 9999)
+          aliasFormerCtorNormalizationRawContext
+          ({} : TypeChecker.State) =
+        .ok (.const ``AliasFormer [], state) := by
+  unfold TypeChecker.Inner.whnf'
+  simp
+  rw [show (if aliasFormerCtorNormalizationRawContext.eagerReduce then
+      aliasFormerCtorNormalizationRawContext.fuel.whnfEager
+    else aliasFormerCtorNormalizationRawContext.fuel.whnf) = 2 by rfl]
+  rw [whnfLoopAliasFormer]
   simp [Functor.map, StateT.map, Except.map]
 
 /-- The full non-inference-only checker run for the raw AliasFormer family
@@ -3300,6 +3349,21 @@ private theorem aliasFormerCtor_checkTypeM :
   rw [checkTypeAliasFormerCandidate]
   rfl
 
+private theorem aliasFormerCtor_whnfM :
+    TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
+        { whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
+      .ok (.const ``AliasFormer []) := by
+  change
+    Except.map (fun x : Expr × TypeChecker.State => x.1)
+      (TypeChecker.Inner.whnf'
+        (.const ``AliasFormer [])
+        (TypeChecker.Methods.withFuel 9999)
+        aliasFormerCtorNormalizationRawContext ({} : TypeChecker.State)) =
+      Except.ok (.const ``AliasFormer [])
+  obtain ⟨state, hrun⟩ := aliasFormerCtor_whnf
+  rw [hrun]
+  rfl
+
 private def aliasFormerFamilyCandidateStep :
     AddInductive.CandidateWhnfStep where
   context := aliasFormerCandidateContext
@@ -3342,6 +3406,20 @@ private theorem aliasFormerCtorCheckTypeStep_valid :
       .ok (.const ``TypeFamilyAlias [])
   exact aliasFormerCtor_checkTypeM
 
+private def aliasFormerCtorCandidateStep :
+    AddInductive.CandidateWhnfStep where
+  context := aliasFormerCtorCandidateContext
+  source := aliasFormerMkInfo.type
+  result := .const ``AliasFormer []
+
+private theorem aliasFormerCtorCandidateStep_valid :
+    aliasFormerCtorCandidateStep.Valid := by
+  change
+    TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
+        { whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
+      .ok (.const ``AliasFormer [])
+  exact aliasFormerCtor_whnfM
+
 private def aliasFormerFamilyCandidate :
     AddInductive.CandidateExpr aliasFormerInfo.type :=
   ⟨aliasFormerCandidateContext,
@@ -3350,12 +3428,45 @@ private def aliasFormerFamilyCandidate :
       aliasFormerFamilyCheckTypeStep_valid
       aliasFormerFamilyCandidateStep_valid⟩
 
+private def aliasFormerCtorCandidate :
+    AddInductive.CandidateExpr aliasFormerMkInfo.type :=
+  ⟨aliasFormerCtorCandidateContext,
+    .terminal aliasFormerCtorCandidateContext aliasFormerMkInfo.type
+      (.const ``TypeFamilyAlias []) (.const ``AliasFormer [])
+      aliasFormerCtorCheckTypeStep_valid
+      aliasFormerCtorCandidateStep_valid⟩
+
+private def aliasFormerConstructorCandidate :
+    AddInductive.CandidateConstructor aliasFormerKernelCtor :=
+  ⟨aliasFormerCtorCandidate⟩
+
+private def aliasFormerFamilyListCandidate :
+    AddInductive.CandidateFamily aliasFormerKernelType where
+  familyType := ⟨aliasFormerFamilyCandidate⟩
+  constructors := .cons aliasFormerConstructorCandidate .nil
+
+/-- Exact singleton family/constructor candidate list used to exercise the
+generic positional Theory boundary. -/
+private def aliasFormerNormalizationCandidate :
+    AddInductive.NormalizationCandidate [aliasFormerKernelType] where
+  families := .cons aliasFormerFamilyListCandidate .nil
+
 /-- The generic candidate traversal retains the exact context, input, and
 result of the actual AliasFormer family WHNF observation. -/
 theorem aliasFormerFamily_candidateTrace :
     AddInductive.buildCandidateExpr aliasFormerInfo.type
         aliasFormerCandidateContext =
       .ok aliasFormerFamilyCandidate := by
+  apply AddInductive.buildCandidateExpr_of_whnf_nonForall
+  · decide
+  · rfl
+
+/-- The post-family constructor position is produced by the same executable
+candidate traversal and retains its exact opaque result. -/
+theorem aliasFormerCtor_candidateTrace :
+    AddInductive.buildCandidateExpr aliasFormerMkInfo.type
+        aliasFormerCtorCandidateContext =
+      .ok aliasFormerCtorCandidate := by
   apply AddInductive.buildCandidateExpr_of_whnf_nonForall
   · decide
   · rfl
@@ -3691,6 +3802,34 @@ theorem aliasFormerFamily_candidateView_tr :
     AddInductive.CandidateExprTrace.view] using
     aliasFormerFamilyCandidateRun.view_tr
 
+private theorem aliasFormerCtorCandidatePrefix_ne :
+    aliasFormerCtorCandidateContext.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix := by
+  decide
+
+private def aliasFormerCtorCandidateContextRun :
+    TypeChecker.CandidateContextRun aliasFormerCtorCandidateContext :=
+  TypeChecker.CandidateContextRun.root
+    aliasFormerCtorNormalizationVEnvs_wf rfl
+    aliasFormerCtorCandidatePrefix_ne
+
+/-- Family endpoint certificate used by the singleton list assembler. -/
+private def aliasFormerFamilyRootRun :
+    TypeChecker.CandidateExprRootRun typeFamilyAliasEnv []
+      aliasFormerFamilyCandidate aliasFormerRawType.type
+      aliasFormerViewType.type where
+  contextRun := aliasFormerCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := aliasFormerFamily_candidateSource_tr
+  view_tr := by
+    simpa [aliasFormerFamilyCandidate,
+      AddInductive.CandidateExprTrace.view] using
+      aliasFormerFamily_candidateView_tr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
 /-- Verified full-check certificate for the actual AliasFormer constructor
 type in the post-family environment. -/
 def aliasFormerCtorCheckTypeRun :
@@ -3704,6 +3843,22 @@ def aliasFormerCtorCheckTypeRun :
     rfl rfl rfl TypeChecker.VState.WF.empty
     (.const rfl rfl rfl) (.const rfl rfl rfl)
     10000 (by rfl)
+
+/-- Constructor endpoint certificate in the exact post-family context. -/
+private def aliasFormerCtorRootRun :
+    TypeChecker.CandidateExprRootRun aliasFormerTypeEnv []
+      aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
+      aliasFormerRawType.ctors[0].type where
+  contextRun := aliasFormerCtorCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := aliasFormerCtorCheckTypeRun.expr_tr
+  view_tr := by
+    refine ⟨_, aliasFormerCtorCheckTypeRun.expr_tr, ?_⟩
+    exact ⟨_, aliasFormerCtorCheckTypeRun.hasType⟩
+  whnfFuel := 9999
+  whnfDepth := rfl
 
 /-- The actual AliasFormer constructor type is typed by the verified full
 checker in the post-family environment. -/
@@ -3816,31 +3971,70 @@ private def aliasRecCtorEvidence :
     .forallE aliasRecFieldEvidence
       (.refl (aliasRecResult_hasType rfl))⟩
 
+private def aliasFormerCandidateConstructorRun :
+    VInductDecl.CandidateConstructorRun aliasFormerTypeEnv []
+      aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] where
+  name_eq := rfl
+  uvars_eq := rfl
+  viewType := aliasFormerRawType.ctors[0].type
+  typeRun := aliasFormerCtorRootRun
+
+private def aliasFormerCandidateConstructorListRun :
+    VInductDecl.CandidateConstructorListRun aliasFormerTypeEnv []
+      aliasFormerFamilyListCandidate.constructors
+      aliasFormerRawType.ctors := by
+  exact .cons aliasFormerCandidateConstructorRun .nil
+
+private def aliasFormerCandidateFamilyRun :
+    VInductDecl.CandidateFamilyRun typeFamilyAliasEnv []
+      aliasFormerFamilyListCandidate aliasFormerRawType where
+  name_eq := rfl
+  uvars_eq := rfl
+  viewType := aliasFormerViewType.type
+  typeRun := aliasFormerFamilyRootRun
+  typeEnv := aliasFormerTypeEnv
+  addType := rfl
+  constructors := aliasFormerCandidateConstructorListRun
+
+/-- The complete source-indexed singleton candidate list is now the source of
+the Theory normalization value and its semantic run. -/
+def aliasFormerNormalizationCandidateRun :
+    VInductDecl.NormalizationCandidateRun typeFamilyAliasEnv []
+      aliasFormerNormalizationCandidate aliasFormerRawDecl where
+  raw := aliasFormerRawType
+  raw_types_eq := rfl
+  uvars_eq := rfl
+  family := aliasFormerCandidateFamilyRun
+
+example : aliasFormerNormalizationCandidateRun.viewDecl =
+    aliasFormerViewDecl := rfl
+
+example : aliasFormerNormalizationCandidateRun.normalization.accepted =
+    true := rfl
+
+theorem aliasFormerCandidateNormalization_eq :
+    aliasFormerNormalizationCandidateRun.normalization =
+      aliasFormerNormalization := rfl
+
+private def aliasFormerTruncatedViewType : VInductiveType :=
+  { aliasFormerViewType with ctors := [] }
+
+private def aliasFormerTruncatedViewDecl : VInductDecl :=
+  { aliasFormerViewDecl with types := [aliasFormerTruncatedViewType] }
+
+/-- A shorter view cannot cross even the computational normalization-shape
+gate, so it cannot reach dependent analysis or transaction construction. -/
+theorem aliasFormerTruncatedView_rejected :
+    VInductDecl.normalization? aliasFormerRawDecl
+      aliasFormerTruncatedViewDecl = none := rfl
+
 /-- Complete checker-produced semantic normalization certificate for
 AliasFormer. -/
 def aliasFormerNormalizationRun :
     VInductDecl.NormalizationRun aliasFormerNormalization
       typeFamilyAliasEnv := by
-  refine {
-    raw := aliasFormerRawType
-    view := aliasFormerViewType
-    source_types_eq := rfl
-    view_types_eq := rfl
-    family := ?_
-    typeEnv := aliasFormerTypeEnv
-    addType := rfl
-    constructors := ?_ }
-  · exact ⟨.sort (.succ (.succ .zero)),
-      aliasFormerFamilyCandidateRun.evidence⟩
-  · refine .cons ?_ .nil
-    have htype : aliasFormerTypeEnv.HasType 0 []
-        (.const aliasFormerRawType.name [])
-        (aliasFormerRawType.type.instL []) :=
-      .const rfl (fun _ h => nomatch h) rfl
-    change aliasFormerTypeEnv.HasType 0 []
-      aliasFormerRawType.ctors[0].type
-      (.const ``TypeFamilyAlias []) at htype
-    exact ⟨.const ``TypeFamilyAlias [], .refl htype⟩
+  simpa only [aliasFormerCandidateNormalization_eq] using
+    aliasFormerNormalizationCandidateRun.normalizationRun
 
 theorem aliasFormerNormalization_wf_checked :
     aliasFormerNormalization.WF typeFamilyAliasEnv :=
@@ -4041,6 +4235,22 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateTrace' depen
 #print axioms aliasFormerFamily_candidateTrace
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCtor_candidateTrace' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.looseBVarRange_eq,
+ Level.instLawfulBEqLevel,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerCtor_candidateTrace
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidate' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -4141,6 +4351,80 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateView_tr' dep
 #print axioms aliasFormerFamily_candidateView_tr
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalizationCandidateRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerNormalizationCandidateRun
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCandidateNormalization_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerCandidateNormalization_eq
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerTruncatedView_rejected' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms aliasFormerTruncatedView_rejected
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasRecField_checkType' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -4208,6 +4492,21 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_whnf' depends on axio
 -/
 #guard_msgs in
 #print axioms aliasFormerFamily_whnf
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCtor_whnf' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerCtor_whnf
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.recAlias_whnf' depends on axioms: [propext,

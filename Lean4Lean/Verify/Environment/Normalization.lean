@@ -1087,6 +1087,58 @@ theorem CandidateExprRun.view_tr
     · simpa only [AddInductive.CandidateExprTrace.view,
         habstract] using bodyMoved
 
+/-- Root-level verified context and translations for an exact executable
+candidate expression and an explicitly named Theory view.
+
+The raw endpoint is a strict translation of the stored kernel source. The
+view endpoint translates the exact reconstructed candidate syntax; allowing
+the ordinary `TrExpr` relation here accounts for the definitional transport
+performed while recursively rebuilding Pi bodies. -/
+structure CandidateExprRootRun (env : VEnv) (Us : List Name)
+    {source : Expr} (candidate : AddInductive.CandidateExpr source)
+    (source' view' : VExpr) where
+  contextRun : CandidateContextRun candidate.context
+  venv_eq : contextRun.context.venv = env
+  lparams_eq : contextRun.context.lparams = Us
+  vlctx_eq : contextRun.context.vlctx = []
+  source_tr : TrExprS env Us [] source source'
+  view_tr : TrExpr env Us [] candidate.view view'
+  whnfFuel : Nat
+  whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1
+
+/-- Interpret a root candidate against its explicitly translated endpoints.
+The candidate view is not selected from a proof-only existential: the caller
+names it and proves that it translates the exact executable view, while the
+verified recursive run supplies the equality to the strict raw endpoint. -/
+theorem CandidateExprRootRun.evidence
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source}
+    {source' view' : VExpr}
+    (run : CandidateExprRootRun env Us candidate source' view') :
+    ∃ A, DefEqEvidence env Us.length [] source' view' A := by
+  have source_tr : run.contextRun.context.TrExprS source source' := by
+    simpa only [VContext.TrExprS, run.venv_eq, run.lparams_eq,
+      run.vlctx_eq] using run.source_tr
+  obtain ⟨candidateView', inferred', ⟨candidateRun⟩⟩ :=
+    CandidateExprRun.exists_ofCandidate candidate.trace run.contextRun
+      source' source_tr run.whnfFuel run.whnfDepth
+  have henv : VEnv.WF env := by
+    simpa only [run.venv_eq] using run.contextRun.context.Ewf
+  have hΔ : VLCtx.WF env Us.length [] := by
+    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
+      run.contextRun.context.Δwf
+  have candidateView_tr :
+      TrExpr env Us [] candidate.view candidateView' := by
+    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
+      candidateRun.view_tr
+  have viewDef : env.IsDefEqU Us.length [] candidateView' view' :=
+    candidateView_tr.uniq henv (.refl henv hΔ) run.view_tr
+  have sourceDef : env.IsDefEqU Us.length [] source' candidateView' := by
+    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
+      candidateRun.evidence.isDefEq.toU
+  obtain ⟨A, hfinal⟩ := sourceDef.trans henv hΔ.toCtx viewDef
+  exact ⟨A, .ofDefEq hfinal⟩
+
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
 tail is checked in the context extended by the raw binder, exactly matching
 `VEnv.TelDefEq` and the mixed generator's raw-binder discipline. -/
@@ -1150,6 +1202,141 @@ theorem NormalizationRun.wf
     exact run.constructors.imp fun _ _ h => by
       obtain ⟨_, hctor⟩ := h
       exact hctor.isDefEq.toU
+
+/-- One constructor candidate tied to the corresponding raw Theory constant.
+Its expression payload may normalize, but its name, universe arity, and exact
+source position remain fixed. -/
+structure CandidateConstructorRun (env : VEnv) (Us : List Name)
+    {source : Constructor}
+    (candidate : AddInductive.CandidateConstructor source)
+    (raw : VConstVal) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  viewType : VExpr
+  typeRun : TypeChecker.CandidateExprRootRun env Us candidate.type
+    raw.type viewType
+
+/-- Replace only the expression payload certified by the constructor run. -/
+def CandidateConstructorRun.view
+    (run : CandidateConstructorRun env Us candidate raw) : VConstVal :=
+  { raw with type := run.viewType }
+
+/-- Exact positional certification for a source-indexed constructor list and
+the raw Theory constructor list. Unlike `zip`, this type cannot truncate a
+longer side or reuse evidence at a different source position. -/
+inductive CandidateConstructorListRun (env : VEnv) (Us : List Name) :
+    {sources : List Constructor} →
+      AddInductive.CandidateList AddInductive.CandidateConstructor sources →
+      List VConstVal → Type where
+  | nil : CandidateConstructorListRun env Us .nil []
+  | cons
+      (head : CandidateConstructorRun env Us candidate raw)
+      (tail : CandidateConstructorListRun env Us candidates raws) :
+      CandidateConstructorListRun env Us
+        (.cons candidate candidates) (raw :: raws)
+
+/-- The exact normalized constructor list retained by a positional run. -/
+def CandidateConstructorListRun.views :
+    CandidateConstructorListRun env Us candidates raws → List VConstVal
+  | .nil => []
+  | .cons head tail => head.view :: tail.views
+
+/-- Positional certification preserves every constructor header. -/
+theorem CandidateConstructorListRun.sameHeaders
+    (run : CandidateConstructorListRun env Us candidates raws) :
+    sameCtorHeaders raws run.views = true := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+    simp [CandidateConstructorListRun.views,
+      CandidateConstructorRun.view, sameCtorHeaders, ih]
+
+/-- Collect the exact checker-produced equality for every positional raw/view
+constructor pair. -/
+theorem CandidateConstructorListRun.evidence
+    (run : CandidateConstructorListRun env Us candidates raws) :
+    List.Forall₂
+      (fun raw view => ∃ A,
+        TypeChecker.DefEqEvidence env Us.length []
+          raw.type view.type A)
+      raws run.views := by
+  induction run with
+  | nil => exact .nil
+  | cons head tail ih =>
+    exact .cons head.typeRun.evidence ih
+
+/-- One family candidate certified in the input environment, together with
+all of its constructors certified in the exact environment obtained by
+inserting the raw family constant. -/
+structure CandidateFamilyRun (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.CandidateFamily source)
+    (raw : VInductiveType) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  viewType : VExpr
+  typeRun : TypeChecker.CandidateExprRootRun env Us
+    candidate.familyType.type raw.type viewType
+  typeEnv : VEnv
+  addType : env.addConst raw.name raw.toVConstant = some typeEnv
+  constructors : CandidateConstructorListRun typeEnv Us
+    candidate.constructors raw.ctors
+
+/-- Replace only the family and constructor expression payloads named by the
+certified candidate runs. -/
+def CandidateFamilyRun.view
+    (run : CandidateFamilyRun env Us candidate raw) : VInductiveType :=
+  { raw with
+    type := run.viewType
+    ctors := run.constructors.views }
+
+/-- Exact singleton candidate-list certification against one raw Theory
+declaration. The singleton kernel-source index rules out partial selection of
+a family candidate, and `raw_types_eq` rules out partial selection of a Theory
+family. Mutual blocks remain an explicit later generalization. -/
+structure NormalizationCandidateRun (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.NormalizationCandidate [source])
+    (rawDecl : VInductDecl) where
+  raw : VInductiveType
+  raw_types_eq : rawDecl.types = [raw]
+  uvars_eq : rawDecl.uvars = Us.length
+  family : CandidateFamilyRun env Us candidate.families.singleton raw
+
+/-- The Theory declaration obtained from the exact singleton candidate. -/
+def NormalizationCandidateRun.viewDecl
+    (run : NormalizationCandidateRun env Us candidate rawDecl) :
+    VInductDecl :=
+  { rawDecl with types := [run.family.view] }
+
+/-- Candidate-list shape evidence is sufficient to construct the Theory
+normalization boundary without `head!`, unchecked `zip`, or an arbitrary view
+declaration supplied separately from the candidate. -/
+def NormalizationCandidateRun.normalization
+    (run : NormalizationCandidateRun env Us candidate rawDecl) :
+    Normalization rawDecl where
+  view := run.viewDecl
+  shape_eq := by
+    simp only [normalizationShape, NormalizationCandidateRun.viewDecl,
+      run.raw_types_eq, beq_self_eq_true, Bool.true_and, sameTypeHeaders,
+      CandidateFamilyRun.view]
+    simp [run.family.constructors.sameHeaders]
+
+/-- Assemble the existing semantic normalization certificate from the exact
+family and constructor candidate runs. -/
+def NormalizationCandidateRun.normalizationRun
+    (run : NormalizationCandidateRun env Us candidate rawDecl) :
+    NormalizationRun run.normalization env where
+  raw := run.raw
+  view := run.family.view
+  source_types_eq := run.raw_types_eq
+  view_types_eq := rfl
+  family := by
+    simpa only [run.uvars_eq] using run.family.typeRun.evidence
+  typeEnv := run.family.typeEnv
+  addType := run.family.addType
+  constructors := by
+    simpa only [run.uvars_eq] using run.family.constructors.evidence
 
 /-- Checker-produced semantic evidence for one positional raw/view
 constructor pair. This has the same four-way declared/emitted split as
@@ -1592,6 +1779,40 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_tr' depends on axioms: [prope
 #print axioms TypeChecker.CandidateExprRun.view_tr
 
 /--
+info: 'Lean4Lean.TypeChecker.CandidateExprRootRun.evidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRootRun.evidence
+
+/--
 info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -1624,6 +1845,92 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
 -/
 #guard_msgs in
 #print axioms TypeChecker.TelDefEqEvidence.telDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.sameHeaders' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorListRun.sameHeaders
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorListRun.evidence
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalization' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateRun.normalization
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalizationRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateRun.normalizationRun
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizedCtorRun.wf' depends on axioms: [propext,

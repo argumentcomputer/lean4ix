@@ -873,6 +873,10 @@ def toList (f : (a : α) → F a → β) :
   | .nil => []
   | .cons head tail => f _ head :: tail.toList f
 
+/-- Eliminate a source-indexed singleton without a partial list operation. -/
+def singleton : CandidateList F [source] → F source
+  | .cons head .nil => head
+
 end CandidateList
 
 /-- Candidate for one constructor; its header is always taken from `source`. -/
@@ -998,6 +1002,12 @@ info: 'Lean4Lean.AddInductive.buildNormalizationCandidate' depends on axioms: [p
 -/
 #guard_msgs in
 #print axioms buildNormalizationCandidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateList.singleton' does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms CandidateList.singleton
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
