@@ -3510,6 +3510,38 @@ private def aliasFormerFamilyCandidateRun :
       (.sort (.succ (.succ .zero))) :=
   .terminal aliasFormerFamilyCandidateNodeRun
 
+private theorem aliasFormerCandidatePrefix_ne :
+    aliasFormerCandidateContext.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix := by
+  decide
+
+/-- The generic root constructor aligns the actual candidate context with the
+verified AliasFormer environment and supplies the empty-state certificate. -/
+private def aliasFormerCandidateContextRun :
+    TypeChecker.CandidateContextRun aliasFormerCandidateContext :=
+  TypeChecker.CandidateContextRun.root aliasFormerNormalizationVEnvs_wf
+    rfl aliasFormerCandidatePrefix_ne
+
+/-- The retained AliasFormer full check now selects its own Theory source and
+output translations; no expression translation is supplied by the fixture. -/
+theorem aliasFormerFamily_candidateRun_exists :
+    ∃ source' view' inferred',
+      aliasFormerCandidateContextRun.context.TrExprS
+        aliasFormerInfo.type source' ∧
+      Nonempty (TypeChecker.CandidateExprRun
+        aliasFormerCandidateContextRun.context.venv
+        aliasFormerCandidateContextRun.context.lparams
+        aliasFormerFamilyCandidate.trace
+        aliasFormerCandidateContextRun.context.vlctx
+        source' view' inferred') := by
+  apply TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars
+    aliasFormerFamilyCandidate.trace aliasFormerCandidateContextRun
+      (whnfFuel := 9999)
+  · change ∀ u ∈ ([] : List Level), u.hasMVar' = false
+    simp
+  · rfl
+  · trivial
+
 /-- The generic interpreter retains the strict translation of the raw
 candidate endpoint. -/
 theorem aliasFormerFamily_candidateSource_tr :
@@ -3890,6 +3922,40 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidate' depends on
 -/
 #guard_msgs in
 #print axioms aliasFormerFamily_candidate
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateRun_exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerFamily_candidateRun_exists
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateSource_tr' depends on axioms: [propext,

@@ -254,6 +254,36 @@ def CheckTypeRun.ofCandidateStep
     rw [context_eq]
     exact step.innerRun recursionFuel hdepth hvalid
 
+/-- Recover the strict Theory translations and typing judgment supplied by an
+exact retained full-check observation.
+
+This is the proof-producing counterpart of `CheckTypeRun.ofCandidateStep` for
+callers that do not yet have named translations.  The only source-side premise
+is the free-variable condition required by the verified checker refinement. -/
+theorem candidateCheckTypeStep_exists_translation
+    (step : AddInductive.CandidateCheckTypeStep)
+    (hvalid : step.Valid)
+    (context : VContext)
+    (context_eq : context.toContext = step.context.toTypeChecker)
+    (state_wf : VState.WF context {})
+    (source_fvars :
+      step.source.FVarsIn (· ∈ context.vlctx.fvars))
+    (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel) :
+    ∃ source' inferred',
+      context.TrExprS step.source source' ∧
+      context.TrExprS step.inferred inferred' ∧
+      context.HasType source' inferred' := by
+  obtain ⟨state, run⟩ :=
+    step.innerRun recursionFuel hdepth hvalid
+  rw [← context_eq] at run
+  obtain ⟨_, _, _, _, source', inferred', typing⟩ :=
+    (Inner.checkType.WF source_fvars
+      (Methods.withFuel recursionFuel) Methods.withFuel.WF)
+      state_wf step.inferred state run
+  exact ⟨source', inferred', typing.2.1, typing.2.2.1,
+    typing.2.2.2⟩
+
 /-- An exact successful `checkType` execution supplies the corresponding
 Theory typing judgment. Translation uniqueness transports the verifier's
 existential result to the precise translations named by the certificate. -/
@@ -305,6 +335,154 @@ theorem CheckTypeRun.isType_of_whnf
     simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
       run.context.Δwf.toCtx
   exact ⟨u, run.hasType.defeqU_r henv hΔ typeRun.isDefEqU⟩
+
+/-- The empty executable checker state is well formed for any verified
+context whose free-variable names are already reserved by the kernel name
+generator.  `VState.WF.empty` is the empty-local-context specialization;
+candidate normalization needs this slightly more general form after entering
+raw Pi binders. -/
+theorem VState.WF.empty_of_reserves
+    (context : VContext)
+    (reserved : ∀ fv ∈ context.vlctx.fvars,
+      (({} : VState).ngen).Reserves fv) :
+    VState.WF context {} where
+  trctx := context.trlctx
+  ngen_wf := reserved
+  ectx := ⟨context.vlctx, .refl, context.Δwf, .refl, .empty, reserved⟩
+  inferTypeI_wf := .empty
+  inferTypeC_wf := .empty
+  whnfCore_wf := .empty
+  whnf_wf := .empty
+  unfold_wf _ := by simp
+
+/-- Positional verified context for an executable normalization candidate.
+
+The equality pins every checker-visible field (environment, local context,
+safety, level parameters, and fuel) to the `AddInductive.Context` retained by
+the candidate trace.  The state certificate is kept with it because every
+retained full-check and WHNF observation starts from the empty checker state. -/
+structure CandidateContextRun
+    (candidateContext : AddInductive.Context) where
+  context : VContext
+  context_eq : context.toContext = candidateContext.toTypeChecker
+  state_wf : VState.WF context {}
+  namePrefix_ne : candidateContext.ngen.namePrefix ≠
+    (({} : VState).ngen).namePrefix
+
+/-- Candidate binders and the kernel checker's own temporary names use
+different prefixes, so every candidate binder is reserved by a freshly
+initialized kernel checker state. -/
+theorem candidateFreshFVarId_reserved
+    (candidateContext : AddInductive.Context)
+    (namePrefix_ne : candidateContext.ngen.namePrefix ≠
+      (({} : VState).ngen).namePrefix) :
+    (({} : VState).ngen).Reserves candidateContext.freshFVarId := by
+  simp [NameGenerator.Reserves, AddInductive.Context.freshFVarId]
+  intro i h
+  apply namePrefix_ne
+  simpa using congrArg Name.getPrefix h
+
+/-- Package an already verified checker context at a candidate position. -/
+def CandidateContextRun.ofVContext
+    (candidateContext : AddInductive.Context)
+    (context : VContext)
+    (context_eq : context.toContext = candidateContext.toTypeChecker)
+    (state_wf : VState.WF context {})
+    (namePrefix_ne : candidateContext.ngen.namePrefix ≠
+      (({} : VState).ngen).namePrefix) :
+    CandidateContextRun candidateContext :=
+  ⟨context, context_eq, state_wf, namePrefix_ne⟩
+
+/-- Construct the root certificate used by family and constructor candidates.
+Their candidate traversal deliberately resets the local context to empty. -/
+def CandidateContextRun.root
+    {ves : VEnvs} (wf : ves.WF candidateContext.env)
+    (lctx_eq : candidateContext.lctx = {})
+    (namePrefix_ne : candidateContext.ngen.namePrefix ≠
+      (({} : VState).ngen).namePrefix) :
+    CandidateContextRun candidateContext := by
+  let context := VContext.mk' wf candidateContext.safety
+    candidateContext.lparams candidateContext.fuel
+  refine ⟨context, ?_, ?_, namePrefix_ne⟩
+  · simp [context, VContext.mk', MLCtx.lctx,
+      AddInductive.Context.toTypeChecker, lctx_eq]
+  · exact VState.WF.empty
+
+/-- Extend a verified candidate context by precisely the raw local declaration
+used by `AddInductive.Context.pushLocalDecl`.
+
+The caller supplies the strict Theory translation and typing of the *stored*
+local-domain expression.  Freshness comes from the trace index; reservation is
+the independent fact needed to restart each retained checker observation from
+the empty kernel checker state. -/
+def CandidateContextRun.pushLocalDecl
+    (run : CandidateContextRun candidateContext)
+    (name : Name) (binderInfo : BinderInfo) (domain : Expr)
+    (fresh : candidateContext.lctx.find?
+      candidateContext.freshFVarId = none)
+    (domain' : VExpr)
+    (domain_tr : run.context.TrExprS domain domain')
+    (domain_type : run.context.IsType domain') :
+    CandidateContextRun
+      (candidateContext.pushLocalDecl name binderInfo domain) := by
+  let mlctx := run.context.mlctx.vlam candidateContext.freshFVarId
+    name domain domain' binderInfo
+  have lctx_eq : run.context.mlctx.lctx = candidateContext.lctx := by
+    calc
+      run.context.mlctx.lctx = run.context.lctx := run.context.lctx_eq
+      _ = candidateContext.lctx := by
+        have h := congrArg (fun c : TypeChecker.Context => c.lctx)
+          run.context_eq
+        simpa [AddInductive.Context.toTypeChecker] using h
+  have fresh' : run.context.mlctx.lctx.find?
+      candidateContext.freshFVarId = none := by
+    rw [lctx_eq]
+    exact fresh
+  have mlctx_wf : mlctx.WF run.context.venv run.context.lparams :=
+    ⟨run.context.mlctx_wf, fresh', domain_tr, domain_type⟩
+  let context := run.context.withMLC mlctx (wf := ⟨mlctx_wf⟩)
+  have context_eq : context.toContext =
+      (candidateContext.pushLocalDecl name binderInfo domain).toTypeChecker := by
+    change { run.context.toContext with
+        lctx := run.context.mlctx.lctx.mkLocalDecl
+          candidateContext.freshFVarId name domain binderInfo } = _
+    rw [run.context_eq, lctx_eq]
+    rfl
+  refine ⟨context, context_eq, VState.WF.empty_of_reserves context ?_, ?_⟩
+  intro fv hfv
+  change fv ∈ candidateContext.freshFVarId ::
+    run.context.vlctx.fvars at hfv
+  simp only [List.mem_cons] at hfv
+  rcases hfv with rfl | hfv
+  · exact candidateFreshFVarId_reserved candidateContext run.namePrefix_ne
+  · exact run.state_wf.ngen_wf fv hfv
+  simpa [AddInductive.Context.pushLocalDecl] using run.namePrefix_ne
+
+@[simp] theorem CandidateContextRun.pushLocalDecl_venv
+    (run : CandidateContextRun candidateContext)
+    (domain_tr : run.context.TrExprS domain domain')
+    (domain_type : run.context.IsType domain') :
+    (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
+      domain_type).context.venv = run.context.venv :=
+  rfl
+
+@[simp] theorem CandidateContextRun.pushLocalDecl_lparams
+    (run : CandidateContextRun candidateContext)
+    (domain_tr : run.context.TrExprS domain domain')
+    (domain_type : run.context.IsType domain') :
+    (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
+      domain_type).context.lparams = run.context.lparams :=
+  rfl
+
+@[simp] theorem CandidateContextRun.pushLocalDecl_vlctx
+    (run : CandidateContextRun candidateContext)
+    (domain_tr : run.context.TrExprS domain domain')
+    (domain_type : run.context.IsType domain') :
+    (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
+      domain_type).context.vlctx =
+      (some (candidateContext.freshFVarId, domain.fvarsList),
+        .vlam domain') :: run.context.vlctx :=
+  rfl
 
 /-- The two exact verifier runs attached to one retained candidate node.
 
@@ -500,9 +678,148 @@ inductive CandidateExprRun (env : VEnv) (Us : List Name) :
             domain.consumeTypeAnnotations.fvarsList),
             .vlam domain') :: Δ) :
       CandidateExprRun env Us
-        (.forallE context source inferred name domain body binderInfo
+        (.forallE context source inferred name domain body binderInfo fresh
           checked normalized domainCandidate bodyCandidate)
         Δ source' (.forallE domainView' bodyView') inferred'
+
+/-- Interim structural side condition for recursive candidate certification.
+
+Lean stores a Pi body under `domain.consumeTypeAnnotations`, while the Theory
+translation of the Pi itself uses the raw domain.  The generic context
+constructor above handles either expression, but relating distinct annotation
+gadgets still needs a retained verified `isDefEq` run.  This predicate isolates
+the already-complete raw-domain case without weakening or hiding that remaining
+boundary. -/
+def CandidateRawBinderDomains :
+    {context : AddInductive.Context} → {source : Expr} →
+      AddInductive.CandidateExprTrace context source → Prop
+  | _, _, .terminal .. => True
+  | _, _, .forallE _ _ _ _ domain _ _ _ _ _
+      domainCandidate bodyCandidate =>
+    domain.consumeTypeAnnotations = domain ∧
+      CandidateRawBinderDomains domainCandidate ∧
+      CandidateRawBinderDomains bodyCandidate
+
+/-- Recursively turn every retained candidate observation into verified
+normalization evidence, constructing the exact verified binder context at
+each Pi node.
+
+The root strict translation is the only semantic input.  Child source
+translations come from destructing the verified parent Pi result, and body
+translations are instantiated at the trace's exact fresh variable.  The
+temporary `CandidateRawBinderDomains` premise marks precisely the annotation
+gadget case that still requires a retained verified `isDefEq` bridge. -/
+theorem CandidateExprRun.exists_ofCandidateRaw
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    (candidateRun : CandidateContextRun candidateContext)
+    (source' : VExpr)
+    (source_tr : candidateRun.context.TrExprS source source')
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
+    (rawDomains : CandidateRawBinderDomains trace) :
+    ∃ view' inferred',
+      Nonempty (CandidateExprRun candidateRun.context.venv
+        candidateRun.context.lparams trace candidateRun.context.vlctx
+        source' view' inferred') := by
+  induction trace generalizing source' with
+  | terminal context source inferred result checked normalized =>
+    obtain ⟨inferred', result', _, _, ⟨node⟩⟩ :=
+      CandidateNodeRun.exists_ofCandidate context source inferred result
+        checked normalized candidateRun.context candidateRun.context_eq
+        candidateRun.state_wf source' source_tr
+        context.fuel.recDepth whnfFuel rfl whnfDepth
+    exact ⟨result', inferred', ⟨.terminal node⟩⟩
+  | forallE context source inferred name domain body binderInfo fresh
+      checked normalized domainCandidate bodyCandidate domainIH bodyIH =>
+    obtain ⟨inferred', result', _, result_tr, ⟨node⟩⟩ :=
+      CandidateNodeRun.exists_ofCandidate context source inferred
+        (.forallE name domain body binderInfo) checked normalized
+        candidateRun.context candidateRun.context_eq candidateRun.state_wf
+        source' source_tr context.fuel.recDepth whnfFuel rfl whnfDepth
+    let .forallE domainType bodyType domain_tr body_tr := result_tr
+    obtain ⟨u, domainTypeHasType⟩ := domainType
+    obtain ⟨v, bodyTypeHasType⟩ := bodyType
+    rcases rawDomains with ⟨rawDomain, domainRaw, bodyRaw⟩
+    obtain ⟨domainView', domainInferred', ⟨domainRun⟩⟩ :=
+      domainIH candidateRun _ domain_tr whnfDepth domainRaw
+    have storedDomain_tr := domain_tr
+    rw [← rawDomain] at storedDomain_tr
+    let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
+      domain.consumeTypeAnnotations fresh _ storedDomain_tr
+        ⟨u, domainTypeHasType⟩
+    have bodyVenv : bodyCandidateRun.context.venv =
+        candidateRun.context.venv := rfl
+    have bodyLparams : bodyCandidateRun.context.lparams =
+        candidateRun.context.lparams := rfl
+    have bodyVlctx : bodyCandidateRun.context.vlctx =
+        (some (context.freshFVarId,
+          domain.consumeTypeAnnotations.fvarsList), .vlam _) ::
+          candidateRun.context.vlctx := rfl
+    have bodyDepth :
+        (context.pushLocalDecl name binderInfo
+          domain.consumeTypeAnnotations).fuel.recDepth = whnfFuel + 1 := by
+      simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+    have bodyΔwf := bodyCandidateRun.context.Δwf
+    rw [bodyVenv, bodyLparams, bodyVlctx] at bodyΔwf
+    have instantiatedBody_tr :=
+      body_tr.inst_fvar candidateRun.context.Ewf.ordered
+        bodyΔwf
+    obtain ⟨bodyView', bodyInferred', ⟨bodyRun⟩⟩ :=
+      bodyIH bodyCandidateRun _ (by
+        change TrExprS bodyCandidateRun.context.venv
+          bodyCandidateRun.context.lparams bodyCandidateRun.context.vlctx
+          (body.instantiate1 context.freshExpr) _
+        rw [bodyVenv, bodyLparams, bodyVlctx]
+        simpa only [AddInductive.Context.freshExpr,
+          Expr.instantiate1_eq] using
+          instantiatedBody_tr)
+        bodyDepth bodyRaw
+    refine ⟨.forallE domainView' bodyView', inferred', ⟨?_⟩⟩
+    exact .forallE domainCandidate bodyCandidate node domainRun bodyRun
+      domainTypeHasType bodyTypeHasType bodyVlctx
+
+/-- Recover a trace root's strict source translation from its retained full
+check.  Unlike recursive child nodes, whose source translations are obtained
+from the parent Pi translation, a root needs only the checker's syntactic
+free-variable premise. -/
+theorem candidateExprTrace_exists_source_translation
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    (candidateRun : CandidateContextRun candidateContext)
+    (source_fvars :
+      source.FVarsIn (· ∈ candidateRun.context.vlctx.fvars)) :
+    ∃ source', candidateRun.context.TrExprS source source' := by
+  let checked := trace.rootCheck
+  obtain ⟨source', _, source_tr, _, _⟩ :=
+    candidateCheckTypeStep_exists_translation
+      ⟨candidateContext, source, checked.inferred⟩ checked.valid
+      candidateRun.context candidateRun.context_eq candidateRun.state_wf
+      source_fvars candidateContext.fuel.recDepth rfl
+  exact ⟨source', source_tr⟩
+
+/-- Recursively certify a raw-domain candidate trace without asking the caller
+for any Theory expression.  The retained root full check chooses the source
+translation; all output and child translations then come from verified
+checker executions and Pi decomposition. -/
+theorem CandidateExprRun.exists_ofCandidateRawFVars
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    (candidateRun : CandidateContextRun candidateContext)
+    (source_fvars :
+      source.FVarsIn (· ∈ candidateRun.context.vlctx.fvars))
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
+    (rawDomains : CandidateRawBinderDomains trace) :
+    ∃ source' view' inferred',
+      candidateRun.context.TrExprS source source' ∧
+      Nonempty (CandidateExprRun candidateRun.context.venv
+        candidateRun.context.lparams trace candidateRun.context.vlctx
+        source' view' inferred') := by
+  obtain ⟨source', source_tr⟩ :=
+    candidateExprTrace_exists_source_translation trace candidateRun
+      source_fvars
+  obtain ⟨view', inferred', run⟩ :=
+    CandidateExprRun.exists_ofCandidateRaw trace candidateRun source'
+      source_tr whnfFuel whnfDepth rawDomains
+  exact ⟨source', view', inferred', source_tr, run⟩
 
 /-- Fold a complete candidate trace into the compositional equality language
 consumed by `NormalizationRun` and `GenerationRun`. -/
@@ -586,7 +903,7 @@ theorem CandidateExprRun.view_tr
   | terminal node => exact node.whnf.rhs_tr
   | @forallE context domain name binderInfo Δ source inferred body
       source' domain' body' inferred' domainView' domainInferred' bodyΔ
-      bodyView' bodyInferred' u v
+      bodyView' bodyInferred' u v fresh
       checked normalized domainCandidate bodyCandidate node domainRun bodyRun
       domainType bodyType bodyContext domainIH bodyIH =>
     have henv : VEnv.WF env := by
@@ -775,6 +1092,156 @@ interpretation roots intentionally inherit the same transitional Verify
 closure as `WhnfRun.isDefEq`. Exact guards ensure that the generic assembler
 does not silently widen it.
 -/
+/--
+info: 'Lean4Lean.TypeChecker.VState.WF.empty_of_reserves' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.VState.WF.empty_of_reserves
+
+/--
+info: 'Lean4Lean.TypeChecker.candidateFreshFVarId_reserved' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.candidateFreshFVarId_reserved
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.root' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.root
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.pushLocalDecl' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.pushLocalDecl
+
+/--
+info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.candidateCheckTypeStep_exists_translation
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateRaw' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.exists_ofCandidateRaw
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars
+
 /--
 info: 'Lean4Lean.TypeChecker.WhnfRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
 -/

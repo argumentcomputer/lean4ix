@@ -463,6 +463,7 @@ inductive CandidateExprTrace : Context → Expr → Type where
       (inferred : Expr)
       (name : Name) (domain body : Expr)
       (binderInfo : BinderInfo)
+      (fresh : context.lctx.find? context.freshFVarId = none)
       (checked : CandidateCheckTypeStep.Valid
         ⟨context, source, inferred⟩)
       (valid : CandidateWhnfStep.Valid
@@ -475,17 +476,25 @@ inductive CandidateExprTrace : Context → Expr → Type where
 
 namespace CandidateExprTrace
 
+/-- The exact full-check observation at the root of a candidate trace. -/
+def rootCheck :
+    CandidateExprTrace context source →
+      CandidateCheckTypeObservation context source
+  | .terminal _ _ inferred _ checked _ => ⟨inferred, checked⟩
+  | .forallE _ _ inferred _ _ _ _ _ checked _ _ _ =>
+    ⟨inferred, checked⟩
+
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
 def view : CandidateExprTrace context source → Expr
   | .terminal _ _ _ result _ _ => result
-  | .forallE context _ _ name _ _ binderInfo _ _ domain body =>
+  | .forallE context _ _ name _ _ binderInfo _ _ _ domain body =>
     .forallE name domain.view
       (body.view.abstract #[context.freshExpr]) binderInfo
 
 /-- Preorder list of all retained checker observations. -/
 def steps : CandidateExprTrace context source → List CandidateWhnfStep
   | .terminal context source _ result _ _ => [{ context, source, result }]
-  | .forallE context source _ name domain body binderInfo _ _
+  | .forallE context source _ name domain body binderInfo _ _ _
       domainCandidate bodyCandidate =>
     { context, source,
       result := .forallE name domain body binderInfo } ::
@@ -495,7 +504,7 @@ def steps : CandidateExprTrace context source → List CandidateWhnfStep
 def checkSteps : CandidateExprTrace context source → List CandidateCheckTypeStep
   | .terminal context source inferred _ _ _ =>
     [{ context, source, inferred }]
-  | .forallE context source inferred _ _ _ _ _ _
+  | .forallE context source inferred _ _ _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source, inferred } ::
       domainCandidate.checkSteps ++ bodyCandidate.checkSteps
@@ -507,7 +516,7 @@ def allValid : (candidate : CandidateExprTrace context source) →
     simp only [steps, List.mem_singleton] at h
     subst step
     exact valid
-  | .forallE _ _ _ _ _ _ _ _ valid domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
     simp only [steps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact valid
@@ -521,7 +530,7 @@ def allChecksValid : (candidate : CandidateExprTrace context source) →
     simp only [checkSteps, List.mem_singleton] at h
     subst step
     exact checked
-  | .forallE _ _ _ _ _ _ _ checked _ domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
     simp only [checkSteps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact checked
@@ -591,14 +600,20 @@ where
         | .ok ⟨view, valid⟩ =>
           match view with
           | .forallE name domain body binderInfo =>
-            let domainCandidate ← loop context domain fuel
-            let bodyContext :=
-              context.pushLocalDecl name binderInfo
-                domain.consumeTypeAnnotations
-            let bodyCandidate ← loop bodyContext
-              (body.instantiate1 context.freshExpr) fuel
-            return .forallE context e inferred name domain body
-              binderInfo checked valid domainCandidate bodyCandidate
+            match hfresh : context.lctx.find? context.freshFVarId with
+            | some _ =>
+              throw (Exception.other
+                "normalization candidate generated a duplicate free variable")
+            | none =>
+              let domainCandidate ← loop context domain fuel
+              let bodyContext :=
+                context.pushLocalDecl name binderInfo
+                  domain.consumeTypeAnnotations
+              let bodyCandidate ← loop bodyContext
+                (body.instantiate1 context.freshExpr) fuel
+              return .forallE context e inferred name domain body
+                binderInfo hfresh checked valid
+                domainCandidate bodyCandidate
           | result =>
             return .terminal context e inferred result checked valid
 
