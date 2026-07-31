@@ -336,6 +336,104 @@ theorem CheckTypeRun.isType_of_whnf
       run.context.Δwf.toCtx
   exact ⟨u, run.hasType.defeqU_r henv hΔ typeRun.isDefEqU⟩
 
+/-- Evidence for one exact successful checker definitional-equality run, with
+strict translations of both kernel endpoints in the same Theory context. -/
+structure IsDefEqRun (env : VEnv) (Us : List Name) (Δ : VLCtx)
+    (lhs rhs : Expr) (lhs' rhs' : VExpr) where
+  context : VContext
+  venv_eq : context.venv = env
+  lparams_eq : context.lparams = Us
+  vlctx_eq : context.vlctx = Δ
+  state_wf : VState.WF context {}
+  lhs_tr : TrExprS env Us Δ lhs lhs'
+  rhs_tr : TrExprS env Us Δ rhs rhs'
+  recursionFuel : Nat
+  run_eq : ∃ state : State,
+    Inner.isDefEq lhs rhs (Methods.withFuel recursionFuel)
+      context.toContext ({} : State) = .ok (true, state)
+
+/-- Convert the retained candidate equality observation to a state-bearing
+Verify certificate. -/
+def IsDefEqRun.ofCandidateStep
+    (step : AddInductive.CandidateIsDefEqStep)
+    (hvalid : step.Valid)
+    (context : VContext)
+    (context_eq : context.toContext = step.context.toTypeChecker)
+    (venv_eq : context.venv = env)
+    (lparams_eq : context.lparams = Us)
+    (vlctx_eq : context.vlctx = Δ)
+    (state_wf : VState.WF context {})
+    (lhs_tr : TrExprS env Us Δ step.lhs lhs')
+    (rhs_tr : TrExprS env Us Δ step.rhs rhs')
+    (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel) :
+    IsDefEqRun env Us Δ step.lhs step.rhs lhs' rhs' where
+  context := context
+  venv_eq := venv_eq
+  lparams_eq := lparams_eq
+  vlctx_eq := vlctx_eq
+  state_wf := state_wf
+  lhs_tr := lhs_tr
+  rhs_tr := rhs_tr
+  recursionFuel := recursionFuel
+  run_eq := by
+    rw [context_eq]
+    exact step.innerRun recursionFuel hdepth hvalid
+
+/-- A successful verified equality run supplies ordinary Theory
+definitional equality. -/
+theorem IsDefEqRun.isDefEqU
+    (run : IsDefEqRun env Us Δ lhs rhs lhs' rhs') :
+    env.IsDefEqU Us.length Δ.toCtx lhs' rhs' := by
+  have hlhs : run.context.TrExprS lhs lhs' := by
+    simpa only [VContext.TrExprS, run.venv_eq, run.lparams_eq,
+      run.vlctx_eq] using run.lhs_tr
+  have hrhs : run.context.TrExprS rhs rhs' := by
+    simpa only [VContext.TrExprS, run.venv_eq, run.lparams_eq,
+      run.vlctx_eq] using run.rhs_tr
+  obtain ⟨state, hrun⟩ := run.run_eq
+  obtain ⟨_, _, _, _, hdefeq⟩ :=
+    (TypeChecker.Inner.isDefEq.WF hlhs hrhs
+      (Methods.withFuel run.recursionFuel) Methods.withFuel.WF)
+      run.state_wf true state hrun
+  simpa only [VContext.IsDefEqU, run.venv_eq, run.lparams_eq,
+    run.vlctx_eq] using hdefeq (by simp)
+
+/-- Consuming a certified annotation path cannot introduce a free variable or
+level metavariable. -/
+theorem candidateTypeAnnotation_fvarsIn
+    (trace : AddInductive.CandidateTypeAnnotationTrace source consumed)
+    (h : source.FVarsIn fvars) : consumed.FVarsIn fvars := by
+  induction trace with
+  | identity => exact h
+  | outParam _ _ _ ih => exact ih h.2
+  | semiOutParam _ _ _ ih => exact ih h.2
+  | optParam _ _ _ _ ih => exact ih h.1.2
+  | autoParam _ _ _ _ ih => exact ih h.1.2
+
+/-- Extract a strict translation of the consumed annotation argument from the
+strict translation of the raw wrapper application. -/
+theorem candidateTypeAnnotation_exists_translation
+    (trace : AddInductive.CandidateTypeAnnotationTrace source consumed)
+    (source_tr : TrExprS env Us Δ source source') :
+    ∃ consumed', TrExprS env Us Δ consumed consumed' := by
+  induction trace generalizing source' with
+  | identity => exact ⟨source', source_tr⟩
+  | outParam _ _ _ ih =>
+    let .app _ _ _ type_tr := source_tr
+    exact ih type_tr
+  | semiOutParam _ _ _ ih =>
+    let .app _ _ _ type_tr := source_tr
+    exact ih type_tr
+  | optParam _ _ _ _ ih =>
+    let .app _ _ fn_tr _ := source_tr
+    let .app _ _ _ type_tr := fn_tr
+    exact ih type_tr
+  | autoParam _ _ _ _ ih =>
+    let .app _ _ fn_tr _ := source_tr
+    let .app _ _ _ type_tr := fn_tr
+    exact ih type_tr
+
 /-- The empty executable checker state is well formed for any verified
 context whose free-variable names are already reserved by the kernel name
 generator.  `VState.WF.empty` is the empty-local-context specialization;
@@ -612,6 +710,8 @@ inductive DefEqEvidence (env : VEnv) :
       (type : env.IsDefEq U Γ A B (.sort u))
       (term : DefEqEvidence env U Γ lhs rhs A) :
       DefEqEvidence env U Γ lhs rhs B
+  | ofDefEq (proof : env.IsDefEq U Γ lhs rhs A) :
+      DefEqEvidence env U Γ lhs rhs A
   | forallE
       (domain : DefEqEvidence env U Γ A A' (.sort u))
       (body : DefEqEvidence env U (A :: Γ) B B' (.sort v)) :
@@ -629,6 +729,7 @@ theorem DefEqEvidence.isDefEq :
   | .beta body arg => .beta body arg
   | .trans left right => .trans left.isDefEq right.isDefEq
   | .change type term => .defeqDF type term.isDefEq
+  | .ofDefEq proof => proof
   | .forallE domain body =>
       .forallEDF domain.isDefEq body.isDefEq
 
@@ -641,12 +742,10 @@ def CandidateNodeRun.evidence
 
 /-- Recursive semantic interpretation of a source-indexed candidate trace.
 
-For a terminal node the exact full-check/WHNF pair is sufficient.  For an
-exposed Pi, the root WHNF reaches the raw Pi, while recursively interpreted
-domain and instantiated-body traces provide congruence from that raw Pi to
-the candidate view.  The body context equation makes the raw-binder discipline
-explicit and prevents evidence checked under a different telescope from being
-reused here. -/
+At a Pi node the raw domain and the annotation-consumed local domain may have
+different strict Theory translations. The retained equality run relates them;
+the body is checked in the consumed-domain context and transported back to the
+raw Pi context only when forming congruence evidence. -/
 inductive CandidateExprRun (env : VEnv) (Us : List Name) :
     {candidateContext : AddInductive.Context} → {source : Expr} →
       AddInductive.CandidateExprTrace candidateContext source →
@@ -658,65 +757,47 @@ inductive CandidateExprRun (env : VEnv) (Us : List Name) :
         (.terminal context source inferred result checked normalized)
         Δ source' result' inferred'
   | forallE
+      (annotations : AddInductive.CandidateTypeAnnotations domain)
+      (annotationsEq : AddInductive.CandidateIsDefEqStep.Valid
+        ⟨context, domain, annotations.consumed⟩)
       (domainCandidate : AddInductive.CandidateExprTrace context domain)
       (bodyCandidate : AddInductive.CandidateExprTrace
-        (context.pushLocalDecl name binderInfo domain.consumeTypeAnnotations)
+        (context.pushLocalDecl name binderInfo annotations.consumed)
         (body.instantiate1 context.freshExpr))
       (node : CandidateNodeRun env Us Δ context source inferred
         (.forallE name domain body binderInfo)
         source' (.forallE domain' body') inferred')
       (domainRun : CandidateExprRun env Us domainCandidate Δ
         domain' domainView' domainInferred')
+      (annotationsRun : IsDefEqRun env Us Δ
+        domain annotations.consumed domain' storedDomain')
       (bodyRun : CandidateExprRun env Us bodyCandidate bodyΔ
-        body' bodyView' bodyInferred')
+        storedBody' bodyView' bodyInferred')
       (domainType : env.HasType Us.length Δ.toCtx domain' (.sort u))
       (bodyType : env.HasType Us.length
         (domain' :: Δ.toCtx) body' (.sort v))
+      (bodySource : env.IsDefEq Us.length (domain' :: Δ.toCtx)
+        body' storedBody' (.sort v))
       (bodyContext :
         bodyΔ =
-          (some (context.freshFVarId,
-            domain.consumeTypeAnnotations.fvarsList),
-            .vlam domain') :: Δ) :
+          (some (context.freshFVarId, annotations.consumed.fvarsList),
+            .vlam storedDomain') :: Δ) :
       CandidateExprRun env Us
         (.forallE context source inferred name domain body binderInfo fresh
-          checked normalized domainCandidate bodyCandidate)
+          annotations annotationsEq checked normalized
+          domainCandidate bodyCandidate)
         Δ source' (.forallE domainView' bodyView') inferred'
 
-/-- Interim structural side condition for recursive candidate certification.
-
-Lean stores a Pi body under `domain.consumeTypeAnnotations`, while the Theory
-translation of the Pi itself uses the raw domain.  The generic context
-constructor above handles either expression, but relating distinct annotation
-gadgets still needs a retained verified `isDefEq` run.  This predicate isolates
-the already-complete raw-domain case without weakening or hiding that remaining
-boundary. -/
-def CandidateRawBinderDomains :
-    {context : AddInductive.Context} → {source : Expr} →
-      AddInductive.CandidateExprTrace context source → Prop
-  | _, _, .terminal .. => True
-  | _, _, .forallE _ _ _ _ domain _ _ _ _ _
-      domainCandidate bodyCandidate =>
-    domain.consumeTypeAnnotations = domain ∧
-      CandidateRawBinderDomains domainCandidate ∧
-      CandidateRawBinderDomains bodyCandidate
-
 /-- Recursively turn every retained candidate observation into verified
-normalization evidence, constructing the exact verified binder context at
-each Pi node.
-
-The root strict translation is the only semantic input.  Child source
-translations come from destructing the verified parent Pi result, and body
-translations are instantiated at the trace's exact fresh variable.  The
-temporary `CandidateRawBinderDomains` premise marks precisely the annotation
-gadget case that still requires a retained verified `isDefEq` bridge. -/
-theorem CandidateExprRun.exists_ofCandidateRaw
+normalization evidence, constructing and transporting the exact verified
+binder context at each Pi node. -/
+theorem CandidateExprRun.exists_ofCandidate
     (trace : AddInductive.CandidateExprTrace candidateContext source)
     (candidateRun : CandidateContextRun candidateContext)
     (source' : VExpr)
     (source_tr : candidateRun.context.TrExprS source source')
     (whnfFuel : Nat)
-    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
-    (rawDomains : CandidateRawBinderDomains trace) :
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
     ∃ view' inferred',
       Nonempty (CandidateExprRun candidateRun.context.venv
         candidateRun.context.lparams trace candidateRun.context.vlctx
@@ -730,7 +811,8 @@ theorem CandidateExprRun.exists_ofCandidateRaw
         context.fuel.recDepth whnfFuel rfl whnfDepth
     exact ⟨result', inferred', ⟨.terminal node⟩⟩
   | forallE context source inferred name domain body binderInfo fresh
-      checked normalized domainCandidate bodyCandidate domainIH bodyIH =>
+      annotations annotationsEq checked normalized
+      domainCandidate bodyCandidate domainIH bodyIH =>
     obtain ⟨inferred', result', _, result_tr, ⟨node⟩⟩ :=
       CandidateNodeRun.exists_ofCandidate context source inferred
         (.forallE name domain body binderInfo) checked normalized
@@ -739,31 +821,57 @@ theorem CandidateExprRun.exists_ofCandidateRaw
     let .forallE domainType bodyType domain_tr body_tr := result_tr
     obtain ⟨u, domainTypeHasType⟩ := domainType
     obtain ⟨v, bodyTypeHasType⟩ := bodyType
-    rcases rawDomains with ⟨rawDomain, domainRaw, bodyRaw⟩
     obtain ⟨domainView', domainInferred', ⟨domainRun⟩⟩ :=
-      domainIH candidateRun _ domain_tr whnfDepth domainRaw
-    have storedDomain_tr := domain_tr
-    rw [← rawDomain] at storedDomain_tr
+      domainIH candidateRun _ domain_tr whnfDepth
+    obtain ⟨storedDomain', storedDomain_tr⟩ :=
+      candidateTypeAnnotation_exists_translation annotations.trace domain_tr
+    let annotationsRun := IsDefEqRun.ofCandidateStep
+      ⟨context, domain, annotations.consumed⟩ annotationsEq
+      candidateRun.context candidateRun.context_eq rfl rfl rfl
+      candidateRun.state_wf domain_tr storedDomain_tr
+      context.fuel.recDepth rfl
+    have henv : VEnv.WF candidateRun.context.venv :=
+      candidateRun.context.Ewf
+    have hΔ : OnCtx candidateRun.context.vlctx.toCtx
+        (candidateRun.context.venv.IsType
+          candidateRun.context.lparams.length) :=
+      candidateRun.context.Δwf.toCtx
+    have annotationDef :=
+      annotationsRun.isDefEqU.of_l henv hΔ domainTypeHasType
     let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
-      domain.consumeTypeAnnotations fresh _ storedDomain_tr
-        ⟨u, domainTypeHasType⟩
+      annotations.consumed fresh storedDomain' storedDomain_tr
+        ⟨u, annotationDef.hasType.2⟩
     have bodyVenv : bodyCandidateRun.context.venv =
         candidateRun.context.venv := rfl
     have bodyLparams : bodyCandidateRun.context.lparams =
         candidateRun.context.lparams := rfl
     have bodyVlctx : bodyCandidateRun.context.vlctx =
-        (some (context.freshFVarId,
-          domain.consumeTypeAnnotations.fvarsList), .vlam _) ::
-          candidateRun.context.vlctx := rfl
+        (some (context.freshFVarId, annotations.consumed.fvarsList),
+          .vlam storedDomain') :: candidateRun.context.vlctx := rfl
     have bodyDepth :
         (context.pushLocalDecl name binderInfo
-          domain.consumeTypeAnnotations).fuel.recDepth = whnfFuel + 1 := by
+          annotations.consumed).fuel.recDepth = whnfFuel + 1 := by
       simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+    have domainContext : VLCtx.IsDefEq
+        candidateRun.context.venv candidateRun.context.lparams.length
+        ((none, .vlam _) :: candidateRun.context.vlctx)
+        ((none, .vlam storedDomain') :: candidateRun.context.vlctx) :=
+      .cons (.refl henv candidateRun.context.Δwf) (by nofun)
+        (.vlam annotationDef)
+    obtain ⟨storedBody', storedBody_tr⟩ :=
+      body_tr.defeqDFC henv domainContext
+    have hRawBody : OnCtx
+        (_ :: candidateRun.context.vlctx.toCtx)
+        (candidateRun.context.venv.IsType
+          candidateRun.context.lparams.length) :=
+      ⟨hΔ, ⟨u, domainTypeHasType⟩⟩
+    have bodySource :=
+      (body_tr.uniq henv domainContext storedBody_tr).of_l
+        henv hRawBody bodyTypeHasType
     have bodyΔwf := bodyCandidateRun.context.Δwf
     rw [bodyVenv, bodyLparams, bodyVlctx] at bodyΔwf
     have instantiatedBody_tr :=
-      body_tr.inst_fvar candidateRun.context.Ewf.ordered
-        bodyΔwf
+      storedBody_tr.inst_fvar henv.ordered bodyΔwf
     obtain ⟨bodyView', bodyInferred', ⟨bodyRun⟩⟩ :=
       bodyIH bodyCandidateRun _ (by
         change TrExprS bodyCandidateRun.context.venv
@@ -771,12 +879,12 @@ theorem CandidateExprRun.exists_ofCandidateRaw
           (body.instantiate1 context.freshExpr) _
         rw [bodyVenv, bodyLparams, bodyVlctx]
         simpa only [AddInductive.Context.freshExpr,
-          Expr.instantiate1_eq] using
-          instantiatedBody_tr)
-        bodyDepth bodyRaw
+          Expr.instantiate1_eq] using instantiatedBody_tr)
+        bodyDepth
     refine ⟨.forallE domainView' bodyView', inferred', ⟨?_⟩⟩
-    exact .forallE domainCandidate bodyCandidate node domainRun bodyRun
-      domainTypeHasType bodyTypeHasType bodyVlctx
+    exact .forallE annotations annotationsEq domainCandidate bodyCandidate node
+      domainRun annotationsRun bodyRun domainTypeHasType bodyTypeHasType
+      bodySource bodyVlctx
 
 /-- Recover a trace root's strict source translation from its retained full
 check.  Unlike recursive child nodes, whose source translations are obtained
@@ -796,18 +904,17 @@ theorem candidateExprTrace_exists_source_translation
       source_fvars candidateContext.fuel.recDepth rfl
   exact ⟨source', source_tr⟩
 
-/-- Recursively certify a raw-domain candidate trace without asking the caller
-for any Theory expression.  The retained root full check chooses the source
-translation; all output and child translations then come from verified
-checker executions and Pi decomposition. -/
-theorem CandidateExprRun.exists_ofCandidateRawFVars
+/-- Recursively certify an annotation-complete candidate trace without asking
+the caller for any Theory expression. The retained root full check chooses the
+source translation; all output and child translations then come from verified
+checker executions, structural annotation traces, and Pi decomposition. -/
+theorem CandidateExprRun.exists_ofCandidateFVars
     (trace : AddInductive.CandidateExprTrace candidateContext source)
     (candidateRun : CandidateContextRun candidateContext)
     (source_fvars :
       source.FVarsIn (· ∈ candidateRun.context.vlctx.fvars))
     (whnfFuel : Nat)
-    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
-    (rawDomains : CandidateRawBinderDomains trace) :
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
     ∃ source' view' inferred',
       candidateRun.context.TrExprS source source' ∧
       Nonempty (CandidateExprRun candidateRun.context.venv
@@ -817,8 +924,8 @@ theorem CandidateExprRun.exists_ofCandidateRawFVars
     candidateExprTrace_exists_source_translation trace candidateRun
       source_fvars
   obtain ⟨view', inferred', run⟩ :=
-    CandidateExprRun.exists_ofCandidateRaw trace candidateRun source'
-      source_tr whnfFuel whnfDepth rawDomains
+    CandidateExprRun.exists_ofCandidate trace candidateRun source'
+      source_tr whnfFuel whnfDepth
   exact ⟨source', view', inferred', source_tr, run⟩
 
 /-- Fold a complete candidate trace into the compositional equality language
@@ -831,29 +938,43 @@ def CandidateExprRun.evidence
     CandidateExprRun env Us trace Δ source' view' inferred' →
       DefEqEvidence env Us.length Δ.toCtx source' view' inferred'
   | .terminal node => node.evidence
-  | .forallE _ _ node domainRun bodyRun domainType bodyType bodyContext => by
+  | .forallE _ _ _ _ node domainRun annotationsRun bodyRun domainType
+      bodyType bodySource bodyContext => by
     have henv : VEnv.WF env := by
       simpa only [node.check.venv_eq] using node.check.context.Ewf
-    have hΓ : OnCtx Δ.toCtx (env.IsType Us.length) := by
+    have hΔ : VLCtx.WF env Us.length Δ := by
       simpa only [node.check.venv_eq, node.check.lparams_eq,
-        node.check.vlctx_eq] using node.check.context.Δwf.toCtx
+        node.check.vlctx_eq] using node.check.context.Δwf
+    have hΓ : OnCtx Δ.toCtx (env.IsType Us.length) := hΔ.toCtx
     have domainEvidence := domainRun.evidence
     obtain ⟨_, domainTypeEq⟩ :=
       domainType.uniq henv hΓ domainEvidence.isDefEq
     have domainAtSort : DefEqEvidence env Us.length Δ.toCtx
         _ _ (.sort _) :=
       .change domainTypeEq.symm domainEvidence
+    have annotationDef :=
+      annotationsRun.isDefEqU.of_l henv hΓ domainType
+    have domainContext : VLCtx.IsDefEq env Us.length
+        ((none, .vlam _) :: Δ) ((none, .vlam _) :: Δ) :=
+      .cons (.refl henv hΔ) (by nofun) (.vlam annotationDef)
     have bodyEvidence := bodyRun.evidence
     rw [bodyContext] at bodyEvidence
     simp only [VLCtx.toCtx] at bodyEvidence
+    have bodyStoredType :=
+      bodySource.hasType.2.defeqDFC henv domainContext.defeqCtx
     have hBodyΓ : OnCtx (_ :: Δ.toCtx) (env.IsType Us.length) :=
-      ⟨hΓ, ⟨_, domainType⟩⟩
+      ⟨hΓ, ⟨_, annotationDef.hasType.2⟩⟩
     obtain ⟨_, bodyTypeEq⟩ :=
-      bodyType.uniq henv hBodyΓ bodyEvidence.isDefEq
-    have bodyAtSort : DefEqEvidence env Us.length
+      bodyStoredType.uniq henv hBodyΓ bodyEvidence.isDefEq
+    have bodyAtSortStored : DefEqEvidence env Us.length
         (_ :: Δ.toCtx) _ _ (.sort _) :=
       .change bodyTypeEq.symm bodyEvidence
-    have piEvidence := DefEqEvidence.forallE domainAtSort bodyAtSort
+    have bodyAtSortRaw :=
+      bodyAtSortStored.isDefEq.defeqDFC henv
+        (domainContext.symm henv).defeqCtx
+    have bodyFinal := bodySource.trans bodyAtSortRaw
+    have piEvidence := DefEqEvidence.forallE domainAtSort
+      (DefEqEvidence.ofDefEq bodyFinal)
     obtain ⟨_, nodeTypeEq⟩ :=
       node.evidence.isDefEq.uniq henv hΓ (domainType.forallE bodyType)
     exact .trans node.evidence (.change nodeTypeEq.symm piEvidence)
@@ -869,7 +990,7 @@ theorem CandidateExprRun.source_tr
     TrExprS env Us Δ source source' := by
   cases run with
   | terminal node => exact node.check.expr_tr
-  | forallE _ _ node => exact node.check.expr_tr
+  | forallE _ _ _ _ node => exact node.check.expr_tr
 
 /-- Move a weak expression translation between definitionally equal verified
 local contexts while retaining its named Theory meaning. -/
@@ -901,11 +1022,12 @@ theorem CandidateExprRun.view_tr
     TrExpr env Us Δ trace.view view' := by
   induction run with
   | terminal node => exact node.whnf.rhs_tr
-  | @forallE context domain name binderInfo Δ source inferred body
-      source' domain' body' inferred' domainView' domainInferred' bodyΔ
-      bodyView' bodyInferred' u v fresh
-      checked normalized domainCandidate bodyCandidate node domainRun bodyRun
-      domainType bodyType bodyContext domainIH bodyIH =>
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
     have henv : VEnv.WF env := by
       simpa only [node.check.venv_eq] using node.check.context.Ewf
     have hΔ : VLCtx.WF env Us.length Δ := by
@@ -916,30 +1038,42 @@ theorem CandidateExprRun.view_tr
     have domainDef : env.IsDefEq Us.length Δ.toCtx
         domain' domainView' (.sort u) :=
       (DefEqEvidence.change domainTypeEq.symm domainRun.evidence).isDefEq
+    have annotationDef :=
+      annotationsRun.isDefEqU.of_l henv hΔ.toCtx domainType
+    have storedToView : env.IsDefEq Us.length Δ.toCtx
+        storedDomain' domainView' (.sort u) :=
+      annotationDef.symm.trans domainDef
     have bodyIH' : TrExpr env Us
         ((some (context.freshFVarId,
-          domain.consumeTypeAnnotations.fvarsList), .vlam domain') :: Δ)
+          annotations.consumed.fvarsList), .vlam storedDomain') :: Δ)
         bodyCandidate.view bodyView' := by
       simpa only [bodyContext] using bodyIH
     have bodyAbstract := bodyIH'.abstract VLCtx.Abstract.zero
     have hctx : VLCtx.IsDefEq env Us.length
-        ((none, .vlam domain') :: Δ)
+        ((none, .vlam storedDomain') :: Δ)
         ((none, .vlam domainView') :: Δ) :=
       .cons (.refl henv hΔ) (by nofun)
-        (.vlam domainDef)
+        (.vlam storedToView)
     have bodyMoved := candidateTrExpr_moveCtx henv hctx bodyAbstract
     have bodyEvidence := bodyRun.evidence
     rw [bodyContext] at bodyEvidence
     simp only [VLCtx.toCtx] at bodyEvidence
-    have hBodyΓ : OnCtx (domain' :: Δ.toCtx)
-        (env.IsType Us.length) := ⟨hΔ.toCtx, ⟨_, domainType⟩⟩
+    have annotationContext : VLCtx.IsDefEq env Us.length
+        ((none, .vlam domain') :: Δ)
+        ((none, .vlam storedDomain') :: Δ) :=
+      .cons (.refl henv hΔ) (by nofun) (.vlam annotationDef)
+    have bodyStoredType :=
+      bodySource.hasType.2.defeqDFC henv annotationContext.defeqCtx
+    have hBodyΓ : OnCtx (storedDomain' :: Δ.toCtx)
+        (env.IsType Us.length) :=
+      ⟨hΔ.toCtx, ⟨_, annotationDef.hasType.2⟩⟩
     obtain ⟨_, bodyTypeEq⟩ :=
-      bodyType.uniq henv hBodyΓ bodyEvidence.isDefEq
-    have bodyDefRaw : env.IsDefEq Us.length
-        (domain' :: Δ.toCtx) body' bodyView' (.sort v) :=
+      bodyStoredType.uniq henv hBodyΓ bodyEvidence.isDefEq
+    have bodyDefStored : env.IsDefEq Us.length
+        (storedDomain' :: Δ.toCtx) storedBody' bodyView' (.sort v) :=
       (DefEqEvidence.change bodyTypeEq.symm bodyEvidence).isDefEq
     have bodyDefMoved :=
-      bodyDefRaw.defeqDFC henv hctx.defeqCtx
+      bodyDefStored.defeqDFC henv hctx.defeqCtx
     have habstract :
         bodyCandidate.view.abstract #[context.freshExpr] =
           Expr.abstract1 context.freshFVarId bodyCandidate.view := by
@@ -1175,41 +1309,13 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
 #print axioms TypeChecker.candidateCheckTypeStep_exists_translation
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateRaw' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
- Quot.sound,
- Expr.abstractRange_eq,
- Expr.abstract_eq,
- Expr.eqv_eq,
- Expr.hasLevelParam_eq,
- Expr.hasLooseBVar_eq,
- Expr.instantiate1_eq,
- Expr.instantiateRange_eq,
- Expr.instantiateRevRange_eq,
- Expr.instantiateRev_eq,
- Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
- Expr.lowerLooseBVars_eq,
- Expr.replace_eq,
- Level.hasMVar_eq,
- Level.hasParam_eq,
- Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
- PersistentHashMap.findAux_isSome,
- Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
- PersistentHashMap.WF.find?_eq,
- PersistentHashMap.WF.toList'_insert]
+info: 'Lean4Lean.TypeChecker.IsDefEqRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
-#print axioms TypeChecker.CandidateExprRun.exists_ofCandidateRaw
+#print axioms TypeChecker.IsDefEqRun.ofCandidateStep
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars' depends on axioms: [propext,
+info: 'Lean4Lean.TypeChecker.IsDefEqRun.isDefEqU' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
@@ -1240,7 +1346,90 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars' depend
  PersistentHashMap.WF.toList'_insert]
 -/
 #guard_msgs in
-#print axioms TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars
+#print axioms TypeChecker.IsDefEqRun.isDefEqU
+
+/--
+info: 'Lean4Lean.TypeChecker.candidateTypeAnnotation_fvarsIn' does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms TypeChecker.candidateTypeAnnotation_fvarsIn
+
+/--
+info: 'Lean4Lean.TypeChecker.candidateTypeAnnotation_exists_translation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.candidateTypeAnnotation_exists_translation
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.exists_ofCandidate
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.exists_ofCandidateFVars
 
 /--
 info: 'Lean4Lean.TypeChecker.WhnfRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]

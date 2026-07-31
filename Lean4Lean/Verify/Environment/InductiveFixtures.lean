@@ -2299,6 +2299,140 @@ theorem aliasRec_rec_lookup_unique :
   aliasRec_aligned.find?_uniq aliasRec_rec_map_lookup
     aliasRecFinalEnv_rec_lookup
 
+/-! ## Binder annotation candidate fixtures -/
+
+/- These four definitions are quoted from the running kernel rather than
+reconstructed. The resulting minimal environment is sufficient for the
+ordinary checker to delta-reduce every annotation gadget while leaving the
+shared `Nat` endpoint opaque. -/
+private def annotationOutParamInfo : ConstantInfo :=
+  .defnInfo (kernelDefVal% outParam)
+
+private def annotationSemiOutParamInfo : ConstantInfo :=
+  .defnInfo (kernelDefVal% semiOutParam)
+
+private def annotationOptParamInfo : ConstantInfo :=
+  .defnInfo (kernelDefVal% optParam)
+
+private def annotationAutoParamInfo : ConstantInfo :=
+  .defnInfo (kernelDefVal% autoParam)
+
+private def annotationKernelMap : ConstMap :=
+  ((({} : ConstMap).insert ``outParam annotationOutParamInfo).insert
+    ``semiOutParam annotationSemiOutParamInfo).insert
+      ``optParam annotationOptParamInfo |>.insert
+        ``autoParam annotationAutoParamInfo
+
+private def annotationKernelEnv : Kernel.Environment :=
+  Kernel.Environment.ofConstants `_annotationCandidate annotationKernelMap
+
+private def annotationCandidateContext : AddInductive.Context where
+  env := annotationKernelEnv
+  lparams := []
+  safety := .safe
+  allowPrimitive := false
+
+private def annotationNatExpr : Expr := .const ``Nat []
+
+private def outParamDomain : Expr :=
+  .app (.const ``outParam [.succ .zero]) annotationNatExpr
+
+private def semiOutParamDomain : Expr :=
+  .app (.const ``semiOutParam [.succ .zero]) annotationNatExpr
+
+private def optParamDomain : Expr :=
+  .app (.app (.const ``optParam [.succ .zero]) annotationNatExpr)
+    (.lit (.natVal 0))
+
+private def autoParamDomain : Expr :=
+  .app (.app (.const ``autoParam [.succ .zero]) annotationNatExpr)
+    (.const ``Lean.Syntax.missing [])
+
+/- Each constructor is inhabited at its precise source and consumed indices;
+the guards below additionally ensure the executable structural mirror chooses
+that constructor. -/
+private def outParamTrace :
+    AddInductive.CandidateTypeAnnotationTrace
+      outParamDomain annotationNatExpr :=
+  .outParam [.succ .zero] annotationNatExpr (.identity _)
+
+private def semiOutParamTrace :
+    AddInductive.CandidateTypeAnnotationTrace
+      semiOutParamDomain annotationNatExpr :=
+  .semiOutParam [.succ .zero] annotationNatExpr (.identity _)
+
+private def optParamTrace :
+    AddInductive.CandidateTypeAnnotationTrace
+      optParamDomain annotationNatExpr :=
+  .optParam [.succ .zero] annotationNatExpr
+    (.lit (.natVal 0)) (.identity _)
+
+private def autoParamTrace :
+    AddInductive.CandidateTypeAnnotationTrace
+      autoParamDomain annotationNatExpr :=
+  .autoParam [.succ .zero] annotationNatExpr
+    (.const ``Lean.Syntax.missing []) (.identity _)
+
+private def annotationTraceTag :
+    AddInductive.CandidateTypeAnnotationTrace source consumed → Nat
+  | .identity _ => 0
+  | .outParam .. => 1
+  | .semiOutParam .. => 2
+  | .optParam .. => 3
+  | .autoParam .. => 4
+
+#guard let ⟨consumed, trace⟩ :=
+    AddInductive.CandidateTypeAnnotationTrace.build outParamDomain
+  consumed.equal annotationNatExpr && annotationTraceTag trace == 1
+
+#guard let ⟨consumed, trace⟩ :=
+    AddInductive.CandidateTypeAnnotationTrace.build semiOutParamDomain
+  consumed.equal annotationNatExpr && annotationTraceTag trace == 2
+
+#guard let ⟨consumed, trace⟩ :=
+    AddInductive.CandidateTypeAnnotationTrace.build optParamDomain
+  consumed.equal annotationNatExpr && annotationTraceTag trace == 3
+
+#guard let ⟨consumed, trace⟩ :=
+    AddInductive.CandidateTypeAnnotationTrace.build autoParamDomain
+  consumed.equal annotationNatExpr && annotationTraceTag trace == 4
+
+private def annotationCandidateAccepted (domain expected : Expr) : Bool :=
+  match AddInductive.buildCandidateTypeAnnotations domain with
+  | .error _ => false
+  | .ok annotations =>
+    annotations.consumed.equal expected &&
+      match AddInductive.observeCandidateIsDefEq annotationCandidateContext
+          domain annotations.consumed with
+      | .ok _ => true
+      | .error _ => false
+
+/- These guards cover the complete binder-annotation seam used by the
+candidate producer: agreement with Lean's opaque helper followed by an exact
+successful ordinary-checker equality observation. -/
+#guard annotationCandidateAccepted outParamDomain annotationNatExpr
+#guard annotationCandidateAccepted semiOutParamDomain annotationNatExpr
+#guard annotationCandidateAccepted optParamDomain annotationNatExpr
+#guard annotationCandidateAccepted autoParamDomain annotationNatExpr
+
+private def annotationIsDefEq (lhs rhs : Expr) :=
+  TypeChecker.M.run annotationCandidateContext.env
+    annotationCandidateContext.safety annotationCandidateContext.lctx
+    annotationCandidateContext.lparams annotationCandidateContext.fuel
+    (TypeChecker.isDefEq lhs rhs)
+
+/- A genuinely unequal domain is observed as `.ok false`, not a checker
+failure, and the candidate boundary rejects it with the dedicated error. -/
+#guard match annotationIsDefEq (.sort .zero) (.sort (.succ .zero)) with
+  | .ok false => true
+  | _ => false
+
+#guard match AddInductive.observeCandidateIsDefEq annotationCandidateContext
+    (.sort .zero) (.sort (.succ .zero)) with
+  | .error (.other message) =>
+    message == "normalization candidate changed a binder domain"
+  | _ => false
+
 /-! ## Checker-produced alias normalization certificates -/
 
 /-- Minimal kernel environment used to replay family-result WHNF without
@@ -3534,13 +3668,12 @@ theorem aliasFormerFamily_candidateRun_exists :
         aliasFormerFamilyCandidate.trace
         aliasFormerCandidateContextRun.context.vlctx
         source' view' inferred') := by
-  apply TypeChecker.CandidateExprRun.exists_ofCandidateRawFVars
+  apply TypeChecker.CandidateExprRun.exists_ofCandidateFVars
     aliasFormerFamilyCandidate.trace aliasFormerCandidateContextRun
       (whnfFuel := 9999)
   · change ∀ u ∈ ([] : List Level), u.hasMVar' = false
     simp
   · rfl
-  · trivial
 
 /-- The generic interpreter retains the strict translation of the raw
 candidate endpoint. -/

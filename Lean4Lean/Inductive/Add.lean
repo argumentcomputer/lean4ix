@@ -433,6 +433,73 @@ theorem CandidateCheckTypeStep.innerRun
     exact ⟨state, by
       simpa [Context.toTypeChecker] using hinner⟩
 
+/-- One exact successful definitional-equality observation retained by the
+candidate producer. The result is fixed to `true`; a negative checker result
+is not evidence and aborts candidate construction. -/
+structure CandidateIsDefEqStep where
+  context : Context
+  lhs : Expr
+  rhs : Expr
+
+def CandidateIsDefEqStep.Valid
+    (step : CandidateIsDefEqStep) : Prop :=
+  TypeChecker.M.run step.context.env step.context.safety
+      step.context.lctx step.context.lparams step.context.fuel
+      (TypeChecker.isDefEq step.lhs step.rhs) =
+    .ok true
+
+structure CandidateIsDefEqObservation
+    (context : Context) (lhs rhs : Expr) : Type where
+  valid : CandidateIsDefEqStep.Valid ⟨context, lhs, rhs⟩
+
+def observeCandidateIsDefEq
+    (context : Context) (lhs rhs : Expr) :
+    Except Exception (CandidateIsDefEqObservation context lhs rhs) :=
+  match hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.isDefEq lhs rhs) with
+  | .error err => .error err
+  | .ok false =>
+    .error (.other "normalization candidate changed a binder domain")
+  | .ok true => .ok ⟨hrun⟩
+
+/-- Recover the state-bearing equality execution erased by `M.run`. -/
+theorem CandidateIsDefEqStep.innerRun
+    (step : CandidateIsDefEqStep) (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel)
+    (hvalid : step.Valid) :
+    ∃ state : TypeChecker.State,
+      TypeChecker.Inner.isDefEq step.lhs step.rhs
+          (TypeChecker.Methods.withFuel recursionFuel)
+          step.context.toTypeChecker
+          ({} : TypeChecker.State) =
+        .ok (true, state) := by
+  unfold CandidateIsDefEqStep.Valid at hvalid
+  unfold TypeChecker.M.run TypeChecker.isDefEq
+    TypeChecker.RecM.run at hvalid
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+    StateT.pure, Except.pure, Pure.pure,
+    StateT.run', Functor.map, Except.map] at hvalid
+  rw [hdepth] at hvalid
+  cases hinner :
+      TypeChecker.Inner.isDefEq step.lhs step.rhs
+        (TypeChecker.Methods.withFuel recursionFuel)
+        { env := step.context.env
+          lctx := step.context.lctx
+          safety := step.context.safety
+          lparams := step.context.lparams
+          fuel := step.context.fuel }
+        ({} : TypeChecker.State) with
+  | error err => simp [hinner] at hvalid
+  | ok pair =>
+    rcases pair with ⟨observed, state⟩
+    have : observed = true := by
+      simpa [hinner] using hvalid
+    subst observed
+    exact ⟨state, by
+      simpa [Context.toTypeChecker] using hinner⟩
+
 /-- Source-indexed retained full-check execution. -/
 structure CandidateCheckTypeRun (source : Expr) where
   step : CandidateCheckTypeStep
@@ -447,12 +514,88 @@ def buildCandidateCheckType
   | .ok ⟨inferred, valid⟩ =>
     return ⟨⟨context, source, inferred⟩, rfl, valid⟩
 
+/-- Structural certificate for the four top-level binder-domain annotations
+peeled by `Expr.consumeTypeAnnotations`.
+
+The certificate exposes which application argument survives. Verify can
+therefore recover a strict translation and free-variable facts for the
+consumed domain from the translated raw domain, without assigning semantic
+authority to Lean's opaque helper. -/
+inductive CandidateTypeAnnotationTrace : Expr → Expr → Type where
+  | identity (source : Expr) :
+      CandidateTypeAnnotationTrace source source
+  | outParam (levels : List Level) (type : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.const ``outParam levels) type) consumed
+  | semiOutParam (levels : List Level) (type : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.const ``semiOutParam levels) type) consumed
+  | optParam (levels : List Level) (type default : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.app (.const ``optParam levels) type) default) consumed
+  | autoParam (levels : List Level) (type tactic : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.app (.const ``autoParam levels) type) tactic) consumed
+
+namespace CandidateTypeAnnotationTrace
+
+/-- Transparent structural mirror of the top-level peeling algorithm. -/
+def build : (source : Expr) → Sigma (CandidateTypeAnnotationTrace source)
+  | .app (.app (.const name levels) type) default =>
+    if hopt : name = ``_root_.optParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .optParam levels type default inner⟩
+    else if hauto : name = ``_root_.autoParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .autoParam levels type default inner⟩
+    else
+      ⟨.app (.app (.const name levels) type) default, .identity _⟩
+  | .app (.const name levels) type =>
+    if hout : name = ``_root_.outParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .outParam levels type inner⟩
+    else if hsemi : name = ``_root_.semiOutParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .semiOutParam levels type inner⟩
+    else
+      ⟨.app (.const name levels) type, .identity _⟩
+  | source => ⟨source, .identity source⟩
+termination_by source => sizeOf source
+
+end CandidateTypeAnnotationTrace
+
+/-- A structural peeling certificate whose result is checked against Lean's
+actual `consumeTypeAnnotations` implementation. -/
+structure CandidateTypeAnnotations (source : Expr) where
+  consumed : Expr
+  trace : CandidateTypeAnnotationTrace source consumed
+  consumed_eq : consumed.equal source.consumeTypeAnnotations = true
+
+def buildCandidateTypeAnnotations
+    (source : Expr) : Except Exception (CandidateTypeAnnotations source) :=
+  let ⟨consumed, trace⟩ := CandidateTypeAnnotationTrace.build source
+  match h : consumed.equal source.consumeTypeAnnotations with
+  | true => .ok ⟨consumed, trace, h⟩
+  | false =>
+    .error (.other
+      "normalization candidate disagrees with consumeTypeAnnotations")
+
 /-- Context- and source-indexed tree underlying one candidate expression.
 The recursive indices are important: a Pi-domain trace uses the exact parent
-context, while its body trace uses precisely `Context.pushLocalDecl` and the
-corresponding fresh free variable. Thus both expression position and checker
-context provenance are enforced by the type rather than being invariants of
-the producer alone. -/
+context, while its body trace uses precisely `Context.pushLocalDecl` with the
+structurally certified annotation-consumed domain and the corresponding fresh
+free variable. The retained equality run relates that local declaration back
+to the raw binder syntax. Thus expression position, annotation handling, and
+checker-context provenance are enforced by the type rather than being
+invariants of the producer alone. -/
 inductive CandidateExprTrace : Context → Expr → Type where
   | terminal (context : Context) (source inferred result : Expr)
       (checked : CandidateCheckTypeStep.Valid
@@ -464,13 +607,16 @@ inductive CandidateExprTrace : Context → Expr → Type where
       (name : Name) (domain body : Expr)
       (binderInfo : BinderInfo)
       (fresh : context.lctx.find? context.freshFVarId = none)
+      (annotations : CandidateTypeAnnotations domain)
+      (annotationsEq : CandidateIsDefEqStep.Valid
+        ⟨context, domain, annotations.consumed⟩)
       (checked : CandidateCheckTypeStep.Valid
         ⟨context, source, inferred⟩)
       (valid : CandidateWhnfStep.Valid
         ⟨context, source, .forallE name domain body binderInfo⟩)
       (domainCandidate : CandidateExprTrace context domain)
       (bodyCandidate : CandidateExprTrace
-        (context.pushLocalDecl name binderInfo domain.consumeTypeAnnotations)
+        (context.pushLocalDecl name binderInfo annotations.consumed)
         (body.instantiate1 context.freshExpr)) :
       CandidateExprTrace context source
 
@@ -481,20 +627,20 @@ def rootCheck :
     CandidateExprTrace context source →
       CandidateCheckTypeObservation context source
   | .terminal _ _ inferred _ checked _ => ⟨inferred, checked⟩
-  | .forallE _ _ inferred _ _ _ _ _ checked _ _ _ =>
+  | .forallE _ _ inferred _ _ _ _ _ _ _ checked _ _ _ =>
     ⟨inferred, checked⟩
 
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
 def view : CandidateExprTrace context source → Expr
   | .terminal _ _ _ result _ _ => result
-  | .forallE context _ _ name _ _ binderInfo _ _ _ domain body =>
+  | .forallE context _ _ name _ _ binderInfo _ _ _ _ _ domain body =>
     .forallE name domain.view
       (body.view.abstract #[context.freshExpr]) binderInfo
 
 /-- Preorder list of all retained checker observations. -/
 def steps : CandidateExprTrace context source → List CandidateWhnfStep
   | .terminal context source _ result _ _ => [{ context, source, result }]
-  | .forallE context source _ name domain body binderInfo _ _ _
+  | .forallE context source _ name domain body binderInfo _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source,
       result := .forallE name domain body binderInfo } ::
@@ -504,10 +650,19 @@ def steps : CandidateExprTrace context source → List CandidateWhnfStep
 def checkSteps : CandidateExprTrace context source → List CandidateCheckTypeStep
   | .terminal context source inferred _ _ _ =>
     [{ context, source, inferred }]
-  | .forallE context source inferred _ _ _ _ _ _ _
+  | .forallE context source inferred _ _ _ _ _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source, inferred } ::
       domainCandidate.checkSteps ++ bodyCandidate.checkSteps
+
+/-- Preorder list of all retained binder-domain equality observations. -/
+def isDefEqSteps :
+    CandidateExprTrace context source → List CandidateIsDefEqStep
+  | .terminal .. => []
+  | .forallE context _ _ _ domain _ _ _ annotations _ _ _
+      domainCandidate bodyCandidate =>
+    { context, lhs := domain, rhs := annotations.consumed } ::
+      domainCandidate.isDefEqSteps ++ bodyCandidate.isDefEqSteps
 
 /-- Every retained WHNF observation is an exact checker execution. -/
 def allValid : (candidate : CandidateExprTrace context source) →
@@ -516,7 +671,7 @@ def allValid : (candidate : CandidateExprTrace context source) →
     simp only [steps, List.mem_singleton] at h
     subst step
     exact valid
-  | .forallE _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
     simp only [steps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact valid
@@ -530,12 +685,25 @@ def allChecksValid : (candidate : CandidateExprTrace context source) →
     simp only [checkSteps, List.mem_singleton] at h
     subst step
     exact checked
-  | .forallE _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
     simp only [checkSteps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact checked
     · exact domain.allChecksValid step h
     · exact body.allChecksValid step h
+
+/-- Every retained binder-domain equality is an exact successful checker
+execution. -/
+def allIsDefEqValid : (candidate : CandidateExprTrace context source) →
+    ∀ step ∈ candidate.isDefEqSteps, step.Valid
+  | .terminal .., step, h => by simp [isDefEqSteps] at h
+  | .forallE _ _ _ _ _ _ _ _ _ annotationsEq _ _ domain body,
+      step, h => by
+    simp only [isDefEqSteps, List.mem_cons, List.mem_append] at h
+    rcases h with (rfl | h) | h
+    · exact annotationsEq
+    · exact domain.allIsDefEqValid step h
+    · exact body.allIsDefEqValid step h
 
 end CandidateExprTrace
 
@@ -561,6 +729,11 @@ def CandidateExpr.checkSteps
     List CandidateCheckTypeStep :=
   candidate.trace.checkSteps
 
+def CandidateExpr.isDefEqSteps
+    (candidate : CandidateExpr source) :
+    List CandidateIsDefEqStep :=
+  candidate.trace.isDefEqSteps
+
 theorem CandidateExpr.step_valid
     (candidate : CandidateExpr source)
     (hstep : step ∈ candidate.steps) :
@@ -573,11 +746,19 @@ theorem CandidateExpr.checkStep_valid
     step.Valid :=
   candidate.trace.allChecksValid step hstep
 
+theorem CandidateExpr.isDefEqStep_valid
+    (candidate : CandidateExpr source)
+    (hstep : step ∈ candidate.isDefEqSteps) :
+    step.Valid :=
+  candidate.trace.allIsDefEqValid step hstep
+
 /-- Normalize exactly the expression positions inspected by inductive
 analysis. Each node is fully checked and then exposed with the ordinary
-checker `whnf`; Pi domains and bodies are traversed under the same raw local
-declarations used by kernel checking. The recursion budget is the configured
-inductive fuel, while every checker run uses the configured
+checker `whnf`; Pi domains retain their raw syntax, while bodies are traversed
+under the structurally certified annotation-consumed local declarations used
+by kernel checking. Every raw/consumed domain pair is also checked by an exact
+successful ordinary-checker `isDefEq` run. The recursion budget is the
+configured inductive fuel, while every checker run uses the configured
 transparency/fuel.
 
 The returned trace is only a candidate analysis view and operational
@@ -605,14 +786,17 @@ where
               throw (Exception.other
                 "normalization candidate generated a duplicate free variable")
             | none =>
+              let annotations ← buildCandidateTypeAnnotations domain
+              let ⟨annotationsEq⟩ ← observeCandidateIsDefEq
+                context domain annotations.consumed
               let domainCandidate ← loop context domain fuel
               let bodyContext :=
                 context.pushLocalDecl name binderInfo
-                  domain.consumeTypeAnnotations
+                  annotations.consumed
               let bodyCandidate ← loop bodyContext
                 (body.instantiate1 context.freshExpr) fuel
               return .forallE context e inferred name domain body
-                binderInfo hfresh checked valid
+                binderInfo hfresh annotations annotationsEq checked valid
                 domainCandidate bodyCandidate
           | result =>
             return .terminal context e inferred result checked valid
@@ -792,6 +976,18 @@ info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, C
 #print axioms buildCandidateExpr
 
 /--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotationTrace.build
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateTypeAnnotations' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateTypeAnnotations
+
+/--
 info: 'Lean4Lean.AddInductive.buildCandidateCheckType' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
@@ -816,6 +1012,12 @@ info: 'Lean4Lean.AddInductive.CandidateExpr.checkStep_valid' depends on axioms: 
 #print axioms CandidateExpr.checkStep_valid
 
 /--
+info: 'Lean4Lean.AddInductive.CandidateExpr.isDefEqStep_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExpr.isDefEqStep_valid
+
+/--
 info: 'Lean4Lean.AddInductive.CandidateWhnfStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
@@ -826,6 +1028,12 @@ info: 'Lean4Lean.AddInductive.CandidateCheckTypeStep.innerRun' depends on axioms
 -/
 #guard_msgs in
 #print axioms CandidateCheckTypeStep.innerRun
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateIsDefEqStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateIsDefEqStep.innerRun
 
 def declareConstructors (stats : InductiveStats)
     (indTypes : Array InductiveType) (isUnsafe : Bool) : M Environment :=
