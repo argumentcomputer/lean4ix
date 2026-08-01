@@ -715,6 +715,13 @@ def build : (source : Expr) → Sigma (CandidateTypeAnnotationTrace source)
   | source => ⟨source, .identity source⟩
 termination_by source => sizeOf source
 
+/-- The structural annotation builder computes the same transparent peeling
+used by inductive validation.  This deliberately relates two definitions in
+this module, not Lean's opaque `Expr.consumeTypeAnnotations`. -/
+theorem build_consumed (source : Expr) :
+    (build source).1 = consumeTypeAnnotations source := by
+  fun_induction build source <;> simp_all [consumeTypeAnnotations]
+
 end CandidateTypeAnnotationTrace
 
 /-- A structural peeling certificate. Verify assigns semantic authority only
@@ -728,6 +735,29 @@ def buildCandidateTypeAnnotations
     (source : Expr) : Except Exception (CandidateTypeAnnotations source) :=
   let ⟨consumed, trace⟩ := CandidateTypeAnnotationTrace.build source
   .ok ⟨consumed, trace⟩
+
+namespace CandidateTypeAnnotations
+
+/-- Operational compatibility with this module's transparent annotation
+peeling.  Semantic consumers still rely on `trace` plus the retained
+definitional-equality execution; `Matches` is used to replay the executable
+family-validation path exactly. -/
+def Matches (annotations : CandidateTypeAnnotations source) : Prop :=
+  annotations.consumed = consumeTypeAnnotations source
+
+theorem matches_of_build
+    (annotations : CandidateTypeAnnotations source)
+    (hbuild : buildCandidateTypeAnnotations source = .ok annotations) :
+    annotations.Matches := by
+  unfold buildCandidateTypeAnnotations at hbuild
+  cases htrace : CandidateTypeAnnotationTrace.build source with
+  | mk consumed trace =>
+    simp only [Except.ok.injEq] at hbuild
+    subst annotations
+    simpa [Matches, htrace] using
+      CandidateTypeAnnotationTrace.build_consumed source
+
+end CandidateTypeAnnotations
 
 /-- Differential check pinning the transparent implementation to Lean's
 opaque helper. This is executable regression evidence, not a logical premise
@@ -800,6 +830,254 @@ def rootCheck :
   | .terminal _ _ inferred _ checked _ => ⟨inferred, checked⟩
   | .forallE _ _ inferred _ _ _ _ _ _ _ checked _ _ _ =>
     ⟨inferred, checked⟩
+
+/-- The exact WHNF result at the root, before recursively normalized domains
+and bodies are reassembled into `view`. -/
+def rootWhnf : CandidateExprTrace context source → Expr
+  | .terminal _ _ _ result _ _ => result
+  | .forallE _ _ _ name domain body binderInfo _ _ _ _ _ _ _ =>
+    .forallE name domain body binderInfo
+
+theorem rootWhnf_valid (candidate : CandidateExprTrace context source) :
+    CandidateWhnfStep.Valid ⟨context, source, candidate.rootWhnf⟩ := by
+  cases candidate <;> assumption
+
+/-- Reader context reached after following the complete main Π spine. -/
+def terminalContext : CandidateExprTrace context source → Context
+  | .terminal context _ _ _ _ _ => context
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.terminalContext
+
+theorem terminalContext_lparams
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.lparams = context.lparams := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Non-Π result reached after following the complete main Π spine. -/
+def terminalResult : CandidateExprTrace context source → Expr
+  | .terminal _ _ _ result _ _ => result
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.terminalResult
+
+/-- The first `count` local expressions allocated along the main Π spine.
+These are exactly the expressions accumulated as inductive parameters when
+`count` is the declaration's `nparams`. -/
+def parameterList :
+    (count : Nat) → CandidateExprTrace context source → List Expr
+  | 0, _ => []
+  | _ + 1, .terminal .. => []
+  | count + 1,
+      .forallE context _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    context.freshExpr :: bodyCandidate.parameterList count
+
+theorem parameterList_length
+    (candidate : CandidateExprTrace context source)
+    (hcount : count ≤ candidate.spineLength) :
+    (candidate.parameterList count).length = count := by
+  induction candidate generalizing count with
+  | terminal =>
+    simp [spineLength] at hcount
+    subst count
+    rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    cases count with
+    | zero => rfl
+    | succ count =>
+      simp only [parameterList, List.length_cons]
+      rw [body_ih]
+      simpa [spineLength] using hcount
+
+/-- Every annotation choice on the main Π spine matches the transparent
+peeling operation used by `checkInductiveTypes`.  This is operational
+provenance, separate from the semantic raw/consumed equality stored at each
+candidate node. -/
+def validationAnnotations :
+    CandidateExprTrace context source → Prop
+  | .terminal .. => True
+  | .forallE _ _ _ _ _ _ _ _ annotations _ _ _ _ bodyCandidate =>
+    annotations.Matches ∧ bodyCandidate.validationAnnotations
+
+/-- Replay the inner family-telescope validator from a candidate's exact main
+Π spine. The first `remaining` binders extend `stats.params`; every later
+binder contributes an index. The theorem is independent of any fixture and
+preserves the exact terminal reader context reached by the executable loop. -/
+theorem checkInductiveTypes_loop_of_candidate
+    (candidate : CandidateExprTrace context source)
+    (stats : InductiveStats) (nparams i nindices fuel : Nat)
+    (remaining : Nat) (k : Expr → InductiveStats → Nat → M α)
+    (hi : i + remaining = nparams)
+    (hcount : remaining ≤ candidate.spineLength)
+    (hfuel : candidate.spineLength < fuel)
+    (hempty : stats.indConsts.isEmpty = true)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult.isForall = false) :
+    checkInductiveTypes.loopInd.loop nparams stats candidate.rootWhnf
+        i nindices fuel k context =
+      k candidate.terminalResult
+        { stats with
+          params := stats.params ++
+            (candidate.parameterList remaining).toArray }
+        (nindices + (candidate.spineLength - remaining))
+        candidate.terminalContext := by
+  induction candidate generalizing i nindices fuel remaining stats with
+  | terminal context source inferred result checked valid =>
+    simp only [spineLength] at hcount hfuel
+    have hremaining : remaining = 0 := by omega
+    subst remaining
+    have hi' : i = nparams := by omega
+    subst i
+    cases stats
+    cases fuel with
+    | zero => omega
+    | succ fuel =>
+      cases result <;>
+        simp_all [rootWhnf, terminalResult, terminalContext, parameterList,
+          spineLength, checkInductiveTypes.loopInd.loop, Expr.isForall]
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    rcases hannotations with ⟨hmatch, hbodyAnnotations⟩
+    cases remaining with
+    | zero =>
+      have hi' : i = nparams := by omega
+      subst i
+      have hbodyFuel : bodyCandidate.spineLength < fuel - 1 := by
+        simp only [spineLength] at hfuel
+        omega
+      have hbodyCount : 0 ≤ bodyCandidate.spineLength := Nat.zero_le _
+      have hvalid := bodyCandidate.rootWhnf_valid
+      change TypeChecker.M.run _ _ _ _ _
+          (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+        .ok bodyCandidate.rootWhnf at hvalid
+      rw [show fuel = (fuel - 1) + 1 by omega]
+      simp only [rootWhnf, checkInductiveTypes.loopInd.loop,
+        Nat.lt_irrefl, if_false, withLocalDecl_apply]
+      rw [← hmatch]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [hvalid]
+      simp only [Except.bind]
+      rw [body_ih stats nparams (nindices + 1) (fuel - 1) 0 rfl
+        hbodyCount hbodyFuel hempty hbodyAnnotations hterminal]
+      simp [terminalResult, terminalContext, parameterList, spineLength,
+        Nat.add_comm, Nat.add_assoc]
+    | succ remaining =>
+      have hil : i < nparams := by omega
+      have hbodyCount : remaining ≤ bodyCandidate.spineLength := by
+        simp only [spineLength] at hcount
+        omega
+      have hbodyFuel : bodyCandidate.spineLength < fuel - 1 := by
+        simp only [spineLength] at hfuel
+        omega
+      have hvalid := bodyCandidate.rootWhnf_valid
+      change TypeChecker.M.run _ _ _ _ _
+          (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+        .ok bodyCandidate.rootWhnf at hvalid
+      rw [show fuel = (fuel - 1) + 1 by omega]
+      simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil, if_true,
+        hempty, withLocalDecl_apply]
+      rw [← hmatch]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [hvalid]
+      simp only [Except.bind]
+      rw [body_ih { stats with
+          params := stats.params.push context.freshExpr }
+        (i + 1) nindices (fuel - 1) remaining (by omega)
+        hbodyCount hbodyFuel (by simpa using hempty) hbodyAnnotations
+        hterminal]
+      simp [terminalResult, terminalContext, parameterList, spineLength]
+
+/-- Exact singleton statistics selected by a candidate family spine with an
+arbitrary parameter/index split. -/
+def singletonCandidateInductiveStats
+    (indType : InductiveType)
+    (candidate : CandidateExprTrace context indType.type)
+    (nparams : Nat) (resultLevel : Level) : InductiveStats where
+  lctx := candidate.terminalContext.lctx
+  levels := context.lparams.map .param
+  resultLevel := resultLevel
+  nindices := #[candidate.spineLength - nparams]
+  indConsts := #[.const indType.name (context.lparams.map .param)]
+  params := (candidate.parameterList nparams).toArray
+  isNotZero := resultLevel.isNeverZero
+
+/-- A source-indexed candidate family spine discharges the complete singleton
+family-validation pass for any number of parameters and indices.  The result
+records the same local expressions, terminal context, index count, universe,
+and family constant selected by the executable validator. -/
+theorem checkInductiveTypes_singleton_of_candidate
+    (indType : InductiveType)
+    (candidate : CandidateExprTrace context indType.type)
+    (nparams : Nat) (resultLevel : Level)
+    (k : InductiveStats → M α)
+    (hclosed :
+      context.env.checkNoMVarNoFVar indType.name indType.type = .ok ())
+    (hcount : nparams ≤ candidate.spineLength)
+    (hfuel : candidate.spineLength < context.fuel.inductiveFuel)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult = .sort resultLevel)
+    (hensure :
+      TypeChecker.M.run candidate.terminalContext.env
+          candidate.terminalContext.safety candidate.terminalContext.lctx
+          candidate.terminalContext.lparams candidate.terminalContext.fuel
+          (TypeChecker.ensureSort (.sort resultLevel)) =
+        .ok (.sort resultLevel)) :
+    checkInductiveTypes nparams #[indType] k context =
+      k (candidate.singletonCandidateInductiveStats
+        indType nparams resultLevel) candidate.terminalContext := by
+  have hcheck := candidate.rootCheck.valid
+  have hwhnf := candidate.rootWhnf_valid
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.checkType indType.type) =
+    .ok candidate.rootCheck.inferred at hcheck
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.whnf indType.type) =
+    .ok candidate.rootWhnf at hwhnf
+  have hterminalForall : candidate.terminalResult.isForall = false := by
+    rw [hterminal]
+    rfl
+  have hterminalLparams :
+      candidate.terminalContext.lparams = context.lparams :=
+    candidate.terminalContext_lparams
+  have hparameterLength := candidate.parameterList_length hcount
+  unfold checkInductiveTypes
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
+  rw [checkInductiveTypes.loopInd.eq_1]
+  have hsize : 0 < #[indType].size := by simp
+  rw [dif_pos hsize]
+  rw [show #[indType][0] = indType by rfl]
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind,
+    liftTypeChecker_apply, hclosed, hcheck, hwhnf]
+  rw [candidate.checkInductiveTypes_loop_of_candidate
+    (stats := InductiveStats.initial (context.lparams.map .param))
+    (nparams := nparams) (i := 0) (nindices := 0)
+    (fuel := context.fuel.inductiveFuel) (remaining := nparams)
+    (hi := Nat.zero_add nparams) (hcount := hcount) (hfuel := hfuel)
+    (hempty := rfl) (hannotations := hannotations)
+    (hterminal := hterminalForall)]
+  rw [hterminal]
+  simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+  rw [hensure]
+  simp only [Except.bind, Expr.sortLevel!]
+  simp only [InductiveStats.initial, Nat.zero_add]
+  rw [if_pos (by rfl : #[].isEmpty = true)]
+  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+    Except.bind]
+  rw [checkInductiveTypes.loopInd.eq_1]
+  have hdone : ¬1 < #[indType].size := by simp
+  rw [dif_neg hdone]
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
+  simp [singletonCandidateInductiveStats, hterminalLparams,
+    hparameterLength]
 
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
 def view : CandidateExprTrace context source → Expr
@@ -1239,10 +1517,24 @@ info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build' depends on axi
 #print axioms CandidateTypeAnnotationTrace.build
 
 /--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build_consumed' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotationTrace.build_consumed
+
+/--
 info: 'Lean4Lean.AddInductive.buildCandidateTypeAnnotations' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms buildCandidateTypeAnnotations
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotations.matches_of_build' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotations.matches_of_build
 
 /--
 info: 'Lean4Lean.AddInductive.buildCandidateCheckType' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -1273,6 +1565,44 @@ info: 'Lean4Lean.AddInductive.CandidateExprTrace.spineLength' depends on axioms:
 -/
 #guard_msgs in
 #print axioms CandidateExprTrace.spineLength
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.rootWhnf_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.rootWhnf_valid
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.terminalContext_lparams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.terminalContext_lparams
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.parameterList_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.parameterList_length
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_of_candidate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_loop_of_candidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_of_candidate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_singleton_of_candidate
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
