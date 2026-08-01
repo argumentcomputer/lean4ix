@@ -28,6 +28,16 @@ structure InductiveStats where
   isNotZero : Bool
   deriving Inhabited
 
+/-- Explicit initial state for family validation. Naming this value keeps the
+executable producer and its exact-result lemmas independent of the opaque
+compiler-generated `Inhabited` instance. -/
+def InductiveStats.initial (levels : List Level) : InductiveStats where
+  levels := levels
+  resultLevel := .zero
+  indConsts := #[]
+  params := #[]
+  isNotZero := false
+
 structure Context where
   env : Environment
   lctx : LocalContext := {}
@@ -144,7 +154,54 @@ def checkInductiveTypes
         assert! stats.params.size == nparams
         stats
   termination_by indTypes.size - dIdx
-  loopInd 0 { (default : InductiveStats) with levels := (← read).lparams.map .param }
+  loopInd 0 (InductiveStats.initial ((← read).lparams.map .param))
+
+/-- Exact singleton result of the family-validation pass when the family type
+normalizes directly to a sort. This is the non-telescope producer seam used by
+end-to-end candidate certificates: the executable pass selects every retained
+statistic, while callers supply only the ordinary checker runs it consumed. -/
+def singletonInductiveStats (context : Context)
+    (indType : InductiveType) (resultLevel : Level) : InductiveStats where
+  lctx := context.lctx
+  levels := context.lparams.map .param
+  resultLevel := resultLevel
+  nindices := #[0]
+  indConsts := #[.const indType.name (context.lparams.map .param)]
+  params := #[]
+  isNotZero := resultLevel.isNeverZero
+
+theorem checkInductiveTypes_singleton_zero_of_whnf_sort
+    (context : Context) (indType : InductiveType)
+    (inferred : Expr) (resultLevel : Level)
+    (k : InductiveStats → M α)
+    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hclosed :
+      context.env.checkNoMVarNoFVar indType.name indType.type = .ok ())
+    (hcheck :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.checkType indType.type) =
+        .ok inferred)
+    (hwhnf :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.whnf indType.type) =
+        .ok (.sort resultLevel))
+    (hensure :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel
+          (TypeChecker.ensureSort (.sort resultLevel)) =
+        .ok (.sort resultLevel)) :
+    checkInductiveTypes 0 #[indType] k context =
+      k (singletonInductiveStats context indType resultLevel) context := by
+  cases hfuel_eq : context.fuel.inductiveFuel with
+  | zero => omega
+  | succ fuel =>
+    simp [checkInductiveTypes, checkInductiveTypes.loopInd,
+      checkInductiveTypes.loopInd.loop, singletonInductiveStats,
+      readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure,
+      Except.bind, Except.pure, liftTypeChecker_apply,
+      hclosed, hcheck, hwhnf, hensure, hfuel_eq,
+      InductiveStats.initial, Expr.sortLevel!]
 
 def hasIndOcc (indConsts : Array Expr) (t : Expr) : Bool :=
   (t.find? fun
