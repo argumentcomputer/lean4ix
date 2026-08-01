@@ -2126,6 +2126,98 @@ theorem GenerationCandidateRun.wf
     generation.WF env :=
   run.generationRun.wf
 
+/-- Complete dependent semantic package for one Verify-side singleton
+candidate.
+
+`kernelSource` and `candidate` retain the exact implementation metadata and
+source-indexed operational trace. `normalization` ties that trace to the raw
+Theory declaration and its reconstructed view. `generation` is the successful
+dependent analysis, and `run` proves that this exact candidate supplies every
+semantic obligation consumed by mixed artifact generation. No independently
+chosen view can be inserted into this package. -/
+structure GenerationCandidatePackage (env : VEnv) (Us : List Name) where
+  kernelSource : InductiveType
+  source : VInductDecl
+  candidate : AddInductive.NormalizationCandidate [kernelSource]
+  normalization : NormalizationCandidateRun env Us candidate source
+  generation : GenerationChecked source
+  run : GenerationCandidateRun normalization generation
+
+/-- Package an already assembled source-indexed candidate run without
+repeating any of its dependent indices at a call site. -/
+def GenerationCandidateRun.package
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateRun normalization generation) :
+    GenerationCandidatePackage env Us where
+  kernelSource := kernelSource
+  source := source
+  candidate := candidate
+  normalization := normalization
+  generation := generation
+  run := run
+
+/-- Erase checker and candidate provenance at the consumer boundary. The
+result contains only the Theory generation value and its ordinary semantic
+certificate, which is the complete input of `VEnv.addInductCertified`. -/
+def GenerationCandidatePackage.certificate
+    (package : GenerationCandidatePackage env Us) :
+    package.source.GenerationCertificate env where
+  generation := package.generation
+  wf := package.run.wf
+
+/-- Build the general Verify metadata replay from a candidate package and the
+ordinary implementation-to-Theory insertion witnesses.
+
+The generation value and its semantic proof are not independent inputs: both
+are projected from `package`. The remaining arguments concern only constant
+map alignment and the exact successful transaction states, so a caller cannot
+pair metadata replay with an unrelated normalized view. -/
+def GenerationCandidatePackage.addInductTrace
+    (package : GenerationCandidatePackage env Us)
+    {m₁ m₂ : ConstMap} {env₂ : VEnv}
+    (typeMap : ConstMap) (typeEnv : VEnv)
+    (ctorMap : ConstMap) (ctorEnv recEnv : VEnv)
+    (addType : AddInductConstant .induct m₁ env
+      package.generation.block.sourceType.toVConstVal typeMap typeEnv)
+    (addCtors : AddInductConstants .ctor typeMap typeEnv
+      package.generation.block.sourceType.ctors ctorMap ctorEnv)
+    (addRec : AddInductConstant .recursor ctorMap ctorEnv
+      (inductGenerationRecVal package.generation) m₂ recEnv)
+    (addRules : AddDefEqs recEnv
+      package.generation.generatedRules env₂) :
+    AddInductTrace m₁ env package.source m₂ env₂ where
+  generation := package.generation
+  generation_wf := package.certificate.wf
+  typeMap := typeMap
+  typeEnv := typeEnv
+  ctorMap := ctorMap
+  ctorEnv := ctorEnv
+  recEnv := recEnv
+  addType := addType
+  addCtors := addCtors
+  addRec := addRec
+  addRules := addRules
+
+/-- Optional outer provenance for packages obtained by the executable
+metadata pass itself. Keeping the exact producer equation separate from the
+semantic package makes the trust boundary explicit: computation selects the
+candidate, while `GenerationCandidateRun` alone grants it Theory meaning. -/
+structure ProducedGenerationCandidatePackage
+    (env : VEnv) (Us : List Name) where
+  package : GenerationCandidatePackage env Us
+  context : AddInductive.Context
+  nparams : Nat
+  numNested : Nat
+  isUnsafe : Bool
+  produced :
+    AddInductive.buildNormalizationCandidate nparams
+        [package.kernelSource] numNested isUnsafe context =
+      .ok package.candidate
+
 /-
 The evidence types mention exact verifier executions, so these semantic
 interpretation roots intentionally inherit the same transitional Verify
@@ -2894,6 +2986,83 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
 -/
 #guard_msgs in
 #print axioms GenerationRun.wf
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.package' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateRun.package
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms GenerationCandidatePackage.certificate
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms GenerationCandidatePackage.addInductTrace
 
 end VInductDecl
 

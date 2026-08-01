@@ -2538,6 +2538,41 @@ private def annotatedPiKernelType : InductiveType where
   type := annotatedPiInfo.type
   ctors := [annotatedPiKernelCtor]
 
+/- The whole-candidate negative keeps the actual AnnotatedPi family and
+constructor metadata, but gives the annotation symbol its correct type as an
+opaque constant. Ordinary metadata typing can therefore reach the recursive
+constructor candidate, while `outParam Prop` is no longer definitionally equal
+to the syntactically consumed `Prop`. -/
+private def annotatedPiOpaqueOutParamInfo : ConstantInfo :=
+  .axiomInfo {
+    name := ``outParam
+    levelParams := outParamKernelDef.levelParams
+    type := outParamKernelDef.type
+    isUnsafe := false }
+
+private def annotatedPiOpaqueOutParamMap : ConstMap :=
+  ({} : ConstMap).insert ``outParam annotatedPiOpaqueOutParamInfo
+
+private def annotatedPiOpaqueOutParamEnv : Kernel.Environment :=
+  Kernel.Environment.ofConstants `_annotatedPiOpaqueAnnotation
+    annotatedPiOpaqueOutParamMap
+
+private def annotatedPiOpaqueOutParamContext : AddInductive.Context where
+  env := annotatedPiOpaqueOutParamEnv
+  lparams := []
+  safety := .safe
+  allowPrimitive := false
+
+/- This is a complete family/constructor candidate rejection, not the earlier
+leaf-level `isDefEq` test. The dedicated message proves failure occurs at the
+raw-to-consumed binder equality boundary before any semantic package or
+transaction can be assembled. -/
+#guard match AddInductive.buildNormalizationCandidate 0
+    [annotatedPiKernelType] 0 false annotatedPiOpaqueOutParamContext with
+  | .error (.other message) =>
+    message == "normalization candidate changed a binder domain"
+  | _ => false
+
 private theorem annotatedPiRawType_wf :
     annotatedPiRawType.toVConstant.WF outParamEnv := by
   exact ⟨_, VEnv.HasType.sort (by decide)⟩
@@ -6630,20 +6665,50 @@ def aliasFormerGenerationCandidateRun :
     simpa using aliasFormerCtorCandidateContextRun.context.Ewf
   constructors := aliasFormerCandidateNormalizedCtorListRun
 
+/-- The generic dependent package retains the exact AliasFormer kernel
+source, candidate trace, reconstructed normalization, successful dependent
+analysis, and semantic generation run in one value. -/
+def aliasFormerGenerationCandidatePackage :
+    VInductDecl.GenerationCandidatePackage typeFamilyAliasEnv [] :=
+  aliasFormerGenerationCandidateRun.package
+
+/-- Theory-only erasure of the AliasFormer producer package. This is the
+consumer-facing value accepted by the public non-identity transaction. -/
+def aliasFormerGenerationCertificate :
+    aliasFormerRawDecl.GenerationCertificate typeFamilyAliasEnv :=
+  aliasFormerGenerationCandidatePackage.certificate
+
+/-- The public proof-carrying path exposes AliasFormer's candidate-derived
+non-identity generation without exposing its checker package. -/
+theorem aliasFormer_addInductCertified_checked :
+    typeFamilyAliasEnv.addInductCertified
+        aliasFormerGenerationCertificate =
+      some aliasFormerFinalEnv :=
+  aliasFormer_addInductGeneration
+
+theorem aliasFormerCertified_trace :
+    Nonempty (VEnv.AddInductGenerationTrace typeFamilyAliasEnv
+      aliasFormerFinalEnv aliasFormerGenerationChecked) :=
+  VEnv.addInductCertified_trace aliasFormer_addInductCertified_checked
+
+theorem aliasFormerCertified_ordered : aliasFormerFinalEnv.Ordered :=
+  VEnv.addInductCertified_WF typeFamilyAliasEnv_ordered
+    aliasFormer_addInductCertified_checked
+
 /-- Complete checker-side AliasFormer generation run, now derived by the
 generic family/constructor spine assembler from the executable singleton
 candidate rather than assembled field-by-field by the fixture. -/
 def aliasFormerGenerationRun :
     VInductDecl.GenerationRun aliasFormerGenerationChecked
       typeFamilyAliasEnv :=
-  aliasFormerGenerationCandidateRun.generationRun
+  aliasFormerGenerationCandidatePackage.run.generationRun
 
 /-- Generation-ready AliasFormer certificate whose raw/view family equality
 comes from the verified checker execution rather than the fixture's explicit
 delta rule. -/
 theorem aliasFormerGenerationChecked_wf_checked :
     aliasFormerGenerationChecked.WF typeFamilyAliasEnv :=
-  aliasFormerGenerationRun.wf
+  aliasFormerGenerationCertificate.wf
 
 /-- The paired AliasRec block with its field normalization supplied by the
 checked WHNF/application/beta certificate. -/
@@ -7220,13 +7285,24 @@ def annotatedPiGenerationCandidateRun :
     simpa using annotatedPiCtorCandidateContextRun.context.Ewf
   constructors := annotatedPiCandidateNormalizedCtorListRun
 
+/-- Complete dependent producer package for the annotation-bearing recursive
+Π candidate. -/
+def annotatedPiGenerationCandidatePackage :
+    VInductDecl.GenerationCandidatePackage outParamEnv [] :=
+  annotatedPiGenerationCandidateRun.package
+
+/-- Theory-only erasure consumed by the public certified transaction. -/
+def annotatedPiGenerationCertificate :
+    annotatedPiRawDecl.GenerationCertificate outParamEnv :=
+  annotatedPiGenerationCandidatePackage.certificate
+
 def annotatedPiGenerationRun :
     VInductDecl.GenerationRun annotatedPiGenerationChecked outParamEnv :=
-  annotatedPiGenerationCandidateRun.generationRun
+  annotatedPiGenerationCandidatePackage.run.generationRun
 
 theorem annotatedPiGenerationChecked_wf_checked :
     annotatedPiGenerationChecked.WF outParamEnv :=
-  annotatedPiGenerationRun.wf
+  annotatedPiGenerationCertificate.wf
 
 def annotatedPiCtorEnv : VEnv :=
   (annotatedPiTypeEnv.addConst annotatedPiRawType.ctors[0].name
@@ -7243,6 +7319,17 @@ def annotatedPiFinalEnv : VEnv :=
 theorem annotatedPi_addInductGeneration :
     outParamEnv.addInductGeneration annotatedPiGenerationChecked =
       some annotatedPiFinalEnv := rfl
+
+/-- The public proof-carrying path accepts the non-identity AnnotatedPi view
+while computing exactly the established mixed Theory transaction. -/
+theorem annotatedPi_addInductCertified :
+    outParamEnv.addInductCertified annotatedPiGenerationCertificate =
+      some annotatedPiFinalEnv :=
+  annotatedPi_addInductGeneration
+
+theorem annotatedPiCertified_ordered : annotatedPiFinalEnv.Ordered :=
+  VEnv.addInductCertified_WF outParamEnv_ordered
+    annotatedPi_addInductCertified
 
 private theorem annotatedPiRawCtor_wf :
     annotatedPiRawType.ctors[0].toVConstant.WF
@@ -7330,17 +7417,18 @@ the checker-produced non-identity normalization certificate. -/
 def annotatedPiAddInductTraceChecked :
     AddInductTrace outParamMap outParamEnv annotatedPiRawDecl
       annotatedPiMap annotatedPiFinalEnv := by
-  refine {
-    generation := annotatedPiGenerationChecked
-    generation_wf := annotatedPiGenerationChecked_wf_checked
-    typeMap := annotatedPiTypeMap
-    typeEnv := annotatedPiTypeEnv
-    ctorMap := annotatedPiCtorMap
-    ctorEnv := annotatedPiCtorEnv
-    recEnv := annotatedPiRecEnv
-    addType := annotatedPiAddType
-    addCtors := ?_
-    addRec := {
+  refine annotatedPiGenerationCandidatePackage.addInductTrace
+    annotatedPiTypeMap annotatedPiTypeEnv annotatedPiCtorMap
+    annotatedPiCtorEnv annotatedPiRecEnv annotatedPiAddType ?_ ?_ ⟨rfl⟩
+  · exact .cons {
+      info := annotatedPiMkInfo
+      kind_eq := by simp [annotatedPiMkInfo, InductConstantKind.Matches]
+      tr := annotatedPiMkInfo_tr
+      map_fresh := by
+        simpa [annotatedPiRawType] using annotatedPiMk_fresh
+      env_add := rfl
+      map_add := rfl } .nil
+  · exact {
       info := annotatedPiRecInfo
       kind_eq := by simp [annotatedPiRecInfo, InductConstantKind.Matches]
       tr := annotatedPiRecInfo_tr
@@ -7349,15 +7437,6 @@ def annotatedPiAddInductTraceChecked :
           annotatedPiRec_fresh
       env_add := rfl
       map_add := rfl }
-    addRules := ⟨rfl⟩ }
-  exact .cons {
-    info := annotatedPiMkInfo
-    kind_eq := by simp [annotatedPiMkInfo, InductConstantKind.Matches]
-    tr := annotatedPiMkInfo_tr
-    map_fresh := by
-      simpa [annotatedPiRawType] using annotatedPiMk_fresh
-    env_add := rfl
-    map_add := rfl } .nil
 
 theorem annotatedPi_addInduct_checked :
     AddInduct outParamMap outParamEnv annotatedPiRawDecl
@@ -7379,6 +7458,15 @@ theorem annotatedPiFinalEnv_trace :
     Nonempty (VEnv.AddInductGenerationTrace outParamEnv
       annotatedPiFinalEnv annotatedPiGenerationChecked) :=
   VEnv.addInductGeneration_trace annotatedPi_addInductGeneration
+
+/-- The public certified wrapper exposes the same trace. This deliberately
+stays separate from the minimal Theory-only iota root below: the concrete
+certificate remembers its Verify provenance, while the transaction equality
+itself admits the smaller Theory proof. -/
+theorem annotatedPiCertified_trace :
+    Nonempty (VEnv.AddInductGenerationTrace outParamEnv
+      annotatedPiFinalEnv annotatedPiGenerationChecked) :=
+  VEnv.addInductCertified_trace annotatedPi_addInductCertified
 
 theorem annotatedPiFinalEnv_family_lookup :
     annotatedPiFinalEnv.constants ``AnnotatedPi =
@@ -7461,7 +7549,11 @@ witnesses are shared with the existing replay. -/
 def aliasFormerAddInductTraceChecked :
     AddInductTrace typeFamilyAliasMap typeFamilyAliasEnv
       aliasFormerRawDecl aliasFormerMap aliasFormerFinalEnv :=
-  aliasFormerAddInductTraceWith aliasFormerGenerationChecked_wf_checked
+  let replay :=
+    aliasFormerAddInductTraceWith aliasFormerGenerationCertificate.wf
+  aliasFormerGenerationCandidatePackage.addInductTrace
+    replay.typeMap replay.typeEnv replay.ctorMap replay.ctorEnv replay.recEnv
+    replay.addType replay.addCtors replay.addRec replay.addRules
 
 theorem aliasFormer_addInduct_checked :
     AddInduct typeFamilyAliasMap typeFamilyAliasEnv
@@ -8052,6 +8144,74 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depe
 #print axioms aliasFormerGenerationCandidateRun
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidatePackage' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerGenerationCandidatePackage
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormer_addInductCertified_checked' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormer_addInductCertified_checked
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationChecked_wf_checked' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -8434,6 +8594,76 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateRun' depe
 -/
 #guard_msgs in
 #print axioms annotatedPiGenerationCandidateRun
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidatePackage' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiGenerationCandidatePackage
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_addInductCertified' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPi_addInductCertified
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationChecked_wf_checked' depends on axioms: [propext,

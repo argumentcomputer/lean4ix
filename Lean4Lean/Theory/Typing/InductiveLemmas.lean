@@ -9880,6 +9880,39 @@ theorem addInductGeneration_WF {source : VInductDecl}
     SR.generatedRulesFold_ordered (addConst_self H.addRec)
   simpa only [H.addRules] using hout
 
+/-- Recover the ordinary normalized transaction trace from the
+proof-carrying public entry point.  The conclusion contains only Theory data;
+the producer that established the certificate is deliberately absent. -/
+theorem addInductCertified_trace {source : VInductDecl}
+    {certificate : source.GenerationCertificate env}
+    (hadd : addInductCertified env certificate = some env') :
+    Nonempty
+      (AddInductGenerationTrace env env' certificate.generation) := by
+  apply addInductGeneration_trace
+  simpa only [addInductCertified_eq_addInductGeneration] using hadd
+
+/-- The proof-carrying wrapper has the same atomic success/failure behavior as
+the underlying normalized transaction. -/
+theorem addInductCertified_atomic {source : VInductDecl}
+    (env : VEnv) (certificate : source.GenerationCertificate env) :
+    addInductCertified env certificate = none ∨
+      ∃ env', addInductCertified env certificate = some env' ∧
+        Nonempty
+          (AddInductGenerationTrace env env' certificate.generation) := by
+  simpa only [addInductCertified_eq_addInductGeneration] using
+    addInductGeneration_atomic env certificate.generation
+
+/-- Ordering preservation for the public certified transaction.  Its
+semantic premise is carried by the certificate rather than repeated at every
+call site. -/
+theorem addInductCertified_WF {source : VInductDecl}
+    {certificate : source.GenerationCertificate env}
+    (henv : env.Ordered)
+    (hadd : addInductCertified env certificate = some env') :
+    env'.Ordered := by
+  apply addInductGeneration_WF henv certificate.wf
+  simpa only [addInductCertified_eq_addInductGeneration] using hadd
+
 /--
 info: 'Lean4Lean.VEnv.addInductGeneration_trace' depends on axioms: [propext, Quot.sound]
 -/
@@ -9927,6 +9960,30 @@ info: 'Lean4Lean.VEnv.addInductGeneration_WF' depends on axioms: [propext, Class
 -/
 #guard_msgs in
 #print axioms addInductGeneration_WF
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_eq_addInductGeneration' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_eq_addInductGeneration
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_trace' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_trace
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_atomic' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_atomic
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_WF' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_WF
 
 /--
 info: 'Lean4Lean.VEnv.addInduct_eq_addInductGeneration' depends on axioms: [propext, Classical.choice, Quot.sound]

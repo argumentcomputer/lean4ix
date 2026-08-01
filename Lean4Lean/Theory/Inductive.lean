@@ -1450,6 +1450,17 @@ structure GenerationChecked.WF {source : VInductDecl}
         gen.block.sourceType.toVConstant = some envT →
       ∀ ctor ∈ gen.block.ctorPairs, ctor.WF gen.block envT
 
+/-- Consumer-facing semantic package for one generation-ready inductive
+declaration.  The executable transaction inspects only `generation`; `wf` is
+the ordinary Theory certificate used by preservation and is never a
+normalization oracle.
+
+Verify can erase checker-specific candidate provenance to this boundary
+before handing a normalized transaction to downstream consumers. -/
+structure GenerationCertificate (source : VInductDecl) (env : VEnv) where
+  generation : GenerationChecked source
+  wf : generation.WF env
+
 end VInductDecl
 
 def VInductDecl.WF (env : VEnv) (decl : VInductDecl) : Prop :=
@@ -1487,6 +1498,24 @@ def VEnv.addInductGeneration {source : VInductDecl}
     (fun env c => env.addConst c.name c.toVConstant) env
   let env ← env.addConst (.str ty.name "rec") gen.recursor
   return gen.generatedRules.foldl VEnv.addDefEq env
+
+/-- Public proof-carrying wrapper around `addInductGeneration`.
+
+The certificate's proof is erased and does not influence computation.  This
+entry point lets a verified producer expose a non-identity normalization
+without exposing its checker trace or asking a consumer to remember a
+separate preservation premise. -/
+def VEnv.addInductCertified {source : VInductDecl}
+    (env : VEnv) (certificate : source.GenerationCertificate env) :
+    Option VEnv :=
+  env.addInductGeneration certificate.generation
+
+@[simp] theorem VEnv.addInductCertified_eq_addInductGeneration
+    {source : VInductDecl} (env : VEnv)
+    (certificate : source.GenerationCertificate env) :
+    env.addInductCertified certificate =
+      env.addInductGeneration certificate.generation :=
+  rfl
 
 /-- Exact intermediate states of a successful normalized inductive
 transaction. Stable lookup, freshness, monotonicity, and preservation
