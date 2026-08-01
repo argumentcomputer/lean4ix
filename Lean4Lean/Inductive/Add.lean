@@ -572,18 +572,18 @@ termination_by source => sizeOf source
 
 end CandidateTypeAnnotationTrace
 
-/-- A structural peeling certificate whose result is checked against Lean's
-actual `consumeTypeAnnotations` implementation. -/
+/-- A structural peeling certificate. The executable producer checks this
+trace's result against Lean's opaque `consumeTypeAnnotations` implementation
+before accepting it; Verify assigns semantic authority only to `trace`. -/
 structure CandidateTypeAnnotations (source : Expr) where
   consumed : Expr
   trace : CandidateTypeAnnotationTrace source consumed
-  consumed_eq : consumed.equal source.consumeTypeAnnotations = true
 
 def buildCandidateTypeAnnotations
     (source : Expr) : Except Exception (CandidateTypeAnnotations source) :=
   let ⟨consumed, trace⟩ := CandidateTypeAnnotationTrace.build source
-  match h : consumed.equal source.consumeTypeAnnotations with
-  | true => .ok ⟨consumed, trace, h⟩
+  match consumed.equal source.consumeTypeAnnotations with
+  | true => .ok ⟨consumed, trace⟩
   | false =>
     .error (.other
       "normalization candidate disagrees with consumeTypeAnnotations")
