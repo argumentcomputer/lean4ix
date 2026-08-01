@@ -6456,6 +6456,247 @@ private theorem annotatedPi_checkConstructors :
   rw [annotatedPi_checkConstructors_terminal_expanded]
   simp [ReaderT.pure, Pure.pure, Except.pure]
 
+private theorem annotatedPiSortAnnotationTrace_build :
+    AddInductive.CandidateTypeAnnotationTrace.build (.sort .zero) =
+      ⟨.sort .zero, .identity _⟩ := by
+  simp [AddInductive.CandidateTypeAnnotationTrace.build]
+
+private theorem annotatedPiDomainAnnotationTrace_build :
+    AddInductive.CandidateTypeAnnotationTrace.build
+        annotatedPiRawDomainKernel =
+      ⟨.sort .zero,
+        .outParam [.succ .zero] (.sort .zero) (.identity _)⟩ := by
+  simp [AddInductive.CandidateTypeAnnotationTrace.build,
+    annotatedPiRawDomainKernel, annotatedPiSortAnnotationTrace_build]
+  rw [annotatedPiSortAnnotationTrace_build]
+
+private theorem annotatedPiInnerAnnotationTrace_build :
+    AddInductive.CandidateTypeAnnotationTrace.build
+        annotatedPiInnerKernel =
+      ⟨annotatedPiInnerKernel, .identity _⟩ := by
+  simp [AddInductive.CandidateTypeAnnotationTrace.build,
+    annotatedPiInnerKernel]
+
+private theorem annotatedPiDomainAnnotations_produced :
+    AddInductive.buildCandidateTypeAnnotations
+        annotatedPiRawDomainKernel =
+      .ok annotatedPiDomainAnnotations := by
+  unfold AddInductive.buildCandidateTypeAnnotations
+  rw [annotatedPiDomainAnnotationTrace_build]
+  rfl
+
+private theorem annotatedPiInnerAnnotations_produced :
+    AddInductive.buildCandidateTypeAnnotations annotatedPiInnerKernel =
+      .ok annotatedPiInnerAnnotations := by
+  unfold AddInductive.buildCandidateTypeAnnotations
+  rw [annotatedPiInnerAnnotationTrace_build]
+  rfl
+
+private theorem annotatedPiDomainCandidateTrace_loop (fuel : Nat) :
+    AddInductive.buildCandidateExpr.loop
+        annotatedPiCtorCandidateContext annotatedPiRawDomainKernel
+        (fuel + 1) =
+      .ok annotatedPiDomainCandidateTrace := by
+  simpa only [annotatedPiDomainCandidateTrace] using
+    AddInductive.buildCandidateExpr_loop_of_whnf_nonForall
+      annotatedPiCtorCandidateContext annotatedPiRawDomainKernel
+      (.sort (.succ .zero)) (.sort .zero) fuel
+      annotatedPiDomainCheckTypeStep_valid
+      annotatedPiDomainCandidateStep_valid rfl
+
+private theorem annotatedPiInnerBodyCandidateTrace_loop (fuel : Nat) :
+    AddInductive.buildCandidateExpr.loop
+        annotatedPiInnerBodyCandidateContext
+        ((Expr.const ``AnnotatedPi []).instantiate1
+          annotatedPiCtorCandidateContext.freshExpr)
+        (fuel + 1) =
+      .ok annotatedPiInnerBodyCandidateTrace := by
+  simpa only [annotatedPiInnerBodyCandidateTrace] using
+    AddInductive.buildCandidateExpr_loop_of_whnf_nonForall
+      annotatedPiInnerBodyCandidateContext
+      ((Expr.const ``AnnotatedPi []).instantiate1
+        annotatedPiCtorCandidateContext.freshExpr)
+      (.sort (.succ .zero)) (.const ``AnnotatedPi []) fuel
+      (by simpa using annotatedPiInnerBodyCheckTypeStep_valid)
+      (by simpa using annotatedPiInnerBodyCandidateStep_valid) rfl
+
+private theorem annotatedPiOuterBodyCandidateTrace_loop (fuel : Nat) :
+    AddInductive.buildCandidateExpr.loop
+        annotatedPiOuterBodyCandidateContext
+        ((Expr.const ``AnnotatedPi []).instantiate1
+          annotatedPiCtorCandidateContext.freshExpr)
+        (fuel + 1) =
+      .ok annotatedPiOuterBodyCandidateTrace := by
+  simpa only [annotatedPiOuterBodyCandidateTrace] using
+    AddInductive.buildCandidateExpr_loop_of_whnf_nonForall
+      annotatedPiOuterBodyCandidateContext
+      ((Expr.const ``AnnotatedPi []).instantiate1
+        annotatedPiCtorCandidateContext.freshExpr)
+      (.sort (.succ .zero)) (.const ``AnnotatedPi []) fuel
+      (by simpa using annotatedPiOuterBodyCheckTypeStep_valid)
+      (by simpa using annotatedPiOuterBodyCandidateStep_valid) rfl
+
+private theorem annotatedPiInnerCandidateTrace_loop :
+    AddInductive.buildCandidateExpr.loop
+        annotatedPiCtorCandidateContext annotatedPiInnerKernel 999 =
+      .ok annotatedPiInnerCandidateTrace := by
+  rw [show 999 = 998 + 1 by rfl]
+  simpa only [annotatedPiInnerCandidateTrace,
+    annotatedPiInnerBodyCandidateContext] using
+    (AddInductive.buildCandidateExpr_loop_of_whnf_forall
+      (context := annotatedPiCtorCandidateContext)
+      (e := annotatedPiInnerKernel)
+      (inferred := .sort (.succ .zero))
+      (fuel := 998)
+      (name := `p)
+      (domain := annotatedPiRawDomainKernel)
+      (body := .const ``AnnotatedPi [])
+      (binderInfo := .default)
+      (hfresh := annotatedPiCtorCandidateFresh)
+      (annotations := annotatedPiDomainAnnotations)
+      (hannotations := annotatedPiDomainAnnotations_produced)
+      (hannotationsEq := annotatedPiDomainAnnotationsEq)
+      (hcheck := annotatedPiInnerCheckTypeStep_valid)
+      (hrun := annotatedPiInnerCandidateStep_valid)
+      (domainCandidate := annotatedPiDomainCandidateTrace)
+      (bodyCandidate := annotatedPiInnerBodyCandidateTrace)
+      (hdomain := by
+        simpa using annotatedPiDomainCandidateTrace_loop 997)
+      (hbody := by
+        simpa [annotatedPiInnerBodyCandidateContext] using
+          annotatedPiInnerBodyCandidateTrace_loop 997))
+
+private theorem annotatedPiCtorCandidateTrace_loop :
+    AddInductive.buildCandidateExpr.loop
+        annotatedPiCtorCandidateContext annotatedPiMkInfo.type
+        annotatedPiCtorCandidateContext.fuel.inductiveFuel =
+      .ok annotatedPiCtorCandidateTrace := by
+  change AddInductive.buildCandidateExpr.loop
+      annotatedPiCtorCandidateContext annotatedPiMkInfo.type
+      (999 + 1) = _
+  simpa only [annotatedPiCtorCandidateTrace,
+    annotatedPiOuterBodyCandidateContext] using
+    (AddInductive.buildCandidateExpr_loop_of_whnf_forall
+      (context := annotatedPiCtorCandidateContext)
+      (e := annotatedPiMkInfo.type)
+      (inferred := .sort (.succ .zero))
+      (fuel := 999)
+      (name := annotatedPiOuterName)
+      (domain := annotatedPiInnerKernel)
+      (body := .const ``AnnotatedPi [])
+      (binderInfo := .default)
+      (hfresh := annotatedPiCtorCandidateFresh)
+      (annotations := annotatedPiInnerAnnotations)
+      (hannotations := annotatedPiInnerAnnotations_produced)
+      (hannotationsEq := annotatedPiInnerAnnotationsEq)
+      (hcheck := annotatedPiCtorCheckTypeStep_valid)
+      (hrun := annotatedPiCtorCandidateStep_valid)
+      (domainCandidate := annotatedPiInnerCandidateTrace)
+      (bodyCandidate := annotatedPiOuterBodyCandidateTrace)
+      (hdomain := annotatedPiInnerCandidateTrace_loop)
+      (hbody := by
+        simpa [annotatedPiOuterBodyCandidateContext] using
+          annotatedPiOuterBodyCandidateTrace_loop 998))
+
+/-- The executable candidate traversal returns the exact nested-forall
+AnnotatedPi constructor trace, including both annotation boundaries and the
+two recursively extended body contexts. -/
+theorem annotatedPiCtor_candidateTrace :
+    AddInductive.buildCandidateExpr annotatedPiMkInfo.type
+        annotatedPiCtorCandidateContext =
+      .ok annotatedPiCtorCandidate := by
+  unfold AddInductive.buildCandidateExpr
+  simp only [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [annotatedPiCtorCandidateTrace_loop]
+  rfl
+
+/-- The family position is the exact terminal candidate returned in the
+pre-family environment. -/
+theorem annotatedPiFamily_candidateTrace :
+    AddInductive.buildCandidateExpr annotatedPiInfo.type
+        annotatedPiFamilyCandidateContext =
+      .ok annotatedPiFamilyCandidate := by
+  apply AddInductive.buildCandidateExpr_of_whnf_nonForall
+  · decide
+  · rfl
+
+private theorem annotatedPiFamilyTypeList_candidateTrace :
+    (withReader (fun c : AddInductive.Context => { c with lctx := {} })
+        (AddInductive.normalizeCandidateFamilyTypeList
+          [annotatedPiKernelType])) annotatedPiFamilyCandidateContext =
+      .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) := by
+  change AddInductive.normalizeCandidateFamilyTypeList
+      [annotatedPiKernelType] annotatedPiFamilyCandidateContext = _
+  simp [AddInductive.normalizeCandidateFamilyTypeList,
+    AddInductive.normalizeCandidateFamilyType,
+    annotatedPiKernelType, annotatedPiFamilyListCandidate,
+    annotatedPiFamily_candidateTrace,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+
+private theorem annotatedPiConstructorList_candidateTrace :
+    AddInductive.normalizeCandidateConstructorList
+        annotatedPiKernelType.ctors annotatedPiCtorCandidateContext =
+      .ok annotatedPiFamilyListCandidate.constructors := by
+  change AddInductive.normalizeCandidateConstructorList
+      [annotatedPiKernelCtor] annotatedPiCtorCandidateContext =
+    .ok (.cons annotatedPiConstructorCandidate .nil)
+  simp [AddInductive.normalizeCandidateConstructorList,
+    AddInductive.normalizeCandidateConstructor,
+    annotatedPiKernelCtor, annotatedPiCtor_candidateTrace,
+    annotatedPiConstructorCandidate,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+
+private theorem annotatedPiFamilyList_candidateTrace :
+    AddInductive.normalizeCandidateFamilyList
+        (.cons annotatedPiFamilyListCandidate.familyType .nil)
+        annotatedPiCtorCandidateContext =
+      .ok annotatedPiNormalizationCandidate.families := by
+  simp [AddInductive.normalizeCandidateFamilyList,
+    annotatedPiNormalizationCandidate, annotatedPiFamilyListCandidate,
+    annotatedPiConstructorList_candidateTrace,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+
+/-- The complete positive AnnotatedPi metadata request selects the exact
+nested-forall normalization candidate in the real pre-family and post-family
+checker environments. -/
+theorem annotatedPiNormalizationCandidate_produced :
+    AddInductive.buildNormalizationCandidate 0
+        [annotatedPiKernelType] 0 false
+        annotatedPiFamilyCandidateContext =
+      .ok annotatedPiNormalizationCandidate := by
+  unfold AddInductive.buildNormalizationCandidate
+  rw [annotatedPi_checkInductiveTypes]
+  simp only [ReaderT.bind, Bind.bind]
+  rw [annotatedPiFamilyTypeList_candidateTrace]
+  simp only [Except.bind]
+  rw [annotatedPi_declareInductiveTypes]
+  unfold AddInductive.withEnv
+  change (ReaderT.bind
+      (AddInductive.checkConstructors #[annotatedPiKernelType]
+        annotatedPiInductiveStats false)
+      (fun _ => ReaderT.bind
+        (AddInductive.normalizeCandidateFamilyList
+          (.cons annotatedPiFamilyListCandidate.familyType .nil))
+        (fun families => pure
+          (⟨families⟩ : AddInductive.NormalizationCandidate
+            [annotatedPiKernelType]))))
+      ({ annotatedPiFamilyCandidateContext with
+        env := annotatedPiTypeKernelEnv } :
+          AddInductive.Context) = _
+  rw [show ({ annotatedPiFamilyCandidateContext with
+      env := annotatedPiTypeKernelEnv } : AddInductive.Context) =
+        annotatedPiCtorCandidateContext by rfl]
+  simp only [ReaderT.bind, Bind.bind]
+  rw [annotatedPi_checkConstructors]
+  simp only [Except.bind]
+  rw [annotatedPiFamilyList_candidateTrace]
+  rfl
+
 private def aliasFormerFamilyCandidateStep :
     AddInductive.CandidateWhnfStep where
   context := aliasFormerCandidateContext
@@ -8134,14 +8375,29 @@ def annotatedPiGenerationCandidatePackage :
     VInductDecl.GenerationCandidatePackage outParamEnv [] :=
   annotatedPiGenerationCandidateRun.package
 
+/-- The complete AnnotatedPi semantic package is selected by the exact
+successful whole-call metadata producer, including its nested annotation-
+consuming traversal in the post-family environment. -/
+def annotatedPiProducedGenerationCandidatePackage :
+    VInductDecl.ProducedGenerationCandidatePackage outParamEnv [] where
+  package := annotatedPiGenerationCandidatePackage
+  context := annotatedPiFamilyCandidateContext
+  nparams := 0
+  numNested := 0
+  isUnsafe := false
+  produced := by
+    simpa [annotatedPiGenerationCandidatePackage,
+      VInductDecl.GenerationCandidateRun.package] using
+      annotatedPiNormalizationCandidate_produced
+
 /-- Theory-only erasure consumed by the public certified transaction. -/
 def annotatedPiGenerationCertificate :
     annotatedPiRawDecl.GenerationCertificate outParamEnv :=
-  annotatedPiGenerationCandidatePackage.certificate
+  annotatedPiProducedGenerationCandidatePackage.package.certificate
 
 def annotatedPiGenerationRun :
     VInductDecl.GenerationRun annotatedPiGenerationChecked outParamEnv :=
-  annotatedPiGenerationCandidatePackage.run.generationRun
+  annotatedPiProducedGenerationCandidatePackage.package.run.generationRun
 
 theorem annotatedPiGenerationChecked_wf_checked :
     annotatedPiGenerationChecked.WF outParamEnv :=
@@ -8260,7 +8516,7 @@ the checker-produced non-identity normalization certificate. -/
 def annotatedPiAddInductTraceChecked :
     AddInductTrace outParamMap outParamEnv annotatedPiRawDecl
       annotatedPiMap annotatedPiFinalEnv := by
-  refine annotatedPiGenerationCandidatePackage.addInductTrace
+  refine annotatedPiProducedGenerationCandidatePackage.package.addInductTrace
     annotatedPiTypeMap annotatedPiTypeEnv annotatedPiCtorMap
     annotatedPiCtorEnv annotatedPiRecEnv annotatedPiAddType ?_ ?_ ⟨rfl⟩
   · exact .cons {
@@ -9542,6 +9798,113 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidatePackage' 
 #print axioms annotatedPiGenerationCandidatePackage
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiCtor_candidateTrace' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiCtor_candidateTrace
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiFamily_candidateTrace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.looseBVarRange_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq]
+-/
+#guard_msgs in
+#print axioms annotatedPiFamily_candidateTrace
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidate_produced' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiNormalizationCandidate_produced
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedGenerationCandidatePackage' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiProducedGenerationCandidatePackage
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_addInductCertified' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -9551,7 +9914,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_addInductCertified' depends
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9586,7 +9951,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationChecked_wf_checked
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9621,7 +9988,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiAddInductTraceChecked' depen
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9656,7 +10025,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_trEnv'_checked' depends on 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,

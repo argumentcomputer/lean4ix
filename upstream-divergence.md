@@ -4,16 +4,16 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline (2026-08-01):
+Audit baseline before this checkpoint (2026-08-01):
 
 - upstream: `0c38ab8`
-- published fork tip: `5e5bb767b3491d21a71908d4c58bcbaa007283bb`
-  on local and `origin/jcb/induct` (22 commits ahead of upstream)
+- published fork tip: `33b99f4e462eaa02b78aba061dcac37bd64d84c4`
+  on local and `origin/jcb/induct` (23 commits ahead of upstream)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited checkout: detached at the same `5e5bb767` tree as both development
-  branch refs; the semantic source and `flake.nix` are clean. Use the branch
-  ref, not detached `HEAD`, for future published-fork comparisons.
+- audited checkout: a Jujutsu working-copy child of the same `33b99f4e` tree
+  as both development branch refs. Use the branch ref, not a detached Git
+  `HEAD`, for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -228,33 +228,33 @@ to the replacement.
 
 - **Status:** published-fork
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
-  `a1d8943`, `6a77882`, `bc37d43`, and `5e5bb76`
+  `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, and `33b99f4`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
   family/constructor lists without truncation; and package the exact generation
   with its semantic WF proof. `ProducedGenerationCandidatePackage` adds the
   stronger equation that the executable whole metadata call produced that
-  same candidate. AliasFormer is the first complete positive instance and
-  supplies both its Theory transaction and Verify replay from the produced
-  package. AnnotatedPi already has the complete semantic consumer package and
-  replay. At `5e5bb76`, its outer operational proof additionally has exact
-  family validation, freshness, transparent recursion detection, raw-family
-  declaration, and recursive inner-Π `inferType`/`ensureType` execution.
+  same candidate. AliasFormer and AnnotatedPi are complete positive instances
+  and each supplies its Theory transaction and Verify replay from its produced
+  package. AnnotatedPi's outer operational proof now covers exact family and
+  constructor validation, freshness, transparent recursion and positivity
+  traversals, raw-family declaration, annotation consumption, nested-Π
+  candidate traversal, dependent family/constructor list assembly, and the
+  complete successful `buildNormalizationCandidate` equation.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Current gap:** AnnotatedPi still lacks exact whole-constructor validation,
-  dependent candidate-list assembly, and the final whole-call produced-package
-  equation. After that bounded fixture, the construction must generalize to
-  parameters, indices, arbitrary constructor lists, and eventually mutual and
-  nested blocks.
-- **Tests:** exact positive AliasFormer whole-call equation; positive
-  semantic/transaction/replay fixtures for AliasFormer and AnnotatedPi;
-  opaque-`outParam` whole-candidate rejection; exact axiom guards; 119-target
-  Theory/Verify build; 20-sorry audit; current-host flake check; and all-system
-  no-build evaluation.
+- **Current gap:** generalize the complete singleton producer construction
+  beyond the two zero-parameter, zero-index fixtures. The next breadth step is
+  parameters, indices, and arbitrary constructor lists, followed by the
+  normalization differential matrix and eventually mutual and nested blocks.
+- **Tests:** exact positive AliasFormer and AnnotatedPi whole-call equations;
+  positive semantic/transaction/replay fixtures for both; opaque-`outParam`
+  whole-candidate rejection; exact axiom guards; full 152-job Lake build;
+  20-sorry audit; formatter check; and current-host `nix build`. The broader
+  current-host flake and all-system no-build gates remain pin/release gates.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
   added. Concrete Verify producer roots expose existing checker-refinement,
   pointer/cache, and projection dependencies; generic Theory transaction roots

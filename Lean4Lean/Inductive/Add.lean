@@ -594,6 +594,20 @@ def observeCandidateIsDefEq
     .error (.other "normalization candidate changed a binder domain")
   | .ok true => .ok ⟨hrun⟩
 
+theorem observeCandidateIsDefEq_of_run
+    (context : Context) (lhs rhs : Expr)
+    (hrun : CandidateIsDefEqStep.Valid ⟨context, lhs, rhs⟩) :
+    observeCandidateIsDefEq context lhs rhs = .ok ⟨hrun⟩ := by
+  change
+    TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.isDefEq lhs rhs) =
+      .ok true at hrun
+  unfold observeCandidateIsDefEq
+  split
+  · simp_all
+  · simp_all
+  · rfl
+
 /-- Recover the state-bearing equality execution erased by `M.run`. -/
 theorem CandidateIsDefEqStep.innerRun
     (step : CandidateIsDefEqStep) (recursionFuel : Nat)
@@ -958,6 +972,66 @@ where
           | result =>
             return .terminal context e inferred result checked valid
 
+/-- One terminal recursive step of `buildCandidateExpr`, with its traversal
+budget made explicit. This is the reusable reduction seam for exact producer
+fixtures; all semantic evidence remains the ordinary checker executions
+stored in the resulting trace. -/
+theorem buildCandidateExpr_loop_of_whnf_nonForall
+    (context : Context) (e inferred view : Expr) (fuel : Nat)
+    (hcheck : CandidateCheckTypeStep.Valid
+      ⟨context, e, inferred⟩)
+    (hrun : CandidateWhnfStep.Valid ⟨context, e, view⟩)
+    (hview : view.isForall = false) :
+    buildCandidateExpr.loop context e (fuel + 1) =
+      .ok (.terminal context e inferred view hcheck hrun) := by
+  unfold buildCandidateExpr.loop
+  rw [observeCandidateCheckType_of_run context e inferred hcheck]
+  rw [observeCandidateWhnf_of_run context e view hrun]
+  cases view <;>
+    simp_all [Expr.isForall, Pure.pure, Except.pure]
+
+/-- One forall recursive step of `buildCandidateExpr`, exposing the exact
+child executions used at the decremented traversal budget. -/
+theorem buildCandidateExpr_loop_of_whnf_forall
+    (context : Context) (e inferred : Expr) (fuel : Nat)
+    (name : Name) (domain body : Expr) (binderInfo : BinderInfo)
+    (hfresh : context.lctx.find? context.freshFVarId = none)
+    (annotations : CandidateTypeAnnotations domain)
+    (hannotations :
+      buildCandidateTypeAnnotations domain = .ok annotations)
+    (hannotationsEq : CandidateIsDefEqStep.Valid
+      ⟨context, domain, annotations.consumed⟩)
+    (hcheck : CandidateCheckTypeStep.Valid
+      ⟨context, e, inferred⟩)
+    (hrun : CandidateWhnfStep.Valid
+      ⟨context, e, .forallE name domain body binderInfo⟩)
+    (domainCandidate : CandidateExprTrace context domain)
+    (bodyCandidate : CandidateExprTrace
+      (context.pushLocalDecl name binderInfo annotations.consumed)
+      (body.instantiate1 context.freshExpr))
+    (hdomain :
+      buildCandidateExpr.loop context domain fuel =
+        .ok domainCandidate)
+    (hbody :
+      buildCandidateExpr.loop
+          (context.pushLocalDecl name binderInfo annotations.consumed)
+          (body.instantiate1 context.freshExpr) fuel =
+        .ok bodyCandidate) :
+    buildCandidateExpr.loop context e (fuel + 1) =
+      .ok (.forallE context e inferred name domain body binderInfo
+        hfresh annotations hannotationsEq hcheck hrun
+        domainCandidate bodyCandidate) := by
+  unfold buildCandidateExpr.loop
+  simp only [observeCandidateCheckType_of_run context e inferred hcheck,
+    observeCandidateWhnf_of_run context e
+      (.forallE name domain body binderInfo) hrun]
+  split
+  · simp_all
+  · simp [Bind.bind, Except.bind, hannotations,
+      observeCandidateIsDefEq_of_run context domain
+        annotations.consumed hannotationsEq,
+      hdomain, hbody, Pure.pure, Except.pure]
+
 /-- Erase the operational trace and retain only the analysis expression. -/
 def normalizeCandidateExpr (e : Expr) : M Expr := do
   return (← buildCandidateExpr e).view
@@ -1135,6 +1209,28 @@ info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, C
 -/
 #guard_msgs in
 #print axioms buildCandidateExpr
+
+/--
+info: 'Lean4Lean.AddInductive.observeCandidateIsDefEq_of_run' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms observeCandidateIsDefEq_of_run
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_nonForall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateExpr_loop_of_whnf_nonForall
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_forall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateExpr_loop_of_whnf_forall
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build' depends on axioms: [propext, Quot.sound]
