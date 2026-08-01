@@ -2409,8 +2409,13 @@ private def annotationCandidateAccepted (domain expected : Expr) : Bool :=
       | .error _ => false
 
 /- These guards cover the complete binder-annotation seam used by the
-candidate producer: agreement with Lean's opaque helper followed by an exact
-successful ordinary-checker equality observation. -/
+candidate producer: the transparent structural implementation remains
+differentially equal to Lean's opaque helper, followed by an exact successful
+ordinary-checker equality observation. -/
+#guard AddInductive.candidateTypeAnnotationsAgree outParamDomain
+#guard AddInductive.candidateTypeAnnotationsAgree semiOutParamDomain
+#guard AddInductive.candidateTypeAnnotationsAgree optParamDomain
+#guard AddInductive.candidateTypeAnnotationsAgree autoParamDomain
 #guard annotationCandidateAccepted outParamDomain annotationNatExpr
 #guard annotationCandidateAccepted semiOutParamDomain annotationNatExpr
 #guard annotationCandidateAccepted optParamDomain annotationNatExpr
@@ -5726,6 +5731,11 @@ private theorem annotatedPiCtorCandidateFresh :
       .const ``AnnotatedPi [] := by
   simp [Expr.instantiate1_eq, Expr.instantiate1']
 
+@[simp] private theorem annotatedPiConst_instantiate1' (arg : Expr) :
+    (Expr.const ``AnnotatedPi []).instantiate1' arg =
+      .const ``AnnotatedPi [] := by
+  rfl
+
 private def annotatedPiInnerBodyCandidateStep :
     AddInductive.CandidateWhnfStep where
   context := annotatedPiInnerBodyCandidateContext
@@ -6169,6 +6179,282 @@ private theorem annotatedPiInner_ensureTypeM :
       AddInductive.Context.toTypeChecker] using
         annotatedPiInner_inferTypeInner]
   rfl
+
+private theorem annotatedPiCtor_getEnvM :
+    TypeChecker.M.run annotatedPiCtorCandidateContext.env
+        annotatedPiCtorCandidateContext.safety
+        annotatedPiCtorCandidateContext.lctx
+        annotatedPiCtorCandidateContext.lparams
+        annotatedPiCtorCandidateContext.fuel TypeChecker.getEnv =
+      .ok annotatedPiTypeKernelEnv := by
+  rfl
+
+private theorem annotatedPiRawDomain_hasIndOcc_false :
+    AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
+        annotatedPiRawDomainKernel = false := by
+  simp [AddInductive.hasIndOcc, annotatedPiInductiveStats,
+    annotatedPiRawDomainKernel, Expr.constName!]
+
+private theorem annotatedPiConst_isValidIndAppIdx :
+    AddInductive.isValidIndAppIdx annotatedPiInductiveStats
+        (.const ``AnnotatedPi []) 0 = true := by
+  simp +decide [AddInductive.isValidIndAppIdx,
+    annotatedPiInductiveStats, Expr.getAppFn, Expr.getAppArgs,
+    Expr.getAppNumArgs]
+
+private theorem annotatedPiInner_stats_hasIndOcc :
+    AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
+        annotatedPiInnerKernel = true := by
+  simpa [annotatedPiInductiveStats] using annotatedPiInner_hasIndOcc
+
+private theorem annotatedPiConst_hasIndOcc :
+    AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
+        (.const ``AnnotatedPi []) = true := by
+  simp [AddInductive.hasIndOcc, annotatedPiInductiveStats,
+    Expr.constName!]
+
+private theorem annotatedPiConst_isValidIndApp :
+    AddInductive.isValidIndApp? annotatedPiInductiveStats
+        (.const ``AnnotatedPi []) = some 0 := by
+  exact AddInductive.isValidIndApp?_singleton_zero
+    annotatedPiInductiveStats (.const ``AnnotatedPi []) rfl
+      annotatedPiConst_isValidIndAppIdx
+
+private theorem annotatedPi_checkPositivity_terminal :
+    AddInductive.checkPositivity.loop annotatedPiInductiveStats
+        annotatedPiMkInfo.name 0 (.const ``AnnotatedPi []) 999
+        annotatedPiInnerBodyCandidateContext = .ok () := by
+  rw [show 999 = 998 + 1 by rfl]
+  unfold AddInductive.checkPositivity.loop
+  simp only [ReaderT.bind, Bind.bind]
+  rw [AddInductive.liftTypeChecker_apply]
+  rw [show TypeChecker.M.run
+      annotatedPiInnerBodyCandidateContext.env
+      annotatedPiInnerBodyCandidateContext.safety
+      annotatedPiInnerBodyCandidateContext.lctx
+      annotatedPiInnerBodyCandidateContext.lparams
+      annotatedPiInnerBodyCandidateContext.fuel
+      (TypeChecker.whnf (.const ``AnnotatedPi [])) =
+        .ok (.const ``AnnotatedPi []) by
+    exact annotatedPiConst_whnfM _]
+  simp [annotatedPiConst_hasIndOcc, annotatedPiConst_isValidIndApp,
+    Bind.bind, ReaderT.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+
+private theorem annotatedPi_checkPositivity :
+    AddInductive.checkPositivity annotatedPiInductiveStats
+        annotatedPiInnerKernel annotatedPiMkInfo.name 0
+        annotatedPiCtorCandidateContext = .ok () := by
+  unfold AddInductive.checkPositivity
+  simp only [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
+      999 + 1 by rfl]
+  unfold AddInductive.checkPositivity.loop
+  simp only [ReaderT.bind, Bind.bind]
+  rw [AddInductive.liftTypeChecker_apply]
+  rw [annotatedPiInner_whnfM]
+  simp only [Except.bind]
+  rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
+      annotatedPiInnerKernel = true by
+    exact annotatedPiInner_stats_hasIndOcc]
+  simp only [Bool.not_true, Bool.false_eq_true, if_false,
+    ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
+    Except.bind, Except.pure]
+  unfold annotatedPiInnerKernel
+  simp only
+  rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
+      annotatedPiRawDomainKernel = false by
+    exact annotatedPiRawDomain_hasIndOcc_false]
+  simp only [Bool.false_eq_true, if_false, Expr.instantiate1',
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  simpa [withLocalDecl, annotatedPiInnerBodyCandidateContext,
+    AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
+    AddInductive.consumeTypeAnnotations, annotatedPiDomainAnnotations,
+    annotatedPiRawDomainKernel, annotatedPiCtorCandidateContext] using
+      annotatedPi_checkPositivity_terminal
+
+private theorem annotatedPiInner_ensureTypeM_expanded :
+    TypeChecker.M.run annotatedPiCtorCandidateContext.env
+        annotatedPiCtorCandidateContext.safety
+        annotatedPiCtorCandidateContext.lctx
+        annotatedPiCtorCandidateContext.lparams
+        annotatedPiCtorCandidateContext.fuel
+        (TypeChecker.ensureType
+          (.forallE `p
+            (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+            (.const ``AnnotatedPi []) .default)) =
+      .ok (.sort (.succ .zero)) := by
+  simpa [annotatedPiInnerKernel, annotatedPiRawDomainKernel] using
+    annotatedPiInner_ensureTypeM
+
+private theorem annotatedPi_checkPositivity_expanded :
+    AddInductive.checkPositivity annotatedPiInductiveStats
+        (.forallE `p
+          (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+          (.const ``AnnotatedPi []) .default)
+        ``AnnotatedPi.mk 0 annotatedPiCtorCandidateContext = .ok () := by
+  simpa [annotatedPiMkInfo, ConstantInfo.name,
+    ConstantInfo.toConstantVal, annotatedPiInnerKernel,
+    annotatedPiRawDomainKernel] using annotatedPi_checkPositivity
+
+private theorem annotatedPi_checkConstructors_terminal :
+    AddInductive.checkConstructors.loop annotatedPiInductiveStats false 0
+        ``AnnotatedPi.mk (.const ``AnnotatedPi []) 1 999
+        annotatedPiOuterBodyCandidateContext = .ok () := by
+  rw [show 999 = 998 + 1 by rfl]
+  unfold AddInductive.checkConstructors.loop
+  simp [annotatedPiConst_isValidIndAppIdx,
+    ReaderT.pure, Pure.pure, Except.pure]
+
+private theorem annotatedPi_checkConstructors_terminal_expanded :
+    AddInductive.checkConstructors.loop annotatedPiInductiveStats false 0
+        ``AnnotatedPi.mk (.const ``AnnotatedPi []) 1 999
+        ({ env := annotatedPiTypeKernelEnv
+           lctx := ({} : LocalContext).mkLocalDecl
+             ⟨({ namePrefix := `_ind_fresh } : NameGenerator).curr⟩
+             (.mkNum
+               (.mkStr
+                 (.mkStr (.mkStr (.mkStr .anonymous "a") "_@")
+                   "_internal") "_hyg") 0)
+             (.forallE `p
+               (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+               (.const ``AnnotatedPi []) .default)
+             .default
+           lparams := []
+           ngen := ({ namePrefix := `_ind_fresh } : NameGenerator).next
+           safety := .safe
+           allowPrimitive := false } : AddInductive.Context) = .ok () := by
+  simpa [annotatedPiOuterBodyCandidateContext,
+    AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId,
+    annotatedPiInnerAnnotations, annotatedPiOuterName,
+    annotatedPiInnerKernel, annotatedPiRawDomainKernel,
+    annotatedPiCtorCandidateContext] using
+      annotatedPi_checkConstructors_terminal
+
+private theorem annotatedPiCtor_noMVarNoFVar_literal :
+    annotatedPiTypeKernelEnv.checkNoMVarNoFVar
+        ``AnnotatedPi.mk
+        (.forallE annotatedPiOuterName annotatedPiInnerKernel
+          (.const ``AnnotatedPi []) .default) = .ok () := by
+  simpa [annotatedPiMkInfo, ConstantInfo.name, ConstantInfo.type,
+    ConstantInfo.toConstantVal, annotatedPiInnerKernel,
+    annotatedPiRawDomainKernel] using annotatedPiCtor_noMVarNoFVar
+
+private theorem annotatedPiCtor_noMVarNoFVar_projected :
+    annotatedPiTypeKernelEnv.checkNoMVarNoFVar
+        annotatedPiMkInfo.toConstantVal.name annotatedPiMkInfo.type =
+      .ok () := by
+  simpa [ConstantInfo.name] using annotatedPiCtor_noMVarNoFVar
+
+private theorem annotatedPiCtor_checkTypeM_literal :
+    TypeChecker.M.run annotatedPiCtorCandidateContext.env
+        annotatedPiCtorCandidateContext.safety
+        annotatedPiCtorCandidateContext.lctx
+        annotatedPiCtorCandidateContext.lparams
+        annotatedPiCtorCandidateContext.fuel
+        (TypeChecker.checkType
+          (.forallE annotatedPiOuterName annotatedPiInnerKernel
+            (.const ``AnnotatedPi []) .default)) =
+      .ok (.sort (.succ .zero)) := by
+  simpa [annotatedPiMkInfo, ConstantInfo.type,
+    ConstantInfo.toConstantVal, annotatedPiInnerKernel,
+    annotatedPiRawDomainKernel] using annotatedPiCtor_checkTypeM
+
+private theorem annotatedPiCtor_noMVarNoFVar_expanded :
+    annotatedPiTypeKernelEnv.checkNoMVarNoFVar ``AnnotatedPi.mk
+        (.forallE
+          (.mkNum
+            (.mkStr
+              (.mkStr (.mkStr (.mkStr .anonymous "a") "_@")
+                "_internal") "_hyg") 0)
+          (.forallE `p
+            (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+            (.const ``AnnotatedPi []) .default)
+          (.const ``AnnotatedPi []) .default) = .ok () := by
+  simpa [annotatedPiMkInfo, ConstantInfo.name, ConstantInfo.type,
+    ConstantInfo.toConstantVal, annotatedPiOuterName,
+    annotatedPiInnerKernel, annotatedPiRawDomainKernel] using
+      annotatedPiCtor_noMVarNoFVar
+
+private theorem annotatedPiCtor_checkTypeM_expanded :
+    TypeChecker.M.run annotatedPiCtorCandidateContext.env
+        annotatedPiCtorCandidateContext.safety
+        annotatedPiCtorCandidateContext.lctx
+        annotatedPiCtorCandidateContext.lparams
+        annotatedPiCtorCandidateContext.fuel
+        (TypeChecker.checkType
+          (.forallE
+            (.mkNum
+              (.mkStr
+                (.mkStr (.mkStr (.mkStr .anonymous "a") "_@")
+                  "_internal") "_hyg") 0)
+            (.forallE `p
+              (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+              (.const ``AnnotatedPi []) .default)
+            (.const ``AnnotatedPi []) .default)) =
+      .ok (.sort (.succ .zero)) := by
+  simpa [annotatedPiMkInfo, ConstantInfo.type,
+    ConstantInfo.toConstantVal, annotatedPiOuterName,
+    annotatedPiInnerKernel, annotatedPiRawDomainKernel] using
+      annotatedPiCtor_checkTypeM
+
+private theorem annotatedPi_checkConstructors :
+    AddInductive.checkConstructors #[annotatedPiKernelType]
+        annotatedPiInductiveStats false
+        annotatedPiCtorCandidateContext = .ok () := by
+  unfold AddInductive.checkConstructors
+  simp only [ReaderT.bind, Bind.bind]
+  rw [AddInductive.liftTypeChecker_apply]
+  rw [annotatedPiCtor_getEnvM]
+  simp only [Except.bind]
+  simp +decide [annotatedPiKernelType, annotatedPiKernelCtor,
+    annotatedPiMkInfo, ConstantInfo.name, ConstantInfo.type,
+    ConstantInfo.toConstantVal, NameSet.contains]
+  rw [annotatedPiCtor_noMVarNoFVar_expanded]
+  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [AddInductive.liftTypeChecker_apply]
+  rw [annotatedPiCtor_checkTypeM_expanded]
+  simp only [Except.bind]
+  simp +decide [ConstantInfo.type, ConstantInfo.toConstantVal,
+    AddInductive.liftTypeChecker_apply,
+    readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
+      999 + 1 by rfl]
+  unfold AddInductive.checkConstructors.loop
+  simp only
+  rw [show annotatedPiInductiveStats.params[0]? = none by rfl]
+  simp only
+  simp only [ReaderT.bind, Bind.bind]
+  rw [AddInductive.liftTypeChecker_apply]
+  rw [annotatedPiInner_ensureTypeM_expanded]
+  simp only [Except.bind, Expr.sortLevel!]
+  rw [show AddInductive.levelStructEq
+      annotatedPiInductiveStats.resultLevel (.succ .zero) = true by rfl]
+  simp only [if_true]
+  simp only [Bool.not_false, if_true,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [annotatedPi_checkPositivity_expanded]
+  simp only [Except.bind]
+  simp only [AddInductive.withLocalDecl_apply,
+    annotatedPiConst_instantiate1, annotatedPiConst_instantiate1',
+    annotatedPiOuterBodyCandidateContext,
+    AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
+    AddInductive.consumeTypeAnnotations, annotatedPiInnerAnnotations,
+    annotatedPiInnerKernel, annotatedPiRawDomainKernel,
+    annotatedPiCtorCandidateContext,
+    ReaderT.pure, Pure.pure, Except.pure]
+  rw [annotatedPi_checkConstructors_terminal_expanded]
+  simp [ReaderT.pure, Pure.pure, Except.pure]
 
 private def aliasFormerFamilyCandidateStep :
     AddInductive.CandidateWhnfStep where

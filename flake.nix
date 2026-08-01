@@ -173,7 +173,10 @@
         # fails before any consumer updates its pin.
         consumer = lake2nix.mkPackage {
           name = "consumer";
-          src = ./nix/fixtures/consumer;
+          # lake2nix reads this fixture's manifest during evaluation. Keep it
+          # inside the already-realized flake source rather than coercing the
+          # subdirectory into a second, not-yet-realized store path.
+          src = "${leanSrc}/nix/fixtures/consumer";
           lakeDeps = {
             lean4lean = lean4leanLakeDependency;
             batteries = lakeDeps.batteries;
@@ -190,7 +193,7 @@
         };
 
         # Regression test for the `replayFromImports` teardown segfault (see
-        # plans/segfault-fix-plan.md): run the shipped wrapper from a clean
+        # plans/DEPRECATED-segfault-fix-plan.md): run the shipped wrapper from a clean
         # environment on a small module and require a clean exit plus the
         # summary line the crash used to swallow.
         cliSmoke =
@@ -243,7 +246,27 @@
         # Lean overlay
         _module.args.pkgs = import nixpkgs {
           inherit system;
-          overlays = [(lean4-nix.readToolchainFile ./lean-toolchain)];
+          overlays = [
+            (lean4-nix.readToolchainFile ./lean-toolchain)
+            # lean4-nix adds fixDarwinDylibNames to the official binary
+            # toolchain. Lean 4.29's libleanshared_1.dylib has no load-command
+            # padding for the longer Nix store install name, so that hook fails
+            # even though the release bundle is already internally relocatable.
+            # Remove only that hook; retain the rest of the standard fixup.
+            (_final: prev:
+              prev.lib.optionalAttrs prev.stdenv.isDarwin {
+                lean =
+                  prev.lean
+                  // {
+                    lean-all = prev.lean.lean-all.overrideAttrs (old: {
+                      nativeBuildInputs =
+                        builtins.filter
+                        (input: (input.outPath or null) != prev.fixDarwinDylibNames.outPath)
+                        (old.nativeBuildInputs or []);
+                    });
+                  };
+              })
+          ];
         };
 
         packages = {
