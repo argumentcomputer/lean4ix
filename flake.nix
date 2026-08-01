@@ -44,21 +44,10 @@
       }: let
         # Lake package
         lake2nix = pkgs.callPackage lean4-nix.lake {};
-        # Restrict the Lake build inputs to Lean-relevant files so edits to
-        # unrelated files (flake.nix, docs, the nix/ fixtures) don't
-        # invalidate the build.
-        leanSrc = pkgs.lib.fileset.toSource {
-          root = ./.;
-          fileset =
-            pkgs.lib.fileset.difference
-            (pkgs.lib.fileset.unions [
-              ./lakefile.toml
-              ./lake-manifest.json
-              ./lean-toolchain
-              (pkgs.lib.fileset.fileFilter (f: f.hasExt "lean") ./.)
-            ])
-            ./nix;
-        };
+        # lean4-nix reads lake-manifest.json while evaluating derivations.
+        # Reuse the flake's lazy source instead of creating a nested
+        # fileset.toSource path that may be unrealized under --no-build.
+        leanSrc = inputs.self.outPath;
         # Dependencies from lake-manifest.json (batteries). lean4-nix's
         # default target guess ("batteries" -> "Batteries") is correct, so
         # no overrides are needed.

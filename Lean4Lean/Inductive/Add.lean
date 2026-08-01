@@ -203,10 +203,23 @@ theorem checkInductiveTypes_singleton_zero_of_whnf_sort
       hclosed, hcheck, hwhnf, hensure, hfuel_eq,
       InductiveStats.initial, Expr.sortLevel!]
 
-def hasIndOcc (indConsts : Array Expr) (t : Expr) : Bool :=
-  (t.find? fun
-    | .const e _ => indConsts.any fun I => I.constName! == e
-    | _ => false).isSome
+/-- Transparent occurrence test for constants in the inductive block.
+
+Lean's `Expr.find?` is an opaque native traversal.  Using it here makes the
+kernel's recursive-family and positivity decisions impossible to reduce in an
+exact producer theorem without postulating a separate contract for that
+traversal.  This structural version follows the same expression children and
+keeps those decisions computational in the logic as well as at runtime. -/
+def hasIndOcc (indConsts : Array Expr) : Expr → Bool
+  | .const name _ => indConsts.any fun I => I.constName! == name
+  | .app fn arg => hasIndOcc indConsts fn || hasIndOcc indConsts arg
+  | .lam _ domain body _ | .forallE _ domain body _ =>
+    hasIndOcc indConsts domain || hasIndOcc indConsts body
+  | .letE _ type value body _ =>
+    hasIndOcc indConsts type || hasIndOcc indConsts value ||
+      hasIndOcc indConsts body
+  | .mdata _ body | .proj _ _ body => hasIndOcc indConsts body
+  | _ => false
 
 /-- Return true if declaration is recursive -/
 def isRec (indTypes : Array InductiveType) (indConsts : Array Expr) : Bool :=
