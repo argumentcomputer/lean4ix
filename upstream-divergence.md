@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the `IndexedVec` semantic checkpoint (2026-08-02):
+Audit baseline after the source-indexed list checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -12,19 +12,22 @@ Audit baseline after the `IndexedVec` semantic checkpoint (2026-08-02):
 - first published documentation child:
   `d35a2f6c94212faae20d5a03341b138bb0e22d36`
   (`docs: record IndexedVec semantic checkpoint`; 34 commits ahead of
-  upstream). Local Git and `origin/jcb/induct` agreed there at audit time. It
-  changes only this ledger relative to `cf3d5a47`; the accumulated fork delta
-  remains 32 files changed, 38,037 insertions, and 59 deletions.
+  upstream). It changes only this ledger relative to `cf3d5a47`.
+- source-indexed list checkpoint:
+  `c9e4ae2d26f28e0adb0c21ffde0e11b42bb691c2`
+  (`feat: generalize candidate list production`; 35 commits ahead of upstream;
+  32 files changed, 38,205 insertions, and 59 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `cf3d5a47` with concrete `IndexedVec`
-  identity witnesses, generation-ready spine runs, the complete
-  producer-selected semantic package, certified Theory transaction, and
-  checked E1 replay. The exact sorry audit, focused and 124-job full
-  Theory/Verify builds, default Nix build, all-system no-build evaluation, and
-  current-host flake check pass at that checkpoint. The documentation child
-  has the identical source tree. Use the branch ref, not a detached Git `HEAD`,
-  for published-fork comparisons.
+- audited source checkpoint: `c9e4ae2d` with arbitrary-length dependent
+  family-type, ordered-constructor, and complete-family production witnesses;
+  singleton AliasFormer/AnnotatedPi migrations; and the two-constructor
+  `IndexedVec` regression layered over the prior semantic package, certified
+  Theory transaction, and checked E1 replay. The exact 20-sorry audit, focused
+  118-job semantic replay and 124-job full Theory/Verify builds, default Nix
+  build, all-system no-build evaluation, current-host flake check, formatter,
+  diff, and import-boundary gates pass at that checkpoint. Use the branch ref,
+  not a detached Git `HEAD`, for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -241,7 +244,7 @@ to the replacement.
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
-  `d553930`, and `cf3d5a4`
+  `d553930`, `cf3d5a4`, and `c9e4ae2`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
