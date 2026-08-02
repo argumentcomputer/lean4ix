@@ -484,16 +484,10 @@ def indexedVecSemanticGenerationCandidatePackage :
   indexedVecSemanticGenerationCandidateRun.package
 
 def indexedVecSemanticProducedGenerationCandidatePackage :
-    VInductDecl.ProducedGenerationCandidatePackage natFinalEnv [`u] where
-  package := indexedVecSemanticGenerationCandidatePackage
-  context := indexedVecFamilyCandidateContext
-  nparams := 1
-  numNested := 0
-  isUnsafe := false
-  produced := by
-    simpa [indexedVecSemanticGenerationCandidatePackage,
-      VInductDecl.GenerationCandidateRun.package] using
-      indexedVecNormalizationCandidateProduced
+    VInductDecl.ProducedGenerationCandidatePackage natFinalEnv [`u] :=
+  indexedVecSemanticGenerationCandidateRun.producedPackage
+    indexedVecFamilyCandidateContext 1 0 false
+    indexedVecNormalizationCandidateProduced
 
 def indexedVecSemanticGenerationCertificate :
     indexedVecDecl.GenerationCertificate natFinalEnv :=

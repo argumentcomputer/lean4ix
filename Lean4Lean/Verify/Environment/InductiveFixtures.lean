@@ -7538,16 +7538,10 @@ def aliasFormerGenerationCandidatePackage :
 successful whole-call metadata producer, including its pre-family and
 post-family checker environments. -/
 def aliasFormerProducedGenerationCandidatePackage :
-    VInductDecl.ProducedGenerationCandidatePackage typeFamilyAliasEnv [] where
-  package := aliasFormerGenerationCandidatePackage
-  context := aliasFormerCandidateContext
-  nparams := 0
-  numNested := 0
-  isUnsafe := false
-  produced := by
-    simpa [aliasFormerGenerationCandidatePackage,
-      VInductDecl.GenerationCandidateRun.package] using
-      aliasFormerNormalizationCandidate_produced
+    VInductDecl.ProducedGenerationCandidatePackage typeFamilyAliasEnv [] :=
+  aliasFormerGenerationCandidateRun.producedPackage
+    aliasFormerCandidateContext 0 0 false
+    aliasFormerNormalizationCandidate_produced
 
 /-- Theory-only erasure of the AliasFormer producer package. This is the
 consumer-facing value accepted by the public non-identity transaction. -/
@@ -8172,16 +8166,10 @@ def annotatedPiGenerationCandidatePackage :
 successful whole-call metadata producer, including its nested annotation-
 consuming traversal in the post-family environment. -/
 def annotatedPiProducedGenerationCandidatePackage :
-    VInductDecl.ProducedGenerationCandidatePackage outParamEnv [] where
-  package := annotatedPiGenerationCandidatePackage
-  context := annotatedPiFamilyCandidateContext
-  nparams := 0
-  numNested := 0
-  isUnsafe := false
-  produced := by
-    simpa [annotatedPiGenerationCandidatePackage,
-      VInductDecl.GenerationCandidateRun.package] using
-      annotatedPiNormalizationCandidate_produced
+    VInductDecl.ProducedGenerationCandidatePackage outParamEnv [] :=
+  annotatedPiGenerationCandidateRun.producedPackage
+    annotatedPiFamilyCandidateContext 0 0 false
+    annotatedPiNormalizationCandidate_produced
 
 /-- Theory-only erasure consumed by the public certified transaction. -/
 def annotatedPiGenerationCertificate :

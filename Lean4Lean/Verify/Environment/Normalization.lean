@@ -2417,6 +2417,34 @@ structure ProducedGenerationCandidatePackage
         [package.kernelSource] numNested isUnsafe context =
       .ok package.candidate
 
+/-- Attach exact executable provenance to an already verified singleton
+generation run.
+
+Both premises are indexed by the same kernel source and dependent candidate:
+the executable equation therefore cannot be reused for a different semantic
+run, reordered constructor list, or caller-selected view.  Conversely, the
+equation supplies no semantic authority by itself; all Theory meaning remains
+in `run`. -/
+def GenerationCandidateRun.producedPackage
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateRun normalization generation)
+    (context : AddInductive.Context)
+    (nparams numNested : Nat) (isUnsafe : Bool)
+    (produced :
+      AddInductive.buildNormalizationCandidate nparams
+          [kernelSource] numNested isUnsafe context = .ok candidate) :
+    ProducedGenerationCandidatePackage env Us where
+  package := run.package
+  context := context
+  nparams := nparams
+  numNested := numNested
+  isUnsafe := isUnsafe
+  produced := produced
+
 /-
 The evidence types mention exact verifier executions, so these semantic
 interpretation roots intentionally inherit the same transitional Verify
@@ -3194,6 +3222,15 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.package' depends on axioms: 
 -/
 #guard_msgs in
 #print axioms GenerationCandidateRun.package
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.producedPackage' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateRun.producedPackage
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on axioms: [propext,
