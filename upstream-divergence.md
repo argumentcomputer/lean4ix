@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the retained semantic-hierarchy checkpoint (2026-08-02):
+Audit baseline after the semantic-hierarchy ownership checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -25,17 +25,31 @@ Audit baseline after the retained semantic-hierarchy checkpoint (2026-08-02):
   `f0caf16c5788d094fdbf1e990884c0c061d6fc75`
   (`feat: retain candidate semantic hierarchy`; 39 commits ahead of upstream;
   3 files changed, 432 insertions, and 111 deletions)
+- produced semantic-hierarchy checkpoint:
+  `e3cf22d293b081ba11be63e910d0d1e1510a042f`
+  (`feat: assemble produced semantic hierarchy`; 41 commits ahead of upstream;
+  3 files changed, 608 insertions, and 39 deletions)
+- semantic-hierarchy ownership checkpoint:
+  `7e5f4f7715cf71be8d09a583f0ec0d8f7aa02e72`
+  (`feat: harden semantic hierarchy ownership`; 42 commits ahead of upstream;
+  3 files changed, 670 insertions, and 25 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `f0caf16c` adds
-  `CandidateExprSemanticRootRun`, which retains the exact recursive checker run
-  and lets that run select the Theory view existentially. Source-indexed
-  constructor-list, family, and singleton-normalization semantic hierarchies
-  project back to the existing normalization interface, and AliasFormer,
-  AnnotatedPi, and `IndexedVec` now own their normalization and generation
-  evidence through those hierarchies. The exact 20-sorry frontier, focused
-  118-job semantic replay, 124-job full Theory/Verify build, default Nix build,
-  all six current-host flake checks, and whitespace checks pass at that
+- audited source checkpoint: `7e5f4f77` combines exact arbitrary-length
+  producer witnesses with source-indexed semantic inputs to return a
+  `Nonempty ProducedNormalizationCandidateSemanticRun`. The retained checker
+  selects every Theory view; callers provide verified contexts and strict
+  source translations, never a view. Semantic generation wrappers project
+  family and constructor spines from that same hierarchy, so normalization,
+  generation, packaging, and produced packaging cannot substitute parallel
+  roots. AliasFormer, AnnotatedPi, and `IndexedVec` all use this ownership path.
+  `IndexedVec` additionally proves that automatic assembly preserves its exact
+  `nil`/`cons` order and rejects a swapped view at the computational shape
+  gate. Exact compile-time guards cover the generic constructors, projections,
+  and fixture roots. The exact 20-sorry frontier, focused 118-job semantic
+  replay, 157-job default Lake build, 124-job Nix proof build, default Nix
+  build, all six current-host flake checks, all-system no-build evaluation,
+  formatter, Theory import-boundary, and whitespace checks pass at that
   checkpoint. Use the branch ref, not a detached Git `HEAD`, for published-fork
   comparisons.
 
@@ -254,7 +268,8 @@ to the replacement.
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
-  `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, and `f0caf16`
+  `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, `f0caf16`, `e3cf22d`, and
+  `7e5f4f7`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -291,35 +306,55 @@ to the replacement.
   constructor-list, family, and singleton-normalization structures preserve the
   same source order through the complete hierarchy. AliasFormer, AnnotatedPi,
   and `IndexedVec` have been migrated to that ownership model.
+  `CandidateExprSemanticRootInput`, dependent constructor/family inputs, and
+  `NormalizationCandidateSemanticInput.exists_ofProduced` now combine those
+  verified inputs with the exact operational family-type and family-list
+  witnesses and return the complete produced semantic hierarchy under
+  `Nonempty`. `CandidateFamilySemanticGenerationRun`,
+  `CandidateSemanticNormalizedCtorRun` and its dependent list, and
+  `GenerationCandidateSemanticRun` make that hierarchy the sole owner of the
+  recursive runs and spines consumed by generation. Their compatibility,
+  package, and produced-package projections preserve the existing public API.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Latest checkpoint:** one retained semantic hierarchy now owns the exact
-  recursive family and constructor runs used by both normalization and
-  generation. `IndexedVec` exercises the dependent two-constructor list, while
-  AliasFormer and AnnotatedPi exercise non-identity singleton views; their
-  existing produced packages, certified Theory transactions, and checked E1
-  replays continue to project from that hierarchy.
-- **Current gap:** construct the dependent semantic constructor/family
-  hierarchy automatically from the arbitrary-length operational `Produced`
-  witnesses and translated successful metadata. The root theorem already
-  selects its view from verified context/source evidence, and outer packaging
-  is generic once the complete semantic run exists; the missing theorem must
-  assemble every retained position without choice of an unrelated endpoint.
-  Then add exact compile-time guards for the new generic roots, complete the
-  normalization differential matrix, and extend the indexed shape to mutual
+- **Latest checkpoint:** automatic singleton semantic assembly now consumes
+  the arbitrary-length operational witnesses plus exact per-position verified
+  contexts/translations and returns the source-ordered hierarchy under
+  `Nonempty`. Semantic generation, public packaging, and produced packaging all
+  project from that owner. `IndexedVec` exercises the dependent
+  two-constructor path and proves `nil`/`cons` order preservation; AliasFormer
+  and AnnotatedPi exercise non-identity singleton views. Their certified Theory
+  transactions and checked E1 replays continue to use the same packages.
+- **Current gap:** derive the remaining structural fields of
+  `GenerationCandidateSemanticRun`—the analyzer/normalization equality,
+  checked WF value, stored-spine and raw/view telescope/result equations,
+  post-family environment WF, and constructor alignments—from one successful
+  dependent analysis plus the produced semantic hierarchy. Then expose a
+  generic outer theorem taking the complete successful
+  `buildNormalizationCandidate` execution to a
+  `Nonempty ProducedGenerationCandidatePackage` (or an equivalent dependent
+  result), with no fixture-supplied generation alignment. Constructing the
+  per-position verified semantic inputs directly from an arbitrary successful
+  outer call is part of that theorem, not authority for the operational result
+  to choose Theory meaning. The outer boundary remains singleton-family;
+  complete the normalization differential matrix before widening it to mutual
   and nested blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
   whole-call equations; positive semantic/transaction/replay fixtures for the
   first two plus the complete checkpoint semantic/transaction/E1 replay for
   `IndexedVec`; exact `IndexedVec` family/`nil`/`cons` candidate traces;
-  opaque-`outParam` whole-candidate rejection; exact axiom guards for the two
-  public semantic roots, the three operational list theorems, and the generic
-  outer package constructor; singleton and two-constructor list regressions;
-  retained-hierarchy migrations for all three fixtures; focused 118-job and
-  full 124-job Lake builds; 20-sorry frontier check; default Nix build; all six
-  current-host flake checks; and whitespace checks.
+  opaque-`outParam` whole-candidate rejection; exact axiom guards for the
+  semantic-input constructors, produced hierarchy, semantic-generation
+  projections, the three operational list theorems, and both outer package
+  constructors; singleton and two-constructor list regressions; exact
+  `IndexedVec` source-order preservation plus swapped-view rejection;
+  retained-hierarchy and semantic-generation migrations for all three
+  fixtures; focused 118-job semantic replay, 157-job default Lake build, and
+  124-job Nix proof build; 20-sorry frontier check; default Nix build; all six
+  current-host flake checks; all-system no-build evaluation; formatter; Theory
+  import-boundary; and whitespace checks.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
   added. The three operational list theorems are guarded at exactly the
   accepted `propext`/`Classical.choice`/`Quot.sound` baseline. The generic outer
@@ -329,13 +364,18 @@ to the replacement.
   the producer equation into semantic authority. Concrete Verify producer
   roots expose existing checker-refinement, pointer/cache, and projection
   dependencies; generic Theory transaction roots retain their narrower
-  guarded closure. The new semantic `spine` projection has exactly the
-  `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure. Root construction
-  and normalization projections inherit the already documented checked
-  semantic closure, including the existing pointer, expression, level,
-  persistent-array/map, and syntax implementation contracts; a direct
-  `#print axioms` audit found no new axiom. Exact compile-time guards for these
-  new public roots remain part of the next checkpoint.
+  guarded closure. The semantic `spine` projection has exactly the
+  `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure. Semantic input
+  construction, produced hierarchy assembly, and semantic-generation
+  projections inherit the already documented checked semantic closure,
+  including the existing pointer, expression, level, persistent-array/map, and
+  syntax implementation contracts. They are now exact compile-time guarded;
+  the AliasFormer and `IndexedVec` roots match that set, while AnnotatedPi adds
+  only the already documented `Expr.hasFVar_eq` dependency reached by its
+  annotated free-variable checker trace. Returning semantic existence under
+  `Nonempty` avoids a choice-based data extractor. No root declares a new
+  axiom, assumes a normalization oracle, or gives operational production
+  independent semantic authority.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or
