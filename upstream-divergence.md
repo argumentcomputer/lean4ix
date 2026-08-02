@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the generic produced-package checkpoint (2026-08-02):
+Audit baseline after the retained semantic-hierarchy checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -21,17 +21,23 @@ Audit baseline after the generic produced-package checkpoint (2026-08-02):
   `a7d101b5e16f1258c6f5c2a7ea08e55f45eb17f1`
   (`feat: generalize produced candidate packaging`; 37 commits ahead of
   upstream; 3 files changed, 49 insertions, and 30 deletions)
+- retained semantic-hierarchy checkpoint:
+  `f0caf16c5788d094fdbf1e990884c0c061d6fc75`
+  (`feat: retain candidate semantic hierarchy`; 39 commits ahead of upstream;
+  3 files changed, 432 insertions, and 111 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `a7d101b5` adds the generic outer
-  `GenerationCandidateRun.producedPackage` constructor and routes AliasFormer,
-  AnnotatedPi, and `IndexedVec` through it. The constructor requires the exact
-  successful whole-call equation for the same dependent candidate already
-  certified by the semantic run. The exact 20-sorry audit, focused 118-job
-  semantic replay and 124-job full Theory/Verify builds, default Nix build,
-  all-system no-build evaluation, current-host flake check, formatter, diff,
-  and import-boundary gates pass at that checkpoint. Use the branch ref, not a
-  detached Git `HEAD`, for published-fork comparisons.
+- audited source checkpoint: `f0caf16c` adds
+  `CandidateExprSemanticRootRun`, which retains the exact recursive checker run
+  and lets that run select the Theory view existentially. Source-indexed
+  constructor-list, family, and singleton-normalization semantic hierarchies
+  project back to the existing normalization interface, and AliasFormer,
+  AnnotatedPi, and `IndexedVec` now own their normalization and generation
+  evidence through those hierarchies. The exact 20-sorry frontier, focused
+  118-job semantic replay, 124-job full Theory/Verify build, default Nix build,
+  all six current-host flake checks, and whitespace checks pass at that
+  checkpoint. Use the branch ref, not a detached Git `HEAD`, for published-fork
+  comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -248,7 +254,7 @@ to the replacement.
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
-  `d553930`, `cf3d5a4`, `c9e4ae2`, and `a7d101b`
+  `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, and `f0caf16`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -278,23 +284,32 @@ to the replacement.
   successful whole-call equation indexed by its same source and candidate, it
   constructs `ProducedGenerationCandidatePackage`. All three fixtures use this
   constructor instead of fixture-specific record assembly.
+  `CandidateExprSemanticRootRun` now retains the exact recursive semantic run
+  behind each root, derives the normalization-facing root and generation-facing
+  spine from that one value, and can existentially select the view from a
+  verified context plus strict source translation. Dependent semantic
+  constructor-list, family, and singleton-normalization structures preserve the
+  same source order through the complete hierarchy. AliasFormer, AnnotatedPi,
+  and `IndexedVec` have been migrated to that ownership model.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Latest checkpoint:** the concrete recursive identity witnesses feed
-  generation-ready family/`nil`/`cons` spine runs and a complete
-  `GenerationCandidatePackage`. `indexedVecSemanticProducedGenerationCandidatePackage`
-  projects the certificate selected by the exact outer call; the corresponding
-  certified Theory transaction and checked E1 `TrEnv'` replay are complete and
-  exactly guarded. AliasFormer, AnnotatedPi, and `IndexedVec` now all attach
-  their executable provenance through the same generic outer constructor.
-- **Current gap:** combine the generic operational list witnesses with generic
-  construction of retained semantic family/constructor runs. Outer packaging
-  is generic once that semantic run exists; the missing step is deriving the
-  run automatically from translated successful metadata. Then complete the
-  normalization differential matrix and eventually extend the same indexed
-  shape to mutual and nested blocks.
+- **Latest checkpoint:** one retained semantic hierarchy now owns the exact
+  recursive family and constructor runs used by both normalization and
+  generation. `IndexedVec` exercises the dependent two-constructor list, while
+  AliasFormer and AnnotatedPi exercise non-identity singleton views; their
+  existing produced packages, certified Theory transactions, and checked E1
+  replays continue to project from that hierarchy.
+- **Current gap:** construct the dependent semantic constructor/family
+  hierarchy automatically from the arbitrary-length operational `Produced`
+  witnesses and translated successful metadata. The root theorem already
+  selects its view from verified context/source evidence, and outer packaging
+  is generic once the complete semantic run exists; the missing theorem must
+  assemble every retained position without choice of an unrelated endpoint.
+  Then add exact compile-time guards for the new generic roots, complete the
+  normalization differential matrix, and extend the indexed shape to mutual
+  and nested blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
   whole-call equations; positive semantic/transaction/replay fixtures for the
   first two plus the complete checkpoint semantic/transaction/E1 replay for
@@ -302,10 +317,9 @@ to the replacement.
   opaque-`outParam` whole-candidate rejection; exact axiom guards for the two
   public semantic roots, the three operational list theorems, and the generic
   outer package constructor; singleton and two-constructor list regressions;
-  focused and full 124-job Lake builds;
-  20-sorry audit;
-  default Nix build; all-system no-build evaluation; current-host flake check;
-  formatter check; and diff/import-boundary gates.
+  retained-hierarchy migrations for all three fixtures; focused 118-job and
+  full 124-job Lake builds; 20-sorry frontier check; default Nix build; all six
+  current-host flake checks; and whitespace checks.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
   added. The three operational list theorems are guarded at exactly the
   accepted `propext`/`Classical.choice`/`Quot.sound` baseline. The generic outer
@@ -315,7 +329,13 @@ to the replacement.
   the producer equation into semantic authority. Concrete Verify producer
   roots expose existing checker-refinement, pointer/cache, and projection
   dependencies; generic Theory transaction roots retain their narrower
-  guarded closure.
+  guarded closure. The new semantic `spine` projection has exactly the
+  `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure. Root construction
+  and normalization projections inherit the already documented checked
+  semantic closure, including the existing pointer, expression, level,
+  persistent-array/map, and syntax implementation contracts; a direct
+  `#print axioms` audit found no new axiom. Exact compile-time guards for these
+  new public roots remain part of the next checkpoint.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or
