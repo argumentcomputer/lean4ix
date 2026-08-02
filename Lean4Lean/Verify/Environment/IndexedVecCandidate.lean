@@ -4,10 +4,10 @@ namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta
 open Lean4Lean.InductiveFixtures
 
-private def indexedVecKernelEnv : Kernel.Environment :=
+def indexedVecKernelEnv : Kernel.Environment :=
   Kernel.Environment.ofConstants `_indexedVecCandidate natMap
 
-private def indexedVecFamilyCandidateContext :
+def indexedVecFamilyCandidateContext :
     Lean4Lean.AddInductive.Context where
   env := indexedVecKernelEnv
   lparams := indexedVecInfo.levelParams
@@ -950,7 +950,7 @@ private def indexedVecFamilyCandidateTrace :
         indexedVecTerminalKernel] using indexedVecFamily_whnfM)
     indexedVecParamDomainCandidateTrace indexedVecInnerCandidateTrace
 
-private def indexedVecFamilyCandidate :
+def indexedVecFamilyCandidate :
     Lean4Lean.AddInductive.CandidateExpr indexedVecInfo.type :=
   ⟨indexedVecFamilyCandidateContext, indexedVecFamilyCandidateTrace⟩
 
@@ -1079,20 +1079,20 @@ theorem indexedVecFamilyCandidate_terminalResult :
       .sort (.succ (.param `u)) := by
   rfl
 
-private def indexedVecKernelNil : Constructor where
+def indexedVecKernelNil : Constructor where
   name := indexedVecNilInfo.name
   type := indexedVecNilInfo.type
 
-private def indexedVecKernelCons : Constructor where
+def indexedVecKernelCons : Constructor where
   name := indexedVecConsInfo.name
   type := indexedVecConsInfo.type
 
-private def indexedVecKernelType : InductiveType where
+def indexedVecKernelType : InductiveType where
   name := indexedVecInfo.name
   type := indexedVecInfo.type
   ctors := [indexedVecKernelNil, indexedVecKernelCons]
 
-private def indexedVecCandidateInductiveStats :
+def indexedVecCandidateInductiveStats :
     Lean4Lean.AddInductive.InductiveStats :=
   indexedVecFamilyCandidate.trace.singletonCandidateInductiveStats
     indexedVecKernelType 1 (.succ (.param `u))
