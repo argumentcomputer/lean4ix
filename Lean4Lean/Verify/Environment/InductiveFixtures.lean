@@ -7932,6 +7932,17 @@ private def annotatedPiFamilyCandidateRun :
       (.sort (.succ (.succ .zero))) :=
   .terminal annotatedPiFamilyCandidateNodeRun
 
+private def annotatedPiFamilySemanticRootInput :
+    TypeChecker.CandidateExprSemanticRootInput outParamEnv []
+      annotatedPiFamilyCandidate annotatedPiRawType.type where
+  contextRun := annotatedPiFamilyCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := annotatedPiFamilyCandidateRun.source_tr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
 private def annotatedPiFamilySemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun outParamEnv []
       annotatedPiFamilyCandidate annotatedPiRawType.type
@@ -8152,6 +8163,17 @@ private def annotatedPiCtorCandidateRun :
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner])
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner]) rfl
 
+private def annotatedPiCtorSemanticRootInput :
+    TypeChecker.CandidateExprSemanticRootInput annotatedPiTypeEnv []
+      annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type where
+  contextRun := annotatedPiCtorCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := annotatedPiCtorCandidateRun.source_tr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
 private def annotatedPiCtorSemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
@@ -8172,11 +8194,8 @@ private def annotatedPiCtorRootRun :
       annotatedPiViewCtor.type :=
   annotatedPiCtorSemanticRootRun.root
 
-private def annotatedPiCtorSpineRun :
-    TypeChecker.CandidateExprSpineRun annotatedPiTypeEnv []
-      annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
-      annotatedPiViewCtor.type := by
-  apply annotatedPiCtorSemanticRootRun.spine
+private theorem annotatedPiCtorCandidate_storedSpine :
+    annotatedPiCtorCandidate.trace.storedSpine = true := by
   have hsource : annotatedPiMkInfo.type =
       .forallE annotatedPiOuterName annotatedPiInnerKernel
         (.const ``AnnotatedPi []) .default := rfl
@@ -8185,12 +8204,26 @@ private def annotatedPiCtorSpineRun :
     beq_self_eq_true, Bool.true_and]
   rfl
 
+private def annotatedPiCtorSpineRun :
+    TypeChecker.CandidateExprSpineRun annotatedPiTypeEnv []
+      annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
+      annotatedPiViewCtor.type :=
+  annotatedPiCtorSemanticRootRun.spine
+    annotatedPiCtorCandidate_storedSpine
+
 private def annotatedPiCandidateConstructorSemanticRun :
     VInductDecl.CandidateConstructorSemanticRun annotatedPiTypeEnv []
       annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] where
   name_eq := rfl
   uvars_eq := rfl
   type := annotatedPiCtorSemanticRootRun
+
+private def annotatedPiCandidateConstructorSemanticInput :
+    VInductDecl.CandidateConstructorSemanticInput annotatedPiTypeEnv []
+      annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := annotatedPiCtorSemanticRootInput
 
 private def annotatedPiCandidateConstructorRun :
     VInductDecl.CandidateConstructorRun annotatedPiTypeEnv []
@@ -8202,6 +8235,12 @@ private def annotatedPiCandidateConstructorSemanticListRun :
       annotatedPiFamilyListCandidate.constructors
       annotatedPiRawType.ctors := by
   exact .cons annotatedPiCandidateConstructorSemanticRun .nil
+
+private def annotatedPiCandidateConstructorSemanticListInput :
+    VInductDecl.CandidateConstructorSemanticListInput annotatedPiTypeEnv []
+      annotatedPiFamilyListCandidate.constructors
+      annotatedPiRawType.ctors := by
+  exact .cons annotatedPiCandidateConstructorSemanticInput .nil
 
 private def annotatedPiCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun annotatedPiTypeEnv []
@@ -8219,6 +8258,16 @@ private def annotatedPiCandidateFamilySemanticRun :
   addType := rfl
   constructors := annotatedPiCandidateConstructorSemanticListRun
 
+private def annotatedPiCandidateFamilySemanticInput :
+    VInductDecl.CandidateFamilySemanticInput outParamEnv []
+      annotatedPiFamilyListCandidate annotatedPiRawType where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := annotatedPiFamilySemanticRootInput
+  typeEnv := annotatedPiTypeEnv
+  addType := rfl
+  constructors := annotatedPiCandidateConstructorSemanticListInput
+
 private def annotatedPiCandidateFamilyRun :
     VInductDecl.CandidateFamilyRun outParamEnv []
       annotatedPiFamilyListCandidate annotatedPiRawType :=
@@ -8234,6 +8283,25 @@ private def annotatedPiNormalizationCandidateSemanticRun :
   raw_types_eq := rfl
   uvars_eq := rfl
   family := annotatedPiCandidateFamilySemanticRun
+
+private def annotatedPiNormalizationCandidateSemanticInput :
+    VInductDecl.NormalizationCandidateSemanticInput outParamEnv []
+      annotatedPiNormalizationCandidate annotatedPiRawDecl where
+  raw := annotatedPiRawType
+  raw_types_eq := rfl
+  uvars_eq := rfl
+  family := annotatedPiCandidateFamilySemanticInput
+
+/-- The exact family/constructor producer traversals and verified translations
+automatically determine the complete retained AnnotatedPi hierarchy, including
+its nested annotation-consuming constructor trace. -/
+theorem annotatedPiProducedSemanticHierarchy_exists :
+    Nonempty (VInductDecl.ProducedNormalizationCandidateSemanticRun
+      annotatedPiFamilyCandidateContext annotatedPiCtorCandidateContext
+      outParamEnv [] annotatedPiNormalizationCandidate
+      annotatedPiRawDecl) :=
+  annotatedPiNormalizationCandidateSemanticInput.exists_ofProduced
+    annotatedPiFamilyTypeListProduced annotatedPiFamilyListProduced
 
 def annotatedPiNormalizationCandidateRun :
     VInductDecl.NormalizationCandidateRun outParamEnv []
@@ -8261,28 +8329,35 @@ theorem annotatedPiBlock_wf_checked :
   refine ⟨annotatedPiNormalization_wf_checked, ?_⟩
   exact annotatedPiViewChecked_wf
 
-private def annotatedPiCandidateFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      annotatedPiNormalizationCandidateRun
+private def annotatedPiCandidateFamilySemanticGenerationRun :
+    VInductDecl.CandidateFamilySemanticGenerationRun
+      annotatedPiNormalizationCandidateSemanticRun
       annotatedPiGenerationChecked where
-  spine := annotatedPiFamilySpineRun
+  storedSpine := rfl
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
   viewResult := rfl
   rightType := VEnv.HasType.sort (by decide)
 
+private def annotatedPiCandidateFamilyGenerationRun :
+    VInductDecl.CandidateFamilyGenerationRun
+      annotatedPiNormalizationCandidateRun
+      annotatedPiGenerationChecked :=
+  annotatedPiCandidateFamilySemanticGenerationRun.run
+
 private def annotatedPiNormalizedCtor : VInductDecl.NormalizedCtor :=
   ⟨annotatedPiRawType.ctors[0],
     annotatedPiViewChecked.constructors[0]⟩
 
-private def annotatedPiCandidateNormalizedCtorRun :
-    VInductDecl.CandidateNormalizedCtorRun annotatedPiGenerationChecked.block
-      annotatedPiTypeEnv [] annotatedPiCandidateConstructorRun
+private def annotatedPiCandidateSemanticNormalizedCtorRun :
+    VInductDecl.CandidateSemanticNormalizedCtorRun
+      annotatedPiGenerationChecked.block
+      annotatedPiTypeEnv [] annotatedPiCandidateConstructorSemanticRun
       annotatedPiNormalizedCtor where
   raw_eq := rfl
   view_eq := rfl
-  spine := annotatedPiCtorSpineRun
+  storedSpine := annotatedPiCtorCandidate_storedSpine
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
@@ -8291,39 +8366,58 @@ private def annotatedPiCandidateNormalizedCtorRun :
     simpa [annotatedPiNormalizedCtor] using
       annotatedPiFamilyConst_hasType [annotatedPiRawInner]
 
+private def annotatedPiCandidateNormalizedCtorRun :
+    VInductDecl.CandidateNormalizedCtorRun annotatedPiGenerationChecked.block
+      annotatedPiTypeEnv [] annotatedPiCandidateConstructorRun
+      annotatedPiNormalizedCtor :=
+  annotatedPiCandidateSemanticNormalizedCtorRun.run
+
+private def annotatedPiCandidateSemanticNormalizedCtorListRun :
+    VInductDecl.CandidateSemanticNormalizedCtorListRun
+      annotatedPiGenerationChecked.block annotatedPiTypeEnv []
+      annotatedPiCandidateConstructorSemanticListRun
+      annotatedPiGenerationChecked.block.ctorPairs := by
+  exact .cons annotatedPiCandidateSemanticNormalizedCtorRun .nil
+
 private def annotatedPiCandidateNormalizedCtorListRun :
     VInductDecl.CandidateNormalizedCtorListRun
       annotatedPiGenerationChecked.block annotatedPiTypeEnv []
       annotatedPiCandidateConstructorListRun
-      annotatedPiGenerationChecked.block.ctorPairs := by
-  exact .cons annotatedPiCandidateNormalizedCtorRun .nil
+      annotatedPiGenerationChecked.block.ctorPairs :=
+  annotatedPiCandidateSemanticNormalizedCtorListRun.run
 
 /-- Complete source-indexed checker certificate for annotated recursive-Π
 generation. This is the first live generation run whose main constructor
 spine contains an annotation-normalized recursive function domain. -/
-def annotatedPiGenerationCandidateRun :
-    VInductDecl.GenerationCandidateRun
-      annotatedPiNormalizationCandidateRun
+def annotatedPiGenerationCandidateSemanticRun :
+    VInductDecl.GenerationCandidateSemanticRun
+      annotatedPiNormalizationCandidateSemanticRun
       annotatedPiGenerationChecked where
   normalization_eq := rfl
   checked := annotatedPiViewChecked_wf
-  family := annotatedPiCandidateFamilyGenerationRun
+  family := annotatedPiCandidateFamilySemanticGenerationRun
   typeEnv_wf := by
     simpa using annotatedPiCtorCandidateContextRun.context.Ewf
-  constructors := annotatedPiCandidateNormalizedCtorListRun
+  constructors := annotatedPiCandidateSemanticNormalizedCtorListRun
+
+def annotatedPiGenerationCandidateRun :
+    VInductDecl.GenerationCandidateRun
+      annotatedPiNormalizationCandidateRun
+      annotatedPiGenerationChecked :=
+  annotatedPiGenerationCandidateSemanticRun.run
 
 /-- Complete dependent producer package for the annotation-bearing recursive
 Π candidate. -/
 def annotatedPiGenerationCandidatePackage :
     VInductDecl.GenerationCandidatePackage outParamEnv [] :=
-  annotatedPiGenerationCandidateRun.package
+  annotatedPiGenerationCandidateSemanticRun.package
 
 /-- The complete AnnotatedPi semantic package is selected by the exact
 successful whole-call metadata producer, including its nested annotation-
 consuming traversal in the post-family environment. -/
 def annotatedPiProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage outParamEnv [] :=
-  annotatedPiGenerationCandidateRun.producedPackage
+  annotatedPiGenerationCandidateSemanticRun.producedPackage
     annotatedPiFamilyCandidateContext 0 0 false
     annotatedPiNormalizationCandidate_produced
 
@@ -9146,6 +9240,74 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerBlock_wf_checked' depends on
 #print axioms aliasFormerBlock_wf_checked
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedSemanticHierarchy_exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerProducedSemanticHierarchy_exists
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateSemanticRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerGenerationCandidateSemanticRun
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -9630,6 +9792,41 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRec_aligned' depends on axioms: [p
 #print axioms aliasRec_aligned
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedSemanticHierarchy_exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiProducedSemanticHierarchy_exists
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidateRun' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -9663,6 +9860,41 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidateRun' d
 -/
 #guard_msgs in
 #print axioms annotatedPiNormalizationCandidateRun
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateSemanticRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiGenerationCandidateSemanticRun
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateRun' depends on axioms: [propext,

@@ -345,6 +345,39 @@ theorem indexedVecProducedSemanticHierarchy_exists :
   indexedVecSemanticNormalizationCandidateInput.exists_ofProduced
     indexedVecFamilyTypeListProduced indexedVecFamilyListProduced
 
+/-- The automatically assembled hierarchy retains both constructor headers in
+the producer's `nil`/`cons` source order.  This inspects the semantic result,
+not the separately constructed concrete replay below. -/
+theorem indexedVecProducedSemanticHierarchy_constructorHeaders :
+    ∃ run : VInductDecl.ProducedNormalizationCandidateSemanticRun
+        indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
+        indexedVecNormalizationCandidate indexedVecDecl,
+      VInductDecl.sameCtorHeaders indexedVecType.ctors
+        run.semantic.family.root.constructors.views = true := by
+  obtain ⟨run⟩ := indexedVecProducedSemanticHierarchy_exists
+  have hraw : run.semantic.raw = indexedVecType := by
+    have htypes : [indexedVecType] = [run.semantic.raw] := by
+      simpa [indexedVecDecl] using run.semantic.raw_types_eq
+    injection htypes with h
+    exact h.symm
+  exact ⟨run, by
+    simpa only [hraw] using
+      run.semantic.family.root.constructors.sameHeaders⟩
+
+private def indexedVecReorderedViewType : VInductiveType :=
+  { indexedVecType with
+    ctors := [indexedVecType.ctors[1], indexedVecType.ctors[0]] }
+
+private def indexedVecReorderedViewDecl : VInductDecl :=
+  { indexedVecDecl with types := [indexedVecReorderedViewType] }
+
+/-- Swapping the two otherwise unchanged constructor payloads fails the
+computational normalization-shape gate before semantic or generation evidence
+can be attached. -/
+theorem indexedVecReorderedView_rejected :
+    VInductDecl.normalization? indexedVecDecl
+      indexedVecReorderedViewDecl = none := rfl
+
 theorem indexedVecSemanticFamilyViewTr :
     TrExpr natFinalEnv [`u] [] indexedVecFamilyCandidate.view
       indexedVecType.type := by
@@ -727,10 +760,118 @@ theorem indexedVecSemantic_aligned_checked :
   indexedVecSemantic_trEnv'_checked.aligned
 
 /-
-The executable producer and final E1 replay intentionally inherit the
-existing transitional verifier closure. These guards make additions to that
-closure visible at the two public roots of this module.
+The semantic assembly, executable producer, and final E1 replay intentionally
+inherit the existing transitional verifier closure. These guards make
+additions to that closure visible at the public roots of this module.
 -/
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms indexedVecProducedSemanticHierarchy_exists
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_constructorHeaders' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms indexedVecProducedSemanticHierarchy_constructorHeaders
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecReorderedView_rejected' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms indexedVecReorderedView_rejected
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSemanticRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms indexedVecSemanticGenerationCandidateSemanticRun
+
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCandidatePackage' depends on axioms: [propext,
  sorryAx,
