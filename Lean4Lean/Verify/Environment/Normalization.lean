@@ -1397,6 +1397,35 @@ theorem CandidateExprSemanticRootRun.exists_ofCandidate
     recursive := ⟨inferred, ?_⟩ }⟩
   simpa only [venv_eq, lparams_eq, vlctx_eq] using recursive
 
+/-- The exact pre-run evidence needed to interpret one candidate root without
+asking a caller to choose its normalized Theory view.
+
+This bundle deliberately stops before the recursive semantic run.  It contains
+only the verified implementation context, its alignment with the requested
+Theory environment, the strict translation of the stored source, and the fuel
+relation consumed by `CandidateExprRun.exists_ofCandidate`. -/
+structure CandidateExprSemanticRootInput (env : VEnv) (Us : List Name)
+    {source : Expr} (candidate : AddInductive.CandidateExpr source)
+    (source' : VExpr) where
+  contextRun : CandidateContextRun candidate.context
+  venv_eq : contextRun.context.venv = env
+  lparams_eq : contextRun.context.lparams = Us
+  vlctx_eq : contextRun.context.vlctx = []
+  source_tr : TrExprS env Us [] source source'
+  whnfFuel : Nat
+  whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1
+
+/-- Run the retained checker interpreter on an exact root input.  The result is
+`Nonempty` because the checker-selected Theory view is semantic evidence rather
+than executable metadata; no choice operator or caller-supplied endpoint is
+introduced by this boundary. -/
+theorem CandidateExprSemanticRootInput.exists
+    (input : CandidateExprSemanticRootInput env Us candidate source') :
+    Nonempty (CandidateExprSemanticRootRun env Us candidate source') :=
+  CandidateExprSemanticRootRun.exists_ofCandidate input.contextRun
+    input.venv_eq input.lparams_eq input.vlctx_eq input.source_tr
+    input.whnfFuel input.whnfDepth
+
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
 tail is checked in the context extended by the raw binder, exactly matching
 `VEnv.TelDefEq` and the mixed generator's raw-binder discipline. -/
@@ -2211,6 +2240,161 @@ def NormalizationCandidateSemanticRun.root
   uvars_eq := run.uvars_eq
   family := run.family.root
 
+/-- Pre-run semantic evidence for one source-indexed constructor.  Its header
+is aligned with the raw Theory constant, while the expression input contains
+only the verified context and strict source translation needed to let the
+retained checker choose the view. -/
+structure CandidateConstructorSemanticInput (env : VEnv) (Us : List Name)
+    {source : Constructor}
+    (candidate : AddInductive.CandidateConstructor source)
+    (raw : VConstVal) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprSemanticRootInput env Us candidate.type
+    raw.type
+
+/-- Interpret one constructor input without selecting its view at the call
+site. -/
+theorem CandidateConstructorSemanticInput.exists
+    (input : CandidateConstructorSemanticInput env Us candidate raw) :
+    Nonempty (CandidateConstructorSemanticRun env Us candidate raw) := by
+  obtain ⟨type⟩ := input.type.exists
+  exact ⟨{
+    name_eq := input.name_eq
+    uvars_eq := input.uvars_eq
+    type := type }⟩
+
+/-- Exact source-order semantic inputs for an arbitrary constructor list.
+Unlike a pointwise predicate over erased lists, these indices prevent an input
+from being reused at another constructor or from silently truncating either
+side. -/
+inductive CandidateConstructorSemanticListInput
+    (env : VEnv) (Us : List Name) :
+    {sources : List Constructor} →
+      AddInductive.CandidateList AddInductive.CandidateConstructor sources →
+      List VConstVal → Type where
+  | nil : CandidateConstructorSemanticListInput env Us .nil []
+  | cons
+      (head : CandidateConstructorSemanticInput env Us candidate raw)
+      (tail : CandidateConstructorSemanticListInput env Us candidates raws) :
+      CandidateConstructorSemanticListInput env Us
+        (.cons candidate candidates) (raw :: raws)
+
+/-- Recursively interpret every source-indexed constructor input. -/
+theorem CandidateConstructorSemanticListInput.exists
+    (input : CandidateConstructorSemanticListInput env Us candidates raws) :
+    Nonempty (CandidateConstructorSemanticListRun env Us candidates raws) := by
+  induction input with
+  | nil => exact ⟨.nil⟩
+  | cons head tail ih =>
+    obtain ⟨headRun⟩ := head.exists
+    obtain ⟨tailRun⟩ := ih
+    exact ⟨.cons headRun tailRun⟩
+
+/-- Pre-run semantic evidence for a complete singleton family position.  The
+family type is interpreted in the input environment and its constructor list
+in the exact environment obtained by inserting the raw family constant. -/
+structure CandidateFamilySemanticInput (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.CandidateFamily source)
+    (raw : VInductiveType) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprSemanticRootInput env Us
+    candidate.familyType.type raw.type
+  typeEnv : VEnv
+  addType : env.addConst raw.name raw.toVConstant = some typeEnv
+  constructors : CandidateConstructorSemanticListInput typeEnv Us
+    candidate.constructors raw.ctors
+
+/-- Interpret the family root and all post-insertion constructor roots from
+their exact pre-run inputs. -/
+theorem CandidateFamilySemanticInput.exists
+    (input : CandidateFamilySemanticInput env Us candidate raw) :
+    Nonempty (CandidateFamilySemanticRun env Us candidate raw) := by
+  obtain ⟨type⟩ := input.type.exists
+  obtain ⟨constructors⟩ := input.constructors.exists
+  exact ⟨{
+    name_eq := input.name_eq
+    uvars_eq := input.uvars_eq
+    type := type
+    typeEnv := input.typeEnv
+    addType := input.addType
+    constructors := constructors }⟩
+
+/-- Pre-run semantic evidence for one source-indexed singleton normalization
+candidate.  The source declaration and candidate list indices rule out an
+unrelated raw family or a partial constructor list. -/
+structure NormalizationCandidateSemanticInput (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.NormalizationCandidate [source])
+    (rawDecl : VInductDecl) where
+  raw : VInductiveType
+  raw_types_eq : rawDecl.types = [raw]
+  uvars_eq : rawDecl.uvars = Us.length
+  family : CandidateFamilySemanticInput env Us
+    candidate.families.singleton raw
+
+/-- Automatically interpret the complete singleton semantic hierarchy from
+its verified, source-indexed inputs. -/
+theorem NormalizationCandidateSemanticInput.exists
+    (input : NormalizationCandidateSemanticInput env Us candidate rawDecl) :
+    Nonempty (NormalizationCandidateSemanticRun env Us candidate rawDecl) := by
+  obtain ⟨family⟩ := input.family.exists
+  exact ⟨{
+    raw := input.raw
+    raw_types_eq := input.raw_types_eq
+    uvars_eq := input.uvars_eq
+    family := family }⟩
+
+/-- The automatic semantic hierarchy paired with the exact executable
+family-type and constructor-list traversals that selected the same dependent
+candidate.  The two producer contexts are explicit because family types are
+checked before raw-family insertion and constructors after it. -/
+structure ProducedNormalizationCandidateSemanticRun
+    (familyContext constructorContext : AddInductive.Context)
+    (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.NormalizationCandidate [source])
+    (rawDecl : VInductDecl) where
+  semantic : NormalizationCandidateSemanticRun env Us candidate rawDecl
+  familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
+    familyContext
+    (.cons candidate.families.singleton.familyType .nil)
+  familiesProduced : AddInductive.CandidateFamilyListProduced
+    constructorContext
+    (.cons candidate.families.singleton.familyType .nil)
+    candidate.families
+
+/-- Combine exact arbitrary-length producer witnesses with verified semantic
+inputs for the same source-indexed singleton candidate.  Operational evidence
+selects the candidate; only the retained checker interpreter supplies Theory
+meaning. -/
+theorem NormalizationCandidateSemanticInput.exists_ofProduced
+    (input : NormalizationCandidateSemanticInput env Us candidate rawDecl)
+    (familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
+      familyContext
+      (.cons candidate.families.singleton.familyType .nil))
+    (familiesProduced : AddInductive.CandidateFamilyListProduced
+      constructorContext
+      (.cons candidate.families.singleton.familyType .nil)
+      candidate.families) :
+    Nonempty (ProducedNormalizationCandidateSemanticRun
+      familyContext constructorContext env Us candidate rawDecl) := by
+  obtain ⟨semantic⟩ := input.exists
+  exact ⟨{
+    semantic := semantic
+    familyTypesProduced := familyTypesProduced
+    familiesProduced := familiesProduced }⟩
+
+/-- Forget executable list provenance and expose the existing normalization
+root selected by the automatic semantic hierarchy. -/
+def ProducedNormalizationCandidateSemanticRun.root
+    (run : ProducedNormalizationCandidateSemanticRun
+      familyContext constructorContext env Us candidate rawDecl) :
+    NormalizationCandidateRun env Us candidate rawDecl :=
+  run.semantic.root
+
 /-- Checker-produced semantic evidence for one positional raw/view
 constructor pair. This has the same four-way declared/emitted split as
 `NormalizedCtor.WF`, but keeps every equality in compositional evidence form
@@ -2329,6 +2513,49 @@ def CandidateFamilyGenerationRun.evidence
   run.spine.evidenceAt run.rawTel run.viewTel
     run.rawResult run.viewResult run.rightType
 
+/-- Family generation alignment whose spine is projected directly from the
+retained semantic hierarchy.  Callers provide only the executable structural
+gate and the component equations required by `GenerationChecked`; they cannot
+substitute a second recursive run or a different normalized view. -/
+structure CandidateFamilySemanticGenerationRun
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source) where
+  storedSpine :
+    candidate.families.singleton.familyType.type.trace.storedSpine = true
+  rawTel : VExpr.telN
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.raw.type =
+    generation.block.rawParams ++ generation.block.rawIndices
+  viewTel : VExpr.telN
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.family.type.view =
+    generation.block.checked.params ++ generation.block.checked.indices
+  rawResult : VExpr.dropN
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.raw.type = generation.block.rawResult
+  viewResult : VExpr.dropN
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.family.type.view =
+    .sort generation.block.checked.resultLevel
+  rightType : env.HasType Us.length
+    (generation.block.rawParams ++ generation.block.rawIndices).reverse
+    (.sort generation.block.checked.resultLevel)
+    (.sort (.succ generation.block.checked.resultLevel))
+
+/-- Recover the existing family-generation run from the single retained
+semantic owner. -/
+def CandidateFamilySemanticGenerationRun.run
+    (run : CandidateFamilySemanticGenerationRun normalization generation) :
+    CandidateFamilyGenerationRun normalization.root generation where
+  spine := normalization.family.type.spine run.storedSpine
+  rawTel := run.rawTel
+  viewTel := run.viewTel
+  rawResult := run.rawResult
+  viewResult := run.viewResult
+  rightType := run.rightType
+
 /-- One positional constructor candidate aligned with the raw/view
 constructor pair retained by dependent analysis.
 
@@ -2357,6 +2584,46 @@ structure CandidateNormalizedCtorRun {source : VInductDecl}
   rightType : env.HasType Us.length
     (ctor.declaredBinders source.nparams).reverse
     (ctor.resultTarget block) (.sort block.checked.resultLevel)
+
+/-- Constructor generation alignment owned by the same retained semantic root
+used for normalization.  The only spine premise is the Boolean structural gate
+computed by the candidate trace; the recursive semantic run and view are
+projected from `root`. -/
+structure CandidateSemanticNormalizedCtorRun {source : VInductDecl}
+    (block : NormalizedChecked source) (env : VEnv) (Us : List Name)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun env Us candidate raw)
+    (ctor : NormalizedCtor) where
+  raw_eq : ctor.raw = raw
+  view_eq : ctor.view.value = root.root.view
+  storedSpine : candidate.type.trace.storedSpine = true
+  rawTel : VExpr.telN candidate.type.trace.spineLength raw.type =
+    ctor.declaredBinders source.nparams
+  viewTel : VExpr.telN candidate.type.trace.spineLength root.type.view =
+    ctor.viewBinders block
+  rawResult : VExpr.dropN candidate.type.trace.spineLength raw.type =
+    ctor.rawResult source.nparams
+  viewResult : VExpr.dropN candidate.type.trace.spineLength root.type.view =
+    ctor.resultTarget block
+  rightType : env.HasType Us.length
+    (ctor.declaredBinders source.nparams).reverse
+    (ctor.resultTarget block) (.sort block.checked.resultLevel)
+
+/-- Project the compatibility constructor run without rebuilding or choosing
+semantic evidence. -/
+def CandidateSemanticNormalizedCtorRun.run
+    (run : CandidateSemanticNormalizedCtorRun block env Us root ctor) :
+    CandidateNormalizedCtorRun block env Us root.root ctor where
+  raw_eq := run.raw_eq
+  view_eq := run.view_eq
+  spine := root.type.spine run.storedSpine
+  rawTel := run.rawTel
+  viewTel := run.viewTel
+  rawResult := run.rawResult
+  viewResult := run.viewResult
+  rightType := run.rightType
 
 /-- Extract the stored constructor's declared telescope/result evidence. -/
 def CandidateNormalizedCtorRun.declaredEvidence
@@ -2437,6 +2704,34 @@ inductive CandidateNormalizedCtorListRun {source : VInductDecl}
       CandidateNormalizedCtorListRun block env Us
         (.cons root roots) (ctor :: ctors)
 
+/-- Dependent positional generation alignment over the retained constructor
+semantic list.  Its projection below is definitionally tied to
+`roots.roots`, so source order and the exact normalization views cannot drift
+between phases. -/
+inductive CandidateSemanticNormalizedCtorListRun {source : VInductDecl}
+    (block : NormalizedChecked source) (env : VEnv) (Us : List Name) :
+    {kernelSources : List Constructor} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources} →
+    {raws : List VConstVal} →
+    (roots : CandidateConstructorSemanticListRun env Us candidates raws) →
+    List NormalizedCtor → Type where
+  | nil : CandidateSemanticNormalizedCtorListRun block env Us .nil []
+  | cons
+      (head : CandidateSemanticNormalizedCtorRun block env Us root ctor)
+      (tail : CandidateSemanticNormalizedCtorListRun block env Us roots ctors) :
+      CandidateSemanticNormalizedCtorListRun block env Us
+        (.cons root roots) (ctor :: ctors)
+
+/-- Forget only retained semantic ownership and recover the existing
+generation-facing positional list. -/
+def CandidateSemanticNormalizedCtorListRun.run :
+    (semantic : CandidateSemanticNormalizedCtorListRun
+      block env Us roots ctors) →
+      CandidateNormalizedCtorListRun block env Us roots.roots ctors
+  | .nil => .nil
+  | .cons head tail => .cons head.run tail.run
+
 /-- Assemble a `NormalizedCtorRun` for every constructor in an exact
 dependent positional list. -/
 theorem CandidateNormalizedCtorListRun.normalizedCtorRuns
@@ -2487,6 +2782,36 @@ structure GenerationCandidateRun
   constructors : CandidateNormalizedCtorListRun generation.block
     normalization.family.typeEnv Us normalization.family.constructors
     generation.block.ctorPairs
+
+/-- Complete generation assembly owned by one retained semantic hierarchy.
+
+This is the no-parallel-run form of `GenerationCandidateRun`: family and
+constructor spines are projections of `normalization`, while the remaining
+fields are the checked structural alignment required by Theory generation. -/
+structure GenerationCandidateSemanticRun
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source) where
+  normalization_eq :
+    generation.block.normalization = normalization.root.normalization
+  checked : generation.block.checked.WF env
+  family : CandidateFamilySemanticGenerationRun normalization generation
+  typeEnv_wf : VEnv.WF normalization.family.typeEnv
+  constructors : CandidateSemanticNormalizedCtorListRun generation.block
+    normalization.family.typeEnv Us normalization.family.constructors
+    generation.block.ctorPairs
+
+/-- Project the established generation assembler.  Every normalization root,
+view, and recursive spine remains definitionally tied to the semantic owner. -/
+def GenerationCandidateSemanticRun.run
+    (run : GenerationCandidateSemanticRun normalization generation) :
+    GenerationCandidateRun normalization.root generation where
+  normalization_eq := run.normalization_eq
+  checked := run.checked
+  family := run.family.run
+  typeEnv_wf := run.typeEnv_wf
+  constructors := run.constructors.run
 
 /-- Assemble the existing checker-side `GenerationRun` entirely from the
 source-indexed normalization candidate and its exact spine certificates. -/
@@ -2662,6 +2987,35 @@ def GenerationCandidateRun.producedPackage
   numNested := numNested
   isUnsafe := isUnsafe
   produced := produced
+
+/-- Package the no-parallel-run semantic assembler at the existing public
+boundary. -/
+def GenerationCandidateSemanticRun.package
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateSemanticRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateSemanticRun normalization generation) :
+    GenerationCandidatePackage env Us :=
+  run.run.package
+
+/-- Attach the exact successful outer metadata call directly to a retained
+semantic-generation owner. -/
+def GenerationCandidateSemanticRun.producedPackage
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateSemanticRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateSemanticRun normalization generation)
+    (context : AddInductive.Context)
+    (nparams numNested : Nat) (isUnsafe : Bool)
+    (produced :
+      AddInductive.buildNormalizationCandidate nparams
+          [kernelSource] numNested isUnsafe context = .ok candidate) :
+    ProducedGenerationCandidatePackage env Us :=
+  run.run.producedPackage context nparams numNested isUnsafe produced
 
 /-
 The evidence types mention exact verifier executions, so these semantic

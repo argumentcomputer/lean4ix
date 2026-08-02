@@ -256,6 +256,95 @@ theorem indexedVecSemanticConsSourceTr :
   exact hshape.to_trExprS indexedVecTypeEnv_ordered trivial
     ⟨.sort u, htype⟩
 
+/-- Pre-run family evidence: the retained checker, rather than this fixture,
+will select the normalized Theory endpoint. -/
+def indexedVecSemanticFamilyRootInput :
+    TypeChecker.CandidateExprSemanticRootInput natFinalEnv [`u]
+      indexedVecFamilyCandidate indexedVecType.type where
+  contextRun := indexedVecSemanticFamilyContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := indexedVecSemanticFamilySourceTr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
+def indexedVecSemanticNilRootInput :
+    TypeChecker.CandidateExprSemanticRootInput indexedVecTypeEnv [`u]
+      nilCandidate indexedVecType.ctors[0].type where
+  contextRun := by
+    simpa [nilCandidate, nilCandidateContext] using
+      indexedVecSemanticCtorContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := indexedVecSemanticNilSourceTr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
+def indexedVecSemanticConsRootInput :
+    TypeChecker.CandidateExprSemanticRootInput indexedVecTypeEnv [`u]
+      consCandidate indexedVecType.ctors[1].type where
+  contextRun := by
+    simpa [consCandidate, consRootContext] using
+      indexedVecSemanticCtorContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := indexedVecSemanticConsSourceTr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
+def indexedVecSemanticNilConstructorInput :
+    VInductDecl.CandidateConstructorSemanticInput indexedVecTypeEnv [`u]
+      indexedVecNilConstructorCandidate indexedVecType.ctors[0] where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := indexedVecSemanticNilRootInput
+
+def indexedVecSemanticConsConstructorInput :
+    VInductDecl.CandidateConstructorSemanticInput indexedVecTypeEnv [`u]
+      indexedVecConsConstructorCandidate indexedVecType.ctors[1] where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := indexedVecSemanticConsRootInput
+
+/-- The automatic input list is indexed by the real ordered `nil`/`cons`
+sources and both raw Theory constants. -/
+def indexedVecSemanticConstructorListInput :
+    VInductDecl.CandidateConstructorSemanticListInput indexedVecTypeEnv [`u]
+      indexedVecFamilyListCandidate.constructors indexedVecType.ctors := by
+  exact .cons indexedVecSemanticNilConstructorInput
+    (.cons indexedVecSemanticConsConstructorInput .nil)
+
+def indexedVecSemanticFamilyInput :
+    VInductDecl.CandidateFamilySemanticInput natFinalEnv [`u]
+      indexedVecFamilyListCandidate indexedVecType where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := indexedVecSemanticFamilyRootInput
+  typeEnv := indexedVecTypeEnv
+  addType := rfl
+  constructors := indexedVecSemanticConstructorListInput
+
+def indexedVecSemanticNormalizationCandidateInput :
+    VInductDecl.NormalizationCandidateSemanticInput natFinalEnv [`u]
+      indexedVecNormalizationCandidate indexedVecDecl where
+  raw := indexedVecType
+  raw_types_eq := rfl
+  uvars_eq := rfl
+  family := indexedVecSemanticFamilyInput
+
+/-- Generic automatic assembly joins the arbitrary-length operational list
+witnesses to the complete retained semantic hierarchy for the two-constructor
+fixture.  No expected normalized view is an input to this theorem. -/
+theorem indexedVecProducedSemanticHierarchy_exists :
+    Nonempty (VInductDecl.ProducedNormalizationCandidateSemanticRun
+      indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
+      indexedVecNormalizationCandidate indexedVecDecl) :=
+  indexedVecSemanticNormalizationCandidateInput.exists_ofProduced
+    indexedVecFamilyTypeListProduced indexedVecFamilyListProduced
+
 theorem indexedVecSemanticFamilyViewTr :
     TrExpr natFinalEnv [`u] [] indexedVecFamilyCandidate.view
       indexedVecType.type := by
@@ -429,16 +518,22 @@ def indexedVecSemanticConsSpineRun :
   indexedVecSemanticConsSemanticRootRun.spine
     consCandidate_identity.storedSpine
 
-def indexedVecSemanticFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      indexedVecSemanticNormalizationCandidateRun
+def indexedVecSemanticFamilySemanticGenerationRun :
+    VInductDecl.CandidateFamilySemanticGenerationRun
+      indexedVecSemanticNormalizationCandidateSemanticRun
       indexedVecChecked.identityGeneration where
-  spine := indexedVecSemanticFamilySpineRun
+  storedSpine := indexedVecFamilyCandidate_identity.storedSpine
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
   viewResult := rfl
   rightType := VEnv.HasType.sort (by decide)
+
+def indexedVecSemanticFamilyGenerationRun :
+    VInductDecl.CandidateFamilyGenerationRun
+      indexedVecSemanticNormalizationCandidateRun
+      indexedVecChecked.identityGeneration :=
+  indexedVecSemanticFamilySemanticGenerationRun.run
 
 def indexedVecSemanticNilNormalizedCtor : VInductDecl.NormalizedCtor :=
   indexedVecChecked.identityGeneration.block.ctorPairs[0]
@@ -474,58 +569,85 @@ theorem indexedVecSemanticConsRightType :
       simp [indexedVecSemanticConsNormalizedCtor])
   simpa [indexedVecSemanticConsNormalizedCtor] using hctor.declaredResult.hasType.2
 
-def indexedVecSemanticNilGenerationRun :
-    VInductDecl.CandidateNormalizedCtorRun
+def indexedVecSemanticNilSemanticGenerationRun :
+    VInductDecl.CandidateSemanticNormalizedCtorRun
       indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticNilConstructorRun indexedVecSemanticNilNormalizedCtor where
+      indexedVecSemanticNilConstructorSemanticRun
+      indexedVecSemanticNilNormalizedCtor where
   raw_eq := rfl
   view_eq := rfl
-  spine := indexedVecSemanticNilSpineRun
+  storedSpine := nilCandidate_identity.storedSpine
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
   viewResult := rfl
   rightType := indexedVecSemanticNilRightType
 
-def indexedVecSemanticConsGenerationRun :
-    VInductDecl.CandidateNormalizedCtorRun
+def indexedVecSemanticConsSemanticGenerationRun :
+    VInductDecl.CandidateSemanticNormalizedCtorRun
       indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticConsConstructorRun indexedVecSemanticConsNormalizedCtor where
+      indexedVecSemanticConsConstructorSemanticRun
+      indexedVecSemanticConsNormalizedCtor where
   raw_eq := rfl
   view_eq := rfl
-  spine := indexedVecSemanticConsSpineRun
+  storedSpine := consCandidate_identity.storedSpine
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
   viewResult := rfl
   rightType := indexedVecSemanticConsRightType
 
+def indexedVecSemanticNilGenerationRun :
+    VInductDecl.CandidateNormalizedCtorRun
+      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
+      indexedVecSemanticNilConstructorRun indexedVecSemanticNilNormalizedCtor :=
+  indexedVecSemanticNilSemanticGenerationRun.run
+
+def indexedVecSemanticConsGenerationRun :
+    VInductDecl.CandidateNormalizedCtorRun
+      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
+      indexedVecSemanticConsConstructorRun indexedVecSemanticConsNormalizedCtor :=
+  indexedVecSemanticConsSemanticGenerationRun.run
+
+def indexedVecSemanticConstructorSemanticGenerationListRun :
+    VInductDecl.CandidateSemanticNormalizedCtorListRun
+      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
+      indexedVecSemanticConstructorSemanticListRun
+      indexedVecChecked.identityGeneration.block.ctorPairs := by
+  exact .cons indexedVecSemanticNilSemanticGenerationRun
+    (.cons indexedVecSemanticConsSemanticGenerationRun .nil)
+
 def indexedVecSemanticConstructorGenerationListRun :
     VInductDecl.CandidateNormalizedCtorListRun
       indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
       indexedVecSemanticConstructorListRun
-      indexedVecChecked.identityGeneration.block.ctorPairs := by
-  exact .cons indexedVecSemanticNilGenerationRun
-    (.cons indexedVecSemanticConsGenerationRun .nil)
+      indexedVecChecked.identityGeneration.block.ctorPairs :=
+  indexedVecSemanticConstructorSemanticGenerationListRun.run
+
+def indexedVecSemanticGenerationCandidateSemanticRun :
+    VInductDecl.GenerationCandidateSemanticRun
+      indexedVecSemanticNormalizationCandidateSemanticRun
+      indexedVecChecked.identityGeneration where
+  normalization_eq := rfl
+  checked := indexedVecChecked.wf_of_decl indexedVecDecl_wf
+  family := indexedVecSemanticFamilySemanticGenerationRun
+  typeEnv_wf := by
+    simpa using indexedVecSemanticCtorContextRun.context.Ewf
+  constructors := indexedVecSemanticConstructorSemanticGenerationListRun
 
 def indexedVecSemanticGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
       indexedVecSemanticNormalizationCandidateRun
-      indexedVecChecked.identityGeneration where
-  normalization_eq := rfl
-  checked := indexedVecChecked.wf_of_decl indexedVecDecl_wf
-  family := indexedVecSemanticFamilyGenerationRun
-  typeEnv_wf := by
-    simpa using indexedVecSemanticCtorContextRun.context.Ewf
-  constructors := indexedVecSemanticConstructorGenerationListRun
+      indexedVecChecked.identityGeneration :=
+  indexedVecSemanticGenerationCandidateSemanticRun.run
 
 def indexedVecSemanticGenerationCandidatePackage :
     VInductDecl.GenerationCandidatePackage natFinalEnv [`u] :=
-  indexedVecSemanticGenerationCandidateRun.package
+  indexedVecSemanticGenerationCandidateSemanticRun.package
 
 def indexedVecSemanticProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage natFinalEnv [`u] :=
-  indexedVecSemanticGenerationCandidateRun.producedPackage
+  indexedVecSemanticGenerationCandidateSemanticRun.producedPackage
     indexedVecFamilyCandidateContext 1 0 false
     indexedVecNormalizationCandidateProduced
 

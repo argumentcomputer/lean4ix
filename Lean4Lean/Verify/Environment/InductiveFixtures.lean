@@ -7155,6 +7155,19 @@ private def aliasFormerCtorCandidateContextRun :
     aliasFormerCtorNormalizationVEnvs_wf rfl
     aliasFormerCtorCandidatePrefix_ne
 
+/-- Pre-run family evidence used by the generic automatic hierarchy
+constructor. -/
+private def aliasFormerFamilySemanticRootInput :
+    TypeChecker.CandidateExprSemanticRootInput typeFamilyAliasEnv []
+      aliasFormerFamilyCandidate aliasFormerRawType.type where
+  contextRun := aliasFormerCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := aliasFormerFamily_candidateSource_tr
+  whnfFuel := 9999
+  whnfDepth := rfl
+
 /-- Family endpoint certificate used by the singleton list assembler. -/
 private def aliasFormerFamilySemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun typeFamilyAliasEnv []
@@ -7220,6 +7233,19 @@ private def aliasFormerCtorCandidateRun :
       aliasFormerRawType.ctors[0].type
       (.const ``TypeFamilyAlias []) :=
   .terminal aliasFormerCtorCandidateNodeRun
+
+/-- Pre-run constructor evidence leaves the opaque-normalized view to the
+retained checker interpreter. -/
+private def aliasFormerCtorSemanticRootInput :
+    TypeChecker.CandidateExprSemanticRootInput aliasFormerTypeEnv []
+      aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type where
+  contextRun := aliasFormerCtorCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+  source_tr := aliasFormerCtorCheckTypeRun.expr_tr
+  whnfFuel := 9999
+  whnfDepth := rfl
 
 /-- Constructor endpoint certificate in the exact post-family context. -/
 private def aliasFormerCtorSemanticRootRun :
@@ -7372,6 +7398,13 @@ private def aliasFormerCandidateConstructorSemanticRun :
   uvars_eq := rfl
   type := aliasFormerCtorSemanticRootRun
 
+private def aliasFormerCandidateConstructorSemanticInput :
+    VInductDecl.CandidateConstructorSemanticInput aliasFormerTypeEnv []
+      aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := aliasFormerCtorSemanticRootInput
+
 private def aliasFormerCandidateConstructorRun :
     VInductDecl.CandidateConstructorRun aliasFormerTypeEnv []
       aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] :=
@@ -7382,6 +7415,12 @@ private def aliasFormerCandidateConstructorSemanticListRun :
       aliasFormerFamilyListCandidate.constructors
       aliasFormerRawType.ctors := by
   exact .cons aliasFormerCandidateConstructorSemanticRun .nil
+
+private def aliasFormerCandidateConstructorSemanticListInput :
+    VInductDecl.CandidateConstructorSemanticListInput aliasFormerTypeEnv []
+      aliasFormerFamilyListCandidate.constructors
+      aliasFormerRawType.ctors := by
+  exact .cons aliasFormerCandidateConstructorSemanticInput .nil
 
 private def aliasFormerCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun aliasFormerTypeEnv []
@@ -7399,6 +7438,16 @@ private def aliasFormerCandidateFamilySemanticRun :
   addType := rfl
   constructors := aliasFormerCandidateConstructorSemanticListRun
 
+private def aliasFormerCandidateFamilySemanticInput :
+    VInductDecl.CandidateFamilySemanticInput typeFamilyAliasEnv []
+      aliasFormerFamilyListCandidate aliasFormerRawType where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := aliasFormerFamilySemanticRootInput
+  typeEnv := aliasFormerTypeEnv
+  addType := rfl
+  constructors := aliasFormerCandidateConstructorSemanticListInput
+
 private def aliasFormerCandidateFamilyRun :
     VInductDecl.CandidateFamilyRun typeFamilyAliasEnv []
       aliasFormerFamilyListCandidate aliasFormerRawType :=
@@ -7413,6 +7462,24 @@ private def aliasFormerNormalizationCandidateSemanticRun :
   raw_types_eq := rfl
   uvars_eq := rfl
   family := aliasFormerCandidateFamilySemanticRun
+
+private def aliasFormerNormalizationCandidateSemanticInput :
+    VInductDecl.NormalizationCandidateSemanticInput typeFamilyAliasEnv []
+      aliasFormerNormalizationCandidate aliasFormerRawDecl where
+  raw := aliasFormerRawType
+  raw_types_eq := rfl
+  uvars_eq := rfl
+  family := aliasFormerCandidateFamilySemanticInput
+
+/-- The exact family/constructor producer traversals and verified translations
+automatically determine a complete retained AliasFormer hierarchy. -/
+theorem aliasFormerProducedSemanticHierarchy_exists :
+    Nonempty (VInductDecl.ProducedNormalizationCandidateSemanticRun
+      aliasFormerCandidateContext aliasFormerCtorCandidateContext
+      typeFamilyAliasEnv [] aliasFormerNormalizationCandidate
+      aliasFormerRawDecl) :=
+  aliasFormerNormalizationCandidateSemanticInput.exists_ofProduced
+    aliasFormerFamilyTypeListProduced aliasFormerFamilyListProduced
 
 def aliasFormerNormalizationCandidateRun :
     VInductDecl.NormalizationCandidateRun typeFamilyAliasEnv []
@@ -7507,28 +7574,35 @@ theorem aliasFormerCtor_isType_checked :
       aliasFormerRawType.ctors[0].type :=
   ⟨.succ .zero, aliasFormerCtor_hasSort_checked⟩
 
-private def aliasFormerCandidateFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      aliasFormerNormalizationCandidateRun
+private def aliasFormerCandidateFamilySemanticGenerationRun :
+    VInductDecl.CandidateFamilySemanticGenerationRun
+      aliasFormerNormalizationCandidateSemanticRun
       aliasFormerGenerationChecked where
-  spine := aliasFormerFamilySpineRun
+  storedSpine := rfl
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
   viewResult := rfl
   rightType := VEnv.HasType.sort (by decide)
 
+private def aliasFormerCandidateFamilyGenerationRun :
+    VInductDecl.CandidateFamilyGenerationRun
+      aliasFormerNormalizationCandidateRun
+      aliasFormerGenerationChecked :=
+  aliasFormerCandidateFamilySemanticGenerationRun.run
+
 private def aliasFormerNormalizedCtor : VInductDecl.NormalizedCtor :=
   ⟨aliasFormerRawType.ctors[0],
     aliasFormerViewChecked.constructors[0]⟩
 
-private def aliasFormerCandidateNormalizedCtorRun :
-    VInductDecl.CandidateNormalizedCtorRun aliasFormerGenerationChecked.block
-      aliasFormerTypeEnv [] aliasFormerCandidateConstructorRun
+private def aliasFormerCandidateSemanticNormalizedCtorRun :
+    VInductDecl.CandidateSemanticNormalizedCtorRun
+      aliasFormerGenerationChecked.block
+      aliasFormerTypeEnv [] aliasFormerCandidateConstructorSemanticRun
       aliasFormerNormalizedCtor where
   raw_eq := rfl
   view_eq := rfl
-  spine := aliasFormerCtorSpineRun
+  storedSpine := rfl
   rawTel := rfl
   viewTel := rfl
   rawResult := rfl
@@ -7536,39 +7610,58 @@ private def aliasFormerCandidateNormalizedCtorRun :
   rightType := by
     simpa [aliasFormerNormalizedCtor] using aliasFormerCtor_hasSort_checked
 
+private def aliasFormerCandidateNormalizedCtorRun :
+    VInductDecl.CandidateNormalizedCtorRun aliasFormerGenerationChecked.block
+      aliasFormerTypeEnv [] aliasFormerCandidateConstructorRun
+      aliasFormerNormalizedCtor :=
+  aliasFormerCandidateSemanticNormalizedCtorRun.run
+
+private def aliasFormerCandidateSemanticNormalizedCtorListRun :
+    VInductDecl.CandidateSemanticNormalizedCtorListRun
+      aliasFormerGenerationChecked.block aliasFormerTypeEnv []
+      aliasFormerCandidateConstructorSemanticListRun
+      aliasFormerGenerationChecked.block.ctorPairs := by
+  exact .cons aliasFormerCandidateSemanticNormalizedCtorRun .nil
+
 private def aliasFormerCandidateNormalizedCtorListRun :
     VInductDecl.CandidateNormalizedCtorListRun
       aliasFormerGenerationChecked.block aliasFormerTypeEnv []
       aliasFormerCandidateConstructorListRun
-      aliasFormerGenerationChecked.block.ctorPairs := by
-  exact .cons aliasFormerCandidateNormalizedCtorRun .nil
+      aliasFormerGenerationChecked.block.ctorPairs :=
+  aliasFormerCandidateSemanticNormalizedCtorListRun.run
 
 /-- Complete source-indexed candidate certificate for the non-identity
 AliasFormer generation transaction. -/
-def aliasFormerGenerationCandidateRun :
-    VInductDecl.GenerationCandidateRun
-      aliasFormerNormalizationCandidateRun
+def aliasFormerGenerationCandidateSemanticRun :
+    VInductDecl.GenerationCandidateSemanticRun
+      aliasFormerNormalizationCandidateSemanticRun
       aliasFormerGenerationChecked where
   normalization_eq := rfl
   checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
-  family := aliasFormerCandidateFamilyGenerationRun
+  family := aliasFormerCandidateFamilySemanticGenerationRun
   typeEnv_wf := by
     simpa using aliasFormerCtorCandidateContextRun.context.Ewf
-  constructors := aliasFormerCandidateNormalizedCtorListRun
+  constructors := aliasFormerCandidateSemanticNormalizedCtorListRun
+
+def aliasFormerGenerationCandidateRun :
+    VInductDecl.GenerationCandidateRun
+      aliasFormerNormalizationCandidateRun
+      aliasFormerGenerationChecked :=
+  aliasFormerGenerationCandidateSemanticRun.run
 
 /-- The generic dependent package retains the exact AliasFormer kernel
 source, candidate trace, reconstructed normalization, successful dependent
 analysis, and semantic generation run in one value. -/
 def aliasFormerGenerationCandidatePackage :
     VInductDecl.GenerationCandidatePackage typeFamilyAliasEnv [] :=
-  aliasFormerGenerationCandidateRun.package
+  aliasFormerGenerationCandidateSemanticRun.package
 
 /-- The complete AliasFormer semantic package is selected by the exact
 successful whole-call metadata producer, including its pre-family and
 post-family checker environments. -/
 def aliasFormerProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage typeFamilyAliasEnv [] :=
-  aliasFormerGenerationCandidateRun.producedPackage
+  aliasFormerGenerationCandidateSemanticRun.producedPackage
     aliasFormerCandidateContext 0 0 false
     aliasFormerNormalizationCandidate_produced
 
