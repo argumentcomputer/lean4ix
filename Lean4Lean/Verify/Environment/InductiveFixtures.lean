@@ -7631,11 +7631,9 @@ def aliasFormerGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       aliasFormerNormalizationCandidateSemanticRun
       aliasFormerGenerationChecked where
-  normalization_eq := rfl
+  analysis := rfl
   checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
   family := aliasFormerCandidateFamilySemanticGenerationRun
-  typeEnv_wf := by
-    simpa using aliasFormerCtorCandidateContextRun.context.Ewf
   constructors := aliasFormerCandidateSemanticNormalizedCtorListRun
 
 def aliasFormerGenerationCandidateRun :
@@ -8382,11 +8380,9 @@ def annotatedPiGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       annotatedPiNormalizationCandidateSemanticRun
       annotatedPiGenerationChecked where
-  normalization_eq := rfl
+  analysis := rfl
   checked := annotatedPiViewChecked_wf
   family := annotatedPiCandidateFamilySemanticGenerationRun
-  typeEnv_wf := by
-    simpa using annotatedPiCtorCandidateContextRun.context.Ewf
   constructors := annotatedPiCandidateSemanticNormalizedCtorListRun
 
 def annotatedPiGenerationCandidateRun :

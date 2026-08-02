@@ -853,6 +853,38 @@ theorem GenerationChecked.viewCtors_eq {source : VInductDecl}
 theorem Normalization.identity_checked? (source : VInductDecl) :
     (Normalization.identity source).checked? = source.checked? := rfl
 
+/-- A successful normalized analysis retains the exact normalization that was
+analyzed; callers do not need to restate this projection as an unrelated
+equality. -/
+theorem Normalization.check?_normalization
+    {source : VInductDecl} {norm : Normalization source}
+    {block : NormalizedChecked source}
+    (h : norm.check? = some block) :
+    block.normalization = norm := by
+  unfold Normalization.check? at h
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  cases h
+  rfl
+
+/-- A successful generation analysis is indexed by the same normalization
+retained in its checked block. -/
+theorem Normalization.generation?_normalization
+    {source : VInductDecl} {norm : Normalization source}
+    {generation : GenerationChecked source}
+    (h : norm.generation? = some generation) :
+    generation.block.normalization = norm := by
+  unfold Normalization.generation? at h
+  obtain ⟨block, hblock, hgeneration⟩ :=
+    Option.bind_eq_some_iff.mp h
+  have hnorm := Normalization.check?_normalization hblock
+  unfold NormalizedChecked.generation? at hgeneration
+  split at hgeneration
+  · have hgeneration' := Option.some.inj hgeneration
+    rw [← hgeneration']
+    exact hnorm
+  · contradiction
+
 theorem identityChecked?_isSome (source : VInductDecl) :
     (identityChecked? source).isSome = source.checked?.isSome := by
   obtain ⟨U, np, types⟩ := source
@@ -905,6 +937,18 @@ info: 'Lean4Lean.VInductDecl.GenerationChecked.viewCtors_eq' depends on axioms: 
 -/
 #guard_msgs in
 #print axioms GenerationChecked.viewCtors_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.check?_normalization' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Normalization.check?_normalization
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.generation?_normalization' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Normalization.generation?_normalization
 
 /--
 info: 'Lean4Lean.VInductDecl.identityChecked?_isSome' depends on axioms: [propext, Classical.choice, Quot.sound]

@@ -2873,19 +2873,17 @@ theorem CandidateNormalizedCtorListRun.normalizedCtorRuns
 /-- Complete source-indexed candidate certificate for one generation-ready
 singleton inductive declaration.
 
-`normalization_eq` ties the retained analyzer block to the candidate-derived
-normalization. `constructors` then aligns every post-family candidate run with
-the corresponding dependent analyzer pair. -/
+`analysis` records that the candidate-derived normalization produced this exact
+dependent generation result. `constructors` then aligns every post-family
+candidate run with the corresponding dependent analyzer pair. -/
 structure GenerationCandidateRun
     {kernelSource : InductiveType} {source : VInductDecl}
     {candidate : AddInductive.NormalizationCandidate [kernelSource]}
     (normalization : NormalizationCandidateRun env Us candidate source)
     (generation : GenerationChecked source) where
-  normalization_eq :
-    generation.block.normalization = normalization.normalization
+  analysis : normalization.normalization.generation? = some generation
   checked : generation.block.checked.WF env
   family : CandidateFamilyGenerationRun normalization generation
-  typeEnv_wf : VEnv.WF normalization.family.typeEnv
   constructors : CandidateNormalizedCtorListRun generation.block
     normalization.family.typeEnv Us normalization.family.constructors
     generation.block.ctorPairs
@@ -2893,18 +2891,16 @@ structure GenerationCandidateRun
 /-- Complete generation assembly owned by one retained semantic hierarchy.
 
 This is the no-parallel-run form of `GenerationCandidateRun`: family and
-constructor spines are projections of `normalization`, while the remaining
-fields are the checked structural alignment required by Theory generation. -/
+constructor spines are projections of `normalization`, while `analysis` retains
+the exact dependent analyzer result consumed by Theory generation. -/
 structure GenerationCandidateSemanticRun
     {kernelSource : InductiveType} {source : VInductDecl}
     {candidate : AddInductive.NormalizationCandidate [kernelSource]}
     (normalization : NormalizationCandidateSemanticRun env Us candidate source)
     (generation : GenerationChecked source) where
-  normalization_eq :
-    generation.block.normalization = normalization.root.normalization
+  analysis : normalization.root.normalization.generation? = some generation
   checked : generation.block.checked.WF env
   family : CandidateFamilySemanticGenerationRun normalization generation
-  typeEnv_wf : VEnv.WF normalization.family.typeEnv
   constructors : CandidateSemanticNormalizedCtorListRun generation.block
     normalization.family.typeEnv Us normalization.family.constructors
     generation.block.ctorPairs
@@ -2914,11 +2910,22 @@ view, and recursive spine remains definitionally tied to the semantic owner. -/
 def GenerationCandidateSemanticRun.run
     (run : GenerationCandidateSemanticRun normalization generation) :
     GenerationCandidateRun normalization.root generation where
-  normalization_eq := run.normalization_eq
+  analysis := run.analysis
   checked := run.checked
   family := run.family.run
-  typeEnv_wf := run.typeEnv_wf
   constructors := run.constructors.run
+
+/-- A retained analyzer result necessarily contains the normalization that was
+analyzed.  This is derived from `analysis`, rather than supplied by fixtures. -/
+theorem GenerationCandidateRun.normalization_eq
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateRun normalization generation) :
+    generation.block.normalization = normalization.normalization :=
+  Normalization.generation?_normalization run.analysis
 
 /-- The retained dependent analysis necessarily checks the exact family view
 selected by the normalization candidate.  This equation is a consequence of
@@ -2945,6 +2952,34 @@ theorem GenerationCandidateRun.familyView_eq
   have htype : generation.block.checked.type =
       normalization.family.view := by injection htypes
   exact (congrArg (fun ty : VInductiveType => ty.type) htype).symm
+
+/-- Reconstruct well-formedness of the post-family environment from the
+retained pre-family context, candidate raw/view equality, checked family view,
+and exact raw-family insertion.  Fixtures therefore do not supply this semantic
+consequence independently. -/
+theorem GenerationCandidateRun.typeEnv_wf
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (run : GenerationCandidateRun normalization generation) :
+    VEnv.WF normalization.family.typeEnv := by
+  have henv : VEnv.WF env := by
+    simpa only [normalization.family.typeRun.venv_eq] using
+      normalization.family.typeRun.contextRun.context.Ewf
+  obtain ⟨_, hfamily⟩ := normalization.family.typeRun.evidence
+  have hview : env.IsType Us.length [] normalization.family.viewType := by
+    simpa only [← generation.block.uvars_eq, normalization.uvars_eq,
+      run.familyView_eq] using run.checked.family_isType
+  have hraw : env.IsType Us.length [] normalization.raw.type :=
+    VEnv.IsType.defeqU_l henv trivial hfamily.isDefEq.toU.symm hview
+  have hrawWF : normalization.raw.toVConstant.WF env := by
+    show env.IsType normalization.raw.uvars [] normalization.raw.type
+    simpa only [normalization.family.uvars_eq] using hraw
+  obtain ⟨ds, hds⟩ := henv
+  exact ⟨.axiom normalization.raw.toVConstVal :: ds,
+    .decl (.axiom hrawWF normalization.family.addType) hds⟩
 
 /-- Type the raw family constant at the analyzer-selected family view in the
 post-family environment.  The proof combines the exact raw insertion, the
@@ -4019,6 +4054,15 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
 #print axioms TypeChecker.CandidateExprSpineRun.evidenceAt
 
 /--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.normalization_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateRun.normalization_eq
+
+/--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyView_eq' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -4026,6 +4070,40 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyView_eq' depends on ax
 -/
 #guard_msgs in
 #print axioms GenerationCandidateRun.familyView_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.typeEnv_wf' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateRun.typeEnv_wf
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyConst_hasType' depends on axioms: [propext,

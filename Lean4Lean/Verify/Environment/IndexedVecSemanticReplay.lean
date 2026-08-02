@@ -627,11 +627,9 @@ def indexedVecSemanticGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       indexedVecSemanticNormalizationCandidateSemanticRun
       indexedVecChecked.identityGeneration where
-  normalization_eq := rfl
+  analysis := rfl
   checked := indexedVecChecked.wf_of_decl indexedVecDecl_wf
   family := indexedVecSemanticFamilySemanticGenerationRun
-  typeEnv_wf := by
-    simpa using indexedVecSemanticCtorContextRun.context.Ewf
   constructors := indexedVecSemanticConstructorSemanticGenerationListRun
 
 def indexedVecSemanticGenerationCandidateRun :
