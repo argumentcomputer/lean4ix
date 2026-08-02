@@ -2529,6 +2529,34 @@ def consCandidateTrace :
 def consCandidate : AddInductive.CandidateExpr indexedVecConsInfo.type :=
   ⟨consRootContext, consCandidateTrace⟩
 
+theorem consCandidate_view_eq :
+    consCandidate.view = indexedVecConsInfo.type := by
+  have habstract (context : AddInductive.Context) (e : Expr) :
+      e.abstract #[context.freshExpr] =
+        Expr.abstract1 context.freshFVarId e := by
+    rw [show #[context.freshExpr] =
+      ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
+    simp only [Expr.abstract_eq, Expr.abstractList]
+  simp only [consCandidate, AddInductive.CandidateExpr.view,
+    consCandidateTrace, consAlphaDomainCandidateTrace,
+    consNatDomainCandidateTrace, consHeadDomainCandidateTrace,
+    consTailDomainCandidateTrace, consTerminalCandidateTrace,
+    consAfterHeadCandidateTrace, consAfterNCandidateTrace,
+    consAfterAlphaCandidateTrace, AddInductive.CandidateExprTrace.view]
+  rw [habstract, habstract, habstract, habstract]
+  rw [consInfoTypeShape]
+  simp [consCtorTypeRaw, consNTypeRaw, consHeadTypeRaw,
+    consTailTypeRaw, consTerminalRaw, consAfterAlpha, consAfterN,
+    consAfterHead, consTerminal, consTailDomain,
+    consAlphaExpr, consNExpr,
+    consRootContext, consAlphaContext, consNContext,
+    consHeadContext, consTailContext, ctorContext,
+    AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshExpr,
+    AddInductive.Context.freshFVarId,
+    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
+    Expr.abstract1, NameGenerator.next, NameGenerator.curr]
+
 theorem consAlphaDomainCandidateTraceLoop (fuel : Nat) :
     AddInductive.buildCandidateExpr.loop consRootContext
       (.sort (.succ (.param `u))) (fuel + 1) =

@@ -954,6 +954,32 @@ def indexedVecFamilyCandidate :
     Lean4Lean.AddInductive.CandidateExpr indexedVecInfo.type :=
   ⟨indexedVecFamilyCandidateContext, indexedVecFamilyCandidateTrace⟩
 
+theorem indexedVecFamilyCandidate_view_eq :
+    indexedVecFamilyCandidate.view = indexedVecInfo.type := by
+  have habstract (context : Lean4Lean.AddInductive.Context) (e : Expr) :
+      e.abstract #[context.freshExpr] =
+        Expr.abstract1 context.freshFVarId e := by
+    rw [show #[context.freshExpr] =
+      ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
+    simp only [Expr.abstract_eq, Expr.abstractList]
+  simp only [indexedVecFamilyCandidate,
+    Lean4Lean.AddInductive.CandidateExpr.view,
+    indexedVecFamilyCandidateTrace,
+    indexedVecInnerCandidateTrace, indexedVecParamDomainCandidateTrace,
+    indexedVecIndexDomainCandidateTrace, indexedVecTerminalCandidateTrace,
+    Lean4Lean.AddInductive.CandidateExprTrace.view]
+  rw [habstract, habstract]
+  simp [Expr.abstractList, Expr.abstract1,
+    indexedVecInnerKernel, indexedVecTerminalKernel,
+    indexedVecParamCandidateContext, indexedVecIndexCandidateContext,
+    indexedVecFamilyCandidateContext,
+    Lean4Lean.AddInductive.Context.pushLocalDecl,
+    Lean4Lean.AddInductive.Context.freshExpr,
+    Lean4Lean.AddInductive.Context.freshFVarId,
+    NameGenerator.next, NameGenerator.curr,
+    indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
+  constructor <;> rfl
+
 private theorem indexedVecParamDomainCandidateTrace_loop (fuel : Nat) :
     Lean4Lean.AddInductive.buildCandidateExpr.loop
       indexedVecFamilyCandidateContext indexedVecTerminalKernel

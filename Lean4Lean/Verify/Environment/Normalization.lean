@@ -681,6 +681,38 @@ theorem CandidateNodeRun.exists_ofCandidate
     (result_tr.trExpr context.Ewf context.Δwf)
     checkFuel whnfFuel checkDepth whnfDepth
 
+/-- Construct a paired candidate node with a caller-selected Theory endpoint
+for the retained WHNF result. The exact full-check execution still selects
+and strictly translates its inferred type; only the already translated WHNF
+endpoint is fixed by the caller. -/
+theorem CandidateNodeRun.exists_ofCandidateAtResult
+    (candidateContext : AddInductive.Context)
+    (source inferred result : Expr)
+    (checked : AddInductive.CandidateCheckTypeStep.Valid
+      ⟨candidateContext, source, inferred⟩)
+    (normalized : AddInductive.CandidateWhnfStep.Valid
+      ⟨candidateContext, source, result⟩)
+    (context : VContext)
+    (context_eq : context.toContext = candidateContext.toTypeChecker)
+    (state_wf : VState.WF context {})
+    (source' result' : VExpr)
+    (source_tr : context.TrExprS source source')
+    (result_tr : context.TrExpr result result')
+    (checkFuel whnfFuel : Nat)
+    (checkDepth : candidateContext.fuel.recDepth = checkFuel)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    ∃ inferred', Nonempty
+      (CandidateNodeRun context.venv context.lparams context.vlctx
+        candidateContext source inferred result source' result' inferred') := by
+  obtain ⟨_, inferred', _, inferred_tr, _⟩ :=
+    candidateCheckTypeStep_exists_translation
+      ⟨candidateContext, source, inferred⟩ checked
+      context context_eq state_wf source_tr.fvarsIn checkFuel checkDepth
+  exact ⟨inferred', ⟨CandidateNodeRun.ofCandidate
+    candidateContext source inferred result checked normalized
+    context context_eq rfl rfl rfl state_wf source_tr inferred_tr
+    result_tr checkFuel whnfFuel checkDepth whnfDepth⟩⟩
+
 /-- Compositional evidence for a normalization comparison.
 
 Leaves are either reflexive, already typed syntax or exact verified WHNF
@@ -788,6 +820,46 @@ inductive CandidateExprRun (env : VEnv) (Us : List Name) :
           domainCandidate bodyCandidate)
         Δ source' (.forallE domainView' bodyView') inferred'
 
+/-- Structural witness that a retained candidate trace is syntactically
+identity-normalizing at every inspected node.
+
+The witness is deliberately recursive rather than a single root equality:
+generation consumes the exposed Pi spine positionally. At Pi nodes it also
+records that annotation processing kept the binder domain unchanged. -/
+inductive CandidateExprIdentity :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      AddInductive.CandidateExprTrace candidateContext source → Prop where
+  | terminal
+      (result_eq : result = source) :
+      CandidateExprIdentity
+        (.terminal context source inferred result checked normalized)
+  | forallE
+      (domainCandidate : AddInductive.CandidateExprTrace context domain)
+      (bodyCandidate : AddInductive.CandidateExprTrace
+        (context.pushLocalDecl name binderInfo annotations.consumed)
+        (body.instantiate1 context.freshExpr))
+      (source_eq : source = .forallE name domain body binderInfo)
+      (consumed_eq : annotations.consumed = domain)
+      (domainIdentity : CandidateExprIdentity domainCandidate)
+      (bodyIdentity : CandidateExprIdentity bodyCandidate) :
+      CandidateExprIdentity
+        (.forallE context source inferred name domain body binderInfo fresh
+          annotations annotationsEq checked normalized
+          domainCandidate bodyCandidate)
+
+/-- Exact component inversion for a strict translation of a kernel Pi. -/
+theorem TrExprS.forallE_components
+    (run : TrExprS env Us Δ (.forallE name domain body binderInfo) source') :
+    ∃ domain' body',
+      source' = .forallE domain' body' ∧
+      env.IsType Us.length Δ.toCtx domain' ∧
+      env.IsType Us.length (domain' :: Δ.toCtx) body' ∧
+      TrExprS env Us Δ domain domain' ∧
+      TrExprS env Us ((none, .vlam domain') :: Δ) body body' := by
+  cases run with
+  | forallE domainType bodyType domain_tr body_tr =>
+    exact ⟨_, _, rfl, domainType, bodyType, domain_tr, body_tr⟩
+
 /-- Recursively turn every retained candidate observation into verified
 normalization evidence, constructing and transporting the exact verified
 binder context at each Pi node. -/
@@ -885,6 +957,100 @@ theorem CandidateExprRun.exists_ofCandidate
     exact .forallE annotations annotationsEq domainCandidate bodyCandidate node
       domainRun annotationsRun bodyRun domainTypeHasType bodyTypeHasType
       bodySource bodyVlctx
+
+/-- Interpret a recursively identity-normalizing candidate at the exact
+strict Theory translation of its source.
+
+Unlike `exists_ofCandidate`, whose verified executions select an existential
+Theory endpoint, this theorem retains `source'` as the endpoint at every
+recursive position. That stronger conclusion is what the generation spine
+assembler needs for declarations whose executable normalization is
+syntactically the identity. -/
+theorem CandidateExprRun.exists_ofIdentity
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    (identity : CandidateExprIdentity trace)
+    (candidateRun : CandidateContextRun candidateContext)
+    (source' : VExpr)
+    (source_tr : candidateRun.context.TrExprS source source')
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    ∃ inferred', Nonempty
+      (CandidateExprRun candidateRun.context.venv
+        candidateRun.context.lparams trace candidateRun.context.vlctx
+        source' source' inferred') := by
+  induction identity generalizing source' with
+  | @terminal result source context inferred checked normalized result_eq =>
+    subst result
+    have result_tr : candidateRun.context.TrExpr source source' :=
+      source_tr.trExpr candidateRun.context.Ewf candidateRun.context.Δwf
+    obtain ⟨inferred', ⟨node⟩⟩ :=
+      CandidateNodeRun.exists_ofCandidateAtResult
+        context source inferred source checked normalized
+        candidateRun.context candidateRun.context_eq candidateRun.state_wf
+        source' source' source_tr result_tr
+        context.fuel.recDepth whnfFuel rfl whnfDepth
+    exact ⟨inferred', ⟨.terminal node⟩⟩
+  | @forallE context domain name binderInfo source inferred body fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate source_eq consumed_eq domainIdentity bodyIdentity
+      domainIH bodyIH =>
+    subst source
+    obtain ⟨domain', body', rfl, domainWF, bodyWF, domain_tr, body_tr⟩ :=
+      TypeChecker.TrExprS.forallE_components source_tr
+    obtain ⟨u, domainType⟩ := domainWF
+    obtain ⟨v, bodyType⟩ := bodyWF
+    have result_tr : candidateRun.context.TrExpr
+        (.forallE name domain body binderInfo)
+          (.forallE domain' body') :=
+      source_tr.trExpr candidateRun.context.Ewf candidateRun.context.Δwf
+    obtain ⟨inferred', ⟨node⟩⟩ :=
+      CandidateNodeRun.exists_ofCandidateAtResult
+        context (.forallE name domain body binderInfo) inferred
+        (.forallE name domain body binderInfo) checked normalized
+        candidateRun.context candidateRun.context_eq candidateRun.state_wf
+        (.forallE domain' body') (.forallE domain' body')
+        source_tr result_tr
+        context.fuel.recDepth whnfFuel rfl whnfDepth
+    obtain ⟨domainInferred', ⟨domainRun⟩⟩ :=
+      domainIH candidateRun domain' domain_tr whnfDepth
+    have consumed_tr : candidateRun.context.TrExprS
+        annotations.consumed domain' := by
+      rw [consumed_eq]
+      exact domain_tr
+    let annotationsRun := IsDefEqRun.ofCandidateStep
+      ⟨context, domain, annotations.consumed⟩ annotationsEq
+      candidateRun.context candidateRun.context_eq rfl rfl rfl
+      candidateRun.state_wf domain_tr consumed_tr
+      context.fuel.recDepth rfl
+    let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
+      annotations.consumed fresh domain' consumed_tr ⟨u, domainType⟩
+    have bodyVenv : bodyCandidateRun.context.venv =
+        candidateRun.context.venv := rfl
+    have bodyLparams : bodyCandidateRun.context.lparams =
+        candidateRun.context.lparams := rfl
+    have bodyVlctx : bodyCandidateRun.context.vlctx =
+        (some (context.freshFVarId, annotations.consumed.fvarsList),
+          .vlam domain') :: candidateRun.context.vlctx := rfl
+    have bodyDepth :
+        (context.pushLocalDecl name binderInfo
+          annotations.consumed).fuel.recDepth =
+          whnfFuel + 1 := by
+      simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+    have instantiatedBody_tr :=
+      body_tr.inst_fvar candidateRun.context.Ewf.ordered
+        bodyCandidateRun.context.Δwf
+    obtain ⟨bodyInferred', ⟨bodyRun⟩⟩ :=
+      bodyIH bodyCandidateRun body' (by
+        change TrExprS bodyCandidateRun.context.venv
+          bodyCandidateRun.context.lparams bodyCandidateRun.context.vlctx
+          (body.instantiate1 context.freshExpr) body'
+        rw [bodyVenv, bodyLparams, bodyVlctx]
+        simpa only [AddInductive.Context.freshExpr,
+          Expr.instantiate1_eq] using instantiatedBody_tr)
+        bodyDepth
+    refine ⟨inferred', ⟨?_⟩⟩
+    exact .forallE annotations annotationsEq domainCandidate bodyCandidate
+      node domainRun annotationsRun bodyRun domainType bodyType bodyType rfl
 
 /-- Recover a trace root's strict source translation from its retained full
 check.  Unlike recursive child nodes, whose source translations are obtained

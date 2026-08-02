@@ -1171,6 +1171,26 @@ def nilCandidateTrace :
 def nilCandidate : AddInductive.CandidateExpr indexedVecNilInfo.type :=
   ⟨nilCandidateContext, nilCandidateTrace⟩
 
+theorem nilCandidate_view_eq :
+    nilCandidate.view = indexedVecNilInfo.type := by
+  have habstract (context : AddInductive.Context) (e : Expr) :
+      e.abstract #[context.freshExpr] =
+        Expr.abstract1 context.freshFVarId e := by
+    rw [show #[context.freshExpr] =
+      ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
+    simp only [Expr.abstract_eq, Expr.abstractList]
+  simp only [nilCandidate, AddInductive.CandidateExpr.view,
+    nilCandidateTrace, nilDomainCandidateTrace, nilBodyCandidateTrace,
+    AddInductive.CandidateExprTrace.view]
+  rw [habstract]
+  rw [nilInfoTypeShape]
+  simp [nilCandidateBody, nilCtorTypeRaw, nilCtorBodyRaw,
+    Expr.instantiate1_eq, Expr.instantiate1', Expr.abstract1,
+    nilCandidateContext, ctorContext,
+    AddInductive.Context.freshExpr,
+    AddInductive.Context.freshFVarId,
+    NameGenerator.next, NameGenerator.curr]
+
 theorem nilDomainCandidateTraceLoop (fuel : Nat) :
     AddInductive.buildCandidateExpr.loop nilCandidateContext
       (.sort (.succ (.param `u))) (fuel + 1) =
