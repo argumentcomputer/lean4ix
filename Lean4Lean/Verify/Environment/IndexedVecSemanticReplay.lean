@@ -557,10 +557,8 @@ def indexedVecSemanticFamilySemanticGenerationRun :
       indexedVecChecked.identityGeneration where
   storedSpine := indexedVecFamilyCandidate_identity.storedSpine
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := VEnv.HasType.sort (by decide)
 
 def indexedVecSemanticFamilyGenerationRun :
     VInductDecl.CandidateFamilyGenerationRun
@@ -574,34 +572,6 @@ def indexedVecSemanticNilNormalizedCtor : VInductDecl.NormalizedCtor :=
 def indexedVecSemanticConsNormalizedCtor : VInductDecl.NormalizedCtor :=
   indexedVecChecked.identityGeneration.block.ctorPairs[1]
 
-theorem indexedVecSemanticNilRightType :
-    indexedVecTypeEnv.HasType 1
-      (indexedVecSemanticNilNormalizedCtor.declaredBinders indexedVecDecl.nparams).reverse
-      (indexedVecSemanticNilNormalizedCtor.resultTarget
-        indexedVecChecked.identityGeneration.block)
-      (.sort indexedVecChecked.resultLevel) := by
-  have hwf :=
-    (indexedVecChecked.wf_of_decl indexedVecDecl_wf).identityGeneration
-      nat_env_wf.ordered
-  have hctor := hwf.ctors indexedVecTypeEnv rfl
-    (ctor := indexedVecSemanticNilNormalizedCtor) (by
-      simp [indexedVecSemanticNilNormalizedCtor])
-  simpa [indexedVecSemanticNilNormalizedCtor] using hctor.declaredResult.hasType.2
-
-theorem indexedVecSemanticConsRightType :
-    indexedVecTypeEnv.HasType 1
-      (indexedVecSemanticConsNormalizedCtor.declaredBinders indexedVecDecl.nparams).reverse
-      (indexedVecSemanticConsNormalizedCtor.resultTarget
-        indexedVecChecked.identityGeneration.block)
-      (.sort indexedVecChecked.resultLevel) := by
-  have hwf :=
-    (indexedVecChecked.wf_of_decl indexedVecDecl_wf).identityGeneration
-      nat_env_wf.ordered
-  have hctor := hwf.ctors indexedVecTypeEnv rfl
-    (ctor := indexedVecSemanticConsNormalizedCtor) (by
-      simp [indexedVecSemanticConsNormalizedCtor])
-  simpa [indexedVecSemanticConsNormalizedCtor] using hctor.declaredResult.hasType.2
-
 def indexedVecSemanticNilSemanticGenerationRun :
     VInductDecl.CandidateSemanticNormalizedCtorRun
       indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
@@ -611,10 +581,8 @@ def indexedVecSemanticNilSemanticGenerationRun :
   view_eq := rfl
   storedSpine := nilCandidate_identity.storedSpine
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := indexedVecSemanticNilRightType
 
 def indexedVecSemanticConsSemanticGenerationRun :
     VInductDecl.CandidateSemanticNormalizedCtorRun
@@ -625,10 +593,8 @@ def indexedVecSemanticConsSemanticGenerationRun :
   view_eq := rfl
   storedSpine := consCandidate_identity.storedSpine
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := indexedVecSemanticConsRightType
 
 def indexedVecSemanticNilGenerationRun :
     VInductDecl.CandidateNormalizedCtorRun

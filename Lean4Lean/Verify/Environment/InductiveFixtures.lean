@@ -7580,10 +7580,8 @@ private def aliasFormerCandidateFamilySemanticGenerationRun :
       aliasFormerGenerationChecked where
   storedSpine := rfl
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := VEnv.HasType.sort (by decide)
 
 private def aliasFormerCandidateFamilyGenerationRun :
     VInductDecl.CandidateFamilyGenerationRun
@@ -7604,11 +7602,8 @@ private def aliasFormerCandidateSemanticNormalizedCtorRun :
   view_eq := rfl
   storedSpine := rfl
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := by
-    simpa [aliasFormerNormalizedCtor] using aliasFormerCtor_hasSort_checked
 
 private def aliasFormerCandidateNormalizedCtorRun :
     VInductDecl.CandidateNormalizedCtorRun aliasFormerGenerationChecked.block
@@ -8335,10 +8330,8 @@ private def annotatedPiCandidateFamilySemanticGenerationRun :
       annotatedPiGenerationChecked where
   storedSpine := rfl
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := VEnv.HasType.sort (by decide)
 
 private def annotatedPiCandidateFamilyGenerationRun :
     VInductDecl.CandidateFamilyGenerationRun
@@ -8359,12 +8352,8 @@ private def annotatedPiCandidateSemanticNormalizedCtorRun :
   view_eq := rfl
   storedSpine := annotatedPiCtorCandidate_storedSpine
   rawTel := rfl
-  viewTel := rfl
   rawResult := rfl
   viewResult := rfl
-  rightType := by
-    simpa [annotatedPiNormalizedCtor] using
-      annotatedPiFamilyConst_hasType [annotatedPiRawInner]
 
 private def annotatedPiCandidateNormalizedCtorRun :
     VInductDecl.CandidateNormalizedCtorRun annotatedPiGenerationChecked.block

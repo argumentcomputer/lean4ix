@@ -2404,6 +2404,18 @@ theorem Checked.WF.mono {decl : VInductDecl} {checked : decl.Checked}
   refine ⟨h.1.mono henv, fun c hc => ?_⟩
   exact ⟨fieldsWF_mono henv (h.2 c hc).1, (h.2 c hc).2.mono henv⟩
 
+/-- Exact syntactic decomposition of an accepted family view into its
+parameter telescope, index telescope, and terminal sort. -/
+theorem Checked.type_eq
+    {source : VInductDecl} (checked : source.Checked) :
+    checked.type.type =
+      VExpr.forallN checked.params
+        (VExpr.forallN checked.indices (.sort checked.resultLevel)) := by
+  rw [← VExpr.forallN_telN_dropN source.nparams checked.type.type,
+    ← forallN_ctorFields_resultOf
+      (VExpr.dropN source.nparams checked.type.type),
+    checked.result_eq, checked.params_eq, checked.indices_eq]
+
 /-- The semantic checker contract types the family before that family is
 inserted. This is the exact premise needed by the first transaction step. -/
 theorem Checked.WF.family_isType
@@ -2417,6 +2429,116 @@ theorem Checked.WF.family_isType
   exact IsType.forallN
     (by simpa [checked.params_eq, checked.indices_eq] using h.1)
     ⟨_, HasType.sort checked.direct_anatomy.2.2.1⟩
+
+/-- Once the retained family constant has the checked family type, the
+checked constructor-result spine types the exact normalized family
+application.  This fact depends only on analyzer semantics and the constant's
+ordinary typing judgment; callers do not need to restate result typing for
+each constructor candidate. -/
+theorem GenerationChecked.checkedResultTarget_hasType
+    {source : VInductDecl} (gen : GenerationChecked source)
+    {env : VEnv} (henv : env.Ordered)
+    (hchecked : gen.block.checked.WF env)
+    (familyConst : env.HasType source.uvars []
+      (.const gen.block.sourceType.name (VLevel.params source.uvars))
+      gen.block.checked.type.type)
+    {ctor : NormalizedCtor} (hctor : ctor ∈ gen.block.ctorPairs) :
+    env.HasType source.uvars (ctor.viewBinders gen.block).reverse
+      (ctor.resultTarget gen.block)
+      (.sort gen.block.checked.resultLevel) := by
+  have htype := gen.block.checked.type_eq
+  have hfamily : env.HasType source.uvars
+      (ctor.view.fields.reverse ++ gen.block.checked.params.reverse)
+      (VExpr.appN
+        (.const gen.block.sourceType.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange ctor.view.fields.length
+          gen.block.checked.params.length))
+      (VExpr.forallN
+        (VExpr.liftTelN ctor.view.fields.length
+          gen.block.checked.indices 0)
+        (.sort gen.block.checked.resultLevel)) := by
+    have hconst : env.HasType source.uvars
+        (ctor.view.fields.reverse ++
+          gen.block.checked.params.reverse ++ [])
+        (.const gen.block.sourceType.name (VLevel.params source.uvars))
+        (VExpr.forallN gen.block.checked.params
+          (VExpr.forallN gen.block.checked.indices
+            (.sort gen.block.checked.resultLevel))) := by
+      simpa only [htype] using familyConst.weak0 henv
+    have happ := HasType.appN_selfSpine'
+      (As := gen.block.checked.params)
+      (B := VExpr.forallN gen.block.checked.indices
+        (.sort gen.block.checked.resultLevel))
+      (Δ := ctor.view.fields.reverse) (Γ := [])
+      (by simpa only [← htype] using gen.block.checked.type_closed)
+      hconst
+    rw [List.length_reverse, VExpr.liftN_forallN] at happ
+    simpa using happ
+  have hspine : env.SpineWF source.uvars
+      (ctor.view.fields.reverse ++ gen.block.checked.params.reverse)
+      (VExpr.forallN
+        (VExpr.liftTelN ctor.view.fields.length
+          gen.block.checked.indices 0)
+        (.sort gen.block.checked.resultLevel))
+      ctor.view.resultIndices
+      (.sort gen.block.checked.resultLevel) := by
+    obtain ⟨c, hc, hview⟩ := gen.viewCtor_ofDirect hctor
+    have h := (hchecked.2 c hc).2
+    rw [hview]
+    simpa [CheckedCtor.ofDirect, gen.block.uvars_eq,
+      gen.block.nparams_eq] using h
+  have hresult := hspine.hasType_appN hfamily
+  rw [← VExpr.appN_append] at hresult
+  have hparams : gen.block.checked.params.length = source.nparams :=
+    gen.shape.2.1.symm.trans gen.shape.1
+  have hfields := (gen.shape.2.2.2.2.2 ctor hctor).2.2.2
+  rw [hparams, ← hfields] at hresult
+  simpa [NormalizedCtor.viewBinders,
+    NormalizedCtor.resultTarget] using hresult
+
+/-- A paired checked constructor's stored view type is exactly its analyzed
+binder telescope followed by the normalized family result application. -/
+theorem GenerationChecked.viewCtorType_eq
+    {source : VInductDecl} (gen : GenerationChecked source)
+    {ctor : NormalizedCtor} (hctor : ctor ∈ gen.block.ctorPairs) :
+    ctor.view.value.type =
+      VExpr.forallN (ctor.viewBinders gen.block)
+        (ctor.resultTarget gen.block) := by
+  obtain ⟨c, hc, hview⟩ := gen.viewCtor_ofDirect hctor
+  have hcAn := gen.block.checked.direct_anatomy.2.2.2.2.2 c hc
+  have htype := VExpr.forallN_telN_dropN
+    gen.block.normalization.view.nparams c.type
+  rw [hcAn.2.1, (stage3Ctor_eq hcAn.2.2).1] at htype
+  have hfields := (gen.shape.2.2.2.2.2 ctor hctor).2.2.2
+  have hfields' :
+      (ctor.rawFields gen.block.normalization.view.nparams).length =
+        (ctorFields (VExpr.dropN
+          gen.block.normalization.view.nparams c.type)).length := by
+    simpa [gen.block.nparams_eq, hview,
+      CheckedCtor.ofDirect] using hfields
+  simpa [← VExpr.forallN_append, NormalizedCtor.viewBinders,
+    NormalizedCtor.resultTarget, hview, hfields',
+    CheckedCtor.ofDirect, gen.block.uvars_eq,
+    gen.block.nparams_eq, gen.block.sourceType_name_eq,
+    gen.block.checked.params_eq, Nat.zero_add] using htype.symm
+
+/--
+info: 'Lean4Lean.VInductDecl.Checked.type_eq' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Checked.type_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationChecked.viewCtorType_eq' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationChecked.viewCtorType_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationChecked.checkedResultTarget_hasType' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationChecked.checkedResultTarget_hasType
 
 /-- Final-environment invariant for mixed raw/view generation. It contains
 only facts stable after the raw family and constructors have been inserted;
