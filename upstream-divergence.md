@@ -4,20 +4,20 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline before this checkpoint (2026-08-02):
+Current audit baseline (2026-08-02):
 
 - upstream: `0c38ab8`
-- published fork tip: `d553930affdb3690ad43fbf9acddf68d476fe260`
-  on local, Git, and `origin/jcb/induct` (32 commits ahead of upstream;
-  31 files changed, 37,236 insertions, 59 deletions)
+- published fork tip: `cf3d5a47d35867e0e6ebe023c0803982e3e36cd1`
+  on local, Git, and `origin/jcb/induct` (33 commits ahead of upstream;
+  32 files changed, 38,037 insertions, 59 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited checkout: a Jujutsu working-copy child of `d553930a` with concrete
-  `IndexedVec` identity witnesses, generation-ready spine runs, the complete
+- audited checkout: published checkpoint `cf3d5a47` with concrete `IndexedVec`
+  identity witnesses, generation-ready spine runs, the complete
   producer-selected semantic package, certified Theory transaction, and
   checked E1 replay. The exact sorry audit, focused and 124-job full
   Theory/Verify builds, default Nix build, all-system no-build evaluation, and
-  current-host flake check pass on that worktree. Use the branch ref, not a
+  current-host flake check pass at that checkpoint. Use the branch ref, not a
   detached Git `HEAD`, for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
@@ -231,11 +231,11 @@ to the replacement.
 
 ## D010 — executable normalization and certified producer boundary
 
-- **Status:** published-fork; this checkpoint extends it
+- **Status:** published-fork
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
-  `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`, and
-  `d553930`
+  `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
+  `d553930`, and `cf3d5a4`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -259,7 +259,7 @@ to the replacement.
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Checkpoint extension:** the concrete recursive identity witnesses feed
+- **Latest checkpoint:** the concrete recursive identity witnesses feed
   generation-ready family/`nil`/`cons` spine runs and a complete
   `GenerationCandidatePackage`. `indexedVecSemanticProducedGenerationCandidatePackage`
   projects the certificate selected by the exact outer call; the corresponding
