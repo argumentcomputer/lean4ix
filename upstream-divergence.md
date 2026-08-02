@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the semantic-hierarchy ownership checkpoint (2026-08-02):
+Audit baseline after the structural generation-evidence checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -33,10 +33,14 @@ Audit baseline after the semantic-hierarchy ownership checkpoint (2026-08-02):
   `7e5f4f7715cf71be8d09a583f0ec0d8f7aa02e72`
   (`feat: harden semantic hierarchy ownership`; 42 commits ahead of upstream;
   3 files changed, 670 insertions, and 25 deletions)
+- structural generation-evidence checkpoint:
+  `2b1d802fc6796e7317ec1d24708a3ebdda416655`
+  (`feat: derive structural generation evidence`; 44 commits ahead of upstream;
+  4 files changed, 445 insertions, and 100 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `7e5f4f77` combines exact arbitrary-length
-  producer witnesses with source-indexed semantic inputs to return a
+- audited source checkpoint: `2b1d802f` builds on the exact arbitrary-length
+  producer witnesses and source-indexed semantic inputs that return a
   `Nonempty ProducedNormalizationCandidateSemanticRun`. The retained checker
   selects every Theory view; callers provide verified contexts and strict
   source translations, never a view. Semantic generation wrappers project
@@ -46,8 +50,14 @@ Audit baseline after the semantic-hierarchy ownership checkpoint (2026-08-02):
   `IndexedVec` additionally proves that automatic assembly preserves its exact
   `nil`/`cons` order and rejects a swapped view at the computational shape
   gate. Exact compile-time guards cover the generic constructors, projections,
-  and fixture roots. The exact 20-sorry frontier, focused 118-job semantic
-  replay, 157-job default Lake build, 124-job Nix proof build, default Nix
+  and fixture roots. Exact checked family/constructor shape now recovers every
+  candidate view telescope; the checked family result level supplies family
+  terminal typing; and one typed post-family family constant plus each checked
+  constructor-result spine supplies every constructor target judgment.
+  AliasFormer, AnnotatedPi, and `IndexedVec` no longer provide `viewTel` or
+  `rightType`; the former circular `IndexedVec` terminal-typing helpers are
+  deleted. The exact 20-sorry frontier, focused direct compiles, 157-job default
+  Lake build, 124-job Theory/Verify and Nix proof builds, default Nix
   build, all six current-host flake checks, all-system no-build evaluation,
   formatter, Theory import-boundary, and whitespace checks pass at that
   checkpoint. Use the branch ref, not a detached Git `HEAD`, for published-fork
@@ -269,7 +279,7 @@ to the replacement.
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
   `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, `f0caf16`, `e3cf22d`, and
-  `7e5f4f7`
+  `7e5f4f7`, plus `2b1d802`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -315,30 +325,47 @@ to the replacement.
   `GenerationCandidateSemanticRun` make that hierarchy the sole owner of the
   recursive runs and spines consumed by generation. Their compatibility,
   package, and produced-package projections preserve the existing public API.
+  The structural generation layer no longer accepts fixture-supplied view
+  telescopes or terminal typing judgments. `Checked.type_eq` and
+  `GenerationChecked.viewCtorType_eq` expose exact accepted family/constructor
+  decomposition. `GenerationCandidateRun.familyView_eq` fixes the singleton
+  candidate view; family terminal typing follows from the checked result level;
+  the inserted raw family constant is typed once at the checked family type;
+  and `GenerationChecked.checkedResultTarget_hasType` applies the checked
+  parameter/index spines to derive each constructor result target.
+  `CandidateNormalizedCtorRun.viewTel_eq` and `rightType_ofChecked` transport
+  these facts through the exact candidate telescope. AliasFormer, AnnotatedPi,
+  and `IndexedVec` now omit both record fields, and the circular `IndexedVec`
+  right-typing theorems formerly obtained from a complete identity-generation
+  WF proof are deleted.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Latest checkpoint:** automatic singleton semantic assembly now consumes
+- **Latest checkpoint:** automatic singleton semantic assembly consumes
   the arbitrary-length operational witnesses plus exact per-position verified
   contexts/translations and returns the source-ordered hierarchy under
   `Nonempty`. Semantic generation, public packaging, and produced packaging all
   project from that owner. `IndexedVec` exercises the dependent
   two-constructor path and proves `nil`/`cons` order preservation; AliasFormer
-  and AnnotatedPi exercise non-identity singleton views. Their certified Theory
-  transactions and checked E1 replays continue to use the same packages.
-- **Current gap:** derive the remaining structural fields of
+  and AnnotatedPi exercise non-identity singleton views. Exact checked shape,
+  family-result typing, one post-family constant proof, and checked result
+  spines now derive all view telescopes and terminal judgments. Their certified
+  Theory transactions and checked E1 replays continue to use the same packages.
+- **Current gap:** derive the remaining fields of
   `GenerationCandidateSemanticRun`—the analyzer/normalization equality,
-  checked WF value, stored-spine and raw/view telescope/result equations,
-  post-family environment WF, and constructor alignments—from one successful
-  dependent analysis plus the produced semantic hierarchy. Then expose a
+  checked WF value, stored-spine, raw telescope/result and view-terminal
+  equations, post-family environment WF, and dependent constructor-run/list
+  alignments—from one successful dependent analysis plus the produced semantic
+  hierarchy. Then expose a
   generic outer theorem taking the complete successful
   `buildNormalizationCandidate` execution to a
   `Nonempty ProducedGenerationCandidatePackage` (or an equivalent dependent
   result), with no fixture-supplied generation alignment. Constructing the
   per-position verified semantic inputs directly from an arbitrary successful
   outer call is part of that theorem, not authority for the operational result
-  to choose Theory meaning. The outer boundary remains singleton-family;
+  to choose Theory meaning. View-telescope and terminal-typing premises must
+  not be reintroduced. The outer boundary remains singleton-family;
   complete the normalization differential matrix before widening it to mutual
   and nested blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
@@ -351,12 +378,20 @@ to the replacement.
   constructors; singleton and two-constructor list regressions; exact
   `IndexedVec` source-order preservation plus swapped-view rejection;
   retained-hierarchy and semantic-generation migrations for all three
-  fixtures; focused 118-job semantic replay, 157-job default Lake build, and
-  124-job Nix proof build; 20-sorry frontier check; default Nix build; all six
+  fixtures; absence of fixture `viewTel`/`rightType` inputs; focused direct
+  compiles, 157-job default Lake build, and 124-job Theory/Verify and Nix proof
+  builds; 20-sorry frontier check; default Nix build; all six
   current-host flake checks; all-system no-build evaluation; formatter; Theory
   import-boundary; and whitespace checks.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
-  added. The three operational list theorems are guarded at exactly the
+  added. `Checked.type_eq`, `GenerationChecked.viewCtorType_eq`, and
+  `GenerationChecked.checkedResultTarget_hasType` are exactly guarded at
+  `propext`/`Quot.sound`. `GenerationCandidateRun.familyView_eq` and
+  `CandidateNormalizedCtorRun.viewTel_eq` have exactly the small transitional
+  `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure inherited from
+  their Verify evidence. Family-constant and constructor-target typing inherit
+  the already recorded full checked-semantic closure and are exactly guarded.
+  The three operational list theorems are guarded at exactly the
   accepted `propext`/`Classical.choice`/`Quot.sound` baseline. The generic outer
   constructor has the exactly guarded
   `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure inherited through
