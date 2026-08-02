@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the structural generation-evidence checkpoint (2026-08-02):
+Audit baseline after the generation analyzer-provenance checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -37,9 +37,13 @@ Audit baseline after the structural generation-evidence checkpoint (2026-08-02):
   `2b1d802fc6796e7317ec1d24708a3ebdda416655`
   (`feat: derive structural generation evidence`; 44 commits ahead of upstream;
   4 files changed, 445 insertions, and 100 deletions)
+- generation analyzer-provenance checkpoint:
+  `a64fe982bc2a7f1c6c34ec82565ec5fe1c26350b`
+  (`feat: derive generation analyzer provenance`; 46 commits ahead of upstream;
+  4 files changed, 138 insertions, and 22 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `2b1d802f` builds on the exact arbitrary-length
+- audited source checkpoint: `a64fe982` builds on the exact arbitrary-length
   producer witnesses and source-indexed semantic inputs that return a
   `Nonempty ProducedNormalizationCandidateSemanticRun`. The retained checker
   selects every Theory view; callers provide verified contexts and strict
@@ -56,7 +60,16 @@ Audit baseline after the structural generation-evidence checkpoint (2026-08-02):
   constructor-result spine supplies every constructor target judgment.
   AliasFormer, AnnotatedPi, and `IndexedVec` no longer provide `viewTel` or
   `rightType`; the former circular `IndexedVec` terminal-typing helpers are
-  deleted. The exact 20-sorry frontier, focused direct compiles, 157-job default
+  deleted. `GenerationCandidateRun` now retains the exact successful dependent
+  `generation?` equation instead of a fixture-provided normalization equality.
+  Theory proves that successful `check?` and `generation?` results retain their
+  analyzed normalization, so the candidate/analyzer normalization equality is
+  derived generically. Verify also reconstructs post-family `VEnv.WF` from the
+  verified pre-family context, candidate raw/view definitional equality,
+  checked family typing, and exact raw-family insertion. AliasFormer,
+  AnnotatedPi, and `IndexedVec` therefore provide neither `normalization_eq` nor
+  `typeEnv_wf`; each supplies only its exact analyzer-success equation. The
+  exact 20-sorry frontier, focused direct compiles, 157-job default
   Lake build, 124-job Theory/Verify and Nix proof builds, default Nix
   build, all six current-host flake checks, all-system no-build evaluation,
   formatter, Theory import-boundary, and whitespace checks pass at that
@@ -278,8 +291,8 @@ to the replacement.
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
-  `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, `f0caf16`, `e3cf22d`, and
-  `7e5f4f7`, plus `2b1d802`
+  `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, `f0caf16`, `e3cf22d`,
+  `7e5f4f7`, `2b1d802`, and `a64fe98`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -338,6 +351,17 @@ to the replacement.
   and `IndexedVec` now omit both record fields, and the circular `IndexedVec`
   right-typing theorems formerly obtained from a complete identity-generation
   WF proof are deleted.
+  `GenerationCandidateRun` and its semantic owner now store the exact equation
+  that candidate normalization's dependent `generation?` analysis returned the
+  retained `GenerationChecked`. Theory's
+  `Normalization.check?_normalization` and
+  `Normalization.generation?_normalization` derive normalization identity from
+  successful analysis. `GenerationCandidateRun.normalization_eq` projects that
+  result, and `GenerationCandidateRun.typeEnv_wf` reconstructs the post-family
+  environment from the verified pre-family context, checked family typing,
+  candidate raw/view equality, and exact raw-family insertion. The three live
+  fixtures now provide `analysis := rfl` and no independent
+  `normalization_eq` or `typeEnv_wf` field.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
@@ -350,14 +374,18 @@ to the replacement.
   two-constructor path and proves `nil`/`cons` order preservation; AliasFormer
   and AnnotatedPi exercise non-identity singleton views. Exact checked shape,
   family-result typing, one post-family constant proof, and checked result
-  spines now derive all view telescopes and terminal judgments. Their certified
-  Theory transactions and checked E1 replays continue to use the same packages.
+  spines now derive all view telescopes and terminal judgments. The semantic
+  generation owner records exact dependent analyzer success rather than a bare
+  normalization equality.
+  Normalization identity and post-family environment WF are generic
+  consequences, and AliasFormer, AnnotatedPi, and `IndexedVec` no longer supply
+  either as fixture evidence. Their certified Theory transactions and checked
+  E1 replays still project from the same source-indexed packages.
 - **Current gap:** derive the remaining fields of
-  `GenerationCandidateSemanticRun`—the analyzer/normalization equality,
-  checked WF value, stored-spine, raw telescope/result and view-terminal
-  equations, post-family environment WF, and dependent constructor-run/list
-  alignments—from one successful dependent analysis plus the produced semantic
-  hierarchy. Then expose a
+  `GenerationCandidateSemanticRun`—the checked WF value, stored-spine, raw
+  telescope/result and view-terminal equations, and dependent
+  constructor-run/list alignments—from one successful dependent analysis plus
+  the produced semantic hierarchy. Then expose a
   generic outer theorem taking the complete successful
   `buildNormalizationCandidate` execution to a
   `Nonempty ProducedGenerationCandidatePackage` (or an equivalent dependent
@@ -365,7 +393,8 @@ to the replacement.
   per-position verified semantic inputs directly from an arbitrary successful
   outer call is part of that theorem, not authority for the operational result
   to choose Theory meaning. View-telescope and terminal-typing premises must
-  not be reintroduced. The outer boundary remains singleton-family;
+  not be reintroduced; neither may normalization equality or post-family WF.
+  The outer boundary remains singleton-family;
   complete the normalization differential matrix before widening it to mutual
   and nested blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
@@ -378,7 +407,9 @@ to the replacement.
   constructors; singleton and two-constructor list regressions; exact
   `IndexedVec` source-order preservation plus swapped-view rejection;
   retained-hierarchy and semantic-generation migrations for all three
-  fixtures; absence of fixture `viewTel`/`rightType` inputs; focused direct
+  fixtures; absence of fixture `viewTel`, `rightType`, `normalization_eq`, and
+  `typeEnv_wf` inputs; exact analyzer-success replay in all three fixtures;
+  focused direct
   compiles, 157-job default Lake build, and 124-job Theory/Verify and Nix proof
   builds; 20-sorry frontier check; default Nix build; all six
   current-host flake checks; all-system no-build evaluation; formatter; Theory
@@ -411,6 +442,12 @@ to the replacement.
   `Nonempty` avoids a choice-based data extractor. No root declares a new
   axiom, assumes a normalization oracle, or gives operational production
   independent semantic authority.
+  The new Theory normalization-retention lemmas are exactly guarded at
+  `propext`/`Quot.sound`. The Verify normalization projection has exactly the
+  small inherited `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure;
+  reconstructed post-family WF has exactly the already recorded checked
+  semantic closure. These are derivations from retained analysis/context
+  evidence, not new axioms or an expansion of the accepted trust budget.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or
