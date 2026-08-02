@@ -847,6 +847,19 @@ inductive CandidateExprIdentity :
           annotations annotationsEq checked normalized
           domainCandidate bodyCandidate)
 
+/-- An identity-normalizing trace necessarily preserves the stored main Pi
+spine. This turns the recursive identity witness into the Boolean gate used
+by the generation assembler. -/
+theorem CandidateExprIdentity.storedSpine
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    (identity : CandidateExprIdentity trace) :
+    trace.storedSpine = true := by
+  induction identity with
+  | terminal => rfl
+  | forallE _ _ source_eq _ _ _ _ bodyIH =>
+    simp [AddInductive.CandidateExprTrace.storedSpine,
+      source_eq, bodyIH]
+
 /-- Exact component inversion for a strict translation of a kernel Pi. -/
 theorem TrExprS.forallE_components
     (run : TrExprS env Us Δ (.forallE name domain body binderInfo) source') :
@@ -1745,6 +1758,26 @@ def CandidateExprSpineRun (env : VEnv) (Us : List Name)
     (raw view : VExpr) : Prop :=
   candidate.trace.storedSpine = true ∧
     ∃ inferred, CandidateExprRun env Us candidate.trace [] raw view inferred
+
+/-- Turn an exact root translation and a recursive identity witness into the
+generation-ready spine package. The root equalities transport the recursive
+run out of the verifier's reconstructed context without choosing a different
+semantic endpoint. -/
+def CandidateExprRootRun.spineOfIdentity
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (run : CandidateExprRootRun env Us candidate source' source')
+    (identity : CandidateExprIdentity candidate.trace) :
+    CandidateExprSpineRun env Us candidate source' source' := by
+  refine ⟨identity.storedSpine, ?_⟩
+  have source_tr : run.contextRun.context.TrExprS source source' := by
+    simpa only [VContext.TrExprS, run.venv_eq, run.lparams_eq,
+      run.vlctx_eq] using run.source_tr
+  obtain ⟨inferred', ⟨recursive⟩⟩ :=
+    CandidateExprRun.exists_ofIdentity candidate.trace identity
+      run.contextRun source' source_tr run.whnfFuel run.whnfDepth
+  refine ⟨inferred', ?_⟩
+  simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using recursive
 
 theorem CandidateExprSpineRun.evidence
     (run : CandidateExprSpineRun env Us candidate raw view) :

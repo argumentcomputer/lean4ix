@@ -969,16 +969,43 @@ theorem indexedVecFamilyCandidate_view_eq :
     indexedVecIndexDomainCandidateTrace, indexedVecTerminalCandidateTrace,
     Lean4Lean.AddInductive.CandidateExprTrace.view]
   rw [habstract, habstract]
-  simp [Expr.abstractList, Expr.abstract1,
-    indexedVecInnerKernel, indexedVecTerminalKernel,
-    indexedVecParamCandidateContext, indexedVecIndexCandidateContext,
+  simp [Expr.abstract1, indexedVecTerminalKernel,
     indexedVecFamilyCandidateContext,
     Lean4Lean.AddInductive.Context.pushLocalDecl,
-    Lean4Lean.AddInductive.Context.freshExpr,
     Lean4Lean.AddInductive.Context.freshFVarId,
     NameGenerator.next, NameGenerator.curr,
     indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
   constructor <;> rfl
+
+/-- Every retained family-type candidate node preserves its kernel source.
+This is the structural premise used by the semantic spine interpreter; it is
+stronger than the root `view` equality because it covers both Pi domains and
+the instantiated body under their exact candidate contexts. -/
+theorem indexedVecFamilyCandidate_identity :
+    Lean4Lean.TypeChecker.CandidateExprIdentity
+      indexedVecFamilyCandidate.trace := by
+  change Lean4Lean.TypeChecker.CandidateExprIdentity
+    indexedVecFamilyCandidateTrace
+  unfold indexedVecFamilyCandidateTrace
+  refine .forallE (name := indexedVecParamName) (binderInfo := .default)
+    (body := indexedVecInnerKernel)
+    (annotations := indexedVecParamAnnotations)
+    indexedVecParamDomainCandidateTrace indexedVecInnerCandidateTrace
+    ?_ rfl (.terminal rfl) ?_
+  · rfl
+  · unfold indexedVecInnerCandidateTrace
+    refine .forallE (name := indexedVecIndexName) (binderInfo := .default)
+      (body := indexedVecTerminalKernel)
+      (annotations := indexedVecIndexAnnotations)
+      indexedVecIndexDomainCandidateTrace indexedVecTerminalCandidateTrace
+      ?_ rfl (.terminal rfl) ?_
+    · simpa only [Expr.instantiate1_eq, indexedVecInnerKernel] using
+        indexedVecInnerKernel_instantiate1
+          indexedVecFamilyCandidateContext.freshExpr
+    · exact .terminal (by
+        simpa only [Expr.instantiate1_eq] using
+          (indexedVecTerminalKernel_instantiate1
+            indexedVecParamCandidateContext.freshExpr).symm)
 
 private theorem indexedVecParamDomainCandidateTrace_loop (fuel : Nat) :
     Lean4Lean.AddInductive.buildCandidateExpr.loop

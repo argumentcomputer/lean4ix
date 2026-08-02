@@ -2546,16 +2546,46 @@ theorem consCandidate_view_eq :
   rw [habstract, habstract, habstract, habstract]
   rw [consInfoTypeShape]
   simp [consCtorTypeRaw, consNTypeRaw, consHeadTypeRaw,
-    consTailTypeRaw, consTerminalRaw, consAfterAlpha, consAfterN,
-    consAfterHead, consTerminal, consTailDomain,
+    consTailTypeRaw, consTerminalRaw, consTerminal, consTailDomain,
     consAlphaExpr, consNExpr,
-    consRootContext, consAlphaContext, consNContext,
-    consHeadContext, consTailContext, ctorContext,
+    consRootContext, consAlphaContext, ctorContext,
     AddInductive.Context.pushLocalDecl,
     AddInductive.Context.freshExpr,
     AddInductive.Context.freshFVarId,
-    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
     Expr.abstract1, NameGenerator.next, NameGenerator.curr]
+
+/-- The retained `cons` candidate preserves all four Pi nodes, their domains,
+and the terminal recursive result under the exact instantiated contexts. -/
+theorem consCandidate_identity :
+    TypeChecker.CandidateExprIdentity consCandidate.trace := by
+  change TypeChecker.CandidateExprIdentity consCandidateTrace
+  unfold consCandidateTrace
+  refine .forallE (name := consAlphaName) (binderInfo := .implicit)
+    (body := consNTypeRaw) (annotations := consAlphaAnnotations)
+    consAlphaDomainCandidateTrace consAfterAlphaCandidateTrace
+    (by simpa [consCtorTypeRaw] using consInfoTypeShape)
+    rfl (.terminal rfl) ?_
+  · unfold consAfterAlphaCandidateTrace
+    refine .forallE (name := consNName) (binderInfo := .implicit)
+      (body := consAfterAlpha.bindingBody!)
+      (annotations := consNatAnnotations)
+      consNatDomainCandidateTrace consAfterNCandidateTrace
+      (by rw [consAfterAlphaShape]; rfl) rfl (.terminal rfl) ?_
+    · unfold consAfterNCandidateTrace
+      refine .forallE (name := consHeadName) (binderInfo := .default)
+        (body := consAfterN.bindingBody!)
+        (annotations := consHeadAnnotations)
+        consHeadDomainCandidateTrace consAfterHeadCandidateTrace
+        (by rw [consAfterNShape]; rfl) rfl (.terminal rfl) ?_
+      · unfold consAfterHeadCandidateTrace
+        refine .forallE (name := consTailName) (binderInfo := .default)
+          (body := consAfterHead.bindingBody!)
+          (annotations := consTailAnnotations)
+          consTailDomainCandidateTrace consTerminalCandidateTrace
+          (by rw [consAfterHeadShape]; rfl) rfl (.terminal rfl) ?_
+        · unfold consTerminalCandidateTrace
+          exact .terminal (by
+            simpa only [Expr.instantiate1_eq] using consTerminalShape.symm)
 
 theorem consAlphaDomainCandidateTraceLoop (fuel : Nat) :
     AddInductive.buildCandidateExpr.loop consRootContext

@@ -4,16 +4,21 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline before this checkpoint (2026-08-01):
+Audit baseline before this checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
-- published fork tip: `33b99f4e462eaa02b78aba061dcac37bd64d84c4`
-  on local and `origin/jcb/induct` (23 commits ahead of upstream)
+- published fork tip: `d553930affdb3690ad43fbf9acddf68d476fe260`
+  on local, Git, and `origin/jcb/induct` (32 commits ahead of upstream;
+  31 files changed, 37,236 insertions, 59 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited checkout: a Jujutsu working-copy child of the same `33b99f4e` tree
-  as both development branch refs. Use the branch ref, not a detached Git
-  `HEAD`, for published-fork comparisons.
+- audited checkout: a Jujutsu working-copy child of `d553930a` with concrete
+  `IndexedVec` identity witnesses, generation-ready spine runs, the complete
+  producer-selected semantic package, certified Theory transaction, and
+  checked E1 replay. The exact sorry audit, focused and 124-job full
+  Theory/Verify builds, default Nix build, all-system no-build evaluation, and
+  current-host flake check pass on that worktree. Use the branch ref, not a
+  detached Git `HEAD`, for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -226,9 +231,11 @@ to the replacement.
 
 ## D010 — executable normalization and certified producer boundary
 
-- **Status:** published-fork
+- **Status:** published-fork; this checkpoint extends it
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
-  `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, and `33b99f4`
+  `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
+  `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`, and
+  `d553930`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -241,20 +248,35 @@ to the replacement.
   constructor validation, freshness, transparent recursion and positivity
   traversals, raw-family declaration, annotation consumption, nested-Π
   candidate traversal, dependent family/constructor list assembly, and the
-  complete successful `buildNormalizationCandidate` equation.
+  complete successful `buildNormalizationCandidate` equation. The executable
+  boundary now also covers Lean's real universe-polymorphic `IndexedVec`:
+  exact parameter/index family validation, post-family `nil` and dependent
+  recursive `cons` candidates, ordered constructor-list assembly, and the
+  complete successful outer producer equation. Generic recursive identity
+  replay retains caller-selected Theory endpoints for identity-normalizing
+  traces.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Current gap:** generalize the complete singleton producer construction
-  beyond the two zero-parameter, zero-index fixtures. The next breadth step is
-  parameters, indices, and arbitrary constructor lists, followed by the
-  normalization differential matrix and eventually mutual and nested blocks.
-- **Tests:** exact positive AliasFormer and AnnotatedPi whole-call equations;
-  positive semantic/transaction/replay fixtures for both; opaque-`outParam`
-  whole-candidate rejection; exact axiom guards; full 152-job Lake build;
-  20-sorry audit; formatter check; and current-host `nix build`. The broader
-  current-host flake and all-system no-build gates remain pin/release gates.
+- **Checkpoint extension:** the concrete recursive identity witnesses feed
+  generation-ready family/`nil`/`cons` spine runs and a complete
+  `GenerationCandidatePackage`. `indexedVecSemanticProducedGenerationCandidatePackage`
+  projects the certificate selected by the exact outer call; the corresponding
+  certified Theory transaction and checked E1 `TrEnv'` replay are complete and
+  exactly guarded.
+- **Current gap:** abstract the source-indexed ordered constructor-list
+  construction to arbitrary successful metadata without weakening exact
+  candidate provenance, followed by the normalization differential matrix and
+  eventually mutual and nested blocks.
+- **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
+  whole-call equations; positive semantic/transaction/replay fixtures for the
+  first two plus the complete checkpoint semantic/transaction/E1 replay for
+  `IndexedVec`; exact `IndexedVec` family/`nil`/`cons` candidate traces;
+  opaque-`outParam` whole-candidate rejection; exact axiom guards for the two
+  new public roots; focused and full 124-job Lake builds; 20-sorry audit;
+  default Nix build; all-system no-build evaluation; current-host flake check;
+  formatter check; and diff/import-boundary gates.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
   added. Concrete Verify producer roots expose existing checker-refinement,
   pointer/cache, and projection dependencies; generic Theory transaction roots
@@ -264,6 +286,31 @@ to the replacement.
 - **Removal condition:** upstream executable inductive ingestion returns or
   derives an equivalently source-indexed certified package, all supported
   metadata paths use it, and ix no longer relies on the fork-only producer API.
+
+## D011 — verified syntactic definitional-equality fast path
+
+- **Status:** published-fork
+- **Commit:** `f0d80f8`
+- **Delta:** `TypeChecker.Inner.isDefEq` accepts `Expr.eqv` inputs before
+  entering `isDefEqCore`. The verified refinement transports the strict source
+  translation across expression equivalence and proves the ordinary Theory
+  definitional equality result. The successful fast path leaves checker state
+  unchanged; non-equivalent inputs retain the existing core behavior.
+- **Ix impact:** removes an operational state-mutation obstruction in exact
+  constructor-candidate replay and makes reflexive executable equality checks
+  cheaper without changing the Theory API.
+- **Tests:** exact-state AliasRec, AnnotatedPi, and `IndexedVec` fixtures;
+  `TypeChecker.Inner.isDefEq.WF`; focused and full Theory/Verify builds; exact
+  20-sorry audit; default Nix build; all-system no-build evaluation; and the
+  current-host flake check.
+- **Axiom note:** no new axiom was declared. The Verify proof reaches the
+  existing `Expr.eqv_eq` implementation contract; it grants no new Theory
+  authority and remains part of Track T's platform-contract audit.
+- **Upstream issue/PR:** TBD; submit as an isolated checker optimization plus
+  its refinement theorem and exact-state regressions.
+- **Removal condition:** an equivalent verified fast path lands upstream, or
+  the fork removes this behavior and all candidate-replay fixtures pass against
+  the upstream state transition instead.
 
 ## Review checklist
 

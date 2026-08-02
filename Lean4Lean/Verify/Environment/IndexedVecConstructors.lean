@@ -1189,7 +1189,19 @@ theorem nilCandidate_view_eq :
     nilCandidateContext, ctorContext,
     AddInductive.Context.freshExpr,
     AddInductive.Context.freshFVarId,
-    NameGenerator.next, NameGenerator.curr]
+    NameGenerator.curr]
+
+/-- The retained `nil` candidate is identity-normalizing at its root, domain,
+and instantiated result. -/
+theorem nilCandidate_identity :
+    TypeChecker.CandidateExprIdentity nilCandidate.trace := by
+  change TypeChecker.CandidateExprIdentity nilCandidateTrace
+  unfold nilCandidateTrace
+  refine .forallE (name := `α) (binderInfo := .implicit)
+    (body := nilCtorBodyRaw) (annotations := nilDomainAnnotations)
+    nilDomainCandidateTrace nilBodyCandidateTrace
+    (by simpa [nilCtorTypeRaw] using nilInfoTypeShape)
+    rfl (.terminal rfl) (.terminal (by rfl))
 
 theorem nilDomainCandidateTraceLoop (fuel : Nat) :
     AddInductive.buildCandidateExpr.loop nilCandidateContext
