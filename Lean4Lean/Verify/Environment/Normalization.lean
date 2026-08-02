@@ -1318,6 +1318,85 @@ theorem CandidateExprRootRun.evidence
   obtain ⟨A, hfinal⟩ := sourceDef.trans henv hΔ.toCtx viewDef
   exact ⟨A, .ofDefEq hfinal⟩
 
+/-- A root candidate together with the exact recursively interpreted semantic
+run selected by its retained checker executions.
+
+Unlike `CandidateExprRootRun`, this bundle does not stop at whole-expression
+equality: it retains the exact inferred type and reconstructed Theory view at
+every recursive candidate position. Consequently the same value can supply
+both normalization evidence and, when the executable trace preserves its main
+Pi spine, the positional telescope/result evidence required by generation.
+The view is selected by the verified run rather than supplied independently by
+a caller. -/
+structure CandidateExprSemanticRootRun (env : VEnv) (Us : List Name)
+    {source : Expr} (candidate : AddInductive.CandidateExpr source)
+    (source' : VExpr) where
+  contextRun : CandidateContextRun candidate.context
+  venv_eq : contextRun.context.venv = env
+  lparams_eq : contextRun.context.lparams = Us
+  vlctx_eq : contextRun.context.vlctx = []
+  source_tr : TrExprS env Us [] source source'
+  whnfFuel : Nat
+  whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1
+  view : VExpr
+  recursive : ∃ inferred, CandidateExprRun env Us candidate.trace []
+    source' view inferred
+
+/-- Forget the retained recursive run and expose the existing root semantic
+interface. The reconstructed view translation is derived from that same run,
+so it cannot name an unrelated endpoint. -/
+def CandidateExprSemanticRootRun.root
+    (run : CandidateExprSemanticRootRun env Us candidate source') :
+    CandidateExprRootRun env Us candidate source' run.view where
+  contextRun := run.contextRun
+  venv_eq := run.venv_eq
+  lparams_eq := run.lparams_eq
+  vlctx_eq := run.vlctx_eq
+  source_tr := run.source_tr
+  view_tr := by
+    obtain ⟨_, recursive⟩ := run.recursive
+    simpa only [AddInductive.CandidateExpr.view] using
+      recursive.view_tr
+  whnfFuel := run.whnfFuel
+  whnfDepth := run.whnfDepth
+
+/-- Automatically construct the retained root semantics from an exact
+verified candidate context and strict translation of the stored kernel
+source.
+
+The checker run selects the Theory view and inferred type existentially; the
+result records those exact selections. No caller-selected normalization view,
+erasure equality, or whole-Pi injectivity principle is used. -/
+theorem CandidateExprSemanticRootRun.exists_ofCandidate
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (contextRun : CandidateContextRun candidate.context)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    (vlctx_eq : contextRun.context.vlctx = [])
+    (source_tr : TrExprS env Us [] source source')
+    (whnfFuel : Nat)
+    (whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (CandidateExprSemanticRootRun env Us candidate source') := by
+  have contextualSource :
+      contextRun.context.TrExprS source source' := by
+    simpa only [VContext.TrExprS, venv_eq, lparams_eq, vlctx_eq] using
+      source_tr
+  obtain ⟨view, inferred, ⟨recursive⟩⟩ :=
+    CandidateExprRun.exists_ofCandidate candidate.trace contextRun source'
+      contextualSource whnfFuel whnfDepth
+  refine ⟨{
+    contextRun := contextRun
+    venv_eq := venv_eq
+    lparams_eq := lparams_eq
+    vlctx_eq := vlctx_eq
+    source_tr := source_tr
+    whnfFuel := whnfFuel
+    whnfDepth := whnfDepth
+    view := view
+    recursive := ⟨inferred, ?_⟩ }⟩
+  simpa only [venv_eq, lparams_eq, vlctx_eq] using recursive
+
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
 tail is checked in the context extended by the raw binder, exactly matching
 `VEnv.TelDefEq` and the mixed generator's raw-binder discipline. -/
@@ -1759,6 +1838,14 @@ def CandidateExprSpineRun (env : VEnv) (Us : List Name)
   candidate.trace.storedSpine = true ∧
     ∃ inferred, CandidateExprRun env Us candidate.trace [] raw view inferred
 
+/-- Retaining the recursive semantic root makes the generation spine a direct
+projection once the executable structural gate has succeeded. -/
+def CandidateExprSemanticRootRun.spine
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (storedSpine : candidate.trace.storedSpine = true) :
+    CandidateExprSpineRun env Us candidate source' run.view :=
+  ⟨storedSpine, run.recursive⟩
+
 /-- Turn an exact root translation and a recursive identity witness into the
 generation-ready spine package. The root equalities transport the recursive
 run out of the verifier's reconstructed context without choosing a different
@@ -1778,6 +1865,36 @@ def CandidateExprRootRun.spineOfIdentity
       run.contextRun source' source_tr run.whnfFuel run.whnfDepth
   refine ⟨inferred', ?_⟩
   simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using recursive
+
+/-- Retain the exact recursive run selected by an identity-normalizing root.
+
+All data fields are inherited from the named root and its fixed Theory
+endpoint. The existential inferred type remains proof-only, so this constructor
+does not use classical choice and does not turn identity into an executable or
+semantic oracle. -/
+def CandidateExprRootRun.semanticOfIdentity
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (run : CandidateExprRootRun env Us candidate source' source')
+    (identity : CandidateExprIdentity candidate.trace) :
+    CandidateExprSemanticRootRun env Us candidate source' where
+  contextRun := run.contextRun
+  venv_eq := run.venv_eq
+  lparams_eq := run.lparams_eq
+  vlctx_eq := run.vlctx_eq
+  source_tr := run.source_tr
+  whnfFuel := run.whnfFuel
+  whnfDepth := run.whnfDepth
+  view := source'
+  recursive := by
+    have source_tr : run.contextRun.context.TrExprS source source' := by
+      simpa only [VContext.TrExprS, run.venv_eq, run.lparams_eq,
+        run.vlctx_eq] using run.source_tr
+    obtain ⟨inferred, ⟨recursive⟩⟩ :=
+      CandidateExprRun.exists_ofIdentity candidate.trace identity
+        run.contextRun source' source_tr run.whnfFuel run.whnfDepth
+    refine ⟨inferred, ?_⟩
+    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using recursive
 
 theorem CandidateExprSpineRun.evidence
     (run : CandidateExprSpineRun env Us candidate raw view) :
@@ -1992,6 +2109,107 @@ def NormalizationCandidateRun.normalizationRun
   addType := run.family.addType
   constructors := by
     simpa only [run.uvars_eq] using run.family.constructors.evidence
+
+/-- One constructor whose exact recursive candidate semantics are retained,
+rather than reconstructed separately for normalization and generation.
+
+The header remains indexed by the kernel source and raw Theory constant. The
+semantic root owns the checker-selected view, its inferred type, and the
+recursive run used by both downstream phases. -/
+structure CandidateConstructorSemanticRun (env : VEnv) (Us : List Name)
+    {source : Constructor}
+    (candidate : AddInductive.CandidateConstructor source)
+    (raw : VConstVal) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprSemanticRootRun env Us candidate.type
+    raw.type
+
+/-- Project the normalization-facing constructor root without losing its
+source or position indices. -/
+def CandidateConstructorSemanticRun.root
+    (run : CandidateConstructorSemanticRun env Us candidate raw) :
+    CandidateConstructorRun env Us candidate raw where
+  name_eq := run.name_eq
+  uvars_eq := run.uvars_eq
+  viewType := run.type.view
+  typeRun := run.type.root
+
+/-- Exact positional semantic ownership for an arbitrary constructor list.
+Every element retains the recursive run selected at that source position; the
+list cannot truncate, reorder, or reuse a run for another constructor. -/
+inductive CandidateConstructorSemanticListRun
+    (env : VEnv) (Us : List Name) :
+    {sources : List Constructor} →
+      AddInductive.CandidateList AddInductive.CandidateConstructor sources →
+      List VConstVal → Type where
+  | nil : CandidateConstructorSemanticListRun env Us .nil []
+  | cons
+      (head : CandidateConstructorSemanticRun env Us candidate raw)
+      (tail : CandidateConstructorSemanticListRun env Us candidates raws) :
+      CandidateConstructorSemanticListRun env Us
+        (.cons candidate candidates) (raw :: raws)
+
+/-- Forget only the retained recursive-run payload and recover the existing
+normalization-facing positional list. -/
+def CandidateConstructorSemanticListRun.roots :
+    CandidateConstructorSemanticListRun env Us candidates raws →
+      CandidateConstructorListRun env Us candidates raws
+  | .nil => .nil
+  | .cons head tail => .cons head.root tail.roots
+
+/-- A singleton-family semantic hierarchy spanning the pre-family candidate,
+the exact raw-family insertion, and every post-family constructor candidate.
+The normalized expression payloads are selected by retained recursive checker
+runs, not by a parallel caller-supplied declaration. -/
+structure CandidateFamilySemanticRun (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.CandidateFamily source)
+    (raw : VInductiveType) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprSemanticRootRun env Us
+    candidate.familyType.type raw.type
+  typeEnv : VEnv
+  addType : env.addConst raw.name raw.toVConstant = some typeEnv
+  constructors : CandidateConstructorSemanticListRun typeEnv Us
+    candidate.constructors raw.ctors
+
+/-- Project the existing normalization-facing family run from the retained
+semantic hierarchy. -/
+def CandidateFamilySemanticRun.root
+    (run : CandidateFamilySemanticRun env Us candidate raw) :
+    CandidateFamilyRun env Us candidate raw where
+  name_eq := run.name_eq
+  uvars_eq := run.uvars_eq
+  viewType := run.type.view
+  typeRun := run.type.root
+  typeEnv := run.typeEnv
+  addType := run.addType
+  constructors := run.constructors.roots
+
+/-- Complete retained semantic ownership for one source-indexed singleton
+normalization candidate. This is the generic bridge from translated family and
+constructor candidates to `NormalizationCandidateRun`; mutual blocks remain a
+later indexed generalization. -/
+structure NormalizationCandidateSemanticRun (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.NormalizationCandidate [source])
+    (rawDecl : VInductDecl) where
+  raw : VInductiveType
+  raw_types_eq : rawDecl.types = [raw]
+  uvars_eq : rawDecl.uvars = Us.length
+  family : CandidateFamilySemanticRun env Us candidate.families.singleton raw
+
+/-- Recover the existing normalization candidate from the retained semantic
+hierarchy. -/
+def NormalizationCandidateSemanticRun.root
+    (run : NormalizationCandidateSemanticRun env Us candidate rawDecl) :
+    NormalizationCandidateRun env Us candidate rawDecl where
+  raw := run.raw
+  raw_types_eq := run.raw_types_eq
+  uvars_eq := run.uvars_eq
+  family := run.family.root
 
 /-- Checker-produced semantic evidence for one positional raw/view
 constructor pair. This has the same four-way declared/emitted split as

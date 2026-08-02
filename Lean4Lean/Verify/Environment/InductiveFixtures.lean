@@ -7156,21 +7156,26 @@ private def aliasFormerCtorCandidateContextRun :
     aliasFormerCtorCandidatePrefix_ne
 
 /-- Family endpoint certificate used by the singleton list assembler. -/
-private def aliasFormerFamilyRootRun :
-    TypeChecker.CandidateExprRootRun typeFamilyAliasEnv []
+private def aliasFormerFamilySemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun typeFamilyAliasEnv []
       aliasFormerFamilyCandidate aliasFormerRawType.type
-      aliasFormerViewType.type where
+    where
   contextRun := aliasFormerCandidateContextRun
   venv_eq := rfl
   lparams_eq := rfl
   vlctx_eq := rfl
   source_tr := aliasFormerFamily_candidateSource_tr
-  view_tr := by
-    simpa [aliasFormerFamilyCandidate,
-      AddInductive.CandidateExprTrace.view] using
-      aliasFormerFamily_candidateView_tr
   whnfFuel := 9999
   whnfDepth := rfl
+  view := aliasFormerViewType.type
+  recursive := ⟨.sort (.succ (.succ .zero)),
+    aliasFormerFamilyCandidateRun⟩
+
+private def aliasFormerFamilyRootRun :
+    TypeChecker.CandidateExprRootRun typeFamilyAliasEnv []
+      aliasFormerFamilyCandidate aliasFormerRawType.type
+      aliasFormerViewType.type :=
+  aliasFormerFamilySemanticRootRun.root
 
 /-- Verified full-check certificate for the actual AliasFormer constructor
 type in the post-family environment. -/
@@ -7217,20 +7222,25 @@ private def aliasFormerCtorCandidateRun :
   .terminal aliasFormerCtorCandidateNodeRun
 
 /-- Constructor endpoint certificate in the exact post-family context. -/
-private def aliasFormerCtorRootRun :
-    TypeChecker.CandidateExprRootRun aliasFormerTypeEnv []
+private def aliasFormerCtorSemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun aliasFormerTypeEnv []
       aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
-      aliasFormerRawType.ctors[0].type where
+    where
   contextRun := aliasFormerCtorCandidateContextRun
   venv_eq := rfl
   lparams_eq := rfl
   vlctx_eq := rfl
   source_tr := aliasFormerCtorCheckTypeRun.expr_tr
-  view_tr := by
-    refine ⟨_, aliasFormerCtorCheckTypeRun.expr_tr, ?_⟩
-    exact ⟨_, aliasFormerCtorCheckTypeRun.hasType⟩
   whnfFuel := 9999
   whnfDepth := rfl
+  view := aliasFormerRawType.ctors[0].type
+  recursive := ⟨.const ``TypeFamilyAlias [], aliasFormerCtorCandidateRun⟩
+
+private def aliasFormerCtorRootRun :
+    TypeChecker.CandidateExprRootRun aliasFormerTypeEnv []
+      aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
+      aliasFormerRawType.ctors[0].type :=
+  aliasFormerCtorSemanticRootRun.root
 
 /-- The actual AliasFormer constructor type is typed by the verified full
 checker in the post-family environment. -/
@@ -7250,13 +7260,13 @@ private def aliasFormerFamilySpineRun :
     TypeChecker.CandidateExprSpineRun typeFamilyAliasEnv []
       aliasFormerFamilyCandidate aliasFormerRawType.type
       aliasFormerViewType.type :=
-  ⟨rfl, ⟨_, aliasFormerFamilyCandidateRun⟩⟩
+  aliasFormerFamilySemanticRootRun.spine rfl
 
 private def aliasFormerCtorSpineRun :
     TypeChecker.CandidateExprSpineRun aliasFormerTypeEnv []
       aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
       aliasFormerRawType.ctors[0].type :=
-  ⟨rfl, ⟨_, aliasFormerCtorCandidateRun⟩⟩
+  aliasFormerCtorSemanticRootRun.spine rfl
 
 /-- Verified delta-normalization leaf for `RecAlias.{1}`. -/
 def recAliasWhnfRun :
@@ -7355,40 +7365,59 @@ private def aliasRecCtorEvidence :
     .forallE aliasRecFieldEvidence
       (.refl (aliasRecResult_hasType rfl))⟩
 
-private def aliasFormerCandidateConstructorRun :
-    VInductDecl.CandidateConstructorRun aliasFormerTypeEnv []
+private def aliasFormerCandidateConstructorSemanticRun :
+    VInductDecl.CandidateConstructorSemanticRun aliasFormerTypeEnv []
       aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := aliasFormerRawType.ctors[0].type
-  typeRun := aliasFormerCtorRootRun
+  type := aliasFormerCtorSemanticRootRun
+
+private def aliasFormerCandidateConstructorRun :
+    VInductDecl.CandidateConstructorRun aliasFormerTypeEnv []
+      aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] :=
+  aliasFormerCandidateConstructorSemanticRun.root
+
+private def aliasFormerCandidateConstructorSemanticListRun :
+    VInductDecl.CandidateConstructorSemanticListRun aliasFormerTypeEnv []
+      aliasFormerFamilyListCandidate.constructors
+      aliasFormerRawType.ctors := by
+  exact .cons aliasFormerCandidateConstructorSemanticRun .nil
 
 private def aliasFormerCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun aliasFormerTypeEnv []
       aliasFormerFamilyListCandidate.constructors
-      aliasFormerRawType.ctors := by
-  exact .cons aliasFormerCandidateConstructorRun .nil
+      aliasFormerRawType.ctors :=
+  aliasFormerCandidateConstructorSemanticListRun.roots
 
-private def aliasFormerCandidateFamilyRun :
-    VInductDecl.CandidateFamilyRun typeFamilyAliasEnv []
+private def aliasFormerCandidateFamilySemanticRun :
+    VInductDecl.CandidateFamilySemanticRun typeFamilyAliasEnv []
       aliasFormerFamilyListCandidate aliasFormerRawType where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := aliasFormerViewType.type
-  typeRun := aliasFormerFamilyRootRun
+  type := aliasFormerFamilySemanticRootRun
   typeEnv := aliasFormerTypeEnv
   addType := rfl
-  constructors := aliasFormerCandidateConstructorListRun
+  constructors := aliasFormerCandidateConstructorSemanticListRun
+
+private def aliasFormerCandidateFamilyRun :
+    VInductDecl.CandidateFamilyRun typeFamilyAliasEnv []
+      aliasFormerFamilyListCandidate aliasFormerRawType :=
+  aliasFormerCandidateFamilySemanticRun.root
 
 /-- The complete source-indexed singleton candidate list is now the source of
 the Theory normalization value and its semantic run. -/
-def aliasFormerNormalizationCandidateRun :
-    VInductDecl.NormalizationCandidateRun typeFamilyAliasEnv []
+private def aliasFormerNormalizationCandidateSemanticRun :
+    VInductDecl.NormalizationCandidateSemanticRun typeFamilyAliasEnv []
       aliasFormerNormalizationCandidate aliasFormerRawDecl where
   raw := aliasFormerRawType
   raw_types_eq := rfl
   uvars_eq := rfl
-  family := aliasFormerCandidateFamilyRun
+  family := aliasFormerCandidateFamilySemanticRun
+
+def aliasFormerNormalizationCandidateRun :
+    VInductDecl.NormalizationCandidateRun typeFamilyAliasEnv []
+      aliasFormerNormalizationCandidate aliasFormerRawDecl :=
+  aliasFormerNormalizationCandidateSemanticRun.root
 
 example : aliasFormerNormalizationCandidateRun.viewDecl =
     aliasFormerViewDecl := rfl
@@ -7810,24 +7839,32 @@ private def annotatedPiFamilyCandidateRun :
       (.sort (.succ (.succ .zero))) :=
   .terminal annotatedPiFamilyCandidateNodeRun
 
-private def annotatedPiFamilyRootRun :
-    TypeChecker.CandidateExprRootRun outParamEnv []
+private def annotatedPiFamilySemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun outParamEnv []
       annotatedPiFamilyCandidate annotatedPiRawType.type
-      annotatedPiRawType.type where
+    where
   contextRun := annotatedPiFamilyCandidateContextRun
   venv_eq := rfl
   lparams_eq := rfl
   vlctx_eq := rfl
   source_tr := annotatedPiFamilyCandidateRun.source_tr
-  view_tr := annotatedPiFamilyCandidateRun.view_tr
   whnfFuel := 9999
   whnfDepth := rfl
+  view := annotatedPiRawType.type
+  recursive := ⟨.sort (.succ (.succ .zero)),
+    annotatedPiFamilyCandidateRun⟩
+
+private def annotatedPiFamilyRootRun :
+    TypeChecker.CandidateExprRootRun outParamEnv []
+      annotatedPiFamilyCandidate annotatedPiRawType.type
+      annotatedPiRawType.type :=
+  annotatedPiFamilySemanticRootRun.root
 
 private def annotatedPiFamilySpineRun :
     TypeChecker.CandidateExprSpineRun outParamEnv []
       annotatedPiFamilyCandidate annotatedPiRawType.type
       annotatedPiRawType.type :=
-  ⟨rfl, ⟨_, annotatedPiFamilyCandidateRun⟩⟩
+  annotatedPiFamilySemanticRootRun.spine rfl
 
 private def annotatedPiCtorCandidateNodeRun :
     TypeChecker.CandidateNodeRun annotatedPiTypeEnv [] []
@@ -8022,24 +8059,31 @@ private def annotatedPiCtorCandidateRun :
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner])
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner]) rfl
 
-private def annotatedPiCtorRootRun :
-    TypeChecker.CandidateExprRootRun annotatedPiTypeEnv []
+private def annotatedPiCtorSemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
-      annotatedPiViewCtor.type where
+    where
   contextRun := annotatedPiCtorCandidateContextRun
   venv_eq := rfl
   lparams_eq := rfl
   vlctx_eq := rfl
   source_tr := annotatedPiCtorCandidateRun.source_tr
-  view_tr := annotatedPiCtorCandidateRun.view_tr
   whnfFuel := 9999
   whnfDepth := rfl
+  view := annotatedPiViewCtor.type
+  recursive := ⟨.sort (.succ .zero), annotatedPiCtorCandidateRun⟩
+
+private def annotatedPiCtorRootRun :
+    TypeChecker.CandidateExprRootRun annotatedPiTypeEnv []
+      annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
+      annotatedPiViewCtor.type :=
+  annotatedPiCtorSemanticRootRun.root
 
 private def annotatedPiCtorSpineRun :
     TypeChecker.CandidateExprSpineRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
       annotatedPiViewCtor.type := by
-  refine ⟨?_, ⟨_, annotatedPiCtorCandidateRun⟩⟩
+  apply annotatedPiCtorSemanticRootRun.spine
   have hsource : annotatedPiMkInfo.type =
       .forallE annotatedPiOuterName annotatedPiInnerKernel
         (.const ``AnnotatedPi []) .default := rfl
@@ -8048,41 +8092,60 @@ private def annotatedPiCtorSpineRun :
     beq_self_eq_true, Bool.true_and]
   rfl
 
-private def annotatedPiCandidateConstructorRun :
-    VInductDecl.CandidateConstructorRun annotatedPiTypeEnv []
+private def annotatedPiCandidateConstructorSemanticRun :
+    VInductDecl.CandidateConstructorSemanticRun annotatedPiTypeEnv []
       annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := annotatedPiViewCtor.type
-  typeRun := annotatedPiCtorRootRun
+  type := annotatedPiCtorSemanticRootRun
+
+private def annotatedPiCandidateConstructorRun :
+    VInductDecl.CandidateConstructorRun annotatedPiTypeEnv []
+      annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] :=
+  annotatedPiCandidateConstructorSemanticRun.root
+
+private def annotatedPiCandidateConstructorSemanticListRun :
+    VInductDecl.CandidateConstructorSemanticListRun annotatedPiTypeEnv []
+      annotatedPiFamilyListCandidate.constructors
+      annotatedPiRawType.ctors := by
+  exact .cons annotatedPiCandidateConstructorSemanticRun .nil
 
 private def annotatedPiCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun annotatedPiTypeEnv []
       annotatedPiFamilyListCandidate.constructors
-      annotatedPiRawType.ctors := by
-  exact .cons annotatedPiCandidateConstructorRun .nil
+      annotatedPiRawType.ctors :=
+  annotatedPiCandidateConstructorSemanticListRun.roots
 
-private def annotatedPiCandidateFamilyRun :
-    VInductDecl.CandidateFamilyRun outParamEnv []
+private def annotatedPiCandidateFamilySemanticRun :
+    VInductDecl.CandidateFamilySemanticRun outParamEnv []
       annotatedPiFamilyListCandidate annotatedPiRawType where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := annotatedPiRawType.type
-  typeRun := annotatedPiFamilyRootRun
+  type := annotatedPiFamilySemanticRootRun
   typeEnv := annotatedPiTypeEnv
   addType := rfl
-  constructors := annotatedPiCandidateConstructorListRun
+  constructors := annotatedPiCandidateConstructorSemanticListRun
+
+private def annotatedPiCandidateFamilyRun :
+    VInductDecl.CandidateFamilyRun outParamEnv []
+      annotatedPiFamilyListCandidate annotatedPiRawType :=
+  annotatedPiCandidateFamilySemanticRun.root
 
 /-- Complete normalization candidate for the annotation-bearing recursive Π
 fixture. The family is unchanged; the constructor domain is reconstructed
 from the exact recursive checker trace with only `outParam` peeled. -/
-def annotatedPiNormalizationCandidateRun :
-    VInductDecl.NormalizationCandidateRun outParamEnv []
+private def annotatedPiNormalizationCandidateSemanticRun :
+    VInductDecl.NormalizationCandidateSemanticRun outParamEnv []
       annotatedPiNormalizationCandidate annotatedPiRawDecl where
   raw := annotatedPiRawType
   raw_types_eq := rfl
   uvars_eq := rfl
-  family := annotatedPiCandidateFamilyRun
+  family := annotatedPiCandidateFamilySemanticRun
+
+def annotatedPiNormalizationCandidateRun :
+    VInductDecl.NormalizationCandidateRun outParamEnv []
+      annotatedPiNormalizationCandidate annotatedPiRawDecl :=
+  annotatedPiNormalizationCandidateSemanticRun.root
 
 example : annotatedPiNormalizationCandidateRun.viewDecl =
     annotatedPiViewDecl := rfl

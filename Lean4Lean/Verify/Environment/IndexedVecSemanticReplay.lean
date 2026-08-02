@@ -317,46 +317,84 @@ def indexedVecSemanticConsRootRun :
   whnfFuel := 9999
   whnfDepth := rfl
 
-def indexedVecSemanticNilConstructorRun :
-    VInductDecl.CandidateConstructorRun indexedVecTypeEnv [`u]
+def indexedVecSemanticFamilySemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun natFinalEnv [`u]
+      indexedVecFamilyCandidate indexedVecType.type :=
+  indexedVecSemanticFamilyRootRun.semanticOfIdentity
+    indexedVecFamilyCandidate_identity
+
+def indexedVecSemanticNilSemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun indexedVecTypeEnv [`u]
+      nilCandidate indexedVecType.ctors[0].type :=
+  indexedVecSemanticNilRootRun.semanticOfIdentity nilCandidate_identity
+
+def indexedVecSemanticConsSemanticRootRun :
+    TypeChecker.CandidateExprSemanticRootRun indexedVecTypeEnv [`u]
+      consCandidate indexedVecType.ctors[1].type :=
+  indexedVecSemanticConsRootRun.semanticOfIdentity consCandidate_identity
+
+def indexedVecSemanticNilConstructorSemanticRun :
+    VInductDecl.CandidateConstructorSemanticRun indexedVecTypeEnv [`u]
       indexedVecNilConstructorCandidate indexedVecType.ctors[0] where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := indexedVecType.ctors[0].type
-  typeRun := indexedVecSemanticNilRootRun
+  type := indexedVecSemanticNilSemanticRootRun
 
-def indexedVecSemanticConsConstructorRun :
-    VInductDecl.CandidateConstructorRun indexedVecTypeEnv [`u]
+def indexedVecSemanticConsConstructorSemanticRun :
+    VInductDecl.CandidateConstructorSemanticRun indexedVecTypeEnv [`u]
       indexedVecConsConstructorCandidate indexedVecType.ctors[1] where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := indexedVecType.ctors[1].type
-  typeRun := indexedVecSemanticConsRootRun
+  type := indexedVecSemanticConsSemanticRootRun
+
+def indexedVecSemanticNilConstructorRun :
+    VInductDecl.CandidateConstructorRun indexedVecTypeEnv [`u]
+      indexedVecNilConstructorCandidate indexedVecType.ctors[0] :=
+  indexedVecSemanticNilConstructorSemanticRun.root
+
+def indexedVecSemanticConsConstructorRun :
+    VInductDecl.CandidateConstructorRun indexedVecTypeEnv [`u]
+      indexedVecConsConstructorCandidate indexedVecType.ctors[1] :=
+  indexedVecSemanticConsConstructorSemanticRun.root
+
+def indexedVecSemanticConstructorSemanticListRun :
+    VInductDecl.CandidateConstructorSemanticListRun indexedVecTypeEnv [`u]
+      indexedVecFamilyListCandidate.constructors indexedVecType.ctors := by
+  exact .cons indexedVecSemanticNilConstructorSemanticRun
+    (.cons indexedVecSemanticConsConstructorSemanticRun .nil)
 
 def indexedVecSemanticConstructorListRun :
     VInductDecl.CandidateConstructorListRun indexedVecTypeEnv [`u]
-      indexedVecFamilyListCandidate.constructors indexedVecType.ctors := by
-  exact .cons indexedVecSemanticNilConstructorRun
-    (.cons indexedVecSemanticConsConstructorRun .nil)
+      indexedVecFamilyListCandidate.constructors indexedVecType.ctors :=
+  indexedVecSemanticConstructorSemanticListRun.roots
 
-def indexedVecSemanticFamilyRun :
-    VInductDecl.CandidateFamilyRun natFinalEnv [`u]
+def indexedVecSemanticFamilySemanticRun :
+    VInductDecl.CandidateFamilySemanticRun natFinalEnv [`u]
       indexedVecFamilyListCandidate indexedVecType where
   name_eq := rfl
   uvars_eq := rfl
-  viewType := indexedVecType.type
-  typeRun := indexedVecSemanticFamilyRootRun
+  type := indexedVecSemanticFamilySemanticRootRun
   typeEnv := indexedVecTypeEnv
   addType := rfl
-  constructors := indexedVecSemanticConstructorListRun
+  constructors := indexedVecSemanticConstructorSemanticListRun
 
-def indexedVecSemanticNormalizationCandidateRun :
-    VInductDecl.NormalizationCandidateRun natFinalEnv [`u]
+def indexedVecSemanticFamilyRun :
+    VInductDecl.CandidateFamilyRun natFinalEnv [`u]
+      indexedVecFamilyListCandidate indexedVecType :=
+  indexedVecSemanticFamilySemanticRun.root
+
+def indexedVecSemanticNormalizationCandidateSemanticRun :
+    VInductDecl.NormalizationCandidateSemanticRun natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
   raw := indexedVecType
   raw_types_eq := rfl
   uvars_eq := rfl
-  family := indexedVecSemanticFamilyRun
+  family := indexedVecSemanticFamilySemanticRun
+
+def indexedVecSemanticNormalizationCandidateRun :
+    VInductDecl.NormalizationCandidateRun natFinalEnv [`u]
+      indexedVecNormalizationCandidate indexedVecDecl :=
+  indexedVecSemanticNormalizationCandidateSemanticRun.root
 
 /-- Reconstructing every family and constructor payload leaves the identity
 IndexedVec declaration unchanged. -/
@@ -374,20 +412,22 @@ def indexedVecSemanticFamilySpineRun :
     TypeChecker.CandidateExprSpineRun natFinalEnv [`u]
       indexedVecFamilyCandidate indexedVecType.type
       indexedVecType.type :=
-  indexedVecSemanticFamilyRootRun.spineOfIdentity
-    indexedVecFamilyCandidate_identity
+  indexedVecSemanticFamilySemanticRootRun.spine
+    indexedVecFamilyCandidate_identity.storedSpine
 
 def indexedVecSemanticNilSpineRun :
     TypeChecker.CandidateExprSpineRun indexedVecTypeEnv [`u]
       nilCandidate indexedVecType.ctors[0].type
       indexedVecType.ctors[0].type :=
-  indexedVecSemanticNilRootRun.spineOfIdentity nilCandidate_identity
+  indexedVecSemanticNilSemanticRootRun.spine
+    nilCandidate_identity.storedSpine
 
 def indexedVecSemanticConsSpineRun :
     TypeChecker.CandidateExprSpineRun indexedVecTypeEnv [`u]
       consCandidate indexedVecType.ctors[1].type
       indexedVecType.ctors[1].type :=
-  indexedVecSemanticConsRootRun.spineOfIdentity consCandidate_identity
+  indexedVecSemanticConsSemanticRootRun.spine
+    consCandidate_identity.storedSpine
 
 def indexedVecSemanticFamilyGenerationRun :
     VInductDecl.CandidateFamilyGenerationRun
