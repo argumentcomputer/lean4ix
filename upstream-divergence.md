@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the source-indexed list checkpoint (2026-08-02):
+Audit baseline after the generic produced-package checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -17,17 +17,21 @@ Audit baseline after the source-indexed list checkpoint (2026-08-02):
   `c9e4ae2d26f28e0adb0c21ffde0e11b42bb691c2`
   (`feat: generalize candidate list production`; 35 commits ahead of upstream;
   32 files changed, 38,205 insertions, and 59 deletions)
+- generic produced-package checkpoint:
+  `a7d101b5e16f1258c6f5c2a7ea08e55f45eb17f1`
+  (`feat: generalize produced candidate packaging`; 37 commits ahead of
+  upstream; 3 files changed, 49 insertions, and 30 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `c9e4ae2d` with arbitrary-length dependent
-  family-type, ordered-constructor, and complete-family production witnesses;
-  singleton AliasFormer/AnnotatedPi migrations; and the two-constructor
-  `IndexedVec` regression layered over the prior semantic package, certified
-  Theory transaction, and checked E1 replay. The exact 20-sorry audit, focused
-  118-job semantic replay and 124-job full Theory/Verify builds, default Nix
-  build, all-system no-build evaluation, current-host flake check, formatter,
-  diff, and import-boundary gates pass at that checkpoint. Use the branch ref,
-  not a detached Git `HEAD`, for published-fork comparisons.
+- audited source checkpoint: `a7d101b5` adds the generic outer
+  `GenerationCandidateRun.producedPackage` constructor and routes AliasFormer,
+  AnnotatedPi, and `IndexedVec` through it. The constructor requires the exact
+  successful whole-call equation for the same dependent candidate already
+  certified by the semantic run. The exact 20-sorry audit, focused 118-job
+  semantic replay and 124-job full Theory/Verify builds, default Nix build,
+  all-system no-build evaluation, current-host flake check, formatter, diff,
+  and import-boundary gates pass at that checkpoint. Use the branch ref, not a
+  detached Git `HEAD`, for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -244,7 +248,7 @@ to the replacement.
 - **Commits:** `1fb7d6e`, `9fde4c6`, `b283912`, `a84aa19`, `c2b1c4f`,
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
-  `d553930`, `cf3d5a4`, and `c9e4ae2`
+  `d553930`, `cf3d5a4`, `c9e4ae2`, and `a7d101b`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -269,6 +273,11 @@ to the replacement.
   the exact list results without erasure, truncation, reordering, or unchecked
   positional lookup. AliasFormer and AnnotatedPi use singleton instances;
   `IndexedVec` exercises the ordered two-constructor instance.
+  `GenerationCandidateRun.producedPackage` now supplies the generic outer
+  singleton step: given an already verified semantic run and the exact
+  successful whole-call equation indexed by its same source and candidate, it
+  constructs `ProducedGenerationCandidatePackage`. All three fixtures use this
+  constructor instead of fixture-specific record assembly.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
@@ -278,28 +287,35 @@ to the replacement.
   `GenerationCandidatePackage`. `indexedVecSemanticProducedGenerationCandidatePackage`
   projects the certificate selected by the exact outer call; the corresponding
   certified Theory transaction and checked E1 `TrEnv'` replay are complete and
-  exactly guarded.
+  exactly guarded. AliasFormer, AnnotatedPi, and `IndexedVec` now all attach
+  their executable provenance through the same generic outer constructor.
 - **Current gap:** combine the generic operational list witnesses with generic
-  construction of retained semantic family/constructor runs and the outer
-  produced singleton package. Then complete the normalization differential
-  matrix and eventually extend the same indexed shape to mutual and nested
-  blocks.
+  construction of retained semantic family/constructor runs. Outer packaging
+  is generic once that semantic run exists; the missing step is deriving the
+  run automatically from translated successful metadata. Then complete the
+  normalization differential matrix and eventually extend the same indexed
+  shape to mutual and nested blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
   whole-call equations; positive semantic/transaction/replay fixtures for the
   first two plus the complete checkpoint semantic/transaction/E1 replay for
   `IndexedVec`; exact `IndexedVec` family/`nil`/`cons` candidate traces;
   opaque-`outParam` whole-candidate rejection; exact axiom guards for the two
-  public semantic roots and the three operational list theorems; singleton and
-  two-constructor list regressions; focused and full 124-job Lake builds;
+  public semantic roots, the three operational list theorems, and the generic
+  outer package constructor; singleton and two-constructor list regressions;
+  focused and full 124-job Lake builds;
   20-sorry audit;
   default Nix build; all-system no-build evaluation; current-host flake check;
   formatter check; and diff/import-boundary gates.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
   added. The three operational list theorems are guarded at exactly the
-  accepted `propext`/`Classical.choice`/`Quot.sound` baseline. Concrete Verify
-  producer roots expose existing checker-refinement, pointer/cache, and
-  projection dependencies; generic Theory transaction roots retain their
-  narrower guarded closure.
+  accepted `propext`/`Classical.choice`/`Quot.sound` baseline. The generic outer
+  constructor has the exactly guarded
+  `propext`/`sorryAx`/`Classical.choice`/`Quot.sound` closure inherited through
+  its dependent Verify evidence types; it declares no axiom and does not widen
+  the producer equation into semantic authority. Concrete Verify producer
+  roots expose existing checker-refinement, pointer/cache, and projection
+  dependencies; generic Theory transaction roots retain their narrower
+  guarded closure.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or
