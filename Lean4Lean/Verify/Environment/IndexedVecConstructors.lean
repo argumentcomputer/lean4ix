@@ -15,7 +15,10 @@ open Lean Meta
 open Lean4Lean.InductiveFixtures
 
 def ctorEnv : Kernel.Environment :=
-  Kernel.Environment.ofConstants `_indexedVecCtorProof indexedVecTypeMap
+  -- `declareInductiveTypes` preserves the input environment header while
+  -- inserting the raw family constant.  Use that exact staged header so this
+  -- environment is not merely lookup-equivalent to the producer result.
+  Kernel.Environment.ofConstants `_indexedVecCandidate indexedVecTypeMap
 
 def ctorContext : AddInductive.Context where
   env := ctorEnv

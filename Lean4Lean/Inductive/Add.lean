@@ -103,6 +103,16 @@ instance : MonadLCtx M where
 @[inline] def withEnv (env : Environment) (x : M α) : M α :=
   withReader (fun c => { c with env }) x
 
+/-- Run a closed-metadata action without inheriting validation-local
+declarations.  All other reader fields, including the staged environment and
+fuel, are preserved exactly. -/
+@[inline] def withEmptyLocalContext (x : M α) : M α :=
+  withReader (fun c : Context => { c with lctx := {} }) x
+
+@[simp] theorem withEmptyLocalContext_apply (x : M α) (context : Context) :
+    withEmptyLocalContext x context = x { context with lctx := {} } := by
+  rfl
+
 def getType (fvar : Expr) : M Expr :=
   return ((← getLCtx).get! fvar.fvarId!).type
 
@@ -142,6 +152,16 @@ def levelStructEq : Level → Level → Bool
   | .param u, .param v => u == v
   | .mvar u, .mvar v => u == v
   | _, _ => false
+
+/-- Transparent sufficient comparison for the common structural universe
+cases used by constructor fields.  Every universe is at least zero, successor
+is monotone, and otherwise exact structural equality is sufficient.  Cases
+outside this deliberately small relation continue to the full normalization-
+based `Level.geq'` comparison below. -/
+def levelStructGe : Level → Level → Bool
+  | _, .zero => true
+  | .succ u, .succ v => levelStructGe u v
+  | u, v => levelStructEq u v
 
 def checkInductiveTypes
     (nparams : Nat) (indTypes : Array InductiveType)
@@ -300,6 +320,22 @@ def declareInductiveTypes (stats : InductiveStats) (numParams : Nat)
     env.checkName info.name c.allowPrimitive
     return env.add (.inductInfo info)
 
+/-- Family declaration observes only the environment, universe parameters,
+and primitive-name policy of its reader context.  In particular, the local
+telescope and fresh-name generator retained by family validation do not alter
+the staged environment it produces. -/
+theorem declareInductiveTypes_context_eq
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat)
+    (isUnsafe : Bool) (left right : Context)
+    (henv : left.env = right.env)
+    (hlparams : left.lparams = right.lparams)
+    (hallow : left.allowPrimitive = right.allowPrimitive) :
+    declareInductiveTypes stats numParams indTypes numNested isUnsafe left =
+      declareInductiveTypes stats numParams indTypes numNested isUnsafe right := by
+  unfold declareInductiveTypes
+  rw [henv, hlparams, hallow]
+
 def isValidIndAppIdx (stats : InductiveStats) (t : Expr) (i : Nat) : Bool :=
   t.withApp fun I args => Id.run do
   unless I == stats.indConsts[i]! && args.size == stats.params.size + stats.nindices[i]! do
@@ -365,7 +401,13 @@ def checkConstructors (indTypes : Array InductiveType)
       foundCtors := foundCtors.insert n
       let t := ctor.type
       env.checkNoMVarNoFVar n t
-      _ ← checkType t
+      -- Constructor metadata has just been established to contain no free
+      -- variables.  Its full closed-type check must therefore not inherit the
+      -- parameter/index locals retained by family validation; keeping that
+      -- check local-context independent also gives candidate replay one stable
+      -- execution.  The telescope loop below deliberately remains in the
+      -- family context because parameter matching uses `stats.params`.
+      _ ← withEmptyLocalContext do checkType t
       let rec loop t i
       | 0 => throw .deepRecursion
       | fuel+1 => do
@@ -382,7 +424,7 @@ def checkConstructors (indTypes : Array InductiveType)
             -- consulting the normalization-based comparison.  Besides
             -- avoiding needless work, this keeps exact checker executions
             -- reducible without a separate reflexivity contract axiom.
-            if levelStructEq stats.resultLevel s.sortLevel! then
+            if levelStructGe stats.resultLevel s.sortLevel! then
               pure ()
             else
               unless stats.resultLevel.isZero || stats.resultLevel.geq' s.sortLevel! do
@@ -1470,17 +1512,28 @@ analyzer and Verify semantic certificate remain separate downstream gates. -/
 def buildNormalizationCandidate
     (nparams : Nat) (types : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool) :
-    M (NormalizationCandidate types) := do
+    M (NormalizationCandidate types) :=
+  -- Family validation retains its parameter/index telescope while invoking
+  -- the continuation.  That context is required by `checkConstructors`, whose
+  -- parameter checks refer to the free variables recorded in `stats`, but it
+  -- is not part of the closed metadata being normalized.  Snapshot the entry
+  -- context so both candidate traversals use one stable fresh-name provenance
+  -- and an empty local context; only the staged kernel environment changes.
+  fun candidateContext =>
   let indTypes := types.toArray
-  checkInductiveTypes nparams indTypes fun stats => do
+  checkInductiveTypes nparams indTypes (fun stats => do
     let familyTypes ←
-      withReader (fun c : Context => { c with lctx := {} }) do
+      withReader (fun _ : Context => { candidateContext with lctx := {} }) do
         normalizeCandidateFamilyTypeList types
     let familyEnv ←
       declareInductiveTypes stats nparams indTypes numNested isUnsafe
     withEnv familyEnv do
       checkConstructors indTypes stats isUnsafe
-      return ⟨← normalizeCandidateFamilyList familyTypes⟩
+      let families ←
+        withReader (fun _ : Context =>
+          { candidateContext with env := familyEnv, lctx := {} }) do
+          normalizeCandidateFamilyList familyTypes
+      return ⟨families⟩) candidateContext
 
 /--
 info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, Classical.choice, Quot.sound]

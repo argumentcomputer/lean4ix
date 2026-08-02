@@ -6204,6 +6204,25 @@ private theorem annotatedPiCtor_checkTypeM_expanded :
     annotatedPiInnerKernel, annotatedPiRawDomainKernel] using
       annotatedPiCtor_checkTypeM
 
+private theorem annotatedPiCtor_checkTypeM_empty :
+    TypeChecker.M.run annotatedPiCtorCandidateContext.env
+        annotatedPiCtorCandidateContext.safety {}
+        annotatedPiCtorCandidateContext.lparams
+        annotatedPiCtorCandidateContext.fuel
+        (TypeChecker.checkType
+          (.forallE
+            (.mkNum
+              (.mkStr
+                (.mkStr (.mkStr (.mkStr .anonymous "a") "_@")
+                  "_internal") "_hyg") 0)
+            (.forallE `p
+              (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+              (.const ``AnnotatedPi []) .default)
+            (.const ``AnnotatedPi []) .default)) =
+      .ok (.sort (.succ .zero)) := by
+  simpa [annotatedPiCtorCandidateContext] using
+    annotatedPiCtor_checkTypeM_expanded
+
 private theorem annotatedPi_checkConstructors :
     AddInductive.checkConstructors #[annotatedPiKernelType]
         annotatedPiInductiveStats false
@@ -6219,8 +6238,10 @@ private theorem annotatedPi_checkConstructors :
   rw [annotatedPiCtor_noMVarNoFVar_expanded]
   simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
+  rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
-  rw [annotatedPiCtor_checkTypeM_expanded]
+  simp only
+  rw [annotatedPiCtor_checkTypeM_empty]
   simp only [Except.bind]
   simp +decide [ConstantInfo.type, ConstantInfo.toConstantVal,
     AddInductive.liftTypeChecker_apply,
@@ -6237,7 +6258,7 @@ private theorem annotatedPi_checkConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [annotatedPiInner_ensureTypeM_expanded]
   simp only [Except.bind, Expr.sortLevel!]
-  rw [show AddInductive.levelStructEq
+  rw [show AddInductive.levelStructGe
       annotatedPiInductiveStats.resultLevel (.succ .zero) = true by rfl]
   simp only [if_true]
   simp only [Bool.not_false, if_true,
@@ -6473,7 +6494,13 @@ theorem annotatedPiNormalizationCandidate_produced :
   unfold AddInductive.buildNormalizationCandidate
   rw [annotatedPi_checkInductiveTypes]
   simp only [ReaderT.bind, Bind.bind]
-  rw [annotatedPiFamilyTypeList_candidateTrace]
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { annotatedPiFamilyCandidateContext with lctx := {} })
+      (AddInductive.normalizeCandidateFamilyTypeList
+        [annotatedPiKernelType])) annotatedPiFamilyCandidateContext =
+      .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) by
+    simpa using annotatedPiFamilyTypeList_candidateTrace]
   simp only [Except.bind]
   rw [annotatedPi_declareInductiveTypes]
   unfold AddInductive.withEnv
@@ -6705,6 +6732,27 @@ private theorem aliasFormerCtor_checkTypeM_const :
   simpa [aliasFormerMkInfo, ConstantInfo.type,
     ConstantInfo.toConstantVal] using aliasFormerCtor_checkTypeM
 
+private theorem aliasFormerCtor_checkTypeM_empty :
+    TypeChecker.M.run aliasFormerCtorCandidateContext.env
+        aliasFormerCtorCandidateContext.safety {}
+        aliasFormerCtorCandidateContext.lparams
+        aliasFormerCtorCandidateContext.fuel
+        (TypeChecker.checkType (.const ``AliasFormer [])) =
+      .ok (.const ``TypeFamilyAlias []) := by
+  simpa [aliasFormerCtorCandidateContext] using
+    aliasFormerCtor_checkTypeM_const
+
+private theorem aliasFormerCtor_checkTypeM_of_empty
+    (lctx : LocalContext) (hlctx : lctx = {}) :
+    TypeChecker.M.run aliasFormerCtorCandidateContext.env
+        aliasFormerCtorCandidateContext.safety lctx
+        aliasFormerCtorCandidateContext.lparams
+        aliasFormerCtorCandidateContext.fuel
+        (TypeChecker.checkType (.const ``AliasFormer [])) =
+      .ok (.const ``TypeFamilyAlias []) := by
+  subst lctx
+  exact aliasFormerCtor_checkTypeM_empty
+
 private theorem aliasFormer_checkConstructors :
     AddInductive.checkConstructors #[aliasFormerKernelType]
         aliasFormerInductiveStats false aliasFormerCtorCandidateContext =
@@ -6719,10 +6767,15 @@ private theorem aliasFormer_checkConstructors :
   simp +decide [ConstantInfo.type,
     ConstantInfo.toConstantVal,
     AddInductive.liftTypeChecker_apply,
-    aliasFormerCtor_noMVarNoFVar, aliasFormerCtor_checkTypeM_const,
+    aliasFormerCtor_noMVarNoFVar,
     readThe, MonadReaderOf.read, ReaderT.read,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
+  rw [aliasFormerCtor_checkTypeM_of_empty
+    ({ decls :=
+      { root := PersistentArrayNode.node #[], tail := #[] } } :
+        LocalContext) rfl]
+  simp only [Except.bind]
   rw [show aliasFormerCtorCandidateContext.fuel.inductiveFuel = 999 + 1 by
     rfl]
   unfold AddInductive.checkConstructors.loop
@@ -6796,7 +6849,13 @@ theorem aliasFormerNormalizationCandidate_produced :
   unfold AddInductive.buildNormalizationCandidate
   rw [aliasFormer_checkInductiveTypes]
   simp only [ReaderT.bind, Bind.bind]
-  rw [aliasFormerFamilyTypeList_candidateTrace]
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { aliasFormerCandidateContext with lctx := {} })
+      (AddInductive.normalizeCandidateFamilyTypeList
+        [aliasFormerKernelType])) aliasFormerCandidateContext =
+      .ok (.cons aliasFormerFamilyListCandidate.familyType .nil) by
+    simpa using aliasFormerFamilyTypeList_candidateTrace]
   simp only [Except.bind]
   rw [aliasFormer_declareInductiveTypes]
   unfold AddInductive.withEnv
