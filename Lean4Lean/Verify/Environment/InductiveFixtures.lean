@@ -6444,6 +6444,17 @@ theorem annotatedPiFamily_candidateTrace :
   · decide
   · rfl
 
+private def annotatedPiFamilyTypeListProduced :
+    AddInductive.CandidateFamilyTypeListProduced
+      annotatedPiFamilyCandidateContext
+      (.cons annotatedPiFamilyListCandidate.familyType .nil) := by
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateFamilyType
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [annotatedPiKernelType]
+    rw [annotatedPiFamily_candidateTrace]
+    rfl) .nil
+
 private theorem annotatedPiFamilyTypeList_candidateTrace :
     (withReader (fun c : AddInductive.Context => { c with lctx := {} })
         (AddInductive.normalizeCandidateFamilyTypeList
@@ -6451,37 +6462,38 @@ private theorem annotatedPiFamilyTypeList_candidateTrace :
       .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) := by
   change AddInductive.normalizeCandidateFamilyTypeList
       [annotatedPiKernelType] annotatedPiFamilyCandidateContext = _
-  simp [AddInductive.normalizeCandidateFamilyTypeList,
-    AddInductive.normalizeCandidateFamilyType,
-    annotatedPiKernelType, annotatedPiFamilyListCandidate,
-    annotatedPiFamily_candidateTrace,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact annotatedPiFamilyTypeListProduced.normalize
+
+private def annotatedPiConstructorListProduced :
+    AddInductive.CandidateConstructorListProduced
+      annotatedPiCtorCandidateContext
+      annotatedPiFamilyListCandidate.constructors := by
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateConstructor
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [annotatedPiKernelCtor]
+    rw [annotatedPiCtor_candidateTrace]
+    rfl) .nil
 
 private theorem annotatedPiConstructorList_candidateTrace :
     AddInductive.normalizeCandidateConstructorList
         annotatedPiKernelType.ctors annotatedPiCtorCandidateContext =
       .ok annotatedPiFamilyListCandidate.constructors := by
-  change AddInductive.normalizeCandidateConstructorList
-      [annotatedPiKernelCtor] annotatedPiCtorCandidateContext =
-    .ok (.cons annotatedPiConstructorCandidate .nil)
-  simp [AddInductive.normalizeCandidateConstructorList,
-    AddInductive.normalizeCandidateConstructor,
-    annotatedPiKernelCtor, annotatedPiCtor_candidateTrace,
-    annotatedPiConstructorCandidate,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact annotatedPiConstructorListProduced.normalize
+
+private def annotatedPiFamilyListProduced :
+    AddInductive.CandidateFamilyListProduced
+      annotatedPiCtorCandidateContext
+      (.cons annotatedPiFamilyListCandidate.familyType .nil)
+      annotatedPiNormalizationCandidate.families := by
+  exact .cons annotatedPiConstructorListProduced .nil
 
 private theorem annotatedPiFamilyList_candidateTrace :
     AddInductive.normalizeCandidateFamilyList
         (.cons annotatedPiFamilyListCandidate.familyType .nil)
         annotatedPiCtorCandidateContext =
       .ok annotatedPiNormalizationCandidate.families := by
-  simp [AddInductive.normalizeCandidateFamilyList,
-    annotatedPiNormalizationCandidate, annotatedPiFamilyListCandidate,
-    annotatedPiConstructorList_candidateTrace,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact annotatedPiFamilyListProduced.normalize
 
 /-- The complete positive AnnotatedPi metadata request selects the exact
 nested-forall normalization candidate in the real pre-family and post-family
@@ -6792,6 +6804,16 @@ theorem aliasFormerFamily_candidateTrace :
   · decide
   · rfl
 
+private def aliasFormerFamilyTypeListProduced :
+    AddInductive.CandidateFamilyTypeListProduced aliasFormerCandidateContext
+      (.cons aliasFormerFamilyListCandidate.familyType .nil) := by
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateFamilyType
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [aliasFormerKernelType]
+    rw [aliasFormerFamily_candidateTrace]
+    rfl) .nil
+
 private theorem aliasFormerFamilyTypeList_candidateTrace :
     (withReader (fun c : AddInductive.Context => { c with lctx := {} })
         (AddInductive.normalizeCandidateFamilyTypeList
@@ -6799,12 +6821,7 @@ private theorem aliasFormerFamilyTypeList_candidateTrace :
       .ok (.cons aliasFormerFamilyListCandidate.familyType .nil) := by
   change AddInductive.normalizeCandidateFamilyTypeList
       [aliasFormerKernelType] aliasFormerCandidateContext = _
-  simp [AddInductive.normalizeCandidateFamilyTypeList,
-    AddInductive.normalizeCandidateFamilyType,
-    aliasFormerKernelType, aliasFormerFamilyListCandidate,
-    aliasFormerFamily_candidateTrace,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact aliasFormerFamilyTypeListProduced.normalize
 
 /-- The post-family constructor position is produced by the same executable
 candidate traversal and retains its exact opaque result. -/
@@ -6816,31 +6833,35 @@ theorem aliasFormerCtor_candidateTrace :
   · decide
   · rfl
 
+private def aliasFormerConstructorListProduced :
+    AddInductive.CandidateConstructorListProduced
+      aliasFormerCtorCandidateContext
+      aliasFormerFamilyListCandidate.constructors := by
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateConstructor
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [aliasFormerKernelCtor]
+    rw [aliasFormerCtor_candidateTrace]
+    rfl) .nil
+
 private theorem aliasFormerConstructorList_candidateTrace :
     AddInductive.normalizeCandidateConstructorList
         aliasFormerKernelType.ctors aliasFormerCtorCandidateContext =
       .ok aliasFormerFamilyListCandidate.constructors := by
-  change AddInductive.normalizeCandidateConstructorList
-      [aliasFormerKernelCtor] aliasFormerCtorCandidateContext =
-    .ok (.cons aliasFormerConstructorCandidate .nil)
-  simp [AddInductive.normalizeCandidateConstructorList,
-    AddInductive.normalizeCandidateConstructor,
-    aliasFormerKernelCtor,
-    aliasFormerCtor_candidateTrace,
-    aliasFormerConstructorCandidate,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact aliasFormerConstructorListProduced.normalize
+
+private def aliasFormerFamilyListProduced :
+    AddInductive.CandidateFamilyListProduced aliasFormerCtorCandidateContext
+      (.cons aliasFormerFamilyListCandidate.familyType .nil)
+      aliasFormerNormalizationCandidate.families := by
+  exact .cons aliasFormerConstructorListProduced .nil
 
 private theorem aliasFormerFamilyList_candidateTrace :
     AddInductive.normalizeCandidateFamilyList
         (.cons aliasFormerFamilyListCandidate.familyType .nil)
         aliasFormerCtorCandidateContext =
       .ok aliasFormerNormalizationCandidate.families := by
-  simp [AddInductive.normalizeCandidateFamilyList,
-    aliasFormerNormalizationCandidate, aliasFormerFamilyListCandidate,
-    aliasFormerConstructorList_candidateTrace,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact aliasFormerFamilyListProduced.normalize
 
 theorem aliasFormerNormalizationCandidate_produced :
     AddInductive.buildNormalizationCandidate 0

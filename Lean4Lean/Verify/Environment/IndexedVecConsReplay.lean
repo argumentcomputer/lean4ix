@@ -2790,6 +2790,18 @@ def indexedVecNormalizationCandidate :
     AddInductive.NormalizationCandidate [indexedVecKernelType] where
   families := .cons indexedVecFamilyListCandidate .nil
 
+/-- Source-indexed evidence for the complete `IndexedVec` family-type list. -/
+def indexedVecFamilyTypeListProduced :
+    AddInductive.CandidateFamilyTypeListProduced
+      indexedVecFamilyCandidateContext
+      (.cons indexedVecFamilyListCandidate.familyType .nil) := by
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateFamilyType
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [indexedVecKernelType]
+    rw [indexedVecFamily_candidateTrace]
+    rfl) .nil
+
 theorem indexedVecFamilyTypeListCandidateProduced :
     (withReader (fun c : AddInductive.Context => { c with lctx := {} })
         (AddInductive.normalizeCandidateFamilyTypeList
@@ -2797,46 +2809,52 @@ theorem indexedVecFamilyTypeListCandidateProduced :
       .ok (.cons indexedVecFamilyListCandidate.familyType .nil) := by
   change AddInductive.normalizeCandidateFamilyTypeList
     [indexedVecKernelType] indexedVecFamilyCandidateContext = _
-  simp [AddInductive.normalizeCandidateFamilyTypeList,
-    AddInductive.normalizeCandidateFamilyType,
-    indexedVecKernelType, indexedVecFamilyListCandidate,
-    indexedVecFamily_candidateTrace,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact indexedVecFamilyTypeListProduced.normalize
 
-theorem indexedVecConstructorListCandidateProduced :
-    AddInductive.normalizeCandidateConstructorList
-        indexedVecKernelType.ctors ctorContext =
-      .ok indexedVecFamilyListCandidate.constructors := by
+/-- The two constructor positions are assembled in source order.  The
+dependent list indices rule out truncating, swapping, or reusing either
+constructor proof. -/
+def indexedVecConstructorListProduced :
+    AddInductive.CandidateConstructorListProduced ctorContext
+      indexedVecFamilyListCandidate.constructors := by
   have hnil : AddInductive.buildCandidateExpr indexedVecNilInfo.type
       ctorContext = .ok nilCandidate := by
     simpa [nilCandidateContext] using nilCandidateProduced
   have hcons : AddInductive.buildCandidateExpr indexedVecConsInfo.type
       ctorContext = .ok consCandidate := by
     simpa [consRootContext] using consCandidateProduced
-  change AddInductive.normalizeCandidateConstructorList
-      [indexedVecKernelNil, indexedVecKernelCons] ctorContext =
-    .ok (.cons indexedVecNilConstructorCandidate
-      (.cons indexedVecConsConstructorCandidate .nil))
-  simp [AddInductive.normalizeCandidateConstructorList,
-    AddInductive.normalizeCandidateConstructor,
-    indexedVecKernelNil, indexedVecKernelCons,
-    indexedVecNilConstructorCandidate,
-    indexedVecConsConstructorCandidate,
-    hnil, hcons,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact .cons (by
+    unfold AddInductive.normalizeCandidateConstructor
+    simp only [ReaderT.bind, Bind.bind]
+    simp only [indexedVecKernelNil]
+    rw [hnil]
+    rfl) (.cons (by
+      unfold AddInductive.normalizeCandidateConstructor
+      simp only [ReaderT.bind, Bind.bind]
+      simp only [indexedVecKernelCons]
+      rw [hcons]
+      rfl) .nil)
+
+theorem indexedVecConstructorListCandidateProduced :
+    AddInductive.normalizeCandidateConstructorList
+        indexedVecKernelType.ctors ctorContext =
+      .ok indexedVecFamilyListCandidate.constructors := by
+  exact indexedVecConstructorListProduced.normalize
+
+/-- Source-indexed evidence for complete family assembly after constructor
+normalization. -/
+def indexedVecFamilyListProduced :
+    AddInductive.CandidateFamilyListProduced ctorContext
+      (.cons indexedVecFamilyListCandidate.familyType .nil)
+      indexedVecNormalizationCandidate.families := by
+  exact .cons indexedVecConstructorListProduced .nil
 
 theorem indexedVecFamilyListCandidateProduced :
     AddInductive.normalizeCandidateFamilyList
         (.cons indexedVecFamilyListCandidate.familyType .nil)
         ctorContext =
       .ok indexedVecNormalizationCandidate.families := by
-  simp [AddInductive.normalizeCandidateFamilyList,
-    indexedVecNormalizationCandidate, indexedVecFamilyListCandidate,
-    indexedVecConstructorListCandidateProduced,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  exact indexedVecFamilyListProduced.normalize
 
 end IndexedVecConsReplay
 

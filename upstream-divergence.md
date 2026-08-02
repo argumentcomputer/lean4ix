@@ -4,21 +4,27 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Current audit baseline (2026-08-02):
+Audit baseline after the `IndexedVec` semantic checkpoint (2026-08-02):
 
 - upstream: `0c38ab8`
-- published fork tip: `cf3d5a47d35867e0e6ebe023c0803982e3e36cd1`
-  on local, Git, and `origin/jcb/induct` (33 commits ahead of upstream;
-  32 files changed, 38,037 insertions, 59 deletions)
+- published semantic checkpoint:
+  `cf3d5a47d35867e0e6ebe023c0803982e3e36cd1` (33 commits ahead of upstream)
+- first published documentation child:
+  `d35a2f6c94212faae20d5a03341b138bb0e22d36`
+  (`docs: record IndexedVec semantic checkpoint`; 34 commits ahead of
+  upstream). Local Git and `origin/jcb/induct` agreed there at audit time. It
+  changes only this ledger relative to `cf3d5a47`; the accumulated fork delta
+  remains 32 files changed, 38,037 insertions, and 59 deletions.
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited checkout: published checkpoint `cf3d5a47` with concrete `IndexedVec`
+- audited source checkpoint: `cf3d5a47` with concrete `IndexedVec`
   identity witnesses, generation-ready spine runs, the complete
   producer-selected semantic package, certified Theory transaction, and
   checked E1 replay. The exact sorry audit, focused and 124-job full
   Theory/Verify builds, default Nix build, all-system no-build evaluation, and
-  current-host flake check pass at that checkpoint. Use the branch ref, not a
-  detached Git `HEAD`, for published-fork comparisons.
+  current-host flake check pass at that checkpoint. The documentation child
+  has the identical source tree. Use the branch ref, not a detached Git `HEAD`,
+  for published-fork comparisons.
 
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
@@ -254,7 +260,12 @@ to the replacement.
   recursive `cons` candidates, ordered constructor-list assembly, and the
   complete successful outer producer equation. Generic recursive identity
   replay retains caller-selected Theory endpoints for identity-normalizing
-  traces.
+  traces. The executable list layer now exposes arbitrary-length dependent
+  `CandidateFamilyTypeListProduced`, `CandidateConstructorListProduced`, and
+  `CandidateFamilyListProduced` witnesses whose `.normalize` theorems recover
+  the exact list results without erasure, truncation, reordering, or unchecked
+  positional lookup. AliasFormer and AnnotatedPi use singleton instances;
+  `IndexedVec` exercises the ordered two-constructor instance.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
@@ -265,22 +276,27 @@ to the replacement.
   projects the certificate selected by the exact outer call; the corresponding
   certified Theory transaction and checked E1 `TrEnv'` replay are complete and
   exactly guarded.
-- **Current gap:** abstract the source-indexed ordered constructor-list
-  construction to arbitrary successful metadata without weakening exact
-  candidate provenance, followed by the normalization differential matrix and
-  eventually mutual and nested blocks.
+- **Current gap:** combine the generic operational list witnesses with generic
+  construction of retained semantic family/constructor runs and the outer
+  produced singleton package. Then complete the normalization differential
+  matrix and eventually extend the same indexed shape to mutual and nested
+  blocks.
 - **Tests:** exact positive AliasFormer, AnnotatedPi, and `IndexedVec`
   whole-call equations; positive semantic/transaction/replay fixtures for the
   first two plus the complete checkpoint semantic/transaction/E1 replay for
   `IndexedVec`; exact `IndexedVec` family/`nil`/`cons` candidate traces;
   opaque-`outParam` whole-candidate rejection; exact axiom guards for the two
-  new public roots; focused and full 124-job Lake builds; 20-sorry audit;
+  public semantic roots and the three operational list theorems; singleton and
+  two-constructor list regressions; focused and full 124-job Lake builds;
+  20-sorry audit;
   default Nix build; all-system no-build evaluation; current-host flake check;
   formatter check; and diff/import-boundary gates.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
-  added. Concrete Verify producer roots expose existing checker-refinement,
-  pointer/cache, and projection dependencies; generic Theory transaction roots
-  retain their narrower guarded closure.
+  added. The three operational list theorems are guarded at exactly the
+  accepted `propext`/`Classical.choice`/`Quot.sound` baseline. Concrete Verify
+  producer roots expose existing checker-refinement, pointer/cache, and
+  projection dependencies; generic Theory transaction roots retain their
+  narrower guarded closure.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or

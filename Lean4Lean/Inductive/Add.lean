@@ -1490,6 +1490,95 @@ def normalizeCandidateFamilyList :
           normalizeCandidateConstructorList indType.ctors }
       (← normalizeCandidateFamilyList tail)
 
+/-- Exact successful traversal of an arbitrary source-indexed family-type
+list. The dependent indices prevent a proof for one metadata position from
+being reused at another position or from silently truncating the source. -/
+inductive CandidateFamilyTypeListProduced (context : Context) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamilyType sources → Prop where
+  | nil : CandidateFamilyTypeListProduced context .nil
+  | cons
+      (head : normalizeCandidateFamilyType source context = .ok candidate)
+      (tail : CandidateFamilyTypeListProduced context candidates) :
+      CandidateFamilyTypeListProduced context (.cons candidate candidates)
+
+/-- A source-indexed family-type traversal determines the complete executable
+list result for any length, without a fixture-specific list reduction. -/
+theorem CandidateFamilyTypeListProduced.normalize
+    {sources : List InductiveType}
+    {candidates : CandidateList CandidateFamilyType sources}
+    (run : CandidateFamilyTypeListProduced context candidates) :
+    normalizeCandidateFamilyTypeList sources context = .ok candidates := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+    unfold normalizeCandidateFamilyTypeList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [head, ih]
+    rfl
+
+/-- Exact successful traversal of an arbitrary source-indexed constructor
+list in one post-family context. Every candidate remains indexed by its source
+constructor, so ordering, length, and header provenance are preserved by the
+type rather than recovered from an erased list equality. -/
+inductive CandidateConstructorListProduced (context : Context) :
+    {sources : List Constructor} →
+      CandidateList CandidateConstructor sources → Prop where
+  | nil : CandidateConstructorListProduced context .nil
+  | cons
+      (head : normalizeCandidateConstructor source context = .ok candidate)
+      (tail : CandidateConstructorListProduced context candidates) :
+      CandidateConstructorListProduced context (.cons candidate candidates)
+
+/-- A source-indexed constructor traversal determines the complete executable
+list result for any length, with no `zip`, partial lookup, or fixture-specific
+cons-chain reduction. -/
+theorem CandidateConstructorListProduced.normalize
+    {sources : List Constructor}
+    {candidates : CandidateList CandidateConstructor sources}
+    (run : CandidateConstructorListProduced context candidates) :
+    normalizeCandidateConstructorList sources context = .ok candidates := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+    unfold normalizeCandidateConstructorList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [head, ih]
+    rfl
+
+/-- Exact successful assembly of complete family candidates from an already
+source-indexed family-type list. Each constructor traversal is tied to the
+corresponding family source, and the tail remains tied to the remaining family
+sources. This is the reusable ordered-list boundary needed before mutual-block
+staging. -/
+inductive CandidateFamilyListProduced (context : Context) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamilyType sources →
+      CandidateList CandidateFamily sources → Prop where
+  | nil : CandidateFamilyListProduced context .nil .nil
+  | cons
+      (constructors : CandidateConstructorListProduced
+        context family.constructors)
+      (tail : CandidateFamilyListProduced context familyTypes families) :
+      CandidateFamilyListProduced context
+        (.cons family.familyType familyTypes) (.cons family families)
+
+/-- Source-indexed family assembly determines the exact executable family-list
+result for arbitrary list lengths. -/
+theorem CandidateFamilyListProduced.normalize
+    {sources : List InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType sources}
+    {families : CandidateList CandidateFamily sources}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    normalizeCandidateFamilyList familyTypes context = .ok families := by
+  induction run with
+  | nil => rfl
+  | cons constructors tail ih =>
+    unfold normalizeCandidateFamilyList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [constructors.normalize, ih]
+    rfl
+
 /-- Shape-preserving output of the executable normalization-candidate pass.
 The dependent family/constructor lists prevent positional provenance from
 being silently reused for a different inductive request. Names, ordering, and
@@ -1600,6 +1689,30 @@ info: 'Lean4Lean.AddInductive.buildNormalizationCandidate' depends on axioms: [p
 -/
 #guard_msgs in
 #print axioms buildNormalizationCandidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyTypeListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyTypeListProduced.normalize
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateConstructorListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorListProduced.normalize
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyListProduced.normalize
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateList.singleton' does not depend on any axioms
