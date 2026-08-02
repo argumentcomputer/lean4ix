@@ -327,6 +327,12 @@ theorem addEquiv.WF {c : VContext} {s : VState} (he₁ : c.TrExprS e₁ e') (he�
 theorem isDefEq.WF {c : VContext} {s : VState}
     (he₁ : c.TrExprS e₁ e₁') (he₂ : c.TrExprS e₂ e₂') :
     RecM.WF c s (isDefEq e₁ e₂) fun b _ => b → c.IsDefEqU e₁' e₂' := by
+  unfold isDefEq
+  split
+  · rename_i heq
+    exact .pure fun _ =>
+      (he₁.eqv heq).uniq c.Ewf (.refl c.Ewf c.Δwf) he₂
+  simp only [pure_bind]
   refine (isDefEqCore.WF he₁ he₂).bind fun b _ _ hb => ?_
   simp; split
   · exact (addEquiv.WF he₁ ⟨_, he₂, (hb ‹_›).symm⟩).map fun _ _ _ _ => hb

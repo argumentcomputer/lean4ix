@@ -2892,105 +2892,21 @@ private def annotatedPiOutParamArgState : TypeChecker.State :=
     inferTypeC := annotatedPiOutParamFnState.inferTypeC.insert
       (.sort .zero) (.sort (.succ .zero)) }
 
-@[simp] private theorem annotatedPiOutParamArgState_eqvManager :
-    annotatedPiOutParamArgState.eqvManager = {} := rfl
-
-private theorem annotatedPiEmptyEqv_isEquivSort :
-    ∃ m : EquivManager,
-      EquivManager.isEquiv true
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          ({} : EquivManager) =
-        (true, m) := by
-  let r := EquivManager.isEquiv true
-    (.sort (.succ .zero)) (.sort (.succ .zero))
-    ({} : EquivManager)
-  refine ⟨r.2, Prod.ext ?_ rfl⟩
-  dsimp only [r]
-  rw [EquivManager.isEquiv.eq_def]
-  by_cases h :
-      ptrEqExpr (.sort (.succ .zero)) (.sort (.succ .zero)) = true
-  · rw [if_pos h]
-    rfl
-  · rw [if_neg h]
-    simp [Expr.isBVar, StateT.pure, pure, Bind.bind, StateT.bind,
-      EquivManager.toNode, EquivManager.find, EquivManager.merge]
-
 private def annotatedPiWithEqvManager
     (state : TypeChecker.State) (m : EquivManager) :
     TypeChecker.State :=
   { state with eqvManager := m }
 
-private theorem annotatedPiQuickIsDefEqSort
-    (methods : TypeChecker.Methods)
-    (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
-    ∃ m : EquivManager,
-      TypeChecker.Inner.quickIsDefEq
-          (.sort (.succ .zero)) (.sort (.succ .zero)) true
-          methods context initial =
-        .ok (.true, annotatedPiWithEqvManager initial m) := by
-  obtain ⟨m, hm⟩ := annotatedPiEmptyEqv_isEquivSort
-  refine ⟨m, ?_⟩
-  unfold TypeChecker.Inner.quickIsDefEq
-  simp [modifyGet, MonadStateOf.modifyGet, monadLift,
-    MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure,
-    StateT.pure, Except.pure, heqv, hm, annotatedPiWithEqvManager,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-
-private theorem annotatedPiIsDefEqCoreSort
-    (methods : TypeChecker.Methods)
-    (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
-    ∃ m : EquivManager,
-      TypeChecker.Inner.isDefEqCore'
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          methods context initial =
-        .ok (true, annotatedPiWithEqvManager initial m) := by
-  obtain ⟨m, hr⟩ :=
-    annotatedPiQuickIsDefEqSort methods context initial heqv
-  refine ⟨m, ?_⟩
-  unfold TypeChecker.Inner.isDefEqCore'
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hr]
-  rfl
-
-private def annotatedPiAfterAddEquiv
-    (state : TypeChecker.State) : TypeChecker.State :=
-  { state with
-    eqvManager := state.eqvManager.addEquiv
-      (.sort (.succ .zero)) (.sort (.succ .zero)) }
-
 private theorem annotatedPiIsDefEqSort
-    (n : Nat)
+    (fuel : Nat)
     (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
-    ∃ m : EquivManager,
-      TypeChecker.Inner.isDefEq
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          (TypeChecker.Methods.withFuel (n + 1)) context initial =
-        .ok (true, annotatedPiAfterAddEquiv
-          (annotatedPiWithEqvManager initial m)) := by
-  obtain ⟨m, hr⟩ :=
-    annotatedPiIsDefEqCoreSort (TypeChecker.Methods.withFuel n)
-      context initial heqv
-  have hr' :
-      TypeChecker.Inner.isDefEqCore
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          (TypeChecker.Methods.withFuel (n + 1)) context initial =
-        .ok (true, annotatedPiWithEqvManager initial m) := by
-    change
-      TypeChecker.Inner.isDefEqCore'
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          (TypeChecker.Methods.withFuel n) context initial =
-        .ok (true, annotatedPiWithEqvManager initial m)
-    exact hr
-  refine ⟨m, ?_⟩
+    (initial : TypeChecker.State) :
+    TypeChecker.Inner.isDefEq
+        (.sort (.succ .zero)) (.sort (.succ .zero))
+        (TypeChecker.Methods.withFuel fuel) context initial =
+      .ok (true, initial) := by
   unfold TypeChecker.Inner.isDefEq
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hr']
+  rw [if_pos (Expr.eqv_refl _)]
   rfl
 
 private def annotatedPiCtorExpectedView : Expr :=
@@ -3269,32 +3185,9 @@ private theorem annotatedPiCtor_checkTypeM :
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
     TypeChecker.Inner.inferApp,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  obtain ⟨eqManager, heq⟩ := annotatedPiIsDefEqSort 9996
-    annotatedPiCtorCandidateContext.toTypeChecker
-    annotatedPiOutParamArgState annotatedPiOutParamArgState_eqvManager
-  change TypeChecker.Inner.isDefEq
-      (.sort (.succ .zero)) (.sort (.succ .zero))
-      (TypeChecker.Methods.withFuel 9997)
-      annotatedPiCtorCandidateContext.toTypeChecker
-      ({ inferTypeC :=
-          (({} : InferCache).insert
-            (.const ``outParam [.succ .zero])
-              (.forallE `α (.sort (.succ .zero))
-                (.sort (.succ .zero)) .default)).insert
-            (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State) =
-    .ok (true, annotatedPiAfterAddEquiv
-      (annotatedPiWithEqvManager
-        ({ inferTypeC :=
-            (({} : InferCache).insert
-              (.const ``outParam [.succ .zero])
-                (.forallE `α (.sort (.succ .zero))
-                  (.sort (.succ .zero)) .default)).insert
-              (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State)
-        eqManager)) at heq
-  rw [heq]
+  rw [annotatedPiIsDefEqSort 9997]
   simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, annotatedPiAfterAddEquiv,
-    annotatedPiWithEqvManager, Expr.bindingBody!,
+    annotatedPiOutParamFnState, Expr.bindingBody!,
     Expr.instantiate1_eq, Expr.instantiate1',
     annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
     AddInductive.Context.toTypeChecker,
@@ -4561,32 +4454,9 @@ private theorem annotatedPiDomain_checkTypeM :
   simp [Expr.hasLooseBVars, Expr.looseBVarRange',
     TypeChecker.Inner.inferType', TypeChecker.Inner.inferApp,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  obtain ⟨eqManager, heq⟩ := annotatedPiIsDefEqSort 9998
-    annotatedPiCtorCandidateContext.toTypeChecker
-    annotatedPiOutParamArgState annotatedPiOutParamArgState_eqvManager
-  change TypeChecker.Inner.isDefEq
-      (.sort (.succ .zero)) (.sort (.succ .zero))
-      (TypeChecker.Methods.withFuel 9999)
-      annotatedPiCtorCandidateContext.toTypeChecker
-      ({ inferTypeC :=
-          (({} : InferCache).insert
-            (.const ``outParam [.succ .zero])
-              (.forallE `α (.sort (.succ .zero))
-                (.sort (.succ .zero)) .default)).insert
-            (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State) =
-    .ok (true, annotatedPiAfterAddEquiv
-      (annotatedPiWithEqvManager
-        ({ inferTypeC :=
-            (({} : InferCache).insert
-              (.const ``outParam [.succ .zero])
-                (.forallE `α (.sort (.succ .zero))
-                  (.sort (.succ .zero)) .default)).insert
-              (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State)
-        eqManager)) at heq
-  rw [heq]
+  rw [annotatedPiIsDefEqSort 9999]
   simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, annotatedPiAfterAddEquiv,
-    annotatedPiWithEqvManager, Expr.bindingBody!,
+    annotatedPiOutParamFnState, Expr.bindingBody!,
     Expr.instantiate1_eq, Expr.instantiate1',
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rfl
@@ -5395,7 +5265,11 @@ private theorem annotatedPiDomain_isDefEqM :
         ({} : TypeChecker.State)) =
       .ok true
   unfold TypeChecker.Inner.isDefEq
-  simp only [normalizationRecMBind]
+  rw [show
+    (annotatedPiRawDomainKernel == (.sort .zero : Expr)) = false by
+      exact annotatedPiApp_beq_sort _ _ _]
+  simp only [Bool.false_eq_true, if_false, pure_bind,
+    normalizationRecMBind]
   rw [hcore']
   rfl
 
@@ -5428,32 +5302,9 @@ private theorem annotatedPiInner_checkTypeM :
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
     TypeChecker.Inner.inferApp,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  obtain ⟨eqManager, heq⟩ := annotatedPiIsDefEqSort 9997
-    annotatedPiCtorCandidateContext.toTypeChecker
-    annotatedPiOutParamArgState annotatedPiOutParamArgState_eqvManager
-  change TypeChecker.Inner.isDefEq
-      (.sort (.succ .zero)) (.sort (.succ .zero))
-      (TypeChecker.Methods.withFuel 9998)
-      annotatedPiCtorCandidateContext.toTypeChecker
-      ({ inferTypeC :=
-          (({} : InferCache).insert
-            (.const ``outParam [.succ .zero])
-              (.forallE `α (.sort (.succ .zero))
-                (.sort (.succ .zero)) .default)).insert
-            (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State) =
-    .ok (true, annotatedPiAfterAddEquiv
-      (annotatedPiWithEqvManager
-        ({ inferTypeC :=
-            (({} : InferCache).insert
-              (.const ``outParam [.succ .zero])
-                (.forallE `α (.sort (.succ .zero))
-                  (.sort (.succ .zero)) .default)).insert
-              (.sort .zero) (.sort (.succ .zero)) } : TypeChecker.State)
-        eqManager)) at heq
-  rw [heq]
+  rw [annotatedPiIsDefEqSort 9998]
   simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, annotatedPiAfterAddEquiv,
-    annotatedPiWithEqvManager, Expr.bindingBody!,
+    annotatedPiOutParamFnState, Expr.bindingBody!,
     Expr.instantiate1_eq, Expr.instantiate1',
     annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
     AddInductive.Context.toTypeChecker,
@@ -5472,25 +5323,6 @@ private theorem annotatedPiInner_whnfM :
         .ok annotatedPiInnerKernel := by
   rfl
 
-private theorem annotatedPiEmptyEqv_isEquivInner :
-    ∃ m : EquivManager,
-      EquivManager.isEquiv true annotatedPiInnerKernel
-          annotatedPiInnerKernel ({} : EquivManager) =
-        (true, m) := by
-  let r := EquivManager.isEquiv true annotatedPiInnerKernel
-    annotatedPiInnerKernel ({} : EquivManager)
-  refine ⟨r.2, Prod.ext ?_ rfl⟩
-  dsimp only [r]
-  rw [EquivManager.isEquiv.eq_def]
-  by_cases h : ptrEqExpr annotatedPiInnerKernel
-      annotatedPiInnerKernel = true
-  · rw [if_pos h]
-    rfl
-  · rw [if_neg h]
-    simp [annotatedPiInnerKernel, annotatedPiRawDomainKernel,
-      Expr.isBVar, StateT.pure, pure, Bind.bind, StateT.bind,
-      EquivManager.toNode, EquivManager.find, EquivManager.merge]
-
 private theorem annotatedPiInner_isDefEqM :
     TypeChecker.M.run annotatedPiCtorCandidateContext.env
       annotatedPiCtorCandidateContext.safety
@@ -5499,36 +5331,6 @@ private theorem annotatedPiInner_isDefEqM :
       annotatedPiCtorCandidateContext.fuel
       (TypeChecker.isDefEq annotatedPiInnerKernel
         annotatedPiInnerKernel) = .ok true := by
-  obtain ⟨m, hm⟩ := annotatedPiEmptyEqv_isEquivInner
-  have hquick :
-      TypeChecker.Inner.quickIsDefEq annotatedPiInnerKernel
-          annotatedPiInnerKernel true
-          (TypeChecker.Methods.withFuel 9999)
-          annotatedPiCtorCandidateContext.toTypeChecker
-          ({} : TypeChecker.State) =
-        .ok (.true,
-          annotatedPiWithEqvManager ({} : TypeChecker.State) m) := by
-    unfold TypeChecker.Inner.quickIsDefEq
-    simp [modifyGet, MonadStateOf.modifyGet, monadLift,
-      MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure,
-      StateT.pure, Except.pure, hm, annotatedPiWithEqvManager,
-      Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  have hcore :
-      TypeChecker.Inner.isDefEqCore annotatedPiInnerKernel
-          annotatedPiInnerKernel (TypeChecker.Methods.withFuel 10000)
-          annotatedPiCtorCandidateContext.toTypeChecker
-          ({} : TypeChecker.State) =
-        .ok (true,
-          annotatedPiWithEqvManager ({} : TypeChecker.State) m) := by
-    change
-      TypeChecker.Inner.isDefEqCore' annotatedPiInnerKernel
-          annotatedPiInnerKernel (TypeChecker.Methods.withFuel 9999)
-          annotatedPiCtorCandidateContext.toTypeChecker
-          ({} : TypeChecker.State) = _
-    unfold TypeChecker.Inner.isDefEqCore'
-    simp only [normalizationRecMBind]
-    rw [hquick]
-    rfl
   change
     Except.map (fun x : Bool × TypeChecker.State => x.1)
       (TypeChecker.Inner.isDefEq annotatedPiInnerKernel
@@ -5536,8 +5338,7 @@ private theorem annotatedPiInner_isDefEqM :
         annotatedPiCtorCandidateContext.toTypeChecker
         ({} : TypeChecker.State)) = .ok true
   unfold TypeChecker.Inner.isDefEq
-  simp only [normalizationRecMBind]
-  rw [hcore]
+  rw [if_pos (Expr.eqv_refl _)]
   rfl
 
 private theorem annotatedPiConst_checkTypeM (lctx : LocalContext) :
@@ -7075,10 +6876,6 @@ private def aliasRecFieldResultState (state : TypeChecker.State) :
     inferTypeC := state.inferTypeC.insert
       aliasRecFieldKernelExpr (.sort (.succ .zero)) }
 
-@[simp] private theorem aliasRecFieldArgState_eqvManager :
-    (aliasRecFieldArgState
-      (aliasRecFieldFnState {})).eqvManager = {} := rfl
-
 @[simp] private theorem aliasRecFieldFnCache_miss :
     (({} : Lean4Lean.InferCache).insert
       (Expr.const ``RecAlias [.succ .zero]) aliasRecFieldFnType)[
@@ -7104,100 +6901,17 @@ private def aliasRecFieldResultState (state : TypeChecker.State) :
         Expr.const ``AliasRec []]? = none
   exact aliasRecFieldFnCache_miss
 
-private theorem aliasRecEmptyEqv_isEquivSort :
-    ∃ m : EquivManager,
-      EquivManager.isEquiv true
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          ({} : EquivManager) =
-        (true, m) := by
-  let r := EquivManager.isEquiv true
-    (.sort (.succ .zero)) (.sort (.succ .zero))
-    ({} : EquivManager)
-  refine ⟨r.2, Prod.ext ?_ rfl⟩
-  dsimp only [r]
-  rw [EquivManager.isEquiv.eq_def]
-  by_cases h :
-      ptrEqExpr (.sort (.succ .zero)) (.sort (.succ .zero)) = true
-  · rw [if_pos h]
-    rfl
-  · rw [if_neg h]
-    simp [Expr.isBVar, StateT.pure, pure, Bind.bind, StateT.bind,
-      EquivManager.toNode, EquivManager.find, EquivManager.merge]
-
-private def aliasRecWithEqvManager
-    (state : TypeChecker.State) (m : EquivManager) :
-    TypeChecker.State :=
-  { state with eqvManager := m }
-
-private theorem quickIsDefEqSort
-    (methods : TypeChecker.Methods)
-    (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
-    ∃ state : TypeChecker.State,
-      TypeChecker.Inner.quickIsDefEq
-          (.sort (.succ .zero)) (.sort (.succ .zero)) true
-          methods context initial =
-        .ok (.true, state) := by
-  obtain ⟨m, hm⟩ := aliasRecEmptyEqv_isEquivSort
-  refine ⟨aliasRecWithEqvManager initial m, ?_⟩
-  unfold TypeChecker.Inner.quickIsDefEq
-  simp [modifyGet, MonadStateOf.modifyGet, monadLift,
-    MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure,
-    StateT.pure, Except.pure, heqv, hm, aliasRecWithEqvManager,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-
-private theorem isDefEqCoreSort
-    (methods : TypeChecker.Methods)
-    (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
-    ∃ state : TypeChecker.State,
-      TypeChecker.Inner.isDefEqCore'
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          methods context initial =
-        .ok (true, state) := by
-  obtain ⟨state, hr⟩ :=
-    quickIsDefEqSort methods context initial heqv
-  refine ⟨state, ?_⟩
-  unfold TypeChecker.Inner.isDefEqCore'
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hr]
-  rfl
-
-private def aliasRecAfterAddEquiv
-    (state : TypeChecker.State) : TypeChecker.State :=
-  { state with
-    eqvManager := state.eqvManager.addEquiv
-      (.sort (.succ .zero)) (.sort (.succ .zero)) }
-
 private theorem isDefEqSort
     (context : TypeChecker.Context)
-    (initial : TypeChecker.State)
-    (heqv : initial.eqvManager = {}) :
+    (initial : TypeChecker.State) :
     ∃ state : TypeChecker.State,
       TypeChecker.Inner.isDefEq
           (.sort (.succ .zero)) (.sort (.succ .zero))
           (TypeChecker.Methods.withFuel 9998) context initial =
         .ok (true, state) := by
-  obtain ⟨state, hr⟩ :=
-    isDefEqCoreSort (TypeChecker.Methods.withFuel 9997)
-      context initial heqv
-  have hr' :
-      TypeChecker.Inner.isDefEqCore
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          (TypeChecker.Methods.withFuel 9998) context initial =
-        .ok (true, state) := by
-    change
-      TypeChecker.Inner.isDefEqCore'
-          (.sort (.succ .zero)) (.sort (.succ .zero))
-          (TypeChecker.Methods.withFuel 9997) context initial =
-        .ok (true, state)
-    exact hr
-  refine ⟨aliasRecAfterAddEquiv state, ?_⟩
+  refine ⟨initial, ?_⟩
   unfold TypeChecker.Inner.isDefEq
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hr']
+  rw [if_pos (Expr.eqv_refl _)]
   rfl
 
 private theorem inferTypeRecAliasInitial :
@@ -7247,7 +6961,6 @@ theorem aliasRecField_checkType :
   obtain ⟨eqState, heq⟩ :=
     isDefEqSort aliasRecNormalizationRawContext
       (aliasRecFieldArgState (aliasRecFieldFnState {}))
-      aliasRecFieldArgState_eqvManager
   simp only [aliasRecFamily_notEagerReduce, Bool.false_eq_true,
     if_false, aliasRecFieldFnType_bindingDomain,
     normalizationRecMBind]

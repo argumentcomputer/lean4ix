@@ -60,73 +60,12 @@ private def indexedVecTerminalKernel : Expr :=
 @[simp] private theorem indexedVecInfo_levelParams :
     indexedVecInfo.levelParams = [`u] := rfl
 
-private theorem emptyEqv_isEquivSelf (e : Expr) :
-    ∃ m : Lean4Lean.EquivManager,
-      Lean4Lean.EquivManager.isEquiv true e e
-          ({} : Lean4Lean.EquivManager) = (true, m) := by
-  let r := Lean4Lean.EquivManager.isEquiv true e e
-    ({} : Lean4Lean.EquivManager)
-  refine ⟨r.2, Prod.ext ?_ rfl⟩
-  dsimp only [r]
-  rw [Lean4Lean.EquivManager.isEquiv.eq_def]
-  by_cases h : Lean4Lean.ptrEqExpr e e = true
-  · rw [if_pos h]
-    rfl
-  · rw [if_neg h]
-    cases e <;>
-      simp [Expr.isBVar, StateT.pure, pure, Bind.bind, StateT.bind,
-        Lean4Lean.EquivManager.toNode, Lean4Lean.EquivManager.find,
-        Lean4Lean.EquivManager.merge]
-
-private def withEqvManager (state : Lean4Lean.TypeChecker.State)
-    (manager : Lean4Lean.EquivManager) : Lean4Lean.TypeChecker.State :=
-  { state with eqvManager := manager }
-
-private theorem quickIsDefEqSelf
-    (e : Expr) (methods : Lean4Lean.TypeChecker.Methods)
-    (context : Lean4Lean.TypeChecker.Context) :
-    ∃ state : Lean4Lean.TypeChecker.State,
-      Lean4Lean.TypeChecker.Inner.quickIsDefEq e e true methods context
-          ({} : Lean4Lean.TypeChecker.State) = .ok (.true, state) := by
-  obtain ⟨manager, heq⟩ := emptyEqv_isEquivSelf e
-  refine ⟨withEqvManager ({} : Lean4Lean.TypeChecker.State) manager, ?_⟩
-  unfold Lean4Lean.TypeChecker.Inner.quickIsDefEq
-  simp [modifyGet, MonadStateOf.modifyGet, monadLift,
-    MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure,
-    StateT.pure, Except.pure, heq, withEqvManager,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-
-private theorem isDefEqSelfCore
-    (e : Expr) (methods : Lean4Lean.TypeChecker.Methods)
-    (context : Lean4Lean.TypeChecker.Context) :
-    ∃ state : Lean4Lean.TypeChecker.State,
-      Lean4Lean.TypeChecker.Inner.isDefEqCore' e e methods context
-          ({} : Lean4Lean.TypeChecker.State) = .ok (true, state) := by
-  obtain ⟨state, hquick⟩ := quickIsDefEqSelf e methods context
-  refine ⟨state, ?_⟩
-  unfold Lean4Lean.TypeChecker.Inner.isDefEqCore'
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hquick]
-  rfl
-
 /-- Reflexive binder-domain equality is an exact successful ordinary-checker
 run in any candidate context with positive recursive fuel. -/
 theorem candidateIsDefEqSelfValid
     (context : Lean4Lean.AddInductive.Context) (e : Expr)
     (fuel : Nat) (hfuel : context.fuel.recDepth = fuel + 1) :
     Lean4Lean.AddInductive.CandidateIsDefEqStep.Valid ⟨context, e, e⟩ := by
-  obtain ⟨state, hcore⟩ :=
-    isDefEqSelfCore e (Lean4Lean.TypeChecker.Methods.withFuel fuel)
-      context.toTypeChecker
-  have hcore' :
-      Lean4Lean.TypeChecker.Inner.isDefEqCore e e
-          (Lean4Lean.TypeChecker.Methods.withFuel (fuel + 1))
-          context.toTypeChecker ({} : Lean4Lean.TypeChecker.State) =
-        .ok (true, state) := by
-    change Lean4Lean.TypeChecker.Inner.isDefEqCore' e e
-      (Lean4Lean.TypeChecker.Methods.withFuel fuel)
-      context.toTypeChecker ({} : Lean4Lean.TypeChecker.State) = _
-    exact hcore
   unfold Lean4Lean.AddInductive.CandidateIsDefEqStep.Valid
   unfold Lean4Lean.TypeChecker.M.run Lean4Lean.TypeChecker.isDefEq
     Lean4Lean.TypeChecker.RecM.run
@@ -140,8 +79,7 @@ theorem candidateIsDefEqSelfValid
         (Lean4Lean.TypeChecker.Methods.withFuel (fuel + 1))
         context.toTypeChecker ({} : Lean4Lean.TypeChecker.State)) = .ok true
   unfold Lean4Lean.TypeChecker.Inner.isDefEq
-  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
-  rw [hcore']
+  rw [if_pos (Expr.eqv_refl e)]
   rfl
 
 private def indexedVecTypeCheckerContext

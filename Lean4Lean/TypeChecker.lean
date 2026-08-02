@@ -153,6 +153,11 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
 def isDefEqCore (t s : Expr) : RecM Bool := fun m => m.isDefEqCore t s
 
 def isDefEq (t s : Expr) : RecM Bool := do
+  -- Syntactically equivalent expressions are definitionally equal without
+  -- consulting or mutating the equivalence manager.  Besides avoiding
+  -- needless work, this keeps exact checker executions compositional when an
+  -- application argument has precisely the declared domain type.
+  if t == s then return true
   let r ← isDefEqCore t s
   if r then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
