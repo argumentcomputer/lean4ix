@@ -253,10 +253,17 @@ theorem nilAlphaFind :
   have hfresh : ({} : LocalContext).find? nilAlphaId = none := by
     have h := LocalContext.WF.find?_eq_find?_toList
       (fv := nilAlphaId) LocalContext.WF.nil
-    simpa [nilAlphaId, LocalContext.toList] using h
+    change
+      ({ fvarIdToDecl := PersistentHashMap.empty,
+         decls := PersistentArray.empty,
+         auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+        nilAlphaId = none
+    rw [h]
+    simp [LocalContext.toList]
   have hwf : nilAlphaLctx.WF := by
-    simpa [nilAlphaLctx] using
-      (LocalContext.WF.mkLocalDecl LocalContext.WF.nil hfresh)
+    change (({} : LocalContext).mkLocalDecl nilAlphaId `α
+      (.sort (.succ (.param `u))) .implicit).WF
+    exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil hfresh
   rw [hwf.find?_eq_find?_toList]
   simp only [nilAlphaLctx]
   rw [LocalContext.mkLocalDecl_toList]
@@ -483,7 +490,8 @@ theorem inferNilFirstApp :
         Expr.eqv_eq])
     (by simpa [indexedVecInfoTypeShape] using inferNilFamily)
     inferNilAlpha (by rfl)
-  simpa [nilFirstApp, nilFirstAppState] using h
+  simpa [nilFirstApp, nilFirstAppState, vecFamilyTail,
+    Expr.instantiate1'] using h
 
 theorem inferNilZero :
     TypeChecker.Inner.inferType' (.const ``Nat.zero []) false
@@ -711,16 +719,23 @@ theorem nilCandidateFresh :
     ({} : LocalContext).find? nilCandidateAlphaId = none := by
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := nilCandidateAlphaId) LocalContext.WF.nil
-  simpa [nilCandidateAlphaId, nilCandidateContext, ctorContext,
-    LocalContext.toList] using h
+  change
+    ({ fvarIdToDecl := PersistentHashMap.empty,
+       decls := PersistentArray.empty,
+       auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+      nilCandidateAlphaId = none
+  rw [h]
+  simp [LocalContext.toList]
 
 theorem nilCandidateAlphaFind :
     nilCandidateAlphaLctx.find? nilCandidateAlphaId =
       some (.cdecl 0 nilCandidateAlphaId `α
         (.sort (.succ (.param `u))) .implicit .default) := by
   have hwf : nilCandidateAlphaLctx.WF := by
-    simpa [nilCandidateAlphaLctx] using
-      (LocalContext.WF.mkLocalDecl LocalContext.WF.nil nilCandidateFresh)
+    change (({} : LocalContext).mkLocalDecl nilCandidateAlphaId `α
+      (.sort (.succ (.param `u))) .implicit).WF
+    exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil
+      nilCandidateFresh
   rw [hwf.find?_eq_find?_toList]
   simp only [nilCandidateAlphaLctx]
   rw [LocalContext.mkLocalDecl_toList]
@@ -804,7 +819,8 @@ theorem inferNilCandidateFirstApp :
     (by simpa [indexedVecInfoTypeShape] using inferNilCandidateAlpha)
     (by rfl)
   simpa [nilCandidateFirstApp, nilCandidateFirstAppState,
-    indexedVecInfoTypeShape, vecFamilyTailInstantiate] using h
+    indexedVecInfoTypeShape, vecFamilyTail,
+    Expr.instantiate1'] using h
 
 theorem inferNilCandidateZero :
     TypeChecker.Inner.inferType' (.const ``Nat.zero []) false
@@ -987,7 +1003,7 @@ theorem nilCandidateIsDeltaFamily :
       Expr.const ``IndexedVec [.param `u] by rfl]
   simp only
   rw [type_lookup_family]
-  simp [indexedVecInfo, ConstantInfo.hasValue]
+  simp [indexedVecInfo, ConstantInfo.deltaValue?]
 
 theorem nilCandidateUnfoldFamily
     (methods : TypeChecker.Methods) (state : TypeChecker.State) :
@@ -1097,7 +1113,8 @@ theorem nilDomainAnnotationsEq :
 theorem nilCandidateContextFresh :
     nilCandidateContext.lctx.find?
       nilCandidateContext.freshFVarId = none := by
-  simpa [nilCandidateAlphaId] using nilCandidateFresh
+  change ({} : LocalContext).find? nilCandidateAlphaId = none
+  exact nilCandidateFresh
 
 theorem nilRootCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
@@ -1253,7 +1270,7 @@ theorem nilCandidateTraceLoop :
       (hdomain := by
         simpa using nilDomainCandidateTraceLoop 998)
       (hbody := by
-        simpa [nilCandidateBodyContext] using
+        simpa [nilCandidateBodyContext, nilDomainAnnotations] using
           nilBodyCandidateTraceLoop 998))
 
 theorem nilCandidateProduced :
@@ -1440,8 +1457,19 @@ theorem consRootFresh :
   simpa [consRootContext, nilCandidateContext] using nilCandidateContextFresh
 
 theorem consAlphaContextWF : consAlphaContext.lctx.WF := by
-  simpa [consAlphaContext, AddInductive.Context.pushLocalDecl] using
-    (LocalContext.WF.mkLocalDecl LocalContext.WF.nil consRootFresh)
+  change (({} : LocalContext).mkLocalDecl
+    consRootContext.freshFVarId consAlphaName
+    (.sort (.succ (.param `u))) .implicit).WF
+  exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil (by
+    have h := LocalContext.WF.find?_eq_find?_toList
+      (fv := consRootContext.freshFVarId) LocalContext.WF.nil
+    change
+      ({ fvarIdToDecl := PersistentHashMap.empty,
+         decls := PersistentArray.empty,
+         auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+        consRootContext.freshFVarId = none
+    rw [h]
+    simp [LocalContext.toList])
 
 theorem consAlphaContextFresh :
     consAlphaContext.lctx.find? consAlphaContext.freshFVarId = none := by
@@ -1606,7 +1634,7 @@ theorem ctorUnfoldNat (lctx methods state) :
     methods (tcContext lctx) state = _
   simp [TypeChecker.Inner.unfoldDefinitionCore,
     TypeChecker.Inner.isDelta, Expr.getAppFn, tcContext,
-    type_lookup_nat, natInfo, ConstantInfo.hasValue,
+    type_lookup_nat, natInfo, ConstantInfo.deltaValue?,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem ctorWhnfLoopNat (lctx methods state n) :

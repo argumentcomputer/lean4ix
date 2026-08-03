@@ -323,7 +323,9 @@ private theorem indexedVecOuterWithLocalDecl
         { indexedVecFamilyCandidateContext.toTypeChecker with
           lctx := indexedVecParamLctx }
         indexedVecAfterParamState := by
-  simpa [indexedVecParamLctx, indexedVecAfterParamState] using
+  simpa [indexedVecParamLctx, indexedVecAfterParamState,
+    indexedVecFamilyCandidateContext,
+    Lean4Lean.AddInductive.Context.toTypeChecker] using
     (indexedVecWithLocalDecl indexedVecParamName .default
       (.sort (.succ (.param `u))) k methods
       indexedVecFamilyCandidateContext.toTypeChecker indexedVecRootSortState)
@@ -547,7 +549,7 @@ private theorem indexedVecUnfoldNat (lctx methods state) :
   simp [Lean4Lean.TypeChecker.Inner.unfoldDefinitionCore,
     Lean4Lean.TypeChecker.Inner.isDelta, Expr.getAppFn,
     indexedVecTypeCheckerContext, indexedVecKernel_lookup_nat,
-    natInfo, ConstantInfo.hasValue,
+    natInfo, ConstantInfo.deltaValue?,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 private theorem indexedVecWhnfLoopNat (lctx methods state n) :
@@ -636,7 +638,11 @@ private theorem indexedVecInnerCheckerWithLocalDecl
           lctx := indexedVecInnerCheckerLctx }
         indexedVecInnerAfterIndexState := by
   simpa [indexedVecInnerCheckerLctx,
-    indexedVecInnerAfterIndexState] using
+    indexedVecInnerAfterIndexState,
+    indexedVecParamCandidateContext,
+    indexedVecFamilyCandidateContext,
+    Lean4Lean.AddInductive.Context.pushLocalDecl,
+    Lean4Lean.AddInductive.Context.toTypeChecker] using
       (indexedVecWithLocalDecl indexedVecIndexName .default
         (.const ``Nat []) k methods
         indexedVecParamCandidateContext.toTypeChecker
@@ -744,16 +750,24 @@ private theorem indexedVecFamilyCandidateFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := indexedVecFamilyCandidateContext.freshFVarId)
     LocalContext.WF.nil
-  simpa [indexedVecFamilyCandidateContext, LocalContext.toList] using h
+  change
+    ({ fvarIdToDecl := PersistentHashMap.empty,
+       decls := PersistentArray.empty,
+       auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+      indexedVecFamilyCandidateContext.freshFVarId = none
+  rw [h]
+  simp [LocalContext.toList]
 
 private theorem indexedVecParamCandidateFresh :
     indexedVecParamCandidateContext.lctx.find?
       indexedVecParamCandidateContext.freshFVarId = none := by
   have hroot := indexedVecFamilyCandidateFresh
   have hwf : indexedVecParamCandidateContext.lctx.WF := by
-    simpa [indexedVecParamCandidateContext,
-      Lean4Lean.AddInductive.Context.pushLocalDecl] using
-      (LocalContext.WF.mkLocalDecl LocalContext.WF.nil hroot)
+    change (({} : LocalContext).mkLocalDecl
+      indexedVecFamilyCandidateContext.freshFVarId
+      indexedVecParamName (.sort (.succ (.param `u))) .default).WF
+    exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil (by
+      simpa [indexedVecFamilyCandidateContext] using hroot)
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := indexedVecParamCandidateContext.freshFVarId) hwf
   rw [h]
@@ -856,13 +870,15 @@ private def indexedVecParamDomainCandidateTrace :
   .terminal indexedVecFamilyCandidateContext indexedVecTerminalKernel
     (.sort (.succ (.succ (.param `u)))) indexedVecTerminalKernel
     (by
-      simpa [indexedVecFamilyCandidateContext, indexedVecInfo,
+      simpa [Lean4Lean.AddInductive.CandidateCheckTypeStep.Valid,
+        indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         indexedVecTerminalKernel] using
           indexedVecSort_checkTypeM
             indexedVecFamilyCandidateContext.lctx)
     (by
-      simpa [indexedVecFamilyCandidateContext, indexedVecInfo,
+      simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
+        indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         indexedVecTerminalKernel] using
           indexedVecSort_whnfM indexedVecFamilyCandidateContext.lctx)
@@ -873,13 +889,15 @@ private def indexedVecIndexDomainCandidateTrace :
   .terminal indexedVecParamCandidateContext (.const ``Nat [])
     (.sort (.succ .zero)) (.const ``Nat [])
     (by
-      simpa [indexedVecParamCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateCheckTypeStep.Valid,
+        indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl] using
           indexedVecNat_checkTypeM indexedVecParamCandidateContext.lctx)
     (by
-      simpa [indexedVecParamCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
+        indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl] using
@@ -895,18 +913,22 @@ private def indexedVecTerminalCandidateTrace :
       indexedVecParamCandidateContext.freshExpr)
     (.sort (.succ (.succ (.param `u)))) indexedVecTerminalKernel
     (by
-      simpa [indexedVecIndexCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateCheckTypeStep.Valid,
+        indexedVecIndexCandidateContext,
         indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        Lean4Lean.AddInductive.Context.pushLocalDecl] using
+        Lean4Lean.AddInductive.Context.pushLocalDecl,
+        indexedVecTerminalKernel] using
           indexedVecSort_checkTypeM indexedVecIndexCandidateContext.lctx)
     (by
-      simpa [indexedVecIndexCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
+        indexedVecIndexCandidateContext,
         indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        Lean4Lean.AddInductive.Context.pushLocalDecl] using
+        Lean4Lean.AddInductive.Context.pushLocalDecl,
+        indexedVecTerminalKernel] using
           indexedVecSort_whnfM indexedVecIndexCandidateContext.lctx)
 
 private def indexedVecInnerCandidateTrace :
@@ -922,16 +944,22 @@ private def indexedVecInnerCandidateTrace :
     .default indexedVecParamCandidateFresh indexedVecIndexAnnotations
     indexedVecIndexAnnotationsEq
     (by
-      simpa [indexedVecParamCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateCheckTypeStep.Valid,
+        indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        Lean4Lean.AddInductive.Context.pushLocalDecl] using
+        Lean4Lean.AddInductive.Context.pushLocalDecl,
+        indexedVecInnerKernel, indexedVecTerminalKernel,
+        Expr.instantiate1'] using
           indexedVecInner_checkTypeM)
     (by
-      simpa [indexedVecParamCandidateContext,
+      simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
+        indexedVecParamCandidateContext,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        Lean4Lean.AddInductive.Context.pushLocalDecl] using
+        Lean4Lean.AddInductive.Context.pushLocalDecl,
+        indexedVecInnerKernel, indexedVecTerminalKernel,
+        Expr.instantiate1'] using
           indexedVecInner_whnfM)
     indexedVecIndexDomainCandidateTrace indexedVecTerminalCandidateTrace
 
@@ -945,9 +973,15 @@ private def indexedVecFamilyCandidateTrace :
     indexedVecParamAnnotationsEq
     indexedVecFamily_checkTypeM
     (by
-      simpa [indexedVecInfo, ConstantInfo.type,
-        ConstantInfo.toConstantVal, indexedVecInnerKernel,
-        indexedVecTerminalKernel] using indexedVecFamily_whnfM)
+      change Lean4Lean.TypeChecker.M.run
+        indexedVecFamilyCandidateContext.env
+        indexedVecFamilyCandidateContext.safety
+        indexedVecFamilyCandidateContext.lctx
+        indexedVecFamilyCandidateContext.lparams
+        indexedVecFamilyCandidateContext.fuel
+        (Lean4Lean.TypeChecker.whnf indexedVecInfo.type) =
+          .ok indexedVecInfo.type
+      exact indexedVecFamily_whnfM)
     indexedVecParamDomainCandidateTrace indexedVecInnerCandidateTrace
 
 def indexedVecFamilyCandidate :
@@ -999,7 +1033,8 @@ theorem indexedVecFamilyCandidate_identity :
       (annotations := indexedVecIndexAnnotations)
       indexedVecIndexDomainCandidateTrace indexedVecTerminalCandidateTrace
       ?_ rfl (.terminal rfl) ?_
-    · simpa only [Expr.instantiate1_eq, indexedVecInnerKernel] using
+    · simpa only [Expr.instantiate1_eq, indexedVecInnerKernel,
+        indexedVecTerminalKernel] using
         indexedVecInnerKernel_instantiate1
           indexedVecFamilyCandidateContext.freshExpr
     · exact .terminal (by
@@ -1071,7 +1106,8 @@ private theorem indexedVecInnerCandidateTrace_loop :
       (hdomain := by
         simpa using indexedVecIndexDomainCandidateTrace_loop 997)
       (hbody := by
-        simpa [indexedVecIndexCandidateContext] using
+        simpa [indexedVecIndexCandidateContext,
+          indexedVecIndexAnnotations] using
           indexedVecTerminalCandidateTrace_loop 997))
 
 private theorem indexedVecFamilyCandidateTrace_loop :
@@ -1100,7 +1136,8 @@ private theorem indexedVecFamilyCandidateTrace_loop :
       (hdomain := by
         simpa using indexedVecParamDomainCandidateTrace_loop 998)
       (hbody := by
-        simpa [indexedVecParamCandidateContext] using
+        simpa [indexedVecParamCandidateContext,
+          indexedVecParamAnnotations, indexedVecTerminalKernel] using
           indexedVecInnerCandidateTrace_loop))
 
 /-- The executable candidate traversal preserves the real IndexedVec family
@@ -1213,15 +1250,19 @@ theorem indexedVec_checkInductiveTypes
         #[indexedVecKernelType] k indexedVecFamilyCandidateContext =
       k indexedVecCandidateInductiveStats
         indexedVecFamilyCandidate.trace.terminalContext := by
-  simpa [indexedVecCandidateInductiveStats] using
-    (Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_of_candidate
+  change Lean4Lean.AddInductive.checkInductiveTypes 1
+      #[indexedVecKernelType] k indexedVecFamilyCandidate.context =
+    k indexedVecCandidateInductiveStats
+      indexedVecFamilyCandidate.trace.terminalContext
+  exact
+    Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_of_candidate
       (indType := indexedVecKernelType)
       (candidate := indexedVecFamilyCandidate.trace)
       (nparams := 1) (resultLevel := .succ (.param `u)) (k := k)
       indexedVecFamily_closed (by decide) (by decide)
       ⟨indexedVecParamAnnotations_match,
         indexedVecIndexAnnotations_match, trivial⟩
-      rfl indexedVecTerminal_ensureSortM)
+      rfl indexedVecTerminal_ensureSortM
 
 theorem indexedVecCandidateInductiveStats_nindices :
     indexedVecCandidateInductiveStats.nindices = #[1] := by
@@ -1259,11 +1300,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecFamily_candidateTrace' depend
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
@@ -1282,14 +1324,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVec_checkInductiveTypes' depends
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -1309,11 +1349,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_nindi
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
@@ -1332,11 +1373,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_param
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,

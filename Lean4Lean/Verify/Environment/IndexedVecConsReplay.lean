@@ -110,7 +110,8 @@ theorem replayInferFirstAppFVarCore
     (by simpa [replayInsert, indexedVecInfoTypeShape] using hfamilyRun)
     (by simpa [replayInsert] using halphaRun)
     (by rfl)
-  simpa [replayInsert, replayFirstApp, vecFamilyTailInstantiate] using happRun
+  simpa [replayInsert, replayFirstApp, vecFamilyTail,
+    Expr.instantiate1'] using happRun
 
 def replaySuccApp (n : Expr) : Expr :=
   .app (.const ``Nat.succ []) n
@@ -189,7 +190,7 @@ theorem replayInferIndexedVecAppCore
     (replayFirstApp alpha) indexExpr (.const ``Nat [])
     (.sort (.succ (.param `u))) vecIndexName .default
     hclosed hcache
-    (by simpa [replayFirstApp] using hfn) harg heager
+    (by simpa [replayFirstApp, vecFamilyTail] using hfn) harg heager
   simpa [replayInsert, ctorIndexedVecApp, replayFirstApp,
     vecFamilyTail, Expr.instantiate1_eq, Expr.instantiate1'] using h
 
@@ -239,8 +240,8 @@ theorem replayInferFirstAppAlphaCachedCore
     (by simpa [familyState, replayInsert, indexedVecInfoTypeShape] using
       hfamilyRun)
     halphaRun (by rfl)
-  simpa [familyState, replayInsert, replayFirstApp,
-    vecFamilyTailInstantiate] using hrun
+  simpa [familyState, replayInsert, replayFirstApp, vecFamilyTail,
+    Expr.instantiate1'] using hrun
 
 theorem replayInferTailDomainAlphaCachedCore
     (fuel : Nat) (lctx : LocalContext) (state : TypeChecker.State)
@@ -402,7 +403,7 @@ theorem replayInferConsHeadN (fuel : Nat) :
       (TypeChecker.Methods.withFuel fuel)
       (tcContext consHeadContext.lctx) consHeadFirstAppState =
         .ok (.const ``Nat [], consHeadNState) := by
-  simpa [consHeadNState, consNExprShape] using
+  simpa [consHeadNState, consNExprShape, replayInsert] using
     (inferTypeFVarCore fuel consHeadContext.lctx
       consHeadFirstAppState consNId (.const ``Nat [])
       (index := 1) (name := consNName) (bi := .implicit)
@@ -1714,13 +1715,27 @@ theorem consRootCheckAlphaFresh :
     consRootContext.lctx.find? consRootCheckAlphaId = none := by
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consRootCheckAlphaId) LocalContext.WF.nil
-  simpa [consRootContext, ctorContext, consRootCheckAlphaId,
-    nilRootSortState, LocalContext.toList] using h
+  change
+    ({ fvarIdToDecl := PersistentHashMap.empty,
+       decls := PersistentArray.empty,
+       auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+      consRootCheckAlphaId = none
+  rw [h]
+  simp [LocalContext.toList]
 
 theorem consRootCheckAlphaLctxWF : consRootCheckAlphaLctx.WF := by
-  simpa [consRootCheckAlphaLctx] using
-    (LocalContext.WF.mkLocalDecl LocalContext.WF.nil
-      consRootCheckAlphaFresh)
+  change (({} : LocalContext).mkLocalDecl consRootCheckAlphaId
+    consAlphaName (.sort (.succ (.param `u))) .implicit).WF
+  exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil (by
+    have h := LocalContext.WF.find?_eq_find?_toList
+      (fv := consRootCheckAlphaId) LocalContext.WF.nil
+    change
+      ({ fvarIdToDecl := PersistentHashMap.empty,
+         decls := PersistentArray.empty,
+         auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+        consRootCheckAlphaId = none
+    rw [h]
+    simp [LocalContext.toList])
 
 theorem consRootCheckAlphaFind :
     consRootCheckAlphaLctx.find? consRootCheckAlphaId =
@@ -2317,7 +2332,8 @@ theorem consRootCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consRootContext, indexedVecConsInfo.type,
         .sort (.succ (.succ (.param `u)))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consRootContext, ctorContext] using
     replayConsRootCheckTypeM
 
 theorem consRootWhnfValid :
@@ -2331,78 +2347,100 @@ theorem consAfterAlphaCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consAlphaContext, consAfterAlpha,
         .sort (.succ (.param `u))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     replayConsAfterAlphaCheckTypeM
 
 theorem consAfterAlphaWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consAlphaContext, consAfterAlpha, consAfterAlpha⟩ := by
-  simpa [AddInductive.CandidateWhnfStep.Valid] using
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     replayConsAfterAlphaWhnfM
 
 theorem consAfterNCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consNContext, consAfterN, .sort (.succ (.param `u))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consNContext, consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     replayConsAfterNCheckTypeM
 
 theorem consAfterNWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consNContext, consAfterN, consAfterN⟩ := by
-  simpa [AddInductive.CandidateWhnfStep.Valid] using
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consNContext, consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     replayConsAfterNWhnfM
 
 theorem consAfterHeadCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consHeadContext, consAfterHead,
         .sort (.succ (.param `u))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsAfterHeadCheckTypeM
 
 theorem consAfterHeadWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consHeadContext, consAfterHead, consAfterHead⟩ := by
-  simpa [AddInductive.CandidateWhnfStep.Valid] using
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsAfterHeadWhnfM
 
 theorem consTerminalCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consTailContext, consTerminal,
         .sort (.succ (.param `u))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consTailContext, consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsTerminalCheckTypeM
 
 theorem consTerminalWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consTailContext, consTerminal, consTerminal⟩ := by
-  simpa [AddInductive.CandidateWhnfStep.Valid] using
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consTailContext, consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsTerminalWhnfM
 
 theorem consAlphaDomainCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consRootContext, (.sort (.succ (.param `u))),
         .sort (.succ (.succ (.param `u)))⟩ := by
-  simpa [consRootContext, ctorContext] using nilDomainCheckValid
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consRootContext, nilCandidateContext, ctorContext] using
+    nilDomainCheckValid
 
 theorem consAlphaDomainWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consRootContext, (.sort (.succ (.param `u))),
         .sort (.succ (.param `u))⟩ := by
-  simpa [consRootContext, ctorContext] using nilDomainWhnfValid
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consRootContext, nilCandidateContext, ctorContext] using
+    nilDomainWhnfValid
 
 theorem consNatDomainCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consAlphaContext, (.const ``Nat []),
         .sort (.succ .zero)⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
-    consAlphaContext, consRootContext, ctorContext] using
+    consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     ctorNatCheckTypeM consAlphaContext.lctx
 
 theorem consNatDomainWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consAlphaContext, (.const ``Nat []), (.const ``Nat [])⟩ := by
   simpa [AddInductive.CandidateWhnfStep.Valid,
-    consAlphaContext, consRootContext, ctorContext] using
+    consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using
     ctorNatWhnfM consAlphaContext.lctx
 
 theorem consHeadDomainCheckValid :
@@ -2410,7 +2448,8 @@ theorem consHeadDomainCheckValid :
       ⟨consNContext, consAlphaExpr,
         .sort (.succ (.param `u))⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
-    consAlphaExprShape] using
+    consAlphaExprShape, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     (ctorFVarCheckTypeM consNContext.lctx consAlphaId
       (.sort (.succ (.param `u))) consAlphaFindInN)
 
@@ -2418,20 +2457,25 @@ theorem consHeadDomainWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consNContext, consAlphaExpr, consAlphaExpr⟩ := by
   simpa [AddInductive.CandidateWhnfStep.Valid,
-    consAlphaExprShape] using
+    consAlphaExprShape, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     (ctorFVarWhnfM consNContext.lctx consAlphaId consAlphaFindInN)
 
 theorem consTailDomainCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consHeadContext, consTailDomain,
         .sort (.succ (.param `u))⟩ := by
-  simpa [AddInductive.CandidateCheckTypeStep.Valid] using
+  simpa [AddInductive.CandidateCheckTypeStep.Valid,
+    consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsTailDomainCheckTypeM
 
 theorem consTailDomainWhnfValid :
     AddInductive.CandidateWhnfStep.Valid
       ⟨consHeadContext, consTailDomain, consTailDomain⟩ := by
-  simpa [AddInductive.CandidateWhnfStep.Valid] using
+  simpa [AddInductive.CandidateWhnfStep.Valid,
+    consHeadContext, consNContext, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
     replayConsTailDomainWhnfM
 
 def consAlphaDomainCandidateTrace :
@@ -2481,7 +2525,12 @@ def consAfterHeadCandidateTrace :
     consTailAnnotations consTailAnnotationsEq
     (by simpa only [consAfterHeadShape] using consAfterHeadCheckValid)
     (by
-      simpa [consAfterHeadShape, consAfterHead, Expr.bindingBody!] using
+      simpa [consAfterN, consAfterHead, consTailDomain,
+        consAlphaExpr, consNExpr, consRootContext, consAlphaContext,
+        consNContext, ctorContext, AddInductive.Context.pushLocalDecl,
+        AddInductive.Context.freshExpr, Expr.bindingBody!,
+        Expr.instantiate1_eq, Expr.instantiate1',
+        Expr.liftLooseBVars_zero] using
         consAfterHeadWhnfValid)
     consTailDomainCandidateTrace consTerminalCandidateTrace
 
@@ -2497,7 +2546,12 @@ def consAfterNCandidateTrace :
     consHeadAnnotations consHeadAnnotationsEq
     (by simpa only [consAfterNShape] using consAfterNCheckValid)
     (by
-      simpa [consAfterNShape, consAfterN, Expr.bindingBody!] using
+      simpa [consAfterAlpha, consAfterN, consAlphaExpr, consNExpr,
+        consRootContext, consAlphaContext, ctorContext,
+        AddInductive.Context.pushLocalDecl,
+        AddInductive.Context.freshExpr, Expr.bindingBody!,
+        Expr.instantiate1_eq, Expr.instantiate1',
+        Expr.liftLooseBVars_zero] using
         consAfterNWhnfValid)
     consHeadDomainCandidateTrace consAfterHeadCandidateTrace
 
@@ -2511,7 +2565,11 @@ def consAfterAlphaCandidateTrace :
     consNatAnnotations consNatAnnotationsEq
     (by simpa only [consAfterAlphaShape] using consAfterAlphaCheckValid)
     (by
-      simpa [consAfterAlphaShape, consAfterAlpha, Expr.bindingBody!] using
+      simpa [consNTypeRaw, consHeadTypeRaw, consTailTypeRaw,
+        consTerminalRaw, consAfterAlpha, consAlphaExpr,
+        consRootContext, ctorContext, AddInductive.Context.freshExpr,
+        Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
+        Expr.liftLooseBVars_zero] using
         consAfterAlphaWhnfValid)
     consNatDomainCandidateTrace consAfterNCandidateTrace
 
@@ -2660,7 +2718,12 @@ theorem consAfterHeadCandidateTraceLoop :
       (hcheck := by
         simpa only [consAfterHeadShape] using consAfterHeadCheckValid)
       (hrun := by
-        simpa [consAfterHeadShape, consAfterHead, Expr.bindingBody!] using
+        simpa [consAfterN, consAfterHead, consTailDomain,
+          consAlphaExpr, consNExpr, consRootContext, consAlphaContext,
+          consNContext, ctorContext, AddInductive.Context.pushLocalDecl,
+          AddInductive.Context.freshExpr, Expr.bindingBody!,
+          Expr.instantiate1_eq, Expr.instantiate1',
+          Expr.liftLooseBVars_zero] using
           consAfterHeadWhnfValid)
       (domainCandidate := consTailDomainCandidateTrace)
       (bodyCandidate := consTerminalCandidateTrace)
@@ -2692,7 +2755,12 @@ theorem consAfterNCandidateTraceLoop :
       (hcheck := by
         simpa only [consAfterNShape] using consAfterNCheckValid)
       (hrun := by
-        simpa [consAfterNShape, consAfterN, Expr.bindingBody!] using
+        simpa [consAfterAlpha, consAfterN, consAlphaExpr, consNExpr,
+          consRootContext, consAlphaContext, ctorContext,
+          AddInductive.Context.pushLocalDecl,
+          AddInductive.Context.freshExpr, Expr.bindingBody!,
+          Expr.instantiate1_eq, Expr.instantiate1',
+          Expr.liftLooseBVars_zero] using
           consAfterNWhnfValid)
       (domainCandidate := consHeadDomainCandidateTrace)
       (bodyCandidate := consAfterHeadCandidateTrace)
@@ -2722,7 +2790,11 @@ theorem consAfterAlphaCandidateTraceLoop :
       (hcheck := by
         simpa only [consAfterAlphaShape] using consAfterAlphaCheckValid)
       (hrun := by
-        simpa [consAfterAlphaShape, consAfterAlpha, Expr.bindingBody!] using
+        simpa [consNTypeRaw, consHeadTypeRaw, consTailTypeRaw,
+          consTerminalRaw, consAfterAlpha, consAlphaExpr,
+          consRootContext, ctorContext, AddInductive.Context.freshExpr,
+          Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
+          Expr.liftLooseBVars_zero] using
           consAfterAlphaWhnfValid)
       (domainCandidate := consNatDomainCandidateTrace)
       (bodyCandidate := consAfterNCandidateTrace)

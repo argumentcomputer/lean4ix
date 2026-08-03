@@ -130,10 +130,18 @@ theorem indexedVecValidationParamContextWF :
     have h := LocalContext.WF.find?_eq_find?_toList
       (fv := indexedVecFamilyCandidateContext.freshFVarId)
       LocalContext.WF.nil
-    simpa [indexedVecFamilyCandidateContext, LocalContext.toList] using h
-  simpa [indexedVecValidationParamContext,
-    AddInductive.Context.pushLocalDecl] using
-      (LocalContext.WF.mkLocalDecl LocalContext.WF.nil hfresh)
+    change
+      ({ fvarIdToDecl := PersistentHashMap.empty,
+         decls := PersistentArray.empty,
+         auxDeclToFullName := Std.TreeMap.empty } : LocalContext).find?
+        indexedVecFamilyCandidateContext.freshFVarId = none
+    rw [h]
+    simp [LocalContext.toList]
+  change (({} : LocalContext).mkLocalDecl
+    indexedVecFamilyCandidateContext.freshFVarId
+    indexedVecValidationParamName
+    (.sort (.succ (.param `u))) .default).WF
+  exact LocalContext.WF.mkLocalDecl LocalContext.WF.nil hfresh
 
 theorem indexedVecValidationFamilyContextFresh :
     indexedVecValidationParamContext.lctx.find?
@@ -271,7 +279,7 @@ theorem ctorIndexedVecFVarCheckTypeM
         (TypeChecker.Methods.withFuel 9999) (tcContext lctx)
         (validationFirstAppState alphaId) =
       .ok (.const ``Nat [], validationIndexState alphaId nId) := by
-    simpa [validationIndexState] using
+    simpa [validationIndexState, replayInsert] using
       (inferTypeFVarCore 9999 lctx
         (validationFirstAppState alphaId) nId (.const ``Nat [])
         hnmiss hn)
@@ -737,8 +745,10 @@ theorem indexedVecValidationNilRootCheckTypeM :
         indexedVecCtorValidationContext.fuel
         (TypeChecker.checkType indexedVecKernelNil.type) =
       .ok (.sort nilCtorInferredLevel) := by
-  simpa [indexedVecCtorValidationContext,
-    indexedVecKernelNil] using nilRootCheckTypeM
+  change TypeChecker.M.run ctorEnv .safe {} [`u] ({} : FuelConfig)
+    (TypeChecker.checkType indexedVecKernelNil.type) =
+      .ok (.sort nilCtorInferredLevel)
+  simpa [indexedVecKernelNil] using nilRootCheckTypeM
 
 theorem indexedVecValidationConsRootCheckTypeM :
     TypeChecker.M.run indexedVecCtorValidationContext.env
@@ -747,8 +757,11 @@ theorem indexedVecValidationConsRootCheckTypeM :
         indexedVecCtorValidationContext.fuel
         (TypeChecker.checkType indexedVecKernelCons.type) =
       .ok (.sort (.succ (.succ (.param `u)))) := by
-  simpa [indexedVecCtorValidationContext,
-    indexedVecKernelCons, consRootContext] using replayConsRootCheckTypeM
+  change TypeChecker.M.run ctorEnv .safe {} [`u] ({} : FuelConfig)
+    (TypeChecker.checkType indexedVecKernelCons.type) =
+      .ok (.sort (.succ (.succ (.param `u))))
+  simpa [indexedVecKernelCons, consRootContext, ctorContext] using
+    replayConsRootCheckTypeM
 
 def validationInferOnlyInsert
     (state : TypeChecker.State) (e type : Expr) : TypeChecker.State :=
@@ -1122,8 +1135,10 @@ theorem indexedVecValidationNatPositivity :
       indexedVecCtorValidationContext.fuel
       (TypeChecker.whnf (.const ``Nat [])) =
         .ok (.const ``Nat []) by
-    simpa [indexedVecCtorValidationContext] using
-      ctorNatWhnfM indexedVecCtorValidationContext.lctx]
+    change TypeChecker.M.run ctorEnv .safe
+      indexedVecCtorValidationContext.lctx [`u] ({} : FuelConfig)
+      (TypeChecker.whnf (.const ``Nat [])) = .ok (.const ``Nat [])
+    exact ctorNatWhnfM indexedVecCtorValidationContext.lctx]
   simp only [Except.bind]
   rw [indexedVecValidationNatHasNoIndOcc]
   simp only [Bool.not_false, if_true,
@@ -1150,11 +1165,12 @@ theorem indexedVecValidationAlphaPositivity :
       (TypeChecker.whnf indexedVecValidationAlpha) =
         .ok indexedVecValidationAlpha by
     rw [indexedVecValidationAlphaShape]
-    simpa [indexedVecValidationNContext,
-      indexedVecCtorValidationContext] using
-      (ctorFVarWhnfM indexedVecValidationNContext.lctx
-        indexedVecValidationAlphaId
-        indexedVecValidationAlphaFindInN)]
+    change TypeChecker.M.run ctorEnv .safe
+      indexedVecValidationNContext.lctx [`u] ({} : FuelConfig)
+      (TypeChecker.whnf (.fvar indexedVecValidationAlphaId)) =
+        .ok (.fvar indexedVecValidationAlphaId)
+    exact ctorFVarWhnfM indexedVecValidationNContext.lctx
+      indexedVecValidationAlphaId indexedVecValidationAlphaFindInN]
   simp only [Except.bind]
   rw [indexedVecValidationAlphaHasNoIndOcc]
   simp only [Bool.not_false, if_true,
@@ -1185,11 +1201,15 @@ theorem indexedVecValidationTailPositivity :
           indexedVecValidationNExpr)) =
         .ok (ctorIndexedVecApp indexedVecValidationAlpha
           indexedVecValidationNExpr) by
-    simpa [indexedVecValidationHeadContext,
-      indexedVecValidationNContext,
-      indexedVecCtorValidationContext] using
-      (ctorIndexedVecWhnfM indexedVecValidationHeadContext.lctx
-        indexedVecValidationAlpha indexedVecValidationNExpr)]
+    change TypeChecker.M.run ctorEnv .safe
+      indexedVecValidationHeadContext.lctx [`u] ({} : FuelConfig)
+      (TypeChecker.whnf
+        (ctorIndexedVecApp indexedVecValidationAlpha
+          indexedVecValidationNExpr)) =
+        .ok (ctorIndexedVecApp indexedVecValidationAlpha
+          indexedVecValidationNExpr)
+    exact ctorIndexedVecWhnfM indexedVecValidationHeadContext.lctx
+      indexedVecValidationAlpha indexedVecValidationNExpr]
   simp only [Except.bind]
   rw [indexedVecValidationTailHasIndOcc]
   simp only [Bool.not_true, Bool.false_eq_true, if_false,
@@ -1242,6 +1262,8 @@ theorem indexedVecValidationNilLoop :
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
   simpa [indexedVecValidationNilResult, ctorIndexedVecApp,
+    indexedVecKernelNil, indexedVecNilInfo, ConstantInfo.name,
+    ConstantInfo.toConstantVal,
     Expr.instantiate1_eq, Expr.instantiate1',
     Expr.liftLooseBVars_zero] using indexedVecValidationNilLoopTerminal
 
@@ -1481,7 +1503,7 @@ theorem indexedVecValidationCheckConstructors :
     Except.bind, Except.pure]
   rw [indexedVecNilNoMVarNoFVar]
   simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+    Except.bind, Except.pure, AddInductive.liftExcept_apply]
   rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationNilRootCheckTypeM]
@@ -1495,7 +1517,7 @@ theorem indexedVecValidationCheckConstructors :
     Except.bind, Except.pure]
   rw [indexedVecConsNoMVarNoFVar]
   simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+    Except.bind, Except.pure, AddInductive.liftExcept_apply]
   rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationConsRootCheckTypeM]
@@ -1548,15 +1570,13 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecNormalizationCandidateProduce
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,

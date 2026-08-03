@@ -86,6 +86,10 @@ instance (priority := low) : MonadLift TypeChecker.M M where
       x.run c.env c.safety c.lctx c.lparams (fuel := c.fuel) :=
   rfl
 
+@[simp] theorem liftExcept_apply (x : Except Exception α) (c : Context) :
+    (liftM x : M α) c = x :=
+  rfl
+
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
 
@@ -156,8 +160,8 @@ def levelStructEq : Level → Level → Bool
 /-- Transparent sufficient comparison for the common structural universe
 cases used by constructor fields.  Every universe is at least zero, successor
 is monotone, and otherwise exact structural equality is sufficient.  Cases
-outside this deliberately small relation continue to the full normalization-
-based `Level.geq'` comparison below. -/
+outside this deliberately small relation continue to the standard
+normalization-based `Level.geq` comparison below. -/
 def levelStructGe : Level → Level → Bool
   | _, .zero => true
   | .succ u, .succ v => levelStructGe u v
@@ -205,7 +209,7 @@ def checkInductiveTypes
       if stats.indConsts.isEmpty then
         let lctx := (← read).lctx
         stats := { stats with lctx, resultLevel, isNotZero := resultLevel.isNeverZero }
-      else if !resultLevel.isEquiv' stats.resultLevel then
+      else if !resultLevel.isEquiv stats.resultLevel then
         throw <| .other "mutually inductive types must live in the same universe"
       stats := { stats with
         nindices := stats.nindices.push nindices
@@ -419,15 +423,15 @@ def checkConstructors (indTypes : Array InductiveType)
             loop (body.instantiate1 param) (i + 1) fuel
           else
             let s ← ensureType dom
-            -- `Level.geq'` traverses an opaque `TreeMap`.  Equal levels are
-            -- reflexively admissible, so discharge that common case before
-            -- consulting the normalization-based comparison.  Besides
-            -- avoiding needless work, this keeps exact checker executions
-            -- reducible without a separate reflexivity contract axiom.
+            -- Equal levels are reflexively admissible, so discharge that
+            -- common case before consulting the full standard-library
+            -- normalization comparison. Besides avoiding needless work, this
+            -- keeps exact checker executions reducible without a separate
+            -- reflexivity contract axiom.
             if levelStructGe stats.resultLevel s.sortLevel! then
               pure ()
             else
-              unless stats.resultLevel.isZero || stats.resultLevel.geq' s.sortLevel! do
+              unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
                 throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
                   is too big for the corresponding inductive datatype"
             if !isUnsafe then
@@ -2131,7 +2135,8 @@ structure Result where
   ngen : NameGenerator
   nparams : Nat
   lctx : LocalContext
-  aux2nested : NameMap Expr -- exprs contain `nparams` loose bvars
+  params : Array Expr -- the fvars declared in `lctx`
+  aux2nested : NameMap Expr -- exprs are open over `params`, like the C++ `m_aux2nested`
   types : List InductiveType
 
 instance [MonadStateOf NameGenerator m] : MonadNameGenerator m where
@@ -2173,11 +2178,11 @@ def restoreNested (r : Result) (env' : Environment) (e : Expr)
     if let some nested := r.aux2nested.find? c then
       let args := t.getAppArgs
       assert! args.size ≥ r.nparams
-      return mkAppRange (nested.instantiateRev As) r.nparams args.size args
+      return mkAppRange ((nested.abstract r.params).instantiateRev As) r.nparams args.size args
     let (nested, auxI_name) ← r.getNestedIfAuxCtor env' c
     let args := t.getAppArgs
     assert! args.size ≥ r.nparams
-    let nested' := nested.instantiateRev As
+    let nested' := (nested.abstract r.params).instantiateRev As
     nested'.withApp fun I I_args => do
     let .const I_c I_ls := I | unreachable!
     let c' := .const (c.replacePrefix auxI_name I_c) I_ls
@@ -2328,8 +2333,14 @@ def run (fuel nparams : Nat) (types : List InductiveType) : M Result := do
       modify fun s => { s with newTypes := s.newTypes.set! i { indType with ctors } }
       loop (i+1) fuel
     else
-      let aux2nested := s.nestedAux.foldl (fun m (e, n) => m.insert n (e.abstract params)) {}
-      return { s with nparams := params.size, lctx, aux2nested, types := s.newTypes.toList }
+      let aux2nested := s.nestedAux.foldl (fun m (e, n) => m.insert n e) {}
+      return {
+        ngen := s.ngen
+        nparams := params.size
+        lctx := lctx
+        params := params
+        aux2nested := aux2nested
+        types := s.newTypes.toList }
   loop 0 fuel
 end ElimNestedInductive
 

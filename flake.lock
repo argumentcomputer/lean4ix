@@ -24,11 +24,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1775267043,
-        "narHash": "sha256-yUCn4Wc5kLboN9JHom/SJAknn7aoSEDyerqFq3k7g0I=",
+        "lastModified": 1784744474,
+        "narHash": "sha256-9yx5PzXBkZ+160uquH4f7lCCPZGlzdc1Y2j+zOKRc54=",
         "owner": "lenianiva",
         "repo": "lean4-nix",
-        "rev": "56e917e2766385d0b096ea8be9c40ae54bfe138a",
+        "rev": "9edc9448c8fe9552ba2b66e6097abda6e14e5c6f",
         "type": "github"
       },
       "original": {

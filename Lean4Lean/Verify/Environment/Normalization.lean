@@ -618,7 +618,8 @@ theorem candidateFreshFVarId_reserved
   simp [NameGenerator.Reserves, AddInductive.Context.freshFVarId]
   intro i h
   apply namePrefix_ne
-  simpa using congrArg Name.getPrefix h
+  simpa only [NameGenerator.curr, Name.getPrefix] using
+    congrArg Name.getPrefix h
 
 /-- Package an already verified checker context at a candidate position. -/
 def CandidateContextRun.ofVContext
@@ -724,23 +725,24 @@ def CandidateContextRun.pushLocalDecl
   rcases hfv with rfl | hfv
   · exact candidateFreshFVarId_reserved candidateContext run.namePrefix_ne
   · exact run.state_wf.ngen_wf fv hfv
-  simpa [AddInductive.Context.pushLocalDecl] using run.namePrefix_ne
+  simpa [AddInductive.Context.pushLocalDecl, NameGenerator.next] using
+    run.namePrefix_ne
 
 @[simp] theorem CandidateContextRun.pushLocalDecl_venv
     (run : CandidateContextRun candidateContext)
     (domain_tr : run.context.TrExprS domain domain')
     (domain_type : run.context.IsType domain') :
     (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
-      domain_type).context.venv = run.context.venv :=
-  rfl
+      domain_type).context.venv = run.context.venv := by
+  simp [CandidateContextRun.pushLocalDecl, VContext.withMLC]
 
 @[simp] theorem CandidateContextRun.pushLocalDecl_lparams
     (run : CandidateContextRun candidateContext)
     (domain_tr : run.context.TrExprS domain domain')
     (domain_type : run.context.IsType domain') :
     (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
-      domain_type).context.lparams = run.context.lparams :=
-  rfl
+      domain_type).context.lparams = run.context.lparams := by
+  simp [CandidateContextRun.pushLocalDecl, VContext.withMLC]
 
 @[simp] theorem CandidateContextRun.pushLocalDecl_vlctx
     (run : CandidateContextRun candidateContext)
@@ -749,8 +751,8 @@ def CandidateContextRun.pushLocalDecl
     (run.pushLocalDecl name binderInfo domain fresh domain' domain_tr
       domain_type).context.vlctx =
       (some (candidateContext.freshFVarId, domain.fvarsList),
-        .vlam domain') :: run.context.vlctx :=
-  rfl
+        .vlam domain') :: run.context.vlctx := by
+  simp [CandidateContextRun.pushLocalDecl, VContext.withMLC]
 
 /-- The two exact verifier runs attached to one retained candidate node.
 
@@ -1097,12 +1099,14 @@ theorem CandidateExprRun.exists_ofCandidate
       annotations.consumed fresh storedDomain' storedDomain_tr
         ⟨u, annotationDef.hasType.2⟩
     have bodyVenv : bodyCandidateRun.context.venv =
-        candidateRun.context.venv := rfl
+        candidateRun.context.venv := by simp [bodyCandidateRun]
     have bodyLparams : bodyCandidateRun.context.lparams =
-        candidateRun.context.lparams := rfl
+        candidateRun.context.lparams := by
+      simp [bodyCandidateRun, AddInductive.Context.pushLocalDecl]
     have bodyVlctx : bodyCandidateRun.context.vlctx =
         (some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam storedDomain') :: candidateRun.context.vlctx := rfl
+          .vlam storedDomain') :: candidateRun.context.vlctx := by
+      simp [bodyCandidateRun]
     have bodyDepth :
         (context.pushLocalDecl name binderInfo
           annotations.consumed).fuel.recDepth = whnfFuel + 1 := by
@@ -1208,20 +1212,24 @@ theorem CandidateExprRun.exists_ofIdentity
     let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
       annotations.consumed fresh domain' consumed_tr ⟨u, domainType⟩
     have bodyVenv : bodyCandidateRun.context.venv =
-        candidateRun.context.venv := rfl
+        candidateRun.context.venv := by simp [bodyCandidateRun]
     have bodyLparams : bodyCandidateRun.context.lparams =
-        candidateRun.context.lparams := rfl
+        candidateRun.context.lparams := by
+      simp [bodyCandidateRun, AddInductive.Context.pushLocalDecl]
     have bodyVlctx : bodyCandidateRun.context.vlctx =
         (some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam domain') :: candidateRun.context.vlctx := rfl
+          .vlam domain') :: candidateRun.context.vlctx := by
+      simp [bodyCandidateRun]
     have bodyDepth :
         (context.pushLocalDecl name binderInfo
           annotations.consumed).fuel.recDepth =
           whnfFuel + 1 := by
       simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+    have bodyDeltaWF := bodyCandidateRun.context.Δwf
+    rw [bodyVenv, bodyLparams, bodyVlctx] at bodyDeltaWF
     have instantiatedBody_tr :=
       body_tr.inst_fvar candidateRun.context.Ewf.ordered
-        bodyCandidateRun.context.Δwf
+        bodyDeltaWF
     obtain ⟨bodyInferred', ⟨bodyRun⟩⟩ :=
       bodyIH bodyCandidateRun body' (by
         change TrExprS bodyCandidateRun.context.venv
@@ -1478,12 +1486,14 @@ theorem CandidateExprRootRun.evidence
       run.contextRun.context.Δwf
   have candidateView_tr :
       TrExpr env Us [] candidate.view candidateView' := by
-    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
+    simpa only [AddInductive.CandidateExpr.view, run.venv_eq,
+      run.lparams_eq, run.vlctx_eq] using
       candidateRun.view_tr
   have viewDef : env.IsDefEqU Us.length [] candidateView' view' :=
     candidateView_tr.uniq henv (.refl henv hΔ) run.view_tr
   have sourceDef : env.IsDefEqU Us.length [] source' candidateView' := by
-    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq] using
+    simpa only [run.venv_eq, run.lparams_eq, run.vlctx_eq,
+      VLCtx.toCtx] using
       candidateRun.evidence.isDefEq.toU
   obtain ⟨A, hfinal⟩ := sourceDef.trans henv hΔ.toCtx viewDef
   exact ⟨A, .ofDefEq hfinal⟩
@@ -2313,7 +2323,8 @@ theorem CandidateExprSpineRun.evidenceAt
   obtain ⟨resultType, evidence⟩ := recursive.spineEvidence aligned
   have exactEvidence : TelResultDefEqEvidence env Us.length []
       rawBinders viewBinders rawResult viewResult resultType := by
-    simpa only [rawTel, viewTel, rawResult_eq, viewResult_eq] using evidence
+    simpa only [rawTel, viewTel, rawResult_eq, viewResult_eq,
+      VLCtx.toCtx] using evidence
   exact exactEvidence.ofRightType recursive.env_wf trivial (by
     simpa using rightType)
 
@@ -2358,7 +2369,7 @@ theorem NormalizationRun.wf
       have : some envT = some run.typeEnv := hadd.symm.trans run.addType
       exact Option.some.inj this
     subst envT
-    exact run.constructors.imp fun _ _ h => by
+    exact Lean4Lean.List.Forall₂.imp (h := run.constructors) fun _ _ h => by
       obtain ⟨_, hctor⟩ := h
       exact hctor.isDefEq.toU
 
@@ -2491,11 +2502,13 @@ def NormalizationCandidateRun.normalizationRun
   source_types_eq := run.raw_types_eq
   view_types_eq := rfl
   family := by
-    simpa only [run.uvars_eq] using run.family.typeRun.evidence
+    simpa only [run.uvars_eq, CandidateFamilyRun.view] using
+      run.family.typeRun.evidence
   typeEnv := run.family.typeEnv
   addType := run.family.addType
   constructors := by
-    simpa only [run.uvars_eq] using run.family.constructors.evidence
+    simpa only [run.uvars_eq, CandidateFamilyRun.view] using
+      run.family.constructors.evidence
 
 /-- One constructor whose exact recursive candidate semantics are retained,
 rather than reconstructed separately for normalization and generation.
@@ -3858,10 +3871,12 @@ private def CandidateFamilySemanticGenerationShape.generationRun
       normalization.raw.type (by
         simpa only [NormalizedChecked.rawParams,
           NormalizedChecked.rawIndices,
+          NormalizationCandidateSemanticRun.root,
           normalization.root.sourceType_eq generation] using
           input.spineLength_eq)
     simpa only [NormalizedChecked.rawParams,
       NormalizedChecked.rawIndices,
+      NormalizationCandidateSemanticRun.root,
       normalization.root.sourceType_eq generation] using components.1
   rawResult := by
     have components := candidateFullTelComponents source.nparams
@@ -3869,9 +3884,11 @@ private def CandidateFamilySemanticGenerationShape.generationRun
       normalization.raw.type (by
         simpa only [NormalizedChecked.rawParams,
           NormalizedChecked.rawIndices,
+          NormalizationCandidateSemanticRun.root,
           normalization.root.sourceType_eq generation] using
           input.spineLength_eq)
     simpa only [NormalizedChecked.rawResult,
+      NormalizationCandidateSemanticRun.root,
       normalization.root.sourceType_eq generation] using components.2
   viewResult := by
     let As := generation.block.checked.params ++
@@ -3987,19 +4004,19 @@ private def
       normalization.family.typeEnv Us normalization.family.constructors
       generation.block.ctorPairs := by
   apply input.generationRuns
-  · simpa only [normalization.root.sourceType_eq generation] using
+  · simpa only [NormalizationCandidateSemanticRun.root,
+      normalization.root.sourceType_eq generation] using
       generation.rawCtors_eq
   · have viewType_eq := normalization.root.familyViewType_eq analysis
     calc
       generation.block.ctorPairs.map (fun ctor => ctor.view.value) =
           generation.block.checked.constructors.map (·.value) := by
-        simpa only [List.map_map] using
+        simpa only [List.map_map, Function.comp_def] using
           congrArg (List.map (·.value)) generation.viewCtors_eq
       _ = generation.block.checked.type.ctors := by
         rw [generation.block.checked.constructors_eq, List.map_map]
         change generation.block.checked.type.ctors.map (fun c => c) = _
-        simpa only [id_eq] using
-          (List.map_id generation.block.checked.type.ctors)
+        exact List.map_id' generation.block.checked.type.ctors
       _ = normalization.family.root.view.ctors := by
         simpa only [NormalizationCandidateSemanticRun.root] using
           congrArg (fun ty : VInductiveType => ty.ctors) viewType_eq
@@ -4043,7 +4060,9 @@ def GenerationCandidateSemanticRun.ofGenerationShape
   simp only [NormalizationCandidateSemanticRun.generationShape,
     normalizationCandidateGenerationShape, Bool.and_eq_true,
     beq_iff_eq] at shape
-  have sourceType_eq := normalization.root.sourceType_eq generation
+  have sourceType_eq : generation.block.sourceType = normalization.raw := by
+    simpa only [NormalizationCandidateSemanticRun.root] using
+      normalization.root.sourceType_eq generation
   have normalization_eq : generation.block.normalization =
       normalization.root.normalization :=
     Normalization.generation?_normalization analysis
@@ -4413,7 +4432,7 @@ closure as `WhnfRun.isDefEq`. Exact guards ensure that the generic assembler
 does not silently widen it.
 -/
 /--
-info: 'Lean4Lean.TypeChecker.VEnv.HasPrimitives.addConst' depends on axioms: [propext, Quot.sound]
+info: 'Lean4Lean.TypeChecker.VEnv.HasPrimitives.addConst' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.VEnv.HasPrimitives.addConst
@@ -4491,7 +4510,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_isType_of_terminalSort' depen
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4500,6 +4518,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_isType_of_terminalSort' depen
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4507,8 +4527,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_isType_of_terminalSort' depen
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4525,7 +4543,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4534,6 +4551,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4541,8 +4560,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4583,7 +4600,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.rawWF' depends on axioms
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4592,6 +4608,8 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.rawWF' depends on axioms
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4599,8 +4617,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.rawWF' depends on axioms
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4617,7 +4633,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContext' depends on 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4626,6 +4641,8 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContext' depends on 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4633,8 +4650,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContext' depends on 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4651,7 +4666,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContextRun' depends 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4660,6 +4674,8 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContextRun' depends 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4667,8 +4683,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContextRun' depends 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4685,7 +4699,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postFamily' depends on a
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4694,6 +4707,8 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postFamily' depends on a
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4701,8 +4716,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postFamily' depends on a
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4720,7 +4733,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.exists' depends on a
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4729,6 +4741,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.exists' depends on a
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4736,8 +4750,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.exists' depends on a
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4754,7 +4766,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticListInput.exists' depen
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4763,6 +4774,8 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticListInput.exists' depen
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4770,8 +4783,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticListInput.exists' depen
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4788,7 +4799,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticInput.exists_ofProduc
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4797,6 +4807,8 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticInput.exists_ofProduc
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4804,8 +4816,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticInput.exists_ofProduc
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4822,7 +4832,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.exists' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4831,6 +4840,8 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.exists' d
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4838,8 +4849,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.exists' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4856,7 +4865,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilySemanticGenerationRun.run' depends o
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4865,6 +4873,8 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilySemanticGenerationRun.run' depends o
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4872,8 +4882,6 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilySemanticGenerationRun.run' depends o
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4890,7 +4898,6 @@ info: 'Lean4Lean.VInductDecl.CandidateSemanticNormalizedCtorListRun.run' depends
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4899,6 +4906,8 @@ info: 'Lean4Lean.VInductDecl.CandidateSemanticNormalizedCtorListRun.run' depends
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4906,8 +4915,6 @@ info: 'Lean4Lean.VInductDecl.CandidateSemanticNormalizedCtorListRun.run' depends
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4924,7 +4931,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.run' depends on axio
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4933,6 +4939,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.run' depends on axio
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4940,8 +4948,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.run' depends on axio
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -4958,7 +4964,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -4967,6 +4972,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -4974,8 +4981,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5036,7 +5041,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5045,6 +5049,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5052,8 +5058,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5070,7 +5074,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5079,6 +5082,8 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5086,8 +5091,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5104,7 +5107,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5113,6 +5115,8 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5120,8 +5124,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5138,7 +5140,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5147,6 +5148,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5154,8 +5157,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5172,7 +5173,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.producedPackage' dep
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5181,6 +5181,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.producedPackage' dep
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5188,8 +5190,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.producedPackage' dep
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5254,7 +5254,6 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5263,6 +5262,8 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5270,8 +5271,6 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5294,7 +5293,6 @@ info: 'Lean4Lean.TypeChecker.IsDefEqRun.isDefEqU' depends on axioms: [propext,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5303,6 +5301,8 @@ info: 'Lean4Lean.TypeChecker.IsDefEqRun.isDefEqU' depends on axioms: [propext,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5310,8 +5310,6 @@ info: 'Lean4Lean.TypeChecker.IsDefEqRun.isDefEqU' depends on axioms: [propext,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5343,7 +5341,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axi
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5352,6 +5349,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axi
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5359,8 +5358,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5377,7 +5374,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends o
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5386,6 +5382,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends o
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5393,8 +5391,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends o
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5429,7 +5425,6 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.exists_ofCandidate' depends on axi
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5438,6 +5433,8 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.exists_ofCandidate' depends on axi
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5445,8 +5442,6 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.exists_ofCandidate' depends on axi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5463,7 +5458,6 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.evidence' depends on axioms: [prop
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5472,6 +5466,8 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.evidence' depends on axioms: [prop
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5479,8 +5475,6 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.evidence' depends on axioms: [prop
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5497,7 +5491,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.evidence' depends on axioms: [prop
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5506,6 +5499,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.evidence' depends on axioms: [prop
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5513,8 +5508,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.evidence' depends on axioms: [prop
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5537,7 +5530,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_tr' depends on axioms: [prope
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5546,6 +5538,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_tr' depends on axioms: [prope
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5553,8 +5547,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_tr' depends on axioms: [prope
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5571,7 +5563,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRootRun.evidence' depends on axioms: [
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5580,6 +5571,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRootRun.evidence' depends on axioms: [
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5587,8 +5580,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRootRun.evidence' depends on axioms: [
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5605,7 +5596,6 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5614,6 +5604,8 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5621,8 +5613,6 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5645,7 +5635,6 @@ info: 'Lean4Lean.TypeChecker.TelResultDefEqEvidence.replacePrefix' depends on ax
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5654,6 +5643,8 @@ info: 'Lean4Lean.TypeChecker.TelResultDefEqEvidence.replacePrefix' depends on ax
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5661,8 +5652,6 @@ info: 'Lean4Lean.TypeChecker.TelResultDefEqEvidence.replacePrefix' depends on ax
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5679,7 +5668,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.spineEvidence' depends on axioms: 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5688,6 +5676,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.spineEvidence' depends on axioms: 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5695,8 +5685,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.spineEvidence' depends on axioms: 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5713,7 +5701,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5722,6 +5709,8 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5729,8 +5718,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5783,7 +5770,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.typeEnv_wf' depends on axiom
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5792,6 +5778,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.typeEnv_wf' depends on axiom
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5799,8 +5787,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.typeEnv_wf' depends on axiom
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5817,7 +5803,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyConst_hasType' depends
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5826,6 +5811,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyConst_hasType' depends
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5833,8 +5820,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyConst_hasType' depends
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5851,7 +5836,6 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.rightType_ofChecked' dep
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5860,6 +5844,8 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.rightType_ofChecked' dep
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5867,8 +5853,6 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.rightType_ofChecked' dep
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5894,7 +5878,6 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.normalizedCtorRun' depen
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5903,6 +5886,8 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.normalizedCtorRun' depen
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5910,8 +5895,6 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.normalizedCtorRun' depen
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5928,7 +5911,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.wf' depends on axioms: [prop
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5937,6 +5919,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.wf' depends on axioms: [prop
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5944,8 +5928,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.wf' depends on axioms: [prop
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5971,7 +5953,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on ax
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -5980,6 +5961,8 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on ax
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5987,8 +5970,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on ax
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6014,7 +5995,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalizationRun' depends
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -6023,6 +6003,8 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalizationRun' depends
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -6030,8 +6012,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalizationRun' depends
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6048,7 +6028,6 @@ info: 'Lean4Lean.VInductDecl.NormalizedCtorRun.wf' depends on axioms: [propext,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -6057,6 +6036,8 @@ info: 'Lean4Lean.VInductDecl.NormalizedCtorRun.wf' depends on axioms: [propext,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -6064,8 +6045,6 @@ info: 'Lean4Lean.VInductDecl.NormalizedCtorRun.wf' depends on axioms: [propext,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6082,7 +6061,6 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -6091,6 +6069,8 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -6098,8 +6078,6 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6134,7 +6112,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -6143,6 +6120,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -6150,8 +6129,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6168,7 +6145,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -6177,6 +6153,8 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends 
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -6184,8 +6162,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

@@ -198,7 +198,10 @@ theorem indexedVecSemanticConsIsType :
   have hctor := hwf.rawCtor_isType (envT := indexedVecTypeEnv) rfl
     (ctor := indexedVecChecked.identityGeneration.block.ctorPairs[1])
     (by simp)
-  simpa using hctor
+  simpa only [
+    show indexedVecDecl.uvars = 1 by rfl,
+    show indexedVecChecked.identityGeneration.block.ctorPairs[1].raw.type =
+      indexedVecType.ctors[1].type by rfl] using hctor
 
 theorem indexedVecSemanticConsSourceTr :
     TrExprS indexedVecTypeEnv [`u] [] indexedVecConsInfo.type
@@ -564,7 +567,11 @@ def indexedVecSemanticAddInductTraceChecked :
       info := indexedVecInfo
       kind_eq := by simp [indexedVecInfo, InductConstantKind.Matches]
       tr := indexedVecInfo_tr
-      map_fresh := by simpa [indexedVecType] using indexedVecType_fresh
+      map_fresh := by
+        rw [show
+          indexedVecSemanticProducedGenerationCandidatePackage.package.generation.block.sourceType.name =
+            ``IndexedVec by rfl]
+        exact indexedVecType_fresh
       env_add := rfl
       map_add := rfl }
   · refine .cons (m₂ := indexedVecNilMap)
@@ -589,8 +596,11 @@ def indexedVecSemanticAddInductTraceChecked :
       kind_eq := by simp [indexedVecRecInfo, InductConstantKind.Matches]
       tr := indexedVecRecInfo_tr
       map_fresh := by
-        simpa [inductGenerationRecVal, indexedVecDecl,
-          indexedVecType] using indexedVecRec_fresh
+        rw [show
+          (inductGenerationRecVal
+            indexedVecSemanticProducedGenerationCandidatePackage.package.generation).name =
+              ``IndexedVec.rec by rfl]
+        exact indexedVecRec_fresh
       env_add := rfl
       map_add := rfl }
 
@@ -625,10 +635,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -637,6 +643,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -644,8 +652,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -662,10 +668,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -674,6 +676,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -681,8 +685,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -701,11 +703,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_missingRawS
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
- Expr.hasLevelParam_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
@@ -736,10 +739,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandid
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -748,6 +747,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandid
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -755,8 +756,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandid
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -773,10 +772,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -785,6 +780,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -792,8 +789,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -810,10 +805,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -822,6 +813,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -829,8 +822,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -847,10 +838,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
- Expr.hasExprMVar_eq,
- Expr.hasFVar_eq,
- Expr.hasLevelMVar_eq,
- Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
@@ -859,6 +846,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -866,8 +855,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
- Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

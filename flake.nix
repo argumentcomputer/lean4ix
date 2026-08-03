@@ -48,11 +48,21 @@
         # Reuse the flake's lazy source instead of creating a nested
         # fileset.toSource path that may be unrealized under --no-build.
         leanSrc = inputs.self.outPath;
+        # Batteries v4.31.0 accidentally split deprecated recycling modules
+        # into a second Lake library with a dependency back to Batteries.  Its
+        # shared/static facets therefore form a cycle, which matters here
+        # because lake2nix exports those facets for downstream consumers.
+        # Backport the upstream fix released after the v4.31.0 tag.
+        batteries431CycleFix = pkgs.fetchurl {
+          url = "https://github.com/leanprover-community/batteries/commit/ba9a97018925ecc18fd8411d8c53de6056cf9dff.patch";
+          hash = "sha256-HjF68B7QUeioDcGT/q6SWQEqPp8o5OQqErfw5D9rdIY=";
+        };
         # Dependencies from lake-manifest.json (batteries). lean4-nix's
         # default target guess ("batteries" -> "Batteries") is correct, so
-        # no overrides are needed.
+        # only the v4.31 shared/static cycle backport is needed.
         lakeDeps = lake2nix.buildDeps {
           src = leanSrc;
+          depOverride.batteries.patches = [batteries431CycleFix];
         };
         lakeBuildArgs = {
           inherit lakeDeps;
@@ -248,24 +258,6 @@
           inherit system;
           overlays = [
             (lean4-nix.readToolchainFile ./lean-toolchain)
-            # lean4-nix adds fixDarwinDylibNames to the official binary
-            # toolchain. Lean 4.29's libleanshared_1.dylib has no load-command
-            # padding for the longer Nix store install name, so that hook fails
-            # even though the release bundle is already internally relocatable.
-            # Remove only that hook; retain the rest of the standard fixup.
-            (_final: prev:
-              prev.lib.optionalAttrs prev.stdenv.isDarwin {
-                lean =
-                  prev.lean
-                  // {
-                    lean-all = prev.lean.lean-all.overrideAttrs (old: {
-                      nativeBuildInputs =
-                        builtins.filter
-                        (input: (input.outPath or null) != prev.fixDarwinDylibNames.outPath)
-                        (old.nativeBuildInputs or []);
-                    });
-                  };
-              })
           ];
         };
 

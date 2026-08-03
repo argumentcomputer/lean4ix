@@ -1,6 +1,6 @@
 # Lean4Lean completion roadmap, with Ix as the first external consumer
 
-**Status:** authoritative local roadmap, audited 2026-08-03 against the
+**Status:** authoritative local roadmap, audited 2026-08-04 against the
 committed fork, the current `jcb/induct` development branch, and ix's
 formalization branch.
 
@@ -106,18 +106,22 @@ fixture-specific post-family `VEnvs.WF` reconstructions. Exact axiom guards and
 the universal Lake/Nix gates pass; constructors are not semantically
 interpreted.
 
-**Active milestone: L4L-01U — upstream v4.31 reconciliation.** Merge live
-digama `upstream/master` through `ef849dfbd94a` into the published development
-line without rewriting the L4L-01A/L4L-01B checkpoints. Reconcile the
-overlapping inductive, checker, Verify, level, replay, CI, and toolchain
-changes. Remove the four now-proved cached-`Expr` axioms and the obsolete
-hand-declared `Expr.mkAppRangeAux.eq_def`; classify upstream's new, unproved
-`addDecl.WF` front-end theorem under L4L-19B and account for every resulting
-axiom/sorry change. Preserve the completed staged-family APIs and all ix-facing
-certificate contracts, then rerun the full Lean/Lake/Nix,
-exact-axiom, sorry-frontier, and ix consumer gates on Lean v4.31. This is an
-integration-only checkpoint: do not start constructor-trace work in its
-conflict resolutions.
+**Active publication checkpoint: L4L-01U — upstream v4.31 reconciliation.**
+The source reconciliation is complete locally: digama `upstream/master`
+through `ef849dfbd94a` is a merge parent, Lean and lean4-nix are on v4.31, the
+overlapping inductive/checker/Verify/level proofs build, and the fork's staged
+family APIs remain intact. The merge removes four cached-`Expr` axioms and the
+obsolete hand-declared `Expr.mkAppRangeAux.eq_def`, reducing the custom-axiom
+inventory from 34 to 29. It adds two classified sorry-frontier entries:
+`NormLevel.isEquiv_wf` (L4L-02B) and `addDecl.WF` (L4L-19B), taking the exact
+frontier from 20 to 22 without increasing the supported-root trust budget.
+All local Lean/Lake/Nix, exact-axiom, and sorry-frontier gates pass. An isolated
+ix v4.31 probe replayed the merged Lean4Lean modules and built ix's runtime
+typechecker modules; the remaining failures are ix-owned Lean/Batteries proof
+API migrations. Because L4L-01U is not an ix pin, that consumer migration is
+recorded but does not block this checkpoint. Publication to origin
+`jcb/induct`, and only that branch, is the remaining completion action. This is
+an integration-only checkpoint: constructor-trace work starts in L4L-01C.
 
 **Next semantic milestone: L4L-01C — retained constructor-validation trace.**
 After L4L-01U, retain the complete successful singleton `checkConstructors`
@@ -148,18 +152,16 @@ the local ix `jcb/ix-formalization2` snapshot
 `5e5bb767b3491d21a71908d4c58bcbaa007283bb`, builds the complete `IxTcVerify`
 target, and reconciles the exact sorry and root-axiom audits. The complete
 post-L4L-01E order is defined only by §13; the track labels below are
-work-package references, not competing milestones. The independent 20-sorry metatheory,
+work-package references, not competing milestones. The independent 22-entry metatheory,
 checker, projection, and trust work remains release work rather than evidence
 that the inductive producer track is stalled.
 
-**Baselines.** The current formalization source checkpoint is
-`da45b536220a3eff5ed78cf2f5afcf5e7491c40f`
-(`feat: derive family validation staging`). Relative to shared ancestor
-`8865b155abbf68d3a827fb3568bf6839780163c2`, this source is 56 commits on
-the fork side while current `upstream/master` at `ef849dfbd94a` is 15 commits
-on the upstream side; the branches have diverged, so an “ahead” count is no
-longer accurate. The roadmap-only commits above the source are its ledger
-descendants. The source follows roadmap decomposition checkpoint
+**Baselines.** The current local formalization source is the L4L-01U merge
+checkpoint, with parents `da45b536220a3eff5ed78cf2f5afcf5e7491c40f`
+(`feat: derive family validation staging`) and
+`ef849dfbd94a` (`upstream/master`). Its immutable source hash is recorded by
+the publication ledger child rather than embedded recursively in the source
+commit itself. The source follows roadmap decomposition checkpoint
 `f82ee77f7181`, generation-readiness source
 `bbb45e0e950724cdbbd405d75e304e2020cecf82`, and its ledger child
 `c4fd62b23a89500154b113d849d183afbf84907f`.
@@ -189,15 +191,16 @@ trust boundary or extracting its `Nonempty` result. L4L-01B interprets the
 exact singleton family-validation run and derives the post-family stage from
 the entry context, eliminating every independently verified post-family
 fixture context while leaving constructor interpretation for L4L-01C/L4L-01D.
-No new axiom or normalization oracle was added. The 124-job Theory/Verify
-build, 157-job default Lake build, default Nix build, all six current-host
-flake checks, all-system no-build flake evaluation, exact 20-sorry frontier,
-formatter, and whitespace checks pass on `da45b536`. Local `master` and
+No new axiom or normalization oracle was added. On the v4.31 merge, the
+154-job default Lake build, default Nix build, all six current-host flake
+checks, all-system no-build flake evaluation, exact 22-entry sorry frontier,
+29-declaration custom-axiom inventory, formatter, CLI replay, and whitespace
+checks pass. Local `master` and
 `origin/master` remain fixed at the prior candidate-context-provenance
 checkpoint, `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`; only local
 `jcb/induct` and `origin/jcb/induct` are published by this work. The live
-digama `upstream/master` independently advanced to `ef849dfbd94a`; it was
-fetched for this audit and was not modified by this branch. The published
+digama `upstream/master` tip `ef849dfbd94a` is the merge's second parent and
+was not modified by this branch. The published
 development checkpoint contains a green Stage-3
 generalized one-family port, two checked-analysis slices, E1 environment alignment, and a
 completed bounded I2 recursive-Pi slice, plus the first explicit
@@ -579,10 +582,11 @@ The executable-candidate checkpoint at
 gate on 2026-08-01. It proves AliasFormer's exact successful whole producer,
 constructs `aliasFormerProducedGenerationCandidatePackage`, and routes both
 the certified Theory transaction and checked Verify replay through it. Exact
-guards expose the additional existing `Expr.hasExprMVar_eq`,
-`Expr.hasLevelMVar_eq`, and `Expr.hasFVar_eq` cache contracts reached while
-checking closed constructor constants; no axiom declaration, native evaluator,
-or assumed normalization equation was added. Only `origin/jcb/induct` moved;
+guards at that pre-v4.31 checkpoint exposed the additional
+`Expr.hasExprMVar_eq`, `Expr.hasLevelMVar_eq`, and `Expr.hasFVar_eq` cache
+contracts reached while checking closed constructor constants; L4L-01U later
+proves those properties and removes their axiom declarations. No native
+evaluator or assumed normalization equation was added. Only `origin/jcb/induct` moved;
 both master refs and every digama/upstream ref remain unchanged.
 The core E1 Verify path is no longer
 vacuous: typed witnesses align kernel `ConstMap` insertions with Theory
@@ -672,8 +676,9 @@ The old gap plan started at `0c38ab8`, where `VInductDecl.WF`,
 the fork's state.
 
 - The sorry-frontier audit and Nix CI are tracked. The audit currently accepts
-  exactly 20 live sorries and excludes `Experimental/`. The exact CI
-  all-system evaluation command is green again at the current published tip;
+  exactly 22 live sorries and excludes `Experimental/`; the two v4.31 additions
+  are classified under L4L-02B and L4L-19B. The exact CI all-system evaluation
+  command is green on the L4L-01U source;
   the remaining `system` deprecation warning comes from the pinned Nix stack
   and is non-fatal.
 - Stage 1 introduced real computational recursor/iota generation for a single,
@@ -1010,7 +1015,7 @@ The sorry-frontier script currently reports exactly:
 | Projection specification | `Verify/Typing/Expr.lean:67`, `TrProj` |
 | Projection structural laws | seven sites in `Verify/Typing/Lemmas.lean`: `weak'`, inverse weakening, `defeqDFC`, `wf`, `uniq`, `instN`, `instL` |
 | Core metatheory | `Injectivity.lean` x3, `UniqueTyping.lean` x1, `ChurchRosser.lean` x2 |
-| Checker verification | `Verify/Level.lean` x1; `InferType.lean` x1; `WHNF.lean` x2; `IsDefEq.lean` x2 |
+| Checker verification | `Verify/Level.lean` x2; `Verify/Environment.lean` x1; `InferType.lean` x1; `WHNF.lean` x2; `IsDefEq.lean` x2 |
 
 There is important non-sorry debt too:
 
@@ -1024,13 +1029,13 @@ There is important non-sorry debt too:
 - `VLocalDecl` core facts, literal encodings, `ContainsLits`,
   `HasPrimitives`, and `TrProj` are implementation-independent but live under
   `Verify/`, forcing ix to import that layer.
-- There are 34 project-specific `axiom` declarations outside
-  `Experimental/`: 32 in `Verify/Axioms.lean` and two pointer-equality
-  contracts in `PtrEq.lean`. Seven `Verify/Axioms` comments explicitly say
-  the asserted cache-property equations are false for the pinned Lean version
-  (`lean4#8554`), and six of those seven are global simp lemmas. Count,
-  classification, and per-root reachability, not just sorry count, are
-  therefore release criteria.
+- There are 29 project-specific `axiom` declarations outside
+  `Experimental/`: 27 in `Verify/Axioms.lean` and two pointer-equality
+  contracts in `PtrEq.lean`. Three cached-field equations remain from the
+  group known false on the older Lean pin (`lean4#8554`). Lean v4.31 repairs
+  the underlying cache behavior, but these equations are still unproved and
+  therefore remain forbidden implementation contracts. Count, classification,
+  and per-root reachability—not just sorry count—are release criteria.
 - The fetched `logrel@upstream` branch at `e431dad8` contains a serious
   experimental route to injectivity/unique typing, but the live
   `Theory/Typing/Injectivity.lean` still has all three sorries. The branch's
@@ -1040,33 +1045,35 @@ There is important non-sorry debt too:
 #### Current custom-axiom inventory
 
 This classification records the intended release treatment; it is not itself
-evidence that an implementation equation is true. In particular, the eleven
+evidence that an implementation equation is true. In particular, the ten
 collection/opaque-layout equations still require validation and may move into
 the forbidden class if a counterexample is found.
 
 | Class | Count | Declarations | Release treatment |
 |---|---:|---|---|
-| Explicitly false cache equations | 7 | `Level.hasParam_eq`, `Level.hasMVar_eq`; `Expr.hasFVar_eq`, `hasExprMVar_eq`, `hasLevelMVar_eq`, `hasLevelParam_eq`, `looseBVarRange_eq` | Forbidden from every supported theorem root |
+| Unproved cached-field equations, known false on older pins | 3 | `Level.hasParam_eq`, `Level.hasMVar_eq`, `Expr.looseBVarRange_eq` | Forbidden from every supported theorem root until proved for the pinned implementation |
 | Reference equations documented as `@[implemented_by]` candidates | 13 | `Expr.replace_eq`, lift/lower, instantiate/range/reverse, abstract/range, `hasLooseBVar_eq`, `eqv_eq`, `equal_eq` | Replace axioms with logical reference definitions and separately justified implementations |
 | Persistent collection semantics | 5 | `TreeMap.all_eq_all_toList`; `PersistentArray.toList'_push`; hash-map insert, find, and contains/find agreement | Prove upstream or narrow to the actual WF/reachable-state invariant |
-| Other opaque or representation-layout bridges | 6 | `Expr.mkAppRangeAux.eq_def`, `Syntax.structEq_eq`; Level and Expr data-layout equations; `Level.mkLevelIMaxCore_eq` | Expose/prove upstream, narrow to the properties and bounds actually needed, or reject |
+| Other opaque or representation-layout bridges | 5 | `Syntax.structEq_eq`; Level and Expr data-layout equations; `Level.mkLevelIMaxCore_eq` | Expose/prove upstream, narrow to the properties and bounds actually needed, or reject |
 | Candidate platform contracts | 3 | `ptrEqExpr_eq`, `ptrEqConstantInfo_eq`, `Level.instLawfulBEqLevel` | May remain only in a named, version-pinned platform manifest with differential tests |
 
-**Expected L4L-01U axiom/sorry delta.** The inventory above describes source
-checkpoint `da45b536` on its current pre-v4.31 toolchain. Upstream commit
-`3dc52e0` proves and removes the four cached-`Expr` axioms `hasFVar_eq`,
-`hasExprMVar_eq`, `hasLevelMVar_eq`, and `hasLevelParam_eq`; `66172a2` removes
-the hand-declared `Expr.mkAppRangeAux.eq_def` because Lean v4.31 generates its
-defining equation. L4L-01U must retain those five removals and rerun exact root
-guards. `Level.hasParam_eq`, `Level.hasMVar_eq`, and `Expr.looseBVarRange_eq`
-remain unproved upstream; although v4.31 fixes the cached-data bug, they remain
-forbidden implementation contracts until proved and must not be reclassified
-as logical foundations. Upstream also adds an intended front-end theorem,
-`Lean4Lean.addDecl.WF`, with a placeholder proof. Its exact frontier entry is
-mapped to L4L-19B and may not reach an ix-supported root before that milestone.
-L4L-01U must publish the exact post-merge declaration count, sorry count, and
-reachability diff; a raw count change is acceptable only when fully classified,
-while the supported-root trust budget may not grow.
+**L4L-01U axiom/sorry result.** Relative to source checkpoint `da45b536`,
+upstream commit `3dc52e0` proves and removes the four cached-`Expr` axioms
+`hasFVar_eq`, `hasExprMVar_eq`, `hasLevelMVar_eq`, and `hasLevelParam_eq`;
+`66172a2` removes the hand-declared `Expr.mkAppRangeAux.eq_def` because Lean
+v4.31 generates its defining equation. The exact custom-axiom inventory is
+therefore 29, down five from 34. `Level.hasParam_eq`, `Level.hasMVar_eq`, and
+`Expr.looseBVarRange_eq` remain unproved; although v4.31 fixes the cached-data
+bug, they remain forbidden implementation contracts and are not logical
+foundations. The exact sorry frontier is 22, up two from 20: upstream adds
+`NormLevel.isEquiv_wf`, mapped to L4L-02B, and the front-end theorem
+`Lean4Lean.addDecl.WF`, mapped to L4L-19B. Exact guards confirm that the five
+retired declarations disappeared. Existing `Expr.mkData_eq` and
+`Expr.mkAppData_eq` become visible in several v4.31 Verify closures because the
+new cached-field implementation routes through those already-inventoried
+layout contracts; no new axiom declaration or supported-root trust category
+was added. Raw count changes are acceptable only with this declaration-level
+and per-root classification.
 
 The current reachability audit is **partially established**, not release-clean:
 
@@ -1096,10 +1103,11 @@ The current reachability audit is **partially established**, not release-clean:
 - the new E1 bridge roots have checked closures, but they inherit `sorryAx`
   through the type dependency `TrConstVal → TrExprS → TrProj`; this is Track
   P's projection-specification hole, not a new E1 axiom declaration;
-- `Expr.hasFVar_eq` is already used to prove `fvarsList_eq_nil`; no textual use
-  of that lemma establishes whether it reaches an exported root;
-- the other six explicitly false equations are simp lemmas and can enter a
-  proof without a textual reference to their names.
+- the five L4L-01U-retired names are absent from the source and exact guards;
+  their former textual uses have kernel proofs or generated v4.31 equations;
+- all three remaining cached-field equations are simp lemmas and can enter a
+  proof without a textual reference to their names, so their absence must be
+  established by exact root guards rather than source search.
 
 Consequently, source import/name searches are useful diagnostics but are not
 the release audit. Only the generated transitive axiom closure of each named
@@ -1126,9 +1134,9 @@ The acceptance decision is deliberately stricter than “Lean compiled it”:
   or proof-design blocker, not a reason to extend the allowlist;
 - `sorryAx` and the persistent-map contracts in the Verify rows are recorded so
   their removal can be tested. They are not part of the accepted release set;
-- the seven cache equations known false for the pinned toolchain are forbidden
-  even if they happen not to make an immediate theorem inconsistent inside
-  Lean. Reachability, rather than declaration presence alone, is the release
+- the three cached-field equations known false on older toolchains remain
+  forbidden until proved for v4.31, even though the implementation bug is
+  fixed. Reachability, rather than declaration presence alone, is the release
   criterion.
 
 | Root | Current transitive closure | Assessment / removal path |
@@ -1162,14 +1170,14 @@ The acceptance decision is deliberately stricter than “Lean compiled it”:
 | `TypeChecker.TelDefEqEvidence.telDefEq`, `VInductDecl.NormalizedCtorRun.wf`, `GenerationRun.wf` | exactly the checked semantic set listed below | Transitional and exactly guarded. These generic roots interpret compositional checker evidence as the pointwise telescope, constructor, and complete generation certificates required by Theory. Their statements mention exact verifier-run evidence, so inheriting the verifier closure is expected; the assembler declares no axiom and does not enlarge that set. |
 | `CandidateExprTrace.storedSpine`, `CandidateExprTrace.spineLength` | `propext`, `Classical.choice`, `Quot.sound` | Accepted structural/computational guards. They inspect the retained trace, require every emitted raw Pi node to remain the same outer Pi, and count exactly those nodes. They permit domain/result normalization but do not postulate Pi injectivity, normalization completeness, or semantic equality. |
 | `InductiveReplayFixtures.candidateIsDefEqSelfValid` | `propext`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Level.instLawfulBEqLevel`, `Syntax.structEq_eq` | Reasonable as an exactly guarded Verify-layer reflexive execution lemma, but not an ix-facing release allowlist. It proves the ordinary checker accepts `e ≡ e`; it declares no equality or normalization axiom. The three implementation contracts are inherited from Lean expression/level/name equality and must stay confined to Verify until Track T justifies or replaces them. |
-| `InductiveReplayFixtures.indexedVecFamily_candidateTrace`, `indexedVecCandidateInductiveStats_nindices`, `indexedVecCandidateInductiveStats_params` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.hasLevelParam_eq`, `Expr.instantiate1_eq`, `Expr.instantiateRev_eq`, `Expr.instantiate_eq`, `Expr.looseBVarRange_eq`, `Expr.replace_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, `PersistentArray.toList'_push`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. These roots replay the real `IndexedVec` family through two dependent binders and expose the computed one-parameter/one-index statistics. `sorryAx` and container/reference equations are inherited from the existing Verify environment/context frontier; the fixture adds no axiom and gives these contracts no Theory authority. |
-| `InductiveReplayFixtures.indexedVec_checkInductiveTypes` | the preceding `IndexedVec` candidate set plus `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, `Expr.hasLevelMVar_eq`, and `Level.hasMVar_eq` | Transitional and exactly guarded. This is the complete executable singleton-family validation, including the closedness checks that reach the four additional cache equations. It computes the actual result rather than assuming a family-validation oracle. The closure is reasonable development evidence because every dependency is visible, but its `sorryAx` and implementation contracts remain release-blocking and must not flow into the Theory certificate consumed by ix. |
+| `InductiveReplayFixtures.indexedVecFamily_candidateTrace`, `indexedVecCandidateInductiveStats_nindices`, `indexedVecCandidateInductiveStats_params` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.instantiate1_eq`, `Expr.instantiateRev_eq`, `Expr.instantiate_eq`, `Expr.looseBVarRange_eq`, `Expr.mkAppData_eq`, `Expr.mkData_eq`, `Expr.replace_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, `PersistentArray.toList'_push`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. These roots replay the real `IndexedVec` family through two dependent binders and expose the computed one-parameter/one-index statistics. `sorryAx` and container/reference/layout equations are inherited from the existing Verify environment/context frontier; the fixture adds no axiom and gives these contracts no Theory authority. |
+| `InductiveReplayFixtures.indexedVec_checkInductiveTypes` | the preceding `IndexedVec` candidate set plus `Level.hasMVar_eq` | Transitional and exactly guarded. This is the complete executable singleton-family validation, including the closedness checks. The four cached-`Expr` facts are now proved on v4.31; their proofs expose only the already listed data-layout contracts. The closure remains development evidence because every dependency is visible, but its `sorryAx` and implementation contracts are release-blocking and must not flow into the Theory certificate consumed by ix. |
 | `AddInductive.observeCandidateIsDefEq_of_run`, `buildCandidateExpr_loop_of_whnf_nonForall`, `buildCandidateExpr_loop_of_whnf_forall` | `propext`, `Classical.choice`, `Quot.sound` | Accepted operational reduction seams, exactly guarded. They expose a supplied exact ordinary-checker execution and assemble one terminal or Π traversal step; they add no normalization oracle, evaluator equation, or fixture-specific axiom. |
 | `TypeChecker.TelDefEqEvidence.ofTelDefEq` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound` | Transitional and exactly guarded. This constructs evidence from already proved pointwise telescope equality; its `sorryAx` is inherited through the Verify translation/context statement, not introduced by extraction. It reaches none of the pointer, expression-reflection, or container contracts used by executable checker refinement. |
 | `CandidateExprIdentity.storedSpine`, `CandidateExprRun.exists_ofIdentity`, `CandidateExprRootRun.spineOfIdentity` | a subset of the checked semantic set listed below, reached transitively by both exact `IndexedVec` public-root guards | Transitional. These roots recursively interpret a syntactically identity-normalizing candidate at caller-selected Theory endpoints and recover its generation-ready stored spine from the same source-indexed run. They declare no axiom and do not assume a normalization equation; their closure is inherited from the existing verifier, translation, unique-typing, and container frontier. Add direct guards if they become independently exported audit roots. |
 | `CandidateExprSemanticRootRun.exists_ofCandidate`, `.root`, `CandidateExprRootRun.semanticOfIdentity`, `CandidateConstructorSemanticListRun.roots`, `CandidateFamilySemanticRun.root`, `NormalizationCandidateSemanticRun.root`; separately `CandidateExprSemanticRootRun.spine` | the first group has exactly the checked semantic set listed below; `spine` has exactly `propext`, `sorryAx`, `Classical.choice`, and `Quot.sound` | Transitional, directly audited with `#print axioms` at `f0caf16c`. The root theorem lets the retained checker run select its Theory view from verified context/source evidence, while the dependent projections preserve exact source positions through normalization. The spine is a direct projection of that same run. Their new composite construction and generation callers are exact compile-time guarded in the next row; add individual guards here only if one becomes an independently exported audit root. None declares an axiom, assumes normalization, invokes a native evaluator, or gives the operational producer independent semantic authority. The broad closure is inherited from the existing checked-semantic translation/refinement frontier and remains release-blocking for ix-facing evidence. |
 | `TypeChecker.CandidateExprSemanticRootInput.exists`, `CandidateConstructorSemanticListInput.exists`, `NormalizationCandidateSemanticInput.exists_ofProduced`, `CandidateFamilySemanticGenerationRun.run`, `CandidateSemanticNormalizedCtorListRun.run`, `GenerationCandidateSemanticRun.run`, `.package`, `.producedPackage` | exactly the checked semantic set listed below, compile-time guarded per root | Transitional and exactly guarded at `7e5f4f77`. The input hierarchy combines verified contexts and strict translations with exact operational list witnesses, then returns the complete source-ordered semantic hierarchy under `Nonempty`; the producer selects the indexed candidate but does not select its Theory view. The semantic-generation projections reuse that hierarchy's recursive runs and spines, eliminating parallel normalization/generation ownership. `Nonempty` is intentional: extracting a data-bearing run would require choice, whereas proof consumers need only semantic existence. No new axiom, normalization oracle, native evaluator, unchecked positional operation, or caller-selected endpoint is introduced. |
-| `aliasFormerProducedSemanticHierarchy_exists`, `annotatedPiProducedSemanticHierarchy_exists`, `indexedVecProducedSemanticHierarchy_exists`, the three `*GenerationCandidateSemanticRun` roots, `indexedVecProducedSemanticHierarchy_constructorHeaders`, and `indexedVecReorderedView_rejected` | the positive AliasFormer/IndexedVec roots have exactly the checked semantic set; AnnotatedPi adds the already recorded `Expr.hasFVar_eq`; reordered-view rejection has exactly `propext` | Transitional fixtures, all exactly guarded. The three positive blocks exercise terminal-alias, annotated recursive-Π, and parameter/index/two-constructor assembly. `IndexedVec` proves that the existential semantic result retains `nil`/`cons` order, while swapping those headers fails the computational normalization-shape gate before semantic or generation evidence can be attached. The AnnotatedPi delta is inherited from its existing free-variable checker trace, not from semantic ownership. |
+| `aliasFormerProducedSemanticHierarchy_exists`, `annotatedPiProducedSemanticHierarchy_exists`, `indexedVecProducedSemanticHierarchy_exists`, the three `*GenerationCandidateSemanticRun` roots, `indexedVecProducedSemanticHierarchy_constructorHeaders`, and `indexedVecReorderedView_rejected` | all positive roots have exactly the checked semantic set; reordered-view rejection has exactly `propext` | Transitional fixtures, all exactly guarded. The three positive blocks exercise terminal-alias, annotated recursive-Π, and parameter/index/two-constructor assembly. `IndexedVec` proves that the existential semantic result retains `nil`/`cons` order, while swapping those headers fails the computational normalization-shape gate before semantic or generation evidence can be attached. The v4.31 cache proofs remove the former AnnotatedPi-only axiom delta. |
 | `CandidateExprRun.spineEvidence`, `CandidateExprSpineRun.evidenceAt`, `TelResultDefEqEvidence.replacePrefix`, `CandidateNormalizedCtorRun.normalizedCtorRun`, `GenerationCandidateRun.wf` | exactly the checked semantic set listed below | Transitional and exactly guarded. These generic generation-level roots recursively recover binder equality and the terminal result from the exact run, prove raw-spine length, replace a constructor's declared parameter prefix with the definitionally equal emitted family prefix in the exact induced contexts, fold a source-indexed dependent constructor list, and produce `GenerationChecked.WF`. They use neither forall injectivity nor a choice-selected candidate view and declare no axiom; the closure is inherited unchanged from checker refinement, unique typing, translation, and container contracts. |
 | `Checked.type_eq`, `GenerationChecked.viewCtorType_eq`, `GenerationChecked.checkedResultTarget_hasType` | exactly `propext`, `Quot.sound` | Accepted Theory baseline and exactly guarded at `2b1d802f`. These roots expose the analyzer's exact family/constructor telescope decomposition and type a constructor's normalized result application from the retained family constant plus checked parameter/index spines. No Verify import, custom axiom, normalization oracle, or whole-Pi injectivity enters Theory. |
 | `Normalization.check?_normalization`, `Normalization.generation?_normalization` | exactly `propext`, `Quot.sound` | Accepted Theory baseline and exactly guarded at `a64fe982`. These theorems invert exact successful dependent analysis to recover the normalization retained by its indexed result. They unfold the computational analyzers and introduce no Verify dependency, choice, custom axiom, or normalization oracle. |
@@ -1184,23 +1192,23 @@ The acceptance decision is deliberately stricter than “Lean compiled it”:
 | `GenerationCandidateRun.package`, `GenerationCandidateRun.producedPackage` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound` | Transitional and exactly guarded. The first packaging root retains the already indexed source/candidate/run fields without interpreting them. The second attaches an exact successful whole-call equation for that same dependent candidate and cannot be reused for a different run, reordered list, or caller-selected view. The small closure comes from the dependent Verify evidence types in their statements; neither root introduces checker, producer, or normalization authority. |
 | `GenerationCandidatePackage.certificate`, `GenerationCandidatePackage.addInductTrace` | exactly the checked semantic set listed below | Transitional and exactly guarded. Certificate erasure derives both the Theory generation and its WF proof from the same package. The metadata replay constructor likewise fixes its trace's generation/WF fields to package projections, so callers may supply insertion witnesses but cannot substitute an unrelated normalized view. The inherited Verify closure remains release-blocking and does not reach the resulting Theory API declaration. |
 | `InductiveReplayFixtures.aliasFormerGenerationCandidateRun` | exactly the checked semantic set listed below | Transitional and exactly guarded. This concrete non-identity fixture supplies exact analysis, WF of the analyzer-owned view declaration, and one successful complete generation-shape gate; it no longer supplies checked WF or any per-position shape record. The generic projection derives checked WF, raw/view family identity, normalized pairing/order, all raw telescope/results and view terminals, and the dependent constructor list. Its existing `GenerationRun`, checked `AddInductTrace`, final environment, WF, and alignment replay delegate through this value, so the vertical path adds no axiom beyond the already visible Verify frontier. |
-| `InductiveReplayFixtures.aliasFormerNormalizationCandidate_produced` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, `Expr.hasLevelMVar_eq`, `Expr.looseBVarRange_eq`, `Level.instLawfulBEqLevel`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. This is the exact successful whole `buildNormalizationCandidate` call on real AliasFormer metadata. It proves the family check, family insertion, constructor check, and source-indexed list assembly in their actual contexts; it does not assert an erasure equality or authorize a caller-selected view. The three `Expr.has*` equations are existing closed-expression cache contracts used by the executable checker, not new axioms or semantic normalization principles. |
-| `InductiveReplayFixtures.aliasFormerProducedGenerationCandidatePackage` | the exact checked semantic set plus `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, and `Expr.hasLevelMVar_eq` | Transitional and exactly guarded. The value uses the generic strengthened outer constructor to combine the exact ordinary producer equation, complete generation-shape success, and the semantic owner. The producer equation selects the candidate but grants no Theory or shape meaning. Generic construction of the verified per-position semantic inputs and analyzer-owned view WF from an arbitrary verified outer context and exact traversals is still open. Checked WF, every per-position shape record, raw/result and view-terminal equations, normalized-pair/order, dependent-list alignment, view telescopes, terminal typing, normalization equality, and post-family WF are generic consequences and are no longer part of that gap. |
+| `InductiveReplayFixtures.aliasFormerNormalizationCandidate_produced` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.looseBVarRange_eq`, `Expr.mkAppData_eq`, `Expr.mkData_eq`, `Level.instLawfulBEqLevel`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. This is the exact successful whole `buildNormalizationCandidate` call on real AliasFormer metadata. It proves the family check, family insertion, constructor check, and source-indexed list assembly in their actual contexts; it does not assert an erasure equality or authorize a caller-selected view. The v4.31 closed-expression cache facts are proved; their implementation proof reaches the two existing data-layout contracts. |
+| `InductiveReplayFixtures.aliasFormerProducedGenerationCandidatePackage` | exactly the checked semantic set | Transitional and exactly guarded. The value uses the generic strengthened outer constructor to combine the exact ordinary producer equation, complete generation-shape success, and the semantic owner. The producer equation selects the candidate but grants no Theory or shape meaning. Generic construction of the verified per-position semantic inputs and analyzer-owned view WF from an arbitrary verified outer context and exact traversals is still open. Checked WF, every per-position shape record, raw/result and view-terminal equations, normalized-pair/order, dependent-list alignment, view telescopes, terminal typing, normalization equality, and post-family WF are generic consequences and are no longer part of that gap. |
 | `InductiveReplayFixtures.aliasFormerFamily_whnf`, `aliasFormerCtor_whnf` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Level.instLawfulBEqLevel`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. These are the pre-family alias reduction and post-family opaque-constructor `Inner.whnf'` traces. They reach no pointer-equality axiom and use no `native_decide` or newly declared reduction principle; the remaining contracts are inherited Verify/platform debt. |
 | `InductiveReplayFixtures.aliasFormerFamily_candidateTrace`, `aliasFormerCtor_candidateTrace`, `aliasFormerFamily_candidate` | the exact AliasFormer operational set plus `Expr.looseBVarRange_eq` from retained full checks | Transitional and exactly guarded. These pin both positions of the real singleton family/constructor candidate list plus the erased family view. They do not certify an arbitrary translated candidate or add semantic authority to `NormalizationCandidate`. |
 | `InductiveReplayFixtures.aliasFormerFamily_candidateRun_exists`, `aliasFormerFamily_candidateSource_tr`, `aliasFormerFamily_candidateView_tr` | respectively the exact checked semantic set, retained-check set, and checked semantic set | Transitional and exactly guarded. The existential fixture instantiates automatic root-context and source/output recovery on actual metadata without supplying a Theory expression. The endpoint fixtures pin the strict raw and reconstructed view translations. AliasFormer's normalization and generation evidence consume the same interpreted trace; none of these fixtures authorizes an arbitrary candidate. |
 | `InductiveReplayFixtures.aliasFormerNormalizationCandidateRun`, `aliasFormerCandidateNormalization_eq` | exactly the checked semantic set | Transitional and exactly guarded. The complete source-indexed singleton list now computes the established AliasFormer view and supplies its live `NormalizationRun`; all downstream checked generation and replay roots therefore exercise the generic list boundary. `aliasFormerTruncatedView_rejected` separately uses only `propext` and proves a shorter view fails before transaction construction. |
-| `InductiveReplayFixtures.recAlias_whnf` | the preceding exact set plus `Expr.hasLevelParam_eq`, `Expr.replace_eq`, and `Level.hasParam_eq` | Transitional and exactly guarded. The additional contracts arise from instantiating and reducing the universe-polymorphic `RecAlias` value. This is still an execution theorem, not an oracle that asserts its result. |
+| `InductiveReplayFixtures.recAlias_whnf` | the preceding exact set plus `Expr.mkAppData_eq`, `Expr.mkData_eq`, `Expr.replace_eq`, and `Level.hasParam_eq` | Transitional and exactly guarded. The additional contracts arise from instantiating and reducing the universe-polymorphic `RecAlias` value. The former `Expr.hasLevelParam_eq` axiom is now a theorem whose implementation proof reaches the two data-layout contracts. This is still an execution theorem, not an oracle that asserts its result. |
 | `InductiveReplayFixtures.aliasFormerFamily_checkType`, `aliasFormerCtor_checkType` | `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.looseBVarRange_eq`, `Level.instLawfulBEqLevel`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. These are exact operational full-check traces. The family check returns `Sort 2`; the constructor check runs after raw-family insertion and returns the retained `TypeFamilyAlias`. Both record the cache result, reach no pointer-equality contract, and introduce no evaluation axiom. |
-| `InductiveReplayFixtures.aliasFormerFamily_isType_checked`, `aliasFormerCtor_isType_checked`, both `*Normalization_wf_checked`, both `*Block_wf_checked`, and both `*GenerationChecked_wf_checked` roots | `propext`, `sorryAx`, `Classical.choice`, `ptrEqConstantInfo_eq`, `ptrEqExpr_eq`, `Quot.sound`, `Expr.abstractRange_eq`, `Expr.abstract_eq`, `Expr.eqv_eq`, `Expr.hasLevelParam_eq`, `Expr.hasLooseBVar_eq`, `Expr.instantiate1_eq`, `Expr.instantiateRange_eq`, `Expr.instantiateRevRange_eq`, `Expr.instantiateRev_eq`, `Expr.instantiate_eq`, `Expr.looseBVarRange_eq`, `Expr.lowerLooseBVars_eq`, `Expr.replace_eq`, `Level.hasMVar_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, `PersistentArray.toList'_push`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `Std.TreeMap.all_eq_all_toList`, `Expr.mkAppRangeAux.eq_def`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. The semantic bridge correctly inherits the existing verified checker's pointer/reflection and container contracts; completing the paired block and generation certificates adds no dependency beyond the normalization endpoint. `sorryAx` remains on the separately tracked translation frontier. This closure is reasonable evidence for development because it adds no axiom and makes every dependency visible, but it is not a release allowlist and must not reach Theory or ix semantic roots. |
+| `InductiveReplayFixtures.aliasFormerFamily_isType_checked`, `aliasFormerCtor_isType_checked`, both `*Normalization_wf_checked`, both `*Block_wf_checked`, and both `*GenerationChecked_wf_checked` roots | `propext`, `sorryAx`, `Classical.choice`, `ptrEqConstantInfo_eq`, `ptrEqExpr_eq`, `Quot.sound`, `Expr.abstractRange_eq`, `Expr.abstract_eq`, `Expr.eqv_eq`, `Expr.hasLooseBVar_eq`, `Expr.instantiate1_eq`, `Expr.instantiateRange_eq`, `Expr.instantiateRevRange_eq`, `Expr.instantiateRev_eq`, `Expr.instantiate_eq`, `Expr.looseBVarRange_eq`, `Expr.lowerLooseBVars_eq`, `Expr.mkAppData_eq`, `Expr.mkData_eq`, `Expr.replace_eq`, `Level.hasMVar_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, `PersistentArray.toList'_push`, `PersistentHashMap.findAux_isSome`, `Syntax.structEq_eq`, `PersistentHashMap.WF.find?_eq`, `PersistentHashMap.WF.toList'_insert` | Transitional and exactly guarded. The semantic bridge correctly inherits the existing verified checker's pointer/reflection, data-layout, and container contracts; completing the paired block and generation certificates adds no dependency beyond the normalization endpoint. `sorryAx` remains on the separately tracked translation frontier. The v4.31 closure drops the generated `mkAppRangeAux` axiom and the previously reachable TreeMap contract. This is development evidence, not a release allowlist, and it must not reach Theory or ix semantic roots. |
 | `InductiveReplayFixtures.aliasFormerGenerationCandidatePackage`, `aliasRecAddInductTraceChecked`, `aliasRec_trEnv'_checked` | exactly the preceding checked semantic set | Transitional and exactly guarded. The semantic package owns the generation/WF pair, and the AliasRec replay retains the established checked semantic closure. No outer producer equation is involved in these roots. |
-| `InductiveReplayFixtures.aliasFormer_addInductCertified_checked`, `aliasFormerGenerationChecked_wf_checked`, `aliasFormerAddInductTraceChecked`, `aliasFormer_trEnv'_checked` | the preceding checked semantic set plus `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, and `Expr.hasLevelMVar_eq` | Transitional and exactly guarded. These concrete consumers now project from the produced package, making exact whole-call provenance visible in their axiom reports. Proof erasure still keeps those contracts out of transaction computation, and the generic Theory API remains Theory-clean; the inherited `sorryAx` and platform equations remain release-blocking for this Verify-produced value. |
+| `InductiveReplayFixtures.aliasFormer_addInductCertified_checked`, `aliasFormerGenerationChecked_wf_checked`, `aliasFormerAddInductTraceChecked`, `aliasFormer_trEnv'_checked` | exactly the preceding checked semantic set | Transitional and exactly guarded. These concrete consumers now project from the produced package, making exact whole-call provenance visible in their axiom reports. Proof erasure still keeps those contracts out of transaction computation, and the generic Theory API remains Theory-clean; the inherited `sorryAx` and platform equations remain release-blocking for this Verify-produced value. |
 | `InductiveReplayFixtures.annotatedPiCtor_candidateTrace`, `annotatedPiFamily_candidateTrace` | exact guarded operational subsets of the checked semantic set; the nested constructor root inherits `sorryAx`, `ptrEqExpr_eq`, and the existing Expr/Level/container refinement equations, while the family root uses only `propext`, `Classical.choice`, `Quot.sound`, `Expr.eqv_eq`, `Expr.looseBVarRange_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, and `Syntax.structEq_eq` | Transitional and exactly guarded. These are the exact recursive candidate traversals selected by the real constructor and family producer calls. The family profile remains narrow; the constructor profile exposes existing checker-refinement debt because it traverses annotation consumption beneath a recursive Π. Neither trace is semantic authority by itself. |
-| `InductiveReplayFixtures.annotatedPiNormalizationCandidate_produced` | `propext`, `sorryAx`, `Classical.choice`, `ptrEqExpr_eq`, `Quot.sound`, `Expr.eqv_eq`, `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, `Expr.hasLevelMVar_eq`, `Expr.hasLevelParam_eq`, the existing instantiate/replace/loose-variable contracts, `Level.hasMVar_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, and the existing persistent-array/hash-map/syntax contracts | Transitional and exactly guarded. This is the exact successful whole `buildNormalizationCandidate` equation for AnnotatedPi, including nested Π traversal and dependent list assembly. The additional cache equations arise from the actual closed constructor checks and do not assert semantic normalization. |
-| `InductiveReplayFixtures.annotatedPiProducedGenerationCandidatePackage` | the exact checked semantic set plus `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, and `Expr.hasLevelMVar_eq` | Transitional and exactly guarded. The record combines AnnotatedPi's exact whole operational result with its semantic-generation owner. As for AliasFormer, the producer equation selects the candidate while the retained semantic hierarchy supplies all Theory meaning; inherited `sorryAx` and platform equations remain release-blocking. |
-| `InductiveReplayFixtures.annotatedPiNormalizationCandidateRun`, `annotatedPiGenerationCandidateRun`, `annotatedPiGenerationCandidatePackage`, `annotatedPi_addInductCertified`, `annotatedPiGenerationChecked_wf_checked`, `annotatedPiAddInductTraceChecked`, `annotatedPi_trEnv'_checked` | exactly the preceding checked semantic set; consumers routed through the produced package additionally expose `Expr.hasExprMVar_eq`, `Expr.hasFVar_eq`, and `Expr.hasLevelMVar_eq` | Transitional and exactly guarded. `AnnotatedPi` exercises the complete recursive-Pi annotation path: exact full checks, WHNF, annotation consumption, lazy-delta definitional equality, recursive candidate contexts, generation assembly, the public certified transaction, and final checked replay. These are existing platform equations reached by the ordinary checker, not newly declared axioms. The fixture adds no oracle, and the inherited `sorryAx`/platform closure remains release-blocking exactly as for the alias fixtures. |
+| `InductiveReplayFixtures.annotatedPiNormalizationCandidate_produced` | `propext`, `sorryAx`, `Classical.choice`, `ptrEqExpr_eq`, `Quot.sound`, `Expr.eqv_eq`, the existing instantiate/replace/loose-variable contracts, `Expr.mkAppData_eq`, `Expr.mkData_eq`, `Level.hasMVar_eq`, `Level.hasParam_eq`, `Level.instLawfulBEqLevel`, and the existing persistent-array/hash-map/syntax contracts | Transitional and exactly guarded. This is the exact successful whole `buildNormalizationCandidate` equation for AnnotatedPi, including nested Π traversal and dependent list assembly. The four former cached-`Expr` axioms are now proved; their data-layout dependencies remain visible and do not assert semantic normalization. |
+| `InductiveReplayFixtures.annotatedPiProducedGenerationCandidatePackage` | exactly the checked semantic set | Transitional and exactly guarded. The record combines AnnotatedPi's exact whole operational result with its semantic-generation owner. As for AliasFormer, the producer equation selects the candidate while the retained semantic hierarchy supplies all Theory meaning; inherited `sorryAx` and platform equations remain release-blocking. |
+| `InductiveReplayFixtures.annotatedPiNormalizationCandidateRun`, `annotatedPiGenerationCandidateRun`, `annotatedPiGenerationCandidatePackage`, `annotatedPi_addInductCertified`, `annotatedPiGenerationChecked_wf_checked`, `annotatedPiAddInductTraceChecked`, `annotatedPi_trEnv'_checked` | exactly the preceding checked semantic set | Transitional and exactly guarded. `AnnotatedPi` exercises the complete recursive-Pi annotation path: exact full checks, WHNF, annotation consumption, lazy-delta definitional equality, recursive candidate contexts, generation assembly, the public certified transaction, and final checked replay. The fixture adds no oracle, and the inherited `sorryAx`/platform closure remains release-blocking exactly as for the alias fixtures. |
 | `InductiveReplayFixtures.indexedVecNormalizationCandidateProduced` | the exact `IndexedVec` operational set: `propext`, `sorryAx`, `Classical.choice`, `Quot.sound`, the retained Expr/Level/cache equations, and the persistent-array/hash-map/syntax contracts printed at the root | Transitional and exactly guarded. This is the complete one-parameter, one-index, ordered `nil`/`cons` outer producer equation. It selects the exact candidate but supplies no Theory meaning by itself. |
-| `InductiveReplayFixtures.indexedVecSemanticProducedGenerationCandidatePackage`, `indexedVecSemantic_trEnv'_checked` | exactly the checked semantic set used by the existing produced-package replays, including the three closedness cache equations | Transitional and exactly guarded. These roots interpret every family/constructor node at the identity endpoint, assemble the source-indexed generation package, project the proof-erased Theory certificate, and carry that same package through the final E1 replay. The fixture adds no oracle or axiom; inherited `sorryAx` and platform contracts remain release-blocking and are visible in both exact guards. |
+| `InductiveReplayFixtures.indexedVecSemanticProducedGenerationCandidatePackage`, `indexedVecSemantic_trEnv'_checked` | exactly the checked semantic set used by the existing produced-package replays | Transitional and exactly guarded. These roots interpret every family/constructor node at the identity endpoint, assemble the source-indexed generation package, project the proof-erased Theory certificate, and carry that same package through the final E1 replay. The former closedness cache axioms are proved on v4.31; the fixture adds no oracle or axiom, and inherited `sorryAx` and platform contracts remain release-blocking and visible in both exact guards. |
 | `InductiveReplayFixtures.annotatedPiFinalEnv_iota_mem` | `propext`, `Quot.sound` | Accepted logical baseline and exactly guarded. Once the checked generation value is supplied, membership of the generated recursive-Pi iota rule in the final Theory environment does not inherit the Verify checker closure. This is the ix-relevant separation to preserve in the general producer/public path. |
 | `VEnv.addInduct_success`, `addInduct_checked`, constructor/recursor collision rejection | `propext`, `Classical.choice`, `Quot.sound` | Accepted logical baseline; compile-time guarded. The success certificate carries analyzer evidence rather than postulating it. `Classical.choice` now enters because the transaction's public artifacts are identity-normalization specializations of the mixed generator. |
 | `VEnv.addInduct_WF` | `propext`, `Classical.choice`, `Quot.sound` | Accepted logical baseline; compile-time guarded. |
@@ -1233,19 +1241,19 @@ pointer/reflection, translation, and container debt that must be discharged or
 isolated before release. The `AnnotatedPi` slice confirms that verdict at the
 hardest current annotation seam: retaining only the structural annotation
 trace and exact `isDefEq` run is sufficient, while the opaque helper agreement
-remains a runtime producer check rather than an assumed theorem. Its one
-additional reachable platform equation, `Expr.hasFVar_eq`, is exactly guarded
-and is not added to the release allowlist. The automatic semantic-input,
+remains a runtime producer check rather than an assumed theorem. The four
+cached-`Expr` properties it exercises are proved on v4.31; their proofs route
+through the two already classified data-layout contracts, which remain exactly
+guarded and outside the release allowlist. The automatic semantic-input,
 produced-hierarchy, and semantic-generation projection roots have exactly the
 same checked semantic set as the retained interpreter; their compile-time
 guards show no trust growth. Returning the assembled hierarchy under
 `Nonempty` is deliberate: it states semantic existence without using choice to
 extract a data-bearing checker-selected view. The exact AliasFormer whole-call
-  proof additionally reaches the existing `Expr.hasExprMVar_eq` and
-  `Expr.hasLevelMVar_eq` cache equations (as well as `Expr.hasFVar_eq`) while
-  reducing the ordinary closed-term checks. Those dependencies are likewise
-  guarded and remain transitional platform contracts. No new axiom or oracle
-  was added.
+proof no longer reaches three separate closedness cache axioms; it reaches
+`Expr.mkData_eq` and `Expr.mkAppData_eq` through the new kernel proofs instead.
+Those dependencies are exactly guarded and remain transitional layout
+contracts. No new axiom or oracle was added.
 The certified public path sharpens this separation: its generic Theory
 transaction theorems use only the accepted logical baseline, while concrete
 AliasFormer/AnnotatedPi/`IndexedVec` certificate values retain the exact
@@ -2520,20 +2528,23 @@ executable and proved:
       an independent post-family `VEnvs`/context; constructors remain
       uninterpreted; family-phase negatives remain sharp; exact axiom guards
       and universal gates pass.
-    - [ ] **L4L-01U (active):** merge live digama `upstream/master` through
-      `ef849dfbd94a` into `jcb/induct` without rewriting the published
-      checkpoints. Resolve the overlapping inductive/checker/Verify/level
-      changes, upgrade to Lean v4.31, retain the fork's Nix and ix-facing
-      certificate surfaces, remove upstream's four now-proved cached-`Expr`
-      axioms and obsolete hand-declared `mkAppRangeAux` equation, and reconcile
-      replay/CI/Experimental layout. Classify the newly stated, still-unproved
-      `addDecl.WF` front-end theorem under L4L-19B without exposing it to ix.
-      Completion requires the upstream tip to be an ancestor of the source
-      checkpoint; the exact sorry and axiom ledgers to account for every delta
-      without a supported-root trust-budget increase; all L4L-01A/L4L-01B
-      regressions and universal Lean/Lake/Nix gates to pass; and the current ix
-      `IxTcVerify` consumer to build against the candidate without a new oracle.
-      Keep this checkpoint integration-only: constructor-trace declarations
+    - [ ] **L4L-01U (publication active):** publish the completed merge of
+      digama `upstream/master` through `ef849dfbd94a` to origin `jcb/induct`
+      without rewriting the published checkpoints or moving either master.
+      The local source already reconciles the overlapping
+      inductive/checker/Verify/level and replay/CI/Experimental changes,
+      upgrades Lean and lean4-nix to v4.31, retains the fork's Nix and ix-facing
+      certificate surfaces, and removes upstream's four now-proved
+      cached-`Expr` axioms plus the obsolete hand-declared `mkAppRangeAux`
+      equation. The exact inventory is 29 custom axioms and 22 non-Experimental
+      sorries. `NormLevel.isEquiv_wf` is assigned to L4L-02B and `addDecl.WF`
+      to L4L-19B; neither enlarges a supported-root allowlist. Completion
+      requires the upstream tip to be an ancestor of the published source
+      checkpoint, all L4L-01A/L4L-01B regressions and universal Lean/Nix gates
+      to pass, and only origin `jcb/induct` to move. The isolated ix v4.31 probe
+      is diagnostic evidence, not an ix pin: merged Lean4Lean replay and ix
+      runtime modules pass, while ix-owned proof/API migration is deferred to
+      the next pin. Keep this checkpoint integration-only; constructor traces
       belong to L4L-01C.
     - [ ] **L4L-01C:** retain the complete successful singleton constructor
       validator as dependent operational data: duplicate/closedness checks,
@@ -2971,13 +2982,17 @@ compatibility) and what lean4lean does not trust automatically.
 
 ## 11. Track V — finish Verify after the specifications exist
 
-### V1 — independent level-normalizer proof (L4L-02)
+### V1 — independent level-normalizer proofs (L4L-02A/L4L-02B)
 
-Prove `NormLevel.subsumption_eval` immediately after L4L-01E. Ix's sorry-free
-level normalizer uses a different representation but offers a proof
-decomposition to port. The proof has no technical dependency on inductive APIs,
-but its implementation and publication are deliberately serialized after the
-active milestone so §13 retains exactly one active checkpoint claim.
+First prove `NormLevel.subsumption_eval` in L4L-02A. Ix's sorry-free level
+normalizer uses a different representation but offers a proof decomposition to
+port. Then prove the v4.31-added `NormLevel.isEquiv_wf` in L4L-02B from the
+normalizer evaluation/subsumption facts and close its downstream list theorem.
+Keeping these as two commits gives each upstream placeholder one exact removal
+and prevents the small algorithmic invariant proof from being hidden inside a
+larger checker patch. Neither proof has a technical dependency on inductive
+APIs, but publication remains serialized after L4L-01E so §13 has one active
+checkpoint at a time.
 
 ### V2 — recursor reduction (L4L-19A)
 
@@ -3052,21 +3067,23 @@ Use four acceptance states:
 3. **Transitional bridge:** a plausible opaque/reference equation has a removal
    issue and may support intermediate Verify work, but cannot silently become a
    release assumption.
-4. **Forbidden:** an equation known false for the pinned toolchain may not occur
-   in any supported root, even if the kernel cannot reduce the opaque/native
-   function far enough to derive `False` internally.
+4. **Forbidden:** an equation known false on a supported toolchain, or not yet
+   proved after the relevant implementation changed, may not occur in any
+   supported root, even if the kernel cannot reduce the opaque/native function
+   far enough to derive `False` internally.
 
 Retire the classes in risk order:
 
-1. Remove the seven false cache equations from reachable proofs. Update to a
-   fixed toolchain and prove the corrected contract, make the checker execute a
-   proved structural function, prove a sufficient reachable-input invariant,
-   or weaken the refinement claim honestly. Merely deleting `[simp]` reduces
-   accidental use but does not discharge the assumption.
+1. Finish the cache-equation retirement started by L4L-01U. Five declarations
+   are gone; remove the remaining three from reachable proofs, then prove the
+   corrected v4.31 contracts, make the checker execute proved structural
+   functions, prove sufficient reachable-input invariants, or weaken the
+   refinement claim honestly. Merely deleting `[simp]` reduces accidental use
+   but does not discharge an assumption.
 2. Convert the thirteen reference equations into logical definitions with
    `@[implemented_by]` only when the replacement is known extensionally
    correct; otherwise use the reference implementation in the verified path.
-3. Replace the five collection and six opaque/layout equations with upstream
+3. Replace the five collection and five opaque/layout equations with upstream
    theorems or narrowly bounded/WF lemmas. Do not assume equality on malformed
    states when only constructor-reachable states are needed.
 4. Decide the final platform budget explicitly. The expected candidates are the
@@ -3129,11 +3146,12 @@ is authoritative, and L4L-01C may not start before L4L-01U is complete.
 | **L4L-00 — published generation-readiness baseline** | **complete** | Stabilized fork infrastructure; one generalized source/view artifact path; proof-carrying non-identity transaction; retained semantic hierarchy; complete executable generation-shape gate; AliasFormer, AnnotatedPi, and `IndexedVec` checkpoints. | Source `bbb45e0e`, ledger child `c4fd62b2`, all gates green. Ix Pin A remains the separately recorded `5e5bb767`/`1f73f5c0` pair and has removed the three former inductive sorry origins without making an oracle claim. |
 | **L4L-01A — staged semantic-input consolidation** | **complete** | Introduce one source-indexed builder over explicitly verified pre-family/post-family candidate stages, strict family/constructor translations, exact raw-family insertion alignment, and the existing dependent `Produced` traversals. Return the existing `Nonempty ProducedNormalizationCandidateSemanticRun`; make no view-WF or generation-package claim. | Source `7c792209`. AliasFormer, AnnotatedPi, and `IndexedVec` use the builder; their per-root semantic-input definitions are gone and exact constructor order is retained. Existing explicit downstream witnesses and one `viewWF` proof per positive are marked temporary until L4L-01E; no choice extractor was added; focused and universal gates pass. |
 | **L4L-01B — family-validation semantics and staging** | **complete** | Interpret the exact singleton `checkInductiveTypes`/family-candidate run from one verified entry context. Derive view telescope and terminal-sort WF, raw-family constant WF through candidate defeq, exact insertion, and the verified post-family candidate stage. | Source `da45b536`. Exact singleton validation semantics derive the parameter/index view split, terminal/raw-family WF, exact insertion, and post-family candidate stage. AliasFormer, AnnotatedPi, and `IndexedVec` supply no independent post-family `VEnvs`/context; family terminal, annotation, fuel, and non-sort negatives remain phase-sharp; constructors remain uninterpreted; exact guards and universal gates pass. |
-| **L4L-01U — upstream v4.31 reconciliation** | **active** | Merge digama `upstream/master` through `ef849dfbd94a` without rewriting published fork checkpoints. Reconcile overlapping inductive/checker/Verify/level work, replay/CI/Experimental layout, Lean v4.31, and Nix; retain upstream's removal of four cached-`Expr` axioms and `Expr.mkAppRangeAux.eq_def`; map its new unproved `addDecl.WF` theorem to L4L-19B. Add no constructor-trace work. | The upstream tip is an ancestor of the source checkpoint; exact sorry/declaration/reachability deltas are audited with no supported-root trust growth; L4L-01A/L4L-01B and universal gates pass on v4.31; current `IxTcVerify` builds without a new oracle; only `jcb/induct` moves. |
+| **L4L-01U — upstream v4.31 reconciliation** | **active: publish** | Publish the completed merge of digama `upstream/master` through `ef849dfbd94a` without rewriting fork checkpoints or moving either master. Retain the v4.31 proof/API ports, upstream's five custom-axiom removals, the fork's Nix/CI and certificate surfaces, and the exact classifications of `NormLevel.isEquiv_wf` (L4L-02B) and `addDecl.WF` (L4L-19B). Add no constructor-trace work. | Local gates pass: full 154-job Lake build, `nix build`, current-host six-check flake build, all-system no-build evaluation, formatter, CLI replay, exact 22-entry sorry guard, and exact 29-declaration axiom inventory. Root guards show no supported-root trust growth. The isolated ix v4.31 probe replays Lean4Lean and builds ix runtime modules; ix-owned proof migration is deferred because this is not a pin. Completion is the committed source/ledger pair on origin `jcb/induct`, and only that branch moves. |
 | **L4L-01C — retained constructor-validation trace** | queued | Add dependent operational evidence for the complete successful singleton `checkConstructors` traversal: duplicate/closedness/root-check, parameter equality, field type/universe, positivity/recursive-target, and terminal-family-application steps. Prove decomposition and recomposition with the executable result. | The trace is source ordered and exact; missing/extra/reordered and each validation-phase negative remain sharp; successful trace equivalence has only the executable baseline closure and makes no Theory-WF claim. |
 | **L4L-01D — constructor-validation semantics and view WF** | queued | Interpret the L4L-01C trace with verified checker refinements and retained candidate normalization. Derive `fieldsWF`, constructor result `SpineWF`, and WF of the exact analyzer-owned view declaration for the currently accepted singleton subset. | All three fixture `viewDecl_wf` proofs are deleted; no `Checked.WF`, view, or view-WF premise is renamed or reintroduced; exact axiom guards pass; no normalization or validation breadth is widened. |
 | **L4L-01E — generic singleton package closure** | queued | Combine the L4L-01A–01D owner, exact dependent analysis, and `ProducedGenerationShapeCandidate` into `Nonempty ProducedGenerationCandidatePackage`, retaining the exact ordinary producer equation without granting it shape or Theory authority. | All three positives use only the generic closure theorem; missing/extra/reordered/truncated/non-defeq regressions remain sharp; no manual semantic-input/view-WF scaffolding remains; universal gates pass. |
-| **L4L-02 — isolated level-normalizer closure** | queued | Prove `NormLevel.subsumption_eval` with its existing statement and remove that sorry-frontier entry. Keep this patch independent of inductive APIs. | Focused Level and full builds pass; exact axiom closure is accepted; the change is packaged as a small upstream-ready commit. |
+| **L4L-02A — level subsumption evaluation** | queued | Prove `NormLevel.subsumption_eval` with its existing statement and remove exactly that sorry-frontier entry. Keep the patch independent of inductive APIs. | Focused Level and full builds pass; the theorem's exact axiom closure is accepted; the frontier drops from 22 to 21; the change is a small upstream-ready commit. |
+| **L4L-02B — level equivalence soundness** | queued | Prove the v4.31-added `NormLevel.isEquiv_wf` from the evaluator/subsumption library and close the dependent list-level soundness path without changing the executable normalizer. | Focused Level and full builds pass; exact root guards add no custom axiom; the frontier drops from 21 to 20; the change is a separate upstream-ready commit. |
 | **L4L-03 — singleton environment-sensitive validation parity** | queued | Complete remaining singleton `checkInductiveTypes`/`checkConstructors` acceptance behavior: pre-declaration `checkType`, transparency/fuel-correct WHNF Pi/result peeling, WHNF recursive-target traversal, and definitional constructor-parameter agreement. | A syntactically different but definitionally equal positive and a genuinely non-defeq negative match kernel outcomes and traverse the L4L-01E package/E1 path. Result-level equality across mutual families remains excluded. |
 | **L4L-04 — singleton normalization differential matrix** | queued | Cover family-result, parameter/index-domain, ordinary-field, direct-recursive, and Pi-hidden recursive aliases, including beta/let, opacity/non-defeq, and fuel boundaries. | Every case compares raw payload, normalized descriptor, recursive positions, recursor, and all rules with kernel metadata and replays through E1; generic rather than fixture-only axiom guards pass. |
 | **L4L-05 — singleton positivity and constructor-validity parity** | queued | Extend acceptance/rejection to the kernel matrix for nested-negative occurrences, family mentions in nonrecursive/dependent/proof fields, recursive functions, and constructor universe bounds. | Each branch has the nearest-kernel differential; all accepted cases use L4L-01E and replay through E1; no proof-only premise or oracle broadens acceptance. This is breadth/completeness, distinct from L4L-01D soundness. |
@@ -3173,14 +3191,19 @@ Every milestone must pass all applicable gates:
 
 ```text
 perl .github/scripts/check_sorry_frontier.pl
-lake build Lean4Lean.Theory Lean4Lean.Verify
-lake build
+nix develop --command lake build Lean4Lean.Theory Lean4Lean.Verify
+nix develop --command lake build
 nix build
 nix flake check --all-systems --no-build --accept-flake-config
 nix flake check --accept-flake-config --print-build-logs
 nix fmt -- --check .
 git diff --check
 ```
+
+The flake is authoritative: milestone evidence must use the pinned Nix
+toolchain and dependencies. Elan or a host `lake` invocation may be used only
+as a non-authoritative diagnostic and never substitutes for either Nix-wrapped
+Lake build, `nix build`, or the flake checks above.
 
 Additionally:
 
@@ -3201,7 +3224,7 @@ Additionally:
 The retired C0-C8 grouping maps to this ladder as follows: C0 = L4L-00;
 C1 = L4L-01A through L4L-07; C2 = L4L-08A through L4L-09C; C3 =
 L4L-10A/L4L-10B/L4L-11; C4 = L4L-12A/L4L-12B plus L4L-15C; C5 =
-L4L-13A through L4L-15C; C6 = L4L-16 through L4L-18B; C7 = L4L-02 plus
+L4L-13A through L4L-15C; C6 = L4L-16 through L4L-18B; C7 = L4L-02A/L4L-02B plus
 L4L-19A through L4L-19C; and C8 = L4L-20A through L4L-20C. These mappings are
 historical cross-references, not alternative completion gates.
 
@@ -3212,6 +3235,13 @@ the exit of L4L-14, and Pin D the exit of L4L-17. L4L-12A/L4L-12B and
 L4L-15A–L4L-15C also require ix migrations, but they shrink API/import debt
 rather than create a new numbered semantic pin. L4L-20C records the final
 release pair.
+
+L4L-01U is an upstream/toolchain integration checkpoint, not a numbered ix
+pin. Its isolated v4.31 probe establishes that merged Lean4Lean modules replay
+and the consumer-facing runtime modules elaborate; it does not require this
+repository to port ix's own ByteArray, Batteries `RBTree`, or proof-library
+APIs. Perform that migration in ix at the next authorized pin and keep its
+worktree, lockfile, and branch out of Lean4Lean commits.
 
 For every Pin A-D:
 
@@ -3275,12 +3305,11 @@ consumer-specific state.
   the hierarchy only under `Nonempty`. L4L-01B derives raw-family WF, exact
   insertion, and the post-family candidate stage from the singleton family
   validator, so no positive supplies an independent post-family context. The
-  current source checkpoint is `da45b536`, with its roadmap-only ledger
-  descendants on
-  `jcb/induct`. The exact sorry-frontier check, 124-job Theory/Verify build,
-  157-job default Lake build, default Nix build, all six current-host flake
-  checks, all-system no-build evaluation, formatter, and whitespace checks
-  were rerun on 2026-08-03 over that source checkpoint.
+  current local source is the L4L-01U merge, whose parent pair and published
+  hash are recorded in §13 and its ledger child on `jcb/induct`. The exact
+  22-entry sorry-frontier check, 154-job default Lake build, default Nix build,
+  all six current-host flake checks, all-system no-build evaluation, formatter,
+  CLI replay, and whitespace checks were rerun on 2026-08-04 over that source.
   Exact compile-time guards show that the new generic and fixture roots add no
   axiom; their broad Verify closure remains explicitly transitional. Pin A
   uses the earlier certificate-bearing `5e5bb767` checkpoint, paired with local
@@ -3343,11 +3372,12 @@ consumer-specific state.
   ahead of both master and ix's recorded Pin A checkpoint at `5e5bb767`. Keep
   pinning coherent checkpoints and recording revision pairs; do not wait for
   the final research milestone.
-- **Upstream collision.** The 2026-08-03 boundary check found live
-  `upstream/master` at `ef849dfbd94a`, 15 commits past common ancestor
-  `8865b155` and overlapping inductive/checker/Verify/level files. L4L-01U is
-  therefore active and must reconcile it before L4L-01C. Repeat this check at
-  every later milestone boundary; retain this roadmap's fixtures, consumer
+- **Upstream collision.** L4L-01U reconciles the 2026-08-03
+  `upstream/master` tip `ef849dfbd94a` as a real merge parent, including the
+  overlapping inductive/checker/Verify/level files. Repeat the ancestry and
+  overlap check at every later milestone boundary; if upstream advances again,
+  insert another explicit integration checkpoint rather than hiding merge work
+  inside a semantic milestone. Retain this roadmap's fixtures, consumer
   contracts, and trust gates when adapting overlapping upstream work.
 - **Scope leakage from Experimental.** Experiments are useful sources, but no
   supported root may import them. Promote a proof only after removing its
@@ -3357,9 +3387,9 @@ L4L-01A and L4L-01B are complete at `7c792209` and `da45b536`
 respectively. The repeated semantic-input plumbing sits behind one
 source-indexed staged owner, and exact family-validation semantics derive its
 post-family stage; all three positives use it and the result deliberately
-stops at `Nonempty ProducedNormalizationCandidateSemanticRun`. The active
-L4L-01U task reconciles live upstream and Lean v4.31 without starting semantic
-constructor work. L4L-01C then retains the constructor-validation execution
+stops at `Nonempty ProducedNormalizationCandidateSemanticRun`. L4L-01U has
+reconciled live upstream and Lean v4.31 without starting semantic constructor
+work; publication is its only remaining action. L4L-01C then retains the constructor-validation execution
 without making a Theory-WF claim; constructor-validator semantics/view WF and
 produced-package closure remain L4L-01D and L4L-01E.
 `VEnv.addInductGeneration`, its exact data-bearing trace and stable
@@ -3543,7 +3573,8 @@ complete family/constructor hierarchy, retains the gate with the exact ordinary
 producer equation, and derives checked WF plus every dependent shape record
 from exact analysis and analyzer-owned view WF. L4L-01A consolidated verified
 per-position inputs over two verified stages; L4L-01B derived the second stage
-from family validation; L4L-01U now reconciles live upstream; L4L-01C then
+from family validation; L4L-01U has reconciled live upstream and awaits only
+publication; L4L-01C then
 retains constructor validation; L4L-01D derives analyzer-owned view WF; and
 L4L-01E combines the
 result with the strengthened gate to return the complete produced package
@@ -3552,8 +3583,9 @@ Theory-level generation, lookup,
 ordering, pattern, and semantic facts—not checker state or a normalization
 oracle—should be exposed to ix.
 
-After L4L-01E, follow §13 without skipping: close the isolated level proof in
-L4L-02; complete singleton environment-sensitive validation, normalization,
+After L4L-01E, follow §13 without skipping: close the two isolated level proofs
+in L4L-02A and L4L-02B; complete singleton environment-sensitive validation,
+normalization,
 positivity, elimination, K, and integration in L4L-03 through L4L-07; then
 advance through mutual L4L-08A–08C, nested L4L-09A–09C, pattern
 L4L-10A/L4L-10B, and oracle handoff L4L-11. The identity and alias kernel equalities remain the computational
@@ -3564,11 +3596,11 @@ environment-free universe/result/name/collision matrix, semantic `Checked.WF`
 and `GenerationChecked.WF` bridges, and exact axiom closures remain regression
 gates.
 
-The current formalization source checkpoint is
-`da45b536220a3eff5ed78cf2f5afcf5e7491c40f`, with roadmap-only ledger
-descendants on `argumentcomputer/lean4lean`'s `jcb/induct` branch; neither
-local `master` nor `origin/master` was moved by this work, and the live digama
-upstream independently advanced to `ef849dfbd94a`. On top of automatic produced
+The current local formalization source is the L4L-01U merge of
+`da45b536220a3eff5ed78cf2f5afcf5e7491c40f` and upstream
+`ef849dfbd94a`; its publication ledger child records the immutable source hash
+on `argumentcomputer/lean4lean`'s `jcb/induct` branch. Neither local `master`
+nor `origin/master` is moved by this work. On top of automatic produced
 semantic-hierarchy assembly and
 semantic-owned generation/package projections, it derives exact family and
 constructor shape, candidate view telescopes, family terminal typing, and all
@@ -3586,7 +3618,7 @@ constructor lists are rejected. Exact axiom guards pin the executable roots to
 the standard logical baseline and the semantic roots to the existing
 transitional sets. Completed milestones L4L-01A and L4L-01B consolidate the
 verified staged semantic inputs and derive the post-family stage from exact
-family-validation semantics. Active milestone L4L-01U reconciles the current
+family-validation semantics. Publication-active L4L-01U reconciles the current
 upstream/toolchain/axiom delta without beginning constructor work. L4L-01C then
 retains the exact constructor-validation trace without making a Theory-WF
 claim; the temporary fixture view-WF proofs remain until L4L-01D, and the

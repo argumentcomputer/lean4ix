@@ -1,4 +1,5 @@
 import Lean4Lean.Std.SMap
+import Lean4Lean.Declaration
 import Lean4Lean.Verify.Environment.Basic
 
 namespace Lean4Lean
@@ -91,17 +92,23 @@ theorem AddInductConstant.map_wf
   rw [H.map_add]
   exact wf.insert _ _ H.map_fresh
 
+theorem InductConstantKind.Matches.deltaValue?_eq_none
+    {kind : InductConstantKind} {ci : ConstantInfo}
+    (H : InductConstantKind.Matches kind ci) : ci.deltaValue? = none := by
+  cases kind <;> cases ci <;>
+    simp_all [InductConstantKind.Matches, ConstantInfo.deltaValue?]
+
 /-- An inductive metadata insertion cannot introduce a declaration body.
 Consequently, any value-bearing entry in the result map was already present
 in the input map. -/
 theorem AddInductConstant.old_of_value
     (H : AddInductConstant kind C₁ env₁ ci' C₂ env₂) (wf : C₁.WF)
-    (hout : C₂.find? name = some ci) (hv : ci.value? = some v) :
+    (hout : C₂.find? name = some ci) (hv : ci.deltaValue? = some v) :
     C₁.find? name = some ci := by
   rw [H.map_add, wf.find?_insert] at hout
   split at hout
   · cases hout
-    have hnone := InductConstantKind.Matches.value?_eq_none H.kind_eq
+    have hnone := InductConstantKind.Matches.deltaValue?_eq_none H.kind_eq
     simp_all
   · exact hout
 
@@ -112,7 +119,7 @@ theorem AddInductConstants.map_wf :
 
 theorem AddInductConstants.old_of_value :
     (H : AddInductConstants kind C₁ env₁ cis C₂ env₂) → C₁.WF →
-    C₂.find? name = some ci → ci.value? = some v → C₁.find? name = some ci
+    C₂.find? name = some ci → ci.deltaValue? = some v → C₁.find? name = some ci
   | .nil, _, hout, _ => hout
   | .cons h hrest, wf, hout, hv =>
     h.old_of_value wf (hrest.old_of_value (h.map_wf wf) hout hv) hv
@@ -123,7 +130,7 @@ theorem AddInduct.map_wf (H : AddInduct C₁ env₁ decl C₂ env₂)
   exact H.addRec.map_wf <| H.addCtors.map_wf <| H.addType.map_wf wf
 
 theorem AddInduct.old_of_value (H : AddInduct C₁ env₁ decl C₂ env₂)
-    (wf : C₁.WF) (hout : C₂.find? name = some ci) (hv : ci.value? = some v) :
+    (wf : C₁.WF) (hout : C₂.find? name = some ci) (hv : ci.deltaValue? = some v) :
     C₁.find? name = some ci := by
   rcases H with ⟨H⟩
   have wfType := H.addType.map_wf wf
@@ -244,7 +251,7 @@ theorem TrEnv.find?_uniq (H : TrEnv safety env venv)
   H.aligned.find?_uniq (H.map_wf.find?'_eq_find? _ ▸ h) hs
 
 theorem TrEnv'.of_value (H : TrEnv' safety C Q venv) (h : C.find? name = some ci)
-    (hs : safety ≤ ci.safety) (hv : ci.value? = some v) :
+    (hs : safety ≤ ci.safety) (hv : ci.deltaValue? = some v) :
     TrExpr venv ci.levelParams [] v (.const ci.name (VLevel.params ci.levelParams.length)) := by
   have {C n ci'} (hC : C.WF) :
       (SMap.insert C n ci').find? name = some ci →
@@ -281,6 +288,6 @@ theorem TrEnv'.of_value (H : TrEnv' safety C Q venv) (h : C.find? name = some ci
     exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
 
 nonrec theorem TrEnv.of_value (H : TrEnv safety env venv) (h : env.find? name = some ci)
-    (hs : safety ≤ ci.safety) (hv : ci.value? = some v) :
+    (hs : safety ≤ ci.safety) (hv : ci.deltaValue? = some v) :
     TrExpr venv ci.levelParams [] v (.const ci.name (VLevel.params ci.levelParams.length)) :=
   H.of_value (by rwa [← H.map_wf.find?'_eq_find?]) hs hv

@@ -44,11 +44,12 @@ def expandEtaStruct (eType e : Expr) : Expr :=
   pure result
 
 def toCtorWhenStruct (inductName : Name) (e : Expr) : m Expr := do
-  if !env.isStructureLike inductName || (e.isConstructorApp?' env).isSome then
+  if !env.isNonRecStructure inductName || (e.isConstructorApp?' env).isSome then
     return e
   let eType ← whnf (← inferType e)
   if !eType.getAppFn.isConstOf inductName then return e
-  if (← whnf (← inferType eType)) == .prop then return e
+  let .sort u ← whnf (← inferType eType) | unreachable!
+  unless u.isNeverZero do return e
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do
