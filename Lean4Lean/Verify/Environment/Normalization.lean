@@ -2576,6 +2576,22 @@ structure CandidateFamilySemanticGenerationRun
       normalization.family.type.view =
     .sort generation.block.checked.resultLevel
 
+/-- Minimal structural input for family generation.  The retained semantic
+root already owns the recursive checker run, while dependent analysis fixes
+the raw and checked components.  A caller therefore supplies only the
+executable stored-spine gate and the total number of binders traversed by that
+spine; all telescope and terminal equations are derived below. -/
+structure CandidateFamilySemanticGenerationShape
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source) where
+  storedSpine :
+    candidate.families.singleton.familyType.type.trace.storedSpine = true
+  spineLength_eq :
+    candidate.families.singleton.familyType.type.trace.spineLength =
+      (generation.block.rawParams ++ generation.block.rawIndices).length
+
 /-- Recover the existing family-generation run from the single retained
 semantic owner. -/
 def CandidateFamilySemanticGenerationRun.run
@@ -2630,6 +2646,21 @@ structure CandidateSemanticNormalizedCtorRun {source : VInductDecl}
     ctor.rawResult source.nparams
   viewResult : VExpr.dropN candidate.type.trace.spineLength root.type.view =
     ctor.resultTarget block
+
+/-- Minimal structural input for one retained constructor root.  It is
+independent of a caller-selected normalized pair: positional raw/view pairing
+is recovered from the successful dependent analysis, and the full component
+equations follow from this total stored-binder count. -/
+structure CandidateConstructorSemanticGenerationShape
+    {source : VInductDecl} (env : VEnv) (Us : List Name)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun env Us candidate raw) where
+  storedSpine : candidate.type.trace.storedSpine = true
+  spineLength_eq : candidate.type.trace.spineLength =
+    (VExpr.telN source.nparams raw.type ++
+      ctorFields (VExpr.dropN source.nparams raw.type)).length
 
 /-- Project the compatibility constructor run without rebuilding or choosing
 semantic evidence. -/
@@ -2819,6 +2850,26 @@ inductive CandidateSemanticNormalizedCtorListRun {source : VInductDecl}
       CandidateSemanticNormalizedCtorListRun block env Us
         (.cons root roots) (ctor :: ctors)
 
+/-- Source-indexed structural generation inputs for every retained semantic
+constructor root.  No normalized constructor list occurs in this type, so a
+caller cannot choose, reorder, truncate, or duplicate the analyzer's pairs. -/
+inductive CandidateConstructorSemanticGenerationShapeList
+    (source : VInductDecl) (env : VEnv) (Us : List Name) :
+    {kernelSources : List Constructor} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources} →
+    {raws : List VConstVal} →
+    (roots : CandidateConstructorSemanticListRun env Us candidates raws) →
+    Type where
+  | nil : CandidateConstructorSemanticGenerationShapeList source env Us .nil
+  | cons
+      (head : CandidateConstructorSemanticGenerationShape
+        (source := source) env Us root)
+      (tail : CandidateConstructorSemanticGenerationShapeList
+        source env Us roots) :
+      CandidateConstructorSemanticGenerationShapeList source env Us
+        (.cons root roots)
+
 /-- Forget only retained semantic ownership and recover the existing
 generation-facing positional list. -/
 def CandidateSemanticNormalizedCtorListRun.run :
@@ -2905,6 +2956,22 @@ structure GenerationCandidateSemanticRun
     normalization.family.typeEnv Us normalization.family.constructors
     generation.block.ctorPairs
 
+/-- Complete semantic-generation input with all analyzer-determined component
+equations erased.  Compared with `GenerationCandidateSemanticRun`, this form
+retains only checked semantics plus the executable stored-spine/length shape
+for each source-indexed root.  Its projection below reconstructs the exact
+family and dependent constructor alignment from `analysis`. -/
+structure GenerationCandidateSemanticShapeRun
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source) where
+  analysis : normalization.root.normalization.generation? = some generation
+  checked : generation.block.checked.WF env
+  family : CandidateFamilySemanticGenerationShape normalization generation
+  constructors : CandidateConstructorSemanticGenerationShapeList source
+    normalization.family.typeEnv Us normalization.family.constructors
+
 /-- Project the established generation assembler.  Every normalization root,
 view, and recursive spine remains definitionally tied to the semantic owner. -/
 def GenerationCandidateSemanticRun.run
@@ -2927,6 +2994,44 @@ theorem GenerationCandidateRun.normalization_eq
     generation.block.normalization = normalization.normalization :=
   Normalization.generation?_normalization run.analysis
 
+/-- The source-indexed singleton declarations force the analyzer's raw family
+to be the exact family retained by a normalization candidate. -/
+theorem NormalizationCandidateRun.sourceType_eq
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateRun env Us candidate source)
+    (generation : GenerationChecked source) :
+    generation.block.sourceType = normalization.raw := by
+  have h : [generation.block.sourceType] = [normalization.raw] :=
+    generation.block.source_types_eq.symm.trans normalization.raw_types_eq
+  injection h
+
+/-- Exact dependent analysis selects the reconstructed family view, including
+its constructor list, not merely an expression payload with the same type. -/
+theorem NormalizationCandidateRun.familyViewType_eq
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (analysis : normalization.normalization.generation? = some generation) :
+    generation.block.checked.type = normalization.family.view := by
+  have normalization_eq : generation.block.normalization =
+      normalization.normalization :=
+    Normalization.generation?_normalization analysis
+  have hviews := congrArg (fun norm : Normalization source => norm.view.types)
+    normalization_eq
+  have htypes : [generation.block.checked.type] =
+      [normalization.family.view] := by
+    calc
+      [generation.block.checked.type] =
+          generation.block.normalization.view.types :=
+        generation.block.checked.types_eq.symm
+      _ = normalization.normalization.view.types := hviews
+      _ = [normalization.family.view] := rfl
+  injection htypes
+
 /-- The retained dependent analysis necessarily checks the exact family view
 selected by the normalization candidate.  This equation is a consequence of
 the two singleton declaration indices and `normalization_eq`, not a separate
@@ -2939,19 +3044,228 @@ theorem GenerationCandidateRun.familyView_eq
     {generation : GenerationChecked source}
     (run : GenerationCandidateRun normalization generation) :
     normalization.family.viewType = generation.block.checked.type.type := by
-  have hviews := congrArg (fun norm : Normalization source => norm.view.types)
-    run.normalization_eq
-  have htypes : [generation.block.checked.type] =
-      [normalization.family.view] := by
+  exact (congrArg (fun ty : VInductiveType => ty.type)
+    (normalization.familyViewType_eq run.analysis)).symm
+
+/-- Taking the exact length of the complete stored telescope recovers both
+its binder list and its non-forall result.  This is the structural bridge from
+one numeric trace invariant to generation's named raw components. -/
+private theorem generationTelNForallNLength :
+    ∀ (As : List VExpr) (B : VExpr),
+      VExpr.telN As.length (VExpr.forallN As B) = As
+  | [], _ => rfl
+  | _ :: As, B => by
+    simp only [List.length_cons, VExpr.forallN, VExpr.telN,
+      generationTelNForallNLength As B]
+
+private theorem generationDropNForallNLength :
+    ∀ (As : List VExpr) (B : VExpr),
+      VExpr.dropN As.length (VExpr.forallN As B) = B
+  | [], _ => rfl
+  | _ :: As, B => by
+    simp only [List.length_cons, VExpr.forallN, VExpr.dropN,
+      generationDropNForallNLength As B]
+
+private theorem candidateFullTelComponents (np n : Nat) (e : VExpr)
+    (h : n =
+      (VExpr.telN np e ++ ctorFields (VExpr.dropN np e)).length) :
+    VExpr.telN n e =
+        VExpr.telN np e ++ ctorFields (VExpr.dropN np e) ∧
+      VExpr.dropN n e = VExpr.resultOf (VExpr.dropN np e) := by
+  let As := VExpr.telN np e ++ ctorFields (VExpr.dropN np e)
+  have he :
+      VExpr.forallN As (VExpr.resultOf (VExpr.dropN np e)) = e := by
+    simp only [As, VExpr.forallN_append,
+      forallN_ctorFields_resultOf, VExpr.forallN_telN_dropN]
+  let B := VExpr.resultOf (VExpr.dropN np e)
+  have hAs : n = As.length := h
+  change VExpr.telN n e = As ∧ VExpr.dropN n e = B
+  rw [hAs, ← he]
+  exact ⟨generationTelNForallNLength _ _,
+    generationDropNForallNLength _ _⟩
+
+/-- Derive every family component equation from the minimal structural shape
+and the exact dependent analyzer result. -/
+private def CandidateFamilySemanticGenerationShape.generationRun
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateSemanticRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (input : CandidateFamilySemanticGenerationShape
+      normalization generation)
+    (analysis : normalization.root.normalization.generation? =
+      some generation) :
+    CandidateFamilySemanticGenerationRun normalization generation where
+  storedSpine := input.storedSpine
+  rawTel := by
+    have components := candidateFullTelComponents source.nparams
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.raw.type (by
+        simpa only [NormalizedChecked.rawParams,
+          NormalizedChecked.rawIndices,
+          normalization.root.sourceType_eq generation] using
+          input.spineLength_eq)
+    simpa only [NormalizedChecked.rawParams,
+      NormalizedChecked.rawIndices,
+      normalization.root.sourceType_eq generation] using components.1
+  rawResult := by
+    have components := candidateFullTelComponents source.nparams
+      candidate.families.singleton.familyType.type.trace.spineLength
+      normalization.raw.type (by
+        simpa only [NormalizedChecked.rawParams,
+          NormalizedChecked.rawIndices,
+          normalization.root.sourceType_eq generation] using
+          input.spineLength_eq)
+    simpa only [NormalizedChecked.rawResult,
+      normalization.root.sourceType_eq generation] using components.2
+  viewResult := by
+    let As := generation.block.checked.params ++
+      generation.block.checked.indices
+    have hlength :
+        candidate.families.singleton.familyType.type.trace.spineLength =
+          As.length := by
+      rw [input.spineLength_eq]
+      simp only [As, List.length_append]
+      rw [generation.shape.2.1, generation.shape.2.2.1]
+    have hview : normalization.family.type.view =
+        generation.block.checked.type.type := by
+      simpa only [NormalizationCandidateSemanticRun.root,
+        CandidateFamilySemanticRun.root, CandidateFamilyRun.view] using
+        (congrArg (fun ty : VInductiveType => ty.type)
+          (normalization.root.familyViewType_eq analysis)).symm
+    rw [hview, generation.block.checked.type_eq, hlength]
+    simpa only [As, VExpr.forallN_append] using
+      generationDropNForallNLength As
+        (.sort generation.block.checked.resultLevel)
+
+/-- Derive one normalized constructor alignment after its positional raw/view
+equalities have been recovered from the analyzer-owned pair list. -/
+private def CandidateConstructorSemanticGenerationShape.generationRun
+    {source : VInductDecl} {generation : GenerationChecked source}
+    {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    {ctor : NormalizedCtor}
+    (input : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root)
+    (raw_eq : ctor.raw = raw)
+    (view_eq : ctor.view.value = root.root.view)
+    (hctor : ctor ∈ generation.block.ctorPairs) :
+    CandidateSemanticNormalizedCtorRun generation.block env Us root ctor where
+  raw_eq := raw_eq
+  view_eq := view_eq
+  storedSpine := input.storedSpine
+  rawTel := by
+    have components := candidateFullTelComponents source.nparams
+      candidate.type.trace.spineLength raw.type input.spineLength_eq
+    simpa only [NormalizedCtor.declaredBinders,
+      NormalizedCtor.rawFields, raw_eq] using components.1
+  rawResult := by
+    have components := candidateFullTelComponents source.nparams
+      candidate.type.trace.spineLength raw.type input.spineLength_eq
+    simpa only [NormalizedCtor.rawResult, raw_eq] using components.2
+  viewResult := by
+    let As := generation.block.checked.params ++ ctor.view.fields
+    have hlength : candidate.type.trace.spineLength = As.length := by
+      rw [input.spineLength_eq]
+      simp only [As, List.length_append]
+      rw [← raw_eq]
+      have hshape := generation.shape.2.2.2.2.2 ctor hctor
+      simp only [NormalizedCtor.rawFields] at hshape
+      rw [hshape.2.2.1, hshape.2.2.2,
+        generation.shape.1.symm.trans generation.shape.2.1]
+    have viewType_eq : root.type.view = ctor.view.value.type := by
+      exact (congrArg (fun value : VConstVal => value.type) view_eq).symm
+    rw [viewType_eq, generation.viewCtorType_eq hctor, hlength]
+    exact generationDropNForallNLength As _
+
+/-- Recursively align structural constructor inputs with a pair list whose raw
+and checked-value projections are already fixed. -/
+private def
+    CandidateConstructorSemanticGenerationShapeList.generationRuns
+    {source : VInductDecl} {generation : GenerationChecked source}
+    {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {roots : CandidateConstructorSemanticListRun env Us candidates raws} :
+    (input : CandidateConstructorSemanticGenerationShapeList
+      source env Us roots) →
+    (ctors : List NormalizedCtor) →
+    (raws_eq : ctors.map (·.raw) = raws) →
+    (views_eq : ctors.map (fun ctor => ctor.view.value) =
+      roots.roots.views) →
+    (membership : ∀ ctor ∈ ctors,
+      ctor ∈ generation.block.ctorPairs) →
+    CandidateSemanticNormalizedCtorListRun generation.block env Us roots ctors
+  | .nil, [], _, _, _ => .nil
+  | .nil, _ :: _, raws_eq, _, _ => by simp at raws_eq
+  | .cons _ _, [], raws_eq, _, _ => by simp at raws_eq
+  | .cons head tail, ctor :: ctors, raws_eq, views_eq, membership => by
+      simp only [List.map_cons, List.cons.injEq] at raws_eq
+      simp only [List.map_cons,
+        CandidateConstructorSemanticListRun.roots,
+        CandidateConstructorListRun.views, List.cons.injEq] at views_eq
+      exact .cons
+        (head.generationRun raws_eq.1 views_eq.1
+          (membership ctor (.head _)))
+        (tail.generationRuns ctors raws_eq.2 views_eq.2
+          (fun ctor hctor => membership ctor (.tail _ hctor)))
+
+/-- Exact analysis determines the complete dependent normalized-constructor
+list from source-indexed semantic roots and their minimal structural shapes. -/
+private def
+    CandidateConstructorSemanticGenerationShapeList.ofAnalysis
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateSemanticRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (input : CandidateConstructorSemanticGenerationShapeList source
+      normalization.family.typeEnv Us normalization.family.constructors)
+    (analysis : normalization.root.normalization.generation? =
+      some generation) :
+    CandidateSemanticNormalizedCtorListRun generation.block
+      normalization.family.typeEnv Us normalization.family.constructors
+      generation.block.ctorPairs := by
+  apply input.generationRuns
+  · simpa only [normalization.root.sourceType_eq generation] using
+      generation.rawCtors_eq
+  · have viewType_eq := normalization.root.familyViewType_eq analysis
     calc
-      [generation.block.checked.type] =
-          generation.block.normalization.view.types :=
-        generation.block.checked.types_eq.symm
-      _ = normalization.normalization.view.types := hviews
-      _ = [normalization.family.view] := rfl
-  have htype : generation.block.checked.type =
-      normalization.family.view := by injection htypes
-  exact (congrArg (fun ty : VInductiveType => ty.type) htype).symm
+      generation.block.ctorPairs.map (fun ctor => ctor.view.value) =
+          generation.block.checked.constructors.map (·.value) := by
+        simpa only [List.map_map] using
+          congrArg (List.map (·.value)) generation.viewCtors_eq
+      _ = generation.block.checked.type.ctors := by
+        rw [generation.block.checked.constructors_eq, List.map_map]
+        change generation.block.checked.type.ctors.map (fun c => c) = _
+        simpa only [id_eq] using
+          (List.map_id generation.block.checked.type.ctors)
+      _ = normalization.family.root.view.ctors := by
+        simpa only [NormalizationCandidateSemanticRun.root] using
+          congrArg (fun ty : VInductiveType => ty.ctors) viewType_eq
+      _ = normalization.family.constructors.roots.views := rfl
+  · exact fun _ hctor => hctor
+
+/-- Reconstruct the established semantic-generation run from the reduced
+shape boundary.  No raw/view pair or component equation is supplied here. -/
+def GenerationCandidateSemanticShapeRun.run
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    {normalization : NormalizationCandidateSemanticRun env Us candidate source}
+    {generation : GenerationChecked source}
+    (input : GenerationCandidateSemanticShapeRun normalization generation) :
+    GenerationCandidateSemanticRun normalization generation where
+  analysis := input.analysis
+  checked := input.checked
+  family := input.family.generationRun input.analysis
+  constructors := input.constructors.ofAnalysis input.analysis
 
 /-- Reconstruct well-formedness of the post-family environment from the
 retained pre-family context, candidate raw/view equality, checked family view,
@@ -3443,6 +3757,40 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.run' depends on axio
 -/
 #guard_msgs in
 #print axioms GenerationCandidateSemanticRun.run
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateSemanticShapeRun.run
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on axioms: [propext,
@@ -4061,6 +4409,24 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.normalization_eq' depends on
 -/
 #guard_msgs in
 #print axioms GenerationCandidateRun.normalization_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.sourceType_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateRun.sourceType_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.familyViewType_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateRun.familyViewType_eq
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyView_eq' depends on axioms: [propext,

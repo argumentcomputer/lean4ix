@@ -7574,67 +7574,42 @@ theorem aliasFormerCtor_isType_checked :
       aliasFormerRawType.ctors[0].type :=
   ⟨.succ .zero, aliasFormerCtor_hasSort_checked⟩
 
-private def aliasFormerCandidateFamilySemanticGenerationRun :
-    VInductDecl.CandidateFamilySemanticGenerationRun
+private def aliasFormerCandidateFamilySemanticGenerationShape :
+    VInductDecl.CandidateFamilySemanticGenerationShape
       aliasFormerNormalizationCandidateSemanticRun
       aliasFormerGenerationChecked where
   storedSpine := rfl
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-private def aliasFormerCandidateFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      aliasFormerNormalizationCandidateRun
-      aliasFormerGenerationChecked :=
-  aliasFormerCandidateFamilySemanticGenerationRun.run
-
-private def aliasFormerNormalizedCtor : VInductDecl.NormalizedCtor :=
-  ⟨aliasFormerRawType.ctors[0],
-    aliasFormerViewChecked.constructors[0]⟩
-
-private def aliasFormerCandidateSemanticNormalizedCtorRun :
-    VInductDecl.CandidateSemanticNormalizedCtorRun
-      aliasFormerGenerationChecked.block
-      aliasFormerTypeEnv [] aliasFormerCandidateConstructorSemanticRun
-      aliasFormerNormalizedCtor where
-  raw_eq := rfl
-  view_eq := rfl
+private def aliasFormerCandidateConstructorSemanticGenerationShape :
+    VInductDecl.CandidateConstructorSemanticGenerationShape
+      (source := aliasFormerRawDecl) aliasFormerTypeEnv []
+      aliasFormerCandidateConstructorSemanticRun where
   storedSpine := rfl
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-private def aliasFormerCandidateNormalizedCtorRun :
-    VInductDecl.CandidateNormalizedCtorRun aliasFormerGenerationChecked.block
-      aliasFormerTypeEnv [] aliasFormerCandidateConstructorRun
-      aliasFormerNormalizedCtor :=
-  aliasFormerCandidateSemanticNormalizedCtorRun.run
+private def aliasFormerCandidateConstructorSemanticGenerationShapeList :
+    VInductDecl.CandidateConstructorSemanticGenerationShapeList
+      aliasFormerRawDecl aliasFormerTypeEnv []
+      aliasFormerCandidateConstructorSemanticListRun := by
+  exact .cons aliasFormerCandidateConstructorSemanticGenerationShape .nil
 
-private def aliasFormerCandidateSemanticNormalizedCtorListRun :
-    VInductDecl.CandidateSemanticNormalizedCtorListRun
-      aliasFormerGenerationChecked.block aliasFormerTypeEnv []
-      aliasFormerCandidateConstructorSemanticListRun
-      aliasFormerGenerationChecked.block.ctorPairs := by
-  exact .cons aliasFormerCandidateSemanticNormalizedCtorRun .nil
-
-private def aliasFormerCandidateNormalizedCtorListRun :
-    VInductDecl.CandidateNormalizedCtorListRun
-      aliasFormerGenerationChecked.block aliasFormerTypeEnv []
-      aliasFormerCandidateConstructorListRun
-      aliasFormerGenerationChecked.block.ctorPairs :=
-  aliasFormerCandidateSemanticNormalizedCtorListRun.run
+private def aliasFormerGenerationCandidateSemanticShapeRun :
+    VInductDecl.GenerationCandidateSemanticShapeRun
+      aliasFormerNormalizationCandidateSemanticRun
+      aliasFormerGenerationChecked where
+  analysis := rfl
+  checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
+  family := aliasFormerCandidateFamilySemanticGenerationShape
+  constructors := aliasFormerCandidateConstructorSemanticGenerationShapeList
 
 /-- Complete source-indexed candidate certificate for the non-identity
 AliasFormer generation transaction. -/
 def aliasFormerGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       aliasFormerNormalizationCandidateSemanticRun
-      aliasFormerGenerationChecked where
-  analysis := rfl
-  checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
-  family := aliasFormerCandidateFamilySemanticGenerationRun
-  constructors := aliasFormerCandidateSemanticNormalizedCtorListRun
+      aliasFormerGenerationChecked :=
+  aliasFormerGenerationCandidateSemanticShapeRun.run
 
 def aliasFormerGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
@@ -8322,56 +8297,34 @@ theorem annotatedPiBlock_wf_checked :
   refine ⟨annotatedPiNormalization_wf_checked, ?_⟩
   exact annotatedPiViewChecked_wf
 
-private def annotatedPiCandidateFamilySemanticGenerationRun :
-    VInductDecl.CandidateFamilySemanticGenerationRun
+private def annotatedPiCandidateFamilySemanticGenerationShape :
+    VInductDecl.CandidateFamilySemanticGenerationShape
       annotatedPiNormalizationCandidateSemanticRun
       annotatedPiGenerationChecked where
   storedSpine := rfl
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-private def annotatedPiCandidateFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      annotatedPiNormalizationCandidateRun
-      annotatedPiGenerationChecked :=
-  annotatedPiCandidateFamilySemanticGenerationRun.run
-
-private def annotatedPiNormalizedCtor : VInductDecl.NormalizedCtor :=
-  ⟨annotatedPiRawType.ctors[0],
-    annotatedPiViewChecked.constructors[0]⟩
-
-private def annotatedPiCandidateSemanticNormalizedCtorRun :
-    VInductDecl.CandidateSemanticNormalizedCtorRun
-      annotatedPiGenerationChecked.block
-      annotatedPiTypeEnv [] annotatedPiCandidateConstructorSemanticRun
-      annotatedPiNormalizedCtor where
-  raw_eq := rfl
-  view_eq := rfl
+private def annotatedPiCandidateConstructorSemanticGenerationShape :
+    VInductDecl.CandidateConstructorSemanticGenerationShape
+      (source := annotatedPiRawDecl) annotatedPiTypeEnv []
+      annotatedPiCandidateConstructorSemanticRun where
   storedSpine := annotatedPiCtorCandidate_storedSpine
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-private def annotatedPiCandidateNormalizedCtorRun :
-    VInductDecl.CandidateNormalizedCtorRun annotatedPiGenerationChecked.block
-      annotatedPiTypeEnv [] annotatedPiCandidateConstructorRun
-      annotatedPiNormalizedCtor :=
-  annotatedPiCandidateSemanticNormalizedCtorRun.run
+private def annotatedPiCandidateConstructorSemanticGenerationShapeList :
+    VInductDecl.CandidateConstructorSemanticGenerationShapeList
+      annotatedPiRawDecl annotatedPiTypeEnv []
+      annotatedPiCandidateConstructorSemanticListRun := by
+  exact .cons annotatedPiCandidateConstructorSemanticGenerationShape .nil
 
-private def annotatedPiCandidateSemanticNormalizedCtorListRun :
-    VInductDecl.CandidateSemanticNormalizedCtorListRun
-      annotatedPiGenerationChecked.block annotatedPiTypeEnv []
-      annotatedPiCandidateConstructorSemanticListRun
-      annotatedPiGenerationChecked.block.ctorPairs := by
-  exact .cons annotatedPiCandidateSemanticNormalizedCtorRun .nil
-
-private def annotatedPiCandidateNormalizedCtorListRun :
-    VInductDecl.CandidateNormalizedCtorListRun
-      annotatedPiGenerationChecked.block annotatedPiTypeEnv []
-      annotatedPiCandidateConstructorListRun
-      annotatedPiGenerationChecked.block.ctorPairs :=
-  annotatedPiCandidateSemanticNormalizedCtorListRun.run
+private def annotatedPiGenerationCandidateSemanticShapeRun :
+    VInductDecl.GenerationCandidateSemanticShapeRun
+      annotatedPiNormalizationCandidateSemanticRun
+      annotatedPiGenerationChecked where
+  analysis := rfl
+  checked := annotatedPiViewChecked_wf
+  family := annotatedPiCandidateFamilySemanticGenerationShape
+  constructors := annotatedPiCandidateConstructorSemanticGenerationShapeList
 
 /-- Complete source-indexed checker certificate for annotated recursive-Π
 generation. This is the first live generation run whose main constructor
@@ -8379,11 +8332,8 @@ spine contains an annotation-normalized recursive function domain. -/
 def annotatedPiGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       annotatedPiNormalizationCandidateSemanticRun
-      annotatedPiGenerationChecked where
-  analysis := rfl
-  checked := annotatedPiViewChecked_wf
-  family := annotatedPiCandidateFamilySemanticGenerationRun
-  constructors := annotatedPiCandidateSemanticNormalizedCtorListRun
+      annotatedPiGenerationChecked :=
+  annotatedPiGenerationCandidateSemanticShapeRun.run
 
 def annotatedPiGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun

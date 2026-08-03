@@ -551,86 +551,48 @@ def indexedVecSemanticConsSpineRun :
   indexedVecSemanticConsSemanticRootRun.spine
     consCandidate_identity.storedSpine
 
-def indexedVecSemanticFamilySemanticGenerationRun :
-    VInductDecl.CandidateFamilySemanticGenerationRun
+def indexedVecSemanticFamilySemanticGenerationShape :
+    VInductDecl.CandidateFamilySemanticGenerationShape
       indexedVecSemanticNormalizationCandidateSemanticRun
       indexedVecChecked.identityGeneration where
   storedSpine := indexedVecFamilyCandidate_identity.storedSpine
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-def indexedVecSemanticFamilyGenerationRun :
-    VInductDecl.CandidateFamilyGenerationRun
-      indexedVecSemanticNormalizationCandidateRun
-      indexedVecChecked.identityGeneration :=
-  indexedVecSemanticFamilySemanticGenerationRun.run
-
-def indexedVecSemanticNilNormalizedCtor : VInductDecl.NormalizedCtor :=
-  indexedVecChecked.identityGeneration.block.ctorPairs[0]
-
-def indexedVecSemanticConsNormalizedCtor : VInductDecl.NormalizedCtor :=
-  indexedVecChecked.identityGeneration.block.ctorPairs[1]
-
-def indexedVecSemanticNilSemanticGenerationRun :
-    VInductDecl.CandidateSemanticNormalizedCtorRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticNilConstructorSemanticRun
-      indexedVecSemanticNilNormalizedCtor where
-  raw_eq := rfl
-  view_eq := rfl
+def indexedVecSemanticNilConstructorSemanticGenerationShape :
+    VInductDecl.CandidateConstructorSemanticGenerationShape
+      (source := indexedVecDecl) indexedVecTypeEnv [`u]
+      indexedVecSemanticNilConstructorSemanticRun where
   storedSpine := nilCandidate_identity.storedSpine
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-def indexedVecSemanticConsSemanticGenerationRun :
-    VInductDecl.CandidateSemanticNormalizedCtorRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticConsConstructorSemanticRun
-      indexedVecSemanticConsNormalizedCtor where
-  raw_eq := rfl
-  view_eq := rfl
+def indexedVecSemanticConsConstructorSemanticGenerationShape :
+    VInductDecl.CandidateConstructorSemanticGenerationShape
+      (source := indexedVecDecl) indexedVecTypeEnv [`u]
+      indexedVecSemanticConsConstructorSemanticRun where
   storedSpine := consCandidate_identity.storedSpine
-  rawTel := rfl
-  rawResult := rfl
-  viewResult := rfl
+  spineLength_eq := rfl
 
-def indexedVecSemanticNilGenerationRun :
-    VInductDecl.CandidateNormalizedCtorRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticNilConstructorRun indexedVecSemanticNilNormalizedCtor :=
-  indexedVecSemanticNilSemanticGenerationRun.run
+def indexedVecSemanticConstructorSemanticGenerationShapeList :
+    VInductDecl.CandidateConstructorSemanticGenerationShapeList
+      indexedVecDecl indexedVecTypeEnv [`u]
+      indexedVecSemanticConstructorSemanticListRun := by
+  exact .cons indexedVecSemanticNilConstructorSemanticGenerationShape
+    (.cons indexedVecSemanticConsConstructorSemanticGenerationShape .nil)
 
-def indexedVecSemanticConsGenerationRun :
-    VInductDecl.CandidateNormalizedCtorRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticConsConstructorRun indexedVecSemanticConsNormalizedCtor :=
-  indexedVecSemanticConsSemanticGenerationRun.run
-
-def indexedVecSemanticConstructorSemanticGenerationListRun :
-    VInductDecl.CandidateSemanticNormalizedCtorListRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticConstructorSemanticListRun
-      indexedVecChecked.identityGeneration.block.ctorPairs := by
-  exact .cons indexedVecSemanticNilSemanticGenerationRun
-    (.cons indexedVecSemanticConsSemanticGenerationRun .nil)
-
-def indexedVecSemanticConstructorGenerationListRun :
-    VInductDecl.CandidateNormalizedCtorListRun
-      indexedVecChecked.identityGeneration.block indexedVecTypeEnv [`u]
-      indexedVecSemanticConstructorListRun
-      indexedVecChecked.identityGeneration.block.ctorPairs :=
-  indexedVecSemanticConstructorSemanticGenerationListRun.run
-
-def indexedVecSemanticGenerationCandidateSemanticRun :
-    VInductDecl.GenerationCandidateSemanticRun
+def indexedVecSemanticGenerationCandidateSemanticShapeRun :
+    VInductDecl.GenerationCandidateSemanticShapeRun
       indexedVecSemanticNormalizationCandidateSemanticRun
       indexedVecChecked.identityGeneration where
   analysis := rfl
   checked := indexedVecChecked.wf_of_decl indexedVecDecl_wf
-  family := indexedVecSemanticFamilySemanticGenerationRun
-  constructors := indexedVecSemanticConstructorSemanticGenerationListRun
+  family := indexedVecSemanticFamilySemanticGenerationShape
+  constructors := indexedVecSemanticConstructorSemanticGenerationShapeList
+
+def indexedVecSemanticGenerationCandidateSemanticRun :
+    VInductDecl.GenerationCandidateSemanticRun
+      indexedVecSemanticNormalizationCandidateSemanticRun
+      indexedVecChecked.identityGeneration :=
+  indexedVecSemanticGenerationCandidateSemanticShapeRun.run
 
 def indexedVecSemanticGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
