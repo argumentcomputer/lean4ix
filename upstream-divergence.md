@@ -4,7 +4,7 @@ This file tracks every deliberate semantic, API, build, or verification delta
 from `upstream/master` that must either be upstreamed or explicitly retained.
 It is the tracked counterpart to `plans/roadmap.md`.
 
-Audit baseline after the generation shape-alignment checkpoint (2026-08-03):
+Audit baseline after the generation-readiness checkpoint (2026-08-03):
 
 - upstream: `0c38ab8`
 - published semantic checkpoint:
@@ -45,9 +45,13 @@ Audit baseline after the generation shape-alignment checkpoint (2026-08-03):
   `5aa9ab69fce1c7dab3f4ca357f6ed8f349fd9397`
   (`feat: derive generation shape alignment`; 48 commits ahead of upstream;
   3 files changed, 458 insertions, and 180 deletions)
+- consolidated generation-readiness checkpoint:
+  `bbb45e0e950724cdbbd405d75e304e2020cecf82`
+  (`feat: consolidate generation readiness`; 50 commits ahead of upstream;
+  3 files changed, 701 insertions, and 98 deletions)
 - fixed fork master: `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`
   on local and `origin/master`
-- audited source checkpoint: `5aa9ab69` builds on the exact arbitrary-length
+- audited source checkpoint: `bbb45e0e` builds on the exact arbitrary-length
   producer witnesses and source-indexed semantic inputs that return a
   `Nonempty ProducedNormalizationCandidateSemanticRun`. The retained checker
   selects every Theory view; callers provide verified contexts and strict
@@ -81,10 +85,16 @@ Audit baseline after the generation shape-alignment checkpoint (2026-08-03):
   checked shape determines each view terminal. The source-indexed recursive
   assembler preserves the analyzer's full constructor order without `zip`,
   lookup defaults, truncation, or reordering. AliasFormer, AnnotatedPi, and
-  `IndexedVec` now supply only checked WF, exact analyzer success, and
-  stored-spine/total-length shape data at this boundary. The
-  exact 20-sorry frontier, focused direct compiles, 157-job default
-  Lake build, 124-job Theory/Verify and Nix proof builds, default Nix
+  `IndexedVec` no longer supply checked WF or any per-family/per-constructor
+  shape records. A strengthened executable producer retains the exact ordinary
+  producer equation together with one complete generation-spine check over
+  the family and constructors. Exact dependent analysis plus WF of the
+  analyzer-owned view declaration derives checked WF, and the one Boolean gate
+  derives every
+  positional stored-spine/count record without `zip` or truncation. Bare
+  producer success is deliberately not treated as semantic or spine-shape
+  authority. The exact 20-sorry frontier, focused direct compiles, 157-job
+  default Lake build, 124-job Theory/Verify and Nix proof builds, default Nix
   build, all six current-host flake checks, all-system no-build evaluation,
   formatter, Theory import-boundary, and whitespace checks pass at that
   checkpoint. Use the branch ref, not a detached Git `HEAD`, for published-fork
@@ -306,7 +316,7 @@ to the replacement.
   `a1d8943`, `6a77882`, `bc37d43`, `5e5bb76`, `33b99f4`, `a3ff992`,
   `9a865ea`, `a627362`, `6732659`, `c40a471`, `c739d41`, `82f4a54`,
   `d553930`, `cf3d5a4`, `c9e4ae2`, `a7d101b`, `f0caf16`, `e3cf22d`,
-  `7e5f4f7`, `2b1d802`, `a64fe98`, and `5aa9ab6`
+  `7e5f4f7`, `2b1d802`, `a64fe98`, `5aa9ab6`, and `bbb45e0`
 - **Delta:** retain exact ordinary-checker full-check, WHNF, and `isDefEq`
   executions in source- and context-indexed candidate traces; interpret them
   into Theory normalization and generation certificates; assemble dependent
@@ -386,41 +396,58 @@ to the replacement.
   generation owner. AliasFormer, AnnotatedPi, and the two-constructor
   `IndexedVec` fixture now use this path and no longer hand-assemble normalized
   pairs or any raw/view telescope/result equations.
+  `normalizationCandidateGenerationShape` now performs one executable check
+  over the complete singleton family and its source-indexed constructor list.
+  It requires each retained trace to preserve the emitted Pi spine, checks the
+  full raw telescope length, and rejects constructor-list mismatches in either
+  direction. `ProducedGenerationShapeCandidate` couples that check to the exact
+  successful ordinary producer equation, while
+  `produceGenerationShapeCandidate` rejects a produced candidate that cannot
+  support mixed raw/view generation. This is intentionally a strengthened
+  operational boundary: success of `buildNormalizationCandidate` alone does
+  not imply stored-spine preservation and does not acquire Theory meaning.
+  `GenerationCandidateSemanticRun.ofGenerationShape` combines the retained
+  semantic hierarchy, exact dependent analysis, WF of the analyzer-owned view
+  declaration, and the one complete shape result. It derives the analyzed
+  checked block's WF and every dependent family/constructor shape record
+  generically. `ProducedGenerationShapeCandidate.producedPackage` then returns
+  the existing complete produced package for that same candidate. AliasFormer,
+  AnnotatedPi, and `IndexedVec` all use this consolidated path; fixtures no
+  longer provide checked WF or per-position generation-shape structures.
 - **Ix impact:** prevents ix from receiving an unrelated hand-selected
   normalization or generation witness while keeping checker state out of the
   Theory API. This is the proof boundary needed before executable metadata can
   be treated as certified inductive generation.
-- **Latest checkpoint:** automatic singleton semantic assembly consumes
-  the arbitrary-length operational witnesses plus exact per-position verified
-  contexts/translations and returns the source-ordered hierarchy under
-  `Nonempty`. Semantic generation, public packaging, and produced packaging all
-  project from that owner. `IndexedVec` exercises the dependent
-  two-constructor path and proves `nil`/`cons` order preservation; AliasFormer
-  and AnnotatedPi exercise non-identity singleton views. Exact checked shape,
-  family-result typing, one post-family constant proof, and checked result
-  spines now derive all view telescopes and terminal judgments. The semantic
-  generation owner records exact dependent analyzer success rather than a bare
-  normalization equality.
-  Normalization identity and post-family environment WF are generic
-  consequences, and AliasFormer, AnnotatedPi, and `IndexedVec` no longer supply
-  either as fixture evidence. Raw family/view identity, normalized constructor
-  pairing and order, raw telescope/results, view terminals, and dependent list
-  alignment are now generic consequences too. Their certified Theory
-  transactions and checked E1 replays still project from the same
-  source-indexed packages.
-- **Current gap:** derive the verified semantic inputs, checked WF value, and
-  stored-spine/total-length shape data from one arbitrary successful outer
-  metadata execution plus dependent analysis. Then expose a
-  generic outer theorem taking the complete successful
-  `buildNormalizationCandidate` execution to a
+- **Latest checkpoint:** one strengthened executable outer result now retains
+  the exact ordinary `buildNormalizationCandidate` equation and one complete
+  raw-family/constructor generation-spine check. The check is source-indexed,
+  rejects missing or extra constructors explicitly, and is independent of
+  semantic proofs. Given the retained semantic hierarchy and exact dependent
+  analysis, `GenerationCandidateSemanticRun.ofGenerationShape` derives checked
+  WF from the analyzer-owned view declaration and expands the single Boolean
+  into every dependent family/constructor stored-spine/count certificate.
+  `ProducedGenerationShapeCandidate.producedPackage` returns the complete
+  producer-selected semantic package for that same candidate. AliasFormer,
+  AnnotatedPi, and the two-constructor `IndexedVec` regression all flow through
+  this boundary. They supply neither checked WF nor per-position shape records;
+  their certified Theory transactions and checked E1 replays continue to
+  project from the same source-indexed packages.
+- **Current gap:** construct the verified per-position semantic inputs and WF
+  of the analyzer-owned view declaration generically from one arbitrary
+  verified outer checker context, strict source translations, and the exact
+  successful operational traversals. Then expose the singleton theorem that
+  combines those semantic inputs, exact dependent analysis, and the
+  strengthened generation-shape result into
   `Nonempty ProducedGenerationCandidatePackage` (or an equivalent dependent
-  result), with no fixture-supplied generation alignment. Constructing the
-  per-position verified semantic inputs directly from an arbitrary successful
-  outer call is part of that theorem, not authority for the operational result
-  to choose Theory meaning. Raw/view pairing, component equations, and
-  dependent list alignment must remain derived; view-telescope and
-  terminal-typing premises must not be reintroduced; neither may normalization
-  equality or post-family WF.
+  result). Bare `buildNormalizationCandidate` success cannot soundly imply the
+  gate: WHNF may change the visible Pi spine and the ordinary producer does not
+  test `storedSpine`. It also cannot imply Theory WF. The generic boundary must
+  therefore either run the strengthened gate or require its successful result,
+  while verified checker executions remain the sole source of Theory meaning.
+  Raw/view pairing, component equations, checked WF, dependent list alignment,
+  and every per-position shape record must remain derived; view-telescope,
+  terminal-typing, normalization-equality, and post-family-WF premises must not
+  be reintroduced.
   The outer boundary remains singleton-family;
   complete the normalization differential matrix before widening it to mutual
   and nested blocks.
@@ -435,11 +462,12 @@ to the replacement.
   exact `IndexedVec` source-order preservation plus swapped-view rejection;
   retained-hierarchy and semantic-generation migrations for all three
   fixtures; absence of fixture `viewTel`, `rightType`, `normalization_eq`,
-  `typeEnv_wf`, normalized-pair, `rawTel`, `rawResult`, and `viewResult` inputs;
-  exact analyzer-success replay in all three fixtures;
-  focused direct
-  compiles, 157-job default Lake build, and 124-job Theory/Verify and Nix proof
-  builds; 20-sorry frontier check; default Nix build; all six
+  `typeEnv_wf`, checked-WF, per-position generation-shape, normalized-pair,
+  `rawTel`, `rawResult`, and `viewResult` inputs; exact strengthened-producer
+  success for all three fixtures; missing-raw and extra-raw constructor-list
+  rejection; exact analyzer-success replay in all three fixtures; focused
+  direct compiles, 157-job default Lake build, and 124-job Theory/Verify and Nix
+  proof builds; 20-sorry frontier check; default Nix build; all six
   current-host flake checks; all-system no-build evaluation; formatter; Theory
   import-boundary; and whitespace checks.
 - **Axiom note:** no normalization oracle, native evaluator, or new axiom was
@@ -482,6 +510,14 @@ to the replacement.
   has exactly the previously recorded checked semantic set. The structural
   list recursion and telescope decomposition introduce no new axiom, and the
   public projection does not enlarge the semantic owner's closure.
+  The complete executable generation-shape functions, strengthened producer,
+  and its exact-success theorem are guarded at exactly
+  `propext`/`Classical.choice`/`Quot.sound`; they declare no axiom and contain no
+  semantic claim. Expanding a successful shape result into the dependent
+  semantic generation owner, deriving checked WF, and constructing the final
+  package inherit exactly the already recorded checked semantic closure. Exact
+  fixture guards expose only their pre-existing checker/pointer/cache and
+  projection dependencies.
 - **Upstream issue/PR:** TBD; submit after the singleton producer interface is
   stable enough that the first PR does not freeze fixture-specific APIs.
 - **Removal condition:** upstream executable inductive ingestion returns or
