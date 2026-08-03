@@ -1121,6 +1121,40 @@ theorem checkInductiveTypes_singleton_of_candidate
   simp [singletonCandidateInductiveStats, hterminalLparams,
     hparameterLength]
 
+/-- Exact successful singleton family-validation execution retained at the
+candidate selected by `buildNormalizationCandidate`.
+
+The executable validator owns the parameter/index split, result universe,
+statistics, and terminal reader context. Keeping the universally quantified
+continuation equation makes this a decomposition of the real
+`checkInductiveTypes` call rather than a fixture-specific success flag. The
+semantic interpretation of the retained candidate remains in Verify. -/
+structure FamilyValidationRun
+    (indType : InductiveType)
+    {context : Context}
+    (candidate : CandidateExprTrace context indType.type) where
+  nparams : Nat
+  resultLevel : Level
+  stats : InductiveStats
+  stats_eq : stats = candidate.singletonCandidateInductiveStats
+    indType nparams resultLevel
+  terminal_eq : candidate.terminalResult = Expr.sort resultLevel
+  run : ∀ {α} (k : InductiveStats → M α),
+    checkInductiveTypes nparams #[indType] k context =
+      k stats candidate.terminalContext
+
+/-- The retained singleton validation run exposes exactly the candidate view
+parameter expressions selected by the executable family pass. -/
+def FamilyValidationRun.parameters
+    (run : FamilyValidationRun indType candidate) : List Expr :=
+  candidate.parameterList run.nparams
+
+/-- The retained singleton validation run exposes the number of candidate
+view indices following the selected parameter prefix. -/
+def FamilyValidationRun.numIndices
+    (run : FamilyValidationRun indType candidate) : Nat :=
+  candidate.spineLength - run.nparams
+
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
 def view : CandidateExprTrace context source → Expr
   | .terminal _ _ _ result _ _ => result
@@ -1769,6 +1803,30 @@ info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_o
 -/
 #guard_msgs in
 #print axioms CandidateExprTrace.checkInductiveTypes_singleton_of_candidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun.parameters' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun.parameters
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun.numIndices' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun.numIndices
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]

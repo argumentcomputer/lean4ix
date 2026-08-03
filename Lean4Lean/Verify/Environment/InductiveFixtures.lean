@@ -2619,65 +2619,13 @@ private def annotatedPiAddType :
   env_add := rfl
   map_add := rfl
 
-private theorem annotatedPiType_trEnv' :
-    TrEnv' .safe annotatedPiTypeMap false annotatedPiTypeEnv :=
-  .inductStaging annotatedPiAddType annotatedPiRawType_wf outParam_trEnv'
-
 private def annotatedPiTypeKernelEnv : Kernel.Environment :=
   Kernel.Environment.ofConstants `_annotatedPiCandidate annotatedPiTypeMap
-
-private theorem annotatedPiType_trEnv :
-    TrEnv .safe annotatedPiTypeKernelEnv annotatedPiTypeEnv := by
-  simpa [TrEnv, annotatedPiTypeKernelEnv] using annotatedPiType_trEnv'
 
 private theorem annotatedPiTypeEnv_ordered : annotatedPiTypeEnv.Ordered :=
   .const (n := annotatedPiRawType.name)
     (ci := annotatedPiRawType.toVConstant)
     outParamEnv_ordered annotatedPiRawType_wf rfl
-
-private theorem annotatedPiType_hasPrimitives :
-    VEnv.HasPrimitives annotatedPiTypeEnv := by
-  apply TypeChecker.VEnv.HasPrimitives.of_avoids
-  intro n hn
-  simp only [TypeChecker.reflectedPrimitiveNames, List.mem_cons,
-    List.not_mem_nil, or_false] at hn
-  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl <;>
-    rfl
-
-private theorem annotatedPiType_safePrimitives :
-    annotatedPiTypeKernelEnv.find? n = some ci →
-      Kernel.Environment.primitives.contains n →
-      ci.safety = .safe ∧ ci.levelParams = [] := by
-  intro hfind hprim
-  change annotatedPiTypeMap.find?' n = some ci at hfind
-  rw [annotatedPiTypeMap_wf.find?'_eq_find?, annotatedPiTypeMap,
-    outParamMap_wf.find?_insert] at hfind
-  split at hfind
-  · rename_i heq
-    simp at heq
-    subst n
-    simp [Kernel.Environment.primitives, NameSet.ofList] at hprim
-    simp +decide [NameSet.contains] at hprim
-  · rw [outParamMap,
-      SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty] at hfind
-    simp [SMap.find?] at hfind
-    obtain ⟨rfl, rfl⟩ := hfind
-    simp [Kernel.Environment.primitives, NameSet.ofList] at hprim
-    simp +decide [NameSet.contains] at hprim
-
-private def annotatedPiTypeVEnvs : VEnvs where
-  venv _ := annotatedPiTypeEnv
-
-private theorem annotatedPiTypeVEnvs_wf :
-    annotatedPiTypeVEnvs.WF annotatedPiTypeKernelEnv where
-  tr := by
-    intro safety
-    exact annotatedPiType_trEnv'.sf_mono DefinitionSafety.le_safe
-  hasPrimitives := annotatedPiType_hasPrimitives
-  safePrimitives := annotatedPiType_safePrimitives
-  mono := fun _ => .rfl
 
 private def annotatedPiFamilyCandidateContext : AddInductive.Context where
   env := outParamKernelEnv
@@ -3286,80 +3234,9 @@ private def aliasFormerCtorNormalizationAddType :
   env_add := rfl
   map_add := rfl
 
-private theorem aliasFormerCtorNormalization_trEnv' :
-    TrEnv' .safe aliasFormerTypeMap false aliasFormerTypeEnv :=
-  .inductStaging aliasFormerCtorNormalizationAddType
-    (by
-      show typeFamilyAliasEnv.IsType aliasFormerRawType.uvars []
-        aliasFormerRawType.type
-      refine ⟨.succ (.succ .zero), ?_⟩
-      change typeFamilyAliasEnv.HasType 0 []
-        (.const ``TypeFamilyAlias []) (.sort (.succ (.succ .zero)))
-      exact VEnv.HasType.const
-        (ci := (vconst(type_of% @TypeFamilyAlias) : VConstant))
-        (ls := []) rfl (by simp) rfl)
-    typeFamilyAlias_trEnv'
-
 private def aliasFormerCtorNormalizationKernelEnv : Kernel.Environment :=
   Kernel.Environment.ofConstants `_aliasFormerNormalization
     aliasFormerTypeMap
-
-private theorem aliasFormerCtorNormalization_trEnv :
-    TrEnv .safe aliasFormerCtorNormalizationKernelEnv
-      aliasFormerTypeEnv := by
-  simpa [TrEnv, aliasFormerCtorNormalizationKernelEnv] using
-    aliasFormerCtorNormalization_trEnv'
-
-private theorem aliasFormerCtorNormalization_hasPrimitives :
-    VEnv.HasPrimitives aliasFormerTypeEnv := by
-  apply TypeChecker.VEnv.HasPrimitives.of_avoids
-  intro n hn
-  simp only [TypeChecker.reflectedPrimitiveNames, List.mem_cons,
-    List.not_mem_nil, or_false] at hn
-  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl <;>
-    rfl
-
-private theorem aliasFormerCtorNormalization_safePrimitives :
-    aliasFormerCtorNormalizationKernelEnv.find? n = some ci →
-      Kernel.Environment.primitives.contains n →
-      ci.safety = .safe ∧ ci.levelParams = [] := by
-  intro hfind hprim
-  change aliasFormerTypeMap.find?' n = some ci at hfind
-  rw [aliasFormerTypeMap_wf.find?'_eq_find?,
-    aliasFormerTypeMap, typeFamilyAliasMap_wf.find?_insert] at hfind
-  split at hfind
-  · rename_i heq
-    simp at heq
-    subst n
-    simp [Kernel.Environment.primitives, NameSet.ofList] at hprim
-    simp +decide [NameSet.contains] at hprim
-  · rw [typeFamilyAliasMap,
-      SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty] at hfind
-    simp [SMap.find?] at hfind
-    obtain ⟨rfl, rfl⟩ := hfind
-    simp [Kernel.Environment.primitives, NameSet.ofList] at hprim
-    simp +decide [NameSet.contains] at hprim
-
-private def aliasFormerCtorNormalizationVEnvs : VEnvs where
-  venv _ := aliasFormerTypeEnv
-
-private theorem aliasFormerCtorNormalizationVEnvs_wf :
-    aliasFormerCtorNormalizationVEnvs.WF
-      aliasFormerCtorNormalizationKernelEnv where
-  tr := by
-    intro safety
-    change TrEnv' _ aliasFormerTypeMap false aliasFormerTypeEnv
-    exact aliasFormerCtorNormalization_trEnv'.sf_mono
-      DefinitionSafety.le_safe
-  hasPrimitives := aliasFormerCtorNormalization_hasPrimitives
-  safePrimitives := aliasFormerCtorNormalization_safePrimitives
-  mono := fun _ => .rfl
-
-private def aliasFormerCtorNormalizationContext : TypeChecker.VContext :=
-  TypeChecker.VContext.mk' aliasFormerCtorNormalizationVEnvs_wf
-    (fuel := { whnf := 2 })
 
 private def aliasFormerCtorNormalizationRawContext : TypeChecker.Context where
   env := aliasFormerCtorNormalizationKernelEnv
@@ -4052,12 +3929,12 @@ theorem aliasFormerCtor_checkType :
     ∃ state : TypeChecker.State,
       TypeChecker.Inner.inferType aliasFormerMkInfo.type false
           (TypeChecker.Methods.withFuel 9999)
-          aliasFormerCtorNormalizationContext.toContext
+          aliasFormerCtorCandidateContext.toTypeChecker
           ({} : TypeChecker.State) =
         .ok (.const ``TypeFamilyAlias [], state) := by
   exact ⟨aliasFormerCtorCheckTypeState {}, by
-    simpa [aliasFormerMkInfo, aliasFormerCtorNormalizationContext,
-      TypeChecker.VContext.mk',
+    simpa [aliasFormerMkInfo, aliasFormerCtorCandidateContext,
+      AddInductive.Context.toTypeChecker,
       aliasFormerCtorNormalizationRawContext] using
       checkTypeAliasFormer⟩
 
@@ -7144,16 +7021,51 @@ theorem aliasFormerFamily_candidateView_tr :
     AddInductive.CandidateExprTrace.view] using
     aliasFormerFamilyCandidateRun.view_tr
 
-private theorem aliasFormerCtorCandidatePrefix_ne :
-    aliasFormerCtorCandidateContext.ngen.namePrefix ≠
-      (({} : TypeChecker.VState).ngen).namePrefix := by
-  decide
+private def aliasFormerPreFamilyStage :
+    TypeChecker.CandidateSemanticStage aliasFormerCandidateContext
+      typeFamilyAliasEnv [] where
+  contextRun := aliasFormerCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
+private def aliasFormerFamilyValidationRun :
+    AddInductive.CandidateExprTrace.FamilyValidationRun
+      aliasFormerKernelType aliasFormerFamilyCandidate.trace where
+  nparams := 0
+  resultLevel := .succ .zero
+  stats := aliasFormerInductiveStats
+  stats_eq := rfl
+  terminal_eq := rfl
+  run := aliasFormer_checkInductiveTypes
+
+private def aliasFormerFamilyStage :
+    VInductDecl.CandidateFamilyStagedInput aliasFormerCandidateContext
+      aliasFormerCtorCandidateContext typeFamilyAliasEnv []
+      aliasFormerFamilyListCandidate.familyType aliasFormerRawType
+      aliasFormerPreFamilyStage where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := {
+    context_eq := rfl
+    source_tr := aliasFormerFamily_candidateSource_tr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  validation := aliasFormerFamilyValidationRun
+  typeEnv := aliasFormerTypeEnv
+  addInduct := aliasFormerCtorNormalizationAddType
+  family_lctx_eq := rfl
+  constructorContext_eq := rfl
+  quotInit_eq := rfl
+  name_not_reflected := by decide
+  name_not_primitive := by
+    simp [aliasFormerRawType, Kernel.Environment.primitives,
+      NameSet.ofList]
+    simp +decide [NameSet.contains]
 
 private def aliasFormerCtorCandidateContextRun :
     TypeChecker.CandidateContextRun aliasFormerCtorCandidateContext :=
-  TypeChecker.CandidateContextRun.root
-    aliasFormerCtorNormalizationVEnvs_wf rfl
-    aliasFormerCtorCandidatePrefix_ne
+  aliasFormerFamilyStage.postContextRun
 
 /-- Family endpoint certificate used by the singleton list assembler. -/
 private def aliasFormerFamilySemanticRootRun :
@@ -7186,8 +7098,9 @@ def aliasFormerCtorCheckTypeRun :
       (.const ``TypeFamilyAlias []) := by
   exact TypeChecker.CheckTypeRun.ofCandidateStep
     aliasFormerCtorCheckTypeStep aliasFormerCtorCheckTypeStep_valid
-    aliasFormerCtorNormalizationContext (by rfl)
-    rfl rfl rfl TypeChecker.VState.WF.empty
+    aliasFormerCtorCandidateContextRun.context
+    aliasFormerCtorCandidateContextRun.context_eq
+    rfl rfl rfl aliasFormerCtorCandidateContextRun.state_wf
     (.const rfl rfl rfl) (.const rfl rfl rfl)
     10000 (by rfl)
 
@@ -7206,8 +7119,9 @@ private def aliasFormerCtorCandidateNodeRun :
     (.const ``TypeFamilyAlias []) (.const ``AliasFormer [])
     aliasFormerCtorCheckTypeStep_valid
     aliasFormerCtorCandidateStep_valid
-    aliasFormerCtorNormalizationContext (by rfl)
-    rfl rfl rfl TypeChecker.VState.WF.empty
+    aliasFormerCtorCandidateContextRun.context
+    aliasFormerCtorCandidateContextRun.context_eq
+    rfl rfl rfl aliasFormerCtorCandidateContextRun.state_wf
     aliasFormerCtorCheckTypeRun.expr_tr (.const rfl rfl rfl)
     ⟨_, aliasFormerCtorCheckTypeRun.expr_tr,
       ⟨_, aliasFormerCtorCheckTypeRun.hasType⟩⟩
@@ -7423,25 +7337,8 @@ private def aliasFormerStagedSemanticInput :
   raw := aliasFormerRawType
   raw_types_eq := rfl
   declaration_uvars_eq := rfl
-  family_name_eq := rfl
-  family_uvars_eq := rfl
-  preFamily := {
-    contextRun := aliasFormerCandidateContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
-  familyType := {
-    context_eq := rfl
-    source_tr := aliasFormerFamily_candidateSource_tr
-    whnfFuel := 9999
-    whnfDepth := rfl }
-  typeEnv := aliasFormerTypeEnv
-  addType := rfl
-  postFamily := {
-    contextRun := aliasFormerCtorCandidateContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
+  preFamily := aliasFormerPreFamilyStage
+  family := aliasFormerFamilyStage
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl
@@ -7818,15 +7715,56 @@ private def annotatedPiFamilyCandidateContextRun :
   TypeChecker.CandidateContextRun.root outParamVEnvs_wf rfl
     annotatedPiFamilyCandidatePrefix_ne
 
-private theorem annotatedPiCtorCandidatePrefix_ne :
-    annotatedPiCtorCandidateContext.ngen.namePrefix ≠
-      (({} : TypeChecker.VState).ngen).namePrefix := by
-  decide
+private theorem annotatedPiFamilySource_tr :
+    TrExprS outParamEnv [] [] annotatedPiInfo.type
+      annotatedPiRawType.type :=
+  annotatedPiInfo_tr.1.2.2
+
+private def annotatedPiPreFamilyStage :
+    TypeChecker.CandidateSemanticStage annotatedPiFamilyCandidateContext
+      outParamEnv [] where
+  contextRun := annotatedPiFamilyCandidateContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
+private def annotatedPiFamilyValidationRun :
+    AddInductive.CandidateExprTrace.FamilyValidationRun
+      annotatedPiKernelType annotatedPiFamilyCandidate.trace where
+  nparams := 0
+  resultLevel := .succ .zero
+  stats := annotatedPiInductiveStats
+  stats_eq := rfl
+  terminal_eq := rfl
+  run := annotatedPi_checkInductiveTypes
+
+private def annotatedPiFamilyStage :
+    VInductDecl.CandidateFamilyStagedInput
+      annotatedPiFamilyCandidateContext annotatedPiCtorCandidateContext
+      outParamEnv [] annotatedPiFamilyListCandidate.familyType
+      annotatedPiRawType annotatedPiPreFamilyStage where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := {
+    context_eq := rfl
+    source_tr := annotatedPiFamilySource_tr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  validation := annotatedPiFamilyValidationRun
+  typeEnv := annotatedPiTypeEnv
+  addInduct := annotatedPiAddType
+  family_lctx_eq := rfl
+  constructorContext_eq := rfl
+  quotInit_eq := rfl
+  name_not_reflected := by decide
+  name_not_primitive := by
+    simp [annotatedPiRawType, Kernel.Environment.primitives,
+      NameSet.ofList]
+    simp +decide [NameSet.contains]
 
 private def annotatedPiCtorCandidateContextRun :
     TypeChecker.CandidateContextRun annotatedPiCtorCandidateContext :=
-  TypeChecker.CandidateContextRun.root annotatedPiTypeVEnvs_wf rfl
-    annotatedPiCtorCandidatePrefix_ne
+  annotatedPiFamilyStage.postContextRun
 
 private def annotatedPiInnerBodyCandidateContextRun :
     TypeChecker.CandidateContextRun
@@ -8207,25 +8145,8 @@ private def annotatedPiStagedSemanticInput :
   raw := annotatedPiRawType
   raw_types_eq := rfl
   declaration_uvars_eq := rfl
-  family_name_eq := rfl
-  family_uvars_eq := rfl
-  preFamily := {
-    contextRun := annotatedPiFamilyCandidateContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
-  familyType := {
-    context_eq := rfl
-    source_tr := annotatedPiFamilyCandidateRun.source_tr
-    whnfFuel := 9999
-    whnfDepth := rfl }
-  typeEnv := annotatedPiTypeEnv
-  addType := rfl
-  postFamily := {
-    contextRun := annotatedPiCtorCandidateContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
+  preFamily := annotatedPiPreFamilyStage
+  family := annotatedPiFamilyStage
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl
@@ -8798,6 +8719,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalizationCandidateRun' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8832,6 +8756,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCandidateNormalization_eq' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9040,6 +8967,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCtor_isType_checked' depends
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9074,6 +9004,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalization_wf_checked' de
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9142,6 +9075,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerBlock_wf_checked' depends on
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9176,6 +9112,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedSemanticHierarchy_ex
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9210,6 +9149,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateSemanticR
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9244,6 +9186,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depe
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9278,6 +9223,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidatePackage' 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9765,7 +9713,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedSemanticHierarchy_ex
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9800,7 +9750,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidateRun' d
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9835,7 +9787,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateSemanticR
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9870,7 +9824,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateRun' depe
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -9905,7 +9861,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidatePackage' 
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -10004,19 +9962,24 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidate_produ
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationShapeCandidate_produced' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
+ ptrEqConstantInfo_eq,
  ptrEqExpr_eq,
  Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
  Expr.eqv_eq,
  Expr.hasExprMVar_eq,
  Expr.hasFVar_eq,
  Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.instantiateRange_eq,
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
  Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -10024,6 +9987,8 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationShapeCandidate_pro
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

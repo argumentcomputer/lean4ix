@@ -125,88 +125,6 @@ def indexedVecSemanticAddType :
   env_add := rfl
   map_add := rfl
 
-theorem indexedVecSemanticTypeTrEnv' :
-    TrEnv' .safe indexedVecTypeMap false indexedVecTypeEnv :=
-  .inductStaging indexedVecSemanticAddType indexedVecType_wf nat_trEnv'
-
-theorem indexedVecSemanticTypeHasPrimitives :
-    VEnv.HasPrimitives indexedVecTypeEnv := by
-  have absent (n : Name) (hlookup : indexedVecTypeEnv.constants n = none) :
-      ¬ indexedVecTypeEnv.contains n := by
-    rintro ⟨ci, hci⟩
-    rw [hlookup] at hci
-    contradiction
-  refine {
-    bool := fun h => (absent ``Bool rfl h).elim
-    boolFalse := fun h => by
-      change none = some _ at h
-      contradiction
-    boolTrue := fun h => by
-      change none = some _ at h
-      contradiction
-    nat := fun _ => ⟨⟨_, rfl⟩, ⟨_, rfl⟩⟩
-    natZero := fun h => by
-      change some natType.ctors[0].toVConstant = some _ at h
-      exact (Option.some.inj h).symm
-    natSucc := fun h => by
-      change some natType.ctors[1].toVConstant = some _ at h
-      exact (Option.some.inj h).symm
-    natAdd := fun h => (absent ``Nat.add rfl h).elim
-    natSub := fun h => (absent ``Nat.sub rfl h).elim
-    natMul := fun h => (absent ``Nat.mul rfl h).elim
-    natPow := fun h => (absent ``Nat.pow rfl h).elim
-    natGcd := fun h => (absent ``Nat.gcd rfl h).elim
-    natMod := fun h => (absent ``Nat.mod rfl h).elim
-    natDiv := fun h => (absent ``Nat.div rfl h).elim
-    natBEq := fun h => (absent ``Nat.beq rfl h).elim
-    natBLE := fun h => (absent ``Nat.ble rfl h).elim
-    natLAnd := fun h => (absent ``Nat.land rfl h).elim
-    natLOr := fun h => (absent ``Nat.lor rfl h).elim
-    natXor := fun h => (absent ``Nat.xor rfl h).elim
-    natShiftLeft := fun h => (absent ``Nat.shiftLeft rfl h).elim
-    natShiftRight := fun h => (absent ``Nat.shiftRight rfl h).elim
-    charOfNat := fun h => by
-      change none = some _ at h
-      contradiction
-    stringOfList := fun h => by
-      change none = some _ at h
-      contradiction }
-
-theorem indexedVecSemanticTypeSafePrimitives :
-    ctorEnv.find? n = some ci →
-      Kernel.Environment.primitives.contains n →
-      ci.safety = .safe ∧ ci.levelParams = [] := by
-  intro hfind hprim
-  change indexedVecTypeMap.find?' n = some ci at hfind
-  rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
-    natMap_wf.find?_insert] at hfind
-  split at hfind
-  · rename_i heq
-    simp at heq
-    subst n
-    simp at hfind
-    subst ci
-    simp [Kernel.Environment.primitives, NameSet.ofList] at hprim
-    simp +decide [NameSet.contains] at hprim
-  · apply indexedVecSemanticNatSafePrimitives (n := n) (ci := ci)
-    · change natMap.find?' n = some ci
-      rw [natMap_wf.find?'_eq_find?]
-      exact hfind
-    · exact hprim
-
-def indexedVecSemanticTypeVEnvs : VEnvs where
-  venv _ := indexedVecTypeEnv
-
-theorem indexedVecSemanticTypeVEnvsWF :
-    indexedVecSemanticTypeVEnvs.WF ctorEnv where
-  tr := by
-    intro safety
-    change TrEnv' _ indexedVecTypeMap false indexedVecTypeEnv
-    exact indexedVecSemanticTypeTrEnv'.sf_mono DefinitionSafety.le_safe
-  hasPrimitives := indexedVecSemanticTypeHasPrimitives
-  safePrimitives := indexedVecSemanticTypeSafePrimitives
-  mono := fun _ => .rfl
-
 theorem indexedVecSemanticFamilyPrefixNe :
     indexedVecFamilyCandidateContext.ngen.namePrefix ≠
       (({} : TypeChecker.VState).ngen).namePrefix := by
@@ -217,19 +135,55 @@ def indexedVecSemanticFamilyContextRun :
   TypeChecker.CandidateContextRun.root indexedVecSemanticNatVEnvsWF rfl
     indexedVecSemanticFamilyPrefixNe
 
-theorem indexedVecSemanticCtorPrefixNe :
-    ctorContext.ngen.namePrefix ≠
-      (({} : TypeChecker.VState).ngen).namePrefix := by
-  decide
-
-def indexedVecSemanticCtorContextRun :
-    TypeChecker.CandidateContextRun ctorContext :=
-  TypeChecker.CandidateContextRun.root indexedVecSemanticTypeVEnvsWF rfl
-    indexedVecSemanticCtorPrefixNe
-
 theorem indexedVecSemanticFamilySourceTr :
     TrExprS natFinalEnv [`u] [] indexedVecInfo.type indexedVecType.type :=
   indexedVecInfo_tr.1.2.2
+
+def indexedVecPreFamilyStage :
+    TypeChecker.CandidateSemanticStage indexedVecFamilyCandidateContext
+      natFinalEnv [`u] where
+  contextRun := indexedVecSemanticFamilyContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
+def indexedVecFamilyValidationRun :
+    AddInductive.CandidateExprTrace.FamilyValidationRun
+      indexedVecKernelType indexedVecFamilyCandidate.trace where
+  nparams := 1
+  resultLevel := .succ (.param `u)
+  stats := indexedVecCandidateInductiveStats
+  stats_eq := rfl
+  terminal_eq := indexedVecFamilyCandidate_terminalResult
+  run := indexedVec_checkInductiveTypes
+
+def indexedVecFamilyStage :
+    VInductDecl.CandidateFamilyStagedInput
+      indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
+      indexedVecFamilyListCandidate.familyType indexedVecType
+      indexedVecPreFamilyStage where
+  name_eq := rfl
+  uvars_eq := rfl
+  type := {
+    context_eq := rfl
+    source_tr := indexedVecSemanticFamilySourceTr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  validation := indexedVecFamilyValidationRun
+  typeEnv := indexedVecTypeEnv
+  addInduct := indexedVecSemanticAddType
+  family_lctx_eq := rfl
+  constructorContext_eq := rfl
+  quotInit_eq := rfl
+  name_not_reflected := by decide
+  name_not_primitive := by
+    simp [indexedVecType, Kernel.Environment.primitives,
+      NameSet.ofList]
+    simp +decide [NameSet.contains]
+
+def indexedVecSemanticCtorContextRun :
+    TypeChecker.CandidateContextRun ctorContext :=
+  indexedVecFamilyStage.postContextRun
 
 theorem indexedVecSemanticNilSourceTr :
     TrExprS indexedVecTypeEnv [`u] [] indexedVecNilInfo.type
@@ -263,25 +217,8 @@ def indexedVecStagedSemanticInput :
   raw := indexedVecType
   raw_types_eq := rfl
   declaration_uvars_eq := rfl
-  family_name_eq := rfl
-  family_uvars_eq := rfl
-  preFamily := {
-    contextRun := indexedVecSemanticFamilyContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
-  familyType := {
-    context_eq := rfl
-    source_tr := indexedVecSemanticFamilySourceTr
-    whnfFuel := 9999
-    whnfDepth := rfl }
-  typeEnv := indexedVecTypeEnv
-  addType := rfl
-  postFamily := {
-    contextRun := indexedVecSemanticCtorContextRun
-    venv_eq := rfl
-    lparams_eq := rfl
-    vlctx_eq := rfl }
+  preFamily := indexedVecPreFamilyStage
+  family := indexedVecFamilyStage
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl
@@ -688,6 +625,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -722,6 +662,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -830,6 +773,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
  Expr.hasLevelParam_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,

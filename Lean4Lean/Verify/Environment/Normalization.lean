@@ -84,6 +84,114 @@ theorem VEnv.HasPrimitives.of_avoids
       (noLookup ``String.ofList
         (by simp [reflectedPrimitiveNames]) hci).elim }
 
+/-- A fresh Theory constant leaves every other lookup unchanged. -/
+theorem VEnv.addConst_other
+    {env env' : VEnv} {name other : Name} {ci : VConstant}
+    (hadd : env.addConst name ci = some env')
+    (hne : name ≠ other) :
+    env'.constants other = env.constants other := by
+  unfold Lean4Lean.VEnv.addConst at hadd
+  split at hadd <;> cases hadd
+  simp [hne]
+
+/-- Inserting a non-primitive constant preserves the verified checker's
+primitive-reflection contract. The computational reflection equations are
+transported monotonically; the primitive constant lookups themselves are
+unchanged. -/
+theorem VEnv.HasPrimitives.addConst
+    {env env' : VEnv} {name : Name} {ci : VConstant}
+    (H : env.HasPrimitives)
+    (hname : name ∉ reflectedPrimitiveNames)
+    (hadd : env.addConst name ci = some env') :
+    env'.HasPrimitives := by
+  have lookup (other : Name) (hother : other ∈ reflectedPrimitiveNames) :
+      env'.constants other = env.constants other :=
+    VEnv.addConst_other hadd (by
+      intro h
+      apply hname
+      simpa only [h] using hother)
+  have oldContains (other : Name)
+      (hother : other ∈ reflectedPrimitiveNames) :
+      env'.contains other → env.contains other := by
+    rintro ⟨value, hvalue⟩
+    exact ⟨value, by simpa only [lookup other hother] using hvalue⟩
+  have newContains (other : Name) :
+      env.contains other → env'.contains other := by
+    rintro ⟨value, hvalue⟩
+    exact ⟨value, (VEnv.addConst_le hadd).constants hvalue⟩
+  have hle := VEnv.addConst_le hadd
+  exact {
+    bool := fun h => by
+      obtain ⟨hfalse, htrue⟩ := H.bool (oldContains ``Bool
+        (by simp [reflectedPrimitiveNames]) h)
+      exact ⟨newContains _ hfalse, newContains _ htrue⟩
+    boolFalse := fun h => H.boolFalse (by
+      simpa only [lookup ``Bool.false
+        (by simp [reflectedPrimitiveNames])] using h)
+    boolTrue := fun h => H.boolTrue (by
+      simpa only [lookup ``Bool.true
+        (by simp [reflectedPrimitiveNames])] using h)
+    nat := fun h => by
+      obtain ⟨hzero, hsucc⟩ := H.nat (oldContains ``Nat
+        (by simp [reflectedPrimitiveNames]) h)
+      exact ⟨newContains _ hzero, newContains _ hsucc⟩
+    natZero := fun h => H.natZero (by
+      simpa only [lookup ``Nat.zero
+        (by simp [reflectedPrimitiveNames])] using h)
+    natSucc := fun h => H.natSucc (by
+      simpa only [lookup ``Nat.succ
+        (by simp [reflectedPrimitiveNames])] using h)
+    natAdd := fun h a b =>
+      (H.natAdd (oldContains ``Nat.add
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natSub := fun h a b =>
+      (H.natSub (oldContains ``Nat.sub
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natMul := fun h a b =>
+      (H.natMul (oldContains ``Nat.mul
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natPow := fun h a b =>
+      (H.natPow (oldContains ``Nat.pow
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natGcd := fun h a b =>
+      (H.natGcd (oldContains ``Nat.gcd
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natMod := fun h a b =>
+      (H.natMod (oldContains ``Nat.mod
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natDiv := fun h a b =>
+      (H.natDiv (oldContains ``Nat.div
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natBEq := fun h a b =>
+      (H.natBEq (oldContains ``Nat.beq
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natBLE := fun h a b =>
+      (H.natBLE (oldContains ``Nat.ble
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natLAnd := fun h a b =>
+      (H.natLAnd (oldContains ``Nat.land
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natLOr := fun h a b =>
+      (H.natLOr (oldContains ``Nat.lor
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natXor := fun h a b =>
+      (H.natXor (oldContains ``Nat.xor
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natShiftLeft := fun h a b =>
+      (H.natShiftLeft (oldContains ``Nat.shiftLeft
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    natShiftRight := fun h a b =>
+      (H.natShiftRight (oldContains ``Nat.shiftRight
+        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
+    charOfNat := fun h => H.charOfNat (by
+      simpa only [lookup ``Char.ofNat
+        (by simp [reflectedPrimitiveNames])] using h)
+    stringOfList := fun h => by
+      obtain ⟨hconstant, hnil, hcons⟩ := H.stringOfList (by
+        simpa only [lookup ``String.ofList
+          (by simp [reflectedPrimitiveNames])] using h)
+      exact ⟨hconstant, hnil.mono hle, hcons.mono hle⟩ }
+
 /-- Kernel-side counterpart of `VEnv.HasPrimitives.of_avoids`: if an isolated
 constant map contains no hard-coded primitive name, the safety premise needed
 by `VContext` is vacuous. -/
@@ -96,6 +204,38 @@ theorem safePrimitives_of_avoids
   intro hfind hprim
   rw [h n hprim] at hfind
   contradiction
+
+/-- Staging one fresh non-primitive inductive family preserves the kernel-side
+primitive safety contract. All old lookups are inherited from the input map;
+the only new lookup cannot be primitive by hypothesis. -/
+theorem AddInductConstant.safePrimitives
+    {pre post : Environment} {env typeEnv : VEnv} {raw : VConstVal}
+    (stage : AddInductConstant .induct pre.constants env raw
+      post.constants typeEnv)
+    (preMapWF : pre.constants.WF)
+    (H : pre.find? n = some ci →
+      Environment.primitives.contains n →
+      ci.safety = .safe ∧ ci.levelParams = [])
+    (hname : Environment.primitives.contains raw.name = false) :
+    post.find? n = some ci →
+      Environment.primitives.contains n →
+      ci.safety = .safe ∧ ci.levelParams = [] := by
+  intro hfind hprim
+  have postMapWF := stage.map_wf preMapWF
+  change post.constants.find?' n = some ci at hfind
+  rw [postMapWF.find?'_eq_find?, stage.map_add,
+    preMapWF.find?_insert] at hfind
+  split at hfind
+  · rename_i heq
+    have : raw.name = n := by simpa using heq
+    subst n
+    rw [hname] at hprim
+    contradiction
+  · apply H
+    change pre.constants.find?' n = some ci
+    rw [preMapWF.find?'_eq_find?]
+    exact hfind
+    exact hprim
 
 /-- Evidence that Verify's recursive WHNF procedure returned an exact kernel
 expression, together with strict translations of the input and output into one
@@ -505,6 +645,36 @@ def CandidateContextRun.root
   · simp [context, VContext.mk', MLCtx.lctx,
       AddInductive.Context.toTypeChecker, lctx_eq]
   · exact VState.WF.empty
+
+@[simp] theorem CandidateContextRun.context_env
+    (run : CandidateContextRun candidateContext) :
+    run.context.env = candidateContext.env := by
+  have h := congrArg (fun c : TypeChecker.Context => c.env) run.context_eq
+  simpa only [AddInductive.Context.toTypeChecker] using h
+
+@[simp] theorem CandidateContextRun.context_lctx
+    (run : CandidateContextRun candidateContext) :
+    run.context.lctx = candidateContext.lctx := by
+  have h := congrArg (fun c : TypeChecker.Context => c.lctx) run.context_eq
+  simpa only [AddInductive.Context.toTypeChecker] using h
+
+@[simp] theorem CandidateContextRun.context_safety
+    (run : CandidateContextRun candidateContext) :
+    run.context.safety = candidateContext.safety := by
+  have h := congrArg (fun c : TypeChecker.Context => c.safety) run.context_eq
+  simpa only [AddInductive.Context.toTypeChecker] using h
+
+@[simp] theorem CandidateContextRun.context_lparams
+    (run : CandidateContextRun candidateContext) :
+    run.context.lparams = candidateContext.lparams := by
+  have h := congrArg (fun c : TypeChecker.Context => c.lparams) run.context_eq
+  simpa only [AddInductive.Context.toTypeChecker] using h
+
+@[simp] theorem CandidateContextRun.context_fuel
+    (run : CandidateContextRun candidateContext) :
+    run.context.fuel = candidateContext.fuel := by
+  have h := congrArg (fun c : TypeChecker.Context => c.fuel) run.context_eq
+  simpa only [AddInductive.Context.toTypeChecker] using h
 
 /-- Extend a verified candidate context by precisely the raw local declaration
 used by `AddInductive.Context.pushLocalDecl`.
@@ -1678,7 +1848,8 @@ theorem CandidateExprRun.context_wf
     (run : CandidateExprRun env Us trace Δ source' view' inferred') :
     VLCtx.WF env Us.length Δ := by
   cases run with
-  | terminal node =>
+  | @terminal Δ context source inferred result source' result' inferred'
+      checked normalized node =>
     simpa only [node.check.venv_eq, node.check.lparams_eq,
       node.check.vlctx_eq] using node.check.context.Δwf
   | forallE _ _ _ _ node =>
@@ -1944,6 +2115,106 @@ theorem CandidateExprRun.env_wf
     simpa only [node.check.venv_eq] using node.check.context.Ewf
   | forallE _ _ _ _ node =>
     simpa only [node.check.venv_eq] using node.check.context.Ewf
+
+/-- Interpret the terminal-sort fact retained by family validation.
+
+At a terminal node the verified WHNF result translates the exact kernel sort.
+At a Pi node the recursively interpreted body is transported from the
+annotation-consumed binder context to the candidate-view binder context. Thus
+the complete checker-selected candidate view is a Theory type without using a
+checked inductive declaration or a caller-supplied view-WF proof. -/
+theorem CandidateExprRun.view_isType_of_terminalSort
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (terminal : trace.terminalResult = .sort resultLevel) :
+    env.IsType Us.length Δ.toCtx view' := by
+  induction run with
+  | terminal node =>
+    simp only [AddInductive.CandidateExprTrace.terminalResult] at terminal
+    have henv : VEnv.WF env := by
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    obtain ⟨strict, strict_tr, strict_def⟩ := node.whnf.rhs_tr
+    rw [terminal] at strict_tr
+    cases strict_tr with
+    | sort level_tr =>
+      exact VEnv.IsType.defeqU_l henv (by
+          simpa only [node.check.venv_eq, node.check.lparams_eq,
+            node.check.vlctx_eq] using node.check.context.Δwf.toCtx)
+        strict_def ⟨_, .sort (VLevel.WF.of_ofLevel level_tr)⟩
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.terminalResult] at terminal
+    have henv : VEnv.WF env := by
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    have hΔ : VLCtx.WF env Us.length Δ := by
+      simpa only [node.check.venv_eq, node.check.lparams_eq,
+        node.check.vlctx_eq] using node.check.context.Δwf
+    have domainDef : env.IsDefEq Us.length Δ.toCtx
+        domain' domainView' (.sort u) :=
+      domainRun.evidence.isDefEq.toU.of_l henv hΔ.toCtx domainType
+    have domainViewType : env.IsType Us.length Δ.toCtx domainView' :=
+      ⟨u, domainDef.hasType.2⟩
+    have annotationDef : env.IsDefEq Us.length Δ.toCtx
+        domain' storedDomain' (.sort u) :=
+      annotationsRun.isDefEqU.of_l henv hΔ.toCtx domainType
+    have storedToView : env.IsDefEq Us.length Δ.toCtx
+        storedDomain' domainView' (.sort u) :=
+      annotationDef.symm.trans domainDef
+    have bodyContextEq : env.IsDefEqCtx Us.length []
+        (storedDomain' :: Δ.toCtx) (domainView' :: Δ.toCtx) :=
+      (VLCtx.IsDefEq.cons (.refl henv hΔ) (ofv := none)
+        (by nofun) (.vlam storedToView)).defeqCtx
+    have bodyViewTypeStored : env.IsType Us.length
+        (storedDomain' :: Δ.toCtx) bodyView' := by
+      simpa only [bodyContext, VLCtx.toCtx] using bodyIH terminal
+    have bodyViewType : env.IsType Us.length
+        (domainView' :: Δ.toCtx) bodyView' := by
+      exact bodyViewTypeStored.defeqDFC henv.ordered bodyContextEq
+    exact domainViewType.forallE bodyViewType
+
+/-- Family validation types the checker-selected view first; the retained
+candidate equality then transports that fact back to the exact raw Theory
+source. This is the declaration-WF fact needed before raw-family insertion. -/
+theorem CandidateExprSemanticRootRun.source_isType_of_terminalSort
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (terminal : candidate.trace.terminalResult = .sort resultLevel) :
+    env.IsType Us.length [] source' := by
+  obtain ⟨_, recursive⟩ := run.recursive
+  have hview := recursive.view_isType_of_terminalSort terminal
+  have henv : VEnv.WF env := by
+    simpa only [run.venv_eq] using run.contextRun.context.Ewf
+  exact hview.defeqU_l henv trivial recursive.evidence.isDefEq.toU.symm
+
+/-- Candidate-view parameter binders selected by an exact singleton family
+validation run. The split is computed from the retained candidate spine. -/
+def CandidateExprSemanticRootRun.viewParameters
+    {indType : InductiveType}
+    {candidate : AddInductive.CandidateExpr indType.type}
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (validation : AddInductive.CandidateExprTrace.FamilyValidationRun
+      indType candidate.trace) : List VExpr :=
+  (VExpr.telN candidate.trace.spineLength run.view).take
+    validation.nparams
+
+/-- Candidate-view index binders following the validator-selected parameter
+prefix. -/
+def CandidateExprSemanticRootRun.viewIndices
+    {indType : InductiveType}
+    {candidate : AddInductive.CandidateExpr indType.type}
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (validation : AddInductive.CandidateExprTrace.FamilyValidationRun
+      indType candidate.trace) : List VExpr :=
+  (VExpr.telN candidate.trace.spineLength run.view).drop
+    validation.nparams
 
 /-- An exact recursive run whose executable main spine preserves the stored
 binders. Unlike a whole-expression root equality, this package is strong
@@ -2378,6 +2649,134 @@ theorem CandidateConstructorSemanticListInput.exists
     obtain ⟨tailRun⟩ := ih
     exact ⟨.cons headRun tailRun⟩
 
+/-- One validated singleton family stage derived from a verified entry
+candidate context and the exact kernel/Theory family insertion.
+
+The family validator selects the parameter/index split and terminal sort. The
+retained candidate semantics then prove the raw family constant well formed;
+that proof extends the entry `TrEnv` and constructs the post-family verifier
+context. No independently verified post-family `VEnvs` is an input. -/
+structure CandidateFamilyStagedInput
+    (familyContext constructorContext : AddInductive.Context)
+    (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.CandidateFamilyType source)
+    (raw : VInductiveType)
+    (preFamily : TypeChecker.CandidateSemanticStage familyContext env Us)
+    where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprStagedInput preFamily
+    candidate.type raw.type
+  validation : AddInductive.CandidateExprTrace.FamilyValidationRun
+    source candidate.type.trace
+  typeEnv : VEnv
+  addInduct : AddInductConstant .induct familyContext.env.constants env
+    raw.toVConstVal constructorContext.env.constants typeEnv
+  family_lctx_eq : familyContext.lctx = {}
+  constructorContext_eq : constructorContext =
+    { familyContext with env := constructorContext.env }
+  quotInit_eq : constructorContext.env.quotInit =
+    familyContext.env.quotInit
+  name_not_reflected : raw.name ∉ TypeChecker.reflectedPrimitiveNames
+  name_not_primitive :
+    Environment.primitives.contains raw.name = false
+
+/-- Family validation plus retained candidate semantics prove the exact raw
+Theory constant suitable for insertion. The semantic view remains hidden
+under `Nonempty`; elimination is only into this proposition. -/
+theorem CandidateFamilyStagedInput.rawWF
+    (input : CandidateFamilyStagedInput familyContext constructorContext
+      env Us candidate raw preFamily) :
+    raw.toVConstant.WF env := by
+  obtain ⟨semantic⟩ := input.type.rootInput.exists
+  show env.IsType raw.uvars [] raw.type
+  simpa only [input.uvars_eq] using
+    semantic.source_isType_of_terminalSort input.validation.terminal_eq
+
+/-- The verifier context after inserting the validated raw family constant.
+Primitive reflection and safety are preserved because the new family name is
+not a kernel or reflected primitive. -/
+def CandidateFamilyStagedInput.postContext
+    (input : CandidateFamilyStagedInput familyContext constructorContext
+      env Us candidate raw preFamily) : TypeChecker.VContext where
+  env := constructorContext.env
+  lctx := constructorContext.lctx
+  lparams := constructorContext.lparams
+  safety := constructorContext.safety
+  fuel := constructorContext.fuel
+  venv := input.typeEnv
+  hasPrimitives := by
+    have H : env.HasPrimitives := by
+      simpa only [preFamily.venv_eq] using
+        preFamily.contextRun.context.hasPrimitives
+    exact TypeChecker.VEnv.HasPrimitives.addConst H
+      input.name_not_reflected input.addInduct.env_add
+  safePrimitives := by
+    intro n ci
+    have preMapWF : familyContext.env.constants.WF := by
+      simpa only [preFamily.contextRun.context_env] using
+        preFamily.contextRun.context.trenv.map_wf
+    exact TypeChecker.AddInductConstant.safePrimitives input.addInduct
+      (n := n) (ci := ci) preMapWF (fun hfind hprim => by
+        apply preFamily.contextRun.context.safePrimitives
+        · simpa only [preFamily.contextRun.context_env] using hfind
+        · exact hprim)
+      input.name_not_primitive
+  trenv := by
+    have preTr : TrEnv' familyContext.safety familyContext.env.constants
+        familyContext.env.quotInit env := by
+      simpa only [TrEnv, preFamily.contextRun.context_safety,
+        preFamily.contextRun.context_env, preFamily.venv_eq] using
+        preFamily.contextRun.context.trenv
+    have postTr := TrEnv'.inductStaging input.addInduct input.rawWF preTr
+    change TrEnv' constructorContext.safety constructorContext.env.constants
+      constructorContext.env.quotInit input.typeEnv
+    rw [show constructorContext.safety = familyContext.safety by
+      rw [input.constructorContext_eq]]
+    rw [input.quotInit_eq]
+    exact postTr
+  mlctx := .nil
+  mlctx_wf := trivial
+  lctx_eq := by
+    change ({} : LocalContext) = constructorContext.lctx
+    rw [input.constructorContext_eq, input.family_lctx_eq]
+
+/-- The exact post-family candidate context constructed from family
+validation, rather than supplied by a second verifier setup. -/
+def CandidateFamilyStagedInput.postContextRun
+    (input : CandidateFamilyStagedInput familyContext constructorContext
+      env Us candidate raw preFamily) :
+    TypeChecker.CandidateContextRun constructorContext :=
+  TypeChecker.CandidateContextRun.ofVContext constructorContext
+    input.postContext (by rfl)
+    (TypeChecker.VState.WF.empty_of_reserves input.postContext (by
+      intro fv hfv
+      change fv ∈ VLCtx.fvars ([] : VLCtx) at hfv
+      simp at hfv))
+    (by
+      rw [input.constructorContext_eq]
+      exact preFamily.contextRun.namePrefix_ne)
+
+/-- Shared post-family semantic stage consumed by every constructor position.
+Its implementation and Theory environments are fixed by the exact family
+insertion above. -/
+def CandidateFamilyStagedInput.postFamily
+    (input : CandidateFamilyStagedInput familyContext constructorContext
+      env Us candidate raw preFamily) :
+    TypeChecker.CandidateSemanticStage constructorContext input.typeEnv Us where
+  contextRun := input.postContextRun
+  venv_eq := rfl
+  lparams_eq := by
+    rw [TypeChecker.CandidateContextRun.context_lparams]
+    calc
+      constructorContext.lparams = familyContext.lparams := by
+        rw [input.constructorContext_eq]
+      _ = preFamily.contextRun.context.lparams :=
+        preFamily.contextRun.context_lparams.symm
+      _ = Us := preFamily.lparams_eq
+  vlctx_eq := rfl
+
 /-- One source-indexed constructor interpreted in the shared post-family
 stage. Header equality and universe alignment stay attached to the exact raw
 constructor position; the expression payload contains no independently
@@ -2535,14 +2934,14 @@ theorem NormalizationCandidateSemanticInput.exists_ofProduced
     familyTypesProduced := familyTypesProduced
     familiesProduced := familiesProduced }⟩
 
-/-- The complete two-stage semantic input for a produced singleton candidate.
+/-- The complete family-validated semantic input for a produced singleton
+candidate.
 
-The pre-family and post-family verifier alignments are owned exactly once.
-The raw-family insertion connects their Theory environments, while the two
-dependent producer traversals connect their implementation contexts to the
-same source-indexed candidate. Family and constructor expression positions
-then supply only strict translations and fuel equalities. No normalized view,
-semantic run, declaration-WF proof, or generation package is an input. -/
+Only the entry verifier alignment is supplied. The exact singleton family
+validation and raw-family insertion derive the post-family verified stage;
+constructor positions then supply strict translations and fuel equalities in
+that derived stage. No normalized view, post-family `VEnvs.WF`, semantic run,
+declaration-WF proof, or generation package is an input. -/
 structure StagedNormalizationCandidateSemanticInput
     (familyContext constructorContext : AddInductive.Context)
     (env : VEnv) (Us : List Name)
@@ -2552,15 +2951,10 @@ structure StagedNormalizationCandidateSemanticInput
   raw : VInductiveType
   raw_types_eq : rawDecl.types = [raw]
   declaration_uvars_eq : rawDecl.uvars = Us.length
-  family_name_eq : source.name = raw.name
-  family_uvars_eq : raw.uvars = Us.length
   preFamily : TypeChecker.CandidateSemanticStage familyContext env Us
-  familyType : TypeChecker.CandidateExprStagedInput preFamily
-    candidate.families.singleton.familyType.type raw.type
-  typeEnv : VEnv
-  addType : env.addConst raw.name raw.toVConstant = some typeEnv
-  postFamily : TypeChecker.CandidateSemanticStage constructorContext typeEnv Us
-  constructors : CandidateConstructorStagedListInput postFamily
+  family : CandidateFamilyStagedInput familyContext constructorContext env Us
+    candidate.families.singleton.familyType raw preFamily
+  constructors : CandidateConstructorStagedListInput family.postFamily
     candidate.families.singleton.constructors raw.ctors
   familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
     familyContext
@@ -2585,15 +2979,15 @@ def StagedNormalizationCandidateSemanticInput.semanticInput
   raw_types_eq := input.raw_types_eq
   uvars_eq := input.declaration_uvars_eq
   family := {
-    name_eq := input.family_name_eq
-    uvars_eq := input.family_uvars_eq
-    type := input.familyType.rootInput
-    typeEnv := input.typeEnv
-    addType := input.addType
+    name_eq := input.family.name_eq
+    uvars_eq := input.family.uvars_eq
+    type := input.family.type.rootInput
+    typeEnv := input.family.typeEnv
+    addType := input.family.addInduct.env_add
     constructors := input.constructors.semanticInput }
 
-/-- Interpret a complete produced singleton candidate from its two explicitly
-verified stages. The result stays in `Nonempty`; in particular, this theorem
+/-- Interpret a complete produced singleton candidate from its entry stage and
+derived family-validation stage. The result stays in `Nonempty`; in particular, this theorem
 does not use choice to expose a semantic run as executable data. -/
 theorem StagedNormalizationCandidateSemanticInput.exists
     {familyContext constructorContext : AddInductive.Context}
@@ -4018,6 +4412,304 @@ interpretation roots intentionally inherit the same transitional Verify
 closure as `WhnfRun.isDefEq`. Exact guards ensure that the generic assembler
 does not silently widen it.
 -/
+/--
+info: 'Lean4Lean.TypeChecker.VEnv.HasPrimitives.addConst' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.VEnv.HasPrimitives.addConst
+
+/--
+info: 'Lean4Lean.TypeChecker.VEnv.addConst_other' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.VEnv.addConst_other
+
+/--
+info: 'Lean4Lean.TypeChecker.AddInductConstant.safePrimitives' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.AddInductConstant.safePrimitives
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_env' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.context_env
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lctx' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.context_lctx
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_safety' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.context_safety
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lparams' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.context_lparams
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_fuel' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.context_fuel
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_isType_of_terminalSort' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.view_isType_of_terminalSort
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_terminalSort' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprSemanticRootRun.source_isType_of_terminalSort
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewParameters' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprSemanticRootRun.viewParameters
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewIndices' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprSemanticRootRun.viewIndices
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyStagedInput
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.rawWF' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyStagedInput.rawWF
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContext' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyStagedInput.postContext
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContextRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyStagedInput.postContextRun
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postFamily' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyStagedInput.postFamily
+
+
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.exists' depends on axioms: [propext,
  sorryAx,
