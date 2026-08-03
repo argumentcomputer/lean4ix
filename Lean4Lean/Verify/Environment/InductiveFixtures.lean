@@ -7574,34 +7574,40 @@ theorem aliasFormerCtor_isType_checked :
       aliasFormerRawType.ctors[0].type :=
   ⟨.succ .zero, aliasFormerCtor_hasSort_checked⟩
 
-private def aliasFormerCandidateFamilySemanticGenerationShape :
-    VInductDecl.CandidateFamilySemanticGenerationShape
-      aliasFormerNormalizationCandidateSemanticRun
-      aliasFormerGenerationChecked where
-  storedSpine := rfl
-  spineLength_eq := rfl
+private theorem aliasFormerCandidate_generationShape :
+    aliasFormerNormalizationCandidateSemanticRun.generationShape = true :=
+  rfl
 
-private def aliasFormerCandidateConstructorSemanticGenerationShape :
-    VInductDecl.CandidateConstructorSemanticGenerationShape
-      (source := aliasFormerRawDecl) aliasFormerTypeEnv []
-      aliasFormerCandidateConstructorSemanticRun where
-  storedSpine := rfl
-  spineLength_eq := rfl
+private theorem aliasFormerCandidate_viewDecl_wf :
+    aliasFormerNormalizationCandidateRun.viewDecl.WF
+      typeFamilyAliasEnv := by
+  change aliasFormerViewDecl.WF typeFamilyAliasEnv
+  exact aliasFormerViewDecl_wf
 
-private def aliasFormerCandidateConstructorSemanticGenerationShapeList :
-    VInductDecl.CandidateConstructorSemanticGenerationShapeList
-      aliasFormerRawDecl aliasFormerTypeEnv []
-      aliasFormerCandidateConstructorSemanticListRun := by
-  exact .cons aliasFormerCandidateConstructorSemanticGenerationShape .nil
+private def aliasFormerProducedGenerationShapeCandidate :
+    VInductDecl.ProducedGenerationShapeCandidate aliasFormerRawDecl
+      aliasFormerRawType aliasFormerKernelType 0 false
+      aliasFormerCandidateContext where
+  candidate := aliasFormerNormalizationCandidate
+  produced := aliasFormerNormalizationCandidate_produced
+  shape := aliasFormerCandidate_generationShape
 
-private def aliasFormerGenerationCandidateSemanticShapeRun :
-    VInductDecl.GenerationCandidateSemanticShapeRun
-      aliasFormerNormalizationCandidateSemanticRun
-      aliasFormerGenerationChecked where
-  analysis := rfl
-  checked := aliasFormerViewChecked.wf_of_decl aliasFormerViewDecl_wf
-  family := aliasFormerCandidateFamilySemanticGenerationShape
-  constructors := aliasFormerCandidateConstructorSemanticGenerationShapeList
+/-- The strengthened outer gate returns the exact AliasFormer candidate with
+its complete executable generation layout attached. -/
+theorem aliasFormerGenerationShapeCandidate_produced :
+    VInductDecl.produceGenerationShapeCandidate aliasFormerRawDecl
+      aliasFormerRawType aliasFormerKernelType 0 false
+      aliasFormerCandidateContext =
+        .ok aliasFormerProducedGenerationShapeCandidate := by
+  have produced :
+      AddInductive.buildNormalizationCandidate aliasFormerRawDecl.nparams
+          [aliasFormerKernelType] 0 false aliasFormerCandidateContext =
+        .ok aliasFormerNormalizationCandidate :=
+    aliasFormerNormalizationCandidate_produced
+  simpa only [aliasFormerProducedGenerationShapeCandidate] using
+    VInductDecl.produceGenerationShapeCandidate_eq_ok
+      (source := aliasFormerRawDecl) (raw := aliasFormerRawType)
+      produced aliasFormerCandidate_generationShape
 
 /-- Complete source-indexed candidate certificate for the non-identity
 AliasFormer generation transaction. -/
@@ -7609,7 +7615,10 @@ def aliasFormerGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       aliasFormerNormalizationCandidateSemanticRun
       aliasFormerGenerationChecked :=
-  aliasFormerGenerationCandidateSemanticShapeRun.run
+  VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape
+    aliasFormerNormalizationCandidateSemanticRun
+    aliasFormerGenerationChecked rfl aliasFormerCandidate_viewDecl_wf
+    aliasFormerCandidate_generationShape
 
 def aliasFormerGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
@@ -7629,9 +7638,9 @@ successful whole-call metadata producer, including its pre-family and
 post-family checker environments. -/
 def aliasFormerProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage typeFamilyAliasEnv [] :=
-  aliasFormerGenerationCandidateSemanticRun.producedPackage
-    aliasFormerCandidateContext 0 0 false
-    aliasFormerNormalizationCandidate_produced
+  aliasFormerProducedGenerationShapeCandidate.producedPackage
+    aliasFormerNormalizationCandidateSemanticRun rfl
+    aliasFormerGenerationChecked rfl aliasFormerCandidate_viewDecl_wf
 
 /-- Theory-only erasure of the AliasFormer producer package. This is the
 consumer-facing value accepted by the public non-identity transaction. -/
@@ -8297,34 +8306,45 @@ theorem annotatedPiBlock_wf_checked :
   refine ⟨annotatedPiNormalization_wf_checked, ?_⟩
   exact annotatedPiViewChecked_wf
 
-private def annotatedPiCandidateFamilySemanticGenerationShape :
-    VInductDecl.CandidateFamilySemanticGenerationShape
-      annotatedPiNormalizationCandidateSemanticRun
-      annotatedPiGenerationChecked where
-  storedSpine := rfl
-  spineLength_eq := rfl
+private theorem annotatedPiCandidate_generationShape :
+    annotatedPiNormalizationCandidateSemanticRun.generationShape = true := by
+  change ((true && true) &&
+    (annotatedPiCtorCandidate.trace.storedSpine && true && true)) = true
+  rw [annotatedPiCtorCandidate_storedSpine]
+  rfl
 
-private def annotatedPiCandidateConstructorSemanticGenerationShape :
-    VInductDecl.CandidateConstructorSemanticGenerationShape
-      (source := annotatedPiRawDecl) annotatedPiTypeEnv []
-      annotatedPiCandidateConstructorSemanticRun where
-  storedSpine := annotatedPiCtorCandidate_storedSpine
-  spineLength_eq := rfl
+private theorem annotatedPiCandidate_viewDecl_wf :
+    annotatedPiNormalizationCandidateRun.viewDecl.WF outParamEnv := by
+  change annotatedPiViewDecl.WF outParamEnv
+  apply annotatedPiViewDecl_wf.mono
+  exact (VEnv.addConst_le (by rfl :
+    VEnv.empty.addConst ``outParam (vconst(type_of% @outParam)) =
+      some outParamConstEnv)).trans VEnv.addDefEq_le
 
-private def annotatedPiCandidateConstructorSemanticGenerationShapeList :
-    VInductDecl.CandidateConstructorSemanticGenerationShapeList
-      annotatedPiRawDecl annotatedPiTypeEnv []
-      annotatedPiCandidateConstructorSemanticListRun := by
-  exact .cons annotatedPiCandidateConstructorSemanticGenerationShape .nil
+private def annotatedPiProducedGenerationShapeCandidate :
+    VInductDecl.ProducedGenerationShapeCandidate annotatedPiRawDecl
+      annotatedPiRawType annotatedPiKernelType 0 false
+      annotatedPiFamilyCandidateContext where
+  candidate := annotatedPiNormalizationCandidate
+  produced := annotatedPiNormalizationCandidate_produced
+  shape := annotatedPiCandidate_generationShape
 
-private def annotatedPiGenerationCandidateSemanticShapeRun :
-    VInductDecl.GenerationCandidateSemanticShapeRun
-      annotatedPiNormalizationCandidateSemanticRun
-      annotatedPiGenerationChecked where
-  analysis := rfl
-  checked := annotatedPiViewChecked_wf
-  family := annotatedPiCandidateFamilySemanticGenerationShape
-  constructors := annotatedPiCandidateConstructorSemanticGenerationShapeList
+/-- The strengthened outer gate retains AnnotatedPi's nested annotation-
+normalizing candidate only after its complete raw generation spine passes. -/
+theorem annotatedPiGenerationShapeCandidate_produced :
+    VInductDecl.produceGenerationShapeCandidate annotatedPiRawDecl
+      annotatedPiRawType annotatedPiKernelType 0 false
+      annotatedPiFamilyCandidateContext =
+        .ok annotatedPiProducedGenerationShapeCandidate := by
+  have produced :
+      AddInductive.buildNormalizationCandidate annotatedPiRawDecl.nparams
+          [annotatedPiKernelType] 0 false annotatedPiFamilyCandidateContext =
+        .ok annotatedPiNormalizationCandidate :=
+    annotatedPiNormalizationCandidate_produced
+  simpa only [annotatedPiProducedGenerationShapeCandidate] using
+    VInductDecl.produceGenerationShapeCandidate_eq_ok
+      (source := annotatedPiRawDecl) (raw := annotatedPiRawType)
+      produced annotatedPiCandidate_generationShape
 
 /-- Complete source-indexed checker certificate for annotated recursive-Π
 generation. This is the first live generation run whose main constructor
@@ -8333,7 +8353,10 @@ def annotatedPiGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       annotatedPiNormalizationCandidateSemanticRun
       annotatedPiGenerationChecked :=
-  annotatedPiGenerationCandidateSemanticShapeRun.run
+  VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape
+    annotatedPiNormalizationCandidateSemanticRun
+    annotatedPiGenerationChecked rfl annotatedPiCandidate_viewDecl_wf
+    annotatedPiCandidate_generationShape
 
 def annotatedPiGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
@@ -8352,9 +8375,9 @@ successful whole-call metadata producer, including its nested annotation-
 consuming traversal in the post-family environment. -/
 def annotatedPiProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage outParamEnv [] :=
-  annotatedPiGenerationCandidateSemanticRun.producedPackage
-    annotatedPiFamilyCandidateContext 0 0 false
-    annotatedPiNormalizationCandidate_produced
+  annotatedPiProducedGenerationShapeCandidate.producedPackage
+    annotatedPiNormalizationCandidateSemanticRun rfl
+    annotatedPiGenerationChecked rfl annotatedPiCandidate_viewDecl_wf
 
 /-- Theory-only erasure consumed by the public certified transaction. -/
 def annotatedPiGenerationCertificate :
@@ -9330,6 +9353,43 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalizationCandidate_produ
 #print axioms aliasFormerNormalizationCandidate_produced
 
 /--
+info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationShapeCandidate_produced' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms aliasFormerGenerationShapeCandidate_produced
+
+/--
 info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedGenerationCandidatePackage' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -9970,6 +10030,36 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidate_produ
 -/
 #guard_msgs in
 #print axioms annotatedPiNormalizationCandidate_produced
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationShapeCandidate_produced' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms annotatedPiGenerationShapeCandidate_produced
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedGenerationCandidatePackage' depends on axioms: [propext,

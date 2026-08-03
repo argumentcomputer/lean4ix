@@ -2870,6 +2870,74 @@ inductive CandidateConstructorSemanticGenerationShapeList
       CandidateConstructorSemanticGenerationShapeList source env Us
         (.cons root roots)
 
+/-- Executable generation-layout check for a complete source-indexed
+constructor candidate list.
+
+The check is intentionally stated against the raw Theory constants retained
+by the semantic hierarchy.  It accepts exactly when every candidate WHNF trace
+preserves the stored main Pi spine and traverses the complete raw constructor
+telescope.  List-length mismatches are rejected explicitly; no `zip` or
+positional lookup can silently truncate either side. -/
+def candidateConstructorSemanticGenerationShape
+    (source : VInductDecl) :
+    {kernelSources : List Constructor} →
+    AddInductive.CandidateList AddInductive.CandidateConstructor
+      kernelSources →
+    List VConstVal → Bool
+  | _, .nil, [] => true
+  | _, .nil, _ :: _ => false
+  | _, .cons _ _, [] => false
+  | _, .cons candidate candidates, raw :: raws =>
+    candidate.type.trace.storedSpine &&
+      candidate.type.trace.spineLength ==
+        (VExpr.telN source.nparams raw.type ++
+          ctorFields (VExpr.dropN source.nparams raw.type)).length &&
+      candidateConstructorSemanticGenerationShape source candidates raws
+
+/-- Executable generation-layout check for a complete singleton
+normalization candidate and its raw Theory family.
+
+This definition is independent of semantic proofs.  It checks only the
+source-indexed candidate traces against the raw family/constructor telescope
+layout that generation would emit.  Verify's retained semantic hierarchy
+later reindexes the same Boolean onto its exact raw family. -/
+def normalizationCandidateGenerationShape
+    {kernelSource : InductiveType}
+    (source : VInductDecl) (raw : VInductiveType)
+    (candidate : AddInductive.NormalizationCandidate [kernelSource]) : Bool :=
+  let familyTrace :=
+    candidate.families.singleton.familyType.type.trace
+  (familyTrace.storedSpine &&
+      familyTrace.spineLength ==
+        (VExpr.telN source.nparams raw.type ++
+          ctorFields (VExpr.dropN source.nparams raw.type)).length) &&
+    candidateConstructorSemanticGenerationShape source
+      candidate.families.singleton.constructors raw.ctors
+
+/-- One executable constructor-list shape check determines every dependent
+per-position shape record required by semantic generation. -/
+def CandidateConstructorSemanticGenerationShapeList.ofCheck
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    (roots : CandidateConstructorSemanticListRun env Us candidates raws)
+    (shape : candidateConstructorSemanticGenerationShape
+      source candidates raws = true) :
+    CandidateConstructorSemanticGenerationShapeList source env Us roots :=
+  match roots with
+  | .nil => .nil
+  | .cons head tail => by
+      simp only [candidateConstructorSemanticGenerationShape,
+        Bool.and_eq_true, beq_iff_eq] at shape
+      exact .cons {
+        storedSpine := shape.1.1
+        spineLength_eq := shape.1.2 }
+        (CandidateConstructorSemanticGenerationShapeList.ofCheck
+          tail shape.2)
+termination_by sizeOf roots
+
 /-- Forget only retained semantic ownership and recover the existing
 generation-facing positional list. -/
 def CandidateSemanticNormalizedCtorListRun.run :
@@ -2971,6 +3039,114 @@ structure GenerationCandidateSemanticShapeRun
   family : CandidateFamilySemanticGenerationShape normalization generation
   constructors : CandidateConstructorSemanticGenerationShapeList source
     normalization.family.typeEnv Us normalization.family.constructors
+
+/-- One executable structural gate for the complete retained singleton
+candidate hierarchy.
+
+The family check uses the complete raw parameter/index telescope.  The
+constructor check traverses the source-indexed candidate and raw lists
+dependently.  This consolidates the former per-fixture family and constructor
+proof records into one computation while remaining separate from semantic
+authority and dependent analysis. -/
+def NormalizationCandidateSemanticRun.generationShape
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source) :
+    Bool :=
+  normalizationCandidateGenerationShape source normalization.raw candidate
+
+/-- One successful outer candidate together with the executable structural
+gate required before mixed raw/view generation.
+
+The record carries the exact ordinary producer equation, so the shape check
+cannot be reused for a different candidate.  It remains operational evidence:
+semantic authority is supplied only after Verify interprets the retained
+checker executions. -/
+structure ProducedGenerationShapeCandidate
+    (source : VInductDecl) (raw : VInductiveType)
+    (kernelSource : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : AddInductive.Context) where
+  candidate : AddInductive.NormalizationCandidate [kernelSource]
+  produced :
+    AddInductive.buildNormalizationCandidate source.nparams
+        [kernelSource] numNested isUnsafe context = .ok candidate
+  shape : normalizationCandidateGenerationShape source raw candidate = true
+
+/-- Run the ordinary outer producer and immediately reject candidates whose
+retained traces cannot support mixed generation of the supplied raw Theory
+family.  The successful result retains both exact producer provenance and the
+single complete shape proof. -/
+def produceGenerationShapeCandidate
+    (source : VInductDecl) (raw : VInductiveType)
+    (kernelSource : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : AddInductive.Context) :
+    Except Exception (ProducedGenerationShapeCandidate source raw kernelSource
+      numNested isUnsafe context) :=
+  match produced : AddInductive.buildNormalizationCandidate source.nparams
+      [kernelSource] numNested isUnsafe context with
+  | .error error => .error error
+  | .ok candidate =>
+    if shape : normalizationCandidateGenerationShape source raw candidate then
+      .ok { candidate, produced, shape }
+    else
+      .error (.other
+        "normalization candidate does not preserve the generation spine")
+
+private theorem produceGenerationShapeCandidate_match_ok
+    {source : VInductDecl} {raw : VInductiveType}
+    {kernelSource : InductiveType} {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (result : Except Exception
+      (AddInductive.NormalizationCandidate [kernelSource]))
+    (toProduced : ∀ actual, result = .ok actual →
+      AddInductive.buildNormalizationCandidate source.nparams
+          [kernelSource] numNested isUnsafe context = .ok actual)
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (result_ok : result = .ok candidate)
+    (shape : normalizationCandidateGenerationShape source raw candidate = true) :
+    (match result_eq : result with
+    | .error error => Except.error error
+    | .ok actual =>
+      if actualShape : normalizationCandidateGenerationShape source raw actual then
+        Except.ok (show ProducedGenerationShapeCandidate source raw kernelSource
+            numNested isUnsafe context from {
+          candidate := actual
+          produced := toProduced actual result_eq
+          shape := actualShape })
+      else
+        Except.error (.other
+          "normalization candidate does not preserve the generation spine")) =
+      Except.ok (show ProducedGenerationShapeCandidate source raw kernelSource
+          numNested isUnsafe context from {
+        candidate
+        produced := toProduced candidate result_ok
+        shape }) := by
+  subst result
+  simp [shape]
+
+/-- A successful ordinary producer equation and successful hierarchy-shape
+check determine the exact successful result of the strengthened producer.
+
+Keeping this dependent-match elimination here avoids repeating proof-carrying
+`Except` reasoning in clients. -/
+theorem produceGenerationShapeCandidate_eq_ok
+    {source : VInductDecl} {raw : VInductiveType}
+    {kernelSource : InductiveType} {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (produced :
+      AddInductive.buildNormalizationCandidate source.nparams
+          [kernelSource] numNested isUnsafe context = .ok candidate)
+    (shape : normalizationCandidateGenerationShape source raw candidate = true) :
+    produceGenerationShapeCandidate source raw kernelSource numNested isUnsafe
+        context =
+      .ok { candidate, produced, shape } := by
+  unfold produceGenerationShapeCandidate
+  exact produceGenerationShapeCandidate_match_ok
+    (result := AddInductive.buildNormalizationCandidate source.nparams
+      [kernelSource] numNested isUnsafe context)
+    (toProduced := fun _ result_eq => result_eq) produced shape
 
 /-- Project the established generation assembler.  Every normalization root,
 view, and recursive spine remains definitionally tied to the semantic owner. -/
@@ -3267,6 +3443,53 @@ def GenerationCandidateSemanticShapeRun.run
   family := input.family.generationRun input.analysis
   constructors := input.constructors.ofAnalysis input.analysis
 
+/-- Build the reduced semantic generation owner from exact dependent
+analysis, semantic WF of the analyzer-owned view declaration, and the single
+executable hierarchy shape check.
+
+`checked` is derived from the exact declaration analyzed by `generation?`;
+callers no longer provide a parallel `Checked.WF` value.  Likewise, the
+family and all constructor shape records are projections of one complete
+source-indexed Boolean gate. -/
+def GenerationCandidateSemanticRun.ofGenerationShape
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source)
+    (analysis : normalization.root.normalization.generation? =
+      some generation)
+    (viewWF : normalization.root.viewDecl.WF env)
+    (shape : normalization.generationShape = true) :
+    GenerationCandidateSemanticRun normalization generation := by
+  simp only [NormalizationCandidateSemanticRun.generationShape,
+    normalizationCandidateGenerationShape, Bool.and_eq_true,
+    beq_iff_eq] at shape
+  have sourceType_eq := normalization.root.sourceType_eq generation
+  have normalization_eq : generation.block.normalization =
+      normalization.root.normalization :=
+    Normalization.generation?_normalization analysis
+  have view_eq : generation.block.normalization.view =
+      normalization.root.viewDecl := by
+    simpa only [NormalizationCandidateRun.normalization] using
+      congrArg (fun norm : Normalization source => norm.view)
+        normalization_eq
+  have checked : generation.block.checked.WF env :=
+    generation.block.checked.wf_of_decl (by
+      rw [view_eq]
+      exact viewWF)
+  apply GenerationCandidateSemanticShapeRun.run {
+    analysis := analysis
+    checked := checked
+    family := {
+      storedSpine := shape.1.1
+      spineLength_eq := by
+        simpa only [NormalizedChecked.rawParams,
+          NormalizedChecked.rawIndices, sourceType_eq] using shape.1.2 }
+    constructors :=
+      CandidateConstructorSemanticGenerationShapeList.ofCheck
+        normalization.family.constructors shape.2 }
+
 /-- Reconstruct well-formedness of the post-family environment from the
 retained pre-family context, candidate raw/view equality, checked family view,
 and exact raw-family insertion.  Fixtures therefore do not supply this semantic
@@ -3548,6 +3771,63 @@ def GenerationCandidateSemanticRun.producedPackage
     ProducedGenerationCandidatePackage env Us :=
   run.run.producedPackage context nparams numNested isUnsafe produced
 
+/-- Construct the complete produced package at the consolidated generation
+shape boundary.
+
+The exact outer metadata equation selects the source-indexed candidate.  The
+retained semantic hierarchy, dependent analysis, analyzer-owned view WF, and
+single executable shape check then determine the generation run used by the
+package.  In particular, callers do not separately provide checked WF or any
+family/constructor shape record. -/
+def NormalizationCandidateSemanticRun.producedPackageOfGenerationShape
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate [kernelSource]}
+    (normalization : NormalizationCandidateSemanticRun env Us candidate source)
+    (generation : GenerationChecked source)
+    (analysis : normalization.root.normalization.generation? =
+      some generation)
+    (viewWF : normalization.root.viewDecl.WF env)
+    (shape : normalization.generationShape = true)
+    (context : AddInductive.Context)
+    (nparams numNested : Nat) (isUnsafe : Bool)
+    (produced :
+      AddInductive.buildNormalizationCandidate nparams
+          [kernelSource] numNested isUnsafe context = .ok candidate) :
+    ProducedGenerationCandidatePackage env Us :=
+  (GenerationCandidateSemanticRun.ofGenerationShape normalization generation
+    analysis viewWF shape).producedPackage context nparams numNested isUnsafe
+      produced
+
+/-- Interpret one successful executable shape-producing outer result as the
+complete semantic package for the same dependent candidate.
+
+`raw_eq` only identifies the raw family carried by the semantic hierarchy
+with the raw family passed to the executable shape gate.  All other
+provenance, including the candidate itself, the outer producer equation, and
+the complete family/constructor shape check, is owned by `producedCandidate`.
+-/
+def ProducedGenerationShapeCandidate.producedPackage
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {raw : VInductiveType} {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (producedCandidate : ProducedGenerationShapeCandidate source raw
+      kernelSource numNested isUnsafe context)
+    (normalization : NormalizationCandidateSemanticRun env Us
+      producedCandidate.candidate source)
+    (raw_eq : raw = normalization.raw)
+    (generation : GenerationChecked source)
+    (analysis : normalization.root.normalization.generation? =
+      some generation)
+    (viewWF : normalization.root.viewDecl.WF env) :
+    ProducedGenerationCandidatePackage env Us :=
+  normalization.producedPackageOfGenerationShape generation analysis viewWF
+    (by
+      simpa only [NormalizationCandidateSemanticRun.generationShape,
+        raw_eq] using producedCandidate.shape)
+    context source.nparams numNested isUnsafe producedCandidate.produced
+
 /-
 The evidence types mention exact verifier executions, so these semantic
 interpretation roots intentionally inherit the same transitional Verify
@@ -3791,6 +4071,152 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on
 -/
 #guard_msgs in
 #print axioms GenerationCandidateSemanticShapeRun.run
+
+/--
+info: 'Lean4Lean.VInductDecl.candidateConstructorSemanticGenerationShape' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms candidateConstructorSemanticGenerationShape
+
+/--
+info: 'Lean4Lean.VInductDecl.normalizationCandidateGenerationShape' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationCandidateGenerationShape
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticGenerationShapeList.ofCheck' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorSemanticGenerationShapeList.ofCheck
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.generationShape' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateSemanticRun.generationShape
+
+/--
+info: 'Lean4Lean.VInductDecl.produceGenerationShapeCandidate' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms produceGenerationShapeCandidate
+
+/--
+info: 'Lean4Lean.VInductDecl.produceGenerationShapeCandidate_eq_ok' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms produceGenerationShapeCandidate_eq_ok
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms GenerationCandidateSemanticRun.ofGenerationShape
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOfGenerationShape' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateSemanticRun.producedPackageOfGenerationShape
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms ProducedGenerationShapeCandidate.producedPackage
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on axioms: [propext,

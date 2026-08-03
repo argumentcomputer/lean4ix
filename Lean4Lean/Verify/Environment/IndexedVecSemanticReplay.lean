@@ -551,48 +551,66 @@ def indexedVecSemanticConsSpineRun :
   indexedVecSemanticConsSemanticRootRun.spine
     consCandidate_identity.storedSpine
 
-def indexedVecSemanticFamilySemanticGenerationShape :
-    VInductDecl.CandidateFamilySemanticGenerationShape
-      indexedVecSemanticNormalizationCandidateSemanticRun
-      indexedVecChecked.identityGeneration where
-  storedSpine := indexedVecFamilyCandidate_identity.storedSpine
-  spineLength_eq := rfl
+theorem indexedVecSemanticCandidate_generationShape :
+    indexedVecSemanticNormalizationCandidateSemanticRun.generationShape =
+      true := by
+  change ((indexedVecFamilyCandidate.trace.storedSpine && true) &&
+    ((nilCandidate.trace.storedSpine && true) &&
+      ((consCandidate.trace.storedSpine && true) && true))) = true
+  rw [indexedVecFamilyCandidate_identity.storedSpine,
+    nilCandidate_identity.storedSpine,
+    consCandidate_identity.storedSpine]
+  rfl
 
-def indexedVecSemanticNilConstructorSemanticGenerationShape :
-    VInductDecl.CandidateConstructorSemanticGenerationShape
-      (source := indexedVecDecl) indexedVecTypeEnv [`u]
-      indexedVecSemanticNilConstructorSemanticRun where
-  storedSpine := nilCandidate_identity.storedSpine
-  spineLength_eq := rfl
+/-- The consolidated constructor gate rejects truncation in either direction
+before dependent semantic generation is assembled. -/
+theorem indexedVecSemanticCandidate_missingRawShape_rejected :
+    VInductDecl.candidateConstructorSemanticGenerationShape indexedVecDecl
+      (.cons indexedVecNilConstructorCandidate .nil) [] = false :=
+  rfl
 
-def indexedVecSemanticConsConstructorSemanticGenerationShape :
-    VInductDecl.CandidateConstructorSemanticGenerationShape
-      (source := indexedVecDecl) indexedVecTypeEnv [`u]
-      indexedVecSemanticConsConstructorSemanticRun where
-  storedSpine := consCandidate_identity.storedSpine
-  spineLength_eq := rfl
+theorem indexedVecSemanticCandidate_extraRawShape_rejected :
+    VInductDecl.candidateConstructorSemanticGenerationShape indexedVecDecl
+      .nil [indexedVecType.ctors[0]] = false :=
+  rfl
 
-def indexedVecSemanticConstructorSemanticGenerationShapeList :
-    VInductDecl.CandidateConstructorSemanticGenerationShapeList
-      indexedVecDecl indexedVecTypeEnv [`u]
-      indexedVecSemanticConstructorSemanticListRun := by
-  exact .cons indexedVecSemanticNilConstructorSemanticGenerationShape
-    (.cons indexedVecSemanticConsConstructorSemanticGenerationShape .nil)
+theorem indexedVecSemanticCandidate_viewDecl_wf :
+    indexedVecSemanticNormalizationCandidateRun.viewDecl.WF natFinalEnv := by
+  change indexedVecDecl.WF natFinalEnv
+  exact indexedVecDecl_wf
 
-def indexedVecSemanticGenerationCandidateSemanticShapeRun :
-    VInductDecl.GenerationCandidateSemanticShapeRun
-      indexedVecSemanticNormalizationCandidateSemanticRun
-      indexedVecChecked.identityGeneration where
-  analysis := rfl
-  checked := indexedVecChecked.wf_of_decl indexedVecDecl_wf
-  family := indexedVecSemanticFamilySemanticGenerationShape
-  constructors := indexedVecSemanticConstructorSemanticGenerationShapeList
+def indexedVecSemanticProducedGenerationShapeCandidate :
+    VInductDecl.ProducedGenerationShapeCandidate indexedVecDecl indexedVecType
+      indexedVecKernelType 0 false indexedVecFamilyCandidateContext where
+  candidate := indexedVecNormalizationCandidate
+  produced := indexedVecNormalizationCandidateProduced
+  shape := indexedVecSemanticCandidate_generationShape
+
+/-- The strengthened outer gate retains the complete parameter/index and
+ordered `nil`/`cons` generation layout in the same produced result. -/
+theorem indexedVecSemanticGenerationShapeCandidate_produced :
+    VInductDecl.produceGenerationShapeCandidate indexedVecDecl indexedVecType
+      indexedVecKernelType 0 false indexedVecFamilyCandidateContext =
+        .ok indexedVecSemanticProducedGenerationShapeCandidate := by
+  have produced :
+      AddInductive.buildNormalizationCandidate indexedVecDecl.nparams
+          [indexedVecKernelType] 0 false indexedVecFamilyCandidateContext =
+        .ok indexedVecNormalizationCandidate :=
+    indexedVecNormalizationCandidateProduced
+  simpa only [indexedVecSemanticProducedGenerationShapeCandidate] using
+    VInductDecl.produceGenerationShapeCandidate_eq_ok
+      (source := indexedVecDecl) (raw := indexedVecType)
+      produced indexedVecSemanticCandidate_generationShape
 
 def indexedVecSemanticGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       indexedVecSemanticNormalizationCandidateSemanticRun
       indexedVecChecked.identityGeneration :=
-  indexedVecSemanticGenerationCandidateSemanticShapeRun.run
+  VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape
+    indexedVecSemanticNormalizationCandidateSemanticRun
+    indexedVecChecked.identityGeneration rfl
+    indexedVecSemanticCandidate_viewDecl_wf
+    indexedVecSemanticCandidate_generationShape
 
 def indexedVecSemanticGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
@@ -606,9 +624,10 @@ def indexedVecSemanticGenerationCandidatePackage :
 
 def indexedVecSemanticProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage natFinalEnv [`u] :=
-  indexedVecSemanticGenerationCandidateSemanticRun.producedPackage
-    indexedVecFamilyCandidateContext 1 0 false
-    indexedVecNormalizationCandidateProduced
+  indexedVecSemanticProducedGenerationShapeCandidate.producedPackage
+    indexedVecSemanticNormalizationCandidateSemanticRun rfl
+    indexedVecChecked.identityGeneration rfl
+    indexedVecSemanticCandidate_viewDecl_wf
 
 def indexedVecSemanticGenerationCertificate :
     indexedVecDecl.GenerationCertificate natFinalEnv :=
@@ -763,6 +782,74 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecReorderedView_rejected' depen
 -/
 #guard_msgs in
 #print axioms indexedVecReorderedView_rejected
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_missingRawShape_rejected' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms indexedVecSemanticCandidate_missingRawShape_rejected
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_extraRawShape_rejected' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms indexedVecSemanticCandidate_extraRawShape_rejected
+
+/--
+info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandidate_produced' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasExprMVar_eq,
+ Expr.hasFVar_eq,
+ Expr.hasLevelMVar_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms indexedVecSemanticGenerationShapeCandidate_produced
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSemanticRun' depends on axioms: [propext,
