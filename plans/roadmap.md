@@ -94,15 +94,26 @@ generation-package, or choice-extraction claim was added. The explicit
 downstream witnesses and analyzer-owned `viewWF` proofs remain visibly
 temporary for L4L-01D/L4L-01E.
 
-**Active milestone: L4L-01B — family-validation semantics and staging.** Start
-from one verified entry candidate context and the exact singleton
-`checkInductiveTypes`/family-candidate execution. Interpret only that family
-phase to derive the analyzer-owned parameter/index telescope, terminal-sort
-typing, raw-family constant WF through semantic definitional equality, exact
-raw-family insertion, and the verified post-family candidate stage. Remove the
-independently verified post-family stages and the three fixture-specific
-post-family `VEnvs.WF` reconstructions. Constructor interpretation belongs to
-L4L-01C/L4L-01D and is not part of this checkpoint.
+**Completed milestone: L4L-01B — family-validation semantics and staging.**
+Source checkpoint `da45b536220a3eff5ed78cf2f5afcf5e7491c40f` interprets the
+exact singleton `checkInductiveTypes`/family-candidate execution from one
+verified entry candidate context. It derives the analyzer-owned
+parameter/index telescope, terminal-sort typing, raw-family constant WF through
+semantic definitional equality, exact raw-family insertion, and the verified
+post-family candidate stage. AliasFormer, AnnotatedPi, and `IndexedVec` no
+longer supply independently verified post-family environments, contexts, or
+fixture-specific post-family `VEnvs.WF` reconstructions. Exact axiom guards and
+the universal Lake/Nix gates pass; constructors are not semantically
+interpreted.
+
+**Active milestone: L4L-01C — retained constructor-validation trace.** Retain
+the complete successful singleton `checkConstructors` traversal as dependent,
+source-ordered operational evidence, including duplicate/closedness/root
+checks, parameter equality, field type/universe checks,
+positivity/recursive-target traversals, and the terminal family application.
+Prove exact decomposition and recomposition with the executable result while
+preserving phase-specific failures. This checkpoint makes no Theory-WF claim;
+semantic interpretation of the trace remains L4L-01D.
 
 The former generic-package milestone was not independently closable: its
 requested view-WF conclusion depends on a semantic interpretation of
@@ -129,8 +140,8 @@ checker, projection, and trust work remains release work rather than evidence
 that the inductive producer track is stalled.
 
 **Baselines.** The current formalization source checkpoint is
-`7c7922091f94b4a4f51c6834b376de376be22e71`
-(`feat: consolidate staged semantic inputs`; 53 commits ahead of
+`da45b536220a3eff5ed78cf2f5afcf5e7491c40f`
+(`feat: derive family validation staging`; 55 commits ahead of
 `upstream/master`). This roadmap update is its ledger-only child. The source
 follows roadmap decomposition checkpoint `f82ee77f7181`, generation-readiness
 source `bbb45e0e950724cdbbd405d75e304e2020cecf82`, and its ledger child
@@ -157,11 +168,14 @@ strengthened producer, and exact-success theorem have exactly the accepted
 `propext`/`Classical.choice`/`Quot.sound` closure; semantic derivations inherit
 only the already recorded checked-semantic closure. L4L-01A adds the staged
 semantic-input owner and migrates all three positives without changing that
-trust boundary or extracting its `Nonempty` result. No new axiom or
-normalization oracle was added. Direct source/fixture compiles, the focused
-118-job Verify build, 157-job default Lake build, default Nix build,
-all-system no-build flake evaluation, exact 20-sorry frontier, formatter, and
-whitespace checks pass on `7c792209`. Local `master` and
+trust boundary or extracting its `Nonempty` result. L4L-01B interprets the
+exact singleton family-validation run and derives the post-family stage from
+the entry context, eliminating every independently verified post-family
+fixture context while leaving constructor interpretation for L4L-01C/L4L-01D.
+No new axiom or normalization oracle was added. The 124-job Theory/Verify
+build, 157-job default Lake build, default Nix build, all six current-host
+flake checks, all-system no-build flake evaluation, exact 20-sorry frontier,
+formatter, and whitespace checks pass on `da45b536`. Local `master` and
 `origin/master` remain fixed at the prior candidate-context-provenance
 checkpoint, `1fb7d6ef9042c5a80b2de9320c88ac0f3ce404cb`; only local
 `jcb/induct` and `origin/jcb/induct` moved. `upstream/master` remains at
@@ -2113,7 +2127,7 @@ executable and proved:
     transaction roots. The identity bridge and ordered alias endpoints use
     exactly `[propext, Classical.choice, Quot.sound]`; alias trace/lookups and
     rule membership use exactly `[propext, Quot.sound]`.
-- [ ] **L4L-01A–L4L-01E (01A complete; 01B active):** complete generic Verify-side production of
+- [ ] **L4L-01A–L4L-01E (01A–01B complete; 01C active):** complete generic Verify-side production of
   normalized transactions in five separately green checkpoints. The
   trace/consumer migration and six actual-metadata replays are complete. The
   generic checker-to-Theory `WhnfRun`, `CheckTypeRun`, `DefEqEvidence`, and
@@ -2122,10 +2136,10 @@ executable and proved:
   AnnotatedPi additionally builds the complete nested candidate, checked
   generation certificate, and transaction from exact checker traces. These
   checked roots no longer bootstrap from older hand-built generation-WF
-  proofs. What remains is not one independent step: semantic-input plumbing,
-  family-validator soundness and environment staging, constructor trace
-  retention, constructor-validator soundness, and final package closure are
-  L4L-01A through L4L-01E respectively. Bare
+  proofs. Semantic-input plumbing and family-validator/environment staging are
+  complete in L4L-01A/L4L-01B. Constructor trace retention,
+  constructor-validator soundness, and final package closure remain the
+  separate L4L-01C through L4L-01E checkpoints. Bare
   `buildNormalizationCandidate` success is insufficient at every stage. The
   whole-candidate non-defeq rejection is a required regression; an arbitrary
   user-supplied view or assumed normalization oracle is forbidden.
@@ -2353,7 +2367,7 @@ executable and proved:
     proof retains exact source-indexed candidate equality, not candidate
     erasure equality or a hand-selected view, and exact guards expose every
     inherited cache/platform dependency.
-  - [ ] **L4L-01A–L4L-01E (01A complete; 01B active):** generalize exact produced-package construction to
+  - [ ] **L4L-01A–L4L-01E (01A–01B complete; 01C active):** generalize exact produced-package construction to
     arbitrary strengthened singleton metadata runs. The executable seam now
     covers `IndexedVec`'s family telescope, parameter, index, and ordered
     two-constructor list; generic identity replay and the concrete
@@ -2454,14 +2468,20 @@ executable and proved:
       three positives use the staged owner, exact constructor order is retained,
       the repeated old input definitions are absent, and focused/universal gates
       pass without changing the axiom frontier.
-    - [ ] **L4L-01B:** interpret the exact singleton family-validation run from
+    - [x] **L4L-01B:** interpret the exact singleton family-validation run from
       one verified entry context. Derive the candidate view parameter/index
       telescope, terminal sort typing, raw-family constant WF through the
       candidate's semantic defeq, the exact raw-family insertion, and the
       verified post-family candidate stage. Remove the second independently
       verified stage and the three fixture-specific post-family `VEnvs.WF`
       reconstructions. Do not inspect or prove constructor validity here.
-    - [ ] **L4L-01C:** retain the complete successful singleton constructor
+      Complete at source checkpoint `da45b536`: the exact singleton validator
+      derives parameter/index views, terminal/raw-family WF, exact insertion,
+      and the post-family candidate stage; none of the three positives retains
+      an independent post-family `VEnvs`/context; constructors remain
+      uninterpreted; family-phase negatives remain sharp; exact axiom guards
+      and universal gates pass.
+    - [ ] **L4L-01C (active):** retain the complete successful singleton constructor
       validator as dependent operational data: duplicate/closedness checks,
       closed root `checkType`, parameter equalities, field `ensureType` and
       universe comparisons, positivity/recursive-target traversals, and the
@@ -3049,8 +3069,8 @@ L4L-01B or permit work to skip directly to L4L-01E.
 |---|---|---|---|
 | **L4L-00 — published generation-readiness baseline** | **complete** | Stabilized fork infrastructure; one generalized source/view artifact path; proof-carrying non-identity transaction; retained semantic hierarchy; complete executable generation-shape gate; AliasFormer, AnnotatedPi, and `IndexedVec` checkpoints. | Source `bbb45e0e`, ledger child `c4fd62b2`, all gates green. Ix Pin A remains the separately recorded `5e5bb767`/`1f73f5c0` pair and has removed the three former inductive sorry origins without making an oracle claim. |
 | **L4L-01A — staged semantic-input consolidation** | **complete** | Introduce one source-indexed builder over explicitly verified pre-family/post-family candidate stages, strict family/constructor translations, exact raw-family insertion alignment, and the existing dependent `Produced` traversals. Return the existing `Nonempty ProducedNormalizationCandidateSemanticRun`; make no view-WF or generation-package claim. | Source `7c792209`. AliasFormer, AnnotatedPi, and `IndexedVec` use the builder; their per-root semantic-input definitions are gone and exact constructor order is retained. Existing explicit downstream witnesses and one `viewWF` proof per positive are marked temporary until L4L-01E; no choice extractor was added; focused and universal gates pass. |
-| **L4L-01B — family-validation semantics and staging** | **active** | Interpret the exact singleton `checkInductiveTypes`/family-candidate run from one verified entry context. Derive view telescope and terminal-sort WF, raw-family constant WF through candidate defeq, exact insertion, and the verified post-family candidate stage. | No positive supplies an independently verified post-family `VEnvs`/context; family terminal, annotation, fuel, and non-sort negatives fail at their original phases; generic roots have exact axiom guards; constructors are not semantically interpreted yet. |
-| **L4L-01C — retained constructor-validation trace** | queued | Add dependent operational evidence for the complete successful singleton `checkConstructors` traversal: duplicate/closedness/root-check, parameter equality, field type/universe, positivity/recursive-target, and terminal-family-application steps. Prove decomposition and recomposition with the executable result. | The trace is source ordered and exact; missing/extra/reordered and each validation-phase negative remain sharp; successful trace equivalence has only the executable baseline closure and makes no Theory-WF claim. |
+| **L4L-01B — family-validation semantics and staging** | **complete** | Interpret the exact singleton `checkInductiveTypes`/family-candidate run from one verified entry context. Derive view telescope and terminal-sort WF, raw-family constant WF through candidate defeq, exact insertion, and the verified post-family candidate stage. | Source `da45b536`. Exact singleton validation semantics derive the parameter/index view split, terminal/raw-family WF, exact insertion, and post-family candidate stage. AliasFormer, AnnotatedPi, and `IndexedVec` supply no independent post-family `VEnvs`/context; family terminal, annotation, fuel, and non-sort negatives remain phase-sharp; constructors remain uninterpreted; exact guards and universal gates pass. |
+| **L4L-01C — retained constructor-validation trace** | **active** | Add dependent operational evidence for the complete successful singleton `checkConstructors` traversal: duplicate/closedness/root-check, parameter equality, field type/universe, positivity/recursive-target, and terminal-family-application steps. Prove decomposition and recomposition with the executable result. | The trace is source ordered and exact; missing/extra/reordered and each validation-phase negative remain sharp; successful trace equivalence has only the executable baseline closure and makes no Theory-WF claim. |
 | **L4L-01D — constructor-validation semantics and view WF** | queued | Interpret the L4L-01C trace with verified checker refinements and retained candidate normalization. Derive `fieldsWF`, constructor result `SpineWF`, and WF of the exact analyzer-owned view declaration for the currently accepted singleton subset. | All three fixture `viewDecl_wf` proofs are deleted; no `Checked.WF`, view, or view-WF premise is renamed or reintroduced; exact axiom guards pass; no normalization or validation breadth is widened. |
 | **L4L-01E — generic singleton package closure** | queued | Combine the L4L-01A–01D owner, exact dependent analysis, and `ProducedGenerationShapeCandidate` into `Nonempty ProducedGenerationCandidatePackage`, retaining the exact ordinary producer equation without granting it shape or Theory authority. | All three positives use only the generic closure theorem; missing/extra/reordered/truncated/non-defeq regressions remain sharp; no manual semantic-input/view-WF scaffolding remains; universal gates pass. |
 | **L4L-02 — isolated level-normalizer closure** | queued | Prove `NormLevel.subsumption_eval` with its existing statement and remove that sorry-frontier entry. Keep this patch independent of inductive APIs. | Focused Level and full builds pass; exact axiom closure is accepted; the change is packaged as a small upstream-ready commit. |
@@ -3192,11 +3212,14 @@ consumer-specific state.
   strengthened-producer results without treating bare producer success as
   semantic authority. L4L-01A additionally consolidates the staged semantic
   inputs while retaining the exact source order and intentionally returning
-  the hierarchy only under `Nonempty`. The current source checkpoint is
-  `7c792209`, with this ledger child on `jcb/induct`. The exact sorry-frontier
-  check, focused direct compiles, focused 118-job Verify build, 157-job default
-  Lake build, default Nix build, all-system no-build evaluation, formatter, and
-  whitespace checks were rerun on 2026-08-03 over that source checkpoint.
+  the hierarchy only under `Nonempty`. L4L-01B derives raw-family WF, exact
+  insertion, and the post-family candidate stage from the singleton family
+  validator, so no positive supplies an independent post-family context. The
+  current source checkpoint is `da45b536`, with this ledger child on
+  `jcb/induct`. The exact sorry-frontier check, 124-job Theory/Verify build,
+  157-job default Lake build, default Nix build, all six current-host flake
+  checks, all-system no-build evaluation, formatter, and whitespace checks
+  were rerun on 2026-08-03 over that source checkpoint.
   Exact compile-time guards show that the new generic and fixture roots add no
   axiom; their broad Verify closure remains explicitly transitional. Pin A
   uses the earlier certificate-bearing `5e5bb767` checkpoint, paired with local
@@ -3267,14 +3290,14 @@ consumer-specific state.
   supported root may import them. Promote a proof only after removing its
   experimental sorries and giving it a stable API.
 
-L4L-01A is complete at `7c792209`: the repeated pre-family/post-family
-semantic-input plumbing now sits behind one source-indexed staged owner, all
-three positives use it, and the result deliberately stops at
-`Nonempty ProducedNormalizationCandidateSemanticRun`. The active L4L-01B task
-removes the independently verified post-family stage by interpreting only the
-family-validation execution. Constructor-trace retention,
-constructor-validator semantics/view WF, and produced-package closure remain
-the separate L4L-01C through L4L-01E checkpoints.
+L4L-01A and L4L-01B are complete at `7c792209` and `da45b536`
+respectively. The repeated semantic-input plumbing sits behind one
+source-indexed staged owner, and exact family-validation semantics derive its
+post-family stage; all three positives use it and the result deliberately
+stops at `Nonempty ProducedNormalizationCandidateSemanticRun`. The active
+L4L-01C task retains the constructor-validation execution without making a
+Theory-WF claim. Constructor-validator semantics/view WF and produced-package
+closure remain the separate L4L-01D and L4L-01E checkpoints.
 `VEnv.addInductGeneration`, its exact data-bearing trace and stable
 consequences, normalized preservation, environment histories, the ordered
 identity bridge, delegated public success/WF roots, all six earlier
@@ -3454,9 +3477,9 @@ analysis plus minimal stored-spine/count shapes. The consolidated
 generation-readiness checkpoint now checks all of those shapes once over the
 complete family/constructor hierarchy, retains the gate with the exact ordinary
 producer equation, and derives checked WF plus every dependent shape record
-from exact analysis and analyzer-owned view WF. L4L-01A consolidates verified
-per-position inputs over the two currently verified stages; L4L-01B derives
-the second stage from family validation; L4L-01C retains constructor
+from exact analysis and analyzer-owned view WF. L4L-01A consolidated verified
+per-position inputs over two verified stages; L4L-01B derived the second stage
+from family validation; L4L-01C now retains constructor
 validation; L4L-01D derives analyzer-owned view WF; and L4L-01E combines the
 result with the strengthened gate to return the complete produced package
 without fixture-specific alignment. Only
@@ -3477,7 +3500,7 @@ and `GenerationChecked.WF` bridges, and exact axiom closures remain regression
 gates.
 
 The current formalization source checkpoint is
-`7c7922091f94b4a4f51c6834b376de376be22e71`, with this roadmap update as its
+`da45b536220a3eff5ed78cf2f5afcf5e7491c40f`, with this roadmap update as its
 ledger child on `argumentcomputer/lean4lean`'s `jcb/induct` branch; neither
 master nor the digama upstream moved. On top of automatic produced
 semantic-hierarchy assembly and
@@ -3495,11 +3518,12 @@ and all per-position shape records from one complete executable hierarchy gate;
 the fixtures no longer supply either class of evidence. Missing and extra raw
 constructor lists are rejected. Exact axiom guards pin the executable roots to
 the standard logical baseline and the semantic roots to the existing
-transitional sets. Completed milestone L4L-01A consolidates the verified staged
-semantic inputs and removes per-position fixture duplication. Active milestone
-L4L-01B derives the post-family stage from exact family-validation semantics;
-the temporary fixture view-WF proofs remain until L4L-01D, and the complete
-produced package is intentionally deferred to L4L-01E. No stage may infer
+transitional sets. Completed milestones L4L-01A and L4L-01B consolidate the
+verified staged semantic inputs and derive the post-family stage from exact
+family-validation semantics. Active milestone L4L-01C retains the exact
+constructor-validation trace without making a Theory-WF claim; the temporary
+fixture view-WF proofs remain until L4L-01D, and the complete produced package
+is intentionally deferred to L4L-01E. No stage may infer
 shape or Theory meaning from bare producer success. Ix Pin A is complete at the
 recorded pair Lean4Lean `5e5bb767b3491d21a71908d4c58bcbaa007283bb`
 and local ix snapshot `1f73f5c016907eadb8ed0dc86ac65b07eb24a145`.
