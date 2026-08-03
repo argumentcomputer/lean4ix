@@ -7155,19 +7155,6 @@ private def aliasFormerCtorCandidateContextRun :
     aliasFormerCtorNormalizationVEnvs_wf rfl
     aliasFormerCtorCandidatePrefix_ne
 
-/-- Pre-run family evidence used by the generic automatic hierarchy
-constructor. -/
-private def aliasFormerFamilySemanticRootInput :
-    TypeChecker.CandidateExprSemanticRootInput typeFamilyAliasEnv []
-      aliasFormerFamilyCandidate aliasFormerRawType.type where
-  contextRun := aliasFormerCandidateContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := aliasFormerFamily_candidateSource_tr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
 /-- Family endpoint certificate used by the singleton list assembler. -/
 private def aliasFormerFamilySemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun typeFamilyAliasEnv []
@@ -7233,19 +7220,6 @@ private def aliasFormerCtorCandidateRun :
       aliasFormerRawType.ctors[0].type
       (.const ``TypeFamilyAlias []) :=
   .terminal aliasFormerCtorCandidateNodeRun
-
-/-- Pre-run constructor evidence leaves the opaque-normalized view to the
-retained checker interpreter. -/
-private def aliasFormerCtorSemanticRootInput :
-    TypeChecker.CandidateExprSemanticRootInput aliasFormerTypeEnv []
-      aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type where
-  contextRun := aliasFormerCtorCandidateContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := aliasFormerCtorCheckTypeRun.expr_tr
-  whnfFuel := 9999
-  whnfDepth := rfl
 
 /-- Constructor endpoint certificate in the exact post-family context. -/
 private def aliasFormerCtorSemanticRootRun :
@@ -7398,13 +7372,6 @@ private def aliasFormerCandidateConstructorSemanticRun :
   uvars_eq := rfl
   type := aliasFormerCtorSemanticRootRun
 
-private def aliasFormerCandidateConstructorSemanticInput :
-    VInductDecl.CandidateConstructorSemanticInput aliasFormerTypeEnv []
-      aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := aliasFormerCtorSemanticRootInput
-
 private def aliasFormerCandidateConstructorRun :
     VInductDecl.CandidateConstructorRun aliasFormerTypeEnv []
       aliasFormerConstructorCandidate aliasFormerRawType.ctors[0] :=
@@ -7415,12 +7382,6 @@ private def aliasFormerCandidateConstructorSemanticListRun :
       aliasFormerFamilyListCandidate.constructors
       aliasFormerRawType.ctors := by
   exact .cons aliasFormerCandidateConstructorSemanticRun .nil
-
-private def aliasFormerCandidateConstructorSemanticListInput :
-    VInductDecl.CandidateConstructorSemanticListInput aliasFormerTypeEnv []
-      aliasFormerFamilyListCandidate.constructors
-      aliasFormerRawType.ctors := by
-  exact .cons aliasFormerCandidateConstructorSemanticInput .nil
 
 private def aliasFormerCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun aliasFormerTypeEnv []
@@ -7438,23 +7399,14 @@ private def aliasFormerCandidateFamilySemanticRun :
   addType := rfl
   constructors := aliasFormerCandidateConstructorSemanticListRun
 
-private def aliasFormerCandidateFamilySemanticInput :
-    VInductDecl.CandidateFamilySemanticInput typeFamilyAliasEnv []
-      aliasFormerFamilyListCandidate aliasFormerRawType where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := aliasFormerFamilySemanticRootInput
-  typeEnv := aliasFormerTypeEnv
-  addType := rfl
-  constructors := aliasFormerCandidateConstructorSemanticListInput
-
 private def aliasFormerCandidateFamilyRun :
     VInductDecl.CandidateFamilyRun typeFamilyAliasEnv []
       aliasFormerFamilyListCandidate aliasFormerRawType :=
   aliasFormerCandidateFamilySemanticRun.root
 
-/-- The complete source-indexed singleton candidate list is now the source of
-the Theory normalization value and its semantic run. -/
+/-- Temporary L4L-01A compatibility witness used by downstream generation.
+The staged owner above independently proves existence without choosing this
+value; L4L-01E removes the explicit witness. -/
 private def aliasFormerNormalizationCandidateSemanticRun :
     VInductDecl.NormalizationCandidateSemanticRun typeFamilyAliasEnv []
       aliasFormerNormalizationCandidate aliasFormerRawDecl where
@@ -7463,13 +7415,43 @@ private def aliasFormerNormalizationCandidateSemanticRun :
   uvars_eq := rfl
   family := aliasFormerCandidateFamilySemanticRun
 
-private def aliasFormerNormalizationCandidateSemanticInput :
-    VInductDecl.NormalizationCandidateSemanticInput typeFamilyAliasEnv []
-      aliasFormerNormalizationCandidate aliasFormerRawDecl where
+private def aliasFormerStagedSemanticInput :
+    VInductDecl.StagedNormalizationCandidateSemanticInput
+      aliasFormerCandidateContext aliasFormerCtorCandidateContext
+      typeFamilyAliasEnv [] aliasFormerNormalizationCandidate
+      aliasFormerRawDecl where
   raw := aliasFormerRawType
   raw_types_eq := rfl
-  uvars_eq := rfl
-  family := aliasFormerCandidateFamilySemanticInput
+  declaration_uvars_eq := rfl
+  family_name_eq := rfl
+  family_uvars_eq := rfl
+  preFamily := {
+    contextRun := aliasFormerCandidateContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  familyType := {
+    context_eq := rfl
+    source_tr := aliasFormerFamily_candidateSource_tr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  typeEnv := aliasFormerTypeEnv
+  addType := rfl
+  postFamily := {
+    contextRun := aliasFormerCtorCandidateContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  constructors := .cons {
+    name_eq := rfl
+    uvars_eq := rfl
+    type := {
+      context_eq := rfl
+      source_tr := aliasFormerCtorCheckTypeRun.expr_tr
+      whnfFuel := 9999
+      whnfDepth := rfl } } .nil
+  familyTypesProduced := aliasFormerFamilyTypeListProduced
+  familiesProduced := aliasFormerFamilyListProduced
 
 /-- The exact family/constructor producer traversals and verified translations
 automatically determine a complete retained AliasFormer hierarchy. -/
@@ -7478,8 +7460,7 @@ theorem aliasFormerProducedSemanticHierarchy_exists :
       aliasFormerCandidateContext aliasFormerCtorCandidateContext
       typeFamilyAliasEnv [] aliasFormerNormalizationCandidate
       aliasFormerRawDecl) :=
-  aliasFormerNormalizationCandidateSemanticInput.exists_ofProduced
-    aliasFormerFamilyTypeListProduced aliasFormerFamilyListProduced
+  aliasFormerStagedSemanticInput.exists
 
 def aliasFormerNormalizationCandidateRun :
     VInductDecl.NormalizationCandidateRun typeFamilyAliasEnv []
@@ -7578,6 +7559,8 @@ private theorem aliasFormerCandidate_generationShape :
     aliasFormerNormalizationCandidateSemanticRun.generationShape = true :=
   rfl
 
+/-- Temporary L4L-01A view-WF compatibility premise. L4L-01D derives this
+from retained validation and L4L-01E removes it from package construction. -/
 private theorem aliasFormerCandidate_viewDecl_wf :
     aliasFormerNormalizationCandidateRun.viewDecl.WF
       typeFamilyAliasEnv := by
@@ -7909,17 +7892,6 @@ private def annotatedPiFamilyCandidateRun :
       (.sort (.succ (.succ .zero))) :=
   .terminal annotatedPiFamilyCandidateNodeRun
 
-private def annotatedPiFamilySemanticRootInput :
-    TypeChecker.CandidateExprSemanticRootInput outParamEnv []
-      annotatedPiFamilyCandidate annotatedPiRawType.type where
-  contextRun := annotatedPiFamilyCandidateContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := annotatedPiFamilyCandidateRun.source_tr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
 private def annotatedPiFamilySemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun outParamEnv []
       annotatedPiFamilyCandidate annotatedPiRawType.type
@@ -8140,17 +8112,6 @@ private def annotatedPiCtorCandidateRun :
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner])
     (annotatedPiFamilyConst_hasType [annotatedPiRawInner]) rfl
 
-private def annotatedPiCtorSemanticRootInput :
-    TypeChecker.CandidateExprSemanticRootInput annotatedPiTypeEnv []
-      annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type where
-  contextRun := annotatedPiCtorCandidateContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := annotatedPiCtorCandidateRun.source_tr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
 private def annotatedPiCtorSemanticRootRun :
     TypeChecker.CandidateExprSemanticRootRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
@@ -8195,13 +8156,6 @@ private def annotatedPiCandidateConstructorSemanticRun :
   uvars_eq := rfl
   type := annotatedPiCtorSemanticRootRun
 
-private def annotatedPiCandidateConstructorSemanticInput :
-    VInductDecl.CandidateConstructorSemanticInput annotatedPiTypeEnv []
-      annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := annotatedPiCtorSemanticRootInput
-
 private def annotatedPiCandidateConstructorRun :
     VInductDecl.CandidateConstructorRun annotatedPiTypeEnv []
       annotatedPiConstructorCandidate annotatedPiRawType.ctors[0] :=
@@ -8212,12 +8166,6 @@ private def annotatedPiCandidateConstructorSemanticListRun :
       annotatedPiFamilyListCandidate.constructors
       annotatedPiRawType.ctors := by
   exact .cons annotatedPiCandidateConstructorSemanticRun .nil
-
-private def annotatedPiCandidateConstructorSemanticListInput :
-    VInductDecl.CandidateConstructorSemanticListInput annotatedPiTypeEnv []
-      annotatedPiFamilyListCandidate.constructors
-      annotatedPiRawType.ctors := by
-  exact .cons annotatedPiCandidateConstructorSemanticInput .nil
 
 private def annotatedPiCandidateConstructorListRun :
     VInductDecl.CandidateConstructorListRun annotatedPiTypeEnv []
@@ -8235,24 +8183,14 @@ private def annotatedPiCandidateFamilySemanticRun :
   addType := rfl
   constructors := annotatedPiCandidateConstructorSemanticListRun
 
-private def annotatedPiCandidateFamilySemanticInput :
-    VInductDecl.CandidateFamilySemanticInput outParamEnv []
-      annotatedPiFamilyListCandidate annotatedPiRawType where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := annotatedPiFamilySemanticRootInput
-  typeEnv := annotatedPiTypeEnv
-  addType := rfl
-  constructors := annotatedPiCandidateConstructorSemanticListInput
-
 private def annotatedPiCandidateFamilyRun :
     VInductDecl.CandidateFamilyRun outParamEnv []
       annotatedPiFamilyListCandidate annotatedPiRawType :=
   annotatedPiCandidateFamilySemanticRun.root
 
-/-- Complete normalization candidate for the annotation-bearing recursive Π
-fixture. The family is unchanged; the constructor domain is reconstructed
-from the exact recursive checker trace with only `outParam` peeled. -/
+/-- Temporary L4L-01A compatibility witness for the annotation-bearing
+recursive Pi fixture. The staged owner proves existence without choosing it;
+L4L-01E removes this explicit downstream value. -/
 private def annotatedPiNormalizationCandidateSemanticRun :
     VInductDecl.NormalizationCandidateSemanticRun outParamEnv []
       annotatedPiNormalizationCandidate annotatedPiRawDecl where
@@ -8261,13 +8199,43 @@ private def annotatedPiNormalizationCandidateSemanticRun :
   uvars_eq := rfl
   family := annotatedPiCandidateFamilySemanticRun
 
-private def annotatedPiNormalizationCandidateSemanticInput :
-    VInductDecl.NormalizationCandidateSemanticInput outParamEnv []
-      annotatedPiNormalizationCandidate annotatedPiRawDecl where
+private def annotatedPiStagedSemanticInput :
+    VInductDecl.StagedNormalizationCandidateSemanticInput
+      annotatedPiFamilyCandidateContext annotatedPiCtorCandidateContext
+      outParamEnv [] annotatedPiNormalizationCandidate
+      annotatedPiRawDecl where
   raw := annotatedPiRawType
   raw_types_eq := rfl
-  uvars_eq := rfl
-  family := annotatedPiCandidateFamilySemanticInput
+  declaration_uvars_eq := rfl
+  family_name_eq := rfl
+  family_uvars_eq := rfl
+  preFamily := {
+    contextRun := annotatedPiFamilyCandidateContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  familyType := {
+    context_eq := rfl
+    source_tr := annotatedPiFamilyCandidateRun.source_tr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  typeEnv := annotatedPiTypeEnv
+  addType := rfl
+  postFamily := {
+    contextRun := annotatedPiCtorCandidateContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  constructors := .cons {
+    name_eq := rfl
+    uvars_eq := rfl
+    type := {
+      context_eq := rfl
+      source_tr := annotatedPiCtorCandidateRun.source_tr
+      whnfFuel := 9999
+      whnfDepth := rfl } } .nil
+  familyTypesProduced := annotatedPiFamilyTypeListProduced
+  familiesProduced := annotatedPiFamilyListProduced
 
 /-- The exact family/constructor producer traversals and verified translations
 automatically determine the complete retained AnnotatedPi hierarchy, including
@@ -8277,8 +8245,7 @@ theorem annotatedPiProducedSemanticHierarchy_exists :
       annotatedPiFamilyCandidateContext annotatedPiCtorCandidateContext
       outParamEnv [] annotatedPiNormalizationCandidate
       annotatedPiRawDecl) :=
-  annotatedPiNormalizationCandidateSemanticInput.exists_ofProduced
-    annotatedPiFamilyTypeListProduced annotatedPiFamilyListProduced
+  annotatedPiStagedSemanticInput.exists
 
 def annotatedPiNormalizationCandidateRun :
     VInductDecl.NormalizationCandidateRun outParamEnv []
@@ -8313,6 +8280,8 @@ private theorem annotatedPiCandidate_generationShape :
   rw [annotatedPiCtorCandidate_storedSpine]
   rfl
 
+/-- Temporary L4L-01A view-WF compatibility premise. L4L-01D derives this
+from retained validation and L4L-01E removes it from package construction. -/
 private theorem annotatedPiCandidate_viewDecl_wf :
     annotatedPiNormalizationCandidateRun.viewDecl.WF outParamEnv := by
   change annotatedPiViewDecl.WF outParamEnv

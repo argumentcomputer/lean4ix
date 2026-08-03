@@ -1426,6 +1426,57 @@ theorem CandidateExprSemanticRootInput.exists
     input.venv_eq input.lparams_eq input.vlctx_eq input.source_tr
     input.whnfFuel input.whnfDepth
 
+/-- One explicitly verified root stage shared by every candidate expression
+interpreted before or after family insertion.
+
+The stage owns the implementation/Theory context alignment once. Individual
+source positions retain only their strict translation, fuel relation, and the
+equality identifying the candidate's stored context with this stage. This is
+the reusable boundary between staged environment validation and the retained
+recursive candidate interpreter. -/
+structure CandidateSemanticStage
+    (candidateContext : AddInductive.Context) (env : VEnv) (Us : List Name)
+    where
+  contextRun : CandidateContextRun candidateContext
+  venv_eq : contextRun.context.venv = env
+  lparams_eq : contextRun.context.lparams = Us
+  vlctx_eq : contextRun.context.vlctx = []
+
+/-- Source-position evidence interpreted in one shared candidate stage.
+
+`context_eq` prevents a verified stage for another producer position from
+being reused. The normalized Theory endpoint is deliberately absent: it is
+selected only by `CandidateExprSemanticRootInput.exists`. -/
+structure CandidateExprStagedInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    (stage : CandidateSemanticStage candidateContext env Us)
+    {source : Expr} (candidate : AddInductive.CandidateExpr source)
+    (source' : VExpr) where
+  context_eq : candidateContext = candidate.context
+  source_tr : TrExprS env Us [] source source'
+  whnfFuel : Nat
+  whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1
+
+/-- Specialize a shared verified stage to one exact source-indexed candidate
+root. This is a pure dependent transport; it neither runs the checker nor
+chooses the semantic view. -/
+def CandidateExprStagedInput.rootInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {source : Expr} {candidate : AddInductive.CandidateExpr source}
+    {source' : VExpr}
+    {stage : CandidateSemanticStage candidateContext env Us}
+    (input : CandidateExprStagedInput stage candidate source') :
+    CandidateExprSemanticRootInput env Us candidate source' := by
+  cases input.context_eq
+  exact {
+    contextRun := stage.contextRun
+    venv_eq := stage.venv_eq
+    lparams_eq := stage.lparams_eq
+    vlctx_eq := stage.vlctx_eq
+    source_tr := input.source_tr
+    whnfFuel := input.whnfFuel
+    whnfDepth := input.whnfDepth }
+
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
 tail is checked in the context extended by the raw binder, exactly matching
 `VEnv.TelDefEq` and the mixed generator's raw-binder discipline. -/
@@ -2327,6 +2378,67 @@ theorem CandidateConstructorSemanticListInput.exists
     obtain ⟨tailRun⟩ := ih
     exact ⟨.cons headRun tailRun⟩
 
+/-- One source-indexed constructor interpreted in the shared post-family
+stage. Header equality and universe alignment stay attached to the exact raw
+constructor position; the expression payload contains no independently
+verified context and no caller-selected semantic view. -/
+structure CandidateConstructorStagedInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    (stage : TypeChecker.CandidateSemanticStage candidateContext env Us)
+    {source : Constructor}
+    (candidate : AddInductive.CandidateConstructor source)
+    (raw : VConstVal) where
+  name_eq : source.name = raw.name
+  uvars_eq : raw.uvars = Us.length
+  type : TypeChecker.CandidateExprStagedInput stage candidate.type raw.type
+
+/-- Forget only the shared-stage presentation and recover the established
+constructor semantic input. -/
+def CandidateConstructorStagedInput.semanticInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {source : Constructor}
+    {candidate : AddInductive.CandidateConstructor source}
+    {raw : VConstVal}
+    {stage : TypeChecker.CandidateSemanticStage candidateContext env Us}
+    (input : CandidateConstructorStagedInput stage candidate raw) :
+    CandidateConstructorSemanticInput env Us candidate raw where
+  name_eq := input.name_eq
+  uvars_eq := input.uvars_eq
+  type := input.type.rootInput
+
+/-- Exact source-order translations for every constructor in one shared
+post-family stage. The dependent indices enforce length, order, source, raw
+header, and candidate alignment without `zip` or list lookup. -/
+inductive CandidateConstructorStagedListInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    (stage : TypeChecker.CandidateSemanticStage candidateContext env Us) :
+    {sources : List Constructor} →
+      AddInductive.CandidateList AddInductive.CandidateConstructor sources →
+      List VConstVal → Type where
+  | nil : CandidateConstructorStagedListInput stage .nil []
+  | cons
+      (head : CandidateConstructorStagedInput stage candidate raw)
+      (tail : CandidateConstructorStagedListInput stage candidates raws) :
+      CandidateConstructorStagedListInput stage
+        (.cons candidate candidates) (raw :: raws)
+
+/-- Convert the staged, source-indexed constructor translations to the
+existing recursive semantic-input representation. -/
+def CandidateConstructorStagedListInput.semanticInput
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {stage : TypeChecker.CandidateSemanticStage candidateContext env Us}
+    {sources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources}
+    {raws : List VConstVal}
+    (input : CandidateConstructorStagedListInput stage candidates raws) :
+    CandidateConstructorSemanticListInput env Us candidates raws :=
+  match input with
+  | .nil => CandidateConstructorSemanticListInput.nil
+  | .cons head tail =>
+    CandidateConstructorSemanticListInput.cons
+      head.semanticInput tail.semanticInput
+
 /-- Pre-run semantic evidence for a complete singleton family position.  The
 family type is interpreted in the input environment and its constructor list
 in the exact environment obtained by inserting the raw family constant. -/
@@ -2422,6 +2534,78 @@ theorem NormalizationCandidateSemanticInput.exists_ofProduced
     semantic := semantic
     familyTypesProduced := familyTypesProduced
     familiesProduced := familiesProduced }⟩
+
+/-- The complete two-stage semantic input for a produced singleton candidate.
+
+The pre-family and post-family verifier alignments are owned exactly once.
+The raw-family insertion connects their Theory environments, while the two
+dependent producer traversals connect their implementation contexts to the
+same source-indexed candidate. Family and constructor expression positions
+then supply only strict translations and fuel equalities. No normalized view,
+semantic run, declaration-WF proof, or generation package is an input. -/
+structure StagedNormalizationCandidateSemanticInput
+    (familyContext constructorContext : AddInductive.Context)
+    (env : VEnv) (Us : List Name)
+    {source : InductiveType}
+    (candidate : AddInductive.NormalizationCandidate [source])
+    (rawDecl : VInductDecl) where
+  raw : VInductiveType
+  raw_types_eq : rawDecl.types = [raw]
+  declaration_uvars_eq : rawDecl.uvars = Us.length
+  family_name_eq : source.name = raw.name
+  family_uvars_eq : raw.uvars = Us.length
+  preFamily : TypeChecker.CandidateSemanticStage familyContext env Us
+  familyType : TypeChecker.CandidateExprStagedInput preFamily
+    candidate.families.singleton.familyType.type raw.type
+  typeEnv : VEnv
+  addType : env.addConst raw.name raw.toVConstant = some typeEnv
+  postFamily : TypeChecker.CandidateSemanticStage constructorContext typeEnv Us
+  constructors : CandidateConstructorStagedListInput postFamily
+    candidate.families.singleton.constructors raw.ctors
+  familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
+    familyContext
+    (.cons candidate.families.singleton.familyType .nil)
+  familiesProduced : AddInductive.CandidateFamilyListProduced
+    constructorContext
+    (.cons candidate.families.singleton.familyType .nil)
+    candidate.families
+
+/-- Project the established semantic-input hierarchy from the consolidated
+two-stage owner. This projection remains data-free with respect to checker
+semantics: it only rearranges verified stage and translation evidence. -/
+def StagedNormalizationCandidateSemanticInput.semanticInput
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : StagedNormalizationCandidateSemanticInput familyContext
+      constructorContext env Us candidate rawDecl) :
+    NormalizationCandidateSemanticInput env Us candidate rawDecl where
+  raw := input.raw
+  raw_types_eq := input.raw_types_eq
+  uvars_eq := input.declaration_uvars_eq
+  family := {
+    name_eq := input.family_name_eq
+    uvars_eq := input.family_uvars_eq
+    type := input.familyType.rootInput
+    typeEnv := input.typeEnv
+    addType := input.addType
+    constructors := input.constructors.semanticInput }
+
+/-- Interpret a complete produced singleton candidate from its two explicitly
+verified stages. The result stays in `Nonempty`; in particular, this theorem
+does not use choice to expose a semantic run as executable data. -/
+theorem StagedNormalizationCandidateSemanticInput.exists
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : StagedNormalizationCandidateSemanticInput familyContext
+      constructorContext env Us candidate rawDecl) :
+    Nonempty (ProducedNormalizationCandidateSemanticRun
+      familyContext constructorContext env Us candidate rawDecl) :=
+  input.semanticInput.exists_ofProduced input.familyTypesProduced
+    input.familiesProduced
 
 /-- Forget executable list provenance and expose the existing normalization
 root selected by the automatic semantic hierarchy. -/
@@ -3935,6 +4119,40 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticInput.exists_ofProduc
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateSemanticInput.exists_ofProduced
+
+/--
+info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLevelParam_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
+ Expr.mkAppRangeAux.eq_def,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms StagedNormalizationCandidateSemanticInput.exists
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateFamilySemanticGenerationRun.run' depends on axioms: [propext,

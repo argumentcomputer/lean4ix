@@ -256,84 +256,49 @@ theorem indexedVecSemanticConsSourceTr :
   exact hshape.to_trExprS indexedVecTypeEnv_ordered trivial
     ⟨.sort u, htype⟩
 
-/-- Pre-run family evidence: the retained checker, rather than this fixture,
-will select the normalized Theory endpoint. -/
-def indexedVecSemanticFamilyRootInput :
-    TypeChecker.CandidateExprSemanticRootInput natFinalEnv [`u]
-      indexedVecFamilyCandidate indexedVecType.type where
-  contextRun := indexedVecSemanticFamilyContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := indexedVecSemanticFamilySourceTr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
-def indexedVecSemanticNilRootInput :
-    TypeChecker.CandidateExprSemanticRootInput indexedVecTypeEnv [`u]
-      nilCandidate indexedVecType.ctors[0].type where
-  contextRun := by
-    simpa [nilCandidate, nilCandidateContext] using
-      indexedVecSemanticCtorContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := indexedVecSemanticNilSourceTr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
-def indexedVecSemanticConsRootInput :
-    TypeChecker.CandidateExprSemanticRootInput indexedVecTypeEnv [`u]
-      consCandidate indexedVecType.ctors[1].type where
-  contextRun := by
-    simpa [consCandidate, consRootContext] using
-      indexedVecSemanticCtorContextRun
-  venv_eq := rfl
-  lparams_eq := rfl
-  vlctx_eq := rfl
-  source_tr := indexedVecSemanticConsSourceTr
-  whnfFuel := 9999
-  whnfDepth := rfl
-
-def indexedVecSemanticNilConstructorInput :
-    VInductDecl.CandidateConstructorSemanticInput indexedVecTypeEnv [`u]
-      indexedVecNilConstructorCandidate indexedVecType.ctors[0] where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := indexedVecSemanticNilRootInput
-
-def indexedVecSemanticConsConstructorInput :
-    VInductDecl.CandidateConstructorSemanticInput indexedVecTypeEnv [`u]
-      indexedVecConsConstructorCandidate indexedVecType.ctors[1] where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := indexedVecSemanticConsRootInput
-
-/-- The automatic input list is indexed by the real ordered `nil`/`cons`
-sources and both raw Theory constants. -/
-def indexedVecSemanticConstructorListInput :
-    VInductDecl.CandidateConstructorSemanticListInput indexedVecTypeEnv [`u]
-      indexedVecFamilyListCandidate.constructors indexedVecType.ctors := by
-  exact .cons indexedVecSemanticNilConstructorInput
-    (.cons indexedVecSemanticConsConstructorInput .nil)
-
-def indexedVecSemanticFamilyInput :
-    VInductDecl.CandidateFamilySemanticInput natFinalEnv [`u]
-      indexedVecFamilyListCandidate indexedVecType where
-  name_eq := rfl
-  uvars_eq := rfl
-  type := indexedVecSemanticFamilyRootInput
-  typeEnv := indexedVecTypeEnv
-  addType := rfl
-  constructors := indexedVecSemanticConstructorListInput
-
-def indexedVecSemanticNormalizationCandidateInput :
-    VInductDecl.NormalizationCandidateSemanticInput natFinalEnv [`u]
+def indexedVecStagedSemanticInput :
+    VInductDecl.StagedNormalizationCandidateSemanticInput
+      indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
   raw := indexedVecType
   raw_types_eq := rfl
-  uvars_eq := rfl
-  family := indexedVecSemanticFamilyInput
+  declaration_uvars_eq := rfl
+  family_name_eq := rfl
+  family_uvars_eq := rfl
+  preFamily := {
+    contextRun := indexedVecSemanticFamilyContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  familyType := {
+    context_eq := rfl
+    source_tr := indexedVecSemanticFamilySourceTr
+    whnfFuel := 9999
+    whnfDepth := rfl }
+  typeEnv := indexedVecTypeEnv
+  addType := rfl
+  postFamily := {
+    contextRun := indexedVecSemanticCtorContextRun
+    venv_eq := rfl
+    lparams_eq := rfl
+    vlctx_eq := rfl }
+  constructors := .cons {
+    name_eq := rfl
+    uvars_eq := rfl
+    type := {
+      context_eq := rfl
+      source_tr := indexedVecSemanticNilSourceTr
+      whnfFuel := 9999
+      whnfDepth := rfl } } (.cons {
+    name_eq := rfl
+    uvars_eq := rfl
+    type := {
+      context_eq := rfl
+      source_tr := indexedVecSemanticConsSourceTr
+      whnfFuel := 9999
+      whnfDepth := rfl } } .nil)
+  familyTypesProduced := indexedVecFamilyTypeListProduced
+  familiesProduced := indexedVecFamilyListProduced
 
 /-- Generic automatic assembly joins the arbitrary-length operational list
 witnesses to the complete retained semantic hierarchy for the two-constructor
@@ -342,8 +307,7 @@ theorem indexedVecProducedSemanticHierarchy_exists :
     Nonempty (VInductDecl.ProducedNormalizationCandidateSemanticRun
       indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl) :=
-  indexedVecSemanticNormalizationCandidateInput.exists_ofProduced
-    indexedVecFamilyTypeListProduced indexedVecFamilyListProduced
+  indexedVecStagedSemanticInput.exists
 
 /-- The automatically assembled hierarchy retains both constructor headers in
 the producer's `nil`/`cons` source order.  This inspects the semantic result,
@@ -505,6 +469,9 @@ def indexedVecSemanticFamilyRun :
       indexedVecFamilyListCandidate indexedVecType :=
   indexedVecSemanticFamilySemanticRun.root
 
+/-- Temporary L4L-01A compatibility witness. The two-stage owner proves a
+semantic run exists without choosing this concrete identity value; L4L-01E
+removes the explicit downstream witness. -/
 def indexedVecSemanticNormalizationCandidateSemanticRun :
     VInductDecl.NormalizationCandidateSemanticRun natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
@@ -574,6 +541,8 @@ theorem indexedVecSemanticCandidate_extraRawShape_rejected :
       .nil [indexedVecType.ctors[0]] = false :=
   rfl
 
+/-- Temporary L4L-01A view-WF compatibility premise. L4L-01D derives this
+from retained validation and L4L-01E removes it from package construction. -/
 theorem indexedVecSemanticCandidate_viewDecl_wf :
     indexedVecSemanticNormalizationCandidateRun.viewDecl.WF natFinalEnv := by
   change indexedVecDecl.WF natFinalEnv
