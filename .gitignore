@@ -1,4 +1,6 @@
 /.lake
 /result
 /.direnv
-/plans
+# Keep scratch plans local while versioning the authoritative execution ladder.
+/plans/*
+!/plans/roadmap.md
