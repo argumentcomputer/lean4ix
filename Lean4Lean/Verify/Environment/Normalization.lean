@@ -1,5 +1,5 @@
 import Lean4Lean.Verify.TypeChecker
-import Lean4Lean.Inductive.Add
+import Lean4Lean.Inductive.ValidationTrace
 
 namespace Lean4Lean
 open Lean hiding Environment Exception
@@ -2967,6 +2967,10 @@ structure StagedNormalizationCandidateSemanticInput
   preFamily : TypeChecker.CandidateSemanticStage familyContext env Us
   family : CandidateFamilyStagedInput familyContext constructorContext env Us
     candidate.families.singleton.familyType raw preFamily
+  constructorValidation : AddInductive.ConstructorValidationRun
+    source family.validation.stats false
+      { candidate.families.singleton.familyType.type.trace.terminalContext with
+        env := constructorContext.env }
   constructors : CandidateConstructorStagedListInput family.postFamily
     candidate.families.singleton.constructors raw.ctors
   familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
@@ -2976,6 +2980,21 @@ structure StagedNormalizationCandidateSemanticInput
     constructorContext
     (.cons candidate.families.singleton.familyType .nil)
     candidate.families
+
+/-- The staged owner retains exactly the successful executable constructor
+validation that selected its source-indexed constructor list. -/
+theorem StagedNormalizationCandidateSemanticInput.constructorValidation_run
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : StagedNormalizationCandidateSemanticInput familyContext
+      constructorContext env Us candidate rawDecl) :
+    AddInductive.checkConstructors #[source] input.family.validation.stats
+        false
+        { candidate.families.singleton.familyType.type.trace.terminalContext with
+          env := constructorContext.env } = .ok () :=
+  input.constructorValidation.run
 
 /-- Project the established semantic-input hierarchy from the consolidated
 two-stage owner. This projection remains data-free with respect to checker
@@ -6167,6 +6186,39 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends 
 -/
 #guard_msgs in
 #print axioms GenerationCandidatePackage.addInductTrace
+
+/--
+info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.constructorValidation_run' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms StagedNormalizationCandidateSemanticInput.constructorValidation_run
 
 end VInductDecl
 

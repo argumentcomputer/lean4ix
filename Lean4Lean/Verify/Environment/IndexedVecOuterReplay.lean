@@ -1220,7 +1220,7 @@ theorem indexedVecValidationTailPositivity :
   rfl
 
 theorem indexedVecValidationNilLoopTerminal :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelNil.name indexedVecValidationNilResult 1 999
       indexedVecCtorValidationContext = .ok () := by
@@ -1235,19 +1235,19 @@ theorem indexedVecValidationNilLoopTerminal :
       indexedVecValidationAlphaShape] using
       indexedVecValidationNilResultIsValid
   unfold indexedVecValidationNilResult ctorIndexedVecApp
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp [hvalid,
     ReaderT.pure, Pure.pure, Except.pure]
 
 theorem indexedVecValidationNilLoop :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelNil.name indexedVecKernelNil.type 0
       indexedVecCtorValidationContext.fuel.inductiveFuel
       indexedVecCtorValidationContext = .ok () := by
   rw [show indexedVecCtorValidationContext.fuel.inductiveFuel =
       999 + 1 by rfl]
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only [indexedVecKernelNil, indexedVecNilInfo,
     ConstantInfo.name, ConstantInfo.type, ConstantInfo.toConstantVal]
   rw [show indexedVecCandidateInductiveStats.params[0]? =
@@ -1287,7 +1287,7 @@ theorem indexedVecValidationNilLoop :
   simp [ctorIndexedVecApp, AddInductive.consumeTypeAnnotations]
 
 theorem indexedVecValidationConsLoopTerminal :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelCons.name indexedVecValidationConsResult 4 996
       indexedVecValidationTailContext = .ok () := by
@@ -1303,17 +1303,17 @@ theorem indexedVecValidationConsLoopTerminal :
       indexedVecValidationNExprShape] using
         indexedVecValidationConsResultIsValid
   unfold indexedVecValidationConsResult ctorIndexedVecApp replaySuccApp
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp [hvalid, ReaderT.pure, Pure.pure, Except.pure]
 
 theorem indexedVecValidationConsLoopTail :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelCons.name indexedVecValidationConsAfterHead 3 997
       indexedVecValidationHeadContext = .ok () := by
   rw [show 997 = 996 + 1 by rfl]
   unfold indexedVecValidationConsAfterHead
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only
   rw [show indexedVecCandidateInductiveStats.params[3]? = none by
     simp [indexedVecValidationStatsParams]]
@@ -1344,13 +1344,13 @@ theorem indexedVecValidationConsLoopTail :
       indexedVecValidationConsLoopTerminal
 
 theorem indexedVecValidationConsLoopHead :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelCons.name indexedVecValidationConsAfterN 2 998
       indexedVecValidationNContext = .ok () := by
   rw [show 998 = 997 + 1 by rfl]
   unfold indexedVecValidationConsAfterN
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only
   rw [show indexedVecCandidateInductiveStats.params[2]? = none by
     simp [indexedVecValidationStatsParams]]
@@ -1387,13 +1387,13 @@ theorem indexedVecValidationConsLoopHead :
       indexedVecValidationConsLoopTail
 
 theorem indexedVecValidationConsLoopN :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelCons.name indexedVecValidationConsAfterParam 1 999
       indexedVecCtorValidationContext = .ok () := by
   rw [show 999 = 998 + 1 by rfl]
   rw [indexedVecValidationConsAfterParamExplicitShape]
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only
   rw [show indexedVecCandidateInductiveStats.params[1]? = none by
     simp [indexedVecValidationStatsParams]]
@@ -1433,7 +1433,7 @@ theorem indexedVecValidationConsLoopN :
       indexedVecValidationConsLoopHead
 
 theorem indexedVecValidationConsLoop :
-    AddInductive.checkConstructors.loop
+    AddInductive.checkConstructorType.loop
       indexedVecCandidateInductiveStats false 0
       indexedVecKernelCons.name indexedVecKernelCons.type 0
       indexedVecCtorValidationContext.fuel.inductiveFuel
@@ -1443,7 +1443,7 @@ theorem indexedVecValidationConsLoop :
   rw [show indexedVecKernelCons.type = consCtorTypeRaw by
     simpa [indexedVecKernelCons] using consInfoTypeShape]
   unfold consCtorTypeRaw
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only
   rw [show indexedVecCandidateInductiveStats.params[0]? =
       some indexedVecValidationAlpha by
@@ -1490,6 +1490,7 @@ theorem indexedVecValidationCheckConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationGetEnvM]
   simp only [Except.bind]
+  unfold AddInductive.checkConstructorFold
   simp only [indexedVecKernelType,
     Std.Legacy.Range.forIn'_eq_forIn'_range', Std.Legacy.Range.size,
     List.range', List.forIn'_cons, List.forIn'_nil,
@@ -1507,9 +1508,11 @@ theorem indexedVecValidationCheckConstructors :
   rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationNilRootCheckTypeM]
+  unfold AddInductive.checkConstructorType
   simp only [Except.bind, readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.pure, Pure.pure, Except.pure]
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure]
   rw [indexedVecValidationNilLoop]
+  unfold AddInductive.checkConstructorFold
   simp only [Except.bind, ReaderT.pure, Pure.pure, Except.pure]
   rw [indexedVecValidationNilSetDoesNotContainCons]
   simp only [Bool.false_eq_true, if_false,
@@ -1521,9 +1524,11 @@ theorem indexedVecValidationCheckConstructors :
   rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationConsRootCheckTypeM]
+  unfold AddInductive.checkConstructorType
   simp only [Except.bind, readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.pure, Pure.pure, Except.pure]
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure]
   rw [indexedVecValidationConsLoop]
+  unfold AddInductive.checkConstructorFold
   rfl
 
 /-- The complete one-parameter, one-index IndexedVec request produces the

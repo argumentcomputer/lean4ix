@@ -392,55 +392,65 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
       throw <| .other s!"arg #{idx + 1} of '{ctor}' \
         has a non valid occurrence of the datatypes being declared"
 
+/-- Validate the parameter/field telescope and terminal family application of
+one constructor. This is factored from the outer traversal so successful
+executions can be retained without reproducing compiler-expanded `for` loops. -/
+def checkConstructorType (stats : InductiveStats) (isUnsafe : Bool)
+    (idx : Nat) (n : Name) (t : Expr) : M Unit := do
+  loop t 0 (← readThe Context).fuel.inductiveFuel
+where
+  loop t i
+  | 0 => throw .deepRecursion
+  | fuel+1 => do
+    if let .forallE name dom body bi := t then
+      if let some param := stats.params[i]? then
+        unless ← isDefEq dom (← getType param) do
+          throw <| .other
+            s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
+        loop (body.instantiate1 param) (i + 1) fuel
+      else
+        let s ← ensureType dom
+        -- Equal levels are reflexively admissible, so discharge that common
+        -- case before consulting the full normalization comparison.
+        if levelStructGe stats.resultLevel s.sortLevel! then
+          pure ()
+        else
+          unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
+            throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
+              is too big for the corresponding inductive datatype"
+        if !isUnsafe then
+          checkPositivity stats dom n i
+        withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
+          loop (body.instantiate1 arg) (i + 1) fuel
+    else if !isValidIndAppIdx stats t idx then
+      throw <| .other s!"invalid return type for '{n}'"
+
+/-- Validate constructors in source order while retaining the duplicate-name
+accumulator as the fold result. -/
+def checkConstructorFold (env : Environment) (stats : InductiveStats)
+    (isUnsafe : Bool) (idx : Nat) (seen : NameSet)
+    (ctors : List Constructor) : M NameSet := match ctors with
+  | [] => pure seen
+  | ctor :: ctors => do
+    let n := ctor.name
+    if seen.contains n then
+      throw <| .other s!"duplicate constructor name '{n}'"
+    let seen := seen.insert n
+    let t := ctor.type
+    env.checkNoMVarNoFVar n t
+    -- Constructor metadata has just been established to contain no free
+    -- variables. Its full closed-type check does not inherit family locals;
+    -- parameter matching in `checkConstructorType` deliberately does.
+    _ ← withEmptyLocalContext do checkType t
+    checkConstructorType stats isUnsafe idx n t
+    checkConstructorFold env stats isUnsafe idx seen ctors
+
 def checkConstructors (indTypes : Array InductiveType)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
   let env ← getEnv
   for h : idx in [:indTypes.size] do
     let indType := indTypes[idx]
-    let mut foundCtors : NameSet := {}
-    for ctor in indType.ctors do
-      let n := ctor.name
-      if foundCtors.contains n then
-        throw <| .other s!"duplicate constructor name '{n}'"
-      foundCtors := foundCtors.insert n
-      let t := ctor.type
-      env.checkNoMVarNoFVar n t
-      -- Constructor metadata has just been established to contain no free
-      -- variables.  Its full closed-type check must therefore not inherit the
-      -- parameter/index locals retained by family validation; keeping that
-      -- check local-context independent also gives candidate replay one stable
-      -- execution.  The telescope loop below deliberately remains in the
-      -- family context because parameter matching uses `stats.params`.
-      _ ← withEmptyLocalContext do checkType t
-      let rec loop t i
-      | 0 => throw .deepRecursion
-      | fuel+1 => do
-        if let .forallE name dom body bi := t then
-          if let some param := stats.params[i]? then
-            unless ← isDefEq dom (← getType param) do
-              throw <| .other
-                s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
-            loop (body.instantiate1 param) (i + 1) fuel
-          else
-            let s ← ensureType dom
-            -- Equal levels are reflexively admissible, so discharge that
-            -- common case before consulting the full standard-library
-            -- normalization comparison. Besides avoiding needless work, this
-            -- keeps exact checker executions reducible without a separate
-            -- reflexivity contract axiom.
-            if levelStructGe stats.resultLevel s.sortLevel! then
-              pure ()
-            else
-              unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
-                throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
-                  is too big for the corresponding inductive datatype"
-            if !isUnsafe then
-              checkPositivity stats dom n i
-            withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
-              loop (body.instantiate1 arg) (i + 1) fuel
-        else if !isValidIndAppIdx stats t idx then
-          throw <| .other s!"invalid return type for '{n}'"
-      loop t 0 (← readThe Context).fuel.inductiveFuel
+    _ ← checkConstructorFold env stats isUnsafe idx {} indType.ctors
 
 /-- One observed WHNF node in the executable normalization-candidate pass.
 The complete `AddInductive.Context` is retained because Verify must replay the

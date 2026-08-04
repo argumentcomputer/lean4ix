@@ -6040,16 +6040,16 @@ private theorem annotatedPi_checkPositivity_expanded :
     annotatedPiRawDomainKernel] using annotatedPi_checkPositivity
 
 private theorem annotatedPi_checkConstructors_terminal :
-    AddInductive.checkConstructors.loop annotatedPiInductiveStats false 0
+    AddInductive.checkConstructorType.loop annotatedPiInductiveStats false 0
         ``AnnotatedPi.mk (.const ``AnnotatedPi []) 1 999
         annotatedPiOuterBodyCandidateContext = .ok () := by
   rw [show 999 = 998 + 1 by rfl]
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp [annotatedPiConst_isValidIndAppIdx,
     ReaderT.pure, Pure.pure, Except.pure]
 
 private theorem annotatedPi_checkConstructors_terminal_expanded :
-    AddInductive.checkConstructors.loop annotatedPiInductiveStats false 0
+    AddInductive.checkConstructorType.loop annotatedPiInductiveStats false 0
         ``AnnotatedPi.mk (.const ``AnnotatedPi []) 1 999
         ({ env := annotatedPiTypeKernelEnv
            lctx := ({} : LocalContext).mkLocalDecl
@@ -6171,6 +6171,7 @@ private theorem annotatedPi_checkConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [annotatedPiCtor_getEnvM]
   simp only [Except.bind]
+  unfold AddInductive.checkConstructorFold
   simp +decide [annotatedPiKernelType, annotatedPiKernelCtor,
     annotatedPiMkInfo, ConstantInfo.name, ConstantInfo.type,
     ConstantInfo.toConstantVal, NameSet.contains]
@@ -6182,6 +6183,7 @@ private theorem annotatedPi_checkConstructors :
   simp only
   rw [annotatedPiCtor_checkTypeM_empty]
   simp only [Except.bind]
+  unfold AddInductive.checkConstructorType
   simp +decide [ConstantInfo.type, ConstantInfo.toConstantVal,
     AddInductive.liftTypeChecker_apply,
     readThe, MonadReaderOf.read, ReaderT.read,
@@ -6189,7 +6191,7 @@ private theorem annotatedPi_checkConstructors :
     Except.bind, Except.pure]
   rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
       999 + 1 by rfl]
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp only
   rw [show annotatedPiInductiveStats.params[0]? = none by rfl]
   simp only
@@ -6215,6 +6217,7 @@ private theorem annotatedPi_checkConstructors :
     annotatedPiCtorCandidateContext,
     ReaderT.pure, Pure.pure, Except.pure]
   rw [annotatedPi_checkConstructors_terminal_expanded]
+  unfold AddInductive.checkConstructorFold
   simp [ReaderT.pure, Pure.pure, Except.pure]
 
 private theorem annotatedPiSortAnnotationTrace_build :
@@ -6724,6 +6727,7 @@ private theorem aliasFormer_checkConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [aliasFormerCtor_getEnvM]
   simp only [Except.bind]
+  unfold AddInductive.checkConstructorFold
   simp +decide [aliasFormerKernelType, aliasFormerKernelCtor,
     aliasFormerMkInfo, ConstantInfo.name, NameSet.contains]
   simp +decide [ConstantInfo.type,
@@ -6738,11 +6742,15 @@ private theorem aliasFormer_checkConstructors :
       { root := PersistentArrayNode.node #[], tail := #[] } } :
         LocalContext) rfl]
   simp only [Except.bind]
+  unfold AddInductive.checkConstructorType
+  simp only [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
   rw [show aliasFormerCtorCandidateContext.fuel.inductiveFuel = 999 + 1 by
     rfl]
-  unfold AddInductive.checkConstructors.loop
+  unfold AddInductive.checkConstructorType.loop
   simp [aliasFormerCtor_isValidIndAppIdx, ReaderT.pure, Pure.pure,
-    Except.pure]
+    Except.pure, AddInductive.checkConstructorFold]
 
 /-- The generic candidate traversal retains the exact context, input, and
 result of the actual AliasFormer family WHNF observation. -/
@@ -7404,7 +7412,7 @@ private def aliasFormerNormalizationCandidateSemanticRun :
   uvars_eq := rfl
   family := aliasFormerCandidateFamilySemanticRun
 
-private def aliasFormerStagedSemanticInput :
+private noncomputable def aliasFormerStagedSemanticInput :
     VInductDecl.StagedNormalizationCandidateSemanticInput
       aliasFormerCandidateContext aliasFormerCtorCandidateContext
       typeFamilyAliasEnv [] aliasFormerNormalizationCandidate
@@ -7414,6 +7422,8 @@ private def aliasFormerStagedSemanticInput :
   declaration_uvars_eq := rfl
   preFamily := aliasFormerPreFamilyStage
   family := aliasFormerFamilyStage
+  constructorValidation :=
+    AddInductive.ConstructorValidationRun.of_run aliasFormer_checkConstructors
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl
@@ -8235,7 +8245,7 @@ private def annotatedPiNormalizationCandidateSemanticRun :
   uvars_eq := rfl
   family := annotatedPiCandidateFamilySemanticRun
 
-private def annotatedPiStagedSemanticInput :
+private noncomputable def annotatedPiStagedSemanticInput :
     VInductDecl.StagedNormalizationCandidateSemanticInput
       annotatedPiFamilyCandidateContext annotatedPiCtorCandidateContext
       outParamEnv [] annotatedPiNormalizationCandidate
@@ -8245,6 +8255,8 @@ private def annotatedPiStagedSemanticInput :
   declaration_uvars_eq := rfl
   preFamily := annotatedPiPreFamilyStage
   family := annotatedPiFamilyStage
+  constructorValidation :=
+    AddInductive.ConstructorValidationRun.of_run annotatedPi_checkConstructors
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl

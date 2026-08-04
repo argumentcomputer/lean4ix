@@ -213,7 +213,7 @@ theorem indexedVecSemanticConsSourceTr :
   exact hshape.to_trExprS indexedVecTypeEnv_ordered trivial
     ⟨.sort u, htype⟩
 
-def indexedVecStagedSemanticInput :
+noncomputable def indexedVecStagedSemanticInput :
     VInductDecl.StagedNormalizationCandidateSemanticInput
       indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
@@ -222,6 +222,9 @@ def indexedVecStagedSemanticInput :
   declaration_uvars_eq := rfl
   preFamily := indexedVecPreFamilyStage
   family := indexedVecFamilyStage
+  constructorValidation :=
+    AddInductive.ConstructorValidationRun.of_run
+      indexedVecValidationCheckConstructors
   constructors := .cons {
     name_eq := rfl
     uvars_eq := rfl
