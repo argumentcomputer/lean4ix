@@ -106,8 +106,9 @@ fixture-specific post-family `VEnvs.WF` reconstructions. Exact axiom guards and
 the universal Lake/Nix gates pass; constructors are not semantically
 interpreted.
 
-**Active publication checkpoint: L4L-01U — upstream v4.31 reconciliation.**
-The source reconciliation is complete locally: digama `upstream/master`
+**Completed milestone: L4L-01U — upstream v4.31 reconciliation.**
+The source reconciliation is complete at
+`7f864b459e4a6062b468d6e5416688feac0f9f99`: digama `upstream/master`
 through `ef849dfbd94a` is a merge parent, Lean and lean4-nix are on v4.31, the
 overlapping inductive/checker/Verify/level proofs build, and the fork's staged
 family APIs remain intact. The merge removes four cached-`Expr` axioms and the
@@ -119,12 +120,13 @@ All local Lean/Lake/Nix, exact-axiom, and sorry-frontier gates pass. An isolated
 ix v4.31 probe replayed the merged Lean4Lean modules and built ix's runtime
 typechecker modules; the remaining failures are ix-owned Lean/Batteries proof
 API migrations. Because L4L-01U is not an ix pin, that consumer migration is
-recorded but does not block this checkpoint. Publication to origin
-`jcb/induct`, and only that branch, is the remaining completion action. This is
-an integration-only checkpoint: constructor-trace work starts in L4L-01C.
+deferred and does not block this checkpoint. The source and this completion
+ledger are published to origin `jcb/induct`; neither master nor the digama
+remote moved. This was an integration-only checkpoint: it added no
+constructor-trace work.
 
-**Next semantic milestone: L4L-01C — retained constructor-validation trace.**
-After L4L-01U, retain the complete successful singleton `checkConstructors`
+**Active milestone: L4L-01C — retained constructor-validation trace.** Retain
+the complete successful singleton `checkConstructors`
 traversal as dependent, source-ordered operational evidence and prove exact
 decomposition/recomposition while preserving phase-specific failures. This
 checkpoint makes no Theory-WF claim; semantic interpretation remains L4L-01D.
@@ -156,12 +158,13 @@ work-package references, not competing milestones. The independent 22-entry meta
 checker, projection, and trust work remains release work rather than evidence
 that the inductive producer track is stalled.
 
-**Baselines.** The current local formalization source is the L4L-01U merge
-checkpoint, with parents `da45b536220a3eff5ed78cf2f5afcf5e7491c40f`
+**Baselines.** The current formalization source is the L4L-01U merge checkpoint
+`7f864b459e4a6062b468d6e5416688feac0f9f99`, with parents
+`da45b536220a3eff5ed78cf2f5afcf5e7491c40f`
 (`feat: derive family validation staging`) and
-`ef849dfbd94a` (`upstream/master`). Its immutable source hash is recorded by
-the publication ledger child rather than embedded recursively in the source
-commit itself. The source follows roadmap decomposition checkpoint
+`ef849dfbd94a` (`upstream/master`). This roadmap-only ledger child records that
+immutable source hash without changing the formalization. The source follows
+roadmap decomposition checkpoint
 `f82ee77f7181`, generation-readiness source
 `bbb45e0e950724cdbbd405d75e304e2020cecf82`, and its ledger child
 `c4fd62b23a89500154b113d849d183afbf84907f`.
@@ -2528,10 +2531,11 @@ executable and proved:
       an independent post-family `VEnvs`/context; constructors remain
       uninterpreted; family-phase negatives remain sharp; exact axiom guards
       and universal gates pass.
-    - [ ] **L4L-01U (publication active):** publish the completed merge of
-      digama `upstream/master` through `ef849dfbd94a` to origin `jcb/induct`
+    - [x] **L4L-01U:** completed at source checkpoint
+      `7f864b459e4a6062b468d6e5416688feac0f9f99`. It merges digama
+      `upstream/master` through `ef849dfbd94a` into origin `jcb/induct`
       without rewriting the published checkpoints or moving either master.
-      The local source already reconciles the overlapping
+      The source reconciles the overlapping
       inductive/checker/Verify/level and replay/CI/Experimental changes,
       upgrades Lean and lean4-nix to v4.31, retains the fork's Nix and ix-facing
       certificate surfaces, and removes upstream's four now-proved
@@ -2539,14 +2543,14 @@ executable and proved:
       equation. The exact inventory is 29 custom axioms and 22 non-Experimental
       sorries. `NormLevel.isEquiv_wf` is assigned to L4L-02B and `addDecl.WF`
       to L4L-19B; neither enlarges a supported-root allowlist. Completion
-      requires the upstream tip to be an ancestor of the published source
-      checkpoint, all L4L-01A/L4L-01B regressions and universal Lean/Nix gates
-      to pass, and only origin `jcb/induct` to move. The isolated ix v4.31 probe
+      evidence includes the upstream tip as a source parent, passing
+      L4L-01A/L4L-01B regressions and universal Lean/Nix gates, and publication
+      of only origin `jcb/induct`. The isolated ix v4.31 probe
       is diagnostic evidence, not an ix pin: merged Lean4Lean replay and ix
       runtime modules pass, while ix-owned proof/API migration is deferred to
       the next pin. Keep this checkpoint integration-only; constructor traces
       belong to L4L-01C.
-    - [ ] **L4L-01C:** retain the complete successful singleton constructor
+    - [ ] **L4L-01C (active):** retain the complete successful singleton constructor
       validator as dependent operational data: duplicate/closedness checks,
       closed root `checkType`, parameter equalities, field `ensureType` and
       universe comparisons, positivity/recursive-target traversals, and the
@@ -3146,8 +3150,8 @@ is authoritative, and L4L-01C may not start before L4L-01U is complete.
 | **L4L-00 — published generation-readiness baseline** | **complete** | Stabilized fork infrastructure; one generalized source/view artifact path; proof-carrying non-identity transaction; retained semantic hierarchy; complete executable generation-shape gate; AliasFormer, AnnotatedPi, and `IndexedVec` checkpoints. | Source `bbb45e0e`, ledger child `c4fd62b2`, all gates green. Ix Pin A remains the separately recorded `5e5bb767`/`1f73f5c0` pair and has removed the three former inductive sorry origins without making an oracle claim. |
 | **L4L-01A — staged semantic-input consolidation** | **complete** | Introduce one source-indexed builder over explicitly verified pre-family/post-family candidate stages, strict family/constructor translations, exact raw-family insertion alignment, and the existing dependent `Produced` traversals. Return the existing `Nonempty ProducedNormalizationCandidateSemanticRun`; make no view-WF or generation-package claim. | Source `7c792209`. AliasFormer, AnnotatedPi, and `IndexedVec` use the builder; their per-root semantic-input definitions are gone and exact constructor order is retained. Existing explicit downstream witnesses and one `viewWF` proof per positive are marked temporary until L4L-01E; no choice extractor was added; focused and universal gates pass. |
 | **L4L-01B — family-validation semantics and staging** | **complete** | Interpret the exact singleton `checkInductiveTypes`/family-candidate run from one verified entry context. Derive view telescope and terminal-sort WF, raw-family constant WF through candidate defeq, exact insertion, and the verified post-family candidate stage. | Source `da45b536`. Exact singleton validation semantics derive the parameter/index view split, terminal/raw-family WF, exact insertion, and post-family candidate stage. AliasFormer, AnnotatedPi, and `IndexedVec` supply no independent post-family `VEnvs`/context; family terminal, annotation, fuel, and non-sort negatives remain phase-sharp; constructors remain uninterpreted; exact guards and universal gates pass. |
-| **L4L-01U — upstream v4.31 reconciliation** | **active: publish** | Publish the completed merge of digama `upstream/master` through `ef849dfbd94a` without rewriting fork checkpoints or moving either master. Retain the v4.31 proof/API ports, upstream's five custom-axiom removals, the fork's Nix/CI and certificate surfaces, and the exact classifications of `NormLevel.isEquiv_wf` (L4L-02B) and `addDecl.WF` (L4L-19B). Add no constructor-trace work. | Local gates pass: full 154-job Lake build, `nix build`, current-host six-check flake build, all-system no-build evaluation, formatter, CLI replay, exact 22-entry sorry guard, and exact 29-declaration axiom inventory. Root guards show no supported-root trust growth. The isolated ix v4.31 probe replays Lean4Lean and builds ix runtime modules; ix-owned proof migration is deferred because this is not a pin. Completion is the committed source/ledger pair on origin `jcb/induct`, and only that branch moves. |
-| **L4L-01C — retained constructor-validation trace** | queued | Add dependent operational evidence for the complete successful singleton `checkConstructors` traversal: duplicate/closedness/root-check, parameter equality, field type/universe, positivity/recursive-target, and terminal-family-application steps. Prove decomposition and recomposition with the executable result. | The trace is source ordered and exact; missing/extra/reordered and each validation-phase negative remain sharp; successful trace equivalence has only the executable baseline closure and makes no Theory-WF claim. |
+| **L4L-01U — upstream v4.31 reconciliation** | **complete** | Merge digama `upstream/master` through `ef849dfbd94a` without rewriting fork checkpoints or moving either master. Retain the v4.31 proof/API ports, upstream's five custom-axiom removals, the fork's Nix/CI and certificate surfaces, and the exact classifications of `NormLevel.isEquiv_wf` (L4L-02B) and `addDecl.WF` (L4L-19B). Add no constructor-trace work. | Source `7f864b459e4a6062b468d6e5416688feac0f9f99`. The 154-job Lake build, `nix build`, current-host six-check flake build, all-system no-build evaluation, formatter, CLI replay, exact 22-entry sorry guard, and exact 29-declaration axiom inventory pass. Root guards show no supported-root trust growth. The isolated ix v4.31 probe is diagnostic only; ix migration is deferred. The source and ledger are published on origin `jcb/induct`, and only that branch moved. |
+| **L4L-01C — retained constructor-validation trace** | **active** | Add dependent operational evidence for the complete successful singleton `checkConstructors` traversal: duplicate/closedness/root-check, parameter equality, field type/universe, positivity/recursive-target, and terminal-family-application steps. Prove decomposition and recomposition with the executable result. | The trace is source ordered and exact; missing/extra/reordered and each validation-phase negative remain sharp; successful trace equivalence has only the executable baseline closure and makes no Theory-WF claim. |
 | **L4L-01D — constructor-validation semantics and view WF** | queued | Interpret the L4L-01C trace with verified checker refinements and retained candidate normalization. Derive `fieldsWF`, constructor result `SpineWF`, and WF of the exact analyzer-owned view declaration for the currently accepted singleton subset. | All three fixture `viewDecl_wf` proofs are deleted; no `Checked.WF`, view, or view-WF premise is renamed or reintroduced; exact axiom guards pass; no normalization or validation breadth is widened. |
 | **L4L-01E — generic singleton package closure** | queued | Combine the L4L-01A–01D owner, exact dependent analysis, and `ProducedGenerationShapeCandidate` into `Nonempty ProducedGenerationCandidatePackage`, retaining the exact ordinary producer equation without granting it shape or Theory authority. | All three positives use only the generic closure theorem; missing/extra/reordered/truncated/non-defeq regressions remain sharp; no manual semantic-input/view-WF scaffolding remains; universal gates pass. |
 | **L4L-02A — level subsumption evaluation** | queued | Prove `NormLevel.subsumption_eval` with its existing statement and remove exactly that sorry-frontier entry. Keep the patch independent of inductive APIs. | Focused Level and full builds pass; the theorem's exact axiom closure is accepted; the frontier drops from 22 to 21; the change is a small upstream-ready commit. |
@@ -3305,8 +3309,10 @@ consumer-specific state.
   the hierarchy only under `Nonempty`. L4L-01B derives raw-family WF, exact
   insertion, and the post-family candidate stage from the singleton family
   validator, so no positive supplies an independent post-family context. The
-  current local source is the L4L-01U merge, whose parent pair and published
-  hash are recorded in §13 and its ledger child on `jcb/induct`. The exact
+  current source is the L4L-01U merge
+  `7f864b459e4a6062b468d6e5416688feac0f9f99`, whose parent pair and
+  publication evidence are recorded in §13 and this ledger child on
+  `jcb/induct`. The exact
   22-entry sorry-frontier check, 154-job default Lake build, default Nix build,
   all six current-host flake checks, all-system no-build evaluation, formatter,
   CLI replay, and whitespace checks were rerun on 2026-08-04 over that source.
@@ -3387,9 +3393,9 @@ L4L-01A and L4L-01B are complete at `7c792209` and `da45b536`
 respectively. The repeated semantic-input plumbing sits behind one
 source-indexed staged owner, and exact family-validation semantics derive its
 post-family stage; all three positives use it and the result deliberately
-stops at `Nonempty ProducedNormalizationCandidateSemanticRun`. L4L-01U has
+stops at `Nonempty ProducedNormalizationCandidateSemanticRun`. L4L-01U
 reconciled live upstream and Lean v4.31 without starting semantic constructor
-work; publication is its only remaining action. L4L-01C then retains the constructor-validation execution
+work. Active milestone L4L-01C now retains the constructor-validation execution
 without making a Theory-WF claim; constructor-validator semantics/view WF and
 produced-package closure remain L4L-01D and L4L-01E.
 `VEnv.addInductGeneration`, its exact data-bearing trace and stable
@@ -3573,8 +3579,8 @@ complete family/constructor hierarchy, retains the gate with the exact ordinary
 producer equation, and derives checked WF plus every dependent shape record
 from exact analysis and analyzer-owned view WF. L4L-01A consolidated verified
 per-position inputs over two verified stages; L4L-01B derived the second stage
-from family validation; L4L-01U has reconciled live upstream and awaits only
-publication; L4L-01C then
+from family validation; L4L-01U reconciled and published the live-upstream
+merge; active milestone L4L-01C now
 retains constructor validation; L4L-01D derives analyzer-owned view WF; and
 L4L-01E combines the
 result with the strengthened gate to return the complete produced package
@@ -3596,9 +3602,10 @@ environment-free universe/result/name/collision matrix, semantic `Checked.WF`
 and `GenerationChecked.WF` bridges, and exact axiom closures remain regression
 gates.
 
-The current local formalization source is the L4L-01U merge of
+The current formalization source is the L4L-01U merge
+`7f864b459e4a6062b468d6e5416688feac0f9f99` of
 `da45b536220a3eff5ed78cf2f5afcf5e7491c40f` and upstream
-`ef849dfbd94a`; its publication ledger child records the immutable source hash
+`ef849dfbd94a`; this publication ledger child records the immutable source hash
 on `argumentcomputer/lean4lean`'s `jcb/induct` branch. Neither local `master`
 nor `origin/master` is moved by this work. On top of automatic produced
 semantic-hierarchy assembly and
@@ -3618,8 +3625,8 @@ constructor lists are rejected. Exact axiom guards pin the executable roots to
 the standard logical baseline and the semantic roots to the existing
 transitional sets. Completed milestones L4L-01A and L4L-01B consolidate the
 verified staged semantic inputs and derive the post-family stage from exact
-family-validation semantics. Publication-active L4L-01U reconciles the current
-upstream/toolchain/axiom delta without beginning constructor work. L4L-01C then
+family-validation semantics. Completed L4L-01U reconciles the current
+upstream/toolchain/axiom delta without beginning constructor work. Active L4L-01C
 retains the exact constructor-validation trace without making a Theory-WF
 claim; the temporary fixture view-WF proofs remain until L4L-01D, and the
 complete produced package is intentionally deferred to L4L-01E. No stage may infer
