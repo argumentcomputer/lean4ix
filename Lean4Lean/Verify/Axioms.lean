@@ -12,7 +12,7 @@ axiom all_eq_all_toList {p : α → β → Bool} :
 
 end Std.TreeMap
 
-open scoped List
+open scoped _root_.List
 namespace Lean
 
 noncomputable def PersistentArrayNode.toList' : PersistentArrayNode α → List α :=
@@ -81,12 +81,6 @@ axiom findAux_isSome {α β} [BEq α] {node : Node α β} (i : USize) (a : α) :
 
 end PersistentHashMap
 
--- FIXME: lean4#8464
-open private mkAppRangeAux from Lean.Expr in
-axiom Expr.mkAppRangeAux.eq_def (n : Nat) (args : Array Expr) (i : Nat) (e : Expr) :
-  mkAppRangeAux n args i e =
-    if i < n then mkAppRangeAux n args (i + 1) (mkApp e args[i]!) else e
-
 namespace Syntax
 
 def structEq' : Syntax → Syntax → Bool
@@ -137,7 +131,8 @@ def hasParam' : Level → Bool
   | .succ l => l.hasParam'
   | .max l₁ l₂ | .imax l₁ l₂ => l₁.hasParam' || l₂.hasParam'
 
-/-- This is currently false, see bug lean4#8554 -/
+/-- This was false prior to the fix of lean4#8554; it should now be provable
+using `mkData_eq` and friends, but this has not been done yet -/
 @[simp] axiom hasParam_eq (l : Level) : l.hasParam = l.hasParam'
 
 def hasMVar' : Level → Bool
@@ -146,7 +141,8 @@ def hasMVar' : Level → Bool
   | .succ l => l.hasMVar'
   | .max l₁ l₂ | .imax l₁ l₂ => l₁.hasMVar' || l₂.hasMVar'
 
-/-- This is currently false, see bug lean4#8554 -/
+/-- This was false prior to the fix of lean4#8554; it should now be provable
+using `mkData_eq` and friends, but this has not been done yet -/
 @[simp] axiom hasMVar_eq (l : Level) : l.hasMVar = l.hasMVar'
 
 /-- This is because the `BEq` instance is implemented in C++ -/
@@ -202,74 +198,6 @@ axiom mkData_eq : @mkData = @mkData'
 in the main results, which use the functions below instead -/
 axiom mkAppData_eq : @mkAppData = @mkAppData'
 
-def hasFVar' : Expr → Bool
-  | .fvar _ => true
-  | .const ..
-  | .bvar _
-  | .sort _
-  | .mvar _
-  | .lit _ => false
-  | .mdata _ e => e.hasFVar'
-  | .proj _ _ e => e.hasFVar'
-  | .app e1 e2
-  | .lam _ e1 e2 _
-  | .forallE _ e1 e2 _ => e1.hasFVar' || e2.hasFVar'
-  | .letE _ t v b _ => t.hasFVar' || v.hasFVar' || b.hasFVar'
-
-/-- This is currently false, see bug lean4#8554 -/
-axiom hasFVar_eq (e : Expr) : e.hasFVar = e.hasFVar'
-
-def hasExprMVar' : Expr → Bool
-  | .mvar _ => true
-  | .const ..
-  | .bvar _
-  | .sort _
-  | .fvar _
-  | .lit _ => false
-  | .mdata _ e => e.hasExprMVar'
-  | .proj _ _ e => e.hasExprMVar'
-  | .app e1 e2
-  | .lam _ e1 e2 _
-  | .forallE _ e1 e2 _ => e1.hasExprMVar' || e2.hasExprMVar'
-  | .letE _ t v b _ => t.hasExprMVar' || v.hasExprMVar' || b.hasExprMVar'
-
-/-- This is currently false, see bug lean4#8554 -/
-@[simp] axiom hasExprMVar_eq (e : Expr) : e.hasExprMVar = e.hasExprMVar'
-
-def hasLevelMVar' : Expr → Bool
-  | .const _ ls => ls.any (·.hasMVar)
-  | .sort u => u.hasMVar
-  | .bvar _
-  | .fvar _
-  | .mvar _
-  | .lit _ => false
-  | .mdata _ e => e.hasLevelMVar'
-  | .proj _ _ e => e.hasLevelMVar'
-  | .app e1 e2
-  | .lam _ e1 e2 _
-  | .forallE _ e1 e2 _ => e1.hasLevelMVar' || e2.hasLevelMVar'
-  | .letE _ t v b _ => t.hasLevelMVar' || v.hasLevelMVar' || b.hasLevelMVar'
-
-/-- This is currently false, see bug lean4#8554 -/
-@[simp] axiom hasLevelMVar_eq (e : Expr) : e.hasLevelMVar = e.hasLevelMVar'
-
-def hasLevelParam' : Expr → Bool
-  | .const _ ls => ls.any (·.hasParam)
-  | .sort u => u.hasParam
-  | .bvar _
-  | .fvar _
-  | .mvar _
-  | .lit _ => false
-  | .mdata _ e => e.hasLevelParam'
-  | .proj _ _ e => e.hasLevelParam'
-  | .app e1 e2
-  | .lam _ e1 e2 _
-  | .forallE _ e1 e2 _ => e1.hasLevelParam' || e2.hasLevelParam'
-  | .letE _ t v b _ => t.hasLevelParam' || v.hasLevelParam' || b.hasLevelParam'
-
-/-- This is currently false, see bug lean4#8554 -/
-@[simp] axiom hasLevelParam_eq (e : Expr) : e.hasLevelParam = e.hasLevelParam'
-
 def looseBVarRange' : Expr → Nat
   | .bvar i => i + 1
   | .const ..
@@ -284,7 +212,8 @@ def looseBVarRange' : Expr → Nat
   | .forallE _ e1 e2 _ => max e1.looseBVarRange' (e2.looseBVarRange' - 1)
   | .letE _ e1 e2 e3 _ => max (max e1.looseBVarRange' e2.looseBVarRange') (e3.looseBVarRange' - 1)
 
-/-- This is currently false, see bug lean4#8554 -/
+/-- This was false prior to the fix of lean4#8554; it should now be provable
+using `mkData_eq` and friends, but this has not been done yet -/
 @[simp] axiom looseBVarRange_eq (e : Expr) : e.looseBVarRange = e.looseBVarRange'
 
 /-- This could be an `@[implemented_by]` -/

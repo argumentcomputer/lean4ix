@@ -153,6 +153,11 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
 def isDefEqCore (t s : Expr) : RecM Bool := fun m => m.isDefEqCore t s
 
 def isDefEq (t s : Expr) : RecM Bool := do
+  -- Syntactically equivalent expressions are definitionally equal without
+  -- consulting or mutating the equivalence manager.  Besides avoiding
+  -- needless work, this keeps exact checker executions compositional when an
+  -- application argument has precisely the declared domain type.
+  if t == s then return true
   let r ← isDefEqCore t s
   if r then
     modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
@@ -189,8 +194,11 @@ def inferLet (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] e where
     let r := r.cheapBetaReduce
     return (← getLCtx).mkForall fvars r
 
-def isProp (e : Expr) : RecM Bool :=
-  return (← whnf (← inferType e)) == .prop
+def getSortLevel (e : Expr) : RecM Level := do
+  let .sort u ← ensureSortCore (← inferType e) e | unreachable!
+  return u
+
+def isProp (e : Expr) : RecM Bool := return (← getSortLevel e).isAlwaysZero
 
 def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Expr := do
   let e := Expr.proj typeName idx struct
@@ -208,16 +216,16 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   for i in [:I_val.numParams] do
     let .forallE _ _ b _ ← whnf r | fail
     r := b.instantiate1 args[i]!
-  let isPropType ← isProp type
+  let maybePropType := !(← getSortLevel type).isNeverZero
   for i in [:idx] do
     let .forallE _ dom b _ ← whnf r | fail
     if b.hasLooseBVars then
-      if isPropType then if !(← isProp dom) then fail
+      if maybePropType then if !(← isProp dom) then fail
       r := b.instantiate1 (.proj I_name i struct)
     else
       r := b
   let .forallE _ dom _ _ ← whnf r | fail
-  if isPropType then if !(← isProp dom) then fail
+  if maybePropType then if !(← isProp dom) then fail
   return dom
 
 def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
@@ -345,20 +353,22 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
       save e
 
 def isDelta (env : Environment) (e : Expr) : Option ConstantInfo := do
-  if let .const c _ := e.getAppFn then
+  if let .const c ls := e.getAppFn then
     if let some ci := env.find? c then
-      if ci.hasValue then
+      if ci.deltaValue?.isSome && ls.length == ci.numLevelParams then
         return ci
   none
+
+def instantiateDeltaValue (ci : ConstantInfo) (ls : List Level) : Expr :=
+  ci.deltaValue?.get!.instantiateLevelParams ci.levelParams ls
 
 def unfoldDefinitionCore (e : Expr) : RecM (Option Expr) := do
   let .const _ ls := e | return none
   let env ← getEnv
   let some d := isDelta env e | return none
-  unless ls.length == d.numLevelParams do return none
-  unless 0 < ls.length do return some (d.instantiateValueLevelParams! ls)
+  unless 0 < ls.length do return some (instantiateDeltaValue d ls)
   if let some r := (← get).unfold[e]? then return some r
-  let r := d.instantiateValueLevelParams! ls
+  let r := instantiateDeltaValue d ls
   modify fun s => { s with unfold := s.unfold.insert e r }
   return some r
 
@@ -490,7 +500,7 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
-  | .sort a1, .sort a2 => pure (a1.isEquiv' a2).toLBool
+  | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
   | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq a1 a2
   | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure (a1 == a2).toLBool
@@ -518,7 +528,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let env ← getEnv
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
-  unless env.isStructureLike fInfo.induct do return false
+  unless env.isNonRecStructure fInfo.induct do return false
   unless ← isDefEq (← inferType t) (← inferType s) do return false
   let args := s.getAppArgs
   for h : i in [fInfo.numParams:args.size] do

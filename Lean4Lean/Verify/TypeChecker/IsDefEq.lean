@@ -1,6 +1,8 @@
 import Lean4Lean.Verify.TypeChecker.Reduce
 import Lean4Lean.Verify.EquivManager
 
+open Lean4Lean
+
 namespace Lean4Lean.TypeChecker.Inner
 open Lean hiding Environment Exception
 
@@ -170,7 +172,7 @@ theorem quickIsDefEq.WF {c : VContext} {s : VState}
       isDefEqForall.WF (subst := #[]) (fvs := []) rfl (c.withMLC_self ▸ he₁) (c.withMLC_self ▸ he₂)
   · have .sort hu := he₁; have .sort hv := he₂
     refine .pure fun h => ⟨_, .sortDF (.of_ofLevel hu) (.of_ofLevel hv) ?_⟩
-    exact Level.isEquiv'_wf (toLBool_true.1 h) hu hv
+    exact Level.isEquiv_wf (toLBool_true.1 h) hu hv
   · let .mdata he₁ := he₁; let .mdata he₂ := he₂
     exact .toLBoolM <| isDefEq.WF he₁ he₂
   · cases he₁
@@ -279,15 +281,20 @@ theorem isDefEqApp.WF {c : VContext} {s : VState}
   simp [Expr.getAppArgs_toList, Expr.mkAppList_getAppArgsList] at h2
   exact h2 hb _ he₁ _ he₂
 
+theorem getSortLevel.WF
+    (he : c.TrExprS e e') : (getSortLevel e).WF c s fun l _ =>
+      ∃ u', VLevel.ofLevel c.lparams l = some u' ∧ c.HasType e' (.sort u') := by
+  refine (inferType.WF he).bind fun ty _ le ⟨ty', _, _, h1, h2⟩ => ?_
+  refine (ensureSortCore.WF h1).bind fun ty _ le h => ?_
+  obtain ⟨⟨u, rfl⟩, ⟨ty₂, h3, h4⟩, _⟩ := h
+  let .sort hu := h3
+  exact .pure ⟨_, hu, h2.defeqU_r c.Ewf c.Δwf h4.symm⟩
+
 theorem isProp.WF
     (he : c.TrExprS e e') : (isProp e).WF c s fun b _ => b → c.HasType e' (.sort .zero) := by
-  unfold isProp
-  refine (inferType.WF he).bind fun ty _ le ⟨ty', _, _, h1, h2⟩ => ?_
-  refine .stateWF fun wf => ?_
-  refine (whnf.WF h1).bind fun ty _ le ⟨_, ty₂, h3, h4⟩ => .pure ?_
-  simp [Expr.prop, Expr.eqv_sort]; rintro rfl
-  let .sort h3 := h3; cases h3
-  exact h2.defeqU_r c.Ewf c.Δwf h4.symm
+  refine (getSortLevel.WF he).bind fun l _ le ⟨u', hu, h⟩ => .pure fun H => ?_
+  exact h.defeqU_r c.Ewf c.Δwf
+    ⟨_, .sortDF (.of_ofLevel hu) trivial (ofLevel_isAlwaysZero hu H)⟩
 
 theorem isDefEqProofIrrel.WF {c : VContext} {s : VState}
     (he₁ : c.TrExprS e₁ e₁') (he₂ : c.TrExprS e₂ e₂') :
@@ -339,7 +346,7 @@ theorem lazyDeltaReductionStep.WF {c : VContext} {s : VState}
   refine .getEnv ?_; extract_lets delta cont F1 F2
   have hdelta {s e e' ci} (he : c.TrExprS e e') (H : isDelta c.env e = some ci) :
       (delta e).WF c s fun r _ => c.TrExpr r e' := by
-    let ⟨n, h1, ⟨_, h2⟩, ls, h3⟩ := isDelta_is_some.1 H
+    let ⟨n, h1, ⟨_, h2⟩, ls, h3, _⟩ := isDelta_is_some.1 H
     have ⟨_, stk⟩ := AppStack.build (e.mkAppList_getAppArgsList ▸ he)
     have .const a1 a2 a3 := h3 ▸ stk.tr
     have ⟨b1, b2, b3, b4⟩ := c.trenv.find?_uniq h1 a1
@@ -371,8 +378,8 @@ theorem lazyDeltaReductionStep.WF {c : VContext} {s : VState}
   split <;> [skip; exact cacheFailure.WF.lift.bind fun _ _ _ _ => hF1]
   rename_i h1 h2; simp at h1
   cases ptrEqConstantInfo_eq h1.1.1.2
-  have ⟨n₁, b1₁, ⟨_, b2₁⟩, ls₁, b3₁⟩ := isDelta_is_some.1 hd1
-  have ⟨n₂, b1₂, ⟨_, b2₂⟩, ls₂, b3₂⟩ := isDelta_is_some.1 hd2
+  have ⟨n₁, b1₁, ⟨_, b2₁⟩, ls₁, b3₁, _⟩ := isDelta_is_some.1 hd1
+  have ⟨n₂, b1₂, ⟨_, b2₂⟩, ls₂, b3₂, _⟩ := isDelta_is_some.1 hd2
   simp [b3₁, b3₂, Expr.constLevels!] at h2
   have ⟨_, stk₁⟩ := AppStack.build (e₁.mkAppList_getAppArgsList ▸ he₁)
   have ⟨_, stk₂⟩ := AppStack.build (e₂.mkAppList_getAppArgsList ▸ he₂)

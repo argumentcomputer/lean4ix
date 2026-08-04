@@ -512,6 +512,158 @@ def accRecCollisionEnv : VEnv :=
 example : accRecCollisionEnv.addInduct accDecl = none :=
   VEnv.addInduct_eq_none_of_rec_present rfl ⟨_, rfl⟩
 
+/-! ## AnnotatedPi: recursive Pi normalization below a constructor field
+
+Lean retains `outParam` in the constructor's raw recursive-function domain,
+while inductive analysis consumes it before recognizing the recursive target.
+This fixture combines the annotation and recursive-Pi seams in one declaration
+and keeps the raw binder syntax in generated artifacts. -/
+
+inductive AnnotatedPi : Type where
+  | mk : ((p : outParam Prop) → AnnotatedPi) → AnnotatedPi
+
+def outParamDefEq : VDefEq :=
+  vdefeq(@outParam ≡ fun (α : Sort u) => α)
+
+def outParamConstEnv : VEnv :=
+  (VEnv.empty.addConst ``outParam (vconst(type_of% @outParam))).get
+    (by decide)
+
+def outParamEnv : VEnv := outParamConstEnv.addDefEq outParamDefEq
+
+theorem outParamConstant_wf :
+    (vconst(type_of% @outParam) : VConstant).WF VEnv.empty := by
+  exact ⟨_, VEnv.HasType.forallE
+    (VEnv.HasType.sort (by decide))
+    (VEnv.HasType.sort (by decide))⟩
+
+theorem outParamConstEnv_ordered : outParamConstEnv.Ordered := by
+  apply VEnv.Ordered.const VEnv.Ordered.empty
+    (ci := vconst(type_of% @outParam))
+  · exact outParamConstant_wf
+  · rfl
+
+theorem outParamEnv_ordered : outParamEnv.Ordered := by
+  apply VEnv.Ordered.defeq outParamConstEnv_ordered
+  constructor
+  · exact VEnv.HasType.const0 rfl
+      (outParamConstant_wf.mono
+        (VEnv.addConst_le (by rfl :
+          VEnv.empty.addConst ``outParam (vconst(type_of% @outParam)) =
+            some outParamConstEnv)))
+  · exact VEnv.HasType.lam
+      (VEnv.HasType.sort (by decide))
+      (VEnv.HasType.bvar .zero)
+
+def annotatedPiRawType : VInductiveType where
+  name := ``AnnotatedPi
+  uvars := 0
+  type := vconst(type_of% @AnnotatedPi).type
+  ctors := [⟨vconst(type_of% @AnnotatedPi.mk), ``AnnotatedPi.mk⟩]
+
+def annotatedPiRawDecl : VInductDecl := ⟨0, 0, [annotatedPiRawType]⟩
+
+def annotatedPiViewCtor : VConstVal where
+  name := ``AnnotatedPi.mk
+  uvars := 0
+  type := .forallE
+    (.forallE (.sort .zero) (.const ``AnnotatedPi []))
+    (.const ``AnnotatedPi [])
+
+def annotatedPiViewType : VInductiveType :=
+  { annotatedPiRawType with ctors := [annotatedPiViewCtor] }
+
+def annotatedPiViewDecl : VInductDecl := ⟨0, 0, [annotatedPiViewType]⟩
+
+example : annotatedPiRawType.ctors[0].type =
+    .forallE
+      (.forallE
+        (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+        (.const ``AnnotatedPi []))
+      (.const ``AnnotatedPi []) := rfl
+
+example : annotatedPiViewDecl.checked?.isSome = true := rfl
+example : normalizationShape annotatedPiRawDecl annotatedPiViewDecl = true :=
+  rfl
+
+def annotatedPiNormalization : Normalization annotatedPiRawDecl where
+  view := annotatedPiViewDecl
+  shape_eq := rfl
+
+def annotatedPiViewChecked : annotatedPiViewDecl.Checked :=
+  annotatedPiViewDecl.checked?.get (by decide)
+
+def annotatedPiBlock : NormalizedChecked annotatedPiRawDecl :=
+  annotatedPiNormalization.check?.get (by decide)
+
+def annotatedPiGenerationChecked : GenerationChecked annotatedPiRawDecl :=
+  annotatedPiBlock.generation?.get (by decide)
+
+def annotatedPiRecArg : RecArg where
+  fieldIndex := 0
+  binders := [.sort .zero]
+  targetType := 0
+  indices := []
+
+example : annotatedPiViewChecked.constructors[0].recursive =
+    [annotatedPiRecArg] := rfl
+
+example : annotatedPiGenerationChecked.block.ctorPairs[0].rawFields 0 =
+    [.forallE
+      (.app (.const ``outParam [.succ .zero]) (.sort .zero))
+      (.const ``AnnotatedPi [])] := rfl
+
+example : annotatedPiGenerationChecked.recursor =
+    vconst(type_of% @AnnotatedPi.rec) := rfl
+
+example : annotatedPiGenerationChecked.generatedRules[0].rhs =
+    (vdefeq((motive : AnnotatedPi → Sort u)
+      (mk : (f : (p : outParam Prop) → AnnotatedPi) →
+        ((p : Prop) → motive (f p)) → motive (@AnnotatedPi.mk f))
+      (f : (p : outParam Prop) → AnnotatedPi) =>
+      @AnnotatedPi.rec motive mk (@AnnotatedPi.mk f) ≡
+        mk f (fun p => @AnnotatedPi.rec motive mk (f p)))).rhs := rfl
+
+/-- The normalized recursive-Pi view is semantically well formed without
+using the annotation definition; the raw-to-view bridge is supplied later by
+the exact checker candidate. -/
+theorem annotatedPiViewDecl_wf : annotatedPiViewDecl.WF VEnv.empty := by
+  refine ⟨rfl, ?_⟩
+  intro ty hty
+  have hty' : ty = annotatedPiViewType :=
+    List.mem_singleton.1 (by simpa [annotatedPiViewDecl] using hty)
+  subst ty
+  refine ⟨by trivial, ?_⟩
+  intro c hc
+  have hc' : c = annotatedPiViewCtor :=
+    List.mem_singleton.1 (by simpa [annotatedPiViewType] using hc)
+  subst c
+  constructor
+  · change fieldsWF 0 ``AnnotatedPi 0 VEnv.empty (.succ .zero) [] [] 0
+      [.forallE (.sort .zero) (.const ``AnnotatedPi [])]
+    refine ⟨?_, ?_, trivial⟩
+    · right
+      left
+      refine ⟨annotatedPiRecArg, ?_, ?_, ?_⟩
+      · rfl
+      · simp [annotatedPiRecArg]
+      · exact ⟨⟨⟨_, VEnv.HasType.sort (by decide)⟩, trivial⟩, rfl⟩
+    · intro h
+      change false = true at h
+      contradiction
+  · change VEnv.empty.SpineWF 0
+      [.forallE (.sort .zero) (.const ``AnnotatedPi [])]
+      (.sort (.succ .zero)) [] (.sort (.succ .zero))
+    rfl
+
+theorem annotatedPiViewChecked_wf :
+    annotatedPiViewChecked.WF outParamEnv := by
+  apply VInductDecl.Checked.WF.mono
+    ((VEnv.addConst_le (by rfl :
+      VEnv.empty.addConst ``outParam (vconst(type_of% @outParam)) =
+        some outParamConstEnv)).trans VEnv.addDefEq_le)
+  exact annotatedPiViewChecked.wf_of_decl annotatedPiViewDecl_wf
+
 /-! ## Explicit normalization boundary
 
 Lean stores reducible aliases in inductive metadata even though

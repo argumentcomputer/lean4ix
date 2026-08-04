@@ -44,26 +44,25 @@
       }: let
         # Lake package
         lake2nix = pkgs.callPackage lean4-nix.lake {};
-        # Restrict the Lake build inputs to Lean-relevant files so edits to
-        # unrelated files (flake.nix, docs, the nix/ fixtures) don't
-        # invalidate the build.
-        leanSrc = pkgs.lib.fileset.toSource {
-          root = ./.;
-          fileset =
-            pkgs.lib.fileset.difference
-            (pkgs.lib.fileset.unions [
-              ./lakefile.toml
-              ./lake-manifest.json
-              ./lean-toolchain
-              (pkgs.lib.fileset.fileFilter (f: f.hasExt "lean") ./.)
-            ])
-            ./nix;
+        # lean4-nix reads lake-manifest.json while evaluating derivations.
+        # Reuse the flake's lazy source instead of creating a nested
+        # fileset.toSource path that may be unrealized under --no-build.
+        leanSrc = inputs.self.outPath;
+        # Batteries v4.31.0 accidentally split deprecated recycling modules
+        # into a second Lake library with a dependency back to Batteries.  Its
+        # shared/static facets therefore form a cycle, which matters here
+        # because lake2nix exports those facets for downstream consumers.
+        # Backport the upstream fix released after the v4.31.0 tag.
+        batteries431CycleFix = pkgs.fetchurl {
+          url = "https://github.com/leanprover-community/batteries/commit/ba9a97018925ecc18fd8411d8c53de6056cf9dff.patch";
+          hash = "sha256-HjF68B7QUeioDcGT/q6SWQEqPp8o5OQqErfw5D9rdIY=";
         };
         # Dependencies from lake-manifest.json (batteries). lean4-nix's
         # default target guess ("batteries" -> "Batteries") is correct, so
-        # no overrides are needed.
+        # only the v4.31 shared/static cycle backport is needed.
         lakeDeps = lake2nix.buildDeps {
           src = leanSrc;
+          depOverride.batteries.patches = [batteries431CycleFix];
         };
         lakeBuildArgs = {
           inherit lakeDeps;
@@ -184,7 +183,10 @@
         # fails before any consumer updates its pin.
         consumer = lake2nix.mkPackage {
           name = "consumer";
-          src = ./nix/fixtures/consumer;
+          # lake2nix reads this fixture's manifest during evaluation. Keep it
+          # inside the already-realized flake source rather than coercing the
+          # subdirectory into a second, not-yet-realized store path.
+          src = "${leanSrc}/nix/fixtures/consumer";
           lakeDeps = {
             lean4lean = lean4leanLakeDependency;
             batteries = lakeDeps.batteries;
@@ -201,7 +203,7 @@
         };
 
         # Regression test for the `replayFromImports` teardown segfault (see
-        # plans/segfault-fix-plan.md): run the shipped wrapper from a clean
+        # plans/DEPRECATED-segfault-fix-plan.md): run the shipped wrapper from a clean
         # environment on a small module and require a clean exit plus the
         # summary line the crash used to swallow.
         cliSmoke =
@@ -254,7 +256,9 @@
         # Lean overlay
         _module.args.pkgs = import nixpkgs {
           inherit system;
-          overlays = [(lean4-nix.readToolchainFile ./lean-toolchain)];
+          overlays = [
+            (lean4-nix.readToolchainFile ./lean-toolchain)
+          ];
         };
 
         packages = {

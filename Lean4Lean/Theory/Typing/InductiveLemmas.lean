@@ -4,6 +4,12 @@ import Lean4Lean.Theory.Typing.Meta
 
 namespace Lean4Lean
 
+/- Lean 4.31 no longer unfolds these structural recursors implicitly in a
+number of `simp`/`simpa` calls below.  Keep the compatibility normalization
+local to this proof module: all rules only reduce on a visible constructor. -/
+attribute [local simp] VExpr.appN VExpr.bvarRevRange VExpr.forallN VExpr.lamN
+  VExpr.liftTelN VExpr.liftN VExpr.inst VExpr.instL VLevel.inst
+
 /-! ## Basic facts about the stage-1 generation helpers -/
 
 namespace VLevel
@@ -304,6 +310,8 @@ def instTelN (a : VExpr) : List VExpr → Nat → List VExpr
   | [], _ => []
   | A :: As, k => A.inst a k :: instTelN a As (k+1)
 
+attribute [local simp] instTelN
+
 theorem instTelN_length (a : VExpr) : ∀ (tel : List VExpr) (k : Nat),
     (instTelN a tel k).length = tel.length
   | [], _ => rfl
@@ -336,7 +344,9 @@ theorem instRev_bvar_ge : ∀ (es : List VExpr) {i : Nat}, es.length ≤ i →
     instRev (.bvar i) es = .bvar (i - es.length)
   | [], i, _ => by simp [instRev]
   | e :: es, i, h => by
-    have h' : es.length < i := by simpa using h
+    have h' : es.length < i := by
+      simp only [List.length_cons] at h
+      omega
     show instRev ((VExpr.bvar i).inst e es.length) es = _
     rw [show (VExpr.bvar i).inst e es.length = .bvar (i-1) from by
         show VExpr.instVar i e es.length = _
@@ -853,6 +863,38 @@ theorem GenerationChecked.viewCtors_eq {source : VInductDecl}
 theorem Normalization.identity_checked? (source : VInductDecl) :
     (Normalization.identity source).checked? = source.checked? := rfl
 
+/-- A successful normalized analysis retains the exact normalization that was
+analyzed; callers do not need to restate this projection as an unrelated
+equality. -/
+theorem Normalization.check?_normalization
+    {source : VInductDecl} {norm : Normalization source}
+    {block : NormalizedChecked source}
+    (h : norm.check? = some block) :
+    block.normalization = norm := by
+  unfold Normalization.check? at h
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  cases h
+  rfl
+
+/-- A successful generation analysis is indexed by the same normalization
+retained in its checked block. -/
+theorem Normalization.generation?_normalization
+    {source : VInductDecl} {norm : Normalization source}
+    {generation : GenerationChecked source}
+    (h : norm.generation? = some generation) :
+    generation.block.normalization = norm := by
+  unfold Normalization.generation? at h
+  obtain ⟨block, hblock, hgeneration⟩ :=
+    Option.bind_eq_some_iff.mp h
+  have hnorm := Normalization.check?_normalization hblock
+  unfold NormalizedChecked.generation? at hgeneration
+  split at hgeneration
+  · have hgeneration' := Option.some.inj hgeneration
+    rw [← hgeneration']
+    exact hnorm
+  · contradiction
+
 theorem identityChecked?_isSome (source : VInductDecl) :
     (identityChecked? source).isSome = source.checked?.isSome := by
   obtain ⟨U, np, types⟩ := source
@@ -905,6 +947,18 @@ info: 'Lean4Lean.VInductDecl.GenerationChecked.viewCtors_eq' depends on axioms: 
 -/
 #guard_msgs in
 #print axioms GenerationChecked.viewCtors_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.check?_normalization' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Normalization.check?_normalization
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.generation?_normalization' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Normalization.generation?_normalization
 
 /--
 info: 'Lean4Lean.VInductDecl.identityChecked?_isSome' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -1340,7 +1394,6 @@ theorem HasType.appN_selfSpine {env : VEnv} {U : Nat} :
     rw [VExpr.liftN_succ_inst_bvar] at happ
     have := HasType.appN_selfSpine (As := As) (B := B) (Δ := Δ) (Γ := A :: Γ)
       (f := f.app (.bvar (Δ.length + As.length))) (by simpa [List.append_assoc] using happ)
-    simp only [VExpr.appN] at this ⊢
     simpa [List.append_assoc, VExpr.bvarRevRange] using this
 
 /-- The closed-telescope entry point for `appN_selfSpine`. -/
@@ -2404,6 +2457,18 @@ theorem Checked.WF.mono {decl : VInductDecl} {checked : decl.Checked}
   refine ⟨h.1.mono henv, fun c hc => ?_⟩
   exact ⟨fieldsWF_mono henv (h.2 c hc).1, (h.2 c hc).2.mono henv⟩
 
+/-- Exact syntactic decomposition of an accepted family view into its
+parameter telescope, index telescope, and terminal sort. -/
+theorem Checked.type_eq
+    {source : VInductDecl} (checked : source.Checked) :
+    checked.type.type =
+      VExpr.forallN checked.params
+        (VExpr.forallN checked.indices (.sort checked.resultLevel)) := by
+  rw [← VExpr.forallN_telN_dropN source.nparams checked.type.type,
+    ← forallN_ctorFields_resultOf
+      (VExpr.dropN source.nparams checked.type.type),
+    checked.result_eq, checked.params_eq, checked.indices_eq]
+
 /-- The semantic checker contract types the family before that family is
 inserted. This is the exact premise needed by the first transaction step. -/
 theorem Checked.WF.family_isType
@@ -2417,6 +2482,116 @@ theorem Checked.WF.family_isType
   exact IsType.forallN
     (by simpa [checked.params_eq, checked.indices_eq] using h.1)
     ⟨_, HasType.sort checked.direct_anatomy.2.2.1⟩
+
+/-- Once the retained family constant has the checked family type, the
+checked constructor-result spine types the exact normalized family
+application.  This fact depends only on analyzer semantics and the constant's
+ordinary typing judgment; callers do not need to restate result typing for
+each constructor candidate. -/
+theorem GenerationChecked.checkedResultTarget_hasType
+    {source : VInductDecl} (gen : GenerationChecked source)
+    {env : VEnv} (henv : env.Ordered)
+    (hchecked : gen.block.checked.WF env)
+    (familyConst : env.HasType source.uvars []
+      (.const gen.block.sourceType.name (VLevel.params source.uvars))
+      gen.block.checked.type.type)
+    {ctor : NormalizedCtor} (hctor : ctor ∈ gen.block.ctorPairs) :
+    env.HasType source.uvars (ctor.viewBinders gen.block).reverse
+      (ctor.resultTarget gen.block)
+      (.sort gen.block.checked.resultLevel) := by
+  have htype := gen.block.checked.type_eq
+  have hfamily : env.HasType source.uvars
+      (ctor.view.fields.reverse ++ gen.block.checked.params.reverse)
+      (VExpr.appN
+        (.const gen.block.sourceType.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange ctor.view.fields.length
+          gen.block.checked.params.length))
+      (VExpr.forallN
+        (VExpr.liftTelN ctor.view.fields.length
+          gen.block.checked.indices 0)
+        (.sort gen.block.checked.resultLevel)) := by
+    have hconst : env.HasType source.uvars
+        (ctor.view.fields.reverse ++
+          gen.block.checked.params.reverse ++ [])
+        (.const gen.block.sourceType.name (VLevel.params source.uvars))
+        (VExpr.forallN gen.block.checked.params
+          (VExpr.forallN gen.block.checked.indices
+            (.sort gen.block.checked.resultLevel))) := by
+      simpa only [htype] using familyConst.weak0 henv
+    have happ := HasType.appN_selfSpine'
+      (As := gen.block.checked.params)
+      (B := VExpr.forallN gen.block.checked.indices
+        (.sort gen.block.checked.resultLevel))
+      (Δ := ctor.view.fields.reverse) (Γ := [])
+      (by simpa only [← htype] using gen.block.checked.type_closed)
+      hconst
+    rw [List.length_reverse, VExpr.liftN_forallN] at happ
+    simpa using happ
+  have hspine : env.SpineWF source.uvars
+      (ctor.view.fields.reverse ++ gen.block.checked.params.reverse)
+      (VExpr.forallN
+        (VExpr.liftTelN ctor.view.fields.length
+          gen.block.checked.indices 0)
+        (.sort gen.block.checked.resultLevel))
+      ctor.view.resultIndices
+      (.sort gen.block.checked.resultLevel) := by
+    obtain ⟨c, hc, hview⟩ := gen.viewCtor_ofDirect hctor
+    have h := (hchecked.2 c hc).2
+    rw [hview]
+    simpa [CheckedCtor.ofDirect, gen.block.uvars_eq,
+      gen.block.nparams_eq] using h
+  have hresult := hspine.hasType_appN hfamily
+  rw [← VExpr.appN_append] at hresult
+  have hparams : gen.block.checked.params.length = source.nparams :=
+    gen.shape.2.1.symm.trans gen.shape.1
+  have hfields := (gen.shape.2.2.2.2.2 ctor hctor).2.2.2
+  rw [hparams, ← hfields] at hresult
+  simpa [NormalizedCtor.viewBinders,
+    NormalizedCtor.resultTarget] using hresult
+
+/-- A paired checked constructor's stored view type is exactly its analyzed
+binder telescope followed by the normalized family result application. -/
+theorem GenerationChecked.viewCtorType_eq
+    {source : VInductDecl} (gen : GenerationChecked source)
+    {ctor : NormalizedCtor} (hctor : ctor ∈ gen.block.ctorPairs) :
+    ctor.view.value.type =
+      VExpr.forallN (ctor.viewBinders gen.block)
+        (ctor.resultTarget gen.block) := by
+  obtain ⟨c, hc, hview⟩ := gen.viewCtor_ofDirect hctor
+  have hcAn := gen.block.checked.direct_anatomy.2.2.2.2.2 c hc
+  have htype := VExpr.forallN_telN_dropN
+    gen.block.normalization.view.nparams c.type
+  rw [hcAn.2.1, (stage3Ctor_eq hcAn.2.2).1] at htype
+  have hfields := (gen.shape.2.2.2.2.2 ctor hctor).2.2.2
+  have hfields' :
+      (ctor.rawFields gen.block.normalization.view.nparams).length =
+        (ctorFields (VExpr.dropN
+          gen.block.normalization.view.nparams c.type)).length := by
+    simpa [gen.block.nparams_eq, hview,
+      CheckedCtor.ofDirect] using hfields
+  simpa [← VExpr.forallN_append, NormalizedCtor.viewBinders,
+    NormalizedCtor.resultTarget, hview, hfields',
+    CheckedCtor.ofDirect, gen.block.uvars_eq,
+    gen.block.nparams_eq, gen.block.sourceType_name_eq,
+    gen.block.checked.params_eq, Nat.zero_add] using htype.symm
+
+/--
+info: 'Lean4Lean.VInductDecl.Checked.type_eq' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Checked.type_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationChecked.viewCtorType_eq' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationChecked.viewCtorType_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.GenerationChecked.checkedResultTarget_hasType' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms GenerationChecked.checkedResultTarget_hasType
 
 /-- Final-environment invariant for mixed raw/view generation. It contains
 only facts stable after the raw family and constructors have been inserted;
@@ -2608,7 +2783,7 @@ theorem ctorApp_emitted_decl {ctor : NormalizedCtor}
       (S.ctorWF ctor hctor).emittedResult.hasType.2
   obtain ⟨_, hemit⟩ :=
     (S.ctorWF ctor hctor).emittedTel.forallN_defeq
-      (by simpa [E] using hresult)
+      (by simpa [E, VEnv.HasType] using hresult)
   have hcE₀ : env.HasType source.uvars []
       (.const ctor.raw.name (VLevel.params source.uvars))
       (VExpr.forallN E (ctor.resultTarget gen.block)) := by
@@ -3338,7 +3513,8 @@ theorem recArgMinor_isType {ctor : NormalizedCtor}
   dsimp only [j] at ht hctx
   have htel : env.OnTel (source.uvars + 1) Γ As := by
     rw [hctx] at ht
-    simpa [r, As, m, j, Bs, RecArg.instL] using ht.1
+    simpa [r, As, m, j, Bs, RecArg.instL,
+      RecArg.minorBinders] using ht.1
   have hsp : env.SpineWF (source.uvars + 1)
       (As.reverse ++ Γ)
       (VExpr.forallN
@@ -3349,6 +3525,7 @@ theorem recArgMinor_isType {ctor : NormalizedCtor}
       (.sort (gen.block.checked.resultLevel.inst ls)) := by
     rw [hctx] at ht
     simpa [r, As, idxs, m, j, Bs, ls, RecArg.instL,
+      RecArg.minorBinders,
       List.append_assoc,
       show j + r₀.binders.length + 1 + (m-j+p) =
         m+p+r₀.binders.length+1 from by omega] using ht.2
@@ -3426,21 +3603,14 @@ theorem recArgMinor_isType {ctor : NormalizedCtor}
     List.nil_append] at hmajor
   have hAsLen : As.length = r.binders.length := by
     simp [As, RecArg.minorBinders, VExpr.liftTelN_length]
-  have hmajorHead :
-      (VExpr.bvar (m-1-r.fieldIndex+p)).liftN As.length =
-        .bvar (m-1-r.fieldIndex+p+r.binders.length) := by
-    simp only [VExpr.liftN, liftVar_base]
-    congr 1
-    rw [hAsLen]
-    omega
   change env.HasType (source.uvars + 1) (As.reverse ++ Γ)
-    (((VExpr.bvar (m-1-r.fieldIndex+p)).liftN As.length).appN
+    ((VExpr.bvar (m-1-r.fieldIndex+p+As.length)).appN
       (VExpr.bvarRevRange 0 As.length))
     (VExpr.appN
       (.const gen.block.sourceType.name ls)
       (VExpr.bvarRevRange
         (m+p+r.binders.length+1) source.nparams ++ idxs)) at hmajor
-  rw [hmajorHead, hAsLen] at hmajor
+  rw [hAsLen] at hmajor
   have hMget :
       (As.reverse ++ Γ)[m+p+r.binders.length]? =
         some gen.motiveType := by
@@ -4439,7 +4609,7 @@ theorem hasType_appN_ihs {env : VEnv} {U : Nat} {Γ : List VExpr} {m k : Nat}
           [.bvar (m-1-q.1)]))) →
     env.HasType U Γ g (VExpr.forallN (ihsR m k rs 0) (Dfin.liftN rs.length)) →
     env.HasType U Γ (g.appN (rs.map argOf)) Dfin
-  | [], g, _, _, hg => by simpa using hg
+  | [], g, _, _, hg => by simpa [ihsR] using hg
   | (j, idxs) :: rs, g, hm, hargs, hg => by
     have happ := VEnv.HasType.app hg (hargs (j, idxs) (.head _))
     simp only [List.length_cons] at happ
@@ -4461,7 +4631,7 @@ theorem hasType_appN_ruleIHs {env : VEnv} {U : Nat} {Γ : List VExpr} {m k : Nat
     env.HasType U Γ g
       (VExpr.forallN (ruleIHs m k rs 0) (Dfin.liftN rs.length)) →
     env.HasType U Γ (g.appN (rs.map argOf)) Dfin
-  | [], g, _, hg => by simpa using hg
+  | [], g, _, hg => by simpa [ruleIHs] using hg
   | r :: rs, g, hargs, hg => by
     have happ := VEnv.HasType.app hg (by
       simpa [ruleIHs] using hargs r (.head _))
@@ -5357,19 +5527,10 @@ theorem ruleCall_hasType {ctor : NormalizedCtor}
       As.length = r.binders.length := by
     simp [As, RecArg.ruleBinders,
       VExpr.liftTelN_length]
-  have hmajorHead :
-      (VExpr.bvar
-        (m-1-r.fieldIndex)).liftN As.length =
-      .bvar
-        (m-1-r.fieldIndex+r.binders.length) := by
-    simp only [VExpr.liftN, liftVar_base]
-    congr 1
-    rw [hAsLen]
-    omega
   change env.HasType (source.uvars + 1)
     (As.reverse ++ Γ)
-    (((VExpr.bvar
-      (m-1-r.fieldIndex)).liftN As.length).appN
+    ((VExpr.bvar
+      (m-1-r.fieldIndex+As.length)).appN
         (VExpr.bvarRevRange 0 As.length))
     (VExpr.appN
       (.const gen.block.sourceType.name ls)
@@ -5377,7 +5538,7 @@ theorem ruleCall_hasType {ctor : NormalizedCtor}
           (m+k+r.binders.length+1)
           source.nparams ++
         idxs)) at hmajor
-  rw [hmajorHead, hAsLen] at hmajor
+  rw [hAsLen] at hmajor
   have hlen : idxs.length = gen.idxTel.length := by
     simpa [idxs, r, RecArg.instL,
       GenerationChecked.idxTel] using
@@ -5394,7 +5555,7 @@ theorem ruleCall_hasType {ctor : NormalizedCtor}
       simpa [Γ, List.append_assoc, hAsLen, hFsLen,
         Nat.add_comm, Nat.add_left_comm,
         Nat.add_assoc] using hmajor)
-  have hbase :
+  have hbaseLift :
       (VExpr.appN
         (.const
           (.str gen.block.sourceType.name "rec")
@@ -5418,6 +5579,28 @@ theorem ruleCall_hasType {ctor : NormalizedCtor}
     apply congrArg (VExpr.appN _)
     apply VExpr.bvarRevRange_congr
     omega
+  have hbaseRange :
+      VExpr.appN
+        ((VExpr.const
+          (.str gen.block.sourceType.name "rec")
+          (VLevel.params (source.uvars + 1))).app
+            (VExpr.bvar
+              (source.nparams +
+                (k + (m + r.binders.length)))))
+        (VExpr.bvarRevRange
+          (m+r.binders.length)
+          (source.nparams+k)) =
+      VExpr.appN
+        (.const
+          (.str gen.block.sourceType.name "rec")
+          (VLevel.params (source.uvars + 1)))
+        (VExpr.bvarRevRange
+          (m+r.binders.length)
+          (source.nparams+(1+k))) := by
+    rw [show source.nparams + (k + (m + r.binders.length)) =
+        (m+r.binders.length) + (source.nparams+k) by omega,
+      show source.nparams+(1+k) = (source.nparams+k)+1 by omega]
+    rfl
   have hlam := HasType.lamN htel (by
     simpa [Γ, Fs, hAsLen, hFsLen,
       List.append_assoc, VExpr.liftN_appN,
@@ -5425,8 +5608,10 @@ theorem ruleCall_hasType {ctor : NormalizedCtor}
         (Nat.zero_le _),
       Nat.add_comm, Nat.add_left_comm,
       Nat.add_assoc] using hcall)
-  simpa [RecArg.ruleCall, RecArg.ruleIH,
-    r, Bs, ls, As, idxs, m, k, Γ, Fs, hbase,
+  simp only [VExpr.liftTelN_length] at hlam
+  rw [hbaseRange] at hlam
+  simpa only [RecArg.ruleCall, RecArg.ruleIH,
+    r, Bs, ls, As, idxs, m, k, Γ, Fs, hbaseLift,
     VExpr.liftTelN_length, List.append_assoc,
     Nat.add_assoc] using hlam
 
@@ -6176,7 +6361,7 @@ theorem DirectFamilyEnv.recAppPi_hasType_decl (Δ : List VExpr) :
     exact S.tconst_decl
   have hout := HasType.appN_selfSpine (env := env) (U := U) hf
   rw [S.hlen] at hout
-  simpa [List.append_nil] using hout
+  simpa [recApp, List.append_nil] using hout
 
 /-- Checked constructor fields form a telescope as soon as the family is
 available; no constructor lookup is needed for recursive occurrences. -/
@@ -6377,7 +6562,7 @@ theorem Stage3Env.recAppPi_hasType_decl (Δ : List VExpr) :
     exact S.tconst_decl
   have := HasType.appN_selfSpine (env := env) (U := U) hf
   rw [S.hlen] at this
-  simpa [List.append_nil] using this
+  simpa [recApp, List.append_nil] using this
 
 /-- The parameter spine at the recursor universes: the index pi. -/
 theorem Stage3Env.recAppPi_hasType (Δ : List VExpr) :
@@ -6396,7 +6581,7 @@ theorem Stage3Env.recAppPi_hasType (Δ : List VExpr) :
   have := HasType.appN_selfSpine (env := env) (U := U+1) hf
   rw [show (paramsTel U np ty).length = np from by
     simp [paramsTel, List.length_map, S.hlen]] at this
-  simpa [List.append_nil] using this
+  simpa [recApp', List.append_nil] using this
 
 /-- The block applied to the full parameter-and-index self-spine is a
 sort, in the context of the indices over the parameters. -/
@@ -6626,7 +6811,6 @@ theorem Stage3Env.recArg_transport {c : VConstVal} (hc : c ∈ ty.ctors)
     (List.getElem?_eq_some_iff.1 hB).1
   have hsem := fieldsWF_recArg (S.hfields c hc) r₀.fieldIndex B r₀ hB (by
     simpa [idxTel_length] using hr)
-  simp only [Nat.zero_add] at hsem
   have htel₁ := hsem.1.instL (U' := U+1) VLevel.params'_one_wf
   have hsp₁ := hsem.2.instL (U' := U+1) VLevel.params'_one_wf
   have hctx :
@@ -6759,14 +6943,16 @@ theorem Stage3Env.recArgMinor_isType {c : VConstVal} (hc : c ∈ ty.ctors)
   dsimp only [j] at ht hctx
   have htel : OnTel env (U+1) Γ As := by
     rw [hctx] at ht
-    simpa [r, As, m, j, RecArg.instL] using ht.1
+    simpa [r, As, m, j, RecArg.instL,
+      RecArg.minorBinders] using ht.1
   have hsp : env.SpineWF (U+1) (As.reverse ++ Γ)
       (VExpr.forallN
         (VExpr.liftTelN (m+p+r.binders.length+1) (idxTel U np ty) 0)
         (.sort (l.inst (VLevel.params' U 1))))
       idxs (.sort (l.inst (VLevel.params' U 1))) := by
     rw [hctx] at ht
-    simpa [r, As, idxs, m, j, RecArg.instL, List.append_assoc,
+    simpa [r, As, idxs, m, j, RecArg.instL,
+      RecArg.minorBinders, List.append_assoc,
       show j + r₀.binders.length + 1 + (m-j+p) =
         m+p+r₀.binders.length+1 from by omega] using ht.2
   have hF : Γ[m-1-j+p]? =
@@ -6800,19 +6986,12 @@ theorem Stage3Env.recArgMinor_isType {c : VConstVal} (hc : c ∈ ty.ctors)
   simp only [List.length_nil, VExpr.liftN_zero, List.nil_append] at hmajor
   have hAsLen : As.length = r.binders.length := by
     simp [As, RecArg.minorBinders, VExpr.liftTelN_length]
-  have hmajorHead :
-      (VExpr.bvar (m-1-r.fieldIndex+p)).liftN As.length =
-        .bvar (m-1-r.fieldIndex+p+r.binders.length) := by
-    simp only [VExpr.liftN, liftVar_base]
-    congr 1
-    rw [hAsLen]
-    omega
   change env.HasType (U+1) (As.reverse ++ Γ)
-    (((VExpr.bvar (m-1-r.fieldIndex+p)).liftN As.length).appN
+    ((VExpr.bvar (m-1-r.fieldIndex+p+As.length)).appN
       (VExpr.bvarRevRange 0 As.length))
     (VExpr.appN (.const T (VLevel.params' U 1))
       (VExpr.bvarRevRange (m+p+r.binders.length+1) np ++ idxs)) at hmajor
-  rw [hmajorHead, hAsLen] at hmajor
+  rw [hAsLen] at hmajor
   have hMget : (As.reverse ++ Γ)[m+p+r.binders.length]? =
       some (motiveType U T np ty) := by
     have hM0 := getElem?_rstack3 As.reverse (Δ ++ Fs.reverse)
@@ -7151,7 +7330,7 @@ theorem Stage3Env.minor_isType {c : VConstVal} (hc : c ∈ ty.ctors) :
   refine IsType.forallN ?_ ?_
   · have h0 := S.fieldsWF_onTel _ [] 0 rfl (by simpa using S.hfields c hc)
     have h1 := h0.weakN S.ord (.zero [motiveType U T np ty])
-    simpa [List.map_reverse, paramsTel] using h1
+    simpa [ctorFieldsR, List.map_reverse, paramsTel] using h1
   · refine IsType.forallN (S.ihs_onTel hc _ (fun q hq => hq) [] 0 rfl) ?_
     have hml2 : (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
         (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
@@ -7284,7 +7463,7 @@ theorem Stage3Env.minor_isTypeRec {c : VConstVal} (hc : c ∈ ty.ctors) :
   refine IsType.forallN ?_ ?_
   · have h0 := S.fieldsWF_onTel _ [] 0 rfl (by simpa using S.hfields c hc)
     have h1 := h0.weakN S.ord (.zero [motiveType U T np ty])
-    simpa [List.map_reverse, paramsTel] using h1
+    simpa [ctorFieldsR, List.map_reverse, paramsTel] using h1
   · refine IsType.forallN (S.ihsRec_onTel hc _ (fun q hq => hq) [] 0 rfl) ?_
     have hml2 : (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
         (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
@@ -8258,7 +8437,8 @@ theorem Stage3Env.ruleBinders_onTel {c : VConstVal} (hc : c ∈ ty.ctors) :
         [motiveType U T np ty]).length = ty.ctors.length + 1 from by
       simp only [List.length_append, List.length_reverse, minorTypes_length,
         List.length_singleton])] at h1
-    simpa [List.map_reverse, paramsTel, List.append_assoc] using h1
+    simpa [ctorFieldsR, List.map_reverse, paramsTel,
+      List.append_assoc] using h1
   refine OnTel.append (OnTel.append hP ⟨?_, ?_⟩) ?_
   · simpa only [List.append_nil] using S.motive_isType
   · have := S.minorTypes_onTel ty.ctors (fun _ h => h) [] 0 rfl
@@ -8284,7 +8464,8 @@ theorem Stage3Env.ruleBindersRec_onTel {c : VConstVal} (hc : c ∈ ty.ctors) :
         [motiveType U T np ty]).length = ty.ctors.length + 1 from by
       simp only [List.length_append, List.length_reverse, minorTypesRec_length,
         List.length_singleton])] at h1
-    simpa [List.map_reverse, paramsTel, List.append_assoc] using h1
+    simpa [ctorFieldsR, List.map_reverse, paramsTel,
+      List.append_assoc] using h1
   refine OnTel.append (OnTel.append hP ⟨?_, ?_⟩) ?_
   · simpa only [List.append_nil] using S.motive_isType
   · have := S.minorTypesRec_onTel ty.ctors (fun _ h => h) [] 0 rfl
@@ -8668,19 +8849,12 @@ theorem Stage3Env.ruleCallRec_hasType {c : VConstVal} (hc : c ∈ ty.ctors)
   simp only [List.length_nil, VExpr.liftN_zero, List.nil_append] at hmajor
   have hAsLen : As.length = r.binders.length := by
     simp [As, RecArg.ruleBinders, VExpr.liftTelN_length]
-  have hmajorHead :
-      (VExpr.bvar (m-1-r.fieldIndex)).liftN As.length =
-        .bvar (m-1-r.fieldIndex+r.binders.length) := by
-    simp only [VExpr.liftN, liftVar_base]
-    congr 1
-    rw [hAsLen]
-    omega
   change env.HasType (U+1) (As.reverse ++ Γ)
-    (((VExpr.bvar (m-1-r.fieldIndex)).liftN As.length).appN
+    ((VExpr.bvar (m-1-r.fieldIndex+As.length)).appN
       (VExpr.bvarRevRange 0 As.length))
     (VExpr.appN (.const T (VLevel.params' U 1))
       (VExpr.bvarRevRange (m+k+r.binders.length+1) np ++ idxs)) at hmajor
-  rw [hmajorHead, hAsLen] at hmajor
+  rw [hAsLen] at hmajor
   have hlen : idxs.length = (idxTel U np ty).length := by
     simpa [idxs, r, RecArg.instL] using (recArg?_eq hr₀).2.2.2.1
   have hcall := S.recAppRec_hasType hrec (As.reverse ++ Fs.reverse)
@@ -8689,7 +8863,7 @@ theorem Stage3Env.ruleCallRec_hasType {c : VConstVal} (hc : c ∈ ty.ctors)
     hlen
     (by simpa [Γ, List.append_assoc, hAsLen, hFsLen, Nat.add_comm,
       Nat.add_left_comm, Nat.add_assoc] using hmajor)
-  have hbase :
+  have hbaseLift :
       (VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
         (VExpr.bvarRevRange m (np+(k+1)))).liftN r.binders.length =
       VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
@@ -8700,12 +8874,25 @@ theorem Stage3Env.ruleCallRec_hasType {c : VConstVal} (hc : c ∈ ty.ctors)
     apply congrArg (VExpr.appN _)
     apply VExpr.bvarRevRange_congr
     omega
+  have hbaseRange :
+      VExpr.appN
+        ((VExpr.const (.str T "rec") (VLevel.params (U+1))).app
+          (VExpr.bvar (np + (k + (m + r.binders.length)))))
+        (VExpr.bvarRevRange (m+r.binders.length) (np+k)) =
+      VExpr.appN
+        (.const (.str T "rec") (VLevel.params (U+1)))
+        (VExpr.bvarRevRange (m+r.binders.length) (np+(k+1))) := by
+    rw [show np + (k + (m + r.binders.length)) =
+        (m+r.binders.length) + (np+k) by omega,
+      show np+(k+1) = (np+k)+1 by omega]
+    rfl
   have hlam := HasType.lamN htel (by
     simpa [Γ, Fs, hAsLen, hFsLen, List.append_assoc,
       VExpr.liftN_appN, bvarRevRange_liftN_ge _ _ _ _ (Nat.zero_le _),
       Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hcall)
-  simpa [RecArg.ruleCall, RecArg.ruleIH, r, As, idxs, m, k, Γ, Fs, hbase,
-    List.append_assoc, Nat.add_assoc] using hlam
+  rw [hbaseRange] at hlam
+  simpa only [RecArg.ruleCall, RecArg.ruleIH, r, As, idxs, m, k, Γ, Fs,
+    hbaseLift, List.append_assoc, Nat.add_assoc] using hlam
 
 
 /-- The right-hand side of an indexed iota rule: the constructor's minor
@@ -8903,7 +9090,7 @@ theorem Stage3Env.minorApp_hasType {i : Nat} {c : VConstVal}
       rw [hargs]
       exact hr)
     hfields
-  simpa only [hrs] using hres
+  simpa only [hrs, List.nil_append] using hres
 
 /-- Generalized iota RHS: apply the selected constructor minor to every field
 and then to the direct or functional recursive call generated for each
@@ -9425,11 +9612,13 @@ theorem Checked.WF.identityCtorWF
   · simpa [NormalizedCtor.emittedBinders,
       NormalizedCtor.rawFields,
       NormalizedCtor.viewBinders, CheckedCtor.ofDirect,
-      checked.params_eq] using htelRefl
+      Checked.identityGeneration, Checked.identityBlock,
+      NormalizedChecked.rawParams, checked.params_eq] using htelRefl
   · simpa [NormalizedCtor.emittedBinders,
       NormalizedCtor.rawFields, NormalizedCtor.rawResult,
       NormalizedCtor.resultTarget, CheckedCtor.ofDirect,
-      checked.params_eq] using hresultDF
+      Checked.identityGeneration, Checked.identityBlock,
+      NormalizedChecked.rawParams, checked.params_eq] using hresultDF
 
 omit S in
 /-- Every semantically checked direct declaration admits the identity mixed
@@ -9880,6 +10069,39 @@ theorem addInductGeneration_WF {source : VInductDecl}
     SR.generatedRulesFold_ordered (addConst_self H.addRec)
   simpa only [H.addRules] using hout
 
+/-- Recover the ordinary normalized transaction trace from the
+proof-carrying public entry point.  The conclusion contains only Theory data;
+the producer that established the certificate is deliberately absent. -/
+theorem addInductCertified_trace {source : VInductDecl}
+    {certificate : source.GenerationCertificate env}
+    (hadd : addInductCertified env certificate = some env') :
+    Nonempty
+      (AddInductGenerationTrace env env' certificate.generation) := by
+  apply addInductGeneration_trace
+  simpa only [addInductCertified_eq_addInductGeneration] using hadd
+
+/-- The proof-carrying wrapper has the same atomic success/failure behavior as
+the underlying normalized transaction. -/
+theorem addInductCertified_atomic {source : VInductDecl}
+    (env : VEnv) (certificate : source.GenerationCertificate env) :
+    addInductCertified env certificate = none ∨
+      ∃ env', addInductCertified env certificate = some env' ∧
+        Nonempty
+          (AddInductGenerationTrace env env' certificate.generation) := by
+  simpa only [addInductCertified_eq_addInductGeneration] using
+    addInductGeneration_atomic env certificate.generation
+
+/-- Ordering preservation for the public certified transaction.  Its
+semantic premise is carried by the certificate rather than repeated at every
+call site. -/
+theorem addInductCertified_WF {source : VInductDecl}
+    {certificate : source.GenerationCertificate env}
+    (henv : env.Ordered)
+    (hadd : addInductCertified env certificate = some env') :
+    env'.Ordered := by
+  apply addInductGeneration_WF henv certificate.wf
+  simpa only [addInductCertified_eq_addInductGeneration] using hadd
+
 /--
 info: 'Lean4Lean.VEnv.addInductGeneration_trace' depends on axioms: [propext, Quot.sound]
 -/
@@ -9927,6 +10149,30 @@ info: 'Lean4Lean.VEnv.addInductGeneration_WF' depends on axioms: [propext, Class
 -/
 #guard_msgs in
 #print axioms addInductGeneration_WF
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_eq_addInductGeneration' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_eq_addInductGeneration
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_trace' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_trace
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_atomic' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_atomic
+
+/--
+info: 'Lean4Lean.VEnv.addInductCertified_WF' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addInductCertified_WF
 
 /--
 info: 'Lean4Lean.VEnv.addInduct_eq_addInductGeneration' depends on axioms: [propext, Classical.choice, Quot.sound]

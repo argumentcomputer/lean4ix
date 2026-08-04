@@ -28,6 +28,16 @@ structure InductiveStats where
   isNotZero : Bool
   deriving Inhabited
 
+/-- Explicit initial state for family validation. Naming this value keeps the
+executable producer and its exact-result lemmas independent of the opaque
+compiler-generated `Inhabited` instance. -/
+def InductiveStats.initial (levels : List Level) : InductiveStats where
+  levels := levels
+  resultLevel := .zero
+  indConsts := #[]
+  params := #[]
+  isNotZero := false
+
 structure Context where
   env : Environment
   lctx : LocalContext := {}
@@ -76,17 +86,86 @@ instance (priority := low) : MonadLift TypeChecker.M M where
       x.run c.env c.safety c.lctx c.lparams (fuel := c.fuel) :=
   rfl
 
+@[simp] theorem liftExcept_apply (x : Except Exception α) (c : Context) :
+    (liftM x : M α) c = x :=
+  rfl
+
 instance (priority := low+1) : MonadWithReaderOf LocalContext M where
   withReader f x := withReader (fun c => { c with lctx := f c.lctx }) x
 
 instance : MonadLCtx M where
   getLCtx := return (← read).lctx
 
+@[simp] theorem withLocalDecl_apply
+    (name : Name) (binderInfo : BinderInfo) (type : Expr)
+    (k : Expr → M α) (context : Context) :
+    withLocalDecl name binderInfo type k context =
+      k context.freshExpr
+        (context.pushLocalDecl name binderInfo type) := by
+  rfl
+
 @[inline] def withEnv (env : Environment) (x : M α) : M α :=
   withReader (fun c => { c with env }) x
 
+/-- Run a closed-metadata action without inheriting validation-local
+declarations.  All other reader fields, including the staged environment and
+fuel, are preserved exactly. -/
+@[inline] def withEmptyLocalContext (x : M α) : M α :=
+  withReader (fun c : Context => { c with lctx := {} }) x
+
+@[simp] theorem withEmptyLocalContext_apply (x : M α) (context : Context) :
+    withEmptyLocalContext x context = x { context with lctx := {} } := by
+  rfl
+
 def getType (fvar : Expr) : M Expr :=
   return ((← getLCtx).get! fvar.fvarId!).type
+
+/-- Transparent binder-annotation peeling used by inductive checking.
+
+Lean's `Expr.consumeTypeAnnotations` is an opaque partial implementation.  A
+kernel proof of an exact successful inductive pass cannot reduce through that
+helper, so using it directly would require a separate contract axiom for every
+annotated binder.  This structural mirror covers the same four top-level
+annotations and is regression-checked against Lean's helper below at the
+candidate boundary. -/
+def consumeTypeAnnotations : (source : Expr) → Expr
+  | .app (.app (.const name levels) type) default =>
+    if name = ``_root_.optParam then
+      consumeTypeAnnotations type
+    else if name = ``_root_.autoParam then
+      consumeTypeAnnotations type
+    else
+      .app (.app (.const name levels) type) default
+  | .app (.const name levels) type =>
+    if name = ``_root_.outParam then
+      consumeTypeAnnotations type
+    else if name = ``_root_.semiOutParam then
+      consumeTypeAnnotations type
+    else
+      .app (.const name levels) type
+  | source => source
+termination_by source => sizeOf source
+
+/-- Transparent structural equality used only as a fast path before the
+normalization-based universe comparison. -/
+def levelStructEq : Level → Level → Bool
+  | .zero, .zero => true
+  | .succ u, .succ v => levelStructEq u v
+  | .max u₁ u₂, .max v₁ v₂ | .imax u₁ u₂, .imax v₁ v₂ =>
+    levelStructEq u₁ v₁ && levelStructEq u₂ v₂
+  | .param u, .param v => u == v
+  | .mvar u, .mvar v => u == v
+  | _, _ => false
+
+/-- Transparent sufficient comparison for the common structural universe
+cases used by constructor fields.  Every universe is at least zero, successor
+is monotone, and otherwise exact structural equality is sufficient.  Cases
+outside this deliberately small relation continue to the standard
+normalization-based `Level.geq` comparison below. -/
+def levelStructGe : Level → Level → Bool
+  | _, .zero => true
+  | .succ u, .succ v => levelStructGe u v
+  | u, v => levelStructEq u v
 
 def checkInductiveTypes
     (nparams : Nat) (indTypes : Array InductiveType)
@@ -104,7 +183,7 @@ def checkInductiveTypes
         if let .forallE name dom body bi := type then
           if i < nparams then
             if stats.indConsts.isEmpty then
-              withLocalDecl name bi dom.consumeTypeAnnotations fun param => do
+              withLocalDecl name bi (consumeTypeAnnotations dom) fun param => do
                 let stats := { stats with params := stats.params.push param }
                 let type := body.instantiate1 param
                 loop stats (← whnf type) (i + 1) nindices fuel k
@@ -115,7 +194,7 @@ def checkInductiveTypes
               let type := body.instantiate1 param
               loop stats (← whnf type) (i + 1) nindices fuel k
           else
-            withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+            withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
               let type := body.instantiate1 arg
               loop stats (← whnf type) i (nindices + 1) fuel k
         else
@@ -130,7 +209,7 @@ def checkInductiveTypes
       if stats.indConsts.isEmpty then
         let lctx := (← read).lctx
         stats := { stats with lctx, resultLevel, isNotZero := resultLevel.isNeverZero }
-      else if !resultLevel.isEquiv' stats.resultLevel then
+      else if !resultLevel.isEquiv stats.resultLevel then
         throw <| .other "mutually inductive types must live in the same universe"
       stats := { stats with
         nindices := stats.nindices.push nindices
@@ -144,12 +223,72 @@ def checkInductiveTypes
         assert! stats.params.size == nparams
         stats
   termination_by indTypes.size - dIdx
-  loopInd 0 { (default : InductiveStats) with levels := (← read).lparams.map .param }
+  loopInd 0 (InductiveStats.initial ((← read).lparams.map .param))
 
-def hasIndOcc (indConsts : Array Expr) (t : Expr) : Bool :=
-  (t.find? fun
-    | .const e _ => indConsts.any fun I => I.constName! == e
-    | _ => false).isSome
+/-- Exact singleton result of the family-validation pass when the family type
+normalizes directly to a sort. This is the non-telescope producer seam used by
+end-to-end candidate certificates: the executable pass selects every retained
+statistic, while callers supply only the ordinary checker runs it consumed. -/
+def singletonInductiveStats (context : Context)
+    (indType : InductiveType) (resultLevel : Level) : InductiveStats where
+  lctx := context.lctx
+  levels := context.lparams.map .param
+  resultLevel := resultLevel
+  nindices := #[0]
+  indConsts := #[.const indType.name (context.lparams.map .param)]
+  params := #[]
+  isNotZero := resultLevel.isNeverZero
+
+theorem checkInductiveTypes_singleton_zero_of_whnf_sort
+    (context : Context) (indType : InductiveType)
+    (inferred : Expr) (resultLevel : Level)
+    (k : InductiveStats → M α)
+    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hclosed :
+      context.env.checkNoMVarNoFVar indType.name indType.type = .ok ())
+    (hcheck :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.checkType indType.type) =
+        .ok inferred)
+    (hwhnf :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel (TypeChecker.whnf indType.type) =
+        .ok (.sort resultLevel))
+    (hensure :
+      TypeChecker.M.run context.env context.safety context.lctx
+          context.lparams context.fuel
+          (TypeChecker.ensureSort (.sort resultLevel)) =
+        .ok (.sort resultLevel)) :
+    checkInductiveTypes 0 #[indType] k context =
+      k (singletonInductiveStats context indType resultLevel) context := by
+  cases hfuel_eq : context.fuel.inductiveFuel with
+  | zero => omega
+  | succ fuel =>
+    simp [checkInductiveTypes, checkInductiveTypes.loopInd,
+      checkInductiveTypes.loopInd.loop, singletonInductiveStats,
+      readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure,
+      Except.bind, Except.pure, liftTypeChecker_apply,
+      hclosed, hcheck, hwhnf, hensure, hfuel_eq,
+      InductiveStats.initial, Expr.sortLevel!]
+
+/-- Transparent occurrence test for constants in the inductive block.
+
+Lean's `Expr.find?` is an opaque native traversal.  Using it here makes the
+kernel's recursive-family and positivity decisions impossible to reduce in an
+exact producer theorem without postulating a separate contract for that
+traversal.  This structural version follows the same expression children and
+keeps those decisions computational in the logic as well as at runtime. -/
+def hasIndOcc (indConsts : Array Expr) : Expr → Bool
+  | .const name _ => indConsts.any fun I => I.constName! == name
+  | .app fn arg => hasIndOcc indConsts fn || hasIndOcc indConsts arg
+  | .lam _ domain body _ | .forallE _ domain body _ =>
+    hasIndOcc indConsts domain || hasIndOcc indConsts body
+  | .letE _ type value body _ =>
+    hasIndOcc indConsts type || hasIndOcc indConsts value ||
+      hasIndOcc indConsts body
+  | .mdata _ body | .proj _ _ body => hasIndOcc indConsts body
+  | _ => false
 
 /-- Return true if declaration is recursive -/
 def isRec (indTypes : Array InductiveType) (indConsts : Array Expr) : Bool :=
@@ -185,6 +324,22 @@ def declareInductiveTypes (stats : InductiveStats) (numParams : Nat)
     env.checkName info.name c.allowPrimitive
     return env.add (.inductInfo info)
 
+/-- Family declaration observes only the environment, universe parameters,
+and primitive-name policy of its reader context.  In particular, the local
+telescope and fresh-name generator retained by family validation do not alter
+the staged environment it produces. -/
+theorem declareInductiveTypes_context_eq
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat)
+    (isUnsafe : Bool) (left right : Context)
+    (henv : left.env = right.env)
+    (hlparams : left.lparams = right.lparams)
+    (hallow : left.allowPrimitive = right.allowPrimitive) :
+    declareInductiveTypes stats numParams indTypes numNested isUnsafe left =
+      declareInductiveTypes stats numParams indTypes numNested isUnsafe right := by
+  unfold declareInductiveTypes
+  rw [henv, hlparams, hallow]
+
 def isValidIndAppIdx (stats : InductiveStats) (t : Expr) (i : Nat) : Bool :=
   t.withApp fun I args => Id.run do
   unless I == stats.indConsts[i]! && args.size == stats.params.size + stats.nindices[i]! do
@@ -201,6 +356,14 @@ def isValidIndApp? (stats : InductiveStats) (t : Expr) : Option Nat := do
       return i
   none
 
+theorem isValidIndApp?_singleton_zero
+    (stats : InductiveStats) (t : Expr)
+    (hsize : stats.indConsts.size = 1)
+    (hvalid : isValidIndAppIdx stats t 0 = true) :
+    isValidIndApp? stats t = some 0 := by
+  unfold isValidIndApp?
+  simp [hsize, hvalid]
+
 def isRecArg (stats : InductiveStats) (t : Expr) : M (Option Nat) := do
   loop t (← readThe Context).fuel.inductiveFuel
 where
@@ -209,7 +372,7 @@ where
   | fuel+1 => do
     let t ← whnf t
     let .forallE name dom body bi := t | return isValidIndApp? stats t
-    withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+    withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
     loop (body.instantiate1 arg) fuel
 
 def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat) :
@@ -223,7 +386,7 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
       if hasIndOcc stats.indConsts dom then
         throw <| .other s!"arg #{idx + 1} of '{ctor}' \
           has a non positive occurrence of the datatypes being declared"
-      withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+      withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
       loop (body.instantiate1 arg) fuel
     else if let none := isValidIndApp? stats t then
       throw <| .other s!"arg #{idx + 1} of '{ctor}' \
@@ -242,7 +405,13 @@ def checkConstructors (indTypes : Array InductiveType)
       foundCtors := foundCtors.insert n
       let t := ctor.type
       env.checkNoMVarNoFVar n t
-      _ ← checkType t
+      -- Constructor metadata has just been established to contain no free
+      -- variables.  Its full closed-type check must therefore not inherit the
+      -- parameter/index locals retained by family validation; keeping that
+      -- check local-context independent also gives candidate replay one stable
+      -- execution.  The telescope loop below deliberately remains in the
+      -- family context because parameter matching uses `stats.params`.
+      _ ← withEmptyLocalContext do checkType t
       let rec loop t i
       | 0 => throw .deepRecursion
       | fuel+1 => do
@@ -254,12 +423,20 @@ def checkConstructors (indTypes : Array InductiveType)
             loop (body.instantiate1 param) (i + 1) fuel
           else
             let s ← ensureType dom
-            unless stats.resultLevel.isZero || stats.resultLevel.geq' s.sortLevel! do
-              throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
-                is too big for the corresponding inductive datatype"
+            -- Equal levels are reflexively admissible, so discharge that
+            -- common case before consulting the full standard-library
+            -- normalization comparison. Besides avoiding needless work, this
+            -- keeps exact checker executions reducible without a separate
+            -- reflexivity contract axiom.
+            if levelStructGe stats.resultLevel s.sortLevel! then
+              pure ()
+            else
+              unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
+                throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
+                  is too big for the corresponding inductive datatype"
             if !isUnsafe then
               checkPositivity stats dom n i
-            withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+            withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
               loop (body.instantiate1 arg) (i + 1) fuel
         else if !isValidIndAppIdx stats t idx then
           throw <| .other s!"invalid return type for '{n}'"
@@ -433,6 +610,87 @@ theorem CandidateCheckTypeStep.innerRun
     exact ⟨state, by
       simpa [Context.toTypeChecker] using hinner⟩
 
+/-- One exact successful definitional-equality observation retained by the
+candidate producer. The result is fixed to `true`; a negative checker result
+is not evidence and aborts candidate construction. -/
+structure CandidateIsDefEqStep where
+  context : Context
+  lhs : Expr
+  rhs : Expr
+
+def CandidateIsDefEqStep.Valid
+    (step : CandidateIsDefEqStep) : Prop :=
+  TypeChecker.M.run step.context.env step.context.safety
+      step.context.lctx step.context.lparams step.context.fuel
+      (TypeChecker.isDefEq step.lhs step.rhs) =
+    .ok true
+
+structure CandidateIsDefEqObservation
+    (context : Context) (lhs rhs : Expr) : Type where
+  valid : CandidateIsDefEqStep.Valid ⟨context, lhs, rhs⟩
+
+def observeCandidateIsDefEq
+    (context : Context) (lhs rhs : Expr) :
+    Except Exception (CandidateIsDefEqObservation context lhs rhs) :=
+  match hrun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.isDefEq lhs rhs) with
+  | .error err => .error err
+  | .ok false =>
+    .error (.other "normalization candidate changed a binder domain")
+  | .ok true => .ok ⟨hrun⟩
+
+theorem observeCandidateIsDefEq_of_run
+    (context : Context) (lhs rhs : Expr)
+    (hrun : CandidateIsDefEqStep.Valid ⟨context, lhs, rhs⟩) :
+    observeCandidateIsDefEq context lhs rhs = .ok ⟨hrun⟩ := by
+  change
+    TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.isDefEq lhs rhs) =
+      .ok true at hrun
+  unfold observeCandidateIsDefEq
+  split
+  · simp_all
+  · simp_all
+  · rfl
+
+/-- Recover the state-bearing equality execution erased by `M.run`. -/
+theorem CandidateIsDefEqStep.innerRun
+    (step : CandidateIsDefEqStep) (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel)
+    (hvalid : step.Valid) :
+    ∃ state : TypeChecker.State,
+      TypeChecker.Inner.isDefEq step.lhs step.rhs
+          (TypeChecker.Methods.withFuel recursionFuel)
+          step.context.toTypeChecker
+          ({} : TypeChecker.State) =
+        .ok (true, state) := by
+  unfold CandidateIsDefEqStep.Valid at hvalid
+  unfold TypeChecker.M.run TypeChecker.isDefEq
+    TypeChecker.RecM.run at hvalid
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+    StateT.pure, Except.pure, Pure.pure,
+    StateT.run', Functor.map, Except.map] at hvalid
+  rw [hdepth] at hvalid
+  cases hinner :
+      TypeChecker.Inner.isDefEq step.lhs step.rhs
+        (TypeChecker.Methods.withFuel recursionFuel)
+        { env := step.context.env
+          lctx := step.context.lctx
+          safety := step.context.safety
+          lparams := step.context.lparams
+          fuel := step.context.fuel }
+        ({} : TypeChecker.State) with
+  | error err => simp [hinner] at hvalid
+  | ok pair =>
+    rcases pair with ⟨observed, state⟩
+    have : observed = true := by
+      simpa [hinner] using hvalid
+    subst observed
+    exact ⟨state, by
+      simpa [Context.toTypeChecker] using hinner⟩
+
 /-- Source-indexed retained full-check execution. -/
 structure CandidateCheckTypeRun (source : Expr) where
   step : CandidateCheckTypeStep
@@ -447,12 +705,121 @@ def buildCandidateCheckType
   | .ok ⟨inferred, valid⟩ =>
     return ⟨⟨context, source, inferred⟩, rfl, valid⟩
 
+/-- Structural certificate for the four top-level binder-domain annotations
+peeled by `Expr.consumeTypeAnnotations`.
+
+The certificate exposes which application argument survives. Verify can
+therefore recover a strict translation and free-variable facts for the
+consumed domain from the translated raw domain, without assigning semantic
+authority to Lean's opaque helper. -/
+inductive CandidateTypeAnnotationTrace : Expr → Expr → Type where
+  | identity (source : Expr) :
+      CandidateTypeAnnotationTrace source source
+  | outParam (levels : List Level) (type : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.const ``outParam levels) type) consumed
+  | semiOutParam (levels : List Level) (type : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.const ``semiOutParam levels) type) consumed
+  | optParam (levels : List Level) (type default : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.app (.const ``optParam levels) type) default) consumed
+  | autoParam (levels : List Level) (type tactic : Expr)
+      (inner : CandidateTypeAnnotationTrace type consumed) :
+      CandidateTypeAnnotationTrace
+        (.app (.app (.const ``autoParam levels) type) tactic) consumed
+
+namespace CandidateTypeAnnotationTrace
+
+/-- Transparent structural mirror of the top-level peeling algorithm. -/
+def build : (source : Expr) → Sigma (CandidateTypeAnnotationTrace source)
+  | .app (.app (.const name levels) type) default =>
+    if hopt : name = ``_root_.optParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .optParam levels type default inner⟩
+    else if hauto : name = ``_root_.autoParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .autoParam levels type default inner⟩
+    else
+      ⟨.app (.app (.const name levels) type) default, .identity _⟩
+  | .app (.const name levels) type =>
+    if hout : name = ``_root_.outParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .outParam levels type inner⟩
+    else if hsemi : name = ``_root_.semiOutParam then by
+      subst name
+      let ⟨consumed, inner⟩ := build type
+      exact ⟨consumed, .semiOutParam levels type inner⟩
+    else
+      ⟨.app (.const name levels) type, .identity _⟩
+  | source => ⟨source, .identity source⟩
+termination_by source => sizeOf source
+
+/-- The structural annotation builder computes the same transparent peeling
+used by inductive validation.  This deliberately relates two definitions in
+this module, not Lean's opaque `Expr.consumeTypeAnnotations`. -/
+theorem build_consumed (source : Expr) :
+    (build source).1 = consumeTypeAnnotations source := by
+  fun_induction build source <;> simp_all [consumeTypeAnnotations]
+
+end CandidateTypeAnnotationTrace
+
+/-- A structural peeling certificate. Verify assigns semantic authority only
+to the trace; compatibility with Lean's opaque helper is retained as a
+differential executable check rather than a proof axiom. -/
+structure CandidateTypeAnnotations (source : Expr) where
+  consumed : Expr
+  trace : CandidateTypeAnnotationTrace source consumed
+
+def buildCandidateTypeAnnotations
+    (source : Expr) : Except Exception (CandidateTypeAnnotations source) :=
+  let ⟨consumed, trace⟩ := CandidateTypeAnnotationTrace.build source
+  .ok ⟨consumed, trace⟩
+
+namespace CandidateTypeAnnotations
+
+/-- Operational compatibility with this module's transparent annotation
+peeling.  Semantic consumers still rely on `trace` plus the retained
+definitional-equality execution; `Matches` is used to replay the executable
+family-validation path exactly. -/
+def Matches (annotations : CandidateTypeAnnotations source) : Prop :=
+  annotations.consumed = consumeTypeAnnotations source
+
+theorem matches_of_build
+    (annotations : CandidateTypeAnnotations source)
+    (hbuild : buildCandidateTypeAnnotations source = .ok annotations) :
+    annotations.Matches := by
+  unfold buildCandidateTypeAnnotations at hbuild
+  cases htrace : CandidateTypeAnnotationTrace.build source with
+  | mk consumed trace =>
+    simp only [Except.ok.injEq] at hbuild
+    subst annotations
+    simpa [Matches, htrace] using
+      CandidateTypeAnnotationTrace.build_consumed source
+
+end CandidateTypeAnnotations
+
+/-- Differential check pinning the transparent implementation to Lean's
+opaque helper. This is executable regression evidence, not a logical premise
+of the candidate producer. -/
+def candidateTypeAnnotationsAgree (source : Expr) : Bool :=
+  let ⟨consumed, _⟩ := CandidateTypeAnnotationTrace.build source
+  consumed.equal source.consumeTypeAnnotations
+
 /-- Context- and source-indexed tree underlying one candidate expression.
 The recursive indices are important: a Pi-domain trace uses the exact parent
-context, while its body trace uses precisely `Context.pushLocalDecl` and the
-corresponding fresh free variable. Thus both expression position and checker
-context provenance are enforced by the type rather than being invariants of
-the producer alone. -/
+context, while its body trace uses precisely `Context.pushLocalDecl` with the
+structurally certified annotation-consumed domain and the corresponding fresh
+free variable. The retained equality run relates that local declaration back
+to the raw binder syntax. Thus expression position, annotation handling, and
+checker-context provenance are enforced by the type rather than being
+invariants of the producer alone. -/
 inductive CandidateExprTrace : Context → Expr → Type where
   | terminal (context : Context) (source inferred result : Expr)
       (checked : CandidateCheckTypeStep.Valid
@@ -463,29 +830,346 @@ inductive CandidateExprTrace : Context → Expr → Type where
       (inferred : Expr)
       (name : Name) (domain body : Expr)
       (binderInfo : BinderInfo)
+      (fresh : context.lctx.find? context.freshFVarId = none)
+      (annotations : CandidateTypeAnnotations domain)
+      (annotationsEq : CandidateIsDefEqStep.Valid
+        ⟨context, domain, annotations.consumed⟩)
       (checked : CandidateCheckTypeStep.Valid
         ⟨context, source, inferred⟩)
       (valid : CandidateWhnfStep.Valid
         ⟨context, source, .forallE name domain body binderInfo⟩)
       (domainCandidate : CandidateExprTrace context domain)
       (bodyCandidate : CandidateExprTrace
-        (context.pushLocalDecl name binderInfo domain.consumeTypeAnnotations)
+        (context.pushLocalDecl name binderInfo annotations.consumed)
         (body.instantiate1 context.freshExpr)) :
       CandidateExprTrace context source
 
 namespace CandidateExprTrace
 
+/-- The main Pi spine exposed by candidate WHNF was already present in the
+stored source syntax at every traversed body position.
+
+This is the structural precondition needed by mixed generation: it permits
+normalization inside binder domains and at the terminal result, but it does
+not let WHNF invent or remove the raw binders that generation must emit. -/
+def storedSpine :
+    {context : Context} → {source : Expr} →
+      CandidateExprTrace context source → Bool
+  | _, _, .terminal .. => true
+  | _, _, .forallE _ source _ name domain body binderInfo _ _ _ _ _ _
+      bodyCandidate =>
+    (source == .forallE name domain body binderInfo) &&
+      storedSpine bodyCandidate
+
+/-- Number of stored Pi binders on the main (body) path of a candidate. -/
+def spineLength :
+    {context : Context} → {source : Expr} →
+      CandidateExprTrace context source → Nat
+  | _, _, .terminal .. => 0
+  | _, _, .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.spineLength + 1
+
+/-- The exact full-check observation at the root of a candidate trace. -/
+def rootCheck :
+    CandidateExprTrace context source →
+      CandidateCheckTypeObservation context source
+  | .terminal _ _ inferred _ checked _ => ⟨inferred, checked⟩
+  | .forallE _ _ inferred _ _ _ _ _ _ _ checked _ _ _ =>
+    ⟨inferred, checked⟩
+
+/-- The exact WHNF result at the root, before recursively normalized domains
+and bodies are reassembled into `view`. -/
+def rootWhnf : CandidateExprTrace context source → Expr
+  | .terminal _ _ _ result _ _ => result
+  | .forallE _ _ _ name domain body binderInfo _ _ _ _ _ _ _ =>
+    .forallE name domain body binderInfo
+
+theorem rootWhnf_valid (candidate : CandidateExprTrace context source) :
+    CandidateWhnfStep.Valid ⟨context, source, candidate.rootWhnf⟩ := by
+  cases candidate <;> assumption
+
+/-- Reader context reached after following the complete main Π spine. -/
+def terminalContext : CandidateExprTrace context source → Context
+  | .terminal context _ _ _ _ _ => context
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.terminalContext
+
+theorem terminalContext_lparams
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.lparams = context.lparams := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Non-Π result reached after following the complete main Π spine. -/
+def terminalResult : CandidateExprTrace context source → Expr
+  | .terminal _ _ _ result _ _ => result
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    bodyCandidate.terminalResult
+
+/-- The first `count` local expressions allocated along the main Π spine.
+These are exactly the expressions accumulated as inductive parameters when
+`count` is the declaration's `nparams`. -/
+def parameterList :
+    (count : Nat) → CandidateExprTrace context source → List Expr
+  | 0, _ => []
+  | _ + 1, .terminal .. => []
+  | count + 1,
+      .forallE context _ _ _ _ _ _ _ _ _ _ _ _ bodyCandidate =>
+    context.freshExpr :: bodyCandidate.parameterList count
+
+theorem parameterList_length
+    (candidate : CandidateExprTrace context source)
+    (hcount : count ≤ candidate.spineLength) :
+    (candidate.parameterList count).length = count := by
+  induction candidate generalizing count with
+  | terminal =>
+    simp [spineLength] at hcount
+    subst count
+    rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    cases count with
+    | zero => rfl
+    | succ count =>
+      simp only [parameterList, List.length_cons]
+      rw [body_ih]
+      simpa [spineLength] using hcount
+
+/-- Every annotation choice on the main Π spine matches the transparent
+peeling operation used by `checkInductiveTypes`.  This is operational
+provenance, separate from the semantic raw/consumed equality stored at each
+candidate node. -/
+def validationAnnotations :
+    CandidateExprTrace context source → Prop
+  | .terminal .. => True
+  | .forallE _ _ _ _ _ _ _ _ annotations _ _ _ _ bodyCandidate =>
+    annotations.Matches ∧ bodyCandidate.validationAnnotations
+
+/-- Replay the inner family-telescope validator from a candidate's exact main
+Π spine. The first `remaining` binders extend `stats.params`; every later
+binder contributes an index. The theorem is independent of any fixture and
+preserves the exact terminal reader context reached by the executable loop. -/
+theorem checkInductiveTypes_loop_of_candidate
+    (candidate : CandidateExprTrace context source)
+    (stats : InductiveStats) (nparams i nindices fuel : Nat)
+    (remaining : Nat) (k : Expr → InductiveStats → Nat → M α)
+    (hi : i + remaining = nparams)
+    (hcount : remaining ≤ candidate.spineLength)
+    (hfuel : candidate.spineLength < fuel)
+    (hempty : stats.indConsts.isEmpty = true)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult.isForall = false) :
+    checkInductiveTypes.loopInd.loop nparams stats candidate.rootWhnf
+        i nindices fuel k context =
+      k candidate.terminalResult
+        { stats with
+          params := stats.params ++
+            (candidate.parameterList remaining).toArray }
+        (nindices + (candidate.spineLength - remaining))
+        candidate.terminalContext := by
+  induction candidate generalizing i nindices fuel remaining stats with
+  | terminal context source inferred result checked valid =>
+    simp only [spineLength] at hcount hfuel
+    have hremaining : remaining = 0 := by omega
+    subst remaining
+    have hi' : i = nparams := by omega
+    subst i
+    cases stats
+    cases fuel with
+    | zero => omega
+    | succ fuel =>
+      cases result <;>
+        simp_all [rootWhnf, terminalResult, terminalContext, parameterList,
+          spineLength, checkInductiveTypes.loopInd.loop, Expr.isForall]
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    rcases hannotations with ⟨hmatch, hbodyAnnotations⟩
+    cases remaining with
+    | zero =>
+      have hi' : i = nparams := by omega
+      subst i
+      have hbodyFuel : bodyCandidate.spineLength < fuel - 1 := by
+        simp only [spineLength] at hfuel
+        omega
+      have hbodyCount : 0 ≤ bodyCandidate.spineLength := Nat.zero_le _
+      have hvalid := bodyCandidate.rootWhnf_valid
+      change TypeChecker.M.run _ _ _ _ _
+          (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+        .ok bodyCandidate.rootWhnf at hvalid
+      rw [show fuel = (fuel - 1) + 1 by omega]
+      simp only [rootWhnf, checkInductiveTypes.loopInd.loop,
+        Nat.lt_irrefl, if_false, withLocalDecl_apply]
+      rw [← hmatch]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [hvalid]
+      simp only [Except.bind]
+      rw [body_ih stats nparams (nindices + 1) (fuel - 1) 0 rfl
+        hbodyCount hbodyFuel hempty hbodyAnnotations hterminal]
+      simp [terminalResult, terminalContext, parameterList, spineLength,
+        Nat.add_comm, Nat.add_assoc]
+    | succ remaining =>
+      have hil : i < nparams := by omega
+      have hbodyCount : remaining ≤ bodyCandidate.spineLength := by
+        simp only [spineLength] at hcount
+        omega
+      have hbodyFuel : bodyCandidate.spineLength < fuel - 1 := by
+        simp only [spineLength] at hfuel
+        omega
+      have hvalid := bodyCandidate.rootWhnf_valid
+      change TypeChecker.M.run _ _ _ _ _
+          (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+        .ok bodyCandidate.rootWhnf at hvalid
+      rw [show fuel = (fuel - 1) + 1 by omega]
+      simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil, if_true,
+        hempty, withLocalDecl_apply]
+      rw [← hmatch]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [hvalid]
+      simp only [Except.bind]
+      rw [body_ih { stats with
+          params := stats.params.push context.freshExpr }
+        (i + 1) nindices (fuel - 1) remaining (by omega)
+        hbodyCount hbodyFuel (by simpa using hempty) hbodyAnnotations
+        hterminal]
+      simp [terminalResult, terminalContext, parameterList, spineLength]
+
+/-- Exact singleton statistics selected by a candidate family spine with an
+arbitrary parameter/index split. -/
+def singletonCandidateInductiveStats
+    (indType : InductiveType)
+    (candidate : CandidateExprTrace context indType.type)
+    (nparams : Nat) (resultLevel : Level) : InductiveStats where
+  lctx := candidate.terminalContext.lctx
+  levels := context.lparams.map .param
+  resultLevel := resultLevel
+  nindices := #[candidate.spineLength - nparams]
+  indConsts := #[.const indType.name (context.lparams.map .param)]
+  params := (candidate.parameterList nparams).toArray
+  isNotZero := resultLevel.isNeverZero
+
+/-- A source-indexed candidate family spine discharges the complete singleton
+family-validation pass for any number of parameters and indices.  The result
+records the same local expressions, terminal context, index count, universe,
+and family constant selected by the executable validator. -/
+theorem checkInductiveTypes_singleton_of_candidate
+    (indType : InductiveType)
+    (candidate : CandidateExprTrace context indType.type)
+    (nparams : Nat) (resultLevel : Level)
+    (k : InductiveStats → M α)
+    (hclosed :
+      context.env.checkNoMVarNoFVar indType.name indType.type = .ok ())
+    (hcount : nparams ≤ candidate.spineLength)
+    (hfuel : candidate.spineLength < context.fuel.inductiveFuel)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult = .sort resultLevel)
+    (hensure :
+      TypeChecker.M.run candidate.terminalContext.env
+          candidate.terminalContext.safety candidate.terminalContext.lctx
+          candidate.terminalContext.lparams candidate.terminalContext.fuel
+          (TypeChecker.ensureSort (.sort resultLevel)) =
+        .ok (.sort resultLevel)) :
+    checkInductiveTypes nparams #[indType] k context =
+      k (candidate.singletonCandidateInductiveStats
+        indType nparams resultLevel) candidate.terminalContext := by
+  have hcheck := candidate.rootCheck.valid
+  have hwhnf := candidate.rootWhnf_valid
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.checkType indType.type) =
+    .ok candidate.rootCheck.inferred at hcheck
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.whnf indType.type) =
+    .ok candidate.rootWhnf at hwhnf
+  have hterminalForall : candidate.terminalResult.isForall = false := by
+    rw [hterminal]
+    rfl
+  have hterminalLparams :
+      candidate.terminalContext.lparams = context.lparams :=
+    candidate.terminalContext_lparams
+  have hparameterLength := candidate.parameterList_length hcount
+  unfold checkInductiveTypes
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
+  rw [checkInductiveTypes.loopInd.eq_1]
+  have hsize : 0 < #[indType].size := by simp
+  rw [dif_pos hsize]
+  rw [show #[indType][0] = indType by rfl]
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind,
+    liftTypeChecker_apply, hclosed, hcheck, hwhnf]
+  rw [candidate.checkInductiveTypes_loop_of_candidate
+    (stats := InductiveStats.initial (context.lparams.map .param))
+    (nparams := nparams) (i := 0) (nindices := 0)
+    (fuel := context.fuel.inductiveFuel) (remaining := nparams)
+    (hi := Nat.zero_add nparams) (hcount := hcount) (hfuel := hfuel)
+    (hempty := rfl) (hannotations := hannotations)
+    (hterminal := hterminalForall)]
+  rw [hterminal]
+  simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+  rw [hensure]
+  simp only [Except.bind, Expr.sortLevel!]
+  simp only [InductiveStats.initial, Nat.zero_add]
+  rw [if_pos (by rfl : #[].isEmpty = true)]
+  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+    Except.bind]
+  rw [checkInductiveTypes.loopInd.eq_1]
+  have hdone : ¬1 < #[indType].size := by simp
+  rw [dif_neg hdone]
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
+  simp [singletonCandidateInductiveStats, hterminalLparams,
+    hparameterLength]
+
+/-- Exact successful singleton family-validation execution retained at the
+candidate selected by `buildNormalizationCandidate`.
+
+The executable validator owns the parameter/index split, result universe,
+statistics, and terminal reader context. Keeping the universally quantified
+continuation equation makes this a decomposition of the real
+`checkInductiveTypes` call rather than a fixture-specific success flag. The
+semantic interpretation of the retained candidate remains in Verify. -/
+structure FamilyValidationRun
+    (indType : InductiveType)
+    {context : Context}
+    (candidate : CandidateExprTrace context indType.type) where
+  nparams : Nat
+  resultLevel : Level
+  stats : InductiveStats
+  stats_eq : stats = candidate.singletonCandidateInductiveStats
+    indType nparams resultLevel
+  terminal_eq : candidate.terminalResult = Expr.sort resultLevel
+  run : ∀ {α} (k : InductiveStats → M α),
+    checkInductiveTypes nparams #[indType] k context =
+      k stats candidate.terminalContext
+
+/-- The retained singleton validation run exposes exactly the candidate view
+parameter expressions selected by the executable family pass. -/
+def FamilyValidationRun.parameters
+    (run : FamilyValidationRun indType candidate) : List Expr :=
+  candidate.parameterList run.nparams
+
+/-- The retained singleton validation run exposes the number of candidate
+view indices following the selected parameter prefix. -/
+def FamilyValidationRun.numIndices
+    (run : FamilyValidationRun indType candidate) : Nat :=
+  candidate.spineLength - run.nparams
+
 /-- Candidate expression reconstructed from the traced WHNF/Pi tree. -/
 def view : CandidateExprTrace context source → Expr
   | .terminal _ _ _ result _ _ => result
-  | .forallE context _ _ name _ _ binderInfo _ _ domain body =>
+  | .forallE context _ _ name _ _ binderInfo _ _ _ _ _ domain body =>
     .forallE name domain.view
       (body.view.abstract #[context.freshExpr]) binderInfo
 
 /-- Preorder list of all retained checker observations. -/
 def steps : CandidateExprTrace context source → List CandidateWhnfStep
   | .terminal context source _ result _ _ => [{ context, source, result }]
-  | .forallE context source _ name domain body binderInfo _ _
+  | .forallE context source _ name domain body binderInfo _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source,
       result := .forallE name domain body binderInfo } ::
@@ -495,10 +1179,19 @@ def steps : CandidateExprTrace context source → List CandidateWhnfStep
 def checkSteps : CandidateExprTrace context source → List CandidateCheckTypeStep
   | .terminal context source inferred _ _ _ =>
     [{ context, source, inferred }]
-  | .forallE context source inferred _ _ _ _ _ _
+  | .forallE context source inferred _ _ _ _ _ _ _ _ _
       domainCandidate bodyCandidate =>
     { context, source, inferred } ::
       domainCandidate.checkSteps ++ bodyCandidate.checkSteps
+
+/-- Preorder list of all retained binder-domain equality observations. -/
+def isDefEqSteps :
+    CandidateExprTrace context source → List CandidateIsDefEqStep
+  | .terminal .. => []
+  | .forallE context _ _ _ domain _ _ _ annotations _ _ _
+      domainCandidate bodyCandidate =>
+    { context, lhs := domain, rhs := annotations.consumed } ::
+      domainCandidate.isDefEqSteps ++ bodyCandidate.isDefEqSteps
 
 /-- Every retained WHNF observation is an exact checker execution. -/
 def allValid : (candidate : CandidateExprTrace context source) →
@@ -507,7 +1200,7 @@ def allValid : (candidate : CandidateExprTrace context source) →
     simp only [steps, List.mem_singleton] at h
     subst step
     exact valid
-  | .forallE _ _ _ _ _ _ _ _ valid domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ _ _ _ valid domain body, step, h => by
     simp only [steps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact valid
@@ -521,12 +1214,25 @@ def allChecksValid : (candidate : CandidateExprTrace context source) →
     simp only [checkSteps, List.mem_singleton] at h
     subst step
     exact checked
-  | .forallE _ _ _ _ _ _ _ checked _ domain body, step, h => by
+  | .forallE _ _ _ _ _ _ _ _ _ _ checked _ domain body, step, h => by
     simp only [checkSteps, List.mem_cons, List.mem_append] at h
     rcases h with (rfl | h) | h
     · exact checked
     · exact domain.allChecksValid step h
     · exact body.allChecksValid step h
+
+/-- Every retained binder-domain equality is an exact successful checker
+execution. -/
+def allIsDefEqValid : (candidate : CandidateExprTrace context source) →
+    ∀ step ∈ candidate.isDefEqSteps, step.Valid
+  | .terminal .., step, h => by simp [isDefEqSteps] at h
+  | .forallE _ _ _ _ _ _ _ _ _ annotationsEq _ _ domain body,
+      step, h => by
+    simp only [isDefEqSteps, List.mem_cons, List.mem_append] at h
+    rcases h with (rfl | h) | h
+    · exact annotationsEq
+    · exact domain.allIsDefEqValid step h
+    · exact body.allIsDefEqValid step h
 
 end CandidateExprTrace
 
@@ -552,6 +1258,11 @@ def CandidateExpr.checkSteps
     List CandidateCheckTypeStep :=
   candidate.trace.checkSteps
 
+def CandidateExpr.isDefEqSteps
+    (candidate : CandidateExpr source) :
+    List CandidateIsDefEqStep :=
+  candidate.trace.isDefEqSteps
+
 theorem CandidateExpr.step_valid
     (candidate : CandidateExpr source)
     (hstep : step ∈ candidate.steps) :
@@ -564,11 +1275,19 @@ theorem CandidateExpr.checkStep_valid
     step.Valid :=
   candidate.trace.allChecksValid step hstep
 
+theorem CandidateExpr.isDefEqStep_valid
+    (candidate : CandidateExpr source)
+    (hstep : step ∈ candidate.isDefEqSteps) :
+    step.Valid :=
+  candidate.trace.allIsDefEqValid step hstep
+
 /-- Normalize exactly the expression positions inspected by inductive
 analysis. Each node is fully checked and then exposed with the ordinary
-checker `whnf`; Pi domains and bodies are traversed under the same raw local
-declarations used by kernel checking. The recursion budget is the configured
-inductive fuel, while every checker run uses the configured
+checker `whnf`; Pi domains retain their raw syntax, while bodies are traversed
+under the structurally certified annotation-consumed local declarations used
+by kernel checking. Every raw/consumed domain pair is also checked by an exact
+successful ordinary-checker `isDefEq` run. The recursion budget is the
+configured inductive fuel, while every checker run uses the configured
 transparency/fuel.
 
 The returned trace is only a candidate analysis view and operational
@@ -591,16 +1310,85 @@ where
         | .ok ⟨view, valid⟩ =>
           match view with
           | .forallE name domain body binderInfo =>
-            let domainCandidate ← loop context domain fuel
-            let bodyContext :=
-              context.pushLocalDecl name binderInfo
-                domain.consumeTypeAnnotations
-            let bodyCandidate ← loop bodyContext
-              (body.instantiate1 context.freshExpr) fuel
-            return .forallE context e inferred name domain body
-              binderInfo checked valid domainCandidate bodyCandidate
+            match hfresh : context.lctx.find? context.freshFVarId with
+            | some _ =>
+              throw (Exception.other
+                "normalization candidate generated a duplicate free variable")
+            | none =>
+              let annotations ← buildCandidateTypeAnnotations domain
+              let ⟨annotationsEq⟩ ← observeCandidateIsDefEq
+                context domain annotations.consumed
+              let domainCandidate ← loop context domain fuel
+              let bodyContext :=
+                context.pushLocalDecl name binderInfo
+                  annotations.consumed
+              let bodyCandidate ← loop bodyContext
+                (body.instantiate1 context.freshExpr) fuel
+              return .forallE context e inferred name domain body
+                binderInfo hfresh annotations annotationsEq checked valid
+                domainCandidate bodyCandidate
           | result =>
             return .terminal context e inferred result checked valid
+
+/-- One terminal recursive step of `buildCandidateExpr`, with its traversal
+budget made explicit. This is the reusable reduction seam for exact producer
+fixtures; all semantic evidence remains the ordinary checker executions
+stored in the resulting trace. -/
+theorem buildCandidateExpr_loop_of_whnf_nonForall
+    (context : Context) (e inferred view : Expr) (fuel : Nat)
+    (hcheck : CandidateCheckTypeStep.Valid
+      ⟨context, e, inferred⟩)
+    (hrun : CandidateWhnfStep.Valid ⟨context, e, view⟩)
+    (hview : view.isForall = false) :
+    buildCandidateExpr.loop context e (fuel + 1) =
+      .ok (.terminal context e inferred view hcheck hrun) := by
+  unfold buildCandidateExpr.loop
+  rw [observeCandidateCheckType_of_run context e inferred hcheck]
+  rw [observeCandidateWhnf_of_run context e view hrun]
+  cases view <;>
+    simp_all [Expr.isForall, Pure.pure, Except.pure]
+
+/-- One forall recursive step of `buildCandidateExpr`, exposing the exact
+child executions used at the decremented traversal budget. -/
+theorem buildCandidateExpr_loop_of_whnf_forall
+    (context : Context) (e inferred : Expr) (fuel : Nat)
+    (name : Name) (domain body : Expr) (binderInfo : BinderInfo)
+    (hfresh : context.lctx.find? context.freshFVarId = none)
+    (annotations : CandidateTypeAnnotations domain)
+    (hannotations :
+      buildCandidateTypeAnnotations domain = .ok annotations)
+    (hannotationsEq : CandidateIsDefEqStep.Valid
+      ⟨context, domain, annotations.consumed⟩)
+    (hcheck : CandidateCheckTypeStep.Valid
+      ⟨context, e, inferred⟩)
+    (hrun : CandidateWhnfStep.Valid
+      ⟨context, e, .forallE name domain body binderInfo⟩)
+    (domainCandidate : CandidateExprTrace context domain)
+    (bodyCandidate : CandidateExprTrace
+      (context.pushLocalDecl name binderInfo annotations.consumed)
+      (body.instantiate1 context.freshExpr))
+    (hdomain :
+      buildCandidateExpr.loop context domain fuel =
+        .ok domainCandidate)
+    (hbody :
+      buildCandidateExpr.loop
+          (context.pushLocalDecl name binderInfo annotations.consumed)
+          (body.instantiate1 context.freshExpr) fuel =
+        .ok bodyCandidate) :
+    buildCandidateExpr.loop context e (fuel + 1) =
+      .ok (.forallE context e inferred name domain body binderInfo
+        hfresh annotations hannotationsEq hcheck hrun
+        domainCandidate bodyCandidate) := by
+  unfold buildCandidateExpr.loop
+  simp only [observeCandidateCheckType_of_run context e inferred hcheck,
+    observeCandidateWhnf_of_run context e
+      (.forallE name domain body binderInfo) hrun]
+  split
+  · simp_all
+  · simp [Bind.bind, Except.bind, hannotations,
+      observeCandidateIsDefEq_of_run context domain
+        annotations.consumed hannotationsEq,
+      hdomain, hbody, Pure.pure, Except.pure]
 
 /-- Erase the operational trace and retain only the analysis expression. -/
 def normalizeCandidateExpr (e : Expr) : M Expr := do
@@ -674,6 +1462,10 @@ def toList (f : (a : α) → F a → β) :
   | .nil => []
   | .cons head tail => f _ head :: tail.toList f
 
+/-- Eliminate a source-indexed singleton without a partial list operation. -/
+def singleton : CandidateList F [source] → F source
+  | .cons head .nil => head
+
 end CandidateList
 
 /-- Candidate for one constructor; its header is always taken from `source`. -/
@@ -736,6 +1528,95 @@ def normalizeCandidateFamilyList :
           normalizeCandidateConstructorList indType.ctors }
       (← normalizeCandidateFamilyList tail)
 
+/-- Exact successful traversal of an arbitrary source-indexed family-type
+list. The dependent indices prevent a proof for one metadata position from
+being reused at another position or from silently truncating the source. -/
+inductive CandidateFamilyTypeListProduced (context : Context) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamilyType sources → Prop where
+  | nil : CandidateFamilyTypeListProduced context .nil
+  | cons
+      (head : normalizeCandidateFamilyType source context = .ok candidate)
+      (tail : CandidateFamilyTypeListProduced context candidates) :
+      CandidateFamilyTypeListProduced context (.cons candidate candidates)
+
+/-- A source-indexed family-type traversal determines the complete executable
+list result for any length, without a fixture-specific list reduction. -/
+theorem CandidateFamilyTypeListProduced.normalize
+    {sources : List InductiveType}
+    {candidates : CandidateList CandidateFamilyType sources}
+    (run : CandidateFamilyTypeListProduced context candidates) :
+    normalizeCandidateFamilyTypeList sources context = .ok candidates := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+    unfold normalizeCandidateFamilyTypeList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [head, ih]
+    rfl
+
+/-- Exact successful traversal of an arbitrary source-indexed constructor
+list in one post-family context. Every candidate remains indexed by its source
+constructor, so ordering, length, and header provenance are preserved by the
+type rather than recovered from an erased list equality. -/
+inductive CandidateConstructorListProduced (context : Context) :
+    {sources : List Constructor} →
+      CandidateList CandidateConstructor sources → Prop where
+  | nil : CandidateConstructorListProduced context .nil
+  | cons
+      (head : normalizeCandidateConstructor source context = .ok candidate)
+      (tail : CandidateConstructorListProduced context candidates) :
+      CandidateConstructorListProduced context (.cons candidate candidates)
+
+/-- A source-indexed constructor traversal determines the complete executable
+list result for any length, with no `zip`, partial lookup, or fixture-specific
+cons-chain reduction. -/
+theorem CandidateConstructorListProduced.normalize
+    {sources : List Constructor}
+    {candidates : CandidateList CandidateConstructor sources}
+    (run : CandidateConstructorListProduced context candidates) :
+    normalizeCandidateConstructorList sources context = .ok candidates := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+    unfold normalizeCandidateConstructorList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [head, ih]
+    rfl
+
+/-- Exact successful assembly of complete family candidates from an already
+source-indexed family-type list. Each constructor traversal is tied to the
+corresponding family source, and the tail remains tied to the remaining family
+sources. This is the reusable ordered-list boundary needed before mutual-block
+staging. -/
+inductive CandidateFamilyListProduced (context : Context) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamilyType sources →
+      CandidateList CandidateFamily sources → Prop where
+  | nil : CandidateFamilyListProduced context .nil .nil
+  | cons
+      (constructors : CandidateConstructorListProduced
+        context family.constructors)
+      (tail : CandidateFamilyListProduced context familyTypes families) :
+      CandidateFamilyListProduced context
+        (.cons family.familyType familyTypes) (.cons family families)
+
+/-- Source-indexed family assembly determines the exact executable family-list
+result for arbitrary list lengths. -/
+theorem CandidateFamilyListProduced.normalize
+    {sources : List InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType sources}
+    {families : CandidateList CandidateFamily sources}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    normalizeCandidateFamilyList familyTypes context = .ok families := by
+  induction run with
+  | nil => rfl
+  | cons constructors tail ih =>
+    unfold normalizeCandidateFamilyList
+    simp only [ReaderT.bind, Bind.bind]
+    rw [constructors.normalize, ih]
+    rfl
+
 /-- Shape-preserving output of the executable normalization-candidate pass.
 The dependent family/constructor lists prevent positional provenance from
 being silently reused for a different inductive request. Names, ordering, and
@@ -758,23 +1639,82 @@ analyzer and Verify semantic certificate remain separate downstream gates. -/
 def buildNormalizationCandidate
     (nparams : Nat) (types : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool) :
-    M (NormalizationCandidate types) := do
+    M (NormalizationCandidate types) :=
+  -- Family validation retains its parameter/index telescope while invoking
+  -- the continuation.  That context is required by `checkConstructors`, whose
+  -- parameter checks refer to the free variables recorded in `stats`, but it
+  -- is not part of the closed metadata being normalized.  Snapshot the entry
+  -- context so both candidate traversals use one stable fresh-name provenance
+  -- and an empty local context; only the staged kernel environment changes.
+  fun candidateContext =>
   let indTypes := types.toArray
-  checkInductiveTypes nparams indTypes fun stats => do
+  checkInductiveTypes nparams indTypes (fun stats => do
     let familyTypes ←
-      withReader (fun c : Context => { c with lctx := {} }) do
+      withReader (fun _ : Context => { candidateContext with lctx := {} }) do
         normalizeCandidateFamilyTypeList types
     let familyEnv ←
       declareInductiveTypes stats nparams indTypes numNested isUnsafe
     withEnv familyEnv do
       checkConstructors indTypes stats isUnsafe
-      return ⟨← normalizeCandidateFamilyList familyTypes⟩
+      let families ←
+        withReader (fun _ : Context =>
+          { candidateContext with env := familyEnv, lctx := {} }) do
+          normalizeCandidateFamilyList familyTypes
+      return ⟨families⟩) candidateContext
 
 /--
 info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms buildCandidateExpr
+
+/--
+info: 'Lean4Lean.AddInductive.observeCandidateIsDefEq_of_run' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms observeCandidateIsDefEq_of_run
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_nonForall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateExpr_loop_of_whnf_nonForall
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_forall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateExpr_loop_of_whnf_forall
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotationTrace.build
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotationTrace.build_consumed' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotationTrace.build_consumed
+
+/--
+info: 'Lean4Lean.AddInductive.buildCandidateTypeAnnotations' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms buildCandidateTypeAnnotations
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateTypeAnnotations.matches_of_build' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateTypeAnnotations.matches_of_build
 
 /--
 info: 'Lean4Lean.AddInductive.buildCandidateCheckType' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -789,6 +1729,110 @@ info: 'Lean4Lean.AddInductive.buildNormalizationCandidate' depends on axioms: [p
 #print axioms buildNormalizationCandidate
 
 /--
+info: 'Lean4Lean.AddInductive.CandidateFamilyTypeListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyTypeListProduced.normalize
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateConstructorListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorListProduced.normalize
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyListProduced.normalize' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyListProduced.normalize
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateList.singleton' does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms CandidateList.singleton
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.storedSpine' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.storedSpine
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.spineLength' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.spineLength
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.rootWhnf_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.rootWhnf_valid
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.terminalContext_lparams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.terminalContext_lparams
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.parameterList_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.parameterList_length
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_of_candidate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_loop_of_candidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_of_candidate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_singleton_of_candidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun.parameters' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun.parameters
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.FamilyValidationRun.numIndices' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.FamilyValidationRun.numIndices
+
+/--
 info: 'Lean4Lean.AddInductive.CandidateExpr.step_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
@@ -801,6 +1845,12 @@ info: 'Lean4Lean.AddInductive.CandidateExpr.checkStep_valid' depends on axioms: 
 #print axioms CandidateExpr.checkStep_valid
 
 /--
+info: 'Lean4Lean.AddInductive.CandidateExpr.isDefEqStep_valid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExpr.isDefEqStep_valid
+
+/--
 info: 'Lean4Lean.AddInductive.CandidateWhnfStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
@@ -811,6 +1861,12 @@ info: 'Lean4Lean.AddInductive.CandidateCheckTypeStep.innerRun' depends on axioms
 -/
 #guard_msgs in
 #print axioms CandidateCheckTypeStep.innerRun
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateIsDefEqStep.innerRun' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateIsDefEqStep.innerRun
 
 def declareConstructors (stats : InductiveStats)
     (indTypes : Array InductiveType) (isUnsafe : Bool) : M Environment :=
@@ -843,7 +1899,7 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
     | 0 => throw .deepRecursion
     | fuel+1 => do
       if let .forallE name dom body bi := type then
-        withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+        withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
           let mut toCheck := toCheck
           if i ≥ stats.params.size then
             if !(← ensureType dom).sortLevel!.isZero then
@@ -888,7 +1944,7 @@ def loopArgs1 (stats : InductiveStats) (type : Expr) (i : Nat) (indices : Array 
       if i < stats.params.size then
         loopArgs1 stats (← whnf <| body.instantiate1 stats.params[i]!) (i + 1) indices fuel k
       else
-        withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+        withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
         loopArgs1 stats (← whnf <| body.instantiate1 arg) i (indices.push arg) fuel k
     else
       k indices
@@ -899,11 +1955,11 @@ def loopInd1 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α
     let ctx ← readThe Context
     loopArgs1 stats (← whnf indTypes[dIdx].type) 0 #[] ctx.fuel.inductiveFuel fun indices =>
     let tTy := mkAppN (mkAppN stats.indConsts[dIdx]! stats.params) indices
-    withLocalDecl `t .default tTy.consumeTypeAnnotations fun major => do
+    withLocalDecl `t .default (consumeTypeAnnotations tTy) fun major => do
     let lctx ← getLCtx
     let motiveTy := lctx.mkForall indices <| lctx.mkForall #[major] <| .sort elimLevel
     let name := if indTypes.size > 1 then (`motive).appendIndexAfter (dIdx+1) else `motive
-    withLocalDecl name .default motiveTy.consumeTypeAnnotations fun motive => do
+    withLocalDecl name .default (consumeTypeAnnotations motiveTy) fun motive => do
     loopInd1 (dIdx + 1) (recInfos.push { motive, minors := #[], indices, major }) k
   else
     k recInfos
@@ -920,7 +1976,7 @@ where
       if let some param := stats.params[i]? then
         loop (body.instantiate1 param) (i + 1) bu u fuel
       else
-        withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+        withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
         let bu := bu.push arg
         let u := if (← isRecArg stats dom).isSome then u.push arg else u
         loop (body.instantiate1 arg) (i + 1) bu u fuel
@@ -933,7 +1989,7 @@ where
   | 0 => throw .deepRecursion
   | fuel+1 => do
     if let .forallE name dom body bi := uiTy then
-      withLocalDecl name bi dom.consumeTypeAnnotations fun arg => do
+      withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
       loop (← whnf <| body.instantiate1 arg) (xs.push arg) fuel
     else
       k uiTy xs
@@ -947,7 +2003,7 @@ def loopU (i : Nat) (v : Array Expr) (k : Array Expr → M α) : M α := do
       return (← getLCtx).mkForall xs <|
         .app (mkAppN recInfos[itIdx]!.motive itIndices) (mkAppN ui xs)
     let vName := ((← getLCtx).get! ui.fvarId!).userName.appendAfter "_ih"
-    withLocalDecl vName .default viTy.consumeTypeAnnotations fun vi => do
+    withLocalDecl vName .default (consumeTypeAnnotations viTy) fun vi => do
     loopU (i + 1) (v.push vi) k
   else
     k v
@@ -965,7 +2021,7 @@ def loopCtors (recInfos : Array RecInfo)
     let lctx ← getLCtx
     let minorTy := lctx.mkForall bu <| lctx.mkForall v motiveApp
     let minorName := ctor.name.replacePrefix indTypeName .anonymous
-    withLocalDecl minorName .default minorTy.consumeTypeAnnotations fun minor => do
+    withLocalDecl minorName .default (consumeTypeAnnotations minorTy) fun minor => do
     let recInfos := recInfos.modify dIdx fun s => { s with minors := s.minors.push minor }
     loopCtors recInfos ctors k
   | [] => k recInfos
@@ -1079,7 +2135,8 @@ structure Result where
   ngen : NameGenerator
   nparams : Nat
   lctx : LocalContext
-  aux2nested : NameMap Expr -- exprs contain `nparams` loose bvars
+  params : Array Expr -- the fvars declared in `lctx`
+  aux2nested : NameMap Expr -- exprs are open over `params`, like the C++ `m_aux2nested`
   types : List InductiveType
 
 instance [MonadStateOf NameGenerator m] : MonadNameGenerator m where
@@ -1121,11 +2178,11 @@ def restoreNested (r : Result) (env' : Environment) (e : Expr)
     if let some nested := r.aux2nested.find? c then
       let args := t.getAppArgs
       assert! args.size ≥ r.nparams
-      return mkAppRange (nested.instantiateRev As) r.nparams args.size args
+      return mkAppRange ((nested.abstract r.params).instantiateRev As) r.nparams args.size args
     let (nested, auxI_name) ← r.getNestedIfAuxCtor env' c
     let args := t.getAppArgs
     assert! args.size ≥ r.nparams
-    let nested' := nested.instantiateRev As
+    let nested' := (nested.abstract r.params).instantiateRev As
     nested'.withApp fun I I_args => do
     let .const I_c I_ls := I | unreachable!
     let c' := .const (c.replacePrefix auxI_name I_c) I_ls
@@ -1276,8 +2333,14 @@ def run (fuel nparams : Nat) (types : List InductiveType) : M Result := do
       modify fun s => { s with newTypes := s.newTypes.set! i { indType with ctors } }
       loop (i+1) fuel
     else
-      let aux2nested := s.nestedAux.foldl (fun m (e, n) => m.insert n (e.abstract params)) {}
-      return { s with nparams := params.size, lctx, aux2nested, types := s.newTypes.toList }
+      let aux2nested := s.nestedAux.foldl (fun m (e, n) => m.insert n e) {}
+      return {
+        ngen := s.ngen
+        nparams := params.size
+        lctx := lctx
+        params := params
+        aux2nested := aux2nested
+        types := s.newTypes.toList }
   loop 0 fuel
 end ElimNestedInductive
 

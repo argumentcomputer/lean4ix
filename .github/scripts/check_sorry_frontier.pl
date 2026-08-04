@@ -53,6 +53,8 @@ my %expected = (
   "Lean4Lean/Verify/Typing/Lemmas.lean\0TrProj.instL"      => 1,
   # Tier V - checker verification, blocked on Tiers S/P
   "Lean4Lean/Verify/Level.lean\0NormLevel.subsumption_eval"     => 1,
+  "Lean4Lean/Verify/Level.lean\0isEquiv_wf"                    => 1,
+  "Lean4Lean/Verify/Environment.lean\0addDecl.WF"              => 1,
   "Lean4Lean/Verify/TypeChecker/InferType.lean\0inferProj.WF"   => 1,
   "Lean4Lean/Verify/TypeChecker/WHNF.lean\0reduceRecursor.WF"   => 1,
   "Lean4Lean/Verify/TypeChecker/WHNF.lean\0reduceProj.WF"       => 1,
