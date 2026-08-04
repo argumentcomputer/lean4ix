@@ -1,0 +1,18 @@
+# Pull upstream changes from digama0/lean4lean daily at 12am UTC
+name: Repo sync
+
+on:
+  schedule:
+  - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh repo sync ${{ github.repository }} --branch master --force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
