@@ -2,19 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [dev]
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch supersedes an in-flight run; master runs are
-# never cancelled, since those are the ones that populate the build cache.
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and self-check
+    name: Build and test
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -34,6 +35,15 @@ jobs:
       # compile. `sorry`s here are expected, as in `Verify`.
       - name: Build Lean4Lean.Experimental
         run: lake build Lean4Lean.Experimental
+
+      # Enforce the trusted sorry frontier: fail if any `Theory`/`Verify`
+      # declaration gains, loses, or renames a `sorry` versus the allowlist in
+      # `Lean4Lean/Audit/SorryFrontier.lean`. Asks the compiled environment which
+      # declarations use `sorryAx`, so it can't drift over comments or string
+      # literals the way a source grep can. Not a default target, so it is built
+      # explicitly here; the surface it imports is already built above.
+      - name: Check sorry frontier
+        run: lake build Lean4Lean.Audit.SorryFrontier
 
       # `lake build` only establishes that lean4lean compiles; these check that it still
       # *works*. The two modes exercise different code paths, so both are worth running.

@@ -44,10 +44,24 @@
       }: let
         # Lake package
         lake2nix = pkgs.callPackage lean4-nix.lake {};
-        # lean4-nix reads lake-manifest.json while evaluating derivations.
-        # Reuse the flake's lazy source instead of creating a nested
-        # fileset.toSource path that may be unrealized under --no-build.
-        leanSrc = inputs.self.outPath;
+        # Restrict the Lake build inputs to Lean-relevant files so edits to
+        # unrelated files (CI, docs, the flake itself) don't invalidate the
+        # cached Lean derivations. Covers the library/CLI/proof/test/audit
+        # sources, the manifests lean4-nix reads while evaluating, and the
+        # downstream-consumer fixture built from `${leanSrc}/nix/fixtures`.
+        # NOTE: a fileset source is left unrealized under `nix flake check
+        # --no-build` (fails with "path '…-source' is not valid"), so the nix
+        # CI job builds for real rather than eval-only.
+        leanSrc = pkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = pkgs.lib.fileset.unions [
+            ./lakefile.toml
+            ./lake-manifest.json
+            ./lean-toolchain
+            ./nix/fixtures
+            (pkgs.lib.fileset.fileFilter (f: f.hasExt "lean") ./.)
+          ];
+        };
         # Batteries v4.31.0 accidentally split deprecated recycling modules
         # into a second Lake library with a dependency back to Batteries.  Its
         # shared/static facets therefore form a cycle, which matters here
@@ -64,14 +78,16 @@
           src = leanSrc;
           depOverride.batteries.patches = [batteries431CycleFix];
         };
+        # System inputs every Lake build/derivation here needs.
+        leanBuildInputs = [
+          pkgs.gmp
+          pkgs.lean.lean-all
+          pkgs.rsync
+        ];
         lakeBuildArgs = {
           inherit lakeDeps;
           src = leanSrc;
-          buildInputs = [
-            pkgs.gmp
-            pkgs.lean.lean-all
-            pkgs.rsync
-          ];
+          buildInputs = leanBuildInputs;
         };
 
         # The Lake dependency artifact: the contract consumed by downstream
@@ -82,7 +98,7 @@
         # link executables against this read-only store path. No CLI, no
         # proof targets. (lean4-nix's capitalization heuristic would guess
         # the nonexistent `Lean4lean` target, hence the explicit name.)
-        lean4leanLakeDependency = lake2nix.mkPackage (
+        lean4leanLib = lake2nix.mkPackage (
           lakeBuildArgs
           // {
             name = "Lean4Lean";
@@ -93,44 +109,25 @@
           }
         );
 
-        # Like lake-dependency, but additionally builds the Theory and
-        # Verify proof libraries (default facets), for consumers that
-        # import the metatheory too — Ix's IxTcVerify imports both
-        # Lean4Lean.Theory.* and Lean4Lean.Verify.*, so the plain
-        # implementation-only artifact is not enough for it.
-        lean4leanLakeDependencyFull = lake2nix.mkPackage (
-          lakeBuildArgs
-          // {
-            name = "Lean4Lean-full";
-            lakeArtifacts = lean4leanLakeDependency;
-            buildPhase = ''
-              runHook preBuild
-              lake build Lean4Lean Lean4Lean.Theory Lean4Lean.Verify
-              lake build Lean4Lean:shared Lean4Lean:static
-              runHook postBuild
-            '';
-            meta = {
-              description = "Lean4Lean library artifact including the Theory and Verify proof libraries";
-            };
-          }
-        );
+        # Common mkPackage args that reuse the prebuilt library artifact as the
+        # Lake build's starting point and skip re-installing it — for the CLI
+        # and checks, which extend the library but don't ship it.
+        reuseLibArgs = {
+          lakeArtifacts = lean4leanLib;
+          installArtifacts = false;
+        };
 
         # Search path covering the library and its Lake deps (batteries).
         leanPath = pkgs.lib.concatStringsSep ":" (
           map (d: "${d}/.lake/build/lib/lean") (
-            [lean4leanLakeDependency] ++ builtins.attrValues lakeDeps
+            [lean4leanLib] ++ builtins.attrValues lakeDeps
           )
         );
 
         # Raw CLI build: reuses the dependency artifact and keeps only
         # bin/lean4lean (no source copy, IR, or duplicate executable).
         lean4leanCLIRaw = lake2nix.mkPackage (
-          lakeBuildArgs
-          // {
-            lakeArtifacts = lean4leanLakeDependency;
-            installArtifacts = false;
-            name = "lean4lean";
-          }
+          lakeBuildArgs // reuseLibArgs // {name = "lean4lean";}
         );
 
         # Wrapped CLI:
@@ -158,22 +155,40 @@
               --prefix LEAN_PATH : "${leanPath}"
           '';
 
+        # A check that builds extra Lake targets over the library artifact and
+        # installs nothing: the build — including any elaboration-time
+        # assertions in those targets — is the test.
+        mkLakeCheck = name: buildTargets:
+          lake2nix.mkPackage (
+            lakeBuildArgs
+            // reuseLibArgs
+            // {
+              inherit name;
+              buildPhase = ''
+                runHook preBuild
+                ${buildTargets}
+                runHook postBuild
+              '';
+            }
+          );
+
         # Proof libraries: the abstract metatheory and the proof that the
-        # implementation satisfies it. One derivation builds both targets
-        # in one Lake workspace so Theory modules are compiled once.
-        proofs = lake2nix.mkPackage (
-          lakeBuildArgs
-          // {
-            name = "Lean4Lean-proofs";
-            lakeArtifacts = lean4leanLakeDependency;
-            installArtifacts = false;
-            buildPhase = ''
-              runHook preBuild
-              lake build Lean4Lean.Theory Lean4Lean.Verify
-              runHook postBuild
-            '';
-          }
-        );
+        # implementation satisfies it, built in one Lake workspace so Theory
+        # modules compile once, then the sorry frontier:
+        # `Lean4Lean.Audit.SorryFrontier` fails the build if any Theory/Verify
+        # declaration gains, loses, or renames a `sorry` versus its allowlist.
+        # It is not a default target, so building it over the just-built
+        # surface is the whole check.
+        proofs = mkLakeCheck "Lean4Lean-proofs" ''
+          lake build Lean4Lean.Theory Lean4Lean.Verify
+          lake build Lean4Lean.Audit.SorryFrontier
+        '';
+
+        # Basic test suite: the `Lean4Lean.Tests.*` regression modules (the
+        # nested-inductive kernel checks and the toolchain audit) run their
+        # assertions at elaboration via `run_meta`/`#guard`, so building the
+        # target is the test run.
+        tests = mkLakeCheck "Lean4Lean-tests" "lake build Lean4Lean.Tests";
 
         # Downstream-consumer check: a minimal Lake package that requires
         # lean4lean, links an executable against the read-only dependency
@@ -183,75 +198,57 @@
         # fails before any consumer updates its pin.
         consumer = lake2nix.mkPackage {
           name = "consumer";
-          # lake2nix reads this fixture's manifest during evaluation. Keep it
-          # inside the already-realized flake source rather than coercing the
-          # subdirectory into a second, not-yet-realized store path.
+          # lake2nix reads this fixture's manifest during evaluation; it is
+          # included in `leanSrc` (the fileset covers `nix/fixtures`), so it is
+          # taken from the library's source path rather than a separate store
+          # path.
           src = "${leanSrc}/nix/fixtures/consumer";
           lakeDeps = {
-            lean4lean = lean4leanLakeDependency;
+            lean4lean = lean4leanLib;
             batteries = lakeDeps.batteries;
           };
           installArtifacts = false;
-          buildInputs = [
-            pkgs.gmp
-            pkgs.lean.lean-all
-            pkgs.rsync
-          ];
+          buildInputs = leanBuildInputs;
           postBuild = ''
             ./.lake/build/bin/consumer | grep -q consumer-ok
           '';
         };
 
-        # Regression test for the `replayFromImports` teardown segfault (see
-        # plans/DEPRECATED-segfault-fix-plan.md): run the shipped wrapper from a clean
-        # environment on a small module and require a clean exit plus the
-        # summary line the crash used to swallow.
-        cliSmoke =
-          pkgs.runCommand "lean4lean-cli-smoke" {}
-          ''
-            unset LEAN_PATH LEAN_SYSROOT
-            ${lean4leanCLI}/bin/lean4lean Lean4Lean.Declaration > out
+        # A CLI check: run `body` (which writes the wrapped CLI's stdout to
+        # `out`), then require the "checked N declarations" summary line.
+        mkCliCheck = name: body:
+          pkgs.runCommand "lean4lean-${name}" {} ''
+            ${body}
             grep -Eq "^checked [0-9]+ declarations" out
             touch $out
           '';
+
+        # Regression test for the `replayFromImports` teardown segfault (see
+        # plans/DEPRECATED-segfault-fix-plan.md): run the shipped wrapper from a
+        # clean environment on a small module and require a clean exit plus the
+        # summary line the crash used to swallow.
+        cliSmoke = mkCliCheck "cli-smoke" ''
+          unset LEAN_PATH LEAN_SYSROOT
+          ${lean4leanCLI}/bin/lean4lean Lean4Lean.Declaration > out
+        '';
 
         # The external-project case: with an ambient LEAN_PATH already set
         # (as `lake env` sets one for a target project), the wrapper must
         # prepend its package paths rather than lose them or clobber the
         # ambient value — a --set/--set-default wrapper fails this check.
-        cliSmokeExternal =
-          pkgs.runCommand "lean4lean-cli-smoke-external" {}
-          ''
-            mkdir ambient
-            LEAN_PATH=$PWD/ambient ${lean4leanCLI}/bin/lean4lean Lean4Lean.Declaration > out
-            grep -Eq "^checked [0-9]+ declarations" out
-            touch $out
-          '';
+        cliSmokeExternal = mkCliCheck "cli-smoke-external" ''
+          mkdir ambient
+          LEAN_PATH=$PWD/ambient ${lean4leanCLI}/bin/lean4lean Lean4Lean.Declaration > out
+        '';
 
         # No-argument mode: with only the repo's lake-manifest.json in the
         # working directory, the CLI must infer the package (matching the
         # manifest name case-insensitively against the Lean4Lean module
         # root) and check the whole library.
-        cliNoArg =
-          pkgs.runCommand "lean4lean-cli-noarg" {}
-          ''
-            cp ${./lake-manifest.json} lake-manifest.json
-            ${lean4leanCLI}/bin/lean4lean > out
-            grep -Eq "^checked [0-9]+ declarations" out
-            touch $out
-          '';
-        # Sorry-frontier audit: every real `sorry` token outside
-        # Lean4Lean/Experimental/ must match the script's exact allowlist
-        # (the upstream-gaps plan's Tier S/P/V/R inventory), so progress
-        # shrinks the allowlist and regressions fail loudly. Pure text
-        # audit — no Lean toolchain involved.
-        sorryFrontier =
-          pkgs.runCommand "lean4lean-sorry-frontier" {}
-          ''
-            ${pkgs.perl}/bin/perl \
-              ${./.github/scripts/check_sorry_frontier.pl} ${leanSrc} \
-              | tee $out
-          '';
+        cliNoArg = mkCliCheck "cli-noarg" ''
+          cp ${./lake-manifest.json} lake-manifest.json
+          ${lean4leanCLI}/bin/lean4lean > out
+        '';
       in {
         # Lean overlay
         _module.args.pkgs = import nixpkgs {
@@ -264,10 +261,7 @@
         packages = {
           default = lean4leanCLI;
           lean4lean = lean4leanCLI;
-          lake-dependency = lean4leanLakeDependency;
-          lake-dependency-full = lean4leanLakeDependencyFull;
-          # Compatibility alias for early users of the staged flake.
-          lib = lean4leanLakeDependency;
+          lake-dependency = lean4leanLib;
         };
 
         apps = let
@@ -282,8 +276,7 @@
         };
 
         checks = {
-          inherit proofs;
-          sorry-frontier = sorryFrontier;
+          inherit proofs tests;
           downstream-consumer = consumer;
           cli-smoke = cliSmoke;
           cli-smoke-external = cliSmokeExternal;

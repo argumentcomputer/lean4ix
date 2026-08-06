@@ -2,7 +2,7 @@ name: Nix
 
 on:
   push:
-    branches: [master]
+    branches: [dev]
   pull_request:
   workflow_dispatch:
 
@@ -14,50 +14,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap gates first: formatting and whole-flake evaluation for every
-  # declared system, without building anything.
-  eval:
-    runs-on: ubuntu-latest
+  # Packaging-compatibility gate: build the shipped outputs and every flake
+  # check on x86_64-linux (the only supported system). ci.yml is the primary
+  # lean-action build and test. The other systems in flake.nix stay declared
+  # but are not built here, so they never gate CI.
+  nix-test:
+    name: Nix Tests
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@v7
-      - name: Sorry frontier
-        run: perl .github/scripts/check_sorry_frontier.pl
-      - uses: DeterminateSystems/nix-installer-action@v20
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v17
+        with:
+          name: argumentcomputer
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Check formatting
         run: nix fmt --accept-flake-config -- --check flake.nix
-      - name: Evaluate all systems
-        run: nix flake check --all-systems --no-build --accept-flake-config
+      # Shipped outputs: the CLI and the downstream Lake-dependency artifact.
+      - run: nix build --print-build-logs --accept-flake-config .#lean4lean .#lake-dependency
+      # Builds every check (proofs + sorry frontier, tests, consumer fixture,
+      # CLI regressions) and evaluates the rest of the flake.
+      - run: nix flake check --print-build-logs --accept-flake-config
 
-  # Build the shipped outputs and run every check (proofs, the
-  # downstream-consumer fixture, and the CLI smoke/no-arg regression
-  # tests) on Linux.
-  check-linux:
-    runs-on: ubuntu-latest
+  # Verify the dev shell provides a working Lake toolchain.
+  nix-devshell:
+    name: Nix devShell
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@v7
-      - uses: DeterminateSystems/nix-installer-action@v20
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v17
         with:
           name: argumentcomputer
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Only push from trusted master builds; PRs stay read-only.
-          skipPush: ${{ github.ref != 'refs/heads/master' }}
-      - name: Build packages
-        run: nix build --accept-flake-config --no-link --print-build-logs .#lake-dependency .#lake-dependency-full .#lean4lean
-      - name: Flake checks
-        run: nix flake check --accept-flake-config --print-build-logs
-
-  # One Darwin runner exercising the wrapper and the consumer fixture,
-  # per the improvement plan; the full check matrix stays on Linux.
-  build-darwin:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: DeterminateSystems/nix-installer-action@v20
-      - uses: cachix/cachix-action@v16
-        with:
-          name: argumentcomputer
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: ${{ github.ref != 'refs/heads/master' }}
-      - name: Build wrapper and consumer check
-        run: nix build --accept-flake-config --no-link --print-build-logs .#lean4lean .#checks.aarch64-darwin.downstream-consumer .#checks.aarch64-darwin.cli-smoke
+      - run: nix develop --accept-flake-config --command bash -c "lake build"
