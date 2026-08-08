@@ -964,7 +964,7 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
   rw [nilCandidateWhnfCoreFamily n ({} : TypeChecker.State)]
   simp [nilCandidateBodyShape, nilCandidateBodyExpr,
     nilCandidateFirstApp, nilCandidateReduceRecursor,
-    Expr.eqv_eq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     .app (.app (.const ``IndexedVec [.param `u])
       (.fvar nilCandidateAlphaId)) (.const ``Nat.zero []) =
@@ -982,7 +982,7 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
       .ok (none, state) := by
   rw [nilCandidateBodyShape]
   simp [TypeChecker.Inner.reduceNative, nilCandidateBodyExpr,
-    nilCandidateFirstApp, Expr.eqv_eq]
+    nilCandidateFirstApp, Expr.structuralEq]
 
 @[simp] theorem nilCandidateReduceNat
     (methods : TypeChecker.Methods) (state : TypeChecker.State) :
@@ -992,7 +992,7 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
   rw [nilCandidateBodyShape]
   simp [TypeChecker.Inner.reduceNat, nilCandidateBodyExpr,
     nilCandidateFirstApp, Expr.getAppNumArgs_eq,
-    Expr.getAppArgsRevList, Expr.appFn!, Expr.eqv_const]
+    Expr.getAppArgsRevList, Expr.appFn!, Expr.structuralEq]
 
 theorem nilCandidateIsDeltaFamily :
     TypeChecker.Inner.isDelta ctorEnv
@@ -1759,7 +1759,7 @@ theorem ctorIndexedVecWhnfCoreInitial
       index).getAppFn = Expr.const ``IndexedVec [.param `u] by rfl]
   rw [ctorIndexedVecWhnfCoreFamily lctx n ({} : TypeChecker.State)]
   simp [ctorIndexedVecApp, ctorIndexedVecReduceRecursor,
-    Expr.eqv_eq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     Expr.app (Expr.app (Expr.const ``IndexedVec [.param `u]) alpha)
       index = ctorIndexedVecApp alpha index by rfl]
@@ -1775,7 +1775,7 @@ theorem ctorIndexedVecWhnfCoreInitial
         TypeChecker.RecM (Option Expr))
       methods (tcContext lctx) state = .ok (none, state) := by
   cases index <;>
-    simp [ctorIndexedVecApp, TypeChecker.Inner.reduceNative, Expr.eqv_eq]
+    simp [ctorIndexedVecApp, TypeChecker.Inner.reduceNative, Expr.structuralEq]
 
 @[simp] theorem ctorIndexedVecReduceNat
     (lctx : LocalContext) (alpha index : Expr)
@@ -1784,7 +1784,7 @@ theorem ctorIndexedVecWhnfCoreInitial
       methods (tcContext lctx) state = .ok (none, state) := by
   simp [ctorIndexedVecApp, TypeChecker.Inner.reduceNat,
     Expr.getAppNumArgs_eq, Expr.getAppArgsRevList,
-    Expr.appFn!, Expr.eqv_const]
+    Expr.appFn!, Expr.structuralEq]
 
 theorem ctorIndexedVecUnfoldFamily
     (lctx : LocalContext) (methods : TypeChecker.Methods)

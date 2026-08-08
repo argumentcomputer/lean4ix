@@ -74,9 +74,7 @@ def NormLevel := Std.TreeMap (List Name) Node compare
   deriving Repr
 
 instance : BEq NormLevel where
-  beq l₁ l₂ :=
-    (l₁.all fun p n => l₂.get? p == some n) &&
-    (l₂.all fun p n => l₁.get? p == some n)
+  beq l₁ l₂ := l₁.toList == l₂.toList
 
 def VarNode.addVar (v : Name) (k : Nat) : List VarNode → List VarNode
   | [] => [⟨v, k⟩]
@@ -131,17 +129,27 @@ def findParent (f : List Name → Bool) : (l₁ l₂ : List Name) → List Name
   | _, [] => []
   | l₁, a :: l₂ => if f (l₁.reverseAux l₂) then [a] else findParent f (a :: l₁) l₂
 
+/-- Whether `n₁.const` is semantically dominated while comparing the node at
+`p₁` with the node at `p₂`.  The path-membership witnesses make the test sound
+for every `NormLevel`, not only maps produced by `normalizeAux`: a variable in
+an active path evaluates to at least one. -/
+abbrev Node.constIsSubsumedBy (n₁ : Node) (p₁ p₂ : List Name) (n₂ : Node) : Prop :=
+  (p₁.length ≠ p₂.length ∧ n₁.const ≤ n₂.const) ∨
+  (n₂.var ≠ [] ∧ ∃ v ∈ n₁.var, v.var ∈ p₁ ∧ n₁.const ≤ v.offset + 1) ∨
+  (p₁.length ≠ p₂.length ∧ n₁.const ≤ 1 ∧ ∃ v ∈ n₂.var, v.var ∈ p₂)
+
+def Node.subsumptionStep (n₁ : Node) (p₁ p₂ : List Name) (n₂ : Node) : Node :=
+  if !subset compare p₂ p₁ then n₁ else
+  let same := p₁.length == p₂.length
+  let n₁ := if n₁.const = 0 ∨ ¬n₁.constIsSubsumedBy p₁ p₂ n₂ then
+    n₁
+  else
+    { n₁ with const := 0 }
+  if same || n₂.var.isEmpty then n₁ else { n₁ with var := subsumeVars n₁.var n₂.var }
+
 def NormLevel.subsumption (acc : NormLevel) (paths := false) : NormLevel :=
   acc.foldl (init := acc) fun acc p₁ n₁ =>
-    let n₁ := acc.foldl (init := n₁) fun n₁ p₂ n₂ =>
-      if !subset compare p₂ p₁ then n₁ else
-      let same := p₁.length == p₂.length
-      let n₁ :=
-        if n₁.const = 0 ||
-          (same || n₁.const > n₂.const) &&
-          (n₂.var.isEmpty || n₁.const > n₁.var.foldl (·.max ·.offset) 0 + 1)
-        then n₁ else { n₁ with const := 0 }
-      if same || n₂.var.isEmpty then n₁ else { n₁ with var := subsumeVars n₁.var n₂.var }
+    let n₁ := acc.foldl (init := n₁) fun n₁ p₂ n₂ => n₁.subsumptionStep p₁ p₂ n₂
     let n₁ := if paths then
       let path := findParent acc.contains [] p₁
       let var := if let [v] := path then subsumeVars n₁.var [⟨v, 0⟩] else n₁.var
@@ -162,12 +170,13 @@ def leVars : List VarNode → List VarNode → Bool
     | .gt => leVars (x :: xs) ys
 
 def NormLevel.le (l₁ l₂ : NormLevel) : Bool :=
-  l₁.all fun p₁ n₁ =>
+  l₁.toList.all fun (p₁, n₁) =>
     if n₁.const = 0 && n₁.var.isEmpty then true else
-    l₂.any fun p₂ n₂ =>
+    l₂.toList.any fun (p₂, n₂) =>
       (!n₂.var.isEmpty || n₁.var.isEmpty) &&
       subset compare p₂ p₁ &&
-      (n₁.const ≤ n₂.const || n₂.var.any (n₁.const ≤ ·.offset + 1)) &&
+      (n₁.const ≤ n₂.const ||
+        n₂.var.any fun v => p₂.contains v.var && n₁.const ≤ v.offset + 1) &&
       leVars n₁.var n₂.var
 
 def NormLevel.buildPaths : StateM NormLevel Unit := do
@@ -243,9 +252,22 @@ end Normalize
 
 def normalize' (l : Level) : Level := (Normalize.normalize l (paths := true)).toTree.reify
 
-def isEquiv' (u v : Level) : Bool := u == v || Normalize.normalize u == Normalize.normalize v
+/-- A transparent structural equality test for levels.  Unlike `Level.beq`,
+this test has no opaque runtime contract, so its successful branch can be used
+directly by the verified checker. -/
+def isStructEq : Level → Level → Bool
+  | .zero, .zero => true
+  | .succ u, .succ v => isStructEq u v
+  | .max u₁ u₂, .max v₁ v₂
+  | .imax u₁ u₂, .imax v₁ v₂ => isStructEq u₁ v₁ && isStructEq u₂ v₂
+  | .param u, .param v => u == v
+  | .mvar ⟨u⟩, .mvar ⟨v⟩ => u == v
+  | _, _ => false
 
-def isEquivList : List Level → List Level → Bool := List.all2 isEquiv
+def isEquiv' (u v : Level) : Bool :=
+  isStructEq u v || Normalize.normalize u == Normalize.normalize v
+
+def isEquivList : List Level → List Level → Bool := List.all2 isEquiv'
 
 def geq' (u v : Level) : Bool := (Normalize.normalize v).le (Normalize.normalize u)
 

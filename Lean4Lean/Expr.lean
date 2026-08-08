@@ -5,6 +5,33 @@ namespace Expr
 
 def prop : Expr := .sort .zero
 
+/-- Transparent structural equality with the non-strict binder behavior used
+by kernel expression comparison.  Unlike `Expr.eqv`, this definition is
+available to the kernel evaluator, so checker branch proofs do not require an
+opaque implementation equation. -/
+def structuralEq : Expr → Expr → Bool
+  | .bvar i, .bvar j
+  | .fvar i, .fvar j
+  | .mvar i, .mvar j
+  | .sort i, .sort j
+  | .lit i, .lit j => i == j
+  | .const name levels, .const name' levels' =>
+      name == name' && levels == levels'
+  | .app fn arg, .app fn' arg' =>
+      structuralEq fn fn' && structuralEq arg arg'
+  | .lam _ domain body _, .lam _ domain' body' _
+  | .forallE _ domain body _, .forallE _ domain' body' _ =>
+      structuralEq domain domain' && structuralEq body body'
+  | .letE _ type value body nondep,
+      .letE _ type' value' body' nondep' =>
+      structuralEq type type' && structuralEq value value' &&
+        structuralEq body body' && nondep == nondep'
+  | .mdata data expr, .mdata data' expr' =>
+      structuralEq expr expr' && data.entries == data'.entries
+  | .proj typeName index struct, .proj typeName' index' struct' =>
+      structuralEq struct struct' && typeName == typeName' && index == index'
+  | _, _ => false
+
 def arrow (d b : Expr) : Expr := .forallE `a d b .default
 
 def lam0 (ty e : Expr) : Expr := .lam `_ ty e default

@@ -31,6 +31,10 @@ inductive VDecl.WF : VEnv → VDecl → VEnv → Prop where
     gen.WF env →
     env.addInductGeneration gen = some env' →
     VDecl.WF env (.induct decl) env'
+  | inductBlock {gen : decl.BlockGenerationChecked} :
+    gen.WF env blockEnv →
+    env.addInductBlockGeneration gen = some env' →
+    VDecl.WF env (.induct decl) env'
 
 inductive VEnv.WF' : List VDecl → VEnv → Prop where
   | empty : VEnv.WF' [] .empty

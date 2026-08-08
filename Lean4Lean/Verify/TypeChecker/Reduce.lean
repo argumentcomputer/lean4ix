@@ -97,7 +97,7 @@ theorem reduceNat.WF {c : VContext} (he : c.TrExprS e e') :
   split <;> (split <;> [skip; exact hP ▸ .pure nofun])
   · rename_i h1 h2
     simp [nargs, Expr.getAppNumArgs_eq] at h1; subst fn
-    let .app f a := e; simp [Expr.appFn!, Expr.eqv_const] at h2 ⊢; subst h2
+    let .app f a := e; simp [Expr.appFn!, Expr.structuralEq_const] at h2 ⊢; subst h2
     let .app ha1 ha2 hf ha := he
     let .const h1 h2 h3 := hf
     refine (whnf.WF ha).bind fun a₁ _ _ ⟨a1, _, a2, a3⟩ => ?_

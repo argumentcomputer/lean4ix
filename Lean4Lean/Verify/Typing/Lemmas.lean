@@ -213,6 +213,16 @@ theorem WF.toCtx : ∀ {Δ}, WF env U Δ → OnCtx Δ.toCtx (env.IsType U)
   | (_, .vlam _) :: _, ⟨hΔ, _, hA⟩ => ⟨hΔ.toCtx, hA⟩
   | (_, .vlet ..) :: _, ⟨hΔ, _, _⟩ => hΔ.toCtx
 
+/-- A verified local context remains well formed when the global environment
+is extended. -/
+theorem WF.mono (henv : env ≤ env') : ∀ {Δ}, WF env U Δ → WF env' U Δ
+  | [], _ => trivial
+  | (_, d) :: Δ, ⟨hΔ, hfvars, hd⟩ =>
+      ⟨hΔ.mono henv, hfvars, by
+        cases d with
+        | vlam => exact hd.mono henv
+        | vlet => exact hd.mono henv⟩
+
 instance : Coe (WF env U Δ) (OnCtx Δ.toCtx (env.IsType U)) := ⟨(·.toCtx)⟩
 
 theorem WF.fvars_nodup : ∀ {Δ}, WF env U Δ → Δ.fvars.Nodup
@@ -581,6 +591,7 @@ inductive TrTypeExpr : VLCtx → Expr → VExpr → Prop where
     TrTypeExpr Δ (.const c us) (.const c us')
   | app : TrTypeExpr Δ f f' → TrTypeExpr Δ a a' →
       TrTypeExpr Δ (.app f a) (.app f' a')
+  | mdata : TrTypeExpr Δ e e' → TrTypeExpr Δ (.mdata data e) e'
   | forallE : TrTypeExpr Δ ty ty' →
       TrTypeExpr ((none, .vlam ty') :: Δ) body body' →
       TrTypeExpr Δ (.forallE name ty body bi) (.forallE ty' body')
@@ -600,6 +611,7 @@ theorem TrTypeExpr.to_trExprS
   | app _ _ ihf iha =>
     obtain ⟨A, B, htf, hta⟩ := hwf.app_inv henv hΔ
     exact .app htf hta (ihf hΔ ⟨_, htf⟩) (iha hΔ ⟨_, hta⟩)
+  | mdata _ ih => exact .mdata (ih hΔ hwf)
   | forallE _ _ ihty ihbody =>
     obtain ⟨_, hwf⟩ := hwf
     obtain ⟨hty, hbody⟩ := VEnv.HasType.forallE_inv henv hwf
@@ -750,6 +762,15 @@ theorem VLCtx.IsDefEq.fvars : VLCtx.IsDefEq env U Δ₁ Δ₂ → Δ₁.fvars = 
   | .cons (ofv := none) h1 h2 _ => h1.fvars
   | .cons (ofv := some fv) h1 h2 _ => by simp [h1.fvars]
 
+/-- Definitionally equal verified local contexts have bound-variable entries
+in exactly the same positions. -/
+theorem VLCtx.IsDefEq.bvars : VLCtx.IsDefEq env U Δ₁ Δ₂ → Δ₁.bvars = Δ₂.bvars
+  | .nil => rfl
+  | .cons (ofv := none) h1 _ _ => by
+      simp only [VLCtx.bvars, h1.bvars]
+  | .cons (ofv := some _) h1 _ _ => by
+      simp only [VLCtx.bvars, h1.bvars]
+
 theorem VLocalDecl.IsDefEq.wf : VLocalDecl.IsDefEq env U Γ d₁ d₂ → VLocalDecl.WF env U Γ d₁
   | .vlam h3 => ⟨_, h3.hasType.1⟩
   | .vlet h3 _ => h3.hasType.1
@@ -757,6 +778,99 @@ theorem VLocalDecl.IsDefEq.wf : VLocalDecl.IsDefEq env U Γ d₁ d₂ → VLocal
 theorem VLCtx.IsDefEq.wf : VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.WF env U Δ₁
   | .nil => ⟨⟩
   | .cons h1 h2 h3 => ⟨h1.wf, h2, h3.wf⟩
+
+theorem VLocalDecl.IsDefEq.mono (henv : env ≤ env') :
+    VLocalDecl.IsDefEq env U Γ d₁ d₂ →
+      VLocalDecl.IsDefEq env' U Γ d₁ d₂
+  | .vlam h => .vlam (h.mono henv)
+  | .vlet h₁ h₂ => .vlet (h₁.mono henv) (h₂.mono henv)
+
+theorem VLCtx.IsDefEq.mono (henv : env ≤ env') :
+    VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.IsDefEq env' U Δ₁ Δ₂
+  | .nil => .nil
+  | .cons h₁ h₂ h₃ => .cons (h₁.mono henv) h₂ (h₃.mono henv)
+
+/-- Definitionally equal verified contexts whose free-variable slots use the
+same identifiers.  Dependency metadata may differ because normalization can
+change the syntactic free-variable list of a definitionally equal local type;
+that metadata is irrelevant to Theory lookup and typing. -/
+inductive VLCtx.IsDefEqFVars (env : VEnv) (U : Nat) : VLCtx → VLCtx → Prop
+  | nil : IsDefEqFVars env U [] []
+  | cons_bvar :
+    IsDefEqFVars env U Δ₁ Δ₂ →
+    VLocalDecl.IsDefEq env U Δ₁.toCtx d₁ d₂ →
+    IsDefEqFVars env U ((none, d₁) :: Δ₁) ((none, d₂) :: Δ₂)
+  | cons_fvar :
+    IsDefEqFVars env U Δ₁ Δ₂ →
+    VLocalDecl.IsDefEq env U Δ₁.toCtx d₁ d₂ →
+    IsDefEqFVars env U
+      ((some (fv, deps₁), d₁) :: Δ₁)
+      ((some (fv, deps₂), d₂) :: Δ₂)
+
+theorem VLCtx.IsDefEq.toFVars :
+    VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.IsDefEqFVars env U Δ₁ Δ₂
+  | .nil => .nil
+  | .cons (ofv := none) h₁ _ h₃ => .cons_bvar h₁.toFVars h₃
+  | .cons (ofv := some _) h₁ _ h₃ => .cons_fvar h₁.toFVars h₃
+
+theorem VLCtx.IsDefEqFVars.defeqCtx :
+    VLCtx.IsDefEqFVars env U Δ₁ Δ₂ →
+      env.IsDefEqCtx U [] Δ₁.toCtx Δ₂.toCtx
+  | .nil => .zero
+  | .cons_bvar h₁ (.vlam h₂) => .succ h₁.defeqCtx h₂
+  | .cons_bvar h₁ (.vlet ..) => h₁.defeqCtx
+  | .cons_fvar h₁ (.vlam h₂) => .succ h₁.defeqCtx h₂
+  | .cons_fvar h₁ (.vlet ..) => h₁.defeqCtx
+
+theorem VLCtx.IsDefEqFVars.find?_uniq (henv : VEnv.WF env)
+    (hΔ : VLCtx.IsDefEqFVars env U Δ₁ Δ₂)
+    (H₁ : Δ₁.find? v = some (e₁, A₁))
+    (H₂ : Δ₂.find? v = some (e₂, A₂)) :
+    env.IsDefEqU U Δ₁.toCtx A₁ A₂ ∧
+      env.IsDefEq U Δ₁.toCtx e₁ e₂ A₁ := by
+  induction hΔ generalizing v e₁ e₂ A₁ A₂ with
+  | nil => simp [VLCtx.find?] at H₁
+  | cons_bvar hΔ hd ih =>
+      revert H₁ H₂
+      simp only [VLCtx.find?]
+      split
+      · rintro ⟨⟩ ⟨⟩
+        cases hd with
+        | vlam h => exact ⟨⟨_, h.weak henv⟩, .bvar .zero⟩
+        | vlet h₁ h₂ => exact ⟨⟨_, h₂⟩, h₁⟩
+      · simp
+        rintro d₁' n₁' H₁' rfl rfl d₂' n₂' H₂' rfl rfl
+        obtain ⟨h₂, h₃⟩ := ih H₁' H₂'
+        cases hd with
+        | vlam => exact ⟨h₂.weakN henv .one, h₃.weak henv⟩
+        | vlet => simpa [VLocalDecl.depth] using ⟨h₂, h₃⟩
+  | @cons_fvar Δ₁ Δ₂ d₁ d₂ fv deps₁ deps₂ hΔ hd ih =>
+      revert H₁ H₂
+      simp only [VLCtx.find?]
+      cases same : fv == (match v with | .inl _ => fv | .inr fv' => fv') <;>
+        simp only [VLCtx.next]
+      all_goals
+        cases v with
+        | inl i =>
+            simp
+            rintro d₁' n₁' H₁' rfl rfl d₂' n₂' H₂' rfl rfl
+            obtain ⟨h₂, h₃⟩ := ih H₁' H₂'
+            cases hd with
+            | vlam => exact ⟨h₂.weakN henv .one, h₃.weak henv⟩
+            | vlet => simpa [VLocalDecl.depth] using ⟨h₂, h₃⟩
+        | inr fv' =>
+            simp only [same]
+            split
+            · rintro ⟨⟩ ⟨⟩
+              cases hd with
+              | vlam h => exact ⟨⟨_, h.weak henv⟩, .bvar .zero⟩
+              | vlet h₁ h₂ => exact ⟨⟨_, h₂⟩, h₁⟩
+            · simp
+              rintro d₁' n₁' H₁' rfl rfl d₂' n₂' H₂' rfl rfl
+              obtain ⟨h₂, h₃⟩ := ih H₁' H₂'
+              cases hd with
+              | vlam => exact ⟨h₂.weakN henv .one, h₃.weak henv⟩
+              | vlet => simpa [VLocalDecl.depth] using ⟨h₂, h₃⟩
 
 theorem VLocalDecl.IsDefEq.symm :
     VLocalDecl.IsDefEq env U Δ d₁ d₂ → VLocalDecl.IsDefEq env U Δ d₂ d₁
@@ -943,6 +1057,71 @@ theorem TrExprS.uniq (H1 : TrExprS env Us Δ₁ e e₁) (H2 : TrExprS env Us Δ�
   | lit _ _ ih1 => let .lit _ r2 := H2; exact ih1 hΔ r2
   | mdata _ ih1 => let .mdata r1 := H2; exact ih1 hΔ r1
   | proj _ l2 ih1 => let .proj r1 r2 := H2; exact l2.uniq henv hΔ.defeqCtx r2 (ih1 hΔ r1)
+
+variable! (henv : VEnv.WF env) {Us : List Name}
+  (hΔ : VLCtx.IsDefEqFVars env Us.length Δ₁ Δ₂)
+  (hΔwf : VLCtx.WF env Us.length Δ₁) in
+/-- Translation congruence across contexts with the same free-variable
+identifiers but potentially different dependency metadata. -/
+theorem TrExprS.uniqFVars
+    (H₁ : TrExprS env Us Δ₁ e e₁) (H₂ : TrExprS env Us Δ₂ e e₂) :
+    env.IsDefEqU Us.length Δ₁.toCtx e₁ e₂ := by
+  induction H₁ generalizing Δ₂ e₂ with
+  | bvar l₁ =>
+      let .bvar r₁ := H₂
+      exact ⟨_, (hΔ.find?_uniq henv l₁ r₁).2⟩
+  | fvar l₁ =>
+      let .fvar r₁ := H₂
+      exact ⟨_, (hΔ.find?_uniq henv l₁ r₁).2⟩
+  | sort l₁ =>
+      let .sort r₁ := H₂
+      cases l₁.symm.trans r₁
+      exact ⟨_, HasType.sort (.of_ofLevel l₁)⟩
+  | const l₁ l₂ l₃ =>
+      let .const r₁ r₂ r₃ := H₂
+      cases l₁.symm.trans r₁
+      cases l₂.symm.trans r₂
+      exact (TrExprS.const l₁ l₂ l₃).wf henv hΔwf
+  | app l₁ l₂ _ _ ih₃ ih₄ =>
+      let .app _ _ r₃ r₄ := H₂
+      exact ⟨_, .appDF
+        (ih₃ hΔ hΔwf r₃ |>.of_l henv hΔwf.toCtx l₁)
+        (ih₄ hΔ hΔwf r₄ |>.of_l henv hΔwf.toCtx l₂)⟩
+  | lam l₁ _ _ ih₂ ih₃ =>
+      let ⟨u, l₁'⟩ := l₁
+      let .lam _ r₂ r₃ := H₂
+      have hA := ih₂ hΔ hΔwf r₂ |>.of_l henv hΔwf.toCtx l₁'
+      have ⟨_, hb⟩ := ih₃ (.cons_bvar hΔ (.vlam hA))
+        ⟨hΔwf, nofun, ⟨u, l₁'⟩⟩ r₃
+      exact ⟨_, .lamDF hA hb⟩
+  | forallE l₁ l₂ _ _ ih₃ ih₄ =>
+      let ⟨_, l₁'⟩ := l₁
+      let ⟨_, l₂⟩ := l₂
+      let .forallE _ _ r₃ r₄ := H₂
+      have hA := ih₃ hΔ hΔwf r₃ |>.of_l henv hΔwf.toCtx l₁'
+      have hbody := ih₄ (.cons_bvar hΔ (.vlam hA))
+        ⟨hΔwf, nofun, l₁⟩ r₄
+      have hbodyCtx : OnCtx (_ :: _) (env.IsType Us.length) :=
+        ⟨hΔwf.toCtx, l₁⟩
+      have hB := hbody.of_l henv hbodyCtx l₂
+      exact ⟨_, .forallEDF hA hB⟩
+  | letE l₁ _ _ _ ih₂ ih₃ ih₄ =>
+      have hΓ := hΔwf.toCtx
+      let .letE _ r₂ r₃ r₄ := H₂
+      have ⟨_, hb⟩ := l₁.isType henv hΓ
+      refine ih₄ (.cons_bvar hΔ ?_) ⟨hΔwf, nofun, l₁⟩ r₄
+      exact .vlet
+        (ih₃ hΔ hΔwf r₃ |>.of_l henv hΓ l₁)
+        (ih₂ hΔ hΔwf r₂ |>.of_l henv hΓ hb)
+  | lit _ _ ih₁ =>
+      let .lit _ r₂ := H₂
+      exact ih₁ hΔ hΔwf r₂
+  | mdata _ ih₁ =>
+      let .mdata r₁ := H₂
+      exact ih₁ hΔ hΔwf r₁
+  | proj _ l₂ ih₁ =>
+      let .proj r₁ r₂ := H₂
+      exact l₂.uniq henv hΔ.defeqCtx r₂ (ih₁ hΔ hΔwf r₁)
 
 variable! (henv : VEnv.WF env) {Us : List Name} (hΔ : VLCtx.IsDefEq env Us.length Δ₁ Δ₂) in
 theorem TrExpr.uniq (H1 : TrExpr env Us Δ₁ e e₁) (H2 : TrExpr env Us Δ₂ e e₂) :

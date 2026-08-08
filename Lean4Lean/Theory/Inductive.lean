@@ -156,14 +156,120 @@ def recFieldIdxs (B : VExpr) : List VExpr := (VExpr.appArgs B []).drop np
 /-- One recursive constructor argument after normalization. `binders` is the
 possibly empty Pi telescope leading to the recursive target. `fieldIndex`
 addresses the constructor field itself, while target indices live under both
-the preceding constructor fields and these binders. `targetType` is reserved
-for the mutual-block index introduced by I3; it is zero in the current
-one-family analyzer. -/
+the preceding constructor fields and these binders. `targetType` is the
+source-ordered family ordinal retained by block analysis; it remains zero in
+the one-family compatibility analyzer. -/
 structure RecArg where
   fieldIndex : Nat
   binders : List VExpr
   targetType : Nat
   indices : List VExpr
+
+/-- Whether an expression mentions any family in a block.  Mutual analysis
+uses one block-wide name set in family formers, recursive-Pi domains, and
+recursive indices; checking only the current family would miss negative
+occurrences of its siblings. -/
+def _root_.Lean4Lean.VExpr.hasAnyConst (names : List Name) (e : VExpr) : Bool :=
+  names.any e.hasConst
+
+/-- The part of a family declaration needed to recognize a recursive target.
+The position of a header in `familyHeaders` is the `RecArg.targetType` stored
+by the block analyzer. -/
+structure FamilyHeader where
+  name : Name
+  indices : Nat
+
+/-- Family headers in declaration order. -/
+def familyHeaders (np : Nat) (types : List VInductiveType) :
+    List FamilyHeader :=
+  types.map fun ty =>
+    ⟨ty.name, (ctorFields (VExpr.dropN np ty.type)).length⟩
+
+/-- Recognize an application of any family in a mutual block.  The returned
+ordinal is its exact position in `headers`; parameter arguments must be the
+shared parameter variables and every index must be free of all block
+families. -/
+def blockTarget? (U np j : Nat) (headers : List FamilyHeader)
+    (names : List Name) (B : VExpr) : Option (Nat × List VExpr) :=
+  let head := B.appHead
+  let args := B.appArgs []
+  let rec loop (target : Nat) : List FamilyHeader →
+      Option (Nat × List VExpr)
+    | [] => none
+    | header :: headers =>
+      if head == .const header.name (VLevel.params U) &&
+          args.length == np + header.indices &&
+          args.take np == VExpr.bvarRevRange j np &&
+          (args.drop np).all fun e => !e.hasAnyConst names then
+        some (target, args.drop np)
+      else
+        loop (target + 1) headers
+  loop 0 headers
+
+/-- Recognize a recursive mutual target below a possibly empty positive Pi
+telescope.  No block family may occur in a Pi domain. -/
+def blockRecTarget? (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) : Nat → VExpr →
+      Option (List VExpr × Nat × List VExpr)
+  | j, .forallE A rest =>
+    if A.hasAnyConst names then none
+    else
+      match blockRecTarget? U np headers names (j+1) rest with
+      | some (binders, target, indices) =>
+        some (A :: binders, target, indices)
+      | none => none
+  | j, B =>
+    match blockTarget? U np j headers names B with
+    | some (target, indices) => some ([], target, indices)
+    | none => none
+
+/-- Analyze one constructor field against every family in a block. -/
+def blockRecArg? (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) (j : Nat) (B : VExpr) : Option RecArg :=
+  match blockRecTarget? U np headers names j B with
+  | some (binders, targetType, indices) =>
+    some { fieldIndex := j, binders, targetType, indices }
+  | none => none
+
+/-- Recursive arguments in source field order, with block-relative target
+ordinals. -/
+def blockRecArgs (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) : List VExpr → (j : Nat := 0) → List RecArg
+  | [], _ => []
+  | B :: Bs, j =>
+    match blockRecArg? U np headers names j B with
+    | some r => r :: blockRecArgs U np headers names Bs (j+1)
+    | none => blockRecArgs U np headers names Bs (j+1)
+
+/-- Positional mutual recursive classification for every constructor field.
+Unlike `blockRecArgs`, this list retains `none` entries, giving semantic
+consumers an exact field-by-field alignment without rerunning the analyzer. -/
+def blockRecArgsAt (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) : List VExpr → (j : Nat := 0) →
+      List (Option RecArg)
+  | [], _ => []
+  | B :: Bs, j =>
+    blockRecArg? U np headers names j B ::
+      blockRecArgsAt U np headers names Bs (j + 1)
+
+/-- A mutual constructor field is either a positive recursive target of some
+family in the block or is free of every block family. -/
+def blockStage3Field (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) (j : Nat) (B : VExpr) : Bool :=
+  (blockRecArg? U np headers names j B).isSome ||
+    !B.hasAnyConst names
+
+/-- Structural mutual constructor shape.  Fields may target any family, but
+the constructor result must target its owning family ordinal. -/
+def blockStage3Ctor (U np : Nat) (headers : List FamilyHeader)
+    (names : List Name) (owner : Nat) : Nat → VExpr → Bool
+  | j, .forallE B rest =>
+    blockStage3Field U np headers names j B &&
+      blockStage3Ctor U np headers names owner (j+1) rest
+  | j, result =>
+    match blockTarget? U np j headers names result with
+    | some (target, _) => target == owner
+    | none => false
 
 /-- Recognize the kernel's one-family `isRecArg` shape in raw VExpr normal
 form. Pi domains must be free of the family (the local strict-positivity
@@ -195,6 +301,13 @@ def recArgs (ni : Nat) : List VExpr → (j : Nat := 0) → List RecArg
     match recArg? U T np ni j B with
     | some r => r :: recArgs ni Bs (j+1)
     | none => recArgs ni Bs (j+1)
+
+/-- Positional one-family recursive classification retained for compatibility
+with the block-wide checked-constructor representation. -/
+def recArgsAt (ni : Nat) : List VExpr → (j : Nat := 0) →
+    List (Option RecArg)
+  | [], _ => []
+  | B :: Bs, j => recArg? U T np ni j B :: recArgsAt ni Bs (j + 1)
 
 /-- Positions of the directly recursive fields, with their index
 arguments (`j` counts binders past the parameters). -/
@@ -230,15 +343,55 @@ def stage3Ctor (ni : Nat) : Nat → VExpr → Bool
   | j, .forallE B rest => stage3Field U T np ni j B && stage3Ctor ni (j+1) rest
   | j, e => isRecField U T np ni j e
 
-/-- The kernel's subsingleton-elimination criterion, strengthened
-syntactically: every non-recursive field appears literally among the
-result's index arguments. -/
+/-- Levels that are structurally forced to evaluate to zero. This is the
+environment-free fragment needed to recognize proof-valued constructor
+fields; Verify supplies the exact ordinary-checker sort observations. -/
+def _root_.Lean4Lean.VLevel.isDefinitelyZero : VLevel → Bool
+  | .zero => true
+  | .max l₁ l₂ => l₁.isDefinitelyZero && l₂.isDefinitelyZero
+  | .imax _ l₂ => l₂.isDefinitelyZero
+  | .param _ | .succ _ => false
+
+/-- Partial local type synthesis used only to recognize fields whose inferred
+sort is structurally `Prop`. Constants and terms requiring reduction remain
+unknown and are conservatively treated as data. -/
+def inferLocalType? (Γ : List VExpr) : VExpr → Option VExpr
+  | .bvar i => Γ[i]?
+  | .sort l => some (.sort (.succ l))
+  | .const _ _ => none
+  | .app f a => do
+    let .forallE _ body ← inferLocalType? Γ f | none
+    return body.inst a
+  | .lam A body => do
+    let bodyType ← inferLocalType? (A :: Γ) body
+    return .forallE A bodyType
+  | .forallE A body => do
+    let .sort u ← inferLocalType? Γ A | none
+    let .sort v ← inferLocalType? (A :: Γ) body | none
+    return .sort (.imax u v)
+
+/-- Whether the partial local synthesis proves that a binder is a proof. -/
+def knownProofField (Γ : List VExpr) (B : VExpr) : Bool :=
+  match inferLocalType? Γ B with
+  | some (.sort l) => l.isDefinitelyZero
+  | _ => false
+
+/-- The kernel's singleton large-elimination criterion. Recursive arguments
+and proof fields impose no recovery condition; every remaining data field
+must occur literally in the constructor result's index spine. The proof-field
+test is a conservative environment-free reflection here and is connected to
+the exact checker result by Verify. -/
 def subsingletonOK (ni : Nat) (ct : VExpr) : Bool :=
-  let Bs := ctorFields ct
+  let Bs := ctorFields (VExpr.dropN np ct)
   let m := Bs.length
-  let ridx := recFieldIdxs np (VExpr.resultOf ct)
-  Bs.zipIdx.all fun (B, j) =>
-    (recArg? U T np ni j B).isSome || ridx.contains (.bvar (m-1-j))
+  let ridx := recFieldIdxs np (VExpr.resultOf (VExpr.dropN np ct))
+  let rec loop (Γ : List VExpr) (j : Nat) : List VExpr → Bool
+    | [] => true
+    | B :: Bs =>
+      ((recArg? U T np ni j B).isSome || knownProofField Γ B ||
+        ridx.contains (.bvar (m-1-j))) &&
+      loop (B :: Γ) (j+1) Bs
+  loop (VExpr.telN np ct).reverse 0 Bs
 
 /-- Large elimination: a never-zero result sort, or the (syntactic)
 subsingleton criterion. -/
@@ -246,8 +399,26 @@ def largeElim (ni : Nat) (ty : VInductiveType) : Bool :=
   (sortLevel np ty).isNeverZero ||
   match ty.ctors with
   | [] => true
-  | [c] => subsingletonOK U T np ni (VExpr.dropN np c.type)
+  | [c] => subsingletonOK U T np ni c.type
   | _ => false
+
+/-- The constructor-shape fragment of the kernel's K-target test. Only the
+visible shared-parameter prefix may precede the constructor result. -/
+def isKTargetCtor (nparams : Nat) : Nat → VExpr → Bool
+  | i, .forallE _ body =>
+      i < nparams && isKTargetCtor nparams (i + 1) body
+  | _, _ => true
+
+/-- Whether a checked one-family declaration receives the kernel's K-like
+recursor reduction flag. This decision is deliberately independent of
+`largeElim`: K eligibility must never be used to bypass the ordinary
+large-elimination criterion. -/
+def isKTarget (np : Nat) (resultLevel : VLevel)
+    (ty : VInductiveType) : Bool :=
+  resultLevel == .zero &&
+    match ty.ctors with
+    | [ctor] => isKTargetCtor np 0 ctor.type
+    | _ => false
 
 /-- A family type is checked before its own constant is declared, so neither
 its parameter nor index domains may already mention the family. This is the
@@ -265,7 +436,6 @@ def stage3DirectCore (U np : Nat) (ty : VInductiveType) : Bool :=
     | .sort l => decide (l.WF U)
     | _ => false) &&
   typeFormerOK np ty &&
-  largeElim U ty.name np ni ty &&
   ty.ctors.all fun c => c.uvars == U &&
     VExpr.telN np c.type == VExpr.telN np ty.type &&
     stage3Ctor U ty.name np ni 0 (VExpr.dropN np c.type)
@@ -299,6 +469,62 @@ def stage3Core : VInductDecl → Bool
   | ⟨U, np, [ty]⟩ =>
     stage3DirectCore U np ty && (namesOK ty && (closedOK ty && levelsOK U ty))
   | _ => false
+
+/-- Family names in exact declaration order. -/
+def familyNames (types : List VInductiveType) : List Name :=
+  types.map (·.name)
+
+/-- The shared parameter telescope selected by the first family.  Empty
+blocks are rejected by `checkedBlock?`; defining this total function keeps the
+dependent traversal itself free of a singleton/nonempty witness. -/
+def blockParams (np : Nat) : List VInductiveType → List VExpr
+  | [] => []
+  | ty :: _ => VExpr.telN np ty.type
+
+/-- A family former in a mutual block is checked before any family constant
+is staged, so every parameter and index domain must be free of every family
+in the block. -/
+def blockTypeFormerOK (np : Nat) (names : List Name)
+    (ty : VInductiveType) : Bool :=
+  (VExpr.telN np ty.type).all (fun e => !e.hasAnyConst names) &&
+    (ctorFields (VExpr.dropN np ty.type)).all
+      (fun e => !e.hasAnyConst names)
+
+/-- Names reserved by the mutual pipeline: all families, then all constructors
+in family/source order, then one recursor per family.  Validation retains this
+order as checked data, and the block transaction inserts the same three
+constant phases before installing generated rules. -/
+def blockGeneratedNames (types : List VInductiveType) : List Name :=
+  types.map (·.name) ++
+    types.flatMap (fun ty => ty.ctors.map (·.name)) ++
+    types.map (fun ty => .str ty.name "rec")
+
+/-- Block-wide duplicate/collision check for all future generated names. -/
+def blockNamesOK (types : List VInductiveType) : Bool :=
+  decide (blockGeneratedNames types).Nodup
+
+/-- Environment-free structural representation check for one family in a
+mutual block.  It checks raw metadata anatomy and cross-family positivity.
+Environment-sensitive normalization, shared-result-universe semantics, and
+staging are supplied separately by `ValidatedBlock.WF` and
+`ValidationCertificate`. -/
+def blockFamilyCore (source : VInductDecl) (params : List VExpr)
+    (owner : Nat) (ty : VInductiveType) : Bool :=
+  let names := familyNames source.types
+  let headers := familyHeaders source.nparams source.types
+  ty.uvars == source.uvars &&
+    params.length == source.nparams &&
+    VExpr.telN source.nparams ty.type == params &&
+    (match VExpr.resultOf (VExpr.dropN source.nparams ty.type) with
+      | .sort l => decide (l.WF source.uvars)
+      | _ => false) &&
+    blockTypeFormerOK source.nparams names ty &&
+    closedOK ty && levelsOK source.uvars ty &&
+    ty.ctors.all fun c =>
+      c.uvars == source.uvars &&
+        VExpr.telN source.nparams c.type == params &&
+        blockStage3Ctor source.uvars source.nparams headers names owner 0
+          (VExpr.dropN source.nparams c.type)
 
 /-- Constructor identities retained across normalization. Types may change by
 WHNF/definitional equality, but names, universe arities, order, and count may
@@ -375,8 +601,8 @@ def Normalization.identity (source : VInductDecl) : Normalization source where
 /-- Semantic validity of a one-family normalization view. The family type is
 definitionally equal in the input environment; constructor types are
 definitionally equal after the raw family constant has been introduced, which
-matches the staging of the kernel's inductive check. I3 will generalize the
-single family insertion to a block insertion. -/
+matches the staging of the kernel's inductive check. `Normalization.BlockWF`
+is the arbitrary-block counterpart. -/
 def Normalization.WF {source : VInductDecl} (norm : Normalization source)
     (env : VEnv) : Prop :=
   ∃ raw view,
@@ -388,19 +614,102 @@ def Normalization.WF {source : VInductDecl} (norm : Normalization source)
           envT.IsDefEqU source.uvars [] rawCtor.type viewCtor.type)
         raw.ctors view.ctors
 
+/-- Stage every raw family constant, in source order, without adding any
+constructors, recursors, or reduction rules.  This is the Theory image of the
+environment used by Lean between `declareInductiveTypes` and
+`checkConstructors`; it is deliberately validation-only. -/
+def _root_.Lean4Lean.VEnv.stageInductiveTypes (env : VEnv)
+    (types : List VInductiveType) : Option VEnv :=
+  types.foldlM (fun env type =>
+    env.addConst type.name type.toVConstant) env
+
+/-- Semantic validity of a normalization view for an arbitrary mutual block.
+
+Every family type is compared in the common input environment.  The exact raw
+family list is then staged as one source-ordered fold, and every constructor
+comparison is performed in the resulting shared environment.  The nested
+`Forall₂` relations retain family and constructor order and cannot truncate a
+reordered or shorter view. -/
+def Normalization.BlockWF {source : VInductDecl}
+    (norm : Normalization source) (env blockEnv : VEnv) : Prop :=
+  env.stageInductiveTypes source.types = some blockEnv ∧
+    List.Forall₂
+      (fun raw view =>
+        env.IsDefEqU source.uvars [] raw.type view.type ∧
+          List.Forall₂
+            (fun rawCtor viewCtor =>
+              blockEnv.IsDefEqU source.uvars []
+                rawCtor.type viewCtor.type)
+            raw.ctors view.ctors)
+      source.types norm.view.types
+
 /-- Whether the recursor may eliminate into a fresh universe or is confined
-to `Prop`. I2 will make the small case constructible; the current direct
-indexed slice produces `large` descriptors only. -/
+to `Prop`. -/
 inductive ElimMode where
   | large
   | small
   deriving DecidableEq, Repr
+
+/-- Universe-slot offset used by recursor metadata. Large elimination inserts
+the fresh motive universe before the declaration universes; small elimination
+adds no universe parameter. -/
+def ElimMode.offset : ElimMode → Nat
+  | .large => 1
+  | .small => 0
+
+/-- Universe arity of the generated recursor. -/
+abbrev ElimMode.recUvars (mode : ElimMode) (U : Nat) : Nat := U + mode.offset
+
+/-- The motive's result level in the recursor universe context. -/
+def ElimMode.motiveLevel : ElimMode → VLevel
+  | .large => .param 0
+  | .small => .zero
+
+/-- Declaration universes as seen by the recursor. Large elimination shifts
+them past the fresh motive level; small elimination retains their order. -/
+abbrev ElimMode.sourceLevels (mode : ElimMode) (U : Nat) : List VLevel :=
+  VLevel.params' U mode.offset
+
+/-- Identity universe arguments for recursive calls to the generated
+recursor. -/
+abbrev ElimMode.recLevels (mode : ElimMode) (U : Nat) : List VLevel :=
+  VLevel.params (mode.recUvars U)
+
+@[simp] theorem ElimMode.large_offset : ElimMode.large.offset = 1 := rfl
+@[simp] theorem ElimMode.small_offset : ElimMode.small.offset = 0 := rfl
+
+@[simp] theorem ElimMode.large_recUvars (U : Nat) :
+    ElimMode.large.recUvars U = U + 1 := rfl
+
+@[simp] theorem ElimMode.small_recUvars (U : Nat) :
+    ElimMode.small.recUvars U = U := by
+  simp [ElimMode.recUvars, ElimMode.offset]
+
+@[simp] theorem ElimMode.large_sourceLevels (U : Nat) :
+    ElimMode.large.sourceLevels U = VLevel.params' U 1 := rfl
+
+@[simp] theorem ElimMode.small_sourceLevels (U : Nat) :
+    ElimMode.small.sourceLevels U = VLevel.params U := rfl
+
+@[simp] theorem ElimMode.large_motiveLevel :
+    ElimMode.large.motiveLevel = .param 0 := rfl
+
+@[simp] theorem ElimMode.small_motiveLevel :
+    ElimMode.small.motiveLevel = .zero := rfl
+
+/-- Environment-free elimination analysis used by the raw compatibility
+path. Verify's ordinary checker replay refines the singleton criterion with
+the exact inferred field sorts. -/
+def eliminationMode (U : Nat) (T : Name) (np ni : Nat)
+    (ty : VInductiveType) : ElimMode :=
+  if largeElim U T np ni ty then .large else .small
 
 /-- Normalized data for one constructor. -/
 structure CheckedCtor where
   value : VConstVal
   fields : List VExpr
   recursive : List RecArg
+  recursiveAt : List (Option RecArg)
   resultIndices : List VExpr
 
 def CheckedCtor.ofDirect (U : Nat) (T : Name) (np ni : Nat)
@@ -408,13 +717,260 @@ def CheckedCtor.ofDirect (U : Nat) (T : Name) (np ni : Nat)
   value := c
   fields := ctorFields (VExpr.dropN np c.type)
   recursive := recArgs U T np ni (ctorFields (VExpr.dropN np c.type))
+  recursiveAt := recArgsAt U T np ni (ctorFields (VExpr.dropN np c.type))
   resultIndices := recFieldIdxs np (VExpr.resultOf (VExpr.dropN np c.type))
 
-/-- Data-bearing result of the shared one-family analysis. The descriptor is
-dependent on its source declaration, so it cannot silently describe a
-different block. Its normalized fields are consumed by generation, proofs,
-fixtures, and Verify alignment as I2 replaces the remaining duplicated
-analysis. -/
+/-- Analyze one constructor against the complete source-ordered family block.
+Unlike `ofDirect`, recursive descriptors retain the ordinal of a sibling
+target instead of forcing `targetType := 0`. -/
+def CheckedCtor.ofBlock (source : VInductDecl)
+    (c : VConstVal) : CheckedCtor where
+  value := c
+  fields := ctorFields (VExpr.dropN source.nparams c.type)
+  recursive := blockRecArgs source.uvars source.nparams
+    (familyHeaders source.nparams source.types) (familyNames source.types)
+    (ctorFields (VExpr.dropN source.nparams c.type))
+  recursiveAt := blockRecArgsAt source.uvars source.nparams
+    (familyHeaders source.nparams source.types) (familyNames source.types)
+    (ctorFields (VExpr.dropN source.nparams c.type))
+  resultIndices := recFieldIdxs source.nparams
+    (VExpr.resultOf (VExpr.dropN source.nparams c.type))
+
+/-- Checked representation of one family at its exact block ordinal.  The
+family itself is a type index rather than a replaceable field; this prevents a
+descriptor from being reused for another position or declaration. -/
+structure CheckedFamily (source : VInductDecl) (params : List VExpr)
+    (ordinal : Nat) (type : VInductiveType) where
+  params_eq : VExpr.telN source.nparams type.type = params
+  indices : List VExpr
+  indices_eq : indices = ctorFields (VExpr.dropN source.nparams type.type)
+  resultLevel : VLevel
+  result_eq : VExpr.resultOf (VExpr.dropN source.nparams type.type) =
+    .sort resultLevel
+  constructors : List CheckedCtor
+  constructors_eq : constructors = type.ctors.map (CheckedCtor.ofBlock source)
+  accepted : blockFamilyCore source params ordinal type = true
+
+/-- Recover the source family indexing a checked family. -/
+def CheckedFamily.value {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (_ : CheckedFamily source params ordinal type) : VInductiveType :=
+  type
+
+/-- Recover the block-relative ordinal indexing a checked family. -/
+def CheckedFamily.ordinal {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (_ : CheckedFamily source params ordinal type) : Nat :=
+  ordinal
+
+/-- A genuinely dependent family spine.  Its list index is the exact suffix
+of `source.types`, and its natural-number index is the ordinal of that
+suffix's head.  Consequently neither family order nor recursive-target
+numbering is represented by an unchecked parallel list. -/
+inductive CheckedFamilies (source : VInductDecl) (params : List VExpr) :
+    Nat → List VInductiveType → Type where
+  | nil {ordinal : Nat} : CheckedFamilies source params ordinal []
+  | cons {ordinal : Nat} {type : VInductiveType}
+      {types : List VInductiveType}
+      (head : CheckedFamily source params ordinal type)
+      (tail : CheckedFamilies source params (ordinal + 1) types) :
+      CheckedFamilies source params ordinal (type :: types)
+
+namespace CheckedFamilies
+
+/-- Erase only the dependent evidence, retaining exact family source order. -/
+def values {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List VInductiveType
+  | _, _, .nil => []
+  | _, _, .cons head tail => head.value :: values tail
+
+/-- Erasing a dependent family spine recovers its exact source-list index. -/
+@[simp] theorem values_eq {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) :
+    families.values = types := by
+  induction families with
+  | nil => rfl
+  | cons head tail ih =>
+    simp only [values, CheckedFamily.value]
+    rw [ih]
+
+/-- Family ordinals in the same order as `values`. -/
+def ordinals {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List Nat
+  | _, _, .nil => []
+  | _, _, .cons head tail => head.ordinal :: ordinals tail
+
+/-- Per-family index telescopes in declaration order. -/
+def indices {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List (List VExpr)
+  | _, _, .nil => []
+  | _, _, .cons head tail => head.indices :: indices tail
+
+/-- Per-family result levels in declaration order. -/
+def resultLevels {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List VLevel
+  | _, _, .nil => []
+  | _, _, .cons head tail => head.resultLevel :: resultLevels tail
+
+/-- Ordered constructor descriptors, grouped by source family. -/
+def constructors {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List (List CheckedCtor)
+  | _, _, .nil => []
+  | _, _, .cons head tail => head.constructors :: constructors tail
+
+/-- Family names projected from the dependent source spine. -/
+def names {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) : List Name :=
+  families.values.map (·.name)
+
+/-- Constructor names retain both family order and within-family order. -/
+def constructorNames {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) :
+    List (List Name) :=
+  families.constructors.map fun constructors =>
+    constructors.map (·.value.name)
+
+/-- Recursive target ordinals retain family, constructor, and field order. -/
+def recursiveTargets {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) :
+    List (List (List Nat)) :=
+  families.constructors.map fun constructors =>
+    constructors.map fun constructor =>
+      constructor.recursive.map (·.targetType)
+
+end CheckedFamilies
+
+/-- Check one family while retaining every computed representation component.
+This is a pure structural pass; no environment or generated constant is an
+input. -/
+def checkedFamily? (source : VInductDecl) (params : List VExpr)
+    (ordinal : Nat) (type : VInductiveType) :
+    Option (CheckedFamily source params ordinal type) :=
+  let indices := ctorFields (VExpr.dropN source.nparams type.type)
+  match hresult : VExpr.resultOf (VExpr.dropN source.nparams type.type) with
+  | .sort resultLevel =>
+    if hparams : VExpr.telN source.nparams type.type = params then
+      if haccepted : blockFamilyCore source params ordinal type then
+        some {
+          params_eq := hparams
+          indices
+          indices_eq := rfl
+          resultLevel
+          result_eq := hresult
+          constructors := type.ctors.map (CheckedCtor.ofBlock source)
+          constructors_eq := rfl
+          accepted := haccepted }
+      else none
+    else none
+  | _ => none
+
+/-- Analyze an arbitrary source-ordered family list into the dependent spine.
+The ordinal advances together with the list index. -/
+def checkedFamilies? (source : VInductDecl) (params : List VExpr) :
+    (ordinal : Nat) → (types : List VInductiveType) →
+      Option (CheckedFamilies source params ordinal types)
+  | _, [] => some .nil
+  | ordinal, type :: types => do
+    let head ← checkedFamily? source params ordinal type
+    let tail ← checkedFamilies? source params (ordinal + 1) types
+    return .cons head tail
+
+/-- Source-indexed checked representation of a complete inductive block.
+Shared parameters are stored once; every per-family component lives in the
+dependent `families` spine indexed by `source.types` itself.  This is the
+L4L-08A analysis boundary and intentionally has no generation or insertion
+projection. -/
+structure CheckedBlock (source : VInductDecl) where
+  params : List VExpr
+  params_eq : params = blockParams source.nparams source.types
+  params_length : params.length = source.nparams
+  families : CheckedFamilies source params 0 source.types
+  nonempty : source.types.isEmpty = false
+  names : List Name
+  names_eq : names = blockGeneratedNames source.types
+  names_nodup : names.Nodup
+
+/-- Analyze a complete block without singleton destructuring.  Empty blocks,
+inconsistent raw parameter surfaces, malformed families/constructors, and
+block-wide generated-name collisions are rejected before a descriptor is
+returned. -/
+def checkedBlock? (source : VInductDecl) : Option source.CheckedBlock :=
+  let params := blockParams source.nparams source.types
+  if hnonempty : source.types.isEmpty = false then
+    if hparams : params.length = source.nparams then
+      if hnames : (blockGeneratedNames source.types).Nodup then
+        match checkedFamilies? source params 0 source.types with
+        | some families => some {
+            params
+            params_eq := rfl
+            params_length := hparams
+            families
+            nonempty := hnonempty
+            names := blockGeneratedNames source.types
+            names_eq := rfl
+            names_nodup := hnames }
+        | none => none
+      else none
+    else none
+  else none
+
+/-- Analyze the normalized view of an arbitrary source block.  The
+`Normalization` index fixes every family and constructor header while the
+dependent `CheckedBlock` fixes the complete normalized family order. -/
+def Normalization.checkedBlock? {source : VInductDecl}
+    (norm : Normalization source) : Option norm.view.CheckedBlock :=
+  norm.view.checkedBlock?
+
+/-- One accepted raw/view mutual block.  Unlike the legacy
+`NormalizedChecked`, this type performs no singleton projection and exposes no
+generation operation. -/
+structure NormalizedCheckedBlock (source : VInductDecl) where
+  normalization : Normalization source
+  checked : normalization.view.CheckedBlock
+  checked_eq : normalization.checkedBlock? = some checked
+
+/-- Analyze one normalization boundary and retain the exact dependent block
+descriptor that accepted its view. -/
+def Normalization.checkBlock? {source : VInductDecl}
+    (norm : Normalization source) : Option (NormalizedCheckedBlock source) :=
+  match hchecked : norm.checkedBlock? with
+  | some checked => some ⟨norm, checked, hchecked⟩
+  | none => none
+
+/-- Construct and analyze a raw/view mutual normalization in one
+computational transaction. -/
+def normalizedCheckedBlock? (source view : VInductDecl) :
+    Option (NormalizedCheckedBlock source) := do
+  let norm ← normalization? source view
+  norm.checkBlock?
+
+/-- Compatibility analyzer for a block already in analyzer normal form. -/
+def identityCheckedBlock? (source : VInductDecl) :
+    Option (NormalizedCheckedBlock source) :=
+  (Normalization.identity source).checkBlock?
+
+/-- The validator-owned shared result universe paired with one exact checked
+normalization view.  Universe equality is semantic (`VLevel.Equiv`) and is
+therefore certified by `ValidatedBlock.WF`, not guessed by the structural
+analyzer. -/
+structure ValidatedBlock (source : VInductDecl) where
+  block : NormalizedCheckedBlock source
+  resultLevel : VLevel
+
+/-- Data-bearing compatibility result for the one-family generation path.
+`CheckedBlock` and `ValidatedBlock` provide the public block-wide analysis and
+validation; this legacy singleton projection remains available for existing
+one-family certificates.  The descriptor is dependent on its source
+declaration, so it cannot silently describe a different block. -/
 structure Checked (source : VInductDecl) where
   type : VInductiveType
   types_eq : source.types = [type]
@@ -425,7 +981,10 @@ structure Checked (source : VInductDecl) where
   resultLevel : VLevel
   result_eq : VExpr.resultOf (VExpr.dropN source.nparams type.type) = .sort resultLevel
   elimination : ElimMode
-  elimination_eq : elimination = .large
+  elimination_eq : elimination =
+    eliminationMode source.uvars type.name source.nparams indices.length type
+  kTarget : Bool
+  kTarget_eq : kTarget = isKTarget source.nparams resultLevel type
   names : List Name
   names_eq : names = generatedNames type
   constructors : List CheckedCtor
@@ -451,8 +1010,10 @@ def checked? : (decl : VInductDecl) → Option decl.Checked
           indices_eq := rfl
           resultLevel := l
           result_eq := hresult
-          elimination := .large
+          elimination := eliminationMode U ty.name np indices.length ty
           elimination_eq := rfl
+          kTarget := isKTarget np l ty
+          kTarget_eq := rfl
           names := generatedNames ty
           names_eq := rfl
           constructors := ty.ctors.map (CheckedCtor.ofDirect U ty.name np indices.length)
@@ -480,7 +1041,9 @@ theorem Checked.unique {decl : VInductDecl}
     rw [← htype, a.result_eq] at hb
     injection hb
   have helim : a.elimination = b.elimination := by
-    rw [a.elimination_eq, b.elimination_eq]
+    rw [a.elimination_eq, b.elimination_eq, htype, hindices]
+  have hkTarget : a.kTarget = b.kTarget := by
+    rw [a.kTarget_eq, b.kTarget_eq, htype, hlevel]
   have hnames : a.names = b.names := by
     rw [a.names_eq, b.names_eq, htype]
   have hctors : a.constructors = b.constructors := by
@@ -499,13 +1062,13 @@ theorem Checked.analyzer_isSome {decl : VInductDecl}
       rcases checked with
         ⟨type, types_eq, params, params_eq,
           indices, indices_eq, resultLevel, result_eq,
-          elimination, elimination_eq, names, names_eq,
+          elimination, elimination_eq, kTarget, kTarget_eq, names, names_eq,
           constructors, constructors_eq, accepted⟩
       change types = [type] at types_eq
       subst types
       subst params
       subst indices
-      subst elimination
+      subst kTarget
       subst names
       subst constructors
       change (VExpr.dropN np type.type).resultOf =
@@ -540,7 +1103,7 @@ theorem Checked.direct_layout {decl : VInductDecl}
       have hdirect := hcore.1
       simp only [stage3DirectCore, Bool.and_eq_true, beq_iff_eq,
         List.all_eq_true] at hdirect
-      obtain ⟨⟨⟨⟨⟨-, hparams⟩, -⟩, -⟩, -⟩, hctors⟩ := hdirect
+      obtain ⟨⟨⟨⟨-, hparams⟩, -⟩, -⟩, hctors⟩ := hdirect
       refine ⟨hparams, fun c hc => ?_⟩
       rw [(hctors c hc).1.2]
       exact hparams
@@ -649,6 +1212,48 @@ def NormalizedChecked.rawResult {source : VInductDecl}
     (block : NormalizedChecked source) : VExpr :=
   VExpr.resultOf (VExpr.dropN source.nparams block.sourceType.type)
 
+/-- Whether a stored parameter domain has one of the four top-level type
+annotations consumed by Lean before it creates the common recursor parameter
+telescope.  Ordinary reducible constants are intentionally not inspected:
+their raw syntax remains observable in generated kernel metadata. -/
+def _root_.Lean4Lean.VExpr.hasTypeAnnotation : VExpr → Bool
+  | .app (.const name _) _ =>
+    name == ``_root_.outParam || name == ``_root_.semiOutParam
+  | .app (.app (.const name _) _) _ =>
+    name == ``_root_.optParam || name == ``_root_.autoParam
+  | _ => false
+
+/-- Parameter surface emitted by recursor generation. Annotation wrappers use
+the analyzer-owned consumed view; every other parameter keeps the stored raw
+domain even when its WHNF differs. -/
+def generationParam (raw view : VExpr) : VExpr :=
+  if raw.hasTypeAnnotation then view else raw
+
+/-- Positional common-parameter telescope used by generated artifacts. -/
+def generationParams : List VExpr → List VExpr → List VExpr
+  | raw :: raws, view :: views =>
+    generationParam raw view :: generationParams raws views
+  | _, _ => []
+
+@[simp] theorem generationParams_self :
+    ∀ params, generationParams params params = params
+  | [] => rfl
+  | param :: params => by
+    simp [generationParams, generationParam, generationParams_self params]
+
+theorem generationParams_length_of_eq :
+    ∀ {raw view : List VExpr}, raw.length = view.length →
+      (generationParams raw view).length = raw.length
+  | [], [], _ => rfl
+  | _ :: _, _ :: _, h => by
+    simp only [generationParams, List.length_cons]
+    exact congrArg Nat.succ
+      (generationParams_length_of_eq (Nat.succ.inj h))
+
+def NormalizedChecked.generationParams {source : VInductDecl}
+    (block : NormalizedChecked source) : List VExpr :=
+  VInductDecl.generationParams block.rawParams block.checked.params
+
 def NormalizedChecked.ctorPairs {source : VInductDecl}
     (block : NormalizedChecked source) : List NormalizedCtor :=
   pairNormalizedCtors block.sourceType.ctors block.checked.constructors
@@ -749,42 +1354,46 @@ def identityGeneration? (source : VInductDecl) :
   let block ← identityChecked? source
   block.generation?
 
-/-- The public acceptance predicate is the existence of a checked descriptor,
-not a second ad-hoc pass over the declaration. -/
-def stage3 (decl : VInductDecl) : Bool := decl.checked?.isSome
+/-- Compatibility acceptance predicate for the legacy one-family checked
+descriptor.  The public block-wide predicate is `stage3`, defined once the
+mutual generation descriptor is available below. -/
+def singletonStage3 (decl : VInductDecl) : Bool := decl.checked?.isSome
 
 /-- The parameter telescope in the recursor's universe context. -/
-def paramsTel (ty : VInductiveType) : List VExpr :=
-  (VExpr.telN np ty.type).map (VExpr.instL (VLevel.params' U 1))
+def paramsTel (ty : VInductiveType) (mode : ElimMode := .large) : List VExpr :=
+  (VExpr.telN np ty.type).map (VExpr.instL (mode.sourceLevels U))
 
 /-- The index telescope in the recursor's universe context (at parameter
 depth). -/
-def idxTel (ty : VInductiveType) : List VExpr :=
-  (ctorFields (VExpr.dropN np ty.type)).map (VExpr.instL (VLevel.params' U 1))
+def idxTel (ty : VInductiveType) (mode : ElimMode := .large) : List VExpr :=
+  (ctorFields (VExpr.dropN np ty.type)).map
+    (VExpr.instL (mode.sourceLevels U))
 
 /-- `recApp` in the recursor's universe context. -/
-def recApp' (off : Nat) : VExpr :=
-  VExpr.appN (.const T (VLevel.params' U 1)) (VExpr.bvarRevRange off np)
+def recApp' (off : Nat) (mode : ElimMode := .large) : VExpr :=
+  VExpr.appN (.const T (mode.sourceLevels U)) (VExpr.bvarRevRange off np)
 
 /-- `motive : ∀ indices, T params indices → Sort u`, in context
 `params`. -/
-def motiveType (ty : VInductiveType) : VExpr :=
-  let ni := (idxTel U np ty).length
-  VExpr.forallN (idxTel U np ty)
-    (.forallE (VExpr.appN (.const T (VLevel.params' U 1))
+def motiveType (ty : VInductiveType) (mode : ElimMode := .large) : VExpr :=
+  let ni := (idxTel U np ty mode).length
+  VExpr.forallN (idxTel U np ty mode)
+    (.forallE (VExpr.appN (.const T (mode.sourceLevels U))
       (VExpr.bvarRevRange ni np ++ VExpr.bvarRevRange 0 ni))
-      (.sort (.param 0)))
+      (.sort mode.motiveLevel))
 
 /-- Constructor fields in the recursor's universe context (still at
 parameter depth, no motive shift). -/
-def ctorFieldsR (c : VConstVal) : List VExpr :=
-  (ctorFields (VExpr.dropN np c.type)).map (VExpr.instL (VLevel.params' U 1))
+def ctorFieldsR (c : VConstVal) (mode : ElimMode := .large) : List VExpr :=
+  (ctorFields (VExpr.dropN np c.type)).map
+    (VExpr.instL (mode.sourceLevels U))
 
 /-- The recursive positions of a constructor with their index arguments,
 in the recursor's universe context. -/
-def recPairsR (ni : Nat) (c : VConstVal) : List (Nat × List VExpr) :=
+def recPairsR (ni : Nat) (c : VConstVal)
+    (mode : ElimMode := .large) : List (Nat × List VExpr) :=
   (recPairs U T np ni (ctorFields (VExpr.dropN np c.type))).map
-    fun (j, idxs) => (j, idxs.map (VExpr.instL (VLevel.params' U 1)))
+    fun (j, idxs) => (j, idxs.map (VExpr.instL (mode.sourceLevels U)))
 
 /-- A recursive-argument descriptor transported into the recursor's universe
 context. Telescope dependency is preserved because universe instantiation does
@@ -797,31 +1406,33 @@ def RecArg.instL (r : RecArg) (ls : List VLevel) : RecArg where
 
 /-- Recursive constructor arguments, including recursive Pi arguments, in the
 recursor universe context. -/
-def recArgsR (ni : Nat) (c : VConstVal) : List RecArg :=
+def recArgsR (ni : Nat) (c : VConstVal)
+    (mode : ElimMode := .large) : List RecArg :=
   (recArgs U T np ni (ctorFields (VExpr.dropN np c.type))).map
-    fun r => r.instL (VLevel.params' U 1)
+    fun r => r.instL (mode.sourceLevels U)
 
 /-- The result index arguments of a constructor, recursor universes (at
 result depth: past the parameters and all fields, no motive). -/
-def ctorIdxs (c : VConstVal) : List VExpr :=
+def ctorIdxs (c : VConstVal) (mode : ElimMode := .large) : List VExpr :=
   (recFieldIdxs np (VExpr.resultOf (VExpr.dropN np c.type))).map
-    (VExpr.instL (VLevel.params' U 1))
+    (VExpr.instL (mode.sourceLevels U))
 
 /-- The minor premise for one constructor, in context `params ++ [motive]`:
 `∀ fields, ∀ ihs, motive idxs (ctor params fields)`, with one induction
 hypothesis per directly recursive field. The fields shift by one for the
 interposed motive. -/
-def minorType (ty : VInductiveType) (c : VConstVal) : VExpr :=
-  let Bs := ctorFieldsR U np c
+def minorType (ty : VInductiveType) (c : VConstVal)
+    (mode : ElimMode := .large) : VExpr :=
+  let Bs := ctorFieldsR U np c mode
   let m := Bs.length
-  let ni := (idxTel U np ty).length
-  let rsP := recPairsR U T np ni c
+  let ni := (idxTel U np ty mode).length
+  let rsP := recPairsR U T np ni c mode
   let r := rsP.length
   VExpr.forallN (VExpr.liftTelN 1 Bs 0)
     (VExpr.forallN (ihsFrom m rsP 0)
       (VExpr.appN (.bvar (m+r))
-        (((ctorIdxs U np c).map fun e => (e.liftN 1 m).liftN r) ++
-          [VExpr.appN (.const c.name (VLevel.params' U 1))
+        (((ctorIdxs U np c mode).map fun e => (e.liftN 1 m).liftN r) ++
+          [VExpr.appN (.const c.name (mode.sourceLevels U))
             (VExpr.bvarRevRange (r+m+1) np ++ VExpr.bvarRevRange r m)])))
 
 /-- Binder telescope of a functional induction hypothesis. Starting from the
@@ -852,35 +1463,42 @@ def ihsFromRecArgs (m : Nat) : List RecArg → Nat → List VExpr
 
 /-- General one-family minor premise, extending `minorType` to recursive
 arguments beneath Pi telescopes. -/
-def minorTypeRec (ty : VInductiveType) (c : VConstVal) : VExpr :=
-  let Bs := ctorFieldsR U np c
+def minorTypeRec (ty : VInductiveType) (c : VConstVal)
+    (mode : ElimMode := .large) : VExpr :=
+  let Bs := ctorFieldsR U np c mode
   let m := Bs.length
-  let ni := (idxTel U np ty).length
-  let rs := recArgsR U T np ni c
+  let ni := (idxTel U np ty mode).length
+  let rs := recArgsR U T np ni c mode
   let r := rs.length
   VExpr.forallN (VExpr.liftTelN 1 Bs 0)
     (VExpr.forallN (ihsFromRecArgs m rs 0)
       (VExpr.appN (.bvar (m+r))
-        (((ctorIdxs U np c).map fun e => (e.liftN 1 m).liftN r) ++
-          [VExpr.appN (.const c.name (VLevel.params' U 1))
+        (((ctorIdxs U np c mode).map fun e => (e.liftN 1 m).liftN r) ++
+          [VExpr.appN (.const c.name (mode.sourceLevels U))
             (VExpr.bvarRevRange (r+m+1) np ++ VExpr.bvarRevRange r m)])))
 
-def minorTypesRec (ty : VInductiveType) : List VConstVal → (i : Nat := 0) → List VExpr
-  | [], _ => []
-  | c :: cs, i => VExpr.liftN i (minorTypeRec U T np ty c) :: minorTypesRec ty cs (i+1)
+def minorTypesRec (ty : VInductiveType) : List VConstVal →
+    (i : Nat := 0) → (mode : ElimMode := .large) → List VExpr
+  | [], _, _ => []
+  | c :: cs, i, mode =>
+    VExpr.liftN i (minorTypeRec U T np ty c mode) ::
+      minorTypesRec ty cs (i+1) mode
 
-def recTypeRec (ty : VInductiveType) : VExpr :=
+def recTypeRec (ty : VInductiveType)
+    (mode : ElimMode := .large) : VExpr :=
   let k := ty.ctors.length
-  let ni := (idxTel U np ty).length
-  VExpr.forallN (paramsTel U np ty) <|
-    .forallE (motiveType U T np ty) <|
-      VExpr.forallN (minorTypesRec U T np ty ty.ctors) <|
-        VExpr.forallN (VExpr.liftTelN (k+1) (idxTel U np ty) 0) <|
-          .forallE (VExpr.appN (.const T (VLevel.params' U 1))
+  let ni := (idxTel U np ty mode).length
+  VExpr.forallN (paramsTel U np ty mode) <|
+    .forallE (motiveType U T np ty mode) <|
+      VExpr.forallN (minorTypesRec U T np ty ty.ctors (mode := mode)) <|
+        VExpr.forallN (VExpr.liftTelN (k+1) (idxTel U np ty mode) 0) <|
+          .forallE (VExpr.appN (.const T (mode.sourceLevels U))
             (VExpr.bvarRevRange (ni+k+1) np ++ VExpr.bvarRevRange 0 ni)) <|
             .app (VExpr.appN (.bvar (ni+k+1)) (VExpr.bvarRevRange 1 ni)) (.bvar 0)
 
-def recConstRec (ty : VInductiveType) : VConstant := ⟨U + 1, recTypeRec U T np ty⟩
+def recConstRec (ty : VInductiveType)
+    (mode : ElimMode := .large) : VConstant :=
+  ⟨mode.recUvars U, recTypeRec U T np ty mode⟩
 
 /-- The telescope introduced around a functional recursive call in an iota
 RHS. It is the source Pi telescope transported under the recursor's common
@@ -919,29 +1537,32 @@ def ruleIHs (m k : Nat) : List RecArg → Nat → List VExpr
   | [], _ => []
   | r :: rs, p => (r.ruleIH m k).liftN p :: ruleIHs m k rs (p+1)
 
-def ruleRec (ty : VInductiveType) (i : Nat) (c : VConstVal) : VDefEq :=
+def ruleRec (ty : VInductiveType) (i : Nat) (c : VConstVal)
+    (mode : ElimMode := .large) : VDefEq :=
   let k := ty.ctors.length
-  let Bs := ctorFieldsR U np c
+  let Bs := ctorFieldsR U np c mode
   let m := Bs.length
-  let ni := (idxTel U np ty).length
-  let rs := recArgsR U T np ni c
-  let binders := paramsTel U np ty ++
-    motiveType U T np ty :: minorTypesRec U T np ty ty.ctors ++
+  let ni := (idxTel U np ty mode).length
+  let rs := recArgsR U T np ni c mode
+  let binders := paramsTel U np ty mode ++
+    motiveType U T np ty mode ::
+      minorTypesRec U T np ty ty.ctors (mode := mode) ++
     VExpr.liftTelN (k+1) Bs 0
-  let recBase := VExpr.appN (.const (.str T "rec") (VLevel.params (U+1)))
+  let recBase := VExpr.appN (.const (.str T "rec") (mode.recLevels U))
     (VExpr.bvarRevRange m (np+k+1))
-  let idxR := (ctorIdxs U np c).map fun e => e.liftN (k+1) m
-  let ctorApp := VExpr.appN (.const c.name (VLevel.params' U 1))
+  let idxR := (ctorIdxs U np c mode).map fun e => e.liftN (k+1) m
+  let ctorApp := VExpr.appN (.const c.name (mode.sourceLevels U))
     (VExpr.bvarRevRange (m+k+1) np ++ VExpr.bvarRevRange 0 m)
   let ihs := rs.map fun r => r.ruleCall m k recBase
-  { uvars := U + 1
+  { uvars := mode.recUvars U
     lhs := VExpr.lamN binders (VExpr.appN recBase (idxR ++ [ctorApp]))
     rhs := VExpr.lamN binders
       (VExpr.appN (.bvar (k-1-i+m)) (VExpr.bvarRevRange 0 m ++ ihs))
     type := VExpr.forallN binders (VExpr.appN (.bvar (k+m)) (idxR ++ [ctorApp])) }
 
-def rulesRec (ty : VInductiveType) : List VDefEq :=
-  ty.ctors.zipIdx.map fun (c, i) => ruleRec U T np ty i c
+def rulesRec (ty : VInductiveType)
+    (mode : ElimMode := .large) : List VDefEq :=
+  ty.ctors.zipIdx.map fun (c, i) => ruleRec U T np ty i c mode
 
 /-- Minor premise types in position: the `i`-th lives under
 `params ++ motive` and the previous `i` minors. -/
@@ -999,17 +1620,20 @@ def rules (ty : VInductiveType) : List VDefEq :=
 namespace NormalizedCtor
 
 /-- Raw field binders transported to the recursor universe context. -/
-def fieldsR (ctor : NormalizedCtor) (U np : Nat) : List VExpr :=
-  (ctor.rawFields np).map (VExpr.instL (VLevel.params' U 1))
+def fieldsR (ctor : NormalizedCtor) (U np : Nat)
+    (mode : ElimMode := .large) : List VExpr :=
+  (ctor.rawFields np).map (VExpr.instL (mode.sourceLevels U))
 
 /-- Normalized recursive classifications transported without re-peeling the
 raw constructor type. -/
-def recArgsR (ctor : NormalizedCtor) (U : Nat) : List RecArg :=
-  ctor.view.recursive.map fun r => r.instL (VLevel.params' U 1)
+def recArgsR (ctor : NormalizedCtor) (U : Nat)
+    (mode : ElimMode := .large) : List RecArg :=
+  ctor.view.recursive.map fun r => r.instL (mode.sourceLevels U)
 
 /-- Normalized constructor-result indices in recursor universes. -/
-def resultIndicesR (ctor : NormalizedCtor) (U : Nat) : List VExpr :=
-  ctor.view.resultIndices.map (VExpr.instL (VLevel.params' U 1))
+def resultIndicesR (ctor : NormalizedCtor) (U : Nat)
+    (mode : ElimMode := .large) : List VExpr :=
+  ctor.view.resultIndices.map (VExpr.instL (mode.sourceLevels U))
 
 end NormalizedCtor
 
@@ -1023,15 +1647,48 @@ below re-runs `recArg?` on raw metadata.
 
 namespace GenerationChecked
 
-/-- Raw parameter telescope in recursor universes. -/
+/-- Elimination mode retained by the single checked analysis. -/
+abbrev elimination {source : VInductDecl} (gen : GenerationChecked source) :
+    ElimMode :=
+  gen.block.checked.elimination
+
+/-- K-like reduction flag retained by the single checked analysis. It is
+metadata for reduction and does not select the elimination mode. -/
+abbrev kTarget {source : VInductDecl} (gen : GenerationChecked source) : Bool :=
+  gen.block.checked.kTarget
+
+/-- Universe arity of this generated recursor. -/
+abbrev recUvars {source : VInductDecl} (gen : GenerationChecked source) : Nat :=
+  gen.elimination.recUvars source.uvars
+
+/-- Declaration universes in this recursor's universe context. -/
+abbrev sourceLevels {source : VInductDecl}
+    (gen : GenerationChecked source) : List VLevel :=
+  gen.elimination.sourceLevels source.uvars
+
+/-- Result level of the motive. -/
+abbrev motiveLevel {source : VInductDecl}
+    (gen : GenerationChecked source) : VLevel :=
+  gen.elimination.motiveLevel
+
+/-- Identity universe arguments of recursive recursor calls. -/
+abbrev recLevels {source : VInductDecl}
+    (gen : GenerationChecked source) : List VLevel :=
+  gen.elimination.recLevels source.uvars
+
+/-- Kernel-observable family-parameter telescope in recursor universes.
+
+Lean consumes the four parameter annotations before emission, but otherwise
+retains stored syntax rather than replacing reducible aliases by their WHNF. -/
 def paramsTel {source : VInductDecl} (gen : GenerationChecked source) :
     List VExpr :=
-  gen.block.rawParams.map (VExpr.instL (VLevel.params' source.uvars 1))
+  gen.block.generationParams.map
+    (VExpr.instL gen.sourceLevels)
 
 /-- Raw index-binder telescope in recursor universes. -/
 def idxTel {source : VInductDecl} (gen : GenerationChecked source) :
     List VExpr :=
-  gen.block.rawIndices.map (VExpr.instL (VLevel.params' source.uvars 1))
+  gen.block.rawIndices.map (VExpr.instL gen.sourceLevels)
 
 /-- Mixed motive: raw index binders, normalized index arity, and the retained
 raw family identity. -/
@@ -1040,24 +1697,25 @@ def motiveType {source : VInductDecl} (gen : GenerationChecked source) : VExpr :
   VExpr.forallN gen.idxTel
     (.forallE
       (VExpr.appN
-        (.const gen.block.sourceType.name (VLevel.params' source.uvars 1))
+        (.const gen.block.sourceType.name gen.sourceLevels)
         (VExpr.bvarRevRange ni source.nparams ++ VExpr.bvarRevRange 0 ni))
-      (.sort (.param 0)))
+      (.sort gen.motiveLevel))
 
 /-- One mixed minor premise. Raw fields are bound verbatim, while induction
 hypotheses and constructor result indices come from the checked view. -/
-def minorType {source : VInductDecl} (ctor : NormalizedCtor) : VExpr :=
-  let Bs := ctor.fieldsR source.uvars source.nparams
+def minorType {source : VInductDecl} (ctor : NormalizedCtor)
+    (mode : ElimMode := .large) : VExpr :=
+  let Bs := ctor.fieldsR source.uvars source.nparams mode
   let m := Bs.length
-  let rs := ctor.recArgsR source.uvars
+  let rs := ctor.recArgsR source.uvars mode
   let r := rs.length
   VExpr.forallN (VExpr.liftTelN 1 Bs 0)
     (VExpr.forallN (ihsFromRecArgs m rs 0)
       (VExpr.appN (.bvar (m+r))
-        ((ctor.resultIndicesR source.uvars |>.map fun e =>
+        ((ctor.resultIndicesR source.uvars mode |>.map fun e =>
             (e.liftN 1 m).liftN r) ++
           [VExpr.appN
-            (.const ctor.raw.name (VLevel.params' source.uvars 1))
+            (.const ctor.raw.name (mode.sourceLevels source.uvars))
             (VExpr.bvarRevRange (r+m+1) source.nparams ++
               VExpr.bvarRevRange r m)])))
 
@@ -1065,7 +1723,7 @@ def minorTypesAux {source : VInductDecl} (gen : GenerationChecked source) :
     List NormalizedCtor → (i : Nat := 0) → List VExpr
   | [], _ => []
   | ctor :: ctors, i =>
-    VExpr.liftN i (minorType (source := source) ctor) ::
+    VExpr.liftN i (minorType (source := source) ctor gen.elimination) ::
       gen.minorTypesAux ctors (i+1)
 
 def minorTypes {source : VInductDecl} (gen : GenerationChecked source) :
@@ -1084,7 +1742,7 @@ def recType {source : VInductDecl} (gen : GenerationChecked source) : VExpr :=
           .forallE
             (VExpr.appN
               (.const gen.block.sourceType.name
-                (VLevel.params' source.uvars 1))
+                gen.sourceLevels)
               (VExpr.bvarRevRange (ni+k+1) source.nparams ++
                 VExpr.bvarRevRange 0 ni)) <|
             .app
@@ -1093,7 +1751,7 @@ def recType {source : VInductDecl} (gen : GenerationChecked source) : VExpr :=
 
 def recursor {source : VInductDecl} (gen : GenerationChecked source) :
     VConstant :=
-  ⟨source.uvars + 1, gen.recType⟩
+  ⟨gen.recUvars, gen.recType⟩
 
 /-- One mixed iota rule. Raw fields and constructor names are observable in
 the rule telescope; normalized recursive descriptors determine recursive calls
@@ -1101,24 +1759,24 @@ and normalized result indices determine the major's index spine. -/
 def rule {source : VInductDecl} (gen : GenerationChecked source)
     (i : Nat) (ctor : NormalizedCtor) : VDefEq :=
   let k := gen.block.ctorPairs.length
-  let Bs := ctor.fieldsR source.uvars source.nparams
+  let Bs := ctor.fieldsR source.uvars source.nparams gen.elimination
   let m := Bs.length
-  let rs := ctor.recArgsR source.uvars
+  let rs := ctor.recArgsR source.uvars gen.elimination
   let binders := gen.paramsTel ++
     gen.motiveType :: gen.minorTypes ++
     VExpr.liftTelN (k+1) Bs 0
   let recBase := VExpr.appN
     (.const (.str gen.block.sourceType.name "rec")
-      (VLevel.params (source.uvars+1)))
+      gen.recLevels)
     (VExpr.bvarRevRange m (source.nparams+k+1))
-  let idxR := ctor.resultIndicesR source.uvars |>.map fun e =>
+  let idxR := ctor.resultIndicesR source.uvars gen.elimination |>.map fun e =>
     e.liftN (k+1) m
   let ctorApp := VExpr.appN
-    (.const ctor.raw.name (VLevel.params' source.uvars 1))
+    (.const ctor.raw.name gen.sourceLevels)
     (VExpr.bvarRevRange (m+k+1) source.nparams ++
       VExpr.bvarRevRange 0 m)
   let ihs := rs.map fun r => r.ruleCall m k recBase
-  { uvars := source.uvars + 1
+  { uvars := gen.recUvars
     lhs := VExpr.lamN binders (VExpr.appN recBase (idxR ++ [ctorApp]))
     rhs := VExpr.lamN binders
       (VExpr.appN (.bvar (k-1-i+m)) (VExpr.bvarRevRange 0 m ++ ihs))
@@ -1133,31 +1791,65 @@ end GenerationChecked
 
 namespace Checked
 
+@[simp] theorem identityGeneration_elimination {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.elimination = checked.elimination := rfl
+
+@[simp] theorem identityGeneration_kTarget {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.kTarget = checked.kTarget := rfl
+
+@[simp] theorem identityGeneration_recUvars {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.recUvars =
+      checked.elimination.recUvars decl.uvars := rfl
+
+@[simp] theorem identityGeneration_sourceLevels {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.sourceLevels =
+      checked.elimination.sourceLevels decl.uvars := rfl
+
+@[simp] theorem identityGeneration_motiveLevel {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.motiveLevel = checked.elimination.motiveLevel := rfl
+
+@[simp] theorem identityGeneration_recLevels {decl : VInductDecl}
+    (checked : decl.Checked) :
+    checked.identityGeneration.recLevels =
+      checked.elimination.recLevels decl.uvars := rfl
+
 private theorem identity_paramsTel {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.paramsTel =
-      VInductDecl.paramsTel decl.uvars decl.nparams checked.type := rfl
+      VInductDecl.paramsTel decl.uvars decl.nparams checked.type
+        checked.elimination := by
+  simp [GenerationChecked.paramsTel, VInductDecl.paramsTel,
+    GenerationChecked.sourceLevels, GenerationChecked.elimination,
+    NormalizedChecked.generationParams, NormalizedChecked.rawParams,
+    Checked.identityGeneration, Checked.identityBlock, checked.params_eq]
 
 private theorem identity_idxTel {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.idxTel =
-      VInductDecl.idxTel decl.uvars decl.nparams checked.type := rfl
+      VInductDecl.idxTel decl.uvars decl.nparams checked.type
+        checked.elimination := rfl
 
 private theorem identity_motiveType {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.motiveType =
       VInductDecl.motiveType decl.uvars checked.type.name decl.nparams
-        checked.type := rfl
+        checked.type checked.elimination := rfl
 
 private theorem identity_minorType {decl : VInductDecl}
     (checked : decl.Checked) (c : VConstVal) :
     GenerationChecked.minorType (source := decl)
       ⟨c, CheckedCtor.ofDirect decl.uvars checked.type.name decl.nparams
-        checked.indices.length c⟩ =
+        checked.indices.length c⟩ checked.elimination =
       VInductDecl.minorTypeRec decl.uvars checked.type.name decl.nparams
-        checked.type c := by
+        checked.type c checked.elimination := by
   have hni : checked.indices.length =
-      (VInductDecl.idxTel decl.uvars decl.nparams checked.type).length := by
+      (VInductDecl.idxTel decl.uvars decl.nparams checked.type
+        checked.elimination).length := by
     rw [checked.indices_eq]
     simp [VInductDecl.idxTel]
   rw [hni]
@@ -1171,7 +1863,7 @@ private theorem identity_minorTypesAux {decl : VInductDecl}
           (cs.map (CheckedCtor.ofDirect decl.uvars checked.type.name
             decl.nparams checked.indices.length))) i =
       VInductDecl.minorTypesRec decl.uvars checked.type.name decl.nparams
-        checked.type cs i
+        checked.type cs i checked.elimination
   | [], _ => rfl
   | c :: cs, i => by
       simp [pairNormalizedCtors, GenerationChecked.minorTypesAux,
@@ -1182,7 +1874,7 @@ private theorem identity_minorTypes {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.minorTypes =
       VInductDecl.minorTypesRec decl.uvars checked.type.name decl.nparams
-        checked.type checked.type.ctors := by
+        checked.type checked.type.ctors (mode := checked.elimination) := by
   unfold GenerationChecked.minorTypes
   simp only [Checked.identityGeneration, Checked.identityBlock,
     NormalizedChecked.ctorPairs]
@@ -1193,7 +1885,7 @@ private theorem identity_recType {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.recType =
       VInductDecl.recTypeRec decl.uvars checked.type.name decl.nparams
-        checked.type := by
+        checked.type checked.elimination := by
   simp only [GenerationChecked.recType, VInductDecl.recTypeRec]
   rw [identity_paramsTel checked, identity_motiveType checked,
     identity_minorTypes checked, identity_idxTel checked]
@@ -1208,9 +1900,11 @@ private theorem identity_recursor {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.recursor =
       VInductDecl.recConstRec decl.uvars checked.type.name decl.nparams
-        checked.type := by
+        checked.type checked.elimination := by
   unfold GenerationChecked.recursor VInductDecl.recConstRec
   rw [identity_recType checked]
+  simp [GenerationChecked.recUvars, GenerationChecked.elimination,
+    Checked.identityGeneration, Checked.identityBlock]
 
 private theorem identity_rule {decl : VInductDecl}
     (checked : decl.Checked) (i : Nat) (c : VConstVal) :
@@ -1218,9 +1912,10 @@ private theorem identity_rule {decl : VInductDecl}
         ⟨c, CheckedCtor.ofDirect decl.uvars checked.type.name decl.nparams
           checked.indices.length c⟩ =
       VInductDecl.ruleRec decl.uvars checked.type.name decl.nparams
-        checked.type i c := by
+        checked.type i c checked.elimination := by
   have hni : checked.indices.length =
-      (VInductDecl.idxTel decl.uvars decl.nparams checked.type).length := by
+      (VInductDecl.idxTel decl.uvars decl.nparams checked.type
+        checked.elimination).length := by
     rw [checked.indices_eq]
     simp [VInductDecl.idxTel]
   have hk : checked.identityGeneration.block.ctorPairs.length =
@@ -1248,7 +1943,7 @@ private theorem identity_rulesAux {decl : VInductDecl}
       List.map
         (fun (c, i) =>
           VInductDecl.ruleRec decl.uvars checked.type.name decl.nparams
-            checked.type i c)
+            checked.type i c checked.elimination)
         (List.zipIdx cs n)
   | [], _ => rfl
   | c :: cs, n => by
@@ -1259,7 +1954,7 @@ private theorem identity_generatedRules {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.identityGeneration.generatedRules =
       VInductDecl.rulesRec decl.uvars checked.type.name decl.nparams
-        checked.type := by
+        checked.type checked.elimination := by
   unfold GenerationChecked.generatedRules VInductDecl.rulesRec
   simp only [Checked.identityGeneration, Checked.identityBlock,
     NormalizedChecked.ctorPairs]
@@ -1291,7 +1986,7 @@ theorem motiveType_eq_legacy {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.motiveType =
       VInductDecl.motiveType decl.uvars checked.type.name decl.nparams
-        checked.type :=
+        checked.type checked.elimination :=
   identity_motiveType checked
 
 /-- The public minor telescope retains the exact legacy identity-normal
@@ -1300,7 +1995,7 @@ theorem minorTypes_eq_legacy {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.minorTypes =
       VInductDecl.minorTypesRec decl.uvars checked.type.name decl.nparams
-        checked.type checked.type.ctors :=
+        checked.type checked.type.ctors (mode := checked.elimination) :=
   identity_minorTypes checked
 
 /-- The public recursor retains the exact legacy identity-normal form while
@@ -1309,7 +2004,7 @@ theorem recursor_eq_legacy {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.recursor =
       VInductDecl.recConstRec decl.uvars checked.type.name decl.nparams
-        checked.type :=
+        checked.type checked.elimination :=
   identity_recursor checked
 
 /-- The public iota-rule list retains the exact legacy identity-normal form
@@ -1318,10 +2013,431 @@ theorem generatedRules_eq_legacy {decl : VInductDecl}
     (checked : decl.Checked) :
     checked.generatedRules =
       VInductDecl.rulesRec decl.uvars checked.type.name decl.nparams
-        checked.type :=
+        checked.type checked.elimination :=
   identity_generatedRules checked
 
 end Checked
+
+/-! ## Mutual raw/view artifacts
+
+The singleton generator above remains the compatibility proof surface while
+the block generator below mirrors `AddInductive.mkRecInfos`: all motives are
+introduced in family order, all constructor minors are then flattened in
+family/constructor order, and every recursive descriptor selects its target
+family by the ordinal retained by `CheckedCtor.ofBlock`.
+-/
+
+/-- Erased data for one member of the dependent checked-family spine.  The
+ordinal and normalized family value travel with the projections they index,
+so later positional pairing does not manufacture a parallel family order. -/
+structure CheckedFamilyData where
+  ordinal : Nat
+  value : VInductiveType
+  indices : List VExpr
+  resultLevel : VLevel
+  constructors : List CheckedCtor
+
+namespace CheckedFamilies
+
+/-- Erase a dependent checked-family spine without changing its order. -/
+def data {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+      CheckedFamilies source params ordinal types → List CheckedFamilyData
+  | _, _, .nil => []
+  | _, _, .cons head tail =>
+      { ordinal := head.ordinal
+        value := head.value
+        indices := head.indices
+        resultLevel := head.resultLevel
+        constructors := head.constructors } :: data tail
+
+end CheckedFamilies
+
+/-- One stored family paired positionally with the checked normalized family
+that drove generation.  Stored family/index syntax remains observable in
+metadata; the view owns recursive classification and result indices. -/
+structure NormalizedFamily where
+  raw : VInductiveType
+  view : CheckedFamilyData
+
+/-- Positional family pairing.  `blockGenerationShape` separately proves
+that neither side is truncated. -/
+def pairNormalizedFamilies :
+    List VInductiveType → List CheckedFamilyData → List NormalizedFamily
+  | raw :: raws, view :: views =>
+      ⟨raw, view⟩ :: pairNormalizedFamilies raws views
+  | _, _ => []
+
+def NormalizedFamily.rawParams (family : NormalizedFamily) (np : Nat) :
+    List VExpr :=
+  VExpr.telN np family.raw.type
+
+def NormalizedFamily.rawIndices (family : NormalizedFamily) (np : Nat) :
+    List VExpr :=
+  ctorFields (VExpr.dropN np family.raw.type)
+
+def NormalizedFamily.ctorPairs (family : NormalizedFamily) :
+    List NormalizedCtor :=
+  pairNormalizedCtors family.raw.ctors family.view.constructors
+
+/-- One flattened constructor together with its source-family identity. -/
+structure NormalizedBlockCtor where
+  owner : Nat
+  familyName : Name
+  familyIndices : List VExpr
+  ctor : NormalizedCtor
+
+def NormalizedFamily.blockCtors (family : NormalizedFamily) :
+    List NormalizedBlockCtor :=
+  family.ctorPairs.map fun ctor =>
+    { owner := family.view.ordinal
+      familyName := family.raw.name
+      familyIndices := family.view.indices
+      ctor }
+
+/-- Per-family layout gate for mutual mixed generation. -/
+def NormalizedFamily.generationShape (np : Nat)
+    (family : NormalizedFamily) : Bool :=
+  family.raw.name == family.view.value.name &&
+    family.raw.uvars == family.view.value.uvars &&
+    (family.rawParams np).length == np &&
+    (family.rawIndices np).length == family.view.indices.length &&
+    family.ctorPairs.length == family.raw.ctors.length &&
+    family.ctorPairs.length == family.view.constructors.length &&
+    family.ctorPairs.all (NormalizedCtor.generationShape np)
+
+def NormalizedCheckedBlock.rawParams {source : VInductDecl}
+    (block : NormalizedCheckedBlock source) : List VExpr :=
+  blockParams source.nparams source.types
+
+def NormalizedCheckedBlock.familyPairs {source : VInductDecl}
+    (block : NormalizedCheckedBlock source) : List NormalizedFamily :=
+  pairNormalizedFamilies source.types block.checked.families.data
+
+def NormalizedCheckedBlock.flatCtors {source : VInductDecl}
+    (block : NormalizedCheckedBlock source) : List NormalizedBlockCtor :=
+  block.familyPairs.flatMap (·.blockCtors)
+
+/-- Executable positional gate for a complete normalized block.  It checks
+the shared parameter surface, every family/index position, and every
+constructor position before raw and checked syntax are mixed. -/
+def NormalizedCheckedBlock.blockGenerationShape {source : VInductDecl}
+    (block : NormalizedCheckedBlock source) : Bool :=
+  block.rawParams.length == source.nparams &&
+    block.rawParams.length == block.checked.params.length &&
+    block.familyPairs.length == source.types.length &&
+    block.familyPairs.length == block.checked.families.data.length &&
+    block.familyPairs.all
+      (NormalizedFamily.generationShape source.nparams) &&
+    block.familyPairs.all fun family =>
+      family.raw.uvars == source.uvars &&
+        family.ctorPairs.all fun ctor => ctor.raw.uvars == source.uvars
+
+/-- A validator-owned mutual normalization whose raw/view positions are
+usable by artifact generation. -/
+structure BlockGenerationChecked (source : VInductDecl) where
+  validated : ValidatedBlock source
+  shape_eq : validated.block.blockGenerationShape = true
+
+def ValidatedBlock.generation? {source : VInductDecl}
+    (validated : ValidatedBlock source) :
+    Option (BlockGenerationChecked source) :=
+  if h : validated.block.blockGenerationShape then
+    some ⟨validated, h⟩
+  else none
+
+/-- The common result level selected by an identity-normalized checked block.
+The empty fallback is unreachable after `checkedBlock?`, but keeps the
+executable analyzer total. -/
+def CheckedBlock.firstResultLevel {source : VInductDecl}
+    (checked : CheckedBlock source) : VLevel :=
+  checked.families.resultLevels.head?.getD .zero
+
+/-- Analyze an already-normalized arbitrary block for mutual generation,
+without any singleton destructuring. -/
+def identityBlockGeneration? (source : VInductDecl) :
+    Option (BlockGenerationChecked source) := do
+  let block ← identityCheckedBlock? source
+  let validated : ValidatedBlock source :=
+    { block
+      resultLevel := block.checked.firstResultLevel }
+  validated.generation?
+
+/-- Public structural acceptance is exact block-generation readiness.  This
+retains the complete source-ordered mutual descriptor instead of projecting a
+singleton family and then rebuilding generation data. -/
+def stage3 (source : VInductDecl) : Bool :=
+  source.identityBlockGeneration?.isSome
+
+namespace BlockGenerationChecked
+
+abbrev block {source : VInductDecl} (gen : BlockGenerationChecked source) :
+    NormalizedCheckedBlock source :=
+  gen.validated.block
+
+abbrev checked {source : VInductDecl} (gen : BlockGenerationChecked source) :
+    gen.block.normalization.view.CheckedBlock :=
+  gen.block.checked
+
+def families {source : VInductDecl} (gen : BlockGenerationChecked source) :
+    List NormalizedFamily :=
+  gen.block.familyPairs
+
+def flatCtors {source : VInductDecl} (gen : BlockGenerationChecked source) :
+    List NormalizedBlockCtor :=
+  gen.block.flatCtors
+
+abbrev familyCount {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Nat :=
+  gen.families.length
+
+abbrev minorCount {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Nat :=
+  gen.flatCtors.length
+
+/-- Whether the accepted block contains any recursive constructor argument.
+For a positive checked block this is the kernel's `inductInfo.isRec` decision
+expressed through the analyzer-owned recursive descriptors. -/
+def isRec {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Bool :=
+  gen.flatCtors.any fun constructor =>
+    !constructor.ctor.view.recursive.isEmpty
+
+/-- Whether some recursive argument is hidden beneath a function telescope,
+matching the kernel's `inductInfo.isReflexive` flag. -/
+def isReflexive {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Bool :=
+  gen.flatCtors.any fun constructor =>
+    constructor.ctor.view.recursive.any fun recursive =>
+      !recursive.binders.isEmpty
+
+/-- The block large-elimination decision.  A non-Prop common result admits
+large elimination; at `Prop`, only the kernel's singleton exception can do
+so.  In particular every genuinely mutual Prop block is small. -/
+def elimination {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : ElimMode :=
+  if gen.validated.resultLevel.isNeverZero then .large
+  else
+    match gen.families with
+    | [family] =>
+      if largeElim source.uvars family.raw.name source.nparams
+          family.view.indices.length family.view.value then .large else .small
+    | _ => .small
+
+/-- K-like reduction is a singleton-only kernel flag. -/
+def kTarget {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Bool :=
+  match gen.families with
+  | [family] =>
+    isKTarget source.nparams gen.validated.resultLevel family.view.value
+  | _ => false
+
+abbrev recUvars {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : Nat :=
+  gen.elimination.recUvars source.uvars
+
+abbrev sourceLevels {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VLevel :=
+  gen.elimination.sourceLevels source.uvars
+
+abbrev motiveLevel {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : VLevel :=
+  gen.elimination.motiveLevel
+
+abbrev recLevels {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VLevel :=
+  gen.elimination.recLevels source.uvars
+
+/-- Shared emitted parameters in recursor universes. -/
+def paramsTel {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VExpr :=
+  generationParams gen.block.rawParams gen.block.checked.params |>.map
+    (VExpr.instL gen.sourceLevels)
+
+def familyNameAt {source : VInductDecl}
+    (gen : BlockGenerationChecked source) (ordinal : Nat) : Name :=
+  (gen.families[ordinal]?).map (fun family => family.raw.name) |>.getD .anonymous
+
+def idxTel {source : VInductDecl} (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : List VExpr :=
+  (family.rawIndices source.nparams).map (VExpr.instL gen.sourceLevels)
+
+/-- One family motive before preceding motives have been inserted. -/
+def motiveType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VExpr :=
+  let indices := gen.idxTel family
+  let ni := indices.length
+  VExpr.forallN indices
+    (.forallE
+      (VExpr.appN (.const family.raw.name gen.sourceLevels)
+        (VExpr.bvarRevRange ni source.nparams ++
+          VExpr.bvarRevRange 0 ni))
+      (.sort gen.motiveLevel))
+
+/-- Motives in kernel order.  Each later motive is weakened past all earlier
+motives while retaining the shared parameter context. -/
+def motiveTypesAux {source : VInductDecl}
+    (gen : BlockGenerationChecked source) :
+    List NormalizedFamily → (i : Nat := 0) → List VExpr
+  | [], _ => []
+  | family :: families, i =>
+    (gen.motiveType family).liftN i ::
+      gen.motiveTypesAux families (i + 1)
+
+def motiveTypes {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VExpr :=
+  gen.motiveTypesAux gen.families
+
+/-- Binder telescope of one mutual functional induction hypothesis. -/
+def blockMinorBinders (d m p : Nat) (r : RecArg) : List VExpr :=
+  VExpr.liftTelN (m - r.fieldIndex + p)
+    (VExpr.liftTelN d r.binders r.fieldIndex) 0
+
+/-- Mutual induction hypothesis routed to the recursive argument's target
+motive. -/
+def blockMinorIH (d m p : Nat) (r : RecArg) : VExpr :=
+  let n := r.binders.length
+  VExpr.forallN (blockMinorBinders d m p r)
+    (VExpr.appN (.bvar (d - 1 - r.targetType + m + p + n))
+      ((r.indices.map fun e =>
+          (e.liftN d (r.fieldIndex + n)).liftN
+            (m - r.fieldIndex + p) n) ++
+        [VExpr.appN (.bvar (m - 1 - r.fieldIndex + p + n))
+          (VExpr.bvarRevRange 0 n)]))
+
+def blockIHsFromRecArgs (d m : Nat) : List RecArg → Nat → List VExpr
+  | [], _ => []
+  | r :: rs, p =>
+    blockMinorIH d m p r :: blockIHsFromRecArgs d m rs (p + 1)
+
+/-- One constructor minor in the context of all block motives. -/
+def minorType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  let d := gen.familyCount
+  let Bs := constructor.ctor.fieldsR source.uvars source.nparams gen.elimination
+  let m := Bs.length
+  let rs := constructor.ctor.recArgsR source.uvars gen.elimination
+  let r := rs.length
+  VExpr.forallN (VExpr.liftTelN d Bs 0)
+    (VExpr.forallN (blockIHsFromRecArgs d m rs 0)
+      (VExpr.appN (.bvar (d - 1 - constructor.owner + m + r))
+        ((constructor.ctor.resultIndicesR source.uvars gen.elimination |>.map
+            fun e => (e.liftN d m).liftN r) ++
+          [VExpr.appN (.const constructor.ctor.raw.name gen.sourceLevels)
+            (VExpr.bvarRevRange (r + m + d) source.nparams ++
+              VExpr.bvarRevRange r m)])))
+
+/-- Globally flattened constructor minors in family/constructor order. -/
+def minorTypesAux {source : VInductDecl}
+    (gen : BlockGenerationChecked source) :
+    List NormalizedBlockCtor → (i : Nat := 0) → List VExpr
+  | [], _ => []
+  | constructor :: constructors, i =>
+    (gen.minorType constructor).liftN i ::
+      gen.minorTypesAux constructors (i + 1)
+
+def minorTypes {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VExpr :=
+  gen.minorTypesAux gen.flatCtors
+
+/-- One recursor type for the selected family, sharing every motive and minor
+with the other family recursors. -/
+def recType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VExpr :=
+  let d := gen.familyCount
+  let k := gen.minorCount
+  let indices := gen.idxTel family
+  let ni := indices.length
+  VExpr.forallN gen.paramsTel <|
+    VExpr.forallN gen.motiveTypes <|
+      VExpr.forallN gen.minorTypes <|
+        VExpr.forallN (VExpr.liftTelN (d + k) indices 0) <|
+          .forallE
+            (VExpr.appN (.const family.raw.name gen.sourceLevels)
+              (VExpr.bvarRevRange (ni + d + k) source.nparams ++
+                VExpr.bvarRevRange 0 ni)) <|
+            .app
+              (VExpr.appN
+                (.bvar (d - 1 - family.view.ordinal + k + ni + 1))
+                (VExpr.bvarRevRange 1 ni))
+              (.bvar 0)
+
+def recursor {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VConstant :=
+  ⟨gen.recUvars, gen.recType family⟩
+
+/-- Named generated recursors in family order. -/
+def recursors {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VConstVal :=
+  gen.families.map fun family =>
+    ⟨gen.recursor family, .str family.raw.name "rec"⟩
+
+/-- Telescope introduced around a mutual recursive rule call. -/
+def blockRuleBinders (common m : Nat) (r : RecArg) : List VExpr :=
+  VExpr.liftTelN (m - r.fieldIndex)
+    (VExpr.liftTelN common r.binders r.fieldIndex) 0
+
+/-- Recursive iota-rule call routed to the target family's recursor. -/
+def blockRuleCall (common m : Nat) (recBase : VExpr)
+    (r : RecArg) : VExpr :=
+  let n := r.binders.length
+  VExpr.lamN (blockRuleBinders common m r)
+    (VExpr.appN (recBase.liftN n)
+      ((r.indices.map fun e =>
+          (e.liftN common (r.fieldIndex + n)).liftN
+            (m - r.fieldIndex) n) ++
+        [VExpr.appN (.bvar (m - 1 - r.fieldIndex + n))
+          (VExpr.bvarRevRange 0 n)]))
+
+def recBase {source : VInductDecl}
+    (gen : BlockGenerationChecked source) (m target : Nat) : VExpr :=
+  VExpr.appN
+    (.const (.str (gen.familyNameAt target) "rec") gen.recLevels)
+    (VExpr.bvarRevRange m
+      (source.nparams + gen.familyCount + gen.minorCount))
+
+/-- One mutual iota rule at its global flattened minor ordinal. -/
+def rule {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (minorIndex : Nat) (constructor : NormalizedBlockCtor) : VDefEq :=
+  let d := gen.familyCount
+  let k := gen.minorCount
+  let common := d + k
+  let Bs := constructor.ctor.fieldsR source.uvars source.nparams gen.elimination
+  let m := Bs.length
+  let rs := constructor.ctor.recArgsR source.uvars gen.elimination
+  let binders := gen.paramsTel ++ gen.motiveTypes ++ gen.minorTypes ++
+    VExpr.liftTelN common Bs 0
+  let ownerRecBase := gen.recBase m constructor.owner
+  let idxR := constructor.ctor.resultIndicesR source.uvars gen.elimination |>.map
+    fun e => e.liftN common m
+  let ctorApp := VExpr.appN
+    (.const constructor.ctor.raw.name gen.sourceLevels)
+    (VExpr.bvarRevRange (m + common) source.nparams ++
+      VExpr.bvarRevRange 0 m)
+  let ihs := rs.map fun recursive =>
+    blockRuleCall common m (gen.recBase m recursive.targetType) recursive
+  { uvars := gen.recUvars
+    lhs := VExpr.lamN binders
+      (VExpr.appN ownerRecBase (idxR ++ [ctorApp]))
+    rhs := VExpr.lamN binders
+      (VExpr.appN (.bvar (k - 1 - minorIndex + m))
+        (VExpr.bvarRevRange 0 m ++ ihs))
+    type := VExpr.forallN binders
+      (VExpr.appN
+        (.bvar (d - 1 - constructor.owner + k + m))
+        (idxR ++ [ctorApp])) }
+
+def generatedRules {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VDefEq :=
+  gen.flatCtors.zipIdx.map fun (constructor, i) =>
+    gen.rule i constructor
+
+end BlockGenerationChecked
 
 /-- Semantic evidence for a recursive argument beneath a Pi telescope. The
 binder domains are checked over the constructor context before the recursive
@@ -1333,6 +2449,132 @@ def RecArg.WF (r : RecArg) (env : VEnv) (l : VLevel) (Is : List VExpr)
     (VExpr.forallN (VExpr.liftTelN (r.fieldIndex + r.binders.length) Is 0)
       (.sort l))
     r.indices (.sort l)
+
+/-- Semantic well-formedness of every constructor field in a mutual block.
+
+Recursive fields may end in any source-indexed family and may sit below a Pi
+telescope.  Their target ordinal selects the corresponding index telescope
+from `familyIndices`.  A non-recursive field must be a block-free type in the
+pre-family environment and obey the common result-universe bound. -/
+def blockFieldsWF (source : VInductDecl) (env : VEnv)
+    (resultLevel : VLevel) (familyIndices : List (List VExpr)) :
+    List VExpr → Nat → List VExpr → Prop
+  | _, _, [] => True
+  | Γ, j, B :: Bs =>
+    (match blockRecArg? source.uvars source.nparams
+        (familyHeaders source.nparams source.types)
+        (familyNames source.types) j B with
+      | some recursive =>
+        match familyIndices[recursive.targetType]? with
+        | some indices =>
+          recursive.WF source.uvars env resultLevel indices Γ
+        | none => False
+      | none =>
+        ∃ u, env.HasType source.uvars Γ B (.sort u) ∧
+          (resultLevel = .zero ∨ u ≤ resultLevel)) ∧
+      blockFieldsWF source env resultLevel familyIndices
+        (B :: Γ) (j + 1) Bs
+
+/-- Interpret the analyzer-retained positional classifications rather than
+recomputing recursive recognition from field syntax.  The list lengths and
+field indices are checked in the proposition, while each recursive target
+selects its exact source-ordered family index telescope. -/
+def checkedBlockFieldsWF (env : VEnv) (U : Nat)
+    (resultLevel : VLevel) (familyIndices : List (List VExpr)) :
+    List VExpr → List (Option RecArg) → List VExpr → Nat → Prop
+  | [], [], _, _ => True
+  | B :: Bs, classification :: classifications, Γ, j =>
+    (match classification with
+      | some recursive =>
+        recursive.fieldIndex = j ∧
+          match familyIndices[recursive.targetType]? with
+          | some indices => recursive.WF U env resultLevel indices Γ
+          | none => False
+      | none =>
+        ∃ u, env.HasType U Γ B (.sort u) ∧
+          (resultLevel = .zero ∨ u ≤ resultLevel)) ∧
+      checkedBlockFieldsWF env U resultLevel familyIndices
+        Bs classifications (B :: Γ) (j + 1)
+  | _, _, _, _ => False
+
+/-- Interpret a dependent source-ordered family spine at one shared result
+universe.  Family formers and the block-free portions of constructor fields
+are interpreted in the common pre-family environment.  Recursive targets are
+reduced to their selected family index telescopes, so this layer does not
+pretend that generated constants or recursors already exist. -/
+def CheckedFamilies.WF {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types)
+    (env : VEnv) (resultLevel : VLevel)
+    (familyIndices : List (List VExpr)) : Prop :=
+  match families with
+  | .nil => True
+  | .cons head tail =>
+    head.resultLevel ≈ resultLevel ∧
+      VEnv.OnTel env source.uvars [] (params ++ head.indices) ∧
+      (∀ constructor ∈ head.constructors,
+        blockFieldsWF source env resultLevel familyIndices
+            params.reverse 0 constructor.fields ∧
+          env.SpineWF source.uvars
+            (constructor.fields.reverse ++ params.reverse)
+            (VExpr.forallN
+              (VExpr.liftTelN constructor.fields.length head.indices 0)
+              (.sort resultLevel))
+            constructor.resultIndices (.sort resultLevel)) ∧
+      tail.WF env resultLevel familyIndices
+
+/-- Erased semantic fold over the exact projections of a dependent checked
+family spine.  `CheckedBlock.WF` uses this presentation so concrete checked
+descriptors obtained by computation reduce through their public projections
+without exposing proof fields stored inside `Option.get`. -/
+def checkedFamilyListsWF (source : VInductDecl) (params : List VExpr)
+    (env : VEnv) (resultLevel : VLevel)
+    (familyIndices : List (List VExpr)) :
+    List VLevel → List (List VExpr) → List (List CheckedCtor) → Prop
+  | [], [], [] => True
+  | level :: levels, indices :: indicesTail,
+      constructors :: constructorsTail =>
+    level ≈ resultLevel ∧
+      VEnv.OnTel env source.uvars [] (params ++ indices) ∧
+      (∀ constructor ∈ constructors,
+        checkedBlockFieldsWF env source.uvars resultLevel familyIndices
+            constructor.fields constructor.recursiveAt params.reverse 0 ∧
+          env.SpineWF source.uvars
+            (constructor.fields.reverse ++ params.reverse)
+            (VExpr.forallN
+              (VExpr.liftTelN constructor.fields.length indices 0)
+              (.sort resultLevel))
+            constructor.resultIndices (.sort resultLevel)) ∧
+      checkedFamilyListsWF source params env resultLevel familyIndices
+        levels indicesTail constructorsTail
+  | _, _, _ => False
+
+/-- Environment-indexed semantics of a structurally checked mutual block.
+The common `resultLevel` is explicit and every family result is required to be
+semantically equivalent to it. -/
+def CheckedBlock.WF {source : VInductDecl}
+    (checked : source.CheckedBlock) (env : VEnv)
+    (resultLevel : VLevel) : Prop :=
+  checkedFamilyListsWF source checked.params env resultLevel
+    checked.families.indices checked.families.resultLevels
+    checked.families.indices checked.families.constructors
+
+/-- Complete Theory semantics of one validator-owned mutual normalization.
+Normalization compares raw family types before staging and raw constructor
+types after all-family staging; the checked view supplies the block-wide
+strict-positivity and result-spine interpretation. -/
+def ValidatedBlock.WF {source : VInductDecl}
+    (validated : ValidatedBlock source) (env blockEnv : VEnv) : Prop :=
+  validated.block.normalization.BlockWF env blockEnv ∧
+    validated.block.checked.WF env validated.resultLevel
+
+/-- Consumer-facing validation-only package.  It deliberately contains no
+generated motive, recursor, rule, or environment insertion beyond the
+temporary all-family validation stage. -/
+structure ValidationCertificate (source : VInductDecl) (env : VEnv) where
+  validated : ValidatedBlock source
+  blockEnv : VEnv
+  wf : validated.WF env blockEnv
 
 /-- Semantic well-formedness of constructor fields over the pre-environment.
 Direct recursive fields retain the Stage-3 spine contract. A recursive Pi
@@ -1380,11 +2622,15 @@ def NormalizedChecked.WF {source : VInductDecl}
     (block : NormalizedChecked source) (env : VEnv) : Prop :=
   block.normalization.WF env ∧ block.checked.WF env
 
-/-- The binders emitted for one mixed minor/rule: the raw family parameter
-surface followed by the stored raw constructor fields. -/
+/-- The binders emitted for one mixed minor/rule: the checked family
+parameters followed by the stored raw constructor fields.
+
+Lean consumes parameter annotations while checking the family and uses those
+checked locals when it builds the recursor. Constructor fields, by contrast,
+retain their stored surface syntax. -/
 def NormalizedCtor.emittedBinders {source : VInductDecl}
     (block : NormalizedChecked source) (ctor : NormalizedCtor) : List VExpr :=
-  block.rawParams ++ ctor.rawFields source.nparams
+  block.checked.params ++ ctor.rawFields source.nparams
 
 /-- The normalized binders whose semantic analysis drives the mixed artifact.
 These expressions are never emitted in place of their raw partners. -/
@@ -1450,6 +2696,128 @@ structure GenerationChecked.WF {source : VInductDecl}
         gen.block.sourceType.toVConstant = some envT →
       ∀ ctor ∈ gen.block.ctorPairs, ctor.WF gen.block envT
 
+/-! ### Mutual generation certificates -/
+
+def NormalizedFamily.rawResult (family : NormalizedFamily) (np : Nat) :
+    VExpr :=
+  VExpr.resultOf (VExpr.dropN np family.raw.type)
+
+def NormalizedBlockCtor.declaredBinders {source : VInductDecl}
+    (constructor : NormalizedBlockCtor) : List VExpr :=
+  constructor.ctor.declaredBinders source.nparams
+
+/-- Constructor binders used by generated mutual artifacts before universe
+instantiation. -/
+def NormalizedBlockCtor.emittedBinders {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : List VExpr :=
+  gen.block.checked.params ++ constructor.ctor.rawFields source.nparams
+
+def NormalizedBlockCtor.viewBinders {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : List VExpr :=
+  gen.block.checked.params ++ constructor.ctor.view.fields
+
+def NormalizedBlockCtor.rawResult {source : VInductDecl}
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  constructor.ctor.rawResult source.nparams
+
+/-- Normalized constructor result reconstructed with the stored owner name. -/
+def NormalizedBlockCtor.resultTarget {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  VExpr.appN
+    (.const constructor.familyName (VLevel.params source.uvars))
+    (VExpr.bvarRevRange
+        (constructor.ctor.rawFields source.nparams).length source.nparams ++
+      constructor.ctor.view.resultIndices)
+
+/-- Granular raw/view semantics for one mutual family. -/
+structure NormalizedFamily.WF {source : VInductDecl}
+    (gen : BlockGenerationChecked source) (family : NormalizedFamily)
+    (env : VEnv) : Prop where
+  familyTel :
+    env.TelDefEq source.uvars []
+      (family.rawParams source.nparams ++ family.rawIndices source.nparams)
+      (gen.block.checked.params ++ family.view.indices)
+  familyResult :
+    env.IsDefEq source.uvars
+      (family.rawParams source.nparams ++
+        family.rawIndices source.nparams).reverse
+      (family.rawResult source.nparams)
+      (.sort gen.validated.resultLevel)
+      (.sort (.succ gen.validated.resultLevel))
+
+/-- Declaration-stage raw/view semantics for one constructor after every
+family has been staged. -/
+structure NormalizedBlockCtor.WF {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) (env : VEnv) : Prop where
+  declaredTel :
+    env.TelDefEq source.uvars []
+      (NormalizedBlockCtor.declaredBinders (source := source) constructor)
+      (NormalizedBlockCtor.viewBinders gen constructor)
+  declaredResult :
+    env.IsDefEq source.uvars
+      (NormalizedBlockCtor.declaredBinders
+        (source := source) constructor).reverse
+      (NormalizedBlockCtor.rawResult (source := source) constructor)
+      (NormalizedBlockCtor.resultTarget gen constructor)
+      (.sort gen.validated.resultLevel)
+  emittedTel :
+    env.TelDefEq source.uvars []
+      (NormalizedBlockCtor.emittedBinders gen constructor)
+      (NormalizedBlockCtor.viewBinders gen constructor)
+  emittedResult :
+    env.IsDefEq source.uvars
+      (NormalizedBlockCtor.emittedBinders gen constructor).reverse
+      (NormalizedBlockCtor.rawResult (source := source) constructor)
+      (NormalizedBlockCtor.resultTarget gen constructor)
+      (.sort gen.validated.resultLevel)
+  owner : ∃ family ∈ gen.families,
+    family.view.ordinal = constructor.owner ∧
+      family.raw.name = constructor.familyName ∧
+      family.view.indices = constructor.familyIndices
+  recursive : ∀ recursive ∈ constructor.ctor.view.recursive,
+    ∃ family ∈ gen.families,
+      family.view.ordinal = recursive.targetType ∧
+        (∃ B,
+          constructor.ctor.view.fields[recursive.fieldIndex]? = some B ∧
+            B = VExpr.forallN recursive.binders
+              (VExpr.appN
+                (.const family.raw.name (VLevel.params source.uvars))
+                (VExpr.bvarRevRange
+                    (recursive.fieldIndex + recursive.binders.length)
+                    source.nparams ++ recursive.indices))) ∧
+        recursive.WF source.uvars env gen.validated.resultLevel
+          family.view.indices
+          ((constructor.ctor.view.fields.take recursive.fieldIndex).reverse ++
+            gen.block.checked.params.reverse)
+  resultSpine :
+    env.SpineWF source.uvars
+      (constructor.ctor.view.fields.reverse ++
+        gen.block.checked.params.reverse)
+      (VExpr.forallN
+        (VExpr.liftTelN constructor.ctor.view.fields.length
+          constructor.familyIndices 0)
+        (.sort gen.validated.resultLevel))
+      constructor.ctor.view.resultIndices
+      (.sort gen.validated.resultLevel)
+
+/-- Semantic input to block artifact preservation.  No field assumes a
+generated motive, minor, recursor, or rule typing judgment. -/
+structure BlockGenerationChecked.WF {source : VInductDecl}
+    (gen : BlockGenerationChecked source) (env blockEnv : VEnv) : Prop where
+  blockWF : gen.validated.WF env blockEnv
+  resultLevelWF : gen.validated.resultLevel.WF source.uvars
+  paramsTel :
+    env.TelDefEq source.uvars [] gen.block.rawParams
+      gen.block.checked.params
+  families : ∀ family ∈ gen.families, family.WF gen env
+  constructors :
+    ∀ constructor ∈ gen.flatCtors,
+      NormalizedBlockCtor.WF gen constructor blockEnv
+
 /-- Consumer-facing semantic package for one generation-ready inductive
 declaration.  The executable transaction inspects only `generation`; `wf` is
 the ordinary Theory certificate used by preservation and is never a
@@ -1461,10 +2829,18 @@ structure GenerationCertificate (source : VInductDecl) (env : VEnv) where
   generation : GenerationChecked source
   wf : generation.WF env
 
+/-- Consumer-facing proof-carrying mutual generation package. -/
+structure BlockGenerationCertificate (source : VInductDecl) (env : VEnv) where
+  generation : BlockGenerationChecked source
+  blockEnv : VEnv
+  wf : generation.WF env blockEnv
+
 end VInductDecl
 
+/-- Legacy declaration-level semantic contract for one-family compatibility.
+Block-wide preservation consumes `BlockGenerationChecked.WF` directly. -/
 def VInductDecl.WF (env : VEnv) (decl : VInductDecl) : Prop :=
-  decl.stage3 ∧
+  decl.singletonStage3 ∧
   ∀ ty ∈ decl.types,
     VEnv.OnTel env decl.uvars []
       (VExpr.telN decl.nparams ty.type ++
@@ -1486,6 +2862,16 @@ def VInductDecl.WF (env : VEnv) (decl : VInductDecl) : Prop :=
           (VExpr.resultOf (VExpr.dropN decl.nparams c.type)))
         (.sort (VInductDecl.sortLevel decl.nparams ty))
 
+/-- Raw family constants of a block in source order. -/
+def VInductDecl.blockTypeConstants (source : VInductDecl) :
+    List VConstVal :=
+  source.types.map (·.toVConstVal)
+
+/-- Raw constructor constants flattened in family/constructor order. -/
+def VInductDecl.blockConstructorConstants (source : VInductDecl) :
+    List VConstVal :=
+  source.types.flatMap (·.ctors)
+
 /-- The single computational transaction for a generation-ready raw/view
 block. Stored family and constructor constants come from the raw source;
 recursor and rules come from the mixed artifact implementation. Semantic
@@ -1499,6 +2885,20 @@ def VEnv.addInductGeneration {source : VInductDecl}
   let env ← env.addConst (.str ty.name "rec") gen.recursor
   return gen.generatedRules.foldl VEnv.addDefEq env
 
+/-- The block-wide generation transaction.  Its four phases deliberately
+match the kernel's visibility boundaries: every family is present before any
+constructor, every constructor before any recursor, and every recursor before
+the first reduction rule. -/
+def VEnv.addInductBlockGeneration {source : VInductDecl}
+    (env : VEnv) (gen : source.BlockGenerationChecked) : Option VEnv := do
+  let env ← source.blockTypeConstants.foldlM
+    (fun env type => env.addConst type.name type.toVConstant) env
+  let env ← source.blockConstructorConstants.foldlM
+    (fun env constructor => env.addConst constructor.name constructor.toVConstant) env
+  let env ← gen.recursors.foldlM
+    (fun env recursor => env.addConst recursor.name recursor.toVConstant) env
+  return gen.generatedRules.foldl VEnv.addDefEq env
+
 /-- Public proof-carrying wrapper around `addInductGeneration`.
 
 The certificate's proof is erased and does not influence computation.  This
@@ -1510,11 +2910,25 @@ def VEnv.addInductCertified {source : VInductDecl}
     Option VEnv :=
   env.addInductGeneration certificate.generation
 
+/-- Proof-carrying wrapper for a block-wide generation transaction.  The
+certificate is erased from computation. -/
+def VEnv.addInductBlockCertified {source : VInductDecl}
+    (env : VEnv) (certificate : source.BlockGenerationCertificate env) :
+    Option VEnv :=
+  env.addInductBlockGeneration certificate.generation
+
 @[simp] theorem VEnv.addInductCertified_eq_addInductGeneration
     {source : VInductDecl} (env : VEnv)
     (certificate : source.GenerationCertificate env) :
     env.addInductCertified certificate =
       env.addInductGeneration certificate.generation :=
+  rfl
+
+@[simp] theorem VEnv.addInductBlockCertified_eq_addInductBlockGeneration
+    {source : VInductDecl} (env : VEnv)
+    (certificate : source.BlockGenerationCertificate env) :
+    env.addInductBlockCertified certificate =
+      env.addInductBlockGeneration certificate.generation :=
   rfl
 
 /-- Exact intermediate states of a successful normalized inductive
@@ -1538,38 +2952,86 @@ structure VEnv.AddInductGenerationTrace {source : VInductDecl}
   addRules :
     gen.generatedRules.foldl VEnv.addDefEq recEnv = env'
 
-/-- The existing raw-normal-form API is exactly the identity-normalization
-wrapper around `addInductGeneration`. -/
+/-- Exact phase boundaries of a successful block-wide generation
+transaction. -/
+structure VEnv.AddInductBlockGenerationTrace {source : VInductDecl}
+    (env env' : VEnv) (gen : source.BlockGenerationChecked) where
+  typeEnv : VEnv
+  ctorEnv : VEnv
+  recEnv : VEnv
+  addTypes :
+    source.blockTypeConstants.foldlM
+      (fun env type => env.addConst type.name type.toVConstant) env =
+        some typeEnv
+  addCtors :
+    source.blockConstructorConstants.foldlM
+      (fun env constructor => env.addConst constructor.name constructor.toVConstant) typeEnv =
+        some ctorEnv
+  addRecs :
+    gen.recursors.foldlM
+      (fun env recursor => env.addConst recursor.name recursor.toVConstant)
+      ctorEnv = some recEnv
+  addRules :
+    gen.generatedRules.foldl VEnv.addDefEq recEnv = env'
+
+/-- The raw-normal-form API analyzes and inserts a complete mutual block. -/
 def VEnv.addInduct (env : VEnv) (decl : VInductDecl) : Option VEnv := do
+  let generation ← decl.identityBlockGeneration?
+  env.addInductBlockGeneration generation
+
+/-- Compatibility wrapper for the pre-L4L-08C one-family raw transaction.
+
+Unlike `addInduct`, this deliberately projects the legacy `Checked` artifact
+and therefore rejects every genuinely mutual declaration.  It remains only
+for a deprecation window so existing one-family consumers can separate their
+API migration from the semantic switch to block-wide generation. -/
+@[deprecated VEnv.addInduct (since := "2026-08-07")]
+def VEnv.addInductSingleton (env : VEnv) (decl : VInductDecl) : Option VEnv := do
   let checked ← decl.checked?
   env.addInductGeneration checked.identityGeneration
 
-/-- The raw public API is transparently the identity-normalization
-specialization of the normalized transaction. -/
-theorem VEnv.addInduct_eq_addInductGeneration
+/-- The compatibility wrapper is exactly the former identity-normalization
+transaction; it is not a second block-generation path. -/
+@[simp, deprecated VEnv.addInduct (since := "2026-08-07")]
+theorem VEnv.addInductSingleton_eq_addInductGeneration
     (env : VEnv) (decl : VInductDecl) :
-    env.addInduct decl =
+    env.addInductSingleton decl =
       decl.checked? >>= fun checked =>
         env.addInductGeneration checked.identityGeneration :=
   rfl
+
+/-- The raw public API is transparently the identity-normalization
+specialization of the normalized block transaction. -/
+theorem VEnv.addInduct_eq_addInductBlockGeneration
+    (env : VEnv) (decl : VInductDecl) :
+    env.addInduct decl =
+      decl.identityBlockGeneration? >>= fun generation =>
+        env.addInductBlockGeneration generation :=
+  rfl
+
+/--
+info: 'Lean4Lean.VEnv.addInductSingleton_eq_addInductGeneration' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VEnv.addInductSingleton_eq_addInductGeneration
 
 /-- Stable, consumer-facing consequences of a successful `addInduct`
 transaction. This deliberately hides the internal `foldlM` sequence: a
 caller receives the complete output environment and all generated objects, or
 `addInduct` returns `none` without exposing an intermediate environment. -/
 structure VEnv.AddInductSuccess (env env' : VEnv) (decl : VInductDecl) : Prop where
-  checked : ∃ checked, decl.checked? = some checked
+  generation : ∃ generation, decl.identityBlockGeneration? = some generation
   accepted : decl.stage3 = true
-  singleton : ∃ ty, decl.types = [ty]
   le : env ≤ env'
   type_fresh : ∀ ty ∈ decl.types, env.constants ty.name = none
   type_lookup : ∀ ty ∈ decl.types, env'.constants ty.name = some ty.toVConstant
   ctor_fresh : ∀ ty ∈ decl.types, ∀ c ∈ ty.ctors, env.constants c.name = none
   ctor_lookup : ∀ ty ∈ decl.types, ∀ c ∈ ty.ctors,
     env'.constants c.name = some c.toVConstant
-  rec_fresh : ∀ ty ∈ decl.types, env.constants (.str ty.name "rec") = none
-  rec_lookup : ∀ ty ∈ decl.types,
-    env'.constants (.str ty.name "rec") =
-      some (VInductDecl.recConstRec decl.uvars ty.name decl.nparams ty)
-  rule_mem : ∀ ty ∈ decl.types,
-    ∀ df ∈ VInductDecl.rulesRec decl.uvars ty.name decl.nparams ty, env'.defeqs df
+  rec_fresh : ∀ generation, decl.identityBlockGeneration? = some generation →
+    ∀ recursor ∈ generation.recursors, env.constants recursor.name = none
+  rec_lookup : ∀ generation, decl.identityBlockGeneration? = some generation →
+    ∀ recursor ∈ generation.recursors,
+      env'.constants recursor.name = some recursor.toVConstant
+  rule_mem : ∀ generation, decl.identityBlockGeneration? = some generation →
+    ∀ df ∈ generation.generatedRules, env'.defeqs df

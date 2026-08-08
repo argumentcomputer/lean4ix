@@ -336,7 +336,7 @@ def whnfCore' (e : Expr) (cheapRec := false) (cheapProj := false) : RecM Expr :=
           else cont
         else cont
       loop 1 body
-    else if f == f0 then
+    else if Expr.structuralEq f f0 then
       if let some r ← reduceRecursor e cheapRec cheapProj then
         whnfCore r cheapRec cheapProj
       else
@@ -383,9 +383,9 @@ def unfoldDefinition (e : Expr) : RecM (Option Expr) := do
 
 def reduceNative (_env : Environment) (e : Expr) : Except Exception (Option Expr) := do
   let .app f (.const c _) := e | return none
-  if f == .const ``reduceBool [] then
+  if Expr.structuralEq f (.const ``reduceBool []) then
     throw <| .other s!"lean4lean does not support 'reduceBool {c}' reduction"
-  else if f == .const ``reduceNat [] then
+  else if Expr.structuralEq f (.const ``reduceNat []) then
     throw <| .other s!"lean4lean does not support 'reduceNat {c}' reduction"
   return none
 
@@ -413,7 +413,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
   let nargs := e.getAppNumArgs
   if nargs == 1 then
     let f := e.appFn!
-    if f == .const ``Nat.succ [] then
+    if Expr.structuralEq f (.const ``Nat.succ []) then
       let some v := rawNatLitExt? (← whnf e.appArg!) | return none
       return some <| .lit <| .natVal <| v + 1
   else if nargs == 2 then
@@ -500,7 +500,7 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
-  | .sort a1, .sort a2 => pure (a1.isEquiv a2).toLBool
+  | .sort a1, .sort a2 => pure (a1.isEquiv' a2).toLBool
   | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq a1 a2
   | .mvar .., .mvar .. => unreachable!
   | .lit a1, .lit a2 => pure (a1 == a2).toLBool

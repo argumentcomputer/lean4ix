@@ -44,16 +44,15 @@ paths under `lake env` (see below). Other outputs:
 * `nix build .#lake-dependency` builds the `Lean4Lean` library artifact
   (oleans, `.export` files, static/shared libraries — no CLI or proofs) that
   downstream Lake packages can consume via lean4-nix's
-  `depOverrideDeriv.lean4lean`; `.#lake-dependency-full` additionally
-  includes the `Theory` and `Verify` proof libraries for consumers that
-  import the metatheory.
+  `depOverrideDeriv.lean4lean`.
 * `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
-  proof libraries (`checks.proofs`), builds and runs a minimal downstream
-  consumer of the library artifact (`checks.downstream-consumer`), and
-  audits that the `sorry` tokens in the tree exactly match the known
-  frontier pinned in
-  [.github/scripts/check_sorry_frontier.pl](.github/scripts/check_sorry_frontier.pl)
-  (`checks.sorry-frontier`).
+  proof libraries plus the sorry audit
+  ([Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean),
+  which fails if any `Theory`/`Verify` declaration gains, loses, or renames
+  a `sorry` versus its exact allowlist) under `checks.proofs`, builds the
+  `Lean4Lean.Tests` regression modules (`checks.tests`), and builds and
+  runs a minimal downstream consumer of the library artifact
+  (`checks.downstream-consumer`).
 * `nix develop` provides a shell with the pinned `lean`/`lake` toolchain, and
   the checked-in [.envrc](.envrc) loads it automatically for
   [direnv](https://direnv.net/) users (run `direnv allow` once).

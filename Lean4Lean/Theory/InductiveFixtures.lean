@@ -47,6 +47,10 @@ def natNormalizedChecked : NormalizedChecked natDecl :=
 def natGenerationChecked : GenerationChecked natDecl :=
   (identityGeneration? natDecl).get (by decide)
 
+/-- The public block descriptor specializes to the same singleton metadata. -/
+def natBlockGenerationChecked : BlockGenerationChecked natDecl :=
+  (identityBlockGeneration? natDecl).get (by decide)
+
 example : natNormalizedChecked.normalization.view = natDecl := rfl
 example : natNormalizedChecked.checked.type = natType := rfl
 example : (normalizedChecked? natDecl natDecl).isSome = true := rfl
@@ -64,6 +68,8 @@ example : natChecked.params = [] := rfl
 example : natChecked.indices = [] := rfl
 example : natChecked.resultLevel = .succ .zero := rfl
 example : natChecked.elimination = .large := rfl
+example : natChecked.kTarget = false := rfl
+example : natGenerationChecked.kTarget = false := rfl
 example : natChecked.constructors.length = 2 := rfl
 example : natChecked.constructors[1].recursive.length = 1 := rfl
 example : natChecked.constructors[1].recursive[0].fieldIndex = 0 := rfl
@@ -118,6 +124,136 @@ example : (rules 0 ``Bool 0 boolType)[0]? =
 
 example : (rules 0 ``Bool 0 boolType)[1]? =
     some (vdefeq(motive f t => @Bool.rec motive f t .true ≡ t)) := rfl
+
+/-! ## Unit/Empty edge shapes
+
+`Unit` is a reducible alias for `PUnit` on this Lean revision, so the actual
+one-constructor kernel metadata is recorded under `PUnit`. Together with
+`Empty`, these fixtures exercise the one- and zero-constructor generation
+paths without inventing an alias-level recursor that the kernel does not
+declare. -/
+
+def punitType : VInductiveType where
+  name := ``PUnit
+  uvars := 1
+  type := vconst(type_of% @PUnit).type
+  ctors := [⟨vconst(type_of% @PUnit.unit), ``PUnit.unit⟩]
+
+def punitDecl : VInductDecl := ⟨1, 0, [punitType]⟩
+
+example : punitDecl.stage3 = true := rfl
+
+def punitChecked : punitDecl.Checked := punitDecl.checked?.get (by decide)
+
+def punitGenerationChecked : GenerationChecked punitDecl :=
+  (identityGeneration? punitDecl).get (by decide)
+
+example : punitChecked.params = [] := rfl
+example : punitChecked.indices = [] := rfl
+example : punitChecked.resultLevel = .param 0 := rfl
+example : punitChecked.elimination = .large := rfl
+example : punitChecked.kTarget = false := rfl
+example : punitChecked.constructors.length = 1 := rfl
+example : punitChecked.constructors[0].fields = [] := rfl
+example : punitChecked.constructors[0].recursive = [] := rfl
+example : punitGenerationChecked.block.ctorPairs.length = 1 := rfl
+example : punitGenerationChecked.minorTypes.length = 1 := rfl
+example : punitGenerationChecked.generatedRules.length = 1 := rfl
+
+/-- The one-constructor recursor retains the fresh elimination universe before
+the source universe, and its sole minor occurs before the major. -/
+example : punitGenerationChecked.recursor =
+    permC (vconst(type_of% @PUnit.rec)) [.param 1, .param 0] := rfl
+
+example : punitGenerationChecked.generatedRules[0]? =
+    some (permE
+      (vdefeq((motive : PUnit.{u} → Sort v) unit =>
+        @PUnit.rec.{v, u} motive unit @PUnit.unit.{u} ≡ unit))
+      [.param 1, .param 0]) := rfl
+
+theorem punitDecl_wf : punitDecl.WF VEnv.empty := by
+  refine ⟨rfl, ?_⟩
+  intro ty hty
+  have hty' : ty = punitType :=
+    List.mem_singleton.1 (by simpa [punitDecl] using hty)
+  subst ty
+  refine ⟨?_, ?_⟩
+  · change True
+    trivial
+  · intro c hc
+    have hc' := List.mem_singleton.1 hc
+    subst c
+    constructor
+    · change True
+      trivial
+    · change VExpr.sort (.param 0) = VExpr.sort (.param 0)
+      rfl
+
+def punitEnv : VEnv :=
+  (VEnv.empty.addInduct punitDecl).get (by decide)
+
+/-- The public checked transaction and the normalized generation core are the
+same computation for this identity-normalized edge fixture. -/
+example : VEnv.empty.addInduct punitDecl =
+    VEnv.empty.addInductGeneration punitGenerationChecked := rfl
+
+theorem punitEnv_ordered : punitEnv.Ordered :=
+  VEnv.addInductGeneration_WF .empty
+    ((punitChecked.wf_of_decl punitDecl_wf).identityGeneration .empty) rfl
+
+def emptyType : VInductiveType where
+  name := ``Empty
+  uvars := 0
+  type := vconst(type_of% @Empty).type
+  ctors := []
+
+def emptyDecl : VInductDecl := ⟨0, 0, [emptyType]⟩
+
+example : emptyDecl.stage3 = true := rfl
+
+def emptyChecked : emptyDecl.Checked := emptyDecl.checked?.get (by decide)
+
+def emptyGenerationChecked : GenerationChecked emptyDecl :=
+  (identityGeneration? emptyDecl).get (by decide)
+
+def emptyBlockGenerationChecked : BlockGenerationChecked emptyDecl :=
+  (identityBlockGeneration? emptyDecl).get (by decide)
+
+example : emptyChecked.params = [] := rfl
+example : emptyChecked.indices = [] := rfl
+example : emptyChecked.resultLevel = .succ .zero := rfl
+example : emptyChecked.elimination = .large := rfl
+example : emptyChecked.kTarget = false := rfl
+example : emptyChecked.constructors = [] := rfl
+example : emptyGenerationChecked.block.ctorPairs = [] := rfl
+example : emptyGenerationChecked.minorTypes = [] := rfl
+example : emptyGenerationChecked.generatedRules = [] := rfl
+
+/-- Empty elimination has a motive and major but no constructor minor. -/
+example : emptyGenerationChecked.recursor =
+    vconst(type_of% @Empty.rec) := rfl
+
+theorem emptyDecl_wf : emptyDecl.WF VEnv.empty := by
+  refine ⟨rfl, ?_⟩
+  intro ty hty
+  have hty' : ty = emptyType :=
+    List.mem_singleton.1 (by simpa [emptyDecl] using hty)
+  subst ty
+  refine ⟨?_, ?_⟩
+  · change True
+    trivial
+  · intro c hc
+    simp [emptyType] at hc
+
+def emptyEnv : VEnv :=
+  (VEnv.empty.addInduct emptyDecl).get (by decide)
+
+example : VEnv.empty.addInduct emptyDecl =
+    VEnv.empty.addInductGeneration emptyGenerationChecked := rfl
+
+theorem emptyEnv_ordered : emptyEnv.Ordered :=
+  VEnv.addInductGeneration_WF .empty
+    ((emptyChecked.wf_of_decl emptyDecl_wf).identityGeneration .empty) rfl
 
 /-! ## List: one parameter, a dependent field, direct recursion -/
 
@@ -215,6 +351,8 @@ example : eqChecked.params = [.sort (.param 0), .bvar 0] := rfl
 example : eqChecked.indices = [.bvar 1] := rfl
 example : eqChecked.resultLevel = .zero := rfl
 example : eqChecked.elimination = .large := rfl
+example : eqChecked.kTarget = true := rfl
+example : eqGenerationChecked.kTarget = true := rfl
 example : eqChecked.constructors[0].resultIndices = [.bvar 0] := rfl
 example : eqChecked.recursor = recConst 1 ``Eq 2 eqType := rfl
 example : eqGenerationChecked.motiveType = eqChecked.motiveType := rfl
@@ -353,11 +491,12 @@ example : ∀ env', VEnv.empty.addInduct indexedVecDecl = some env' →
     VEnv.AddInductSuccess VEnv.empty env' indexedVecDecl :=
   fun _ => VEnv.addInduct_success
 
-/-- The transaction certificate exposes the exact analyzer result for ix-like
-consumers without re-running `checked?`. -/
+/-- The transaction certificate exposes the exact block-generation result for
+ix-like consumers without re-running structural analysis. -/
 example : ∀ env', VEnv.empty.addInduct indexedVecDecl = some env' →
-    ∃ checked, indexedVecDecl.checked? = some checked :=
-  fun _ => VEnv.addInduct_checked
+    ∃ generation,
+      indexedVecDecl.identityBlockGeneration? = some generation :=
+  fun _ => VEnv.addInduct_generation
 
 /-! ## Acc: recursive argument beneath a Pi telescope
 
@@ -379,6 +518,9 @@ def accChecked : accDecl.Checked := accDecl.checked?.get (by decide)
 
 def accGenerationChecked : GenerationChecked accDecl :=
   (identityGeneration? accDecl).get (by decide)
+
+def accBlockGenerationChecked : BlockGenerationChecked accDecl :=
+  (identityBlockGeneration? accDecl).get (by decide)
 
 def accRecArgs : List RecArg :=
   recArgs 1 ``Acc 2 1 (ctorFields (VExpr.dropN 2 accType.ctors[0].type))
@@ -426,9 +568,10 @@ example : (VEnv.empty.addInduct accDecl).map (·.constants ``Acc.rec) =
 example : ∀ env', VEnv.empty.addInduct accDecl = some env' →
     env'.defeqs (ruleRec 1 ``Acc 2 accType 0 accType.ctors[0]) := by
   intro env' hadd
-  apply VEnv.addInduct_rule_mem hadd (.head _)
+  apply VEnv.addInduct_rule_mem hadd
+    (generation := accBlockGenerationChecked) rfl
   change ruleRec 1 ``Acc 2 accType 0 accType.ctors[0] ∈
-    [ruleRec 1 ``Acc 2 accType 0 accType.ctors[0]]
+    accBlockGenerationChecked.generatedRules
   exact .head _
 
 example : ∀ env', VEnv.empty.addInduct accDecl = some env' →
@@ -502,7 +645,8 @@ theorem accDecl_wf : accDecl.WF VEnv.empty := by
 def accEnv : VEnv := (VEnv.empty.addInduct accDecl).get (by decide)
 
 example : accEnv.Ordered :=
-  VEnv.addInduct_WF .empty accDecl_wf rfl
+  VEnv.addInductGeneration_WF .empty
+    ((accChecked.wf_of_decl accDecl_wf).identityGeneration .empty) rfl
 
 /-- A collision at the generated recursor name still rejects the whole Acc
 transaction; no recursive-Pi special case bypasses freshness. -/
@@ -510,7 +654,8 @@ def accRecCollisionEnv : VEnv :=
   (VEnv.empty.addConst ``Acc.rec ⟨0, .sort .zero⟩).get (by decide)
 
 example : accRecCollisionEnv.addInduct accDecl = none :=
-  VEnv.addInduct_eq_none_of_rec_present rfl ⟨_, rfl⟩
+  VEnv.addInduct_eq_none_of_rec_present
+    (generation := accBlockGenerationChecked) rfl (.head _) ⟨_, rfl⟩
 
 /-! ## AnnotatedPi: recursive Pi normalization below a constructor field
 
@@ -663,6 +808,275 @@ theorem annotatedPiViewChecked_wf :
       VEnv.empty.addConst ``outParam (vconst(type_of% @outParam)) =
         some outParamConstEnv)).trans VEnv.addDefEq_le)
   exact annotatedPiViewChecked.wf_of_decl annotatedPiViewDecl_wf
+
+/-! ## AnnotatedParam: definitionally equal constructor parameters
+
+Family validation consumes the `outParam` annotation before recording its
+parameter local. Constructor metadata retains the annotation, so the ordinary
+validator must use definitional equality rather than syntax when it checks the
+constructor's parameter prefix. -/
+
+inductive AnnotatedParam (alpha : outParam Type) : Type where
+  | mk : AnnotatedParam alpha
+
+def annotatedParamRawType : VInductiveType where
+  name := ``AnnotatedParam
+  uvars := 0
+  type := vconst(type_of% @AnnotatedParam).type
+  ctors := [⟨vconst(type_of% @AnnotatedParam.mk), ``AnnotatedParam.mk⟩]
+
+def annotatedParamRawDecl : VInductDecl :=
+  ⟨0, 1, [annotatedParamRawType]⟩
+
+def annotatedParamViewCtor : VConstVal where
+  name := ``AnnotatedParam.mk
+  uvars := 0
+  type := .forallE (.sort (.succ .zero))
+    (.app (.const ``AnnotatedParam []) (.bvar 0))
+
+def annotatedParamViewType : VInductiveType where
+  name := ``AnnotatedParam
+  uvars := 0
+  type := .forallE (.sort (.succ .zero)) (.sort (.succ .zero))
+  ctors := [annotatedParamViewCtor]
+
+def annotatedParamViewDecl : VInductDecl :=
+  ⟨0, 1, [annotatedParamViewType]⟩
+
+example : annotatedParamRawType.type =
+    .forallE
+      (.app (.const ``outParam [.succ (.succ .zero)])
+        (.sort (.succ .zero)))
+      (.sort (.succ .zero)) := rfl
+
+example : annotatedParamRawType.ctors[0].type =
+    .forallE
+      (.app (.const ``outParam [.succ (.succ .zero)])
+        (.sort (.succ .zero)))
+      (.app (.const ``AnnotatedParam []) (.bvar 0)) := rfl
+
+example : annotatedParamViewDecl.checked?.isSome = true := rfl
+example : normalizationShape annotatedParamRawDecl annotatedParamViewDecl =
+    true := rfl
+
+def annotatedParamNormalization : Normalization annotatedParamRawDecl where
+  view := annotatedParamViewDecl
+  shape_eq := rfl
+
+def annotatedParamViewChecked : annotatedParamViewDecl.Checked :=
+  annotatedParamViewDecl.checked?.get (by decide)
+
+def annotatedParamBlock : NormalizedChecked annotatedParamRawDecl :=
+  annotatedParamNormalization.check?.get (by decide)
+
+def annotatedParamGenerationChecked :
+    GenerationChecked annotatedParamRawDecl :=
+  annotatedParamBlock.generation?.get (by decide)
+
+example : annotatedParamGenerationChecked.recursor =
+    vconst(type_of% @AnnotatedParam.rec) := rfl
+
+example : annotatedParamGenerationChecked.generatedRules[0]? =
+    some (vdefeq((alpha : Type)
+      (motive : AnnotatedParam alpha → Sort u)
+      (mk : motive (@AnnotatedParam.mk alpha)) =>
+      @AnnotatedParam.rec alpha motive mk (@AnnotatedParam.mk alpha) ≡ mk)) := rfl
+
+/-- The raw parameter domain retained by kernel metadata before annotation
+consumption. -/
+def annotatedParamRawDomain : VExpr :=
+  .app (.const ``outParam [.succ (.succ .zero)])
+    (.sort (.succ .zero))
+
+/-- The stored `outParam Type` parameter and the checked `Type` parameter are
+definitionally equal in the exact pre-declaration environment. -/
+theorem annotatedParamRawDomain_defeq :
+    outParamEnv.IsDefEq 0 [] annotatedParamRawDomain
+      (.sort (.succ .zero)) (.sort (.succ (.succ .zero))) := by
+  have hfn : outParamEnv.IsDefEq 0 []
+      (.const ``outParam [.succ (.succ .zero)])
+      (.lam (.sort (.succ (.succ .zero))) (.bvar 0))
+      (.forallE (.sort (.succ (.succ .zero)))
+        (.sort (.succ (.succ .zero)))) := by
+    simpa [outParamDefEq, VExpr.instL, VLevel.inst] using
+      (VEnv.IsDefEq.extra (env := outParamEnv) (uvars := 0) (Γ := [])
+        (df := outParamDefEq) (ls := [.succ (.succ .zero)])
+        (by simp [outParamEnv, VEnv.addDefEq])
+        (by simp; decide) rfl)
+  have harg : outParamEnv.HasType 0 []
+      (.sort (.succ .zero)) (.sort (.succ (.succ .zero))) :=
+    VEnv.HasType.sort (by decide)
+  exact (VEnv.IsDefEq.appDF hfn harg).trans
+    (VEnv.IsDefEq.beta (VEnv.HasType.bvar .zero) harg)
+
+/--
+info: 'Lean4Lean.InductiveFixtures.annotatedParamRawDomain_defeq' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms annotatedParamRawDomain_defeq
+
+/-- The annotation-consumed declaration accepted by the structural analyzer
+has the ordinary direct semantic interpretation. -/
+theorem annotatedParamViewDecl_wf :
+    annotatedParamViewDecl.WF VEnv.empty := by
+  refine ⟨rfl, ?_⟩
+  intro ty hty
+  have hty' : ty = annotatedParamViewType :=
+    List.mem_singleton.1 (by
+      simpa [annotatedParamViewDecl] using hty)
+  subst ty
+  refine ⟨?_, ?_⟩
+  · change VEnv.OnTel VEnv.empty 0 [] [.sort (.succ .zero)]
+    exact ⟨⟨_, VEnv.HasType.sort (by decide)⟩, trivial⟩
+  · intro c hc
+    have hc' : c = annotatedParamViewCtor :=
+      List.mem_singleton.1 (by
+        simpa [annotatedParamViewType] using hc)
+    subst c
+    exact ⟨trivial, rfl⟩
+
+/-- Exact Theory environment after staging the stored family constant. -/
+def annotatedParamTypeEnv : VEnv :=
+  (outParamEnv.addConst annotatedParamRawType.name
+    annotatedParamRawType.toVConstant).get (by decide)
+
+theorem annotatedParamTypeEnv_ordered :
+    annotatedParamTypeEnv.Ordered := by
+  have hbody : outParamEnv.HasType 0 [annotatedParamRawDomain]
+      (.sort (.succ .zero)) (.sort (.succ (.succ .zero))) :=
+    VEnv.HasType.sort (by decide)
+  apply VEnv.Ordered.const (n := annotatedParamRawType.name)
+    (ci := annotatedParamRawType.toVConstant)
+    outParamEnv_ordered
+  · exact ⟨.imax (.succ (.succ .zero)) (.succ (.succ .zero)),
+      VEnv.HasType.forallE
+        (VEnv.IsDefEq.hasType annotatedParamRawDomain_defeq).1 hbody⟩
+  · rfl
+
+private theorem annotatedParamFamilyApp_hasType (domain : VExpr)
+    (hdomain : annotatedParamTypeEnv.HasType 0 [domain]
+      (.bvar 0) annotatedParamRawDomain) :
+    annotatedParamTypeEnv.HasType 0 [domain]
+      (.app (.const ``AnnotatedParam []) (.bvar 0))
+      (.sort (.succ .zero)) := by
+  apply VEnv.HasType.app
+    (A := annotatedParamRawDomain) (B := .sort (.succ .zero))
+  · simpa [annotatedParamRawType, annotatedParamRawDomain,
+        VExpr.instL, VLevel.inst] using
+      VEnv.HasType.const (env := annotatedParamTypeEnv) (U := 0)
+        (Γ := [domain]) (c := ``AnnotatedParam)
+        (ci := annotatedParamRawType.toVConstant) (ls := [])
+        (VEnv.addConst_self (show
+          outParamEnv.addConst annotatedParamRawType.name
+            annotatedParamRawType.toVConstant =
+              some annotatedParamTypeEnv from rfl))
+        (by simp) rfl
+  · exact hdomain
+
+theorem annotatedParamRawCtorBody_hasType :
+    annotatedParamTypeEnv.HasType 0 [annotatedParamRawDomain]
+      (.app (.const ``AnnotatedParam []) (.bvar 0))
+      (.sort (.succ .zero)) := by
+  apply annotatedParamFamilyApp_hasType
+  simpa [annotatedParamRawDomain, VExpr.liftN] using
+    (VEnv.HasType.bvar (env := annotatedParamTypeEnv) (U := 0)
+      (Lookup.zero (Γ := []) (ty := annotatedParamRawDomain)))
+
+theorem annotatedParamCheckedCtorBody_hasType :
+    annotatedParamTypeEnv.HasType 0 [.sort (.succ .zero)]
+      (.app (.const ``AnnotatedParam []) (.bvar 0))
+      (.sort (.succ .zero)) := by
+  apply annotatedParamFamilyApp_hasType
+  have hb : annotatedParamTypeEnv.HasType 0 [.sort (.succ .zero)]
+      (.bvar 0) (.sort (.succ .zero)) := by
+    simpa [VExpr.liftN] using
+      (VEnv.HasType.bvar (env := annotatedParamTypeEnv) (U := 0)
+        (Lookup.zero (Γ := []) (ty := .sort (.succ .zero))))
+  have hd := annotatedParamRawDomain_defeq.mono
+    (VEnv.addConst_le (show
+      outParamEnv.addConst annotatedParamRawType.name
+        annotatedParamRawType.toVConstant =
+          some annotatedParamTypeEnv from rfl))
+  exact (hd.weak0 annotatedParamTypeEnv_ordered).symm.defeq hb
+
+/-- The raw family and constructor metadata are semantically related to the
+annotation-consumed analyzer view at their exact declaration stages. -/
+theorem annotatedParamNormalization_wf :
+    annotatedParamNormalization.WF outParamEnv := by
+  refine ⟨annotatedParamRawType, annotatedParamViewType,
+    rfl, rfl, ?_, ?_⟩
+  · have hbody : outParamEnv.HasType 0 [annotatedParamRawDomain]
+        (.sort (.succ .zero)) (.sort (.succ (.succ .zero))) :=
+      VEnv.HasType.sort (by decide)
+    exact ⟨_, VEnv.IsDefEq.forallEDF
+      annotatedParamRawDomain_defeq hbody⟩
+  · intro envT hadd
+    have henv : envT = annotatedParamTypeEnv := by
+      have : some envT = some annotatedParamTypeEnv :=
+        hadd.symm.trans (show
+          outParamEnv.addConst annotatedParamRawType.name
+            annotatedParamRawType.toVConstant =
+              some annotatedParamTypeEnv from rfl)
+      exact Option.some.inj this
+    subst envT
+    exact .cons ⟨_, VEnv.IsDefEq.forallEDF
+      (annotatedParamRawDomain_defeq.mono
+        (VEnv.addConst_le (show
+          outParamEnv.addConst annotatedParamRawType.name
+            annotatedParamRawType.toVConstant =
+              some annotatedParamTypeEnv from rfl)))
+      annotatedParamRawCtorBody_hasType⟩ .nil
+
+theorem annotatedParamViewChecked_wf :
+    annotatedParamViewChecked.WF outParamEnv := by
+  apply VInductDecl.Checked.WF.mono
+    ((VEnv.addConst_le (by rfl :
+      VEnv.empty.addConst ``outParam (vconst(type_of% @outParam)) =
+        some outParamConstEnv)).trans VEnv.addDefEq_le)
+  exact annotatedParamViewChecked.wf_of_decl annotatedParamViewDecl_wf
+
+/-- The mixed generation value uses the checked parameter for emitted
+recursor binders while retaining the raw constructor surface, and all four
+raw/view telescope/result obligations hold in their respective contexts. -/
+theorem annotatedParamGenerationChecked_wf :
+    annotatedParamGenerationChecked.WF outParamEnv := by
+  refine {
+    blockWF := ⟨annotatedParamNormalization_wf,
+      annotatedParamViewChecked_wf⟩
+    familyTel := ?_
+    familyResult := ?_
+    ctors := ?_ }
+  · change outParamEnv.TelDefEq 0 [] [annotatedParamRawDomain]
+      [.sort (.succ .zero)]
+    exact ⟨⟨_, annotatedParamRawDomain_defeq⟩, trivial⟩
+  · exact VEnv.HasType.sort (by decide)
+  · intro envT hadd ctor hctor
+    have henv : envT = annotatedParamTypeEnv := by
+      have : some envT = some annotatedParamTypeEnv :=
+        hadd.symm.trans (show
+          outParamEnv.addConst annotatedParamRawType.name
+            annotatedParamRawType.toVConstant =
+              some annotatedParamTypeEnv from rfl)
+      exact Option.some.inj this
+    subst envT
+    change ctor ∈ [⟨annotatedParamRawType.ctors[0],
+      annotatedParamViewChecked.constructors[0]⟩] at hctor
+    obtain rfl := List.mem_singleton.1 hctor
+    refine {
+      declaredTel := ⟨⟨_, annotatedParamRawDomain_defeq.mono
+        (VEnv.addConst_le (show
+          outParamEnv.addConst annotatedParamRawType.name
+            annotatedParamRawType.toVConstant =
+              some annotatedParamTypeEnv from rfl))⟩, trivial⟩
+      declaredResult := annotatedParamRawCtorBody_hasType
+      emittedTel := ⟨⟨_, VEnv.HasType.sort (by decide)⟩, trivial⟩
+      emittedResult := annotatedParamCheckedCtorBody_hasType }
+
+/--
+info: 'Lean4Lean.InductiveFixtures.annotatedParamGenerationChecked_wf' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms annotatedParamGenerationChecked_wf
 
 /-! ## Explicit normalization boundary
 
@@ -1313,6 +1727,840 @@ info: 'Lean4Lean.InductiveFixtures.aliasRecFinalEnv_ordered' depends on axioms: 
 #guard_msgs in
 #print axioms aliasRecFinalEnv_ordered
 
+/-! ## Normalization differential matrix
+
+The isolated `AliasFormer` and `AliasRec` fixtures above establish that Lean
+retains reducible aliases at family results and direct recursive targets.  The
+single indexed declaration below covers every remaining normalization
+position in one real kernel payload: parameter and index domains, ordinary
+fields, direct recursion, recursion hidden behind a Pi-producing alias, and
+beta/let redexes retained in alias definitions.  Its view is deliberately
+written out so changes to either Lean's stored metadata or the Theory
+normalizer fail by computation.
+-/
+
+abbrev MatrixBetaAlias (alpha : Sort u) :=
+  (fun type : Sort u => type) alpha
+
+abbrev MatrixLetAlias (alpha : Sort u) :=
+  let type := alpha
+  type
+
+abbrev MatrixPiAlias (alpha : Sort u) := (proof : Prop) → alpha
+
+abbrev MatrixIndexAlias
+    (index : TypeFamilyAlias) : TypeFamilyAlias := index
+
+inductive NormalizationMatrix (alpha : TypeFamilyAlias) :
+    TypeFamilyAlias → Type 1 where
+  | mk (index : TypeFamilyAlias)
+      (ordinary : RecAlias Prop)
+      (beta : MatrixBetaAlias Prop)
+      (letBound : MatrixLetAlias Prop)
+      (direct : RecAlias
+        (NormalizationMatrix alpha (MatrixIndexAlias index)))
+      (piHidden : MatrixPiAlias
+        (NormalizationMatrix alpha (MatrixIndexAlias index)))
+      (betaRecursive : MatrixBetaAlias
+        (NormalizationMatrix alpha (MatrixIndexAlias index)))
+      (letRecursive : MatrixLetAlias
+        (NormalizationMatrix alpha (MatrixIndexAlias index))) :
+      NormalizationMatrix alpha (MatrixIndexAlias index)
+
+def normalizationMatrixRawType : VInductiveType where
+  name := ``NormalizationMatrix
+  uvars := 0
+  type := vconst(type_of% @NormalizationMatrix).type
+  ctors := [⟨vconst(type_of% @NormalizationMatrix.mk),
+    ``NormalizationMatrix.mk⟩]
+
+def normalizationMatrixRawDecl : VInductDecl :=
+  ⟨0, 1, [normalizationMatrixRawType]⟩
+
+def normalizationMatrixTarget (alpha index : VExpr) : VExpr :=
+  (VExpr.const ``NormalizationMatrix []).app alpha |>.app
+    ((VExpr.const ``MatrixIndexAlias []).app index)
+
+def normalizationMatrixViewCtorType : VExpr :=
+  .forallE (.sort (.succ .zero)) <|
+  .forallE (.sort (.succ .zero)) <|
+  .forallE (.sort .zero) <|
+  .forallE (.sort .zero) <|
+  .forallE (.sort .zero) <|
+  .forallE (normalizationMatrixTarget (.bvar 4) (.bvar 3)) <|
+  .forallE (.forallE (.sort .zero)
+    (normalizationMatrixTarget (.bvar 6) (.bvar 5))) <|
+  .forallE (normalizationMatrixTarget (.bvar 6) (.bvar 5)) <|
+  .forallE (normalizationMatrixTarget (.bvar 7) (.bvar 6)) <|
+  normalizationMatrixTarget (.bvar 8) (.bvar 7)
+
+def normalizationMatrixViewCtor : VConstVal :=
+  { normalizationMatrixRawType.ctors[0] with
+    type := normalizationMatrixViewCtorType }
+
+def normalizationMatrixViewType : VInductiveType :=
+  { normalizationMatrixRawType with
+    type := .forallE (.sort (.succ .zero))
+      (.forallE (.sort (.succ .zero))
+        (.sort (.succ (.succ .zero))))
+    ctors := [normalizationMatrixViewCtor] }
+
+def normalizationMatrixViewDecl : VInductDecl :=
+  ⟨0, 1, [normalizationMatrixViewType]⟩
+
+example : normalizationMatrixRawType.type =
+    (VExpr.const ``TypeFamilyAlias []).forallE
+      ((VExpr.const ``TypeFamilyAlias []).forallE
+        (VExpr.sort (.succ (.succ .zero)))) := rfl
+
+example : normalizationMatrixRawType.ctors[0].type =
+    vconst(type_of% @NormalizationMatrix.mk).type := rfl
+
+example : normalizationMatrixRawDecl.checked? = none := rfl
+example : normalizationMatrixViewDecl.checked?.isSome = true := rfl
+example : normalizationShape normalizationMatrixRawDecl
+    normalizationMatrixViewDecl = true := rfl
+
+def normalizationMatrixNormalization :
+    Normalization normalizationMatrixRawDecl where
+  view := normalizationMatrixViewDecl
+  shape_eq := rfl
+
+def normalizationMatrixViewChecked :
+    normalizationMatrixViewDecl.Checked :=
+  normalizationMatrixViewDecl.checked?.get (by decide)
+
+def normalizationMatrixBlock :
+    NormalizedChecked normalizationMatrixRawDecl :=
+  normalizationMatrixNormalization.check?.get (by decide)
+
+def normalizationMatrixGenerationChecked :
+    GenerationChecked normalizationMatrixRawDecl :=
+  normalizationMatrixBlock.generation?.get (by decide)
+
+example : normalizationMatrixNormalization.accepted = true := rfl
+example : (normalizedChecked? normalizationMatrixRawDecl
+    normalizationMatrixViewDecl).isSome = true := rfl
+example : normalizationMatrixBlock.checked.type =
+    normalizationMatrixViewType := rfl
+example : normalizationMatrixViewChecked.params =
+    [.sort (.succ .zero)] := rfl
+example : normalizationMatrixViewChecked.indices =
+    [.sort (.succ .zero)] := rfl
+example : normalizationMatrixViewChecked.constructors[0].fields.length = 8 :=
+  rfl
+example : normalizationMatrixViewChecked.constructors[0].recursive.length = 4 :=
+  rfl
+example : normalizationMatrixViewChecked.constructors[0].recursive.map
+    (fun position => (position.fieldIndex, position.binders.length)) =
+      [(4, 0), (5, 1), (6, 0), (7, 0)] := rfl
+example : normalizationMatrixGenerationChecked.recursor =
+    vconst(type_of% @NormalizationMatrix.rec) := rfl
+example : normalizationMatrixGenerationChecked.generatedRules[0]? =
+    some (vdefeq(alpha motive mk index ordinary beta letBound direct
+      piHidden betaRecursive letRecursive =>
+      @NormalizationMatrix.rec alpha motive mk (MatrixIndexAlias index)
+          (@NormalizationMatrix.mk alpha index ordinary beta letBound direct
+            piHidden betaRecursive letRecursive) ≡
+        mk index ordinary beta letBound direct piHidden betaRecursive
+          letRecursive
+          (@NormalizationMatrix.rec alpha motive mk
+            (MatrixIndexAlias index) direct)
+          (fun proof => @NormalizationMatrix.rec alpha motive mk
+            (MatrixIndexAlias index) (piHidden proof))
+          (@NormalizationMatrix.rec alpha motive mk
+            (MatrixIndexAlias index) betaRecursive)
+          (@NormalizationMatrix.rec alpha motive mk
+            (MatrixIndexAlias index) letRecursive))) := rfl
+example : normalizationMatrixGenerationChecked.generatedRules.length = 1 := rfl
+
+/-! The semantic pre-environment contains the exact reducible definitions
+whose WHNFs justify the normalized descriptor.  Each abbreviation is added
+as a constant followed by its delta equation so the final transaction uses
+the same staged environment discipline as ordinary declarations. -/
+
+def normalizationMatrixRecAliasConstEnv : VEnv :=
+  (typeFamilyAliasEnv.addConst ``RecAlias
+    (vconst(type_of% @RecAlias))).get (by decide)
+
+def normalizationMatrixRecAliasEnv : VEnv :=
+  normalizationMatrixRecAliasConstEnv.addDefEq recAliasDefEq
+
+theorem normalizationMatrixRecAliasEnv_ordered :
+    normalizationMatrixRecAliasEnv.Ordered := by
+  apply VEnv.Ordered.defeq
+  · apply VEnv.Ordered.const (n := ``RecAlias)
+      (ci := vconst(type_of% @RecAlias))
+      (env' := normalizationMatrixRecAliasConstEnv)
+      typeFamilyAliasEnv_ordered
+    · exact ⟨_, by type_tac⟩
+    · rfl
+  · have hlookup : normalizationMatrixRecAliasConstEnv.constants
+        ``RecAlias = some (vconst(type_of% @RecAlias)) := rfl
+    constructor <;> type_tac
+
+def matrixBetaAliasDefEq : VDefEq :=
+  vdefeq(@MatrixBetaAlias ≡ fun (alpha : Sort u) =>
+    (fun type : Sort u => type) alpha)
+
+def normalizationMatrixBetaAliasConstEnv : VEnv :=
+  (normalizationMatrixRecAliasEnv.addConst ``MatrixBetaAlias
+    (vconst(type_of% @MatrixBetaAlias))).get (by decide)
+
+def normalizationMatrixBetaAliasEnv : VEnv :=
+  normalizationMatrixBetaAliasConstEnv.addDefEq matrixBetaAliasDefEq
+
+theorem normalizationMatrixBetaAliasEnv_ordered :
+    normalizationMatrixBetaAliasEnv.Ordered := by
+  apply VEnv.Ordered.defeq
+  · apply VEnv.Ordered.const (n := ``MatrixBetaAlias)
+      (ci := vconst(type_of% @MatrixBetaAlias))
+      (env' := normalizationMatrixBetaAliasConstEnv)
+      normalizationMatrixRecAliasEnv_ordered
+    · exact ⟨_, by type_tac⟩
+    · rfl
+  · have hlookup : normalizationMatrixBetaAliasConstEnv.constants
+        ``MatrixBetaAlias = some (vconst(type_of% @MatrixBetaAlias)) := rfl
+    constructor <;> type_tac
+
+def matrixLetAliasDefEq : VDefEq :=
+  vdefeq(@MatrixLetAlias ≡ fun (alpha : Sort u) =>
+    let type := alpha
+    type)
+
+def normalizationMatrixLetAliasConstEnv : VEnv :=
+  (normalizationMatrixBetaAliasEnv.addConst ``MatrixLetAlias
+    (vconst(type_of% @MatrixLetAlias))).get (by decide)
+
+def normalizationMatrixLetAliasEnv : VEnv :=
+  normalizationMatrixLetAliasConstEnv.addDefEq matrixLetAliasDefEq
+
+theorem normalizationMatrixLetAliasEnv_ordered :
+    normalizationMatrixLetAliasEnv.Ordered := by
+  apply VEnv.Ordered.defeq
+  · apply VEnv.Ordered.const (n := ``MatrixLetAlias)
+      (ci := vconst(type_of% @MatrixLetAlias))
+      (env' := normalizationMatrixLetAliasConstEnv)
+      normalizationMatrixBetaAliasEnv_ordered
+    · exact ⟨_, by type_tac⟩
+    · rfl
+  · have hlookup : normalizationMatrixLetAliasConstEnv.constants
+        ``MatrixLetAlias = some (vconst(type_of% @MatrixLetAlias)) := rfl
+    constructor <;> type_tac
+
+def matrixPiAliasDefEq : VDefEq :=
+  vdefeq(@MatrixPiAlias ≡ fun (alpha : Sort u) =>
+    (proof : Prop) → alpha)
+
+def normalizationMatrixPiAliasConstEnv : VEnv :=
+  (normalizationMatrixLetAliasEnv.addConst ``MatrixPiAlias
+    (vconst(type_of% @MatrixPiAlias))).get (by decide)
+
+def normalizationMatrixPiAliasEnv : VEnv :=
+  normalizationMatrixPiAliasConstEnv.addDefEq matrixPiAliasDefEq
+
+theorem normalizationMatrixPiAliasEnv_ordered :
+    normalizationMatrixPiAliasEnv.Ordered := by
+  apply VEnv.Ordered.defeq
+  · apply VEnv.Ordered.const (n := ``MatrixPiAlias)
+      (ci := vconst(type_of% @MatrixPiAlias))
+      (env' := normalizationMatrixPiAliasConstEnv)
+      normalizationMatrixLetAliasEnv_ordered
+    · exact ⟨_, by type_tac⟩
+    · rfl
+  · have hlookup : normalizationMatrixPiAliasConstEnv.constants
+        ``MatrixPiAlias = some (vconst(type_of% @MatrixPiAlias)) := rfl
+    constructor
+    · type_tac
+    · apply VEnv.HasType.lam
+      · exact VEnv.HasType.sort (by decide)
+      · apply VEnv.IsDefEq.defeq
+          (VEnv.IsDefEq.sortDF
+            (l := .imax (.succ .zero) (.param 0))
+            (l' := .param 0) (by decide) (by decide) (by
+              rw [VLevel.equiv_def]
+              intro ls
+              simp only [VLevel.eval, Nat.zero_add]
+              let n := ls.getD 0 0
+              change Nat.imax 1 n = n
+              by_cases h : n = 0
+              · simp [Nat.imax, h]
+              · have hn : 1 ≤ n := Nat.one_le_iff_ne_zero.mpr h
+                simp [Nat.imax, h, Nat.max_eq_right hn]))
+        exact VEnv.HasType.forallE
+          (VEnv.HasType.sort (by decide))
+          (VEnv.HasType.bvar (.succ .zero))
+
+def matrixIndexAliasDefEq : VDefEq :=
+  vdefeq(MatrixIndexAlias ≡ fun index : TypeFamilyAlias => index)
+
+def normalizationMatrixIndexAliasConstEnv : VEnv :=
+  (normalizationMatrixPiAliasEnv.addConst ``MatrixIndexAlias
+    (vconst(type_of% @MatrixIndexAlias))).get (by decide)
+
+def normalizationMatrixAliasEnv : VEnv :=
+  normalizationMatrixIndexAliasConstEnv.addDefEq matrixIndexAliasDefEq
+
+theorem normalizationMatrixAliasEnv_ordered :
+    normalizationMatrixAliasEnv.Ordered := by
+  apply VEnv.Ordered.defeq
+  · apply VEnv.Ordered.const (n := ``MatrixIndexAlias)
+      (ci := vconst(type_of% @MatrixIndexAlias))
+      (env' := normalizationMatrixIndexAliasConstEnv)
+      normalizationMatrixPiAliasEnv_ordered
+    · have hfamily : normalizationMatrixPiAliasEnv.constants
+          ``TypeFamilyAlias = some (vconst(type_of% @TypeFamilyAlias)) := rfl
+      exact ⟨_, by type_tac⟩
+    · rfl
+  · have hfamily : normalizationMatrixIndexAliasConstEnv.constants
+        ``TypeFamilyAlias = some (vconst(type_of% @TypeFamilyAlias)) := rfl
+    have hlookup : normalizationMatrixIndexAliasConstEnv.constants
+        ``MatrixIndexAlias = some (vconst(type_of% @MatrixIndexAlias)) := rfl
+    constructor <;> type_tac
+
+theorem normalizationMatrixRecAliasEnv_le_betaAliasEnv :
+    normalizationMatrixRecAliasEnv ≤ normalizationMatrixBetaAliasEnv :=
+  (VEnv.addConst_le (by rfl : normalizationMatrixRecAliasEnv.addConst
+    ``MatrixBetaAlias (vconst(type_of% @MatrixBetaAlias)) =
+      some normalizationMatrixBetaAliasConstEnv)).trans VEnv.addDefEq_le
+
+theorem normalizationMatrixBetaAliasEnv_le_letAliasEnv :
+    normalizationMatrixBetaAliasEnv ≤ normalizationMatrixLetAliasEnv :=
+  (VEnv.addConst_le (by rfl : normalizationMatrixBetaAliasEnv.addConst
+    ``MatrixLetAlias (vconst(type_of% @MatrixLetAlias)) =
+      some normalizationMatrixLetAliasConstEnv)).trans VEnv.addDefEq_le
+
+theorem normalizationMatrixLetAliasEnv_le_piAliasEnv :
+    normalizationMatrixLetAliasEnv ≤ normalizationMatrixPiAliasEnv :=
+  (VEnv.addConst_le (by rfl : normalizationMatrixLetAliasEnv.addConst
+    ``MatrixPiAlias (vconst(type_of% @MatrixPiAlias)) =
+      some normalizationMatrixPiAliasConstEnv)).trans VEnv.addDefEq_le
+
+theorem normalizationMatrixPiAliasEnv_le_aliasEnv :
+    normalizationMatrixPiAliasEnv ≤ normalizationMatrixAliasEnv :=
+  (VEnv.addConst_le (by rfl : normalizationMatrixPiAliasEnv.addConst
+    ``MatrixIndexAlias (vconst(type_of% @MatrixIndexAlias)) =
+      some normalizationMatrixIndexAliasConstEnv)).trans VEnv.addDefEq_le
+
+theorem normalizationMatrixRecAliasEnv_le_aliasEnv :
+    normalizationMatrixRecAliasEnv ≤ normalizationMatrixAliasEnv :=
+  normalizationMatrixRecAliasEnv_le_betaAliasEnv.trans <|
+    normalizationMatrixBetaAliasEnv_le_letAliasEnv.trans <|
+      normalizationMatrixLetAliasEnv_le_piAliasEnv.trans
+        normalizationMatrixPiAliasEnv_le_aliasEnv
+
+theorem typeFamilyAliasEnv_le_normalizationMatrixAliasEnv :
+    typeFamilyAliasEnv ≤ normalizationMatrixAliasEnv := by
+  exact ((VEnv.addConst_le (by rfl : typeFamilyAliasEnv.addConst ``RecAlias
+    (vconst(type_of% @RecAlias)) =
+      some normalizationMatrixRecAliasConstEnv)).trans VEnv.addDefEq_le).trans
+        normalizationMatrixRecAliasEnv_le_aliasEnv
+
+theorem normalizationMatrix_typeFamilyAliasDefEq_mem :
+    normalizationMatrixAliasEnv.defeqs typeFamilyAliasDefEq :=
+  typeFamilyAliasEnv_le_normalizationMatrixAliasEnv.defeqs
+    VEnv.addDefEq_self
+
+theorem normalizationMatrix_recAliasDefEq_mem :
+    normalizationMatrixAliasEnv.defeqs recAliasDefEq :=
+  normalizationMatrixRecAliasEnv_le_aliasEnv.defeqs VEnv.addDefEq_self
+
+theorem normalizationMatrix_betaAliasDefEq_mem :
+    normalizationMatrixAliasEnv.defeqs matrixBetaAliasDefEq :=
+  (normalizationMatrixBetaAliasEnv_le_letAliasEnv.trans <|
+    normalizationMatrixLetAliasEnv_le_piAliasEnv.trans
+      normalizationMatrixPiAliasEnv_le_aliasEnv).defeqs VEnv.addDefEq_self
+
+theorem normalizationMatrix_letAliasDefEq_mem :
+    normalizationMatrixAliasEnv.defeqs matrixLetAliasDefEq :=
+  (normalizationMatrixLetAliasEnv_le_piAliasEnv.trans
+    normalizationMatrixPiAliasEnv_le_aliasEnv).defeqs VEnv.addDefEq_self
+
+theorem normalizationMatrix_piAliasDefEq_mem :
+    normalizationMatrixAliasEnv.defeqs matrixPiAliasDefEq :=
+  normalizationMatrixPiAliasEnv_le_aliasEnv.defeqs VEnv.addDefEq_self
+
+theorem normalizationMatrixTypeFamily_defeq {env : VEnv} {U : Nat}
+    {Γ : List VExpr} (henv : normalizationMatrixAliasEnv ≤ env) :
+    env.IsDefEq U Γ (VExpr.const ``TypeFamilyAlias [])
+      (VExpr.sort (.succ .zero))
+      (VExpr.sort (.succ (.succ .zero))) := by
+  exact .extra (df := typeFamilyAliasDefEq) (ls := [])
+    (henv.defeqs normalizationMatrix_typeFamilyAliasDefEq_mem)
+    (fun _ h => nomatch h) rfl
+
+theorem normalizationMatrixRecAlias_app_defeq {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {u : VLevel} {A : VExpr} (hu : u.WF U)
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hA : env.HasType U Γ A (VExpr.sort u)) :
+    env.IsDefEq U Γ ((VExpr.const ``RecAlias [u]).app A) A
+      (VExpr.sort u) := by
+  have hdelta : env.IsDefEq U Γ (VExpr.const ``RecAlias [u])
+      (VExpr.lam (VExpr.sort u) (VExpr.bvar 0))
+      (VExpr.forallE (VExpr.sort u) (VExpr.sort u)) :=
+    .extra (df := recAliasDefEq) (ls := [u])
+      (henv.defeqs normalizationMatrix_recAliasDefEq_mem)
+      (by simpa using hu) rfl
+  have hbeta := VEnv.IsDefEq.beta (VEnv.IsDefEq.bvar .zero) hA
+  exact (VEnv.IsDefEq.appDF hdelta hA).trans (by
+    simpa [VExpr.inst, VExpr.instVar, VExpr.liftN] using hbeta)
+
+theorem normalizationMatrixBetaAlias_app_defeq {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {u : VLevel} {A : VExpr} (hu : u.WF U)
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hA : env.HasType U Γ A (VExpr.sort u)) :
+    env.IsDefEq U Γ ((VExpr.const ``MatrixBetaAlias [u]).app A) A
+      (VExpr.sort u) := by
+  have hdelta : env.IsDefEq U Γ (VExpr.const ``MatrixBetaAlias [u])
+      (VExpr.lam (VExpr.sort u)
+        ((VExpr.lam (VExpr.sort u) (VExpr.bvar 0)).app (VExpr.bvar 0)))
+      (VExpr.forallE (VExpr.sort u) (VExpr.sort u)) :=
+    .extra (df := matrixBetaAliasDefEq) (ls := [u])
+      (henv.defeqs normalizationMatrix_betaAliasDefEq_mem)
+      (by simpa using hu) rfl
+  have hbody : env.HasType U (VExpr.sort u :: Γ)
+      ((VExpr.lam (VExpr.sort u) (VExpr.bvar 0)).app (VExpr.bvar 0))
+      (VExpr.sort u) :=
+    VEnv.HasType.app
+      (VEnv.HasType.lam (VEnv.HasType.sort hu) (VEnv.HasType.bvar .zero))
+      (VEnv.HasType.bvar .zero)
+  have houterBeta := VEnv.IsDefEq.beta hbody hA
+  have houter := (VEnv.IsDefEq.appDF hdelta hA).trans (by
+    simpa [VExpr.inst, VExpr.instVar, VExpr.liftN] using houterBeta)
+  have hinnerBeta := VEnv.IsDefEq.beta (VEnv.IsDefEq.bvar .zero) hA
+  exact houter.trans (by
+    simpa [VExpr.inst, VExpr.instVar, VExpr.liftN] using hinnerBeta)
+
+theorem normalizationMatrixLetAlias_app_defeq {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {u : VLevel} {A : VExpr} (hu : u.WF U)
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hA : env.HasType U Γ A (VExpr.sort u)) :
+    env.IsDefEq U Γ ((VExpr.const ``MatrixLetAlias [u]).app A) A
+      (VExpr.sort u) := by
+  have hdelta : env.IsDefEq U Γ (VExpr.const ``MatrixLetAlias [u])
+      (VExpr.lam (VExpr.sort u) (VExpr.bvar 0))
+      (VExpr.forallE (VExpr.sort u) (VExpr.sort u)) :=
+    .extra (df := matrixLetAliasDefEq) (ls := [u])
+      (henv.defeqs normalizationMatrix_letAliasDefEq_mem)
+      (by simpa using hu) rfl
+  have hbeta := VEnv.IsDefEq.beta (VEnv.IsDefEq.bvar .zero) hA
+  exact (VEnv.IsDefEq.appDF hdelta hA).trans (by
+    simpa [VExpr.inst, VExpr.instVar, VExpr.liftN] using hbeta)
+
+private theorem normalizationMatrix_one_imax_equiv (u : VLevel) :
+    .imax (.succ .zero) u ≈ u := by
+  rw [VLevel.equiv_def]
+  intro ls
+  simp only [VLevel.eval, Nat.zero_add]
+  let n := u.eval ls
+  change Nat.imax 1 n = n
+  by_cases h : n = 0
+  · simp [Nat.imax, h]
+  · have hn : 1 ≤ n := Nat.one_le_iff_ne_zero.mpr h
+    simp [Nat.imax, h, Nat.max_eq_right hn]
+
+theorem normalizationMatrixPiAlias_app_defeq {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {u : VLevel} {A : VExpr} (hu : u.WF U)
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hA : env.HasType U Γ A (VExpr.sort u)) :
+    env.IsDefEq U Γ ((VExpr.const ``MatrixPiAlias [u]).app A)
+      (VExpr.forallE (VExpr.sort .zero) A.lift) (VExpr.sort u) := by
+  have hdelta : env.IsDefEq U Γ (VExpr.const ``MatrixPiAlias [u])
+      (VExpr.lam (VExpr.sort u)
+        (VExpr.forallE (VExpr.sort .zero) (VExpr.bvar 1)))
+      (VExpr.forallE (VExpr.sort u) (VExpr.sort u)) :=
+    .extra (df := matrixPiAliasDefEq) (ls := [u])
+      (henv.defeqs normalizationMatrix_piAliasDefEq_mem)
+      (by simpa using hu) rfl
+  have hbody : env.HasType U (VExpr.sort u :: Γ)
+      (VExpr.forallE (VExpr.sort .zero) (VExpr.bvar 1))
+      (VExpr.sort u) := by
+    apply VEnv.IsDefEq.defeq
+      (VEnv.IsDefEq.sortDF
+        (l := .imax (.succ .zero) u) (l' := u)
+        ⟨trivial, hu⟩ hu (normalizationMatrix_one_imax_equiv u))
+    exact VEnv.HasType.forallE (VEnv.HasType.sort (by trivial))
+      (VEnv.HasType.bvar (.succ .zero))
+  have hbeta := VEnv.IsDefEq.beta hbody hA
+  exact (VEnv.IsDefEq.appDF hdelta hA).trans (by
+    simpa [VExpr.inst, VExpr.instVar, VExpr.liftN] using hbeta)
+
+theorem normalizationMatrixIndexAlias_app_hasType {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {index : VExpr}
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hindex : env.HasType U Γ index (VExpr.sort (.succ .zero))) :
+    env.HasType U Γ ((VExpr.const ``MatrixIndexAlias []).app index)
+      (VExpr.sort (.succ .zero)) := by
+  have hfn : env.HasType U Γ (VExpr.const ``MatrixIndexAlias [])
+      ((VExpr.const ``TypeFamilyAlias []).forallE
+        (VExpr.const ``TypeFamilyAlias [])) :=
+    .constDF (henv.constants (by rfl : normalizationMatrixAliasEnv.constants
+        ``MatrixIndexAlias = some (vconst(type_of% @MatrixIndexAlias))))
+      (fun _ h => nomatch h) (fun _ h => nomatch h) rfl .nil
+  have hindexRaw := (normalizationMatrixTypeFamily_defeq henv).defeq' hindex
+  exact (normalizationMatrixTypeFamily_defeq henv).defeq
+    (VEnv.HasType.app hfn hindexRaw)
+
+theorem normalizationMatrixTarget_hasType {env : VEnv} {U : Nat}
+    {Γ : List VExpr} {alpha index : VExpr}
+    (henv : normalizationMatrixAliasEnv ≤ env)
+    (hfamily : env.constants ``NormalizationMatrix =
+      some normalizationMatrixRawType.toVConstant)
+    (halpha : env.HasType U Γ alpha (VExpr.const ``TypeFamilyAlias []))
+    (hindex : env.HasType U Γ index (VExpr.const ``TypeFamilyAlias [])) :
+    env.HasType U Γ (normalizationMatrixTarget alpha index)
+      (VExpr.sort (.succ (.succ .zero))) := by
+  have hfn : env.HasType U Γ (VExpr.const ``NormalizationMatrix [])
+      (VExpr.forallE (VExpr.const ``TypeFamilyAlias [])
+        (VExpr.forallE (VExpr.const ``TypeFamilyAlias [])
+          (VExpr.sort (.succ (.succ .zero))))) :=
+    .constDF hfamily (fun _ h => nomatch h) (fun _ h => nomatch h)
+      rfl .nil
+  have hindexFn : env.HasType U Γ (VExpr.const ``MatrixIndexAlias [])
+      ((VExpr.const ``TypeFamilyAlias []).forallE
+        (VExpr.const ``TypeFamilyAlias [])) :=
+    .constDF (henv.constants (by rfl : normalizationMatrixAliasEnv.constants
+        ``MatrixIndexAlias = some (vconst(type_of% @MatrixIndexAlias))))
+      (fun _ h => nomatch h) (fun _ h => nomatch h) rfl .nil
+  exact VEnv.HasType.app (VEnv.HasType.app hfn halpha)
+    (VEnv.HasType.app hindexFn hindex)
+
+theorem normalizationMatrixNormalization_wf :
+    normalizationMatrixNormalization.WF normalizationMatrixAliasEnv := by
+  refine ⟨normalizationMatrixRawType, normalizationMatrixViewType,
+    rfl, rfl, ?_, ?_⟩
+  · refine ⟨VExpr.sort (.imax (.succ (.succ .zero))
+        (.imax (.succ (.succ .zero))
+          (.succ (.succ (.succ .zero))))), ?_⟩
+    change normalizationMatrixAliasEnv.IsDefEq 0 []
+      ((VExpr.const ``TypeFamilyAlias []).forallE
+        ((VExpr.const ``TypeFamilyAlias []).forallE
+          (VExpr.sort (.succ (.succ .zero)))))
+      ((VExpr.sort (.succ .zero)).forallE
+        ((VExpr.sort (.succ .zero)).forallE
+          (VExpr.sort (.succ (.succ .zero)))))
+      (VExpr.sort (.imax (.succ (.succ .zero))
+        (.imax (.succ (.succ .zero))
+          (.succ (.succ (.succ .zero))))))
+    apply VEnv.IsDefEq.forallEDF
+    · exact normalizationMatrixTypeFamily_defeq .rfl
+    · apply VEnv.IsDefEq.forallEDF
+      · exact normalizationMatrixTypeFamily_defeq .rfl
+      · exact VEnv.IsDefEq.sortDF (by decide) (by decide) rfl
+  · intro envT hadd
+    have henv : normalizationMatrixAliasEnv ≤ envT :=
+      VEnv.addConst_le hadd
+    have htypeFamily : envT.constants ``TypeFamilyAlias =
+        some (vconst(type_of% @TypeFamilyAlias)) :=
+      henv.constants (by rfl)
+    have hrecAlias : envT.constants ``RecAlias =
+        some (vconst(type_of% @RecAlias)) :=
+      henv.constants (by rfl)
+    have hbetaAlias : envT.constants ``MatrixBetaAlias =
+        some (vconst(type_of% @MatrixBetaAlias)) :=
+      henv.constants (by rfl)
+    have hletAlias : envT.constants ``MatrixLetAlias =
+        some (vconst(type_of% @MatrixLetAlias)) :=
+      henv.constants (by rfl)
+    have hpiAlias : envT.constants ``MatrixPiAlias =
+        some (vconst(type_of% @MatrixPiAlias)) :=
+      henv.constants (by rfl)
+    have hindexAlias : envT.constants ``MatrixIndexAlias =
+        some (vconst(type_of% @MatrixIndexAlias)) :=
+      henv.constants (by rfl)
+    have hfamily : envT.constants ``NormalizationMatrix =
+        some normalizationMatrixRawType.toVConstant :=
+      VEnv.addConst_self hadd
+    exact .cons ⟨_, by
+      apply VEnv.IsDefEq.forallEDF
+      · exact normalizationMatrixTypeFamily_defeq henv
+      · apply VEnv.IsDefEq.forallEDF
+        · exact normalizationMatrixTypeFamily_defeq henv
+        · apply VEnv.IsDefEq.forallEDF
+          · exact normalizationMatrixRecAlias_app_defeq
+              (by decide) henv (by type_tac)
+          · apply VEnv.IsDefEq.forallEDF
+            · exact normalizationMatrixBetaAlias_app_defeq
+                (by decide) henv (by type_tac)
+            · apply VEnv.IsDefEq.forallEDF
+              · exact normalizationMatrixLetAlias_app_defeq
+                  (by decide) henv (by type_tac)
+              · apply VEnv.IsDefEq.forallEDF
+                · exact normalizationMatrixRecAlias_app_defeq
+                    (by decide) henv (by type_tac)
+                · apply VEnv.IsDefEq.forallEDF
+                  · exact normalizationMatrixPiAlias_app_defeq
+                      (by decide) henv (by type_tac)
+                  · apply VEnv.IsDefEq.forallEDF
+                    · exact normalizationMatrixBetaAlias_app_defeq
+                        (by decide) henv (by type_tac)
+                    · apply VEnv.IsDefEq.forallEDF
+                      · exact normalizationMatrixLetAlias_app_defeq
+                          (by decide) henv (by type_tac)
+                      · type_tac⟩ .nil
+
+theorem normalizationMatrixViewChecked_wf :
+    normalizationMatrixViewChecked.WF normalizationMatrixAliasEnv := by
+  refine ⟨?_, ?_⟩
+  · change normalizationMatrixAliasEnv.OnTel 0 []
+      [VExpr.sort (.succ .zero), VExpr.sort (.succ .zero)]
+    exact ⟨⟨_, by type_tac⟩, ⟨⟨_, by type_tac⟩, trivial⟩⟩
+  · intro c hc
+    change c ∈ [normalizationMatrixViewCtor] at hc
+    have hc' : c = normalizationMatrixViewCtor :=
+      List.mem_singleton.1 hc
+    subst c
+    constructor
+    · change fieldsWF 0 ``NormalizationMatrix 1
+        normalizationMatrixAliasEnv (.succ (.succ .zero))
+        [VExpr.sort (.succ .zero)] [VExpr.sort (.succ .zero)] 0
+        [VExpr.sort (.succ .zero), VExpr.sort .zero,
+          VExpr.sort .zero, VExpr.sort .zero,
+          normalizationMatrixTarget (.bvar 4) (.bvar 3),
+          (VExpr.sort .zero).forallE
+            (normalizationMatrixTarget (.bvar 6) (.bvar 5)),
+          normalizationMatrixTarget (.bvar 6) (.bvar 5),
+          normalizationMatrixTarget (.bvar 7) (.bvar 6)]
+      refine ⟨?_, ?_, ?_⟩
+      · exact .inr (.inr ⟨rfl, .succ (.succ .zero), by type_tac,
+          .inr (VLevel.le_refl _)⟩)
+      · intro h
+        change false = true at h
+        contradiction
+      · refine ⟨?_, ?_, ?_⟩
+        · exact .inr (.inr ⟨rfl, .succ .zero, by type_tac,
+            .inr VLevel.le_succ⟩)
+        · intro h
+          change false = true at h
+          contradiction
+        · refine ⟨?_, ?_, ?_⟩
+          · exact .inr (.inr ⟨rfl, .succ .zero, by type_tac,
+              .inr VLevel.le_succ⟩)
+          · intro h
+            change false = true at h
+            contradiction
+          · refine ⟨?_, ?_, ?_⟩
+            · exact .inr (.inr ⟨rfl, .succ .zero, by type_tac,
+                .inr VLevel.le_succ⟩)
+            · intro h
+              change false = true at h
+              contradiction
+            · refine ⟨?_, ?_, ?_⟩
+              · exact .inl rfl
+              · intro _
+                exact ⟨_, _, rfl,
+                  normalizationMatrixIndexAlias_app_hasType .rfl
+                    (by type_tac), rfl⟩
+              · refine ⟨?_, ?_, ?_⟩
+                · refine .inr (.inl ⟨_, rfl, by decide, ?_⟩)
+                  constructor
+                  · exact ⟨⟨_, by type_tac⟩, trivial⟩
+                  · exact ⟨_, _, rfl,
+                      normalizationMatrixIndexAlias_app_hasType .rfl
+                        (by type_tac), rfl⟩
+                · intro h
+                  change false = true at h
+                  contradiction
+                · refine ⟨?_, ?_, ?_⟩
+                  · exact .inl rfl
+                  · intro _
+                    exact ⟨_, _, rfl,
+                      normalizationMatrixIndexAlias_app_hasType .rfl
+                        (by type_tac), rfl⟩
+                  · refine ⟨?_, ?_, trivial⟩
+                    · exact .inl rfl
+                    · intro _
+                      exact ⟨_, _, rfl,
+                        normalizationMatrixIndexAlias_app_hasType .rfl
+                          (by type_tac), rfl⟩
+    · exact ⟨_, _, rfl,
+        normalizationMatrixIndexAlias_app_hasType .rfl (by type_tac), rfl⟩
+
+theorem normalizationMatrixBlock_wf :
+    normalizationMatrixBlock.WF normalizationMatrixAliasEnv :=
+  ⟨normalizationMatrixNormalization_wf,
+    normalizationMatrixViewChecked_wf⟩
+
+theorem normalizationMatrixGenerationChecked_wf :
+    normalizationMatrixGenerationChecked.WF normalizationMatrixAliasEnv := by
+  refine {
+    blockWF := normalizationMatrixBlock_wf
+    familyTel := ?_
+    familyResult := ?_
+    ctors := ?_ }
+  · refine ⟨⟨_, normalizationMatrixTypeFamily_defeq .rfl⟩, ?_⟩
+    exact ⟨⟨_, normalizationMatrixTypeFamily_defeq .rfl⟩, trivial⟩
+  · exact VEnv.IsDefEq.sortDF (by decide) (by decide) rfl
+  · intro envT hadd ctor hctor
+    change ctor ∈
+      [⟨normalizationMatrixRawType.ctors[0],
+        normalizationMatrixViewChecked.constructors[0]⟩] at hctor
+    obtain rfl := List.mem_singleton.1 hctor
+    have henv : normalizationMatrixAliasEnv ≤ envT :=
+      VEnv.addConst_le hadd
+    have hfamily : envT.constants ``NormalizationMatrix =
+        some normalizationMatrixRawType.toVConstant :=
+      VEnv.addConst_self hadd
+    have hindexAlias : envT.constants ``MatrixIndexAlias =
+        some (vconst(type_of% @MatrixIndexAlias)) :=
+      henv.constants (by rfl)
+    refine {
+      declaredTel := ?_
+      declaredResult := ?_
+      emittedTel := ?_
+      emittedResult := ?_ }
+    · refine ⟨⟨_, normalizationMatrixTypeFamily_defeq henv⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixTypeFamily_defeq henv⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixRecAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixBetaAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixLetAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixRecAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixPiAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixBetaAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      exact ⟨⟨_, normalizationMatrixLetAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, trivial⟩
+    · exact normalizationMatrixTarget_hasType henv hfamily
+        (by type_tac) (by type_tac)
+    · refine ⟨⟨_, by type_tac⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixTypeFamily_defeq henv⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixRecAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixBetaAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixLetAlias_app_defeq
+        (by decide) henv (by type_tac)⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixRecAlias_app_defeq
+        (by decide) henv (by
+          exact normalizationMatrixTarget_hasType henv hfamily
+            ((normalizationMatrixTypeFamily_defeq henv).defeq'
+              (by type_tac))
+            (by type_tac))⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixPiAlias_app_defeq
+        (by decide) henv (by
+          exact normalizationMatrixTarget_hasType henv hfamily
+            ((normalizationMatrixTypeFamily_defeq henv).defeq'
+              (by type_tac))
+            (by type_tac))⟩, ?_⟩
+      refine ⟨⟨_, normalizationMatrixBetaAlias_app_defeq
+        (by decide) henv (by
+          exact normalizationMatrixTarget_hasType henv hfamily
+            ((normalizationMatrixTypeFamily_defeq henv).defeq'
+              (by type_tac))
+            (by type_tac))⟩, ?_⟩
+      exact ⟨⟨_, normalizationMatrixLetAlias_app_defeq
+        (by decide) henv (by
+          exact normalizationMatrixTarget_hasType henv hfamily
+            ((normalizationMatrixTypeFamily_defeq henv).defeq'
+              (by type_tac))
+            (by type_tac))⟩, trivial⟩
+    · exact normalizationMatrixTarget_hasType henv hfamily
+        ((normalizationMatrixTypeFamily_defeq henv).defeq'
+          (by type_tac))
+        (by type_tac)
+
+def normalizationMatrixFinalEnv : VEnv :=
+  (normalizationMatrixAliasEnv.addInductGeneration
+    normalizationMatrixGenerationChecked).get (by decide)
+
+theorem normalizationMatrix_addInductGeneration :
+    normalizationMatrixAliasEnv.addInductGeneration
+      normalizationMatrixGenerationChecked =
+        some normalizationMatrixFinalEnv := rfl
+
+theorem normalizationMatrixFinalEnv_trace :
+    Nonempty (VEnv.AddInductGenerationTrace normalizationMatrixAliasEnv
+      normalizationMatrixFinalEnv normalizationMatrixGenerationChecked) :=
+  VEnv.addInductGeneration_trace normalizationMatrix_addInductGeneration
+
+theorem normalizationMatrixFinalEnv_family_lookup :
+    normalizationMatrixFinalEnv.constants ``NormalizationMatrix =
+      some normalizationMatrixRawType.toVConstant := by
+  rcases normalizationMatrixFinalEnv_trace with ⟨H⟩
+  exact H.family_lookup
+
+theorem normalizationMatrixFinalEnv_ctor_lookup :
+    normalizationMatrixFinalEnv.constants ``NormalizationMatrix.mk =
+      some normalizationMatrixRawType.ctors[0].toVConstant := by
+  rcases normalizationMatrixFinalEnv_trace with ⟨H⟩
+  exact H.ctor_lookup (.head _)
+
+theorem normalizationMatrixFinalEnv_rec_lookup :
+    normalizationMatrixFinalEnv.constants ``NormalizationMatrix.rec =
+      some (vconst(type_of% @NormalizationMatrix.rec)) := by
+  rcases normalizationMatrixFinalEnv_trace with ⟨H⟩
+  exact H.rec_lookup
+
+theorem normalizationMatrixFinalEnv_iota_mem :
+    normalizationMatrixFinalEnv.defeqs
+      (vdefeq(alpha motive mk index ordinary beta letBound direct
+        piHidden betaRecursive letRecursive =>
+        @NormalizationMatrix.rec alpha motive mk (MatrixIndexAlias index)
+            (@NormalizationMatrix.mk alpha index ordinary beta letBound direct
+              piHidden betaRecursive letRecursive) ≡
+          mk index ordinary beta letBound direct piHidden betaRecursive
+            letRecursive
+            (@NormalizationMatrix.rec alpha motive mk
+              (MatrixIndexAlias index) direct)
+            (fun proof => @NormalizationMatrix.rec alpha motive mk
+              (MatrixIndexAlias index) (piHidden proof))
+            (@NormalizationMatrix.rec alpha motive mk
+              (MatrixIndexAlias index) betaRecursive)
+            (@NormalizationMatrix.rec alpha motive mk
+              (MatrixIndexAlias index) letRecursive))) := by
+  rcases normalizationMatrixFinalEnv_trace with ⟨H⟩
+  apply H.rule_mem
+  exact .head _
+
+theorem normalizationMatrixFinalEnv_ordered :
+    normalizationMatrixFinalEnv.Ordered :=
+  VEnv.addInductGeneration_WF normalizationMatrixAliasEnv_ordered
+    normalizationMatrixGenerationChecked_wf
+    normalizationMatrix_addInductGeneration
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixNormalization_wf' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixNormalization_wf
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixViewChecked_wf' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixViewChecked_wf
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixGenerationChecked_wf' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixGenerationChecked_wf
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixFinalEnv_trace' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixFinalEnv_trace
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixFinalEnv_iota_mem' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixFinalEnv_iota_mem
+
+/--
+info: 'Lean4Lean.InductiveFixtures.normalizationMatrixFinalEnv_ordered' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms normalizationMatrixFinalEnv_ordered
+
 /-! ## Checked-analysis rejection fixtures -/
 
 /-
@@ -1676,34 +2924,72 @@ def ctorCollisionEnv : VEnv :=
 
 example : ctorCollisionEnv.constants ``Nat.zero = some ⟨0, .sort .zero⟩ := rfl
 example : ctorCollisionEnv.addInduct natDecl = none :=
-  VEnv.addInduct_eq_none_of_ctor_present rfl (.head _) ⟨_, rfl⟩
+  VEnv.addInduct_eq_none_of_ctor_present (.head _) (.head _) ⟨_, rfl⟩
 
 def recCollisionEnv : VEnv :=
   (VEnv.empty.addConst ``Nat.rec ⟨0, .sort .zero⟩).get (by decide)
 
 example : recCollisionEnv.constants ``Nat.rec = some ⟨0, .sort .zero⟩ := rfl
 example : recCollisionEnv.addInduct natDecl = none :=
-  VEnv.addInduct_eq_none_of_rec_present rfl ⟨_, rfl⟩
+  VEnv.addInduct_eq_none_of_rec_present
+    (generation := natBlockGenerationChecked) rfl (.head _) ⟨_, rfl⟩
 
-/-! ## Conservativity: outside the stage-3 class `addInduct` refuses. -/
+/-! ## Small elimination -/
 
-/-- `Or` is Prop-valued with two constructors: no large elimination, so
-stage 3 rejects it. -/
-example : (show VInductDecl from ⟨0, 2, [{
-      name := ``Or
-      uvars := 0
-      type := vconst(type_of% @Or).type
-      ctors := [⟨vconst(type_of% @Or.inl), ``Or.inl⟩,
-        ⟨vconst(type_of% @Or.inr), ``Or.inr⟩] }]⟩).checked? = none := rfl
+/-- `Or` is the canonical small-elimination family: its motive remains in
+`Prop`, so the generated recursor introduces no fresh universe parameter. -/
+def orType : VInductiveType where
+  name := ``Or
+  uvars := 0
+  type := vconst(type_of% @Or).type
+  ctors := [⟨vconst(type_of% @Or.inl), ``Or.inl⟩,
+    ⟨vconst(type_of% @Or.inr), ``Or.inr⟩]
 
-example :
-    VEnv.empty.addInduct ⟨0, 2, [{
-      name := ``Or
-      uvars := 0
-      type := vconst(type_of% @Or).type
-      ctors := [⟨vconst(type_of% @Or.inl), ``Or.inl⟩,
-        ⟨vconst(type_of% @Or.inr), ``Or.inr⟩] }]⟩ = none := rfl
+def orDecl : VInductDecl := ⟨0, 2, [orType]⟩
+
+def orChecked : orDecl.Checked := orDecl.checked?.get (by decide)
+
+example : orDecl.stage3 = true := rfl
+example : orChecked.elimination = .small := rfl
+example : orChecked.kTarget = false := rfl
+example : orChecked.recursor.uvars = 0 := rfl
+example : orChecked.recursor = vconst(type_of% @Or.rec) := rfl
+example : orChecked.generatedRules[0]? =
+    some (vdefeq(a b motive inl inr h =>
+      @Or.rec a b motive inl inr (@Or.inl a b h) ≡ inl h)) := rfl
+example : orChecked.generatedRules[1]? =
+    some (vdefeq(a b motive inl inr h =>
+      @Or.rec a b motive inl inr (@Or.inr a b h) ≡ inr h)) := rfl
+example : (VEnv.empty.addInduct orDecl).isSome = true := rfl
+
+/-- `And` is the canonical singleton-Prop exception: both constructor fields
+are proofs, so Lean legitimately gives it a large eliminator with one fresh
+universe parameter. -/
+def andType : VInductiveType where
+  name := ``And
+  uvars := 0
+  type := vconst(type_of% @And).type
+  ctors := [⟨vconst(type_of% @And.intro), ``And.intro⟩]
+
+def andDecl : VInductDecl := ⟨0, 2, [andType]⟩
+
+def andChecked : andDecl.Checked := andDecl.checked?.get (by decide)
+
+example : andDecl.stage3 = true := rfl
+example : andChecked.elimination = .large := rfl
+/-- Large elimination and K eligibility are independent: `And` has the
+singleton-proof elimination exception, but its constructor has fields. -/
+example : andChecked.kTarget = false := rfl
+example : andChecked.recursor.uvars = 1 := rfl
+example : andChecked.recursor = vconst(type_of% @And.rec) := rfl
+example : andChecked.generatedRules[0]? =
+    some (vdefeq(a b motive intro left right =>
+      @And.rec a b motive intro (@And.intro a b left right) ≡
+        intro left right)) := rfl
+example : (VEnv.empty.addInduct andDecl).isSome = true := rfl
+
+/-! ## Conservativity: malformed declarations and name collisions refuse. -/
 
 /-- A name collision rejects the whole transaction. -/
 example (env : VEnv) (h : env.contains ``Nat) : env.addInduct natDecl = none :=
-  VEnv.addInduct_eq_none_of_type_present rfl h
+  VEnv.addInduct_eq_none_of_type_present (.head _) h

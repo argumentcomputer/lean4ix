@@ -324,6 +324,65 @@ def declareInductiveTypes (stats : InductiveStats) (numParams : Nat)
     env.checkName info.name c.allowPrimitive
     return env.add (.inductInfo info)
 
+/-- The exact kernel family record assembled for a singleton inductive block.
+Naming it exposes the value installed by `declareInductiveTypes` without
+asking a replay proof to duplicate the producer's record construction. -/
+def singletonDeclaredInfo (stats : InductiveStats) (numParams numIndices : Nat)
+    (indType : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) : InductiveVal :=
+  { indType with
+    numParams, numIndices, all := [indType.name], numNested, isUnsafe
+    levelParams := context.lparams
+    ctors := indType.ctors.map (·.name)
+    isRec := isRec #[indType] stats.indConsts
+    isReflexive := isReflexive #[indType] stats.indConsts }
+
+/-- A successful singleton family declaration installs exactly the family
+record assembled by the executable producer.  The result equation supplies
+the name-check evidence; replay callers provide only the validator's exact
+singleton index count. -/
+theorem declareInductiveTypes_singleton_constants
+    (stats : InductiveStats) (numParams numIndices : Nat)
+    (indType : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) (familyEnv : Environment)
+    (hnindices : stats.nindices = #[numIndices])
+    (hdeclare :
+      declareInductiveTypes stats numParams #[indType] numNested isUnsafe context =
+        .ok familyEnv) :
+    familyEnv.constants =
+      context.env.constants.insert indType.name
+        (.inductInfo <| singletonDeclaredInfo stats numParams numIndices
+          indType numNested isUnsafe context) := by
+  unfold declareInductiveTypes at hdeclare
+  rw [hnindices] at hdeclare
+  cases hcheck : context.env.checkName indType.name context.allowPrimitive with
+  | error error =>
+      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
+  | ok _ =>
+      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
+      exact congrArg Kernel.Environment.constants hdeclare.symm
+
+/-- A successful singleton family declaration changes only the constant map;
+in particular it preserves the kernel's quotient-initialization flag. -/
+theorem declareInductiveTypes_singleton_quotInit
+    (stats : InductiveStats) (numParams numIndices : Nat)
+    (indType : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) (familyEnv : Environment)
+    (hnindices : stats.nindices = #[numIndices])
+    (hdeclare :
+      declareInductiveTypes stats numParams #[indType] numNested isUnsafe context =
+        .ok familyEnv) :
+    familyEnv.quotInit = context.env.quotInit := by
+  unfold declareInductiveTypes at hdeclare
+  rw [hnindices] at hdeclare
+  cases hcheck : context.env.checkName indType.name context.allowPrimitive with
+  | error error =>
+      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
+  | ok _ =>
+      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
+      subst familyEnv
+      rfl
+
 /-- Family declaration observes only the environment, universe parameters,
 and primitive-name policy of its reader context.  In particular, the local
 telescope and fresh-name generator retained by family validation do not alter
@@ -392,55 +451,65 @@ def checkPositivity (stats : InductiveStats) (t : Expr) (ctor : Name) (idx : Nat
       throw <| .other s!"arg #{idx + 1} of '{ctor}' \
         has a non valid occurrence of the datatypes being declared"
 
+/-- Validate the parameter/field telescope and terminal family application of
+one constructor. This is factored from the outer traversal so successful
+executions can be retained without reproducing compiler-expanded `for` loops. -/
+def checkConstructorType (stats : InductiveStats) (isUnsafe : Bool)
+    (idx : Nat) (n : Name) (t : Expr) : M Unit := do
+  loop t 0 (← readThe Context).fuel.inductiveFuel
+where
+  loop t i
+  | 0 => throw .deepRecursion
+  | fuel+1 => do
+    if let .forallE name dom body bi := t then
+      if let some param := stats.params[i]? then
+        unless ← isDefEq dom (← getType param) do
+          throw <| .other
+            s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
+        loop (body.instantiate1 param) (i + 1) fuel
+      else
+        let s ← ensureType dom
+        -- Equal levels are reflexively admissible, so discharge that common
+        -- case before consulting the full normalization comparison.
+        if levelStructGe stats.resultLevel s.sortLevel! then
+          pure ()
+        else
+          unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
+            throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
+              is too big for the corresponding inductive datatype"
+        if !isUnsafe then
+          checkPositivity stats dom n i
+        withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
+          loop (body.instantiate1 arg) (i + 1) fuel
+    else if !isValidIndAppIdx stats t idx then
+      throw <| .other s!"invalid return type for '{n}'"
+
+/-- Validate constructors in source order while retaining the duplicate-name
+accumulator as the fold result. -/
+def checkConstructorFold (env : Environment) (stats : InductiveStats)
+    (isUnsafe : Bool) (idx : Nat) (seen : NameSet)
+    (ctors : List Constructor) : M NameSet := match ctors with
+  | [] => pure seen
+  | ctor :: ctors => do
+    let n := ctor.name
+    if seen.contains n then
+      throw <| .other s!"duplicate constructor name '{n}'"
+    let seen := seen.insert n
+    let t := ctor.type
+    env.checkNoMVarNoFVar n t
+    -- Constructor metadata has just been established to contain no free
+    -- variables. Its full closed-type check does not inherit family locals;
+    -- parameter matching in `checkConstructorType` deliberately does.
+    _ ← withEmptyLocalContext do checkType t
+    checkConstructorType stats isUnsafe idx n t
+    checkConstructorFold env stats isUnsafe idx seen ctors
+
 def checkConstructors (indTypes : Array InductiveType)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
   let env ← getEnv
   for h : idx in [:indTypes.size] do
     let indType := indTypes[idx]
-    let mut foundCtors : NameSet := {}
-    for ctor in indType.ctors do
-      let n := ctor.name
-      if foundCtors.contains n then
-        throw <| .other s!"duplicate constructor name '{n}'"
-      foundCtors := foundCtors.insert n
-      let t := ctor.type
-      env.checkNoMVarNoFVar n t
-      -- Constructor metadata has just been established to contain no free
-      -- variables.  Its full closed-type check must therefore not inherit the
-      -- parameter/index locals retained by family validation; keeping that
-      -- check local-context independent also gives candidate replay one stable
-      -- execution.  The telescope loop below deliberately remains in the
-      -- family context because parameter matching uses `stats.params`.
-      _ ← withEmptyLocalContext do checkType t
-      let rec loop t i
-      | 0 => throw .deepRecursion
-      | fuel+1 => do
-        if let .forallE name dom body bi := t then
-          if let some param := stats.params[i]? then
-            unless ← isDefEq dom (← getType param) do
-              throw <| .other
-                s!"arg #{i + 1} of '{n}' does not match inductive datatype parameters"
-            loop (body.instantiate1 param) (i + 1) fuel
-          else
-            let s ← ensureType dom
-            -- Equal levels are reflexively admissible, so discharge that
-            -- common case before consulting the full standard-library
-            -- normalization comparison. Besides avoiding needless work, this
-            -- keeps exact checker executions reducible without a separate
-            -- reflexivity contract axiom.
-            if levelStructGe stats.resultLevel s.sortLevel! then
-              pure ()
-            else
-              unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
-                throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
-                  is too big for the corresponding inductive datatype"
-            if !isUnsafe then
-              checkPositivity stats dom n i
-            withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
-              loop (body.instantiate1 arg) (i + 1) fuel
-        else if !isValidIndAppIdx stats t idx then
-          throw <| .other s!"invalid return type for '{n}'"
-      loop t 0 (← readThe Context).fuel.inductiveFuel
+    _ ← checkConstructorFold env stats isUnsafe idx {} indType.ctors
 
 /-- One observed WHNF node in the executable normalization-candidate pass.
 The complete `AddInductive.Context` is retained because Verify must replay the
@@ -858,7 +927,7 @@ def storedSpine :
   | _, _, .terminal .. => true
   | _, _, .forallE _ source _ name domain body binderInfo _ _ _ _ _ _
       bodyCandidate =>
-    (source == .forallE name domain body binderInfo) &&
+    Expr.structuralEq source (.forallE name domain body binderInfo) &&
       storedSpine bodyCandidate
 
 /-- Number of stored Pi binders on the main (body) path of a candidate. -/
@@ -897,6 +966,53 @@ def terminalContext : CandidateExprTrace context source → Context
 theorem terminalContext_lparams
     (candidate : CandidateExprTrace context source) :
     candidate.terminalContext.lparams = context.lparams := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Following the main candidate Π spine preserves the kernel environment. -/
+theorem terminalContext_env
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.env = context.env := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Following the main candidate Π spine preserves the primitive-name
+policy used by family declaration. -/
+theorem terminalContext_allowPrimitive
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.allowPrimitive = context.allowPrimitive := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Following the main candidate Π spine changes only the local context and
+name generator; it preserves the checker safety mode. -/
+theorem terminalContext_safety
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.safety = context.safety := by
+  induction candidate with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+    simpa [terminalContext, Context.pushLocalDecl] using body_ih
+
+/-- Following the main candidate Π spine preserves the checker fuel
+configuration. -/
+theorem terminalContext_fuel
+    (candidate : CandidateExprTrace context source) :
+    candidate.terminalContext.fuel = context.fuel := by
   induction candidate with
   | terminal => rfl
   | forallE context source inferred name domain body binderInfo fresh
@@ -1390,6 +1506,65 @@ theorem buildCandidateExpr_loop_of_whnf_forall
         annotations.consumed hannotationsEq,
       hdomain, hbody, Pure.pure, Except.pure]
 
+/-- Every annotation choice on a successfully built candidate main spine
+comes from the transparent annotation builder used by the ordinary producer.
+This recovers validator-replay provenance from the executable traversal
+itself; callers do not supply an independent annotation premise. -/
+theorem CandidateExprTrace.validationAnnotations_of_loop
+    {context : Context} {source : Expr} {fuel : Nat}
+    {candidate : CandidateExprTrace context source}
+    (h : buildCandidateExpr.loop context source fuel = .ok candidate) :
+    candidate.validationAnnotations := by
+  fun_induction buildCandidateExpr.loop context source fuel <;>
+    simp_all
+  case case5 =>
+    simp only [Bind.bind, Except.bind] at h
+    repeat' split at h
+    all_goals try simp_all [Functor.map, Except.map]
+    repeat' split at h
+    all_goals try simp_all
+    subst candidate
+    constructor
+    · apply CandidateTypeAnnotations.matches_of_build
+      assumption
+    · apply_assumption
+      assumption
+  case case6 =>
+    simp only [Pure.pure, Except.pure, Except.ok.injEq] at h
+    subst candidate
+    trivial
+
+/-- A successful ordinary candidate-expression call carries the complete
+annotation provenance needed to replay family validation. -/
+theorem CandidateExpr.validationAnnotations_of_build
+    {context : Context} {source : Expr}
+    {candidate : CandidateExpr source}
+    (h : buildCandidateExpr source context = .ok candidate) :
+    candidate.trace.validationAnnotations := by
+  unfold buildCandidateExpr at h
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.bind, Except.pure] at h
+  split at h <;> try simp_all
+  simp [ReaderT.pure, Pure.pure, Except.pure] at h
+  subst candidate
+  apply CandidateExprTrace.validationAnnotations_of_loop
+  assumption
+
+/-- The context stored at the root of a successful expression candidate is
+the exact reader context in which the ordinary builder was executed. -/
+theorem CandidateExpr.context_eq_of_build
+    {context : Context} {source : Expr}
+    {candidate : CandidateExpr source}
+    (h : buildCandidateExpr source context = .ok candidate) :
+    candidate.context = context := by
+  unfold buildCandidateExpr at h
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.bind, Except.pure] at h
+  split at h <;> try simp_all
+  simp [ReaderT.pure, Pure.pure, Except.pure] at h
+  subst candidate
+  rfl
+
 /-- Erase the operational trace and retain only the analysis expression. -/
 def normalizeCandidateExpr (e : Expr) : M Expr := do
   return (← buildCandidateExpr e).view
@@ -1466,6 +1641,17 @@ def toList (f : (a : α) → F a → β) :
 def singleton : CandidateList F [source] → F source
   | .cons head .nil => head
 
+/-- A source-indexed singleton list is completely determined by its total
+singleton projection.  This eta law lets retained producer witnesses be
+reindexed at staged singleton APIs without inspecting or replacing their
+candidate payload. -/
+theorem singleton_eta (candidates : CandidateList F [source]) :
+    candidates = .cons candidates.singleton .nil := by
+  cases candidates with
+  | cons head tail =>
+      cases tail
+      rfl
+
 end CandidateList
 
 /-- Candidate for one constructor; its header is always taken from `source`. -/
@@ -1487,6 +1673,16 @@ structure CandidateFamily (source : InductiveType) where
   constructors :
     CandidateList CandidateConstructor source.ctors
 
+/-- Project the pre-family candidate spine from a complete dependent family
+candidate list without erasing source indices or using a parallel list. -/
+def CandidateList.familyTypes :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources →
+      CandidateList CandidateFamilyType sources
+  | [], .nil => .nil
+  | _ :: _, .cons family families =>
+    .cons family.familyType families.familyTypes
+
 def CandidateFamily.view (candidate : CandidateFamily source) : InductiveType :=
   { source with
     type := candidate.familyType.type.view
@@ -1496,9 +1692,60 @@ def normalizeCandidateConstructor
     (ctor : Constructor) : M (CandidateConstructor ctor) := do
   return ⟨← buildCandidateExpr ctor.type⟩
 
+/-- The root context stored by a successful constructor normalization is the
+exact post-family reader context used for that traversal. -/
+theorem CandidateConstructor.context_eq_of_normalize
+    {context : Context} {source : Constructor}
+    {candidate : CandidateConstructor source}
+    (h : normalizeCandidateConstructor source context = .ok candidate) :
+    candidate.type.context = context := by
+  unfold normalizeCandidateConstructor at h
+  simp only [ReaderT.bind, Bind.bind] at h
+  cases hbuild : buildCandidateExpr source.type context with
+  | error error =>
+      simp [Except.bind, hbuild] at h
+  | ok type =>
+      simp [Except.bind, ReaderT.pure, Pure.pure, Except.pure, hbuild] at h
+      subst candidate
+      exact CandidateExpr.context_eq_of_build hbuild
+
 def normalizeCandidateFamilyType
     (indType : InductiveType) : M (CandidateFamilyType indType) := do
   return ⟨← buildCandidateExpr indType.type⟩
+
+/-- A successful family-type normalization carries the annotation provenance
+of its underlying executable expression traversal. -/
+theorem CandidateFamilyType.validationAnnotations_of_normalize
+    {context : Context} {source : InductiveType}
+    {candidate : CandidateFamilyType source}
+    (h : normalizeCandidateFamilyType source context = .ok candidate) :
+    candidate.type.trace.validationAnnotations := by
+  unfold normalizeCandidateFamilyType at h
+  simp only [ReaderT.bind, Bind.bind] at h
+  cases hbuild : buildCandidateExpr source.type context with
+  | error error =>
+      simp [Except.bind, hbuild] at h
+  | ok type =>
+      simp [Except.bind, ReaderT.pure, Pure.pure, Except.pure, hbuild] at h
+      subst candidate
+      exact type.validationAnnotations_of_build hbuild
+
+/-- The root context stored by a successful family-type normalization is the
+exact pre-family reader context used for that traversal. -/
+theorem CandidateFamilyType.context_eq_of_normalize
+    {context : Context} {source : Lean.InductiveType}
+    {candidate : CandidateFamilyType source}
+    (h : normalizeCandidateFamilyType source context = .ok candidate) :
+    candidate.type.context = context := by
+  unfold normalizeCandidateFamilyType at h
+  simp only [ReaderT.bind, Bind.bind] at h
+  cases hbuild : buildCandidateExpr source.type context with
+  | error error =>
+      simp [Except.bind, hbuild] at h
+  | ok type =>
+      simp [Except.bind, ReaderT.pure, Pure.pure, Except.pure, hbuild] at h
+      subst candidate
+      exact CandidateExpr.context_eq_of_build hbuild
 
 def normalizeCandidateConstructorList :
     (ctors : List Constructor) →
@@ -1555,6 +1802,30 @@ theorem CandidateFamilyTypeListProduced.normalize
     rw [head, ih]
     rfl
 
+/-- A successful singleton family-type traversal retains the annotation
+provenance of the exact candidate selected at its sole source position. -/
+theorem CandidateFamilyTypeListProduced.singleton_validationAnnotations
+    {context : Context} {source : Lean.InductiveType}
+    {candidates : CandidateList CandidateFamilyType [source]}
+    (run : CandidateFamilyTypeListProduced context candidates) :
+    candidates.singleton.type.trace.validationAnnotations := by
+  cases run with
+  | cons head tail =>
+      cases tail
+      exact CandidateFamilyType.validationAnnotations_of_normalize head
+
+/-- A successful singleton family-type traversal stores its exact traversal
+context at the candidate root. -/
+theorem CandidateFamilyTypeListProduced.singleton_context_eq
+    {context : Context} {source : Lean.InductiveType}
+    {candidates : CandidateList CandidateFamilyType [source]}
+    (run : CandidateFamilyTypeListProduced context candidates) :
+    candidates.singleton.type.context = context := by
+  cases run with
+  | cons head tail =>
+      cases tail
+      exact CandidateFamilyType.context_eq_of_normalize head
+
 /-- Exact successful traversal of an arbitrary source-indexed constructor
 list in one post-family context. Every candidate remains indexed by its source
 constructor, so ordering, length, and header provenance are preserved by the
@@ -1583,6 +1854,18 @@ theorem CandidateConstructorListProduced.normalize
     simp only [ReaderT.bind, Bind.bind]
     rw [head, ih]
     rfl
+
+/-- A successful singleton constructor traversal stores its exact traversal
+context at the candidate root. -/
+theorem CandidateConstructorListProduced.singleton_context_eq
+    {context : Context} {source : Constructor}
+    {candidates : CandidateList CandidateConstructor [source]}
+    (run : CandidateConstructorListProduced context candidates) :
+    candidates.singleton.type.context = context := by
+  cases run with
+  | cons head tail =>
+      cases tail
+      exact CandidateConstructor.context_eq_of_normalize head
 
 /-- Exact successful assembly of complete family candidates from an already
 source-indexed family-type list. Each constructor traversal is tied to the
@@ -1617,6 +1900,48 @@ theorem CandidateFamilyListProduced.normalize
     rw [constructors.normalize, ih]
     rfl
 
+/-- Singleton family assembly reuses, without replacement, the family-type
+candidate produced in the pre-family environment. -/
+theorem CandidateFamilyListProduced.singleton_familyType
+    {context : Context} {source : Lean.InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType [source]}
+    {families : CandidateList CandidateFamily [source]}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    families.singleton.familyType = familyTypes.singleton := by
+  cases run with
+  | cons constructors tail =>
+      cases tail
+      rfl
+
+/-- Singleton family assembly exposes the exact source-indexed constructor
+traversal retained for its sole family. -/
+theorem CandidateFamilyListProduced.singleton_constructors
+    {context : Context} {source : Lean.InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType [source]}
+    {families : CandidateList CandidateFamily [source]}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    CandidateConstructorListProduced context
+      families.singleton.constructors := by
+  cases run with
+  | cons constructors tail =>
+      cases tail
+      exact constructors
+
+/-- A successful singleton family assembly can be reindexed directly by the
+family-type payload retained in its assembled result.  This dependent eta law
+avoids rewriting the input list underneath the execution witness. -/
+theorem CandidateFamilyListProduced.singleton_reindex
+    {context : Context} {source : Lean.InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType [source]}
+    {families : CandidateList CandidateFamily [source]}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    CandidateFamilyListProduced context
+      (.cons families.singleton.familyType .nil) families := by
+  cases run with
+  | cons constructors tail =>
+      cases tail
+      exact .cons constructors .nil
+
 /-- Shape-preserving output of the executable normalization-candidate pass.
 The dependent family/constructor lists prevent positional provenance from
 being silently reused for a different inductive request. Names, ordering, and
@@ -1628,6 +1953,176 @@ structure NormalizationCandidate (source : List InductiveType) where
 def NormalizationCandidate.view
     (candidate : NormalizationCandidate source) : List InductiveType :=
   candidate.families.toList fun _ family => family.view
+
+/-- One exact family-type traversal result together with the source-indexed
+operational witness that produced it.  The witness is provenance for later
+Verify staging; it carries no Theory semantics. -/
+structure CandidateFamilyTypeListExecution (context : Context)
+    (sources : List InductiveType) where
+  candidates : CandidateList CandidateFamilyType sources
+  produced : CandidateFamilyTypeListProduced context candidates
+
+/-- Run the existing family-type normalizer while retaining its exact
+source-ordered traversal equations.  Errors and candidate data are unchanged. -/
+def executeCandidateFamilyTypeList (context : Context) :
+    (sources : List InductiveType) →
+      Except Exception (CandidateFamilyTypeListExecution context sources)
+  | [] => .ok ⟨.nil, .nil⟩
+  | source :: sources =>
+      match hhead : normalizeCandidateFamilyType source context with
+      | .error error => .error error
+      | .ok head =>
+          match executeCandidateFamilyTypeList context sources with
+          | .error error => .error error
+          | .ok tail => .ok {
+              candidates := .cons head tail.candidates
+              produced := .cons (by simpa using hhead) tail.produced }
+
+/-- One exact constructor traversal result together with its source-indexed
+operational witness. -/
+structure CandidateConstructorListExecution (context : Context)
+    (sources : List Constructor) where
+  candidates : CandidateList CandidateConstructor sources
+  produced : CandidateConstructorListProduced context candidates
+
+/-- Run the existing constructor normalizer while retaining its exact
+source-ordered traversal equations. -/
+def executeCandidateConstructorList (context : Context) :
+    (sources : List Constructor) →
+      Except Exception (CandidateConstructorListExecution context sources)
+  | [] => .ok ⟨.nil, .nil⟩
+  | source :: sources =>
+      match hhead : normalizeCandidateConstructor source context with
+      | .error error => .error error
+      | .ok head =>
+          match executeCandidateConstructorList context sources with
+          | .error error => .error error
+          | .ok tail => .ok {
+              candidates := .cons head tail.candidates
+              produced := .cons (by simpa using hhead) tail.produced }
+
+/-- One exact family/constructor assembly result together with both dependent
+source lists retained by the ordinary traversal. -/
+structure CandidateFamilyListExecution (context : Context)
+    {sources : List InductiveType}
+    (familyTypes : CandidateList CandidateFamilyType sources) where
+  candidates : CandidateList CandidateFamily sources
+  produced : CandidateFamilyListProduced context familyTypes candidates
+
+/-- Run the existing family assembler while retaining each constructor-list
+execution.  This is an operational refinement of
+`normalizeCandidateFamilyList`, not an additional acceptance premise. -/
+def executeCandidateFamilyList (context : Context) :
+    {sources : List InductiveType} →
+    (familyTypes : CandidateList CandidateFamilyType sources) →
+      Except Exception (CandidateFamilyListExecution context familyTypes)
+  | [], .nil => .ok ⟨.nil, .nil⟩
+  | source :: _, .cons familyType familyTypes =>
+      match executeCandidateConstructorList context source.ctors with
+      | .error error => .error error
+      | .ok constructors =>
+          match executeCandidateFamilyList context familyTypes with
+          | .error error => .error error
+          | .ok tail =>
+            let family : CandidateFamily source := {
+              familyType
+              constructors := constructors.candidates }
+            .ok {
+              candidates := .cons family tail.candidates
+              produced := by
+                change CandidateFamilyListProduced context
+                  (.cons family.familyType familyTypes)
+                  (.cons family tail.candidates)
+                exact .cons constructors.produced tail.produced }
+
+/-- Detailed operational result of `buildNormalizationCandidate`.
+
+The ordinary result erases to `candidate`.  The remaining fields retain the
+validator-selected statistics, intermediate environment, and exact list
+traversals already executed by the same call.  Verify uses these equations as
+staging provenance; all semantic authority still comes from the D1--D4
+interpreters. -/
+structure NormalizationCandidateExecution
+    (nparams : Nat) (types : List InductiveType)
+    (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context) where
+  validationContext : Context
+  stats : InductiveStats
+  familyTypes : CandidateFamilyTypeListExecution
+    { candidateContext with lctx := {} } types
+  familyEnv : Environment
+  declareRun : declareInductiveTypes stats nparams types.toArray
+    numNested isUnsafe validationContext = .ok familyEnv
+  constructorRun : checkConstructors types.toArray stats isUnsafe
+    { validationContext with env := familyEnv } = .ok ()
+  families : CandidateFamilyListExecution
+    { candidateContext with env := familyEnv, lctx := {} }
+    familyTypes.candidates
+
+def NormalizationCandidateExecution.candidate
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext) : NormalizationCandidate types :=
+  ⟨execution.families.candidates⟩
+
+/-- The post-family half of the detailed ordinary execution. -/
+def buildNormalizationCandidateExecutionAfterValidation
+    (nparams : Nat) (types : List InductiveType)
+    (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context)
+    (stats : InductiveStats) :
+    M (NormalizationCandidateExecution nparams types numNested isUnsafe
+      candidateContext) :=
+  fun validationContext =>
+    match executeCandidateFamilyTypeList
+        { candidateContext with lctx := {} } types with
+    | .error error => .error error
+    | .ok familyTypes =>
+      match hdeclare : declareInductiveTypes stats nparams types.toArray
+          numNested isUnsafe validationContext with
+      | .error error => .error error
+      | .ok familyEnv =>
+        match hconstructors : checkConstructors types.toArray stats isUnsafe
+            { validationContext with env := familyEnv } with
+        | .error error => .error error
+        | .ok () =>
+          match executeCandidateFamilyList
+              { candidateContext with env := familyEnv, lctx := {} }
+              familyTypes.candidates with
+          | .error error => .error error
+          | .ok families => .ok {
+              validationContext
+              stats
+              familyTypes
+              familyEnv
+              declareRun := by simpa using hdeclare
+              constructorRun := by simpa using hconstructors
+              families }
+
+/-- A retained successful post-validation execution exposes exactly the
+statistics and reader context supplied by the family validator. -/
+theorem NormalizationCandidateExecution.fields_of_afterValidation
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext)
+    (stats : InductiveStats) (validationContext : Context)
+    (h : buildNormalizationCandidateExecutionAfterValidation nparams types
+        numNested isUnsafe candidateContext stats validationContext =
+      .ok execution) :
+    execution.stats = stats ∧
+      execution.validationContext = validationContext := by
+  unfold buildNormalizationCandidateExecutionAfterValidation at h
+  repeat' split at h
+  all_goals try simp_all
+  subst execution
+  exact ⟨rfl, rfl⟩
+
+/-- Execute the ordinary singleton/mutual candidate pass while retaining the
+exact operational provenance erased by the public candidate result. -/
+def buildNormalizationCandidateExecution
+    (nparams : Nat) (types : List InductiveType)
+    (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context) :
+    Except Exception (NormalizationCandidateExecution nparams types
+      numNested isUnsafe candidateContext) :=
+  checkInductiveTypes nparams types.toArray (fun stats =>
+    buildNormalizationCandidateExecutionAfterValidation nparams types
+      numNested isUnsafe candidateContext stats) candidateContext
 
 /-- Run the generic one-pass candidate producer at the same two environments
 as kernel inductive checking: family types in the input environment, then
@@ -1661,6 +2156,58 @@ def buildNormalizationCandidate
           { candidateContext with env := familyEnv, lctx := {} }) do
           normalizeCandidateFamilyList familyTypes
       return ⟨families⟩) candidateContext
+
+/-- Erase a retained successful execution back to the unchanged public
+candidate producer.  The family-validation equation supplies the continuation
+boundary selected by `checkInductiveTypes`; every later rewrite comes from an
+operation already stored in `execution`. -/
+theorem NormalizationCandidateExecution.produces
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext)
+    (validationRun : ∀ {α} (k : InductiveStats → M α),
+      checkInductiveTypes nparams types.toArray k candidateContext =
+        k execution.stats execution.validationContext) :
+    buildNormalizationCandidate nparams types numNested isUnsafe
+        candidateContext = .ok execution.candidate := by
+  unfold buildNormalizationCandidate
+  rw [validationRun]
+  simp only [ReaderT.bind, Bind.bind]
+  rw [show
+    (withReader (fun _ : Context =>
+        { candidateContext with lctx := {} })
+      (normalizeCandidateFamilyTypeList types)) execution.validationContext =
+        .ok execution.familyTypes.candidates by
+      change normalizeCandidateFamilyTypeList types
+        { candidateContext with lctx := {} } = _
+      exact execution.familyTypes.produced.normalize]
+  simp only [Except.bind]
+  rw [execution.declareRun]
+  unfold withEnv
+  change (ReaderT.bind
+      (checkConstructors types.toArray execution.stats isUnsafe)
+      (fun _ => ReaderT.bind
+        (withReader (fun _ : Context =>
+          { candidateContext with
+            env := execution.familyEnv, lctx := {} })
+          (normalizeCandidateFamilyList execution.familyTypes.candidates))
+        (fun families => pure
+          (⟨families⟩ : NormalizationCandidate types))))
+      ({ execution.validationContext with
+        env := execution.familyEnv } : Context) = _
+  simp only [ReaderT.bind, Bind.bind]
+  rw [execution.constructorRun]
+  simp only [Except.bind]
+  rw [show
+    (withReader (fun _ : Context =>
+        { candidateContext with
+          env := execution.familyEnv, lctx := {} })
+      (normalizeCandidateFamilyList execution.familyTypes.candidates))
+      { execution.validationContext with env := execution.familyEnv } =
+        .ok execution.families.candidates by
+      change normalizeCandidateFamilyList execution.familyTypes.candidates
+        { candidateContext with env := execution.familyEnv, lctx := {} } = _
+      exact execution.families.produced.normalize]
+  rfl
 
 /--
 info: 'Lean4Lean.AddInductive.buildCandidateExpr' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -1910,24 +2457,40 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
     loop ctor.type 0 #[] (← readThe Context).fuel.inductiveFuel
   | _ => return false
 
-partial -- TODO: remove
+/-- Search the kernel's elimination-universe name sequence (`u`, `u_1`, …)
+for its first entry not already used by the inductive declaration.  Among
+`lparams.length + 1` distinct candidates at least one is available; the
+zero-fuel branch is therefore only a totality fallback. -/
+def getFreshElimParam.loop (lparams : List Name) (u : Name) (i : Nat) :
+    Nat → Name
+  | 0 => u
+  | fuel + 1 =>
+      if lparams.contains u then
+        loop lparams ((`u).appendIndexAfter i) (i + 1) fuel
+      else
+        u
+
+def getFreshElimParam (lparams : List Name) : Name :=
+  getFreshElimParam.loop lparams `u 1 (lparams.length + 1)
+
 def getElimLevel (stats : InductiveStats) (indTypes : Array InductiveType) :
     M Level := do
   unless ← isLargeEliminator stats indTypes do return .zero
   let {lparams, ..} ← read
-  let rec loop u i := Id.run do
-    unless lparams.contains u do return .param u
-    loop ((`u).appendIndexAfter i) (i + 1)
-  return loop `u 1
+  return .param (getFreshElimParam lparams)
+
+/-- The constructor-shape fragment of the kernel's K-target test. A visible
+Pi is accepted only while it belongs to the shared parameter prefix; the
+first visible field makes the target ineligible. -/
+def isKTargetCtor (nparams : Nat) : Nat → Expr → Bool
+  | i, .forallE _ _ body _ => i < nparams && isKTargetCtor nparams (i + 1) body
+  | _, _ => true
 
 def isKTarget (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
   let #[indType] := indTypes | return false
   unless stats.resultLevel.isZero do return false
   let [ctor] := indType.ctors | return false
-  let rec loop i
-    | .forallE _ _ body _ => i < stats.params.size && loop (i + 1) body
-    | _ => true
-  return loop 0 ctor.type
+  return isKTargetCtor stats.params.size 0 ctor.type
 
 @[inline] def getIIndices (stats : InductiveStats) (t : Expr) : Nat × Array Expr :=
   ((isValidIndApp? stats t).get!, t.getAppArgs[stats.params.size:])

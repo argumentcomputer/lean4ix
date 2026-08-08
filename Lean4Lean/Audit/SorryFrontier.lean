@@ -1,19 +1,72 @@
 import Lean4Lean.Theory
+import Lean4Lean.Theory.ConstructorValidityFixtures
+import Lean4Lean.Theory.Inductive
 import Lean4Lean.Theory.InductiveFixtures
+import Lean4Lean.Theory.Meta
+import Lean4Lean.Theory.MutualInductiveFixtures
+import Lean4Lean.Theory.Quot
+import Lean4Lean.Theory.SingletonParity
+import Lean4Lean.Theory.Typing.Basic
+import Lean4Lean.Theory.Typing.ChurchRosser
+import Lean4Lean.Theory.Typing.Env
+import Lean4Lean.Theory.Typing.EnvLemmas
+import Lean4Lean.Theory.Typing.HeadReduction
+import Lean4Lean.Theory.Typing.InductiveLemmas
 import Lean4Lean.Theory.Typing.Injectivity
+import Lean4Lean.Theory.Typing.Lemmas
+import Lean4Lean.Theory.Typing.Meta
+import Lean4Lean.Theory.Typing.Pattern
+import Lean4Lean.Theory.Typing.QuotLemmas
+import Lean4Lean.Theory.Typing.Strong
+import Lean4Lean.Theory.Typing.UniqueTyping
+import Lean4Lean.Theory.VDecl
+import Lean4Lean.Theory.VEnv
+import Lean4Lean.Theory.VExpr
+import Lean4Lean.Theory.VLevel
 import Lean4Lean.Verify
-import Lean4Lean.Verify.Level
+import Lean4Lean.Verify.Axioms
 import Lean4Lean.Verify.Environment
+import Lean4Lean.Verify.Environment.Basic
+import Lean4Lean.Verify.Environment.CandidateIdentityReplay
+import Lean4Lean.Verify.Environment.ConstructorValidation
+import Lean4Lean.Verify.Environment.ConstructorValidityMatrix
+import Lean4Lean.Verify.Environment.ConstructorValidityReplay
+import Lean4Lean.Verify.Environment.Elimination
+import Lean4Lean.Verify.Environment.EliminationFixtures
+import Lean4Lean.Verify.Environment.EliminationFixturesCommon
+import Lean4Lean.Verify.Environment.EliminationFixturesEdges
+import Lean4Lean.Verify.Environment.EliminationFixturesEq
+import Lean4Lean.Verify.Environment.EliminationFixturesEqNat
+import Lean4Lean.Verify.Environment.EliminationFixturesNat
+import Lean4Lean.Verify.Environment.EliminationFixturesOrAnd
+import Lean4Lean.Verify.Environment.EliminationFixturesSmall
 import Lean4Lean.Verify.Environment.IndexedVecCandidate
 import Lean4Lean.Verify.Environment.IndexedVecConsReplay
 import Lean4Lean.Verify.Environment.IndexedVecConstructors
 import Lean4Lean.Verify.Environment.IndexedVecOuterReplay
 import Lean4Lean.Verify.Environment.IndexedVecSemanticReplay
 import Lean4Lean.Verify.Environment.InductiveFixtures
+import Lean4Lean.Verify.Environment.Lemmas
+import Lean4Lean.Verify.Environment.MutualInductiveFixtures
 import Lean4Lean.Verify.Environment.Normalization
+import Lean4Lean.Verify.Environment.NormalizationMatrix
+import Lean4Lean.Verify.Environment.SingletonParityMatrix
+import Lean4Lean.Verify.Environment.SingletonParityReplay
+import Lean4Lean.Verify.EquivManager
+import Lean4Lean.Verify.Expr
+import Lean4Lean.Verify.Level
+import Lean4Lean.Verify.LocalContext
+import Lean4Lean.Verify.NameGenerator
+import Lean4Lean.Verify.TypeChecker
+import Lean4Lean.Verify.TypeChecker.Basic
 import Lean4Lean.Verify.TypeChecker.InferType
-import Lean4Lean.Verify.TypeChecker.WHNF
 import Lean4Lean.Verify.TypeChecker.IsDefEq
+import Lean4Lean.Verify.TypeChecker.Reduce
+import Lean4Lean.Verify.TypeChecker.WHNF
+import Lean4Lean.Verify.Typing.ConditionallyTyped
+import Lean4Lean.Verify.Typing.Expr
+import Lean4Lean.Verify.Typing.Lemmas
+import Lean4Lean.Verify.VLCtx
 
 /-!
 # Lean4Lean sorry frontier
@@ -32,8 +85,15 @@ when it sits in a foreign namespace (e.g. `Lean.Level.isEquiv_wf` lives in
 
 The audited surface is exactly the modules reachable from this file's imports:
 importing a `Theory`/`Verify` module here is what brings it into scope. A sorry
-in a proof module not (transitively) imported here is not seen, so when a new
-`Theory`/`Verify` file joins the trusted build, add its import below.
+in a proof module not (transitively) imported here is not seen, so the import
+block above lists the complete `Theory`/`Verify` file tree explicitly (imports
+already reachable transitively are harmless). When files are added or renamed,
+regenerate it with
+
+  { printf 'import %s\n' Lean4Lean.Theory Lean4Lean.Verify; \
+    find Lean4Lean/Theory Lean4Lean/Verify -name '*.lean' \
+      | sed 's/\.lean$//; s#/#.#g; s/^/import /'; } | LC_ALL=C sort -u
+
 `Lean4Lean.Experimental.*` is parked proof work outside the trusted surface and
 is intentionally not imported.
 
@@ -77,8 +137,8 @@ private def allowlist : Array Lean.Name := #[
   `Lean4Lean.TrProj.instN,
   `Lean4Lean.TrProj.instL,
   -- Tier V — checker verification, blocked on Tiers S/P
-  `Lean.Level.Normalize.NormLevel.subsumption_eval,
-  `Lean.Level.isEquiv_wf,
+  -- (NormLevel.subsumption_eval and Level.isEquiv_wf were proved on the
+  -- formalization line, 2026-08-05/07, and left the frontier.)
   `Lean4Lean.addDecl.WF,
   `Lean4Lean.TypeChecker.Inner.inferProj.WF,
   `Lean4Lean.TypeChecker.Inner.reduceRecursor.WF,
@@ -96,7 +156,14 @@ private def allowlist : Array Lean.Name := #[
   -- carries a sorry dependency even though the source has no `sorry` token
   -- (which is why the old source-token scan never saw these). Not proof debt.
   `Lean4Lean.InductiveFixtures.KernelDifferential.KernelRejectRecDomain,
-  `Lean4Lean.InductiveFixtures.KernelDifferential.KernelRejectRecIndex]
+  `Lean4Lean.InductiveFixtures.KernelDifferential.KernelRejectRecIndex,
+  -- The L4L-05 nearest-kernel negatives (Theory/ConstructorValidityFixtures.lean)
+  -- are the same pattern: `#guard_msgs`-pinned rejections whose recovered
+  -- constants carry `sorryAx`. Not proof debt.
+  `Lean4Lean.InductiveFixtures.KernelDifferential.L4L05FamilyNonrecursive,
+  `Lean4Lean.InductiveFixtures.KernelDifferential.L4L05FamilyProof,
+  `Lean4Lean.InductiveFixtures.KernelDifferential.L4L05NestedNegative,
+  `Lean4Lean.InductiveFixtures.KernelDifferential.L4L05RecursiveDependency]
 
 /-- Declarations in the audited surface that directly reference `sorryAx`. -/
 private def observedFrontier (env : Lean.Environment) : Array Lean.Name := Id.run do

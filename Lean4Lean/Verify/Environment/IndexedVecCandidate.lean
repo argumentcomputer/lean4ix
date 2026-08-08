@@ -19,9 +19,33 @@ private theorem indexedVecKernel_lookup_nat :
   change natMap.find?' ``Nat = some natInfo
   rw [natMap_wf.find?'_eq_find?, nat_type_map_lookup]
 
+private theorem indexedVecKernel_lookup_zero :
+    indexedVecKernelEnv.find? ``Nat.zero = some natZeroInfo := by
+  change natMap.find?' ``Nat.zero = some natZeroInfo
+  rw [natMap_wf.find?'_eq_find?, natMap,
+    natCtorMap_wf.find?_insert, natCtorMap,
+    natZeroMap_wf.find?_insert, natZeroMap,
+    natTypeMap_wf.find?_insert]
+  rfl
+
+private theorem indexedVecKernel_lookup_succ :
+    indexedVecKernelEnv.find? ``Nat.succ = some natSuccInfo := by
+  change natMap.find?' ``Nat.succ = some natSuccInfo
+  rw [natMap_wf.find?'_eq_find?, nat_succ_map_lookup]
+
 @[simp] private theorem indexedVecKernel_get_nat :
     indexedVecKernelEnv.get ``Nat = .ok natInfo := by
   simp only [Kernel.Environment.get, indexedVecKernel_lookup_nat,
+    Pure.pure, Except.pure]
+
+@[simp] private theorem indexedVecKernel_get_zero :
+    indexedVecKernelEnv.get ``Nat.zero = .ok natZeroInfo := by
+  simp only [Kernel.Environment.get, indexedVecKernel_lookup_zero,
+    Pure.pure, Except.pure]
+
+@[simp] private theorem indexedVecKernel_get_succ :
+    indexedVecKernelEnv.get ``Nat.succ = .ok natSuccInfo := by
+  simp only [Kernel.Environment.get, indexedVecKernel_lookup_succ,
     Pure.pure, Except.pure]
 
 private def indexedVecParamName : Name :=
@@ -82,7 +106,7 @@ theorem candidateIsDefEqSelfValid
   rw [if_pos (Expr.eqv_refl e)]
   rfl
 
-private def indexedVecTypeCheckerContext
+def indexedVecTypeCheckerContext
     (lctx : LocalContext) : Lean4Lean.TypeChecker.Context where
   env := indexedVecKernelEnv
   lctx := lctx
@@ -251,6 +275,32 @@ private theorem indexedVecInferTypeFuel
     Level.substParams', Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
+@[simp] theorem indexedVecPreFamilyInferConstantZero
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferConstant
+      (indexedVecTypeCheckerContext lctx) ``Nat.zero [] false =
+        .ok (.const ``Nat []) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferConstant
+  simp [indexedVecTypeCheckerContext, indexedVecKernel_get_zero,
+    natZeroInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+    ConstantVal.instantiateTypeLevelParams,
+    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+@[simp] theorem indexedVecPreFamilyInferConstantSucc
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferConstant
+      (indexedVecTypeCheckerContext lctx) ``Nat.succ [] false =
+        .ok (.forallE `n (.const ``Nat []) (.const ``Nat []) .default) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferConstant
+  simp [indexedVecTypeCheckerContext, indexedVecKernel_get_succ,
+    natSuccInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+    ConstantVal.instantiateTypeLevelParams,
+    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+
 @[simp] private theorem indexedVecInferTypeNatCore
     (n : Nat) (lctx : LocalContext)
     (state : Lean4Lean.TypeChecker.State)
@@ -266,6 +316,54 @@ private theorem indexedVecInferTypeFuel
   unfold Lean4Lean.TypeChecker.Inner.inferType'
   simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
     indexedVecInferConstantNat,
+    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+
+theorem indexedVecPreFamilyInferTypeFVarCore
+    (n : Nat) (lctx : LocalContext)
+    (state : Lean4Lean.TypeChecker.State) (id : FVarId) (type : Expr)
+    (hcache : state.inferTypeC[(.fvar id : Expr)]? = none)
+    (hfind : lctx.find? id =
+      some (.cdecl index id name type bi kind)) :
+    Lean4Lean.TypeChecker.Inner.inferType' (.fvar id) false
+      (Lean4Lean.TypeChecker.Methods.withFuel n)
+      (indexedVecTypeCheckerContext lctx) state =
+        .ok (type, { state with inferTypeC :=
+          state.inferTypeC.insert (.fvar id) type }) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferType'
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+    Lean4Lean.TypeChecker.Inner.inferFVar,
+    indexedVecTypeCheckerContext, hfind, LocalDecl.type,
+    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+
+theorem indexedVecPreFamilyInferTypeZeroCore
+    (n : Nat) (lctx : LocalContext)
+    (state : Lean4Lean.TypeChecker.State)
+    (hcache : state.inferTypeC[(.const ``Nat.zero [] : Expr)]? = none) :
+    Lean4Lean.TypeChecker.Inner.inferType' (.const ``Nat.zero []) false
+      (Lean4Lean.TypeChecker.Methods.withFuel n)
+      (indexedVecTypeCheckerContext lctx) state =
+        .ok (.const ``Nat [], { state with inferTypeC :=
+          (state.inferTypeC.insert (.const ``Nat.zero [])
+            (.const ``Nat [])) }) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferType'
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+    indexedVecPreFamilyInferConstantZero,
+    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+
+theorem indexedVecPreFamilyInferTypeSuccCore
+    (n : Nat) (lctx : LocalContext)
+    (state : Lean4Lean.TypeChecker.State)
+    (hcache : state.inferTypeC[(.const ``Nat.succ [] : Expr)]? = none) :
+    Lean4Lean.TypeChecker.Inner.inferType' (.const ``Nat.succ []) false
+      (Lean4Lean.TypeChecker.Methods.withFuel n)
+      (indexedVecTypeCheckerContext lctx) state =
+        .ok (.forallE `n (.const ``Nat []) (.const ``Nat []) .default,
+          { state with inferTypeC := (state.inferTypeC.insert
+            (.const ``Nat.succ [])
+            (.forallE `n (.const ``Nat []) (.const ``Nat []) .default)) }) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferType'
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+    indexedVecPreFamilyInferConstantSucc,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 private def indexedVecRootSortState : Lean4Lean.TypeChecker.State :=
@@ -735,6 +833,216 @@ private theorem indexedVecInner_checkTypeM :
         .ok (.sort indexedVecInnerInferredLevel,
           indexedVecInnerSortState) by
       simpa [indexedVecInnerKernel] using indexedVecInnerInferForall]
+  rfl
+
+/-! The constructor pre-family replay runs after family analysis has added its
+parameter and index locals, but before `IndexedVec` itself is present in the
+kernel environment.  The following executions expose the family-free pieces
+of the family candidate proof for an arbitrary local context. -/
+
+def indexedVecPreFamilyIndexTelescope : Expr :=
+  .forallE indexedVecIndexName (.const ``Nat [])
+    (.sort (.succ (.param `u))) .default
+
+theorem indexedVecPreFamilyIndexTelescope_eq :
+    indexedVecPreFamilyIndexTelescope = indexedVecInfo.type.bindingBody! := by
+  rfl
+
+theorem indexedVecPreFamilySortCheckTypeM (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.M.run indexedVecKernelEnv .safe lctx [`u]
+      ({} : FuelConfig)
+      (Lean4Lean.TypeChecker.checkType
+        (.sort (.succ (.param `u)))) =
+      .ok (.sort (.succ (.succ (.param `u)))) :=
+  indexedVecSort_checkTypeM lctx
+
+theorem indexedVecPreFamilyNatCheckTypeM (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.M.run indexedVecKernelEnv .safe lctx [`u]
+      ({} : FuelConfig)
+      (Lean4Lean.TypeChecker.checkType (.const ``Nat [])) =
+      .ok (.sort (.succ .zero)) :=
+  indexedVecNat_checkTypeM lctx
+
+@[simp] private theorem indexedVecInferConstantNatOnly
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferConstant
+      (indexedVecTypeCheckerContext lctx) ``Nat [] true =
+        .ok (.sort (.succ .zero)) := by
+  unfold Lean4Lean.TypeChecker.Inner.inferConstant
+  simp [indexedVecTypeCheckerContext, indexedVecKernel_get_nat,
+    natInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+    ConstantVal.instantiateTypeLevelParams,
+    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    Level.substParams', Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+
+private def indexedVecPreFamilyNatInferOnlyState :
+    Lean4Lean.TypeChecker.State :=
+  { ({} : Lean4Lean.TypeChecker.State) with
+    inferTypeI := ({} : Lean4Lean.TypeChecker.State).inferTypeI.insert
+      (.const ``Nat []) (.sort (.succ .zero)) }
+
+private theorem indexedVecPreFamilyNatInferOnly
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferType (.const ``Nat []) true
+      (Lean4Lean.TypeChecker.Methods.withFuel 10000)
+      (indexedVecTypeCheckerContext lctx)
+      ({} : Lean4Lean.TypeChecker.State) =
+        .ok (.sort (.succ .zero),
+          indexedVecPreFamilyNatInferOnlyState) := by
+  change Lean4Lean.TypeChecker.Inner.inferType' (.const ``Nat []) true
+    (Lean4Lean.TypeChecker.Methods.withFuel 9999)
+    (indexedVecTypeCheckerContext lctx)
+    ({} : Lean4Lean.TypeChecker.State) = _
+  unfold Lean4Lean.TypeChecker.Inner.inferType'
+  simp [indexedVecPreFamilyNatInferOnlyState,
+    Expr.hasLooseBVars, Expr.looseBVarRange',
+    indexedVecInferConstantNatOnly, Bind.bind, ReaderT.bind,
+    StateT.bind, Except.bind]
+
+theorem indexedVecPreFamilyNatEnsureTypeM (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.M.run indexedVecKernelEnv .safe lctx [`u]
+      ({} : FuelConfig)
+      (Lean4Lean.TypeChecker.ensureType (.const ``Nat [])) =
+        .ok (.sort (.succ .zero)) := by
+  unfold Lean4Lean.TypeChecker.ensureType Lean4Lean.TypeChecker.inferType
+    Lean4Lean.TypeChecker.ensureSort Lean4Lean.TypeChecker.RecM.run
+    Lean4Lean.TypeChecker.M.run
+  simp only [readThe, MonadReaderOf.read, ReaderT.read,
+    Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
+    Pure.pure, StateT.pure, Except.pure, StateT.run',
+    Functor.map, Except.map]
+  rw [show Lean4Lean.TypeChecker.Inner.inferType (.const ``Nat []) true
+      (Lean4Lean.TypeChecker.Methods.withFuel 10000)
+      { env := indexedVecKernelEnv
+        lctx := lctx
+        safety := .safe
+        lparams := [`u]
+        fuel := ({} : FuelConfig) }
+      ({} : Lean4Lean.TypeChecker.State) =
+        .ok (.sort (.succ .zero),
+          indexedVecPreFamilyNatInferOnlyState) by
+    simpa [indexedVecTypeCheckerContext] using
+      indexedVecPreFamilyNatInferOnly lctx]
+  rfl
+
+private def indexedVecPreFamilyIndexCheckerLctx
+    (lctx : LocalContext) : LocalContext :=
+  lctx.mkLocalDecl ⟨indexedVecInnerNatState.ngen.curr⟩
+    indexedVecIndexName (.const ``Nat []) .default
+
+private theorem indexedVecPreFamilyIndexNatCore (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferType' (.const ``Nat []) false
+      (Lean4Lean.TypeChecker.Methods.withFuel 9998)
+      (indexedVecTypeCheckerContext lctx)
+      ({} : Lean4Lean.TypeChecker.State) =
+        .ok (.sort (.succ .zero), indexedVecInnerNatState) := by
+  simpa [indexedVecInnerNatState] using
+    (indexedVecInferTypeNatCore 9998 lctx
+      ({} : Lean4Lean.TypeChecker.State) Std.HashMap.getElem?_empty)
+
+private theorem indexedVecPreFamilyIndexWithLocalDecl
+    (lctx : LocalContext)
+    {α} (k : Expr → Lean4Lean.TypeChecker.RecM α)
+    (methods : Lean4Lean.TypeChecker.Methods) :
+    (withLocalDecl (m := Lean4Lean.TypeChecker.RecM)
+      indexedVecIndexName .default (.const ``Nat []) k)
+        methods (indexedVecTypeCheckerContext lctx)
+          indexedVecInnerNatState =
+      k (.fvar ⟨indexedVecInnerNatState.ngen.curr⟩) methods
+        { indexedVecTypeCheckerContext lctx with
+          lctx := indexedVecPreFamilyIndexCheckerLctx lctx }
+        indexedVecInnerAfterIndexState := by
+  simpa [indexedVecPreFamilyIndexCheckerLctx,
+    indexedVecInnerAfterIndexState, indexedVecTypeCheckerContext] using
+    (indexedVecWithLocalDecl indexedVecIndexName .default
+      (.const ``Nat []) k methods (indexedVecTypeCheckerContext lctx)
+      indexedVecInnerNatState)
+
+private theorem indexedVecPreFamilyIndexSortCore (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferType'
+      (.sort (.succ (.param `u))) false
+      (Lean4Lean.TypeChecker.Methods.withFuel 9998)
+      { indexedVecTypeCheckerContext lctx with
+        lctx := indexedVecPreFamilyIndexCheckerLctx lctx }
+      indexedVecInnerAfterIndexState =
+        .ok (.sort (.succ (.succ (.param `u))),
+          indexedVecInnerSortState) := by
+  simpa [indexedVecPreFamilyIndexCheckerLctx,
+    indexedVecInnerAfterIndexState, indexedVecInnerNatState,
+    indexedVecInnerSortState, indexedVecTypeCheckerContext] using
+    (indexedVecInferTypeSortCore 9998
+      (indexedVecPreFamilyIndexCheckerLctx lctx)
+      indexedVecInnerAfterIndexState (by
+        simp [indexedVecInnerAfterIndexState,
+          indexedVecInnerNatState]))
+
+private theorem indexedVecPreFamilyIndexInferForall
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.Inner.inferForall
+      indexedVecPreFamilyIndexTelescope false
+      (Lean4Lean.TypeChecker.Methods.withFuel 9999)
+      (indexedVecTypeCheckerContext lctx)
+      ({} : Lean4Lean.TypeChecker.State) =
+        .ok (.sort indexedVecInnerInferredLevel,
+          indexedVecInnerSortState) := by
+  unfold indexedVecPreFamilyIndexTelescope
+  unfold Lean4Lean.TypeChecker.Inner.inferForall
+  simp only [Lean4Lean.TypeChecker.Inner.inferForall.loop]
+  rw [show (.const ``Nat [] : Expr).instantiateRev #[] =
+    .const ``Nat [] by
+      simp [Expr.instantiateRev_eq, Expr.instantiate_eq]]
+  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  rw [indexedVecInferTypeFuel 9998]
+  rw [indexedVecPreFamilyIndexNatCore]
+  simp only
+  rw [indexedVecEnsureSort]
+  simp only
+  rw [indexedVecPreFamilyIndexWithLocalDecl]
+  rw [show
+    (.sort (.succ (.param `u)) : Expr).instantiateRev
+      (#[] |>.push (.fvar ⟨indexedVecInnerNatState.ngen.curr⟩)) =
+        .sort (.succ (.param `u)) by
+      simp [Expr.instantiateRev_eq, Expr.instantiate_eq,
+        Expr.instantiate1']]
+  simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  rw [indexedVecInferTypeFuel 9998]
+  rw [indexedVecPreFamilyIndexSortCore]
+  simp only
+  rw [indexedVecEnsureSort]
+  simp [indexedVecInnerInferredLevel, Expr.sortLevel!,
+    Pure.pure, ReaderT.pure, StateT.pure, Except.pure]
+
+theorem indexedVecPreFamilyIndexTelescopeCheckTypeM
+    (lctx : LocalContext) :
+    Lean4Lean.TypeChecker.M.run indexedVecKernelEnv .safe lctx [`u]
+      ({} : FuelConfig)
+      (Lean4Lean.TypeChecker.checkType
+        indexedVecPreFamilyIndexTelescope) =
+      .ok (.sort indexedVecInnerInferredLevel) := by
+  change Except.map
+    (fun x : Expr × Lean4Lean.TypeChecker.State => x.1)
+    (Lean4Lean.TypeChecker.Inner.inferType'
+      indexedVecPreFamilyIndexTelescope false
+      (Lean4Lean.TypeChecker.Methods.withFuel 9999)
+      (indexedVecTypeCheckerContext lctx)
+      ({} : Lean4Lean.TypeChecker.State)) = _
+  unfold Lean4Lean.TypeChecker.Inner.inferType'
+  simp [indexedVecPreFamilyIndexTelescope, Expr.hasLooseBVars,
+    Expr.looseBVarRange', Bind.bind, ReaderT.bind, StateT.bind,
+    Except.bind]
+  rw [show
+    Lean4Lean.TypeChecker.Inner.inferForall
+      (.forallE indexedVecIndexName (.const ``Nat [])
+        (.sort (.succ (.param `u))) .default)
+      false (Lean4Lean.TypeChecker.Methods.withFuel 9999)
+      (indexedVecTypeCheckerContext lctx)
+      ({} : Lean4Lean.TypeChecker.State) =
+        .ok (.sort indexedVecInnerInferredLevel,
+          indexedVecInnerSortState) by
+      simpa [indexedVecPreFamilyIndexTelescope] using
+        indexedVecPreFamilyIndexInferForall lctx]
   rfl
 
 private theorem indexedVecInner_whnfM :

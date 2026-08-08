@@ -1229,6 +1229,22 @@ theorem eqv_const {e : Expr} : e == .const c ls ↔ e = .const c ls := by
   conv => lhs; simp [(· == ·)]
   cases e <;> simp [eqv']
 
+theorem structuralEq_const {e : Expr} :
+    structuralEq e (.const c ls) = true ↔ e = .const c ls := by
+  cases e <;> simp [structuralEq]
+
+theorem structuralEq_refl (e : Expr) : structuralEq e e = true := by
+  induction e <;> simp [structuralEq, *]
+
+/-- Transparent structural equality implies Lean's non-strict expression
+equivalence.  This direction deliberately does not identify binder names or
+binder information, which `Expr.eqv` also ignores. -/
+theorem structuralEq_eqv {a b : Expr} :
+    structuralEq a b = true → a == b := by
+  simp only [(· == ·)]
+  induction a generalizing b <;> cases b <;>
+    simp_all [structuralEq, eqv']
+
 theorem eqv_refl (e : Expr) : e == e := by
   simp [(· == ·)]; induction e <;> simp [eqv', *]
 

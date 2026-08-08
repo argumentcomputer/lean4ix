@@ -33,6 +33,8 @@ theorem TrEnv'.sf_mono (hsf : safety ≤ safety') :
     .inductStaging hadd hwf (H.sf_mono hsf)
   | .induct hadd H =>
     .induct hadd (H.sf_mono hsf)
+  | .inductBlock hadd H =>
+    .inductBlock hadd (H.sf_mono hsf)
 
 theorem TrConstant.mono {env env' : VEnv} (henv : env ≤ env')
     (H : TrConstant safety env ci ci') : TrConstant safety env' ci ci' :=
@@ -138,6 +140,24 @@ theorem AddInduct.old_of_value (H : AddInduct C₁ env₁ decl C₂ env₂)
   exact H.addType.old_of_value wf
     (H.addCtors.old_of_value wfType (H.addRec.old_of_value wfCtors hout hv) hv) hv
 
+theorem AddInductBlock.map_wf
+    (H : AddInductBlock C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) : C₂.WF := by
+  rcases H with ⟨H⟩
+  exact H.addRecs.map_wf <| H.addCtors.map_wf <|
+    H.addTypes.map_wf wf
+
+theorem AddInductBlock.old_of_value
+    (H : AddInductBlock C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) (hout : C₂.find? name = some ci)
+    (hv : ci.deltaValue? = some v) : C₁.find? name = some ci := by
+  rcases H with ⟨H⟩
+  have wfTypes := H.addTypes.map_wf wf
+  have wfCtors := H.addCtors.map_wf wfTypes
+  exact H.addTypes.old_of_value wf
+    (H.addCtors.old_of_value wfTypes
+      (H.addRecs.old_of_value wfCtors hout hv) hv) hv
+
 theorem Aligned.addInductConstant
     (wf : Aligned safety C₁ env₁)
     (H : AddInductConstant kind C₁ env₁ ci C₂ env₂) : Aligned safety C₂ env₂ := by
@@ -166,11 +186,27 @@ theorem Aligned.addInduct (H : AddInduct C₁ env₁ decl C₂ env₂)
   have wfRec := wfCtors.addInductConstant H.addRec
   exact wfRec.addDefEqFold _
 
+theorem Aligned.addInductBlock
+    (H : AddInductBlock C₁ env₁ decl C₂ env₂)
+    (wf : Aligned safety C₁ env₁) : Aligned safety C₂ env₂ := by
+  rcases H with ⟨H⟩
+  rw [← H.addRules.to_add]
+  have wfTypes := wf.addInductConstants H.addTypes
+  have wfCtors := wfTypes.addInductConstants H.addCtors
+  have wfRecs := wfCtors.addInductConstants H.addRecs
+  exact wfRecs.addDefEqFold _
+
 /--
 info: 'Lean4Lean.Aligned.addInduct' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms Aligned.addInduct
+
+/--
+info: 'Lean4Lean.Aligned.addInductBlock' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Aligned.addInductBlock
 
 theorem TrEnv'.aligned (H : TrEnv' safety C Q venv) : Aligned safety C venv := by
   induction H with
@@ -181,6 +217,7 @@ theorem TrEnv'.aligned (H : TrEnv' safety C Q venv) : Aligned safety C venv := b
   | quot _ h _ ih => exact ih.addQuot h
   | inductStaging h _ _ ih => exact ih.addInductConstant h
   | induct h _ ih => exact ih.addInduct h
+  | inductBlock h _ ih => exact ih.addInductBlock h
 
 /--
 info: 'Lean4Lean.TrEnv'.aligned' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
@@ -285,6 +322,8 @@ theorem TrEnv'.of_value (H : TrEnv' safety C Q venv) (h : C.find? name = some ci
   | inductStaging h1 _ H ih =>
     exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
   | induct h1 H ih =>
+    exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
+  | inductBlock h1 H ih =>
     exact (ih (h1.old_of_value H.map_wf h hv)).mono h1.le
 
 nonrec theorem TrEnv.of_value (H : TrEnv safety env venv) (h : env.find? name = some ci)
