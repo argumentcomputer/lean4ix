@@ -1,47 +1,11 @@
 import Lean4Lean.Verify.Expr
-import Lean4Lean.Theory.VExpr
+import Lean4Lean.Theory.LocalContext
 
 namespace Lean4Lean
 
 open Lean (FVarId Expr)
 
-inductive VLocalDecl where
-  | vlam (type : VExpr)
-  | vlet (type value : VExpr)
-
-def VLocalDecl.depth : VLocalDecl → Nat
-  | .vlam .. => 1
-  | .vlet .. => 0
-
-def VLocalDecl.value : VLocalDecl → VExpr
-  | .vlam .. => .bvar 0
-  | .vlet _ e => e
-
-def VLocalDecl.type' : VLocalDecl → VExpr
-  | .vlam A
-  | .vlet A _ => A
-
-def VLocalDecl.type : VLocalDecl → VExpr
-  | .vlam A => A.lift
-  | .vlet A _ => A
-
-def VLocalDecl.lift' : VLocalDecl → Lift → VLocalDecl
-  | .vlam A, n => .vlam (A.lift' n)
-  | .vlet A e, n => .vlet (A.lift' n) (e.lift' n)
-
-def VLocalDecl.liftN : VLocalDecl → Nat → Nat → VLocalDecl
-  | .vlam A, n, k => .vlam (A.liftN n k)
-  | .vlet A e, n, k => .vlet (A.liftN n k) (e.liftN n k)
-
-def VLocalDecl.inst : VLocalDecl → VExpr → (k : Nat := 0) → VLocalDecl
-  | .vlam A, e₀, k => .vlam (A.inst e₀ k)
-  | .vlet A e, e₀, k => .vlet (A.inst e₀ k) (e.inst e₀ k)
-
-def VLocalDecl.instL : VLocalDecl → List VLevel → VLocalDecl
-  | .vlam A, ls => .vlam (A.instL ls)
-  | .vlet A e, ls => .vlet (A.instL ls) (e.instL ls)
-
-def VLCtx := List (Option (FVarId × List FVarId) × VLocalDecl)
+@[reducible] def VLCtx := List (Option (FVarId × List FVarId) × VLocalDecl)
 
 namespace VLCtx
 

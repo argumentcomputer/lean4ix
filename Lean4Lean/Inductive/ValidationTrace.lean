@@ -38,7 +38,7 @@ inductive ConstructorUniverseTrace (resultLevel fieldLevel : Level) : Type where
       ConstructorUniverseTrace resultLevel fieldLevel
   | fallback
       (structuralFailed : levelStructGe resultLevel fieldLevel = false)
-      (valid : (resultLevel.isZero || resultLevel.geq fieldLevel) = true) :
+      (valid : (resultLevel.isAlwaysZero || resultLevel.geq fieldLevel) = true) :
       ConstructorUniverseTrace resultLevel fieldLevel
 
 namespace ConstructorUniverseTrace
@@ -48,7 +48,7 @@ successful universe trace. -/
 theorem not_nonempty_of_rejected
     (structuralRejected : levelStructGe resultLevel fieldLevel = false)
     (fallbackRejected :
-      (resultLevel.isZero || resultLevel.geq fieldLevel) = false) :
+      (resultLevel.isAlwaysZero || resultLevel.geq fieldLevel) = false) :
     ¬ Nonempty (ConstructorUniverseTrace resultLevel fieldLevel) := by
   rintro ⟨trace⟩
   cases trace with
@@ -244,6 +244,62 @@ def buildExecution (stats : InductiveStats) (ctor : Name) (argIdx : Nat)
                   | some targetIdx => .ok (.target context source result fuel
                       targetIdx hwhnf hoccurs hforall hvalid)
 
+/-- The transparent decomposition succeeds on every input accepted by the
+executable positivity traversal, so retained-trace construction needs no
+choice principle. -/
+theorem buildExecution_ok_of_run
+    (success : checkPositivity.loop stats ctor argIdx source fuel context =
+      .ok ()) :
+    ∃ trace, buildExecution stats ctor argIdx context source fuel =
+      .ok trace := by
+  induction fuel generalizing context source with
+  | zero =>
+      rw [checkPositivity.loop.eq_1] at success
+      change Except.error Exception.deepRecursion = Except.ok () at success
+      contradiction
+  | succ fuel ih =>
+      rw [checkPositivity.loop.eq_2] at success
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+      unfold buildExecution
+      split
+      next error heq =>
+        rw [heq] at success
+        simp [Except.bind] at success
+      next result heq =>
+        rw [heq] at success
+        simp only [Except.bind] at success
+        split
+        next hoccurs => exact ⟨_, rfl⟩
+        next hoccurs =>
+          rw [hoccurs] at success
+          simp only [Bool.not_true, Bool.false_eq_true, if_false,
+            ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
+            Except.bind, Except.pure] at success
+          cases result <;> simp only [Expr.isForall] <;> simp only at success
+          case forallE name domain body binderInfo =>
+            split
+            next hdomain =>
+              rw [hdomain] at success
+              change Except.error _ = Except.ok () at success
+              contradiction
+            next hdomain =>
+              rw [hdomain] at success
+              have tailSuccess :
+                  checkPositivity.loop stats ctor argIdx
+                    (body.instantiate1 context.freshExpr) fuel
+                    (context.pushLocalDecl name binderInfo
+                      (consumeTypeAnnotations domain)) = .ok () := success
+              obtain ⟨tail, htail⟩ := ih tailSuccess
+              rw [htail]
+              exact ⟨_, rfl⟩
+          all_goals
+            split
+            next hvalid =>
+              rw [hvalid] at success
+              change Except.error _ = Except.ok () at success
+              contradiction
+            next targetIdx hvalid => exact ⟨_, rfl⟩
+
 /-- An exact positivity failure, including its diagnostic payload, excludes a
 successful trace at precisely that source/context/fuel position. -/
 theorem not_nonempty_of_error
@@ -352,6 +408,28 @@ def buildExecution (stats : InductiveStats) (isUnsafe : Bool)
           context source context.fuel.inductiveFuel with
       | .error error => .error error
       | .ok trace => .ok (.safe rfl trace)
+
+/-- The retained safe/unsafe branch decomposition succeeds whenever the
+executable positivity branch does. -/
+theorem buildExecution_ok_of_run
+    (success :
+      (if !isUnsafe then checkPositivity stats source ctor argIdx else pure ())
+        context = .ok ()) :
+    ∃ trace, buildExecution stats isUnsafe ctor argIdx context source =
+      .ok trace := by
+  cases isUnsafe with
+  | true => exact ⟨_, rfl⟩
+  | false =>
+      simp only [Bool.not_false, if_true] at success
+      unfold checkPositivity at success
+      simp only [readThe, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+        Except.bind, Except.pure] at success
+      obtain ⟨trace, htrace⟩ :=
+        ConstructorPositivityTrace.buildExecution_ok_of_run success
+      unfold buildExecution
+      rw [htrace]
+      exact ⟨_, rfl⟩
 
 /-- Failure of the exact safe/unsafe positivity branch excludes its retained
 mode trace without changing the executable diagnostic. -/
@@ -600,7 +678,7 @@ theorem exists_of_run
                     rw [hstruct] at success
                     simp only [Bool.false_eq_true, if_false] at success
                     cases hfallback :
-                        (stats.resultLevel.isZero ||
+                        (stats.resultLevel.isAlwaysZero ||
                           stats.resultLevel.geq sortResult.sortLevel!) with
                     | false =>
                         rw [hfallback] at success
@@ -688,13 +766,156 @@ def buildExecution (stats : InductiveStats) (isUnsafe : Bool)
                           sortResult.sortLevel! with
                       | true => finish (.structural hstruct)
                       | false =>
-                          match hfallback : stats.resultLevel.isZero ||
+                          match hfallback : stats.resultLevel.isAlwaysZero ||
                               stats.resultLevel.geq sortResult.sortLevel! with
                           | false => .error <| .other
                               s!"universe level of type_of(arg #{argIdx + 1}) of '{ctor}' is too big for the corresponding inductive datatype"
                           | true => finish (.fallback hstruct hfallback)
           | _ => .error <| .other
               "constructor source shape disagrees with isForall"
+
+/-- The transparent telescope decomposition succeeds on every constructor
+type accepted by the inner executable validator. -/
+theorem buildExecution_ok_of_run
+    (success :
+      checkConstructorType.loop stats isUnsafe familyIdx ctor source argIdx fuel
+        context = .ok ()) :
+    ∃ trace, buildExecution stats isUnsafe familyIdx ctor context source
+      argIdx fuel = .ok trace := by
+  induction fuel generalizing context source argIdx with
+  | zero =>
+      rw [checkConstructorType.loop.eq_1] at success
+      change Except.error Exception.deepRecursion = Except.ok () at success
+      contradiction
+  | succ fuel ih =>
+      rw [show fuel + 1 = Nat.succ fuel by omega] at success
+      cases source
+      case forallE name domain body binderInfo =>
+        rw [checkConstructorType.loop.eq_2] at success
+        simp only at success
+        unfold buildExecution
+        simp only [Expr.isForall]
+        split
+        next param hparam =>
+          rw [hparam] at success
+          simp only [ReaderT.bind, Bind.bind] at success
+          split
+          next error heq =>
+            rw [heq] at success
+            simp [Except.bind] at success
+          next parameterType heq =>
+            rw [heq] at success
+            simp only [Except.bind, liftTypeChecker_apply] at success
+            split
+            next error heq2 =>
+              rw [heq2] at success
+              simp [Except.bind] at success
+            next heq2 =>
+              rw [heq2] at success
+              simp only [Except.bind] at success
+              change Except.error _ = Except.ok () at success
+              contradiction
+            next heq2 =>
+              rw [heq2] at success
+              simp only [Except.bind, if_true, ReaderT.pure, Pure.pure,
+                ReaderT.bind, Bind.bind, Except.pure] at success
+              obtain ⟨tail, htail⟩ := ih success
+              rw [htail]
+              exact ⟨_, rfl⟩
+        next hparam =>
+          rw [hparam] at success
+          simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+          split
+          next error heq =>
+            rw [heq] at success
+            simp [Except.bind] at success
+          next sortResult heq =>
+            rw [heq] at success
+            simp only [Except.bind] at success
+            have finish :
+                (do
+                  if !isUnsafe then checkPositivity stats domain ctor argIdx
+                  withLocalDecl name binderInfo (consumeTypeAnnotations domain)
+                      fun arg =>
+                    checkConstructorType.loop stats isUnsafe familyIdx ctor
+                      (body.instantiate1 arg) (argIdx + 1) fuel)
+                    context = .ok () →
+                (∃ positivity,
+                  ConstructorPositivityModeTrace.buildExecution stats isUnsafe
+                    ctor argIdx context domain = .ok positivity) ∧
+                ∃ tail,
+                  buildExecution stats isUnsafe familyIdx ctor
+                    (context.pushLocalDecl name binderInfo
+                      (consumeTypeAnnotations domain))
+                    (body.instantiate1 context.freshExpr) (argIdx + 1) fuel =
+                    .ok tail := by
+              intro restSuccess
+              cases isUnsafe with
+              | false =>
+                  simp only [Bool.not_false, if_true,
+                    ReaderT.bind, Bind.bind] at restSuccess
+                  cases hpos : checkPositivity stats domain ctor argIdx
+                      context with
+                  | error err => simp_all [Except.bind]
+                  | ok posUnit =>
+                      cases posUnit
+                      rw [hpos] at restSuccess
+                      simp only [Except.bind,
+                        withLocalDecl_apply] at restSuccess
+                      have hpmSuccess :
+                          (if !false then
+                            checkPositivity stats domain ctor argIdx
+                          else pure ()) context = .ok () := by
+                        simpa using hpos
+                      exact ⟨ConstructorPositivityModeTrace.buildExecution_ok_of_run
+                        hpmSuccess, ih restSuccess⟩
+              | true =>
+                  simp only [Bool.not_true, if_false,
+                    ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
+                    Except.bind, Except.pure,
+                    withLocalDecl_apply] at restSuccess
+                  have hpmSuccess :
+                      (if !true then
+                        checkPositivity stats domain ctor argIdx
+                      else pure ()) context = .ok () := by
+                    simp [ReaderT.pure, Pure.pure, Except.pure]
+                  exact ⟨ConstructorPositivityModeTrace.buildExecution_ok_of_run
+                    hpmSuccess, ih restSuccess⟩
+            split
+            next hstruct =>
+              rw [hstruct] at success
+              simp only [if_true, ReaderT.pure, Pure.pure,
+                ReaderT.bind, Bind.bind, Except.bind, Except.pure] at success
+              obtain ⟨⟨positivity, hpm⟩, tail, htail⟩ := finish success
+              rw [hpm, htail]
+              exact ⟨_, rfl⟩
+            next hstruct =>
+              rw [hstruct] at success
+              simp only [Bool.false_eq_true, if_false] at success
+              split
+              next hfallback =>
+                rw [hfallback] at success
+                change Except.error _ = Except.ok () at success
+                contradiction
+              next hfallback =>
+                rw [hfallback] at success
+                simp only [Bool.true_eq_false, Bool.not_true, if_false,
+                  ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
+                  Except.bind, Except.pure] at success
+                obtain ⟨⟨positivity, hpm⟩, tail, htail⟩ := finish success
+                rw [hpm, htail]
+                exact ⟨_, rfl⟩
+      all_goals
+        unfold checkConstructorType.loop at success
+        simp only at success
+        unfold buildExecution
+        simp only [Expr.isForall]
+        split
+        next hvalid =>
+          rw [hvalid] at success
+          change Except.error _ = Except.ok () at success
+          contradiction
+        next hvalid => exact ⟨_, rfl⟩
 
 /-- Erasing the inner trace also replays the public one-constructor checker,
 including its exact context-fuel read. -/
@@ -823,17 +1044,11 @@ theorem checkConstructors_singleton_eq_checkConstructorList
           context.lparams context.fuel TypeChecker.getEnv =
         .ok context.env := by rfl
   rw [hget]
-  simp only [Except.bind,
-    Std.Legacy.Range.forIn'_eq_forIn'_range', Std.Legacy.Range.size,
-    List.range', List.forIn'_cons, List.forIn'_nil,
-    List.size_toArray, List.length_cons, List.length_nil,
-    List.getElem_toArray, List.getElem_cons_zero,
-    Nat.sub_zero, Nat.zero_add, Nat.add_sub_cancel, Nat.div_one]
+  simp only [Except.bind]
+  simp only [checkConstructorsLoop]
   unfold checkConstructorList
   simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
-  cases checkConstructorFold context.env stats isUnsafe 0 {} indType.ctors context <;>
-    rfl
 
 namespace ConstructorListValidationTrace
 
@@ -1025,6 +1240,71 @@ theorem exists_of_fold_run
                       obtain ⟨tailTrace⟩ := ih success
                       exact ⟨.cons seen head tail hfresh hclosed rootCheck
                         typeTrace tailTrace⟩
+
+/-- The transparent list decomposition succeeds on every constructor list
+accepted by the executable stateful fold. -/
+theorem buildExecution_ok_of_fold_run
+    (success : checkConstructorFold context.env stats isUnsafe familyIdx
+      seen ctors context = .ok result) :
+    ∃ trace, buildExecution stats isUnsafe familyIdx context seen ctors =
+      .ok trace := by
+  induction ctors generalizing seen result with
+  | nil => exact ⟨_, rfl⟩
+  | cons head tail ih =>
+      unfold checkConstructorFold at success
+      simp only at success
+      unfold buildExecution
+      split
+      next hfresh =>
+        rw [hfresh] at success
+        change Except.error _ = Except.ok result at success
+        contradiction
+      next hfresh =>
+        rw [hfresh] at success
+        simp only [Bool.false_eq_true, if_false,
+          ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+          Except.bind, Except.pure] at success
+        split
+        next error heq =>
+          rw [heq] at success
+          simp [liftExcept_apply, Except.bind] at success
+        next heq =>
+          rw [heq] at success
+          simp only [liftExcept_apply, Except.bind] at success
+          rw [withEmptyLocalContext_apply, liftTypeChecker_apply] at success
+          split
+          next error heq2 =>
+            rw [heq2] at success
+            simp [Except.bind] at success
+          next inferred heq2 =>
+            rw [heq2] at success
+            simp only [Except.bind] at success
+            cases htype : checkConstructorType stats isUnsafe familyIdx
+                head.name head.type context with
+            | error err => simp_all [Except.bind]
+            | ok typeResult =>
+                cases typeResult
+                rw [htype] at success
+                simp only [Except.bind, ReaderT.pure, Pure.pure,
+                  Except.pure] at success
+                have htypeLoop :
+                    checkConstructorType.loop stats isUnsafe familyIdx
+                        head.name head.type 0 context.fuel.inductiveFuel
+                        context = .ok () := by
+                  unfold checkConstructorType at htype
+                  simpa only [readThe, MonadReaderOf.read, ReaderT.read,
+                    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+                    Except.bind, Except.pure] using htype
+                obtain ⟨typeTrace, hT⟩ :=
+                  ConstructorTypeValidationTrace.buildExecution_ok_of_run
+                    htypeLoop
+                rw [hT]
+                change checkConstructorFold context.env stats isUnsafe
+                  familyIdx (seen.insert head.name) tail context =
+                    .ok result at success
+                obtain ⟨tailTrace, htl⟩ := ih success
+                rw [htl]
+                exact ⟨_, rfl⟩
 
 /-- The stateful list fold's exact error value excludes a complete trace for
 that same source list and incoming duplicate-name accumulator. -/
@@ -1219,6 +1499,24 @@ def buildExecution (indType : InductiveType) (stats : InductiveStats)
   | .error error => .error error
   | .ok trace => .ok ⟨trace⟩
 
+/-- The transparent singleton decomposition succeeds on every source family
+accepted by the real constructor validator. -/
+theorem buildExecution_ok_of_run
+    (success : checkConstructors #[indType] stats isUnsafe context = .ok ()) :
+    ∃ validation, buildExecution indType stats isUnsafe context =
+      .ok validation := by
+  rw [checkConstructors_singleton_eq_checkConstructorList] at success
+  unfold checkConstructorList at success
+  cases hfold : checkConstructorFold context.env stats isUnsafe 0 {}
+      indType.ctors context with
+  | error err => simp_all [Functor.map, Except.map]
+  | ok result =>
+      obtain ⟨trace, htrace⟩ :=
+        ConstructorListValidationTrace.buildExecution_ok_of_fold_run hfold
+      unfold buildExecution
+      rw [htrace]
+      exact ⟨_, rfl⟩
+
 /-- Recomposition: retained operational evidence replays the real singleton
 `checkConstructors` execution exactly. -/
 theorem run
@@ -1243,13 +1541,16 @@ theorem nonempty_of_run
         ConstructorListValidationTrace.exists_of_fold_run hfold
       exact ⟨⟨trace⟩⟩
 
-/-- Choose the unique-by-source operational shape supplied by a successful
-run. The only nonconstructive ingredient is the project's existing baseline
-`Classical.choice`; every retained equality comes from the executable run. -/
-noncomputable def of_run
+/-- Choose the operational shape supplied by a successful run by replaying
+the transparent decomposition.  The success premise only discharges the
+impossible error branch, so the retained evidence is computed by
+`buildExecution` rather than selected through `Classical.choice`. -/
+def of_run
     (success : checkConstructors #[indType] stats isUnsafe context = .ok ()) :
     ConstructorValidationRun indType stats isUnsafe context :=
-  Classical.choice (nonempty_of_run success)
+  match h : buildExecution indType stats isUnsafe context with
+  | .ok validation => validation
+  | .error _ => absurd (buildExecution_ok_of_run success) (by simp [h])
 
 /-- Exact decomposition/recomposition contract for singleton constructor
 validation. -/

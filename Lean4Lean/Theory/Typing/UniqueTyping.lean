@@ -267,6 +267,95 @@ variable! (henv : VEnv.WF env) (hΓ : OnCtx Γ' (env.IsType U)) in
 theorem _root_.Lean4Lean.VExpr.WF.weak'_iff (W : Ctx.Lift' l Γ Γ') :
     VExpr.WF env U Γ' (e.lift' l) ↔ VExpr.WF env U Γ e := IsDefEqU.weak'_iff henv hΓ W
 
+/-! ### Application-spine weakening and inversion -/
+
+/-- General context weakening for an application spine. -/
+theorem SpineWF.weak' {env : VEnv} (henv : env.Ordered)
+    {U : Nat} {lift : Lift} {Γ Γ' : List VExpr}
+    (W : Ctx.Lift' lift Γ Γ') :
+    ∀ {es : List VExpr} {A B : VExpr}, env.SpineWF U Γ A es B →
+      env.SpineWF U Γ' (A.lift' lift)
+        (es.map fun e => e.lift' lift) (B.lift' lift) := by
+  intro es
+  induction es with
+  | nil =>
+      intro A B h
+      cases h
+      exact .nil
+  | cons e es ih =>
+      intro A B h
+      obtain ⟨A₁, A₂, rfl, he, hrest⟩ := h.cons_inv
+      refine .cons (he.weak' henv W) ?_
+      have weakened := ih hrest
+      rwa [VExpr.lift'_inst_hi] at weakened
+
+/-- Invert weakening of every component of an application-spine judgment
+when the enlarged context is well formed. -/
+theorem SpineWF.weakN_inv {env : VEnv} {U n k : Nat} {Γ Γ' : List VExpr}
+    (henv : env.WF) (hΓ' : OnCtx Γ' (env.IsType U))
+    (W : Ctx.LiftN n k Γ Γ') :
+    ∀ {es : List VExpr} {A B : VExpr},
+      env.SpineWF U Γ' (A.liftN n k)
+        (es.map fun e => e.liftN n k) (B.liftN n k) →
+      env.SpineWF U Γ A es B := by
+  intro es
+  induction es with
+  | nil =>
+      intro A B h
+      have hab := VExpr.liftN_inj.1 h.nil_inv
+      subst B
+      exact .nil
+  | cons e es ih =>
+      intro A B h
+      obtain ⟨A₁', A₂', sourceEq, he, hrest⟩ := h.cons_inv
+      cases A with
+      | bvar index => cases sourceEq
+      | sort level => cases sourceEq
+      | const name levels => cases sourceEq
+      | app fn argument => cases sourceEq
+      | lam domain body => cases sourceEq
+      | forallE A₁ A₂ =>
+        injection sourceEq with domainEq bodyEq
+        subst A₁'
+        subst A₂'
+        refine .cons ((HasType.weakN_iff henv hΓ' W).1 he) ?_
+        rw [← VExpr.liftN_inst_hi] at hrest
+        exact ih hrest
+
+/-- Invert a general context lift componentwise across an application-spine
+judgment. -/
+theorem SpineWF.weak'_inv {env : VEnv} {U : Nat} {lift : Lift}
+    {Γ Γ' : List VExpr}
+    (henv : env.WF) (hΓ' : OnCtx Γ' (env.IsType U))
+    (W : Ctx.Lift' lift Γ Γ') :
+    ∀ {es : List VExpr} {A B : VExpr},
+      env.SpineWF U Γ' (A.lift' lift)
+        (es.map fun e => e.lift' lift) (B.lift' lift) →
+      env.SpineWF U Γ A es B := by
+  intro es
+  induction es with
+  | nil =>
+      intro A B h
+      have hab := VExpr.lift'_inj.1 h.nil_inv
+      subst B
+      exact .nil
+  | cons e es ih =>
+      intro A B h
+      obtain ⟨A₁', A₂', sourceEq, he, hrest⟩ := h.cons_inv
+      cases A with
+      | bvar index => cases sourceEq
+      | sort level => cases sourceEq
+      | const name levels => cases sourceEq
+      | app fn argument => cases sourceEq
+      | lam domain body => cases sourceEq
+      | forallE A₁ A₂ =>
+        injection sourceEq with domainEq bodyEq
+        subst A₁'
+        subst A₂'
+        refine .cons ((HasType.weak'_iff henv hΓ' W).1 he) ?_
+        rw [← VExpr.lift'_inst_hi] at hrest
+        exact ih hrest
+
 variable! (henv : VEnv.WF env) in
 theorem _root_.Lean4Lean.OnCtx.weak'_inv
     (W : Ctx.Lift' ρ Γ Γ') (H : OnCtx Γ' (env.IsType U)) : OnCtx Γ (env.IsType U) := by

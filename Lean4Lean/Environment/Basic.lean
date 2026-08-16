@@ -51,6 +51,62 @@ def isNonRecStructure (env : Environment) (constName : Name) : Bool :=
   | some (.inductInfo { isRec := false, ctors := [_], numIndices := 0, .. }) => true
   | _ => false
 
+/-- A one-constructor, unindexed structure whose constructor and generated
+recursor have both reached the host environment.  Family metadata is staged
+before either artifact is inserted; projection verification may only demand a
+registered Theory view at this later boundary.
+
+Unlike `isNonRecStructure`, projection readiness deliberately does not inspect
+`InductiveVal.isRec`: Lean emits primitive projections for recursive structures
+too (including nested-recursive structures in the Lean prelude). -/
+def isProjectionReadyStructure (env : Environment) (constName : Name) : Bool :=
+  match env.constants.find?' constName with
+  | some (.inductInfo { ctors := [ctor], numIndices := 0, .. }) =>
+    match env.constants.find?' ctor,
+        env.constants.find?' (mkRecName constName) with
+    | some (.ctorInfo _), some (.recInfo _) => true
+    | _, _ => false
+  | _ => false
+
+theorem isProjectionReadyStructure_false_of_no_ctorInfo
+    {env : Environment} {name : Name} {info : InductiveVal}
+    (hfind : env.constants.find?' name = some (.inductInfo info))
+    (hnoCtor : ∀ ctor ctorInfo,
+      env.constants.find?' ctor ≠ some (.ctorInfo ctorInfo)) :
+    env.isProjectionReadyStructure name = false := by
+  cases info
+  rename_i constant numParams numIndices all ctors numNested isRec isUnsafe isReflexive
+  cases constant
+  unfold isProjectionReadyStructure
+  rw [hfind]
+  cases numIndices with
+  | succ _ => rfl
+  | zero =>
+    cases ctors with
+    | nil => rfl
+    | cons ctor rest =>
+      cases rest with
+      | cons _ _ => rfl
+      | nil =>
+        cases hctor : env.constants.find?' ctor with
+        | none => simp [hctor]
+        | some info =>
+          cases info <;> simp_all
+
+theorem isProjectionReadyStructure_false_of_numIndices_ne
+    {env : Environment} {name : Name} {info : InductiveVal}
+    (hfind : env.constants.find?' name = some (.inductInfo info))
+    (hindices : info.numIndices ≠ 0) :
+    env.isProjectionReadyStructure name = false := by
+  cases info
+  simp_all [isProjectionReadyStructure]
+
+theorem isProjectionReadyStructure_false_of_not_found
+    {env : Environment} {name : Name}
+    (hfind : env.constants.find?' name = none) :
+    env.isProjectionReadyStructure name = false := by
+  simp [isProjectionReadyStructure, hfind]
+
 def checkName (env : Environment) (n : Name)
     (allowPrimitive := false) : Except Exception Unit := do
   if env.contains n then

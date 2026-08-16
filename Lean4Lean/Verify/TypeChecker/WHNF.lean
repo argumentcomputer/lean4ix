@@ -4,11 +4,11 @@ namespace Lean4Lean.TypeChecker.Inner
 open Lean hiding Environment Exception
 
 theorem reduceRecursor.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
-    RecM.WF c s (reduceRecursor e cheapRec cheapProj) fun oe _ =>
+    RecM.WF c s (reduceRecursor e) fun oe _ =>
       ∀ e₁, oe = some e₁ → c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' := sorry
 
 theorem whnfFVar.WF {c : VContext} {s : VState} (he : c.TrExprS (.fvar fv) e') :
-    RecM.WF c s (whnfFVar (.fvar fv) cheapRec cheapProj) fun e₁ _ =>
+    RecM.WF c s (whnfFVar (.fvar fv) cheapProj) fun e₁ _ =>
       c.FVarsBelow (.fvar fv) e₁ ∧ c.TrExpr e₁ e' := by
   refine .getLCtx ?_
   simp [Expr.fvarId!]; split <;> [skip; exact .pure ⟨.rfl, he.trExpr c.Ewf c.Δwf⟩]
@@ -23,30 +23,126 @@ theorem whnfFVar.WF {c : VContext} {s : VState} (he : c.TrExprS (.fvar fv) e') :
   exact .refl c.Ewf c.Δwf
 
 theorem reduceProj.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i e) e') :
-    RecM.WF c s (reduceProj i e cheapRec cheapProj) fun oe _ =>
-      ∀ e₁, oe = some e₁ → c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e' := sorry
+    RecM.WF c s (reduceProj i e cheapProj) fun oe _ =>
+      ∀ e₁, oe = some e₁ → c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e' := by
+  let .proj (e' := major) heMajor hproj := he
+  obtain ⟨view, levels, params, _hviewName, hsemantic⟩ := hproj
+  obtain ⟨code, hcode, hresult, hprojector⟩ := hsemantic.program
+  have finish {normal : Expr} {state : VState}
+      (hbelow : c.FVarsBelow e normal)
+      (htr : c.TrExpr normal major) :
+      RecM.WF c state
+        (normal.withApp fun mk args => do
+          let .const mkC _ := mk | return none
+          let env ← getEnv
+          let .ctorInfo mkInfo ← env.get mkC | return none
+          return args[mkInfo.numParams + i]?) (fun oe _ =>
+            ∀ e₁, oe = some e₁ →
+              c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e') := by
+    rw [Expr.withApp_eq]
+    split
+    · rename_i mkC hostLevels hheadShape
+      obtain ⟨runtimeMajor, hnormalS, hnormalEq⟩ := htr
+      have ⟨runtimeHead, hstack⟩ := AppStack.build
+        (normal.mkAppList_getAppArgsList ▸ hnormalS)
+      have hhead := hstack.tr
+      rw [hheadShape] at hhead
+      let .const (us' := runtimeLevels) _hconst _hlevelsMap
+          _hlevelsLength := hhead
+      obtain ⟨runtimeArgs, hargsTr, hfull⟩ := hstack.argsTranslation
+      rw [normal.mkAppList_getAppArgsList] at hfull
+      have hfullEq := hfull.uniq c.Ewf (.refl c.Ewf c.Δwf) hnormalS
+      have hmajorEq := hfullEq.trans c.Ewf c.Δwf hnormalEq
+      refine .getEnv ?_
+      refine (M.WF.liftExcept envGet.WF).lift.bind fun _ci _ _ hfind => ?_
+      split
+      · rename_i mkInfo
+        refine .pure ?_
+        intro selected hselected
+        have hconstructorName : mkC = view.constructorName :=
+          c.Ewf.registeredStructureHeadInversion.constructor_name_inv
+            c.Δwf hsemantic rfl hmajorEq
+        have hnumParams : mkInfo.numParams = view.nparams :=
+          c.projectionReady.constructorNumParams view mkInfo
+            hsemantic.viewWF (by
+              rw [← hconstructorName]
+              exact hfind)
+        have hselectedList :
+            normal.getAppArgsList[mkInfo.numParams + i]? = some selected := by
+          rw [← Expr.getAppArgs_toList, Array.getElem?_toList]
+          exact hselected
+        obtain ⟨runtimeField, hfieldGet, hfieldTr⟩ :=
+          Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
+        have hfieldGetCanonical :
+            runtimeArgs[view.nparams + i]? = some runtimeField := by
+          rw [← hnumParams]
+          exact hfieldGet
+        obtain ⟨alignment⟩ :=
+          c.Ewf.registeredStructureHeadInversion.constructor_inv
+            c.Δwf hsemantic hcode rfl hfieldGetCanonical hmajorEq
+        have hiota := hsemantic.projector_constructor_aligned
+          c.Ewf c.Δwf hcode hprojector alignment
+        have hmajorTyped := hmajorEq.of_r c.Ewf c.Δwf hsemantic.majorType
+        have hprojectorCongr : c.IsDefEqU
+            (.app code.projector
+              (VExpr.appN (.const mkC runtimeLevels) runtimeArgs))
+            (.app code.projector major) :=
+          ⟨_, hprojector.appDF hmajorTyped⟩
+        have hfieldTarget : c.IsDefEqU runtimeField e' := by
+          rw [hresult]
+          exact hiota.symm.trans c.Ewf c.Δwf hprojectorCongr
+        refine ⟨?_, ⟨runtimeField, hfieldTr, hfieldTarget⟩⟩
+        intro P hP hprojFv
+        exact FVarsIn.getAppArgsList (hbelow P hP hprojFv)
+          (List.mem_of_getElem? hselectedList)
+      · exact .pure nofun
+    · exact .pure nofun
+  unfold reduceProj
+  split
+  · refine (whnfCore.WF heMajor).bind fun normal _ _ hnormal => ?_
+    split
+    · obtain ⟨literalMajor, hliteralS, hliteralEq⟩ := hnormal.2
+      let .lit _ hconstructorS := hliteralS
+      refine (whnf.WF hconstructorS).bind fun expanded _ _ hexpanded => ?_
+      have hbelow' : c.FVarsBelow e expanded :=
+        FVarsBelow.trans (fun _ _ _ => FVarsIn.strLitToConstructor)
+          hexpanded.1
+      have htr' := hexpanded.2.defeq c.Ewf c.Δwf hliteralEq
+      exact RecM.WF.pureBind (finish hbelow' htr')
+    · exact RecM.WF.pureBind (finish hnormal.1 hnormal.2)
+  · refine (whnf.WF heMajor).bind fun normal _ _ hnormal => ?_
+    split
+    · obtain ⟨literalMajor, hliteralS, hliteralEq⟩ := hnormal.2
+      let .lit _ hconstructorS := hliteralS
+      refine (whnf.WF hconstructorS).bind fun expanded _ _ hexpanded => ?_
+      have hbelow' : c.FVarsBelow e expanded :=
+        FVarsBelow.trans (fun _ _ _ => FVarsIn.strLitToConstructor)
+          hexpanded.1
+      have htr' := hexpanded.2.defeq c.Ewf c.Δwf hliteralEq
+      exact RecM.WF.pureBind (finish hbelow' htr')
+    · exact RecM.WF.pureBind (finish hnormal.1 hnormal.2)
 
 theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
-    RecM.WF c s (whnfCore' e cheapRec cheapProj) fun e₁ _ =>
+    RecM.WF c s (whnfCore' e cheapProj) fun e₁ _ =>
       c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' := by
-  unfold whnfCore'; extract_lets F G
+  unfold whnfCore'; extract_lets F
   let full := (· matches Expr.fvar _ | .app .. | .letE .. | .proj ..)
   generalize hP : (fun e₁ (_ : VState) => _) = P
   have hid {s} : RecM.WF c s (pure e) P := hP ▸ .pure ⟨.rfl, he.trExpr c.Ewf c.Δwf⟩
-  suffices hG : full e → RecM.WF c s (G ⟨⟩) P by
+  suffices hF : full e → RecM.WF c s (F ⟨⟩) P by
     split
     any_goals exact hid
-    any_goals exact hG rfl
+    any_goals exact hF rfl
     · let .mdata he := he
-      exact (whnfCore'.WF he).bind fun _ _ _ h => hP ▸ .pure h
-    · refine .getLCtx ?_; split <;> [exact hid; exact hG rfl]
-  simp [G]; refine fun hfull => .get ?_; split
+      exact hP ▸ whnfCore'.WF he
+    · refine .getLCtx ?_; split <;> [exact hid; exact hF rfl]
+  simp [F]; refine fun hfull => .get ?_; split
   · rename_i r eq; refine .stateWF fun wf => hP ▸ .pure ?_
     have ⟨_, h1, h2, h3⟩ := (wf.whnfCore_wf eq).2.2.2.2 he.fvarsIn
     refine ⟨h1, h3.defeq c.Ewf c.Δwf ?_⟩
     exact h2.uniq c.Ewf (.refl c.Ewf c.Δwf) he
   have hsave {e₁ s} (h1 : c.FVarsBelow e e₁) (h2 : c.TrExpr e₁ e') :
-      (save e cheapRec cheapProj e₁).WF c s P := by
+      (save e cheapProj e₁).WF c s P := by
     simp [save]
     split <;> [skip; exact hP ▸ .pure ⟨h1, h2⟩]
     rintro _ mwf wf a s' ⟨⟩
@@ -59,16 +155,15 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
       · exact he.fvarsIn.mono wf.ngen_wf
       · exact h2.fvarsIn.mono wf.ngen_wf
     exact hP ▸ ⟨.rfl, { wf with whnfCore_wf := hic wf.whnfCore_wf }, h1, h2⟩
-  unfold F; split <;> cases hfull
-  · simp; exact hP ▸ whnfFVar.WF he
+  split <;> cases hfull
+  · exact hP ▸ whnfFVar.WF he
   · rename_i fn arg _; generalize eq : fn.app arg = e at *
-    rw [Expr.withRevApp_eq]
     have ⟨_, stk⟩ := AppStack.build <| e.mkAppList_getAppArgsList ▸ he
     refine (whnfCore.WF stk.tr).bind fun _ s _ ⟨h1, h2⟩ => ?_
     split <;> [rename_i name dom body bi _; split]
     · let rec loop.WF {e e' i rargs f} (H : LambdaBodyN i e' f) (hi : i ≤ rargs.size) :
         ∃ n f', LambdaBodyN n e' f' ∧ n ≤ rargs.size ∧
-          loop e cheapRec cheapProj rargs i f = loop.cont e cheapRec cheapProj rargs n f' := by
+          loop e cheapProj rargs i f = loop.cont e cheapProj rargs n f' := by
         unfold loop; split
         · split
           · refine loop.WF (by simpa [Nat.add_comm] using H.add (.succ .zero)) ‹_›
@@ -120,7 +215,7 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
       let ⟨h3, _, h4, eq⟩ := eq ▸ this h1 (eq ▸ he) stk.tr h2
       refine (whnfCore.WF h4).bind fun _ _ _ ⟨h5, h6⟩ => ?_
       refine hsave (h3.trans h5) (h6.defeq c.Ewf c.Δwf eq)
-  · let .letE h1 h2 h3 h4 := he; simp
+  · let .letE h1 h2 h3 h4 := he
     refine (whnfCore.WF (h4.inst_let c.Ewf.ordered h3)).bind fun _ _ _ ⟨h1, h2⟩ => ?_
     exact hsave (.trans (fun _ _ he => he.2.2.instantiate1 he.2.1) h1) h2
   · refine (reduceProj.WF he).bind fun _ _ _ H => ?_
@@ -132,32 +227,29 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
 
 theorem whnf'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
     RecM.WF c s (whnf' e) fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' := by
-  unfold whnf'; extract_lets F G
+  unfold whnf'; extract_lets F
   generalize hP : (fun e₁ (_ : VState) => _) = P
   have hid {s} : RecM.WF c s (pure e) P := hP ▸ .pure ⟨.rfl, he.trExpr c.Ewf c.Δwf⟩
-  suffices hG : RecM.WF c s (G ()) P by
+  suffices hF : RecM.WF c s (F ()) P by
     split
     any_goals exact hid
-    any_goals exact hG
+    any_goals exact hF
     · let .mdata he := he
-      exact (whnf'.WF he).bind fun _ _ _ h => hP ▸ .pure h
-    · refine .getLCtx ?_; split <;> [exact hid; exact hG]
-  simp [G]; refine .get ?_; split
+      exact hP ▸ whnf'.WF he
+    · refine .getLCtx ?_; split <;> [exact hid; exact hF]
+  simp [F]; refine .get ?_; split
   · rename_i r eq; refine .stateWF fun wf => hP ▸ .pure ?_
     have ⟨_, h1, h2, h3⟩ := (wf.whnf_wf eq).2.2.2.2 he.fvarsIn
     refine ⟨h1, h3.defeq c.Ewf c.Δwf ?_⟩
     exact h2.uniq c.Ewf (.refl c.Ewf c.Δwf) he
-  unfold F
   have {e e' s n} (he : c.TrExprS e e') : (loop e n).WF c s fun e₁ _ =>
       c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' := by
     induction n generalizing s e e' with | zero => exact .throw | succ n ih => ?_
     refine .getEnv <| (whnfCore'.WF he).bind fun e₁ s _ ⟨h1, _, he₁, eq⟩ => ?_
     refine (M.WF.liftExcept reduceNative.WF).lift.bind fun _ _ _ h3 => ?_
-    extract_lets F1 F2; split <;> [cases h3 _ rfl; skip]
-    refine .pureBind ?_; unfold F2
+    split <;> [cases h3 _ rfl; skip]
     refine (reduceNat.WF he₁).bind fun _ _ _ h3 => ?_; split
     · exact .pure ⟨.trans h1 (h3 _ rfl).1, (h3 _ rfl).2.defeq c.Ewf c.Δwf eq⟩
-    refine .pureBind ?_; unfold F1
     refine (unfoldDefinition.WF he₁).bind fun _ _ _ H => ?_
     split <;> [skip; exact .pure ⟨h1, _, he₁, eq⟩]
     have ⟨a1, _, a2, eq'⟩ := H

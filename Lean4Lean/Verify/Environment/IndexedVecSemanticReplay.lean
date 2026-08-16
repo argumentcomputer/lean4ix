@@ -103,6 +103,224 @@ theorem indexedVecSemanticNatSafePrimitives :
           exact ⟨rfl, rfl⟩
         · simp [SMap.find?] at hfind
 
+theorem indexedVecKernelEnv_noProjectionReady (name : Name) :
+    indexedVecKernelEnv.isProjectionReadyStructure name = false := by
+  simp only [indexedVecKernelEnv,
+    Kernel.Environment.isProjectionReadyStructure,
+    Kernel.Environment.ofConstants]
+  simp only [natMap_wf.find?'_eq_find?]
+  simp only [natMap, natCtorMap_wf.find?_insert]
+  simp only [natCtorMap, natZeroMap_wf.find?_insert]
+  simp only [natZeroMap, natTypeMap_wf.find?_insert]
+  simp only [natTypeMap, SMap.WF.find?_insert
+    (s := ({} : ConstMap)) SMap.WF.empty]
+  by_cases hRec : ``Nat.rec = name
+  · subst name
+    simp [SMap.find?, natRecInfo]
+  · by_cases hSucc : ``Nat.succ = name
+    · subst name
+      simp [hRec, SMap.find?, natSuccInfo]
+    · by_cases hZero : ``Nat.zero = name
+      · subst name
+        simp [hRec, hSucc, SMap.find?, natZeroInfo]
+      · by_cases hNat : ``Nat = name
+        · subst name
+          simp [hRec, hSucc, hZero, SMap.find?, natInfo]
+        · simp [hRec, hSucc, hZero, hNat, SMap.find?]
+
+theorem indexedVecKernelEnv_noStructureEta (name : Name) :
+    indexedVecKernelEnv.isNonRecStructure name = false := by
+  simp only [indexedVecKernelEnv, Kernel.Environment.isNonRecStructure,
+    Kernel.Environment.ofConstants, Kernel.Environment.find?]
+  simp only [natMap_wf.find?'_eq_find?]
+  simp only [natMap, natCtorMap_wf.find?_insert]
+  simp only [natCtorMap, natZeroMap_wf.find?_insert]
+  simp only [natZeroMap, natTypeMap_wf.find?_insert]
+  simp only [natTypeMap, SMap.WF.find?_insert
+    (s := ({} : ConstMap)) SMap.WF.empty]
+  by_cases hRec : ``Nat.rec = name
+  · subst name
+    simp [SMap.find?, natRecInfo]
+  · by_cases hSucc : ``Nat.succ = name
+    · subst name
+      simp [hRec, SMap.find?, natSuccInfo]
+    · by_cases hZero : ``Nat.zero = name
+      · subst name
+        simp [hRec, hSucc, SMap.find?, natZeroInfo]
+      · by_cases hNat : ``Nat = name
+        · subst name
+          simp [hRec, hSucc, hZero, SMap.find?, natInfo]
+        · simp [hRec, hSucc, hZero, hNat, SMap.find?]
+
+theorem indexedVecTypeEnv_noProjectionReady (name : Name) :
+    ctorContext.env.isProjectionReadyStructure name = false := by
+  simp only [ctorContext, ctorEnv,
+    Kernel.Environment.isProjectionReadyStructure,
+    Kernel.Environment.ofConstants]
+  simp only [indexedVecTypeMap_wf.find?'_eq_find?]
+  simp only [indexedVecTypeMap, natMap_wf.find?_insert]
+  simp only [natMap, natCtorMap_wf.find?_insert]
+  simp only [natCtorMap, natZeroMap_wf.find?_insert]
+  simp only [natZeroMap, natTypeMap_wf.find?_insert]
+  simp only [natTypeMap, SMap.WF.find?_insert
+    (s := ({} : ConstMap)) SMap.WF.empty]
+  by_cases hVec : ``IndexedVec = name
+  · subst name
+    simp [SMap.find?, indexedVecInfo]
+  · by_cases hRec : ``Nat.rec = name
+    · subst name
+      simp [hVec, SMap.find?, natRecInfo]
+    · by_cases hSucc : ``Nat.succ = name
+      · subst name
+        simp [hVec, hRec, SMap.find?, natSuccInfo]
+      · by_cases hZero : ``Nat.zero = name
+        · subst name
+          simp [hVec, hRec, hSucc, SMap.find?, natZeroInfo]
+        · by_cases hNat : ``Nat = name
+          · subst name
+            simp [hVec, hRec, hSucc, hZero, SMap.find?, natInfo]
+          · simp [hVec, hRec, hSucc, hZero, hNat, SMap.find?]
+
+theorem indexedVecTypeEnv_noStructureEta (name : Name) :
+    ctorContext.env.isNonRecStructure name = false := by
+  simp only [ctorContext, ctorEnv, Kernel.Environment.isNonRecStructure,
+    Kernel.Environment.ofConstants, Kernel.Environment.find?]
+  simp only [indexedVecTypeMap_wf.find?'_eq_find?]
+  simp only [indexedVecTypeMap, natMap_wf.find?_insert]
+  simp only [natMap, natCtorMap_wf.find?_insert]
+  simp only [natCtorMap, natZeroMap_wf.find?_insert]
+  simp only [natZeroMap, natTypeMap_wf.find?_insert]
+  simp only [natTypeMap, SMap.WF.find?_insert
+    (s := ({} : ConstMap)) SMap.WF.empty]
+  by_cases hVec : ``IndexedVec = name
+  · subst name
+    simp [SMap.find?, indexedVecInfo]
+  · by_cases hRec : ``Nat.rec = name
+    · subst name
+      simp [hVec, SMap.find?, natRecInfo]
+    · by_cases hSucc : ``Nat.succ = name
+      · subst name
+        simp [hVec, hRec, SMap.find?, natSuccInfo]
+      · by_cases hZero : ``Nat.zero = name
+        · subst name
+          simp [hVec, hRec, hSucc, SMap.find?, natZeroInfo]
+        · by_cases hNat : ``Nat = name
+          · subst name
+            simp [hVec, hRec, hSucc, hZero, SMap.find?, natInfo]
+          · simp [hVec, hRec, hSucc, hZero, hNat, SMap.find?]
+
+private theorem addConst_constants {env env' : VEnv} {name : Name}
+    {ci : VConstant} (hadd : env.addConst name ci = some env') (query : Name) :
+    env'.constants query =
+      if name = query then some ci else env.constants query := by
+  unfold VEnv.addConst at hadd
+  split at hadd <;> cases hadd
+  rfl
+
+private theorem structureView_nparams_eq_zero_of_nat
+    {env : VEnv} {view : VStructureView} (hview : view.WF env)
+    (hname : ``Nat = view.name)
+    (hNat : env.constants ``Nat = some natType.toVConstant) :
+    view.nparams = 0 := by
+  have hfamily := hview.family
+  rw [← hname, hNat] at hfamily
+  have hsourceType : view.generation.block.sourceType.type = natType.type :=
+    congrArg VConstant.type (Option.some.inj hfamily).symm
+  have hshape := view.generation.shape_eq
+  simp only [VInductDecl.NormalizedChecked.generationShape, Bool.and_eq_true,
+    beq_iff_eq] at hshape
+  have hrawParamsLength := hshape.1.1.1.1.1
+  have hNatType : natType.type = .sort (.succ .zero) := rfl
+  rw [VInductDecl.NormalizedChecked.rawParams, hsourceType,
+    hNatType] at hrawParamsLength
+  cases hnp : view.source.nparams with
+  | zero => simpa using hnp
+  | succ _ =>
+    rw [hnp] at hrawParamsLength
+    simp [VExpr.telN] at hrawParamsLength
+
+private theorem natFinalEnv_structureView_nparams_eq_zero
+    {view : VStructureView} (hview : view.WF natFinalEnv) :
+    view.nparams = 0 := by
+  have hrec := hview.recursor
+  change natRecEnv.constants view.recursorName =
+    some view.generation.recursor at hrec
+  rw [addConst_constants
+      (show natCtorEnv.addConst ``Nat.rec
+        (VInductDecl.recConst 0 ``Nat 0 natType) = some natRecEnv from rfl),
+    addConst_constants
+      (show natZeroEnv.addConst natType.ctors[1].name
+        natType.ctors[1].toVConstant = some natCtorEnv from rfl),
+    addConst_constants
+      (show natTypeEnv.addConst natType.ctors[0].name
+        natType.ctors[0].toVConstant = some natZeroEnv from rfl),
+    addConst_constants
+      (show VEnv.empty.addConst natType.name natType.toVConstant =
+        some natTypeEnv from rfl)] at hrec
+  have hNatName : natType.name = ``Nat := rfl
+  have hZeroName : natType.ctors[0].name = ``Nat.zero := rfl
+  have hSuccName : natType.ctors[1].name = ``Nat.succ := rfl
+  rw [hNatName, hZeroName, hSuccName] at hrec
+  simp [VEnv.empty, VStructureView.recursorName] at hrec
+  exact structureView_nparams_eq_zero_of_nat hview hrec.1
+    nat_type_env_lookup
+
+private theorem indexedVecTypeEnv_structureView_nparams_eq_zero
+    {view : VStructureView} (hview : view.WF indexedVecTypeEnv) :
+    view.nparams = 0 := by
+  have hrec := hview.recursor
+  rw [addConst_constants
+      (show natFinalEnv.addConst indexedVecType.name
+        indexedVecType.toVConstant = some indexedVecTypeEnv from rfl)] at hrec
+  change (if indexedVecType.name = view.recursorName then
+      some indexedVecType.toVConstant else
+      natRecEnv.constants view.recursorName) =
+    some view.generation.recursor at hrec
+  rw [addConst_constants
+      (show natCtorEnv.addConst ``Nat.rec
+        (VInductDecl.recConst 0 ``Nat 0 natType) = some natRecEnv from rfl),
+    addConst_constants
+      (show natZeroEnv.addConst natType.ctors[1].name
+        natType.ctors[1].toVConstant = some natCtorEnv from rfl),
+    addConst_constants
+      (show natTypeEnv.addConst natType.ctors[0].name
+        natType.ctors[0].toVConstant = some natZeroEnv from rfl),
+    addConst_constants
+      (show VEnv.empty.addConst natType.name natType.toVConstant =
+        some natTypeEnv from rfl)] at hrec
+  have hVecName : indexedVecType.name = ``IndexedVec := rfl
+  have hNatName : natType.name = ``Nat := rfl
+  have hZeroName : natType.ctors[0].name = ``Nat.zero := rfl
+  have hSuccName : natType.ctors[1].name = ``Nat.succ := rfl
+  rw [hVecName, hNatName, hZeroName, hSuccName] at hrec
+  simp [VEnv.empty, VStructureView.recursorName] at hrec
+  exact structureView_nparams_eq_zero_of_nat hview hrec.1 rfl
+
+private theorem natMap_constructor_numParams
+    {view : VStructureView} {info : ConstructorVal}
+    (hzero : view.nparams = 0)
+    (hfind : natMap.find? view.constructorName = some (.ctorInfo info)) :
+    info.numParams = view.nparams := by
+  rw [natMap, natCtorMap_wf.find?_insert] at hfind
+  split at hfind
+  · cases hfind
+  · rw [natCtorMap, natZeroMap_wf.find?_insert] at hfind
+    split at hfind
+    · simp [natSuccInfo] at hfind
+      cases hfind
+      exact hzero.symm
+    · rw [natZeroMap, natTypeMap_wf.find?_insert] at hfind
+      split at hfind
+      · simp [natZeroInfo] at hfind
+        cases hfind
+        exact hzero.symm
+      · rw [natTypeMap,
+          SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty]
+          at hfind
+        split at hfind
+        · cases hfind
+        · simp [SMap.find?] at hfind
+
 def indexedVecSemanticNatVEnvs : VEnvs where
   venv _ := natFinalEnv
 
@@ -110,10 +328,24 @@ theorem indexedVecSemanticNatVEnvsWF : indexedVecSemanticNatVEnvs.WF indexedVecK
   tr := by
     intro safety
     change TrEnv' _ natMap false natFinalEnv
-    exact nat_trEnv'.sf_mono DefinitionSafety.le_safe
+    exact nat_trEnv'
   hasPrimitives := indexedVecSemanticNatHasPrimitives
   safePrimitives := indexedVecSemanticNatSafePrimitives
   mono := fun _ => .rfl
+  projectionReady := {
+    infer := by
+      intro name _info _hfind hready
+      rw [indexedVecKernelEnv_noProjectionReady] at hready
+      contradiction
+    constructorNumParams := by
+      intro view info hview hfind
+      change natMap.find?' view.constructorName =
+        some (.ctorInfo info) at hfind
+      rw [natMap_wf.find?'_eq_find?] at hfind
+      exact natMap_constructor_numParams
+        (natFinalEnv_structureView_nparams_eq_zero hview) hfind }
+  structureEtaReady := StructureEtaReady.of_no_nonRecStructure
+    indexedVecKernelEnv_noStructureEta
 
 def indexedVecSemanticAddType :
     AddInductConstant .induct natMap natFinalEnv
@@ -172,6 +404,23 @@ def indexedVecFamilyStage :
   validation := indexedVecFamilyValidationRun
   typeEnv := indexedVecTypeEnv
   addInduct := indexedVecSemanticAddType
+  projectionReady := {
+    infer := by
+      intro name _info _hfind hready
+      rw [indexedVecTypeEnv_noProjectionReady] at hready
+      contradiction
+    constructorNumParams := by
+      intro view info hview hfind
+      change indexedVecTypeMap.find?' view.constructorName =
+        some (.ctorInfo info) at hfind
+      rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
+        natMap_wf.find?_insert] at hfind
+      split at hfind
+      · cases hfind
+      · exact natMap_constructor_numParams
+          (indexedVecTypeEnv_structureView_nparams_eq_zero hview) hfind }
+  structureEtaReady := StructureEtaReady.of_no_nonRecStructure
+    indexedVecTypeEnv_noStructureEta
   family_lctx_eq := rfl
   constructorContext_eq := rfl
   quotInit_eq := rfl
@@ -213,7 +462,7 @@ theorem indexedVecSemanticConsSourceTr :
   exact hshape.to_trExprS indexedVecTypeEnv_ordered trivial
     ⟨.sort u, htype⟩
 
-noncomputable def indexedVecStagedUniverseInput :
+def indexedVecStagedUniverseInput :
     VInductDecl.StagedNormalizationCandidateUniverseInput
       indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
@@ -786,7 +1035,7 @@ private theorem indexedVecCandidateWhnfResult_eq
   rw [self] at other
   exact (Except.ok.inj other).symm
 
-private noncomputable def indexedVecValidationNatPositivityAlignment
+private def indexedVecValidationNatPositivityAlignment
     (trace : AddInductive.ConstructorPositivityModeTrace
       indexedVecStagedUniverseInput.staged.family.validation.stats false
       indexedVecKernelCons.name 1 indexedVecCtorValidationContext
@@ -816,7 +1065,7 @@ private noncomputable def indexedVecValidationNatPositivityAlignment
             indexedVecValidationNatHasNoIndOcc] at occurs
           contradiction
 
-private noncomputable def indexedVecValidationAlphaPositivityAlignment
+private def indexedVecValidationAlphaPositivityAlignment
     (trace : AddInductive.ConstructorPositivityModeTrace
       indexedVecStagedUniverseInput.staged.family.validation.stats false
       indexedVecKernelCons.name 2 indexedVecValidationNContext
@@ -849,7 +1098,7 @@ private noncomputable def indexedVecValidationAlphaPositivityAlignment
           rw [indexedVecValidationAlphaHasNoIndOcc] at occurs
           contradiction
 
-private noncomputable def indexedVecValidationTailPositivityAlignment
+private def indexedVecValidationTailPositivityAlignment
     (trace : AddInductive.ConstructorPositivityModeTrace
       indexedVecStagedUniverseInput.staged.family.validation.stats false
       indexedVecKernelCons.name 3 indexedVecValidationHeadContext
@@ -926,7 +1175,7 @@ theorem indexedVecValidationCandidateFieldFVars_ne :
 /-- Exact D2 owner for `IndexedVec`.  Its validator telescope is transported
 only across proved context/source equalities, while every candidate view is
 instantiated with the validator-owned locals at the same de Bruijn position. -/
-noncomputable def indexedVecStagedPostFamilyInput :
+def indexedVecStagedPostFamilyInput :
     VInductDecl.StagedNormalizationCandidatePostFamilyInput
       indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl where
@@ -2595,7 +2844,7 @@ private theorem indexedVecPreFamilySafetyRun :
   rw [constructorListRun]
   rfl
 
-private noncomputable def indexedVecStagedPreFamilyInput :
+private def indexedVecStagedPreFamilyInput :
     VInductDecl.StagedNormalizationCandidatePreFamilyInput
       indexedVecFamilyCandidateContext ctorContext natFinalEnv [`u]
       indexedVecNormalizationCandidate indexedVecDecl :=
@@ -2862,31 +3111,32 @@ theorem indexedVecSemanticExactProducedGenerationCandidatePackage_exists :
     |>.exactProducedPackage_nonempty indexedVecStagedPreFamilyInput rfl
       indexedVecChecked.identityGeneration indexedVecSemanticCandidate_analysis
 
-private noncomputable def
+private def
     indexedVecSemanticExactProducedGenerationCandidatePackage :
     VInductDecl.ExactProducedGenerationCandidatePackage natFinalEnv [`u]
       indexedVecSemanticProducedGenerationShapeCandidate
       indexedVecChecked.identityGeneration :=
-  Classical.choice
-    indexedVecSemanticExactProducedGenerationCandidatePackage_exists
+  indexedVecSemanticProducedGenerationShapeCandidate.exactProducedPackage
+    indexedVecStagedPreFamilyInput rfl indexedVecChecked.identityGeneration
+    indexedVecSemanticCandidate_analysis
 
-noncomputable def indexedVecSemanticGenerationCandidateSemanticRun :
+def indexedVecSemanticGenerationCandidateSemanticRun :
   VInductDecl.GenerationCandidateSemanticRun
       indexedVecSemanticExactProducedGenerationCandidatePackage.normalization
       indexedVecChecked.identityGeneration :=
   indexedVecSemanticExactProducedGenerationCandidatePackage.semantic
 
-noncomputable def indexedVecSemanticGenerationCandidateRun :
+def indexedVecSemanticGenerationCandidateRun :
     VInductDecl.GenerationCandidateRun
       indexedVecSemanticExactProducedGenerationCandidatePackage.normalization.root
       indexedVecChecked.identityGeneration :=
   indexedVecSemanticGenerationCandidateSemanticRun.run
 
-noncomputable def indexedVecSemanticGenerationCandidatePackage :
+def indexedVecSemanticGenerationCandidatePackage :
     VInductDecl.GenerationCandidatePackage natFinalEnv [`u] :=
   indexedVecSemanticGenerationCandidateSemanticRun.package
 
-noncomputable def indexedVecSemanticProducedGenerationCandidatePackage :
+def indexedVecSemanticProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage natFinalEnv [`u] :=
   indexedVecSemanticExactProducedGenerationCandidatePackage.package
 
@@ -2911,7 +3161,7 @@ theorem indexedVecSemanticCertified_ordered :
   VEnv.addInductCertified_WF nat_env_wf.ordered
     indexedVecSemantic_addInductCertified
 
-noncomputable def indexedVecSemanticAddInductTraceChecked :
+def indexedVecSemanticAddInductTraceChecked :
     AddInductTrace natMap natFinalEnv indexedVecDecl indexedVecMap
       indexedVecFinalEnv := by
   refine indexedVecSemanticProducedGenerationCandidatePackage.package.addInductTrace
@@ -3004,9 +3254,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3037,9 +3290,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPostFamilySemantic_ex
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3070,9 +3326,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPreFamilySemantic_exi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3103,9 +3362,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3120,7 +3382,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecReorderedView_rejected' depen
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_missingRawShape_rejected' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -3152,7 +3413,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_extraRawSha
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandidate_produced' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -3200,9 +3460,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticExactProducedGenerati
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3233,9 +3496,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3266,9 +3532,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3299,9 +3568,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

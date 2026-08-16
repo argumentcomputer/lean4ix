@@ -9,7 +9,7 @@ inductive Pattern where
   | app (f a : Pattern)
   | var (f : Pattern)
 
-def Pattern.varN (p : Pattern) : Nat → Pattern
+@[reducible] def Pattern.varN (p : Pattern) : Nat → Pattern
   | 0 => p
   | n+1 => (p.varN n).var
 
@@ -19,7 +19,7 @@ inductive Subpattern (p : Pattern) : Pattern → Prop where
   | appR : Subpattern p a → Subpattern p (.app f a)
   | varL : Subpattern p f → Subpattern p (.var f)
 
-def Subpattern.varN (h : Subpattern p f) : ∀ {n}, Subpattern p (.varN f n)
+theorem Subpattern.varN (h : Subpattern p f) : ∀ {n}, Subpattern p (.varN f n)
   | 0 => h
   | _+1 => .varL (.varN h)
 
@@ -70,7 +70,7 @@ inductive Pattern.LE : Pattern → Pattern → Prop where
   | app : LE f f' → LE a a' → LE (.app f a) (.app f' a')
   | app_var : LE f f' → LE (.app f a) (.var f')
 
-def Pattern.Path : Pattern → Type
+@[reducible] def Pattern.Path : Pattern → Type
   | .const _ => Empty
   | .app f a => f.Path ⊕ a.Path
   | .var f => Option f.Path
@@ -164,6 +164,22 @@ theorem Pattern.matches_instN {p : Pattern} {e : VExpr} {m1 m2} (H : p.Matches e
     rw [(_ : (fun _ => _) = _)]; exact ih1.app ih2
     ext (_|_) <;> rfl
 
+/-- Universe instantiation preserves a successful match.  The universe
+capture is instantiated pointwise and every expression capture is
+instantiated by the same level substitution. -/
+theorem Pattern.Matches.instL {p : Pattern} {e : VExpr} {m1 m2}
+    (H : p.Matches e m1 m2) (ls : List VLevel) :
+    p.Matches (e.instL ls) (m1.map (VLevel.inst ls))
+      fun x => (m2 x).instL ls := by
+  induction H with
+  | const => erw [show (fun _ : Empty => _) = _ by ext ⟨⟩]; exact .const
+  | var _ ih =>
+    rw [(_ : (fun _ => _) = _)]; exact ih.var
+    ext (_|_) <;> rfl
+  | app _ _ ih1 ih2 =>
+    rw [(_ : (fun _ => _) = _)]; exact ih1.app ih2
+    ext (_|_) <;> rfl
+
 theorem Pattern.matches_inter {p q : Pattern} {e : VExpr} :
     (∃ m1 m2, p.Matches e m1 m2) ∧ (∃ m1 m2, q.Matches e m1 m2) ↔
     (∃ r m1 m2, p.inter q = some r ∧ r.Matches e m1 m2) := by
@@ -227,6 +243,218 @@ inductive SimplePattern where
   | iota (recursor : Name) (major : Nat) (constr : Name) (args : Nat)
   | defn (head : Name)
 
-def SimplePattern.toPattern : SimplePattern → Pattern
+@[reducible] def SimplePattern.toPattern : SimplePattern → Pattern
   | .defn c => .const c
   | .iota r m c n => .app (.varN (.const r) m) (.varN (.const c) n)
+
+/-! ## Shape helpers for generated recursor patterns
+
+`HeadConstN`, `HeadConst`, `of_varN_matches`, `RecursorIotaPattern`, and
+`matches_shape` form the implementation-independent shape layer consumed by
+the generated iota patterns of a certified inductive block
+(`Theory/Typing/InductivePattern.lean`). They characterize matching against
+`Pattern.varN` towers and `SimplePattern.iota` patterns without referring to
+any generator data. -/
+
+/-- `HeadConstN c ls n e`: `e` is the constant `c` at levels `ls` applied to
+exactly `n` arguments. This is the expression shape captured by matching the
+pattern `Pattern.varN (.const c) n`. -/
+inductive HeadConstN (c : Name) (ls : List VLevel) : Nat → VExpr → Prop where
+  | const : HeadConstN c ls 0 (.const c ls)
+  | app : HeadConstN c ls n f → HeadConstN c ls (n+1) (.app f a)
+
+/-- `e` is an application spine headed by the constant `c`. -/
+def HeadConst (c : Name) (e : VExpr) : Prop := ∃ ls n, HeadConstN c ls n e
+
+/-- Matching a `varN` tower of a constant captures exactly a `HeadConstN`
+spine whose head levels are the pattern's level assignment. -/
+theorem Pattern.of_varN_matches {c : Name} :
+    ∀ {n : Nat} {e : VExpr} {m2}, (Pattern.varN (.const c) n).Matches e m1 m2 →
+      HeadConstN c m1 n e := by
+  intro n
+  induction n with
+  | zero => intro e m2 H; cases H; exact .const
+  | succ n ih => intro e m2 H; cases H with | var h => exact .app (ih h)
+
+/-- Every `HeadConstN` spine matches its `varN` tower. -/
+theorem HeadConstN.matches : HeadConstN c ls n e →
+    ∃ m2, (Pattern.varN (.const c) n).Matches e ls m2
+  | .const => ⟨_, .const⟩
+  | .app h => let ⟨_, h'⟩ := h.matches; ⟨_, .var h'⟩
+
+/-- The capture paths of an `n`-ary `varN` tower in argument order (outermost
+application first): matching assigns the `t`-th entry the `t`-th spine
+argument. -/
+def Pattern.varNPaths (p : Pattern) : ∀ n, List (Pattern.Path (p.varN n))
+  | 0 => []
+  | n+1 => (varNPaths p n).map some ++ [none]
+
+@[simp] theorem Pattern.varNPaths_length (p : Pattern) :
+    ∀ n, (varNPaths p n).length = n
+  | 0 => rfl
+  | n+1 => by
+    show ((varNPaths p n).map some ++ [none]).length = n + 1
+    rw [List.length_append, List.length_map, varNPaths_length p n]; rfl
+
+/-- The exact pattern of one generated iota rule: the recursor constant
+applied to `major` arguments (parameters, motives, minors, and the
+constructor's result indices), with a `ctor`-headed major premise carrying
+`args` arguments. Definitionally `(SimplePattern.iota recursor major ctor
+args).toPattern`. -/
+def RecursorIotaPattern (recursor : Name) (major : Nat)
+    (ctor : Name) (args : Nat) : Pattern :=
+  .app (.varN (.const recursor) major) (.varN (.const ctor) args)
+
+theorem SimplePattern.toPattern_iota :
+    (SimplePattern.iota r m c n).toPattern = RecursorIotaPattern r m c n := rfl
+
+/-- Match inversion for an iota pattern: the expression is exactly a
+recursor-headed spine at the pattern's level assignment whose last argument
+is a constructor-headed spine (at unconstrained levels). -/
+theorem RecursorIotaPattern.matches_shape
+    (H : (RecursorIotaPattern r mj c n).Matches e m1 m2) :
+    ∃ f a ls, e = .app f a ∧ HeadConstN r m1 mj f ∧ HeadConstN c ls n a := by
+  cases H with
+  | app h1 h2 =>
+    exact ⟨_, _, _, rfl, Pattern.of_varN_matches h1, Pattern.of_varN_matches h2⟩
+
+/-- Match construction for an iota pattern from the two head spines. -/
+theorem RecursorIotaPattern.matches_of
+    (h1 : HeadConstN r ls mj f) (h2 : HeadConstN c ls' n a) :
+    ∃ m2, (RecursorIotaPattern r mj c n).Matches (.app f a) ls m2 :=
+  let ⟨_, hf⟩ := h1.matches
+  let ⟨_, ha⟩ := h2.matches
+  ⟨_, .app hf ha⟩
+
+/-- Subpatterns of a constant `varN` tower are exactly its shorter towers. -/
+theorem Subpattern.varN_const_le :
+    ∀ {n}, Subpattern p (Pattern.varN (.const c) n) →
+      ∃ j, j ≤ n ∧ p = Pattern.varN (.const c) j := by
+  intro n
+  induction n with
+  | zero => intro H; cases H; exact ⟨0, Nat.le_refl _, rfl⟩
+  | succ n ih =>
+    intro H
+    cases H with
+    | refl => exact ⟨n+1, Nat.le_refl _, rfl⟩
+    | varL h =>
+      let ⟨j, hj, hp⟩ := ih h
+      exact ⟨j, Nat.le_succ_of_le hj, hp⟩
+
+/-- Subpattern classification for an iota pattern: the whole pattern, a
+prefix of the recursor head, or a prefix of the constructor spine. -/
+theorem RecursorIotaPattern.subpattern_inv
+    (H : Subpattern p (RecursorIotaPattern r mj c n)) :
+    p = RecursorIotaPattern r mj c n ∨
+      (∃ j, j ≤ mj ∧ p = .varN (.const r) j) ∨
+      (∃ j, j ≤ n ∧ p = .varN (.const c) j) := by
+  cases H with
+  | refl => exact .inl rfl
+  | appL h => exact .inr (.inl h.varN_const_le)
+  | appR h => exact .inr (.inr h.varN_const_le)
+
+/-- Two constant `varN` towers intersect only when they agree exactly. -/
+theorem Pattern.varN_const_inter_some :
+    ∀ {n n' p}, (Pattern.varN (.const c) n).inter (Pattern.varN (.const c') n') = some p →
+      c = c' ∧ n = n' ∧ p = Pattern.varN (.const c) n := by
+  intro n
+  induction n with
+  | zero =>
+    intro n' p h
+    cases n' with
+    | zero =>
+      simp [Pattern.varN, Pattern.inter] at h
+      exact ⟨h.1, rfl, h.2.symm⟩
+    | succ n' => simp [Pattern.varN, Pattern.inter] at h
+  | succ n ih =>
+    intro n' p h
+    cases n' with
+    | zero => simp [Pattern.varN, Pattern.inter] at h
+    | succ n' =>
+      simp only [Pattern.varN, Pattern.inter, bind, Option.bind_eq_some_iff,
+        Option.pure_def, Option.some.injEq] at h
+      obtain ⟨q, hq, rfl⟩ := h
+      obtain ⟨rfl, rfl, rfl⟩ := ih hq
+      exact ⟨rfl, rfl, rfl⟩
+
+theorem Pattern.varN_const_inter_of_ne_name (h : c ≠ c') (n n' : Nat) :
+    (Pattern.varN (.const c) n).inter (Pattern.varN (.const c') n') = none := by
+  cases e : (Pattern.varN (.const c) n).inter (Pattern.varN (.const c') n') with
+  | none => rfl
+  | some p => exact absurd (varN_const_inter_some e).1 h
+
+theorem Pattern.varN_const_inter_of_ne_arity (h : n ≠ n') (c c' : Name) :
+    (Pattern.varN (.const c) n).inter (Pattern.varN (.const c') n') = none := by
+  cases e : (Pattern.varN (.const c) n).inter (Pattern.varN (.const c') n') with
+  | none => rfl
+  | some p => exact absurd (varN_const_inter_some e).2.1 h
+
+/-- An application pattern intersects a constant `varN` tower only through a
+positive tower whose inner tower intersects the function part. -/
+theorem Pattern.app_inter_varN_const_some {f a : Pattern}
+    (h : (Pattern.app f a).inter (Pattern.varN (.const c) n) = some p) :
+    ∃ n' q, n = n' + 1 ∧ f.inter (Pattern.varN (.const c) n') = some q ∧
+      p = .app q a := by
+  cases n with
+  | zero => simp [Pattern.varN, Pattern.inter] at h
+  | succ n' =>
+    simp only [Pattern.varN, Pattern.inter, bind, Option.bind_eq_some_iff,
+      Option.pure_def, Option.some.injEq] at h
+    obtain ⟨q, hq, rfl⟩ := h
+    exact ⟨n', q, rfl, hq, rfl⟩
+
+/-- Two iota patterns intersect only when they agree exactly. -/
+theorem RecursorIotaPattern.inter_some
+    (h : (RecursorIotaPattern r mj c n).inter (RecursorIotaPattern r' mj' c' n') = some p) :
+    r = r' ∧ mj = mj' ∧ c = c' ∧ n = n' ∧ p = RecursorIotaPattern r mj c n := by
+  simp only [RecursorIotaPattern, Pattern.inter, bind, Option.bind_eq_some_iff,
+    Option.pure_def, Option.some.injEq] at h
+  obtain ⟨q1, h1, q2, h2, rfl⟩ := h
+  obtain ⟨rfl, rfl, rfl⟩ := Pattern.varN_const_inter_some h1
+  obtain ⟨rfl, rfl, rfl⟩ := Pattern.varN_const_inter_some h2
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
+/-- An iota pattern intersects a constant `varN` tower only at a tower whose
+inner arity is the pattern's major arity with the recursor's name. -/
+theorem RecursorIotaPattern.inter_varN_const_some
+    (h : (RecursorIotaPattern r mj c n).inter (Pattern.varN (.const b) j) = some p) :
+    b = r ∧ j = mj + 1 := by
+  obtain ⟨j', q, rfl, hq, rfl⟩ := Pattern.app_inter_varN_const_some h
+  obtain ⟨rfl, rfl, rfl⟩ := Pattern.varN_const_inter_some hq
+  exact ⟨rfl, rfl⟩
+
+/-- Constant `varN` towers are injective in the head name and the arity. -/
+theorem Pattern.varN_const_inj {c c' : Name} :
+    ∀ {n n' : Nat}, Pattern.varN (.const c) n = Pattern.varN (.const c') n' →
+      c = c' ∧ n = n'
+  | 0, 0, h => by cases h; exact ⟨rfl, rfl⟩
+  | 0, n'+1, h => absurd h (by simp [Pattern.varN])
+  | n+1, 0, h => absurd h (by simp [Pattern.varN])
+  | n+1, n'+1, h => by
+    injection h with h1
+    obtain ⟨rfl, rfl⟩ := Pattern.varN_const_inj h1
+    exact ⟨rfl, rfl⟩
+
+/-- Iota patterns are injective in all four components. -/
+theorem RecursorIotaPattern.inj
+    (h : RecursorIotaPattern r mj c n = RecursorIotaPattern r' mj' c' n') :
+    r = r' ∧ mj = mj' ∧ c = c' ∧ n = n' := by
+  injection h with h1 h2
+  obtain ⟨rfl, rfl⟩ := Pattern.varN_const_inj h1
+  obtain ⟨rfl, rfl⟩ := Pattern.varN_const_inj h2
+  exact ⟨rfl, rfl, rfl, rfl⟩
+
+/-- The only application subpattern of an iota pattern is the pattern
+itself. -/
+theorem RecursorIotaPattern.app_subpattern
+    (H : Subpattern (.app p₁ p₂) (RecursorIotaPattern r mj c n)) :
+    p₁ = .varN (.const r) mj ∧ p₂ = .varN (.const c) n := by
+  rcases RecursorIotaPattern.subpattern_inv H with heq | ⟨j, hj, heq⟩ | ⟨j, hj, heq⟩
+  · injection heq with h1 h2; exact ⟨h1, h2⟩
+  · cases j <;> exact absurd heq (by simp [Pattern.varN])
+  · cases j <;> exact absurd heq (by simp [Pattern.varN])
+
+/-- Apply an RHS template head to a list of template arguments. -/
+def Pattern.RHS.appN {p : Pattern} (f : p.RHS) : List p.RHS → p.RHS
+  | [] => f
+  | a :: as => Pattern.RHS.appN (.app f a) as

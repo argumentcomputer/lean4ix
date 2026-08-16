@@ -32,7 +32,7 @@ inductive LargeEliminatorLoopTrace (stats : InductiveStats) :
       (ensureType : ConstructorEnsureTypeStep.Valid
         ⟨context.pushLocalDecl name binderInfo
           (consumeTypeAnnotations domain), domain, sortResult⟩)
-      (isProp : sortResult.sortLevel!.isZero = true)
+      (isProp : sortResult.sortLevel!.isAlwaysZero = true)
       (tail : LargeEliminatorLoopTrace stats
         (context.pushLocalDecl name binderInfo
           (consumeTypeAnnotations domain))
@@ -47,7 +47,7 @@ inductive LargeEliminatorLoopTrace (stats : InductiveStats) :
       (ensureType : ConstructorEnsureTypeStep.Valid
         ⟨context.pushLocalDecl name binderInfo
           (consumeTypeAnnotations domain), domain, sortResult⟩)
-      (isProp : sortResult.sortLevel!.isZero = false)
+      (isProp : sortResult.sortLevel!.isAlwaysZero = false)
       (tail : LargeEliminatorLoopTrace stats
         (context.pushLocalDecl name binderInfo
           (consumeTypeAnnotations domain))
@@ -162,7 +162,7 @@ def buildExecution (stats : InductiveStats) (context : Context)
                 (TypeChecker.ensureType domain) with
             | .error error => .error error
             | .ok sortResult =>
-                if isProp : sortResult.sortLevel!.isZero then
+                if isProp : sortResult.sortLevel!.isAlwaysZero then
                   match buildExecution stats nextContext nextSource
                       (argIdx + 1) toCheck fuel with
                   | .error error => .error error
@@ -178,7 +178,7 @@ def buildExecution (stats : InductiveStats) (context : Context)
                       .dataField context fuel argIdx toCheck name domain body
                         binderInfo sortResult (Nat.le_of_not_gt isParameter)
                         hensure (by
-                          cases h : sortResult.sortLevel!.isZero <;> simp_all)
+                          cases h : sortResult.sortLevel!.isAlwaysZero <;> simp_all)
                         tail⟩
         | _ => .error <| .other
             "large-eliminator source shape disagrees with isForall"
@@ -435,7 +435,7 @@ structure KTargetSingletonExecution
     (result : Bool) where
   indType : InductiveType
   indTypes_eq : indTypes = #[indType]
-  resultLevelZero : stats.resultLevel.isZero = true
+  resultLevelZero : stats.resultLevel.isAlwaysZero = true
   ctor : Constructor
   ctors_eq : indType.ctors = [ctor]
   trace : KTargetCtorTrace stats.params.size ctor.type 0 result
@@ -460,7 +460,7 @@ def buildExecution (stats : InductiveStats)
   | .ok result =>
       match _htypes : indTypes with
       | #[indType] =>
-          if hzero : stats.resultLevel.isZero then
+          if hzero : stats.resultLevel.isAlwaysZero then
             match hctors : indType.ctors with
             | [ctor] =>
                 let ⟨traceResult, trace⟩ :=

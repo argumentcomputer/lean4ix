@@ -723,12 +723,12 @@ theorem normalizationMatrix_rec_lookup_unique :
     normalizationMatrixFinalEnv_rec_lookup
 
 /-! The semantic generation helpers used above are guarded in
-`Theory.Typing.InductiveLemmas`; these two guards pin the separate transitional
-Verify closure of metadata translation and final environment replay. -/
+`Theory.Typing.InductiveLemmas`; these two guards pin the separate, now
+`sorryAx`-free Verify closure of metadata translation and final environment
+replay. -/
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.normalizationMatrixInfo_tr' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -737,7 +737,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.normalizationMatrixInfo_tr' depends on 
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.normalizationMatrix_trEnv'' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,

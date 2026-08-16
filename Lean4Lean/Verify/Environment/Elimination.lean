@@ -6,11 +6,11 @@ open Lean hiding Environment Exception
 
 namespace AddInductive
 
-/-- Theory's presentation of the Boolean returned by the ordinary
-large-eliminator checker. -/
-def checkerElimMode : Bool → VInductDecl.ElimMode
-  | false => .small
-  | true => .large
+/-- Compatibility name for Theory's presentation of the Boolean returned by
+the ordinary large-eliminator checker. -/
+@[deprecated VInductDecl.ElimMode.ofBool (since := "2026-08-11")]
+abbrev checkerElimMode : Bool → VInductDecl.ElimMode :=
+  VInductDecl.ElimMode.ofBool
 
 /-- Lightweight alignment for an exact `getElimLevel` execution when the
 normalization statistics are already pinned independently. This is useful for
@@ -22,7 +22,7 @@ structure CheckerElimLevelRun
     (execution : ElimLevelExecution stats indTypes context) : Type where
   sourceUvars_eq : source.uvars = context.lparams.length
   mode_eq : generation.elimination =
-    checkerElimMode execution.large.result
+    VInductDecl.ElimMode.ofBool execution.large.result
   recUvars_eq : generation.recUvars =
     (getRecLevelParams execution.level context.lparams).length
   recLevels_eq :
@@ -42,7 +42,7 @@ def build?
     Option (CheckerElimLevelRun generation execution) := do
   if huvars : source.uvars = context.lparams.length then
     if hmode : generation.elimination =
-        checkerElimMode execution.large.result then
+        VInductDecl.ElimMode.ofBool execution.large.result then
       if hrecUvars : generation.recUvars =
           (getRecLevelParams execution.level context.lparams).length then
         if hlevels :
@@ -67,11 +67,11 @@ theorem large_result_iff
   cases hresult : execution.large.result with
   | false =>
       have hmode : generation.elimination = VInductDecl.ElimMode.small := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
   | true =>
       have hmode : generation.elimination = VInductDecl.ElimMode.large := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
 
 theorem small_result_iff
@@ -81,11 +81,11 @@ theorem small_result_iff
   cases hresult : execution.large.result with
   | false =>
       have hmode : generation.elimination = VInductDecl.ElimMode.small := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
   | true =>
       have hmode : generation.elimination = VInductDecl.ElimMode.large := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
 
 end CheckerElimLevelRun
@@ -143,7 +143,7 @@ structure CheckerEliminationRun
   sourceUvars_eq : source.uvars =
     execution.normalization.validationContext.lparams.length
   mode_eq : generation.elimination =
-    checkerElimMode execution.elimination.large.result
+    VInductDecl.ElimMode.ofBool execution.elimination.large.result
   kTarget_eq : generation.kTarget = execution.kTarget.result
   recUvars_eq : generation.recUvars = execution.recLevelParams.length
   recLevels_eq : execution.recLevels.mapM
@@ -164,7 +164,7 @@ def build?
     if huvars : source.uvars =
         execution.normalization.validationContext.lparams.length then
       if hmode : generation.elimination =
-          checkerElimMode execution.elimination.large.result then
+          VInductDecl.ElimMode.ofBool execution.elimination.large.result then
         if hkTarget : generation.kTarget = execution.kTarget.result then
           if hrecUvars : generation.recUvars =
               execution.recLevelParams.length then
@@ -192,11 +192,11 @@ theorem large_result_iff
   cases hresult : execution.elimination.large.result with
   | false =>
       have hmode : generation.elimination = VInductDecl.ElimMode.small := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
   | true =>
       have hmode : generation.elimination = VInductDecl.ElimMode.large := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
 
 theorem small_result_iff
@@ -206,11 +206,11 @@ theorem small_result_iff
   cases hresult : execution.elimination.large.result with
   | false =>
       have hmode : generation.elimination = VInductDecl.ElimMode.small := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
   | true =>
       have hmode : generation.elimination = VInductDecl.ElimMode.large := by
-        simpa [checkerElimMode, hresult] using run.mode_eq
+        simpa [hresult] using run.mode_eq
       simp [hmode]
 
 theorem kTarget_result_true_iff

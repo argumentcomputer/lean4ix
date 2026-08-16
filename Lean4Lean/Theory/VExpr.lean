@@ -34,6 +34,11 @@ theorem liftVar_lt_add (self : i < k) : liftVar n i j < k + n := by
 
 namespace VExpr
 
+/-- Iterated application, with arguments ordered from left to right. -/
+def appN (f : VExpr) : List VExpr → VExpr
+  | [] => f
+  | a :: as => (f.app a).appN as
+
 variable (n : Nat) in
 def liftN : VExpr → (k :_:= 0) → VExpr
   | .bvar i, k => .bvar (liftVar n i k)
@@ -244,6 +249,28 @@ def inst : VExpr → VExpr → (k :_:= 0) → VExpr
   | .app fn arg, e, k => .app (fn.inst e k) (arg.inst e k)
   | .lam ty body, e, k => .lam (ty.inst e k) (body.inst e (k+1))
   | .forallE ty body, e, k => .forallE (ty.inst e k) (body.inst e (k+1))
+
+theorem instL_appN (ls : List VLevel) (as : List VExpr) (f : VExpr) :
+    (appN f as).instL ls = appN (f.instL ls) (as.map (instL ls)) := by
+  induction as generalizing f with
+  | nil => rfl
+  | cons a as ih => simp [appN, instL, ih]
+
+theorem liftN_appN (n k : Nat) (f : VExpr) : ∀ (as : List VExpr),
+    (f.appN as).liftN n k = appN (f.liftN n k) (as.map (liftN n · k))
+  | [] => rfl
+  | a :: as => by
+    show (VExpr.appN (f.app a) as).liftN n k = _
+    rw [liftN_appN n k (f.app a) as]
+    rfl
+
+theorem instN_appN (a : VExpr) (k : Nat) (f : VExpr) : ∀ (as : List VExpr),
+    (f.appN as).inst a k = appN (f.inst a k) (as.map (·.inst a k))
+  | [] => rfl
+  | e :: as => by
+    show (VExpr.appN (f.app e) as).inst a k = _
+    rw [instN_appN a k (f.app e) as]
+    rfl
 
 @[simp] theorem inst_default : inst default e k = default := rfl
 

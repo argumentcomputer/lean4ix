@@ -276,11 +276,11 @@ private theorem candidateWhnfCoreFVar_refl
     (context : AddInductive.Context) (id : FVarId)
     (state : TypeChecker.State)
     (hnotlet : TypeChecker.Inner.isLetFVar context.lctx id = false) :
-    TypeChecker.Inner.whnfCore (.fvar id) false false
+    TypeChecker.Inner.whnfCore (.fvar id) false
         (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker state =
       .ok (.fvar id, state) := by
-  change TypeChecker.Inner.whnfCore' (.fvar id) false false
+  change TypeChecker.Inner.whnfCore' (.fvar id) false
       (TypeChecker.Methods.withFuel 9998)
       context.toTypeChecker state =
     .ok (.fvar id, state)
@@ -298,7 +298,7 @@ private theorem candidateReduceRecursorFVarApp_none
     (state : TypeChecker.State)
     (hquot : context.env.quotInit = false) :
     TypeChecker.Inner.reduceRecursor
-        (.app (.fvar fnId) (.fvar argId)) false false
+        (.app (.fvar fnId) (.fvar argId))
         (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker state =
       .ok (none, state) := by
@@ -322,7 +322,7 @@ private theorem candidateWhnfCoreFVarAppFVar_refl
     (hquot : context.env.quotInit = false)
     (hnotlet : TypeChecker.Inner.isLetFVar context.lctx fnId = false) :
     TypeChecker.Inner.whnfCore'
-        (.app (.fvar fnId) (.fvar argId)) false false
+        (.app (.fvar fnId) (.fvar argId)) false
         (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker ({} : TypeChecker.State) =
       .ok (.app (.fvar fnId) (.fvar argId),
@@ -477,7 +477,7 @@ theorem candidateWhnfFVarAppFVar_refl
 private theorem candidateWhnfCoreConst_refl
     (context : AddInductive.Context) (constName : Name)
     (levels : List Level) (state : TypeChecker.State) :
-    TypeChecker.Inner.whnfCore (.const constName levels) false false
+    TypeChecker.Inner.whnfCore (.const constName levels) false
         (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker state =
       .ok (.const constName levels, state) := by
@@ -491,7 +491,7 @@ private theorem candidateReduceRecursorConstFVarFVar_none
     (hfind : context.env.find? constName = some (.inductInfo info)) :
     TypeChecker.Inner.reduceRecursor
         (.app (.app (.const constName levels) (.fvar arg1)) (.fvar arg2))
-        false false (TypeChecker.Methods.withFuel 9999)
+        (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker state = .ok (none, state) := by
   unfold TypeChecker.Inner.reduceRecursor
   simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
@@ -518,7 +518,7 @@ private theorem candidateWhnfCoreConstFVarFVar_refl
     (hfind : context.env.find? constName = some (.inductInfo info)) :
     TypeChecker.Inner.whnfCore'
         (.app (.app (.const constName levels) (.fvar arg1)) (.fvar arg2))
-        false false (TypeChecker.Methods.withFuel 9999)
+        false (TypeChecker.Methods.withFuel 9999)
         context.toTypeChecker ({} : TypeChecker.State) =
       .ok (.app (.app (.const constName levels) (.fvar arg1))
         (.fvar arg2), ({} : TypeChecker.State)) := by

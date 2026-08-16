@@ -7,190 +7,37 @@ open Kernel
 
 namespace TypeChecker
 
-/-- The primitive constants whose Theory reflections are required by the
-verified checker. `Nat.pred` and `Nat.bitwise` are kernel primitive names too,
-but they have no dedicated fields in `VEnv.HasPrimitives`. -/
-def reflectedPrimitiveNames : List Name := [
-  ``Bool, ``Bool.false, ``Bool.true,
-  ``Nat, ``Nat.zero, ``Nat.succ,
-  ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow,
-  ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
-  ``Nat.land, ``Nat.lor, ``Nat.xor,
-  ``Nat.shiftLeft, ``Nat.shiftRight,
-  ``Char.ofNat, ``String.ofList]
+/-- Compatibility name for the consumer-neutral reflected-primitive list. -/
+@[deprecated Lean4Lean.VEnv.reflectedPrimitiveNames (since := "2026-08-11")]
+abbrev reflectedPrimitiveNames : List Name :=
+  Lean4Lean.VEnv.reflectedPrimitiveNames
 
-/-- A small Theory environment that contains none of Lean's hard-coded
-primitive names satisfies the primitive-reflection contract vacuously. This is
-useful for isolated staged checker contexts. -/
+/-- Compatibility shim for the consumer-neutral Theory theorem. -/
+@[deprecated Lean4Lean.VEnv.HasPrimitives.of_avoids (since := "2026-08-11")]
 theorem VEnv.HasPrimitives.of_avoids
     {env : VEnv}
     (h : ∀ n ∈ reflectedPrimitiveNames, env.constants n = none) :
-    env.HasPrimitives := by
-  have noContains (n) (hn : n ∈ reflectedPrimitiveNames) :
-      ¬env.contains n := by
-    rintro ⟨ci, hci⟩
-    rw [h n hn] at hci
-    contradiction
-  have noLookup (n) (hn : n ∈ reflectedPrimitiveNames)
-      {ci} (hci : env.constants n = some ci) : False := by
-    rw [h n hn] at hci
-    contradiction
-  exact {
-    bool := fun hc =>
-      (noContains ``Bool (by simp [reflectedPrimitiveNames]) hc).elim
-    boolFalse := fun hci =>
-      (noLookup ``Bool.false (by simp [reflectedPrimitiveNames]) hci).elim
-    boolTrue := fun hci =>
-      (noLookup ``Bool.true (by simp [reflectedPrimitiveNames]) hci).elim
-    nat := fun hc =>
-      (noContains ``Nat (by simp [reflectedPrimitiveNames]) hc).elim
-    natZero := fun hci =>
-      (noLookup ``Nat.zero (by simp [reflectedPrimitiveNames]) hci).elim
-    natSucc := fun hci =>
-      (noLookup ``Nat.succ (by simp [reflectedPrimitiveNames]) hci).elim
-    natAdd := fun hc =>
-      (noContains ``Nat.add (by simp [reflectedPrimitiveNames]) hc).elim
-    natSub := fun hc =>
-      (noContains ``Nat.sub (by simp [reflectedPrimitiveNames]) hc).elim
-    natMul := fun hc =>
-      (noContains ``Nat.mul (by simp [reflectedPrimitiveNames]) hc).elim
-    natPow := fun hc =>
-      (noContains ``Nat.pow (by simp [reflectedPrimitiveNames]) hc).elim
-    natGcd := fun hc =>
-      (noContains ``Nat.gcd (by simp [reflectedPrimitiveNames]) hc).elim
-    natMod := fun hc =>
-      (noContains ``Nat.mod (by simp [reflectedPrimitiveNames]) hc).elim
-    natDiv := fun hc =>
-      (noContains ``Nat.div (by simp [reflectedPrimitiveNames]) hc).elim
-    natBEq := fun hc =>
-      (noContains ``Nat.beq (by simp [reflectedPrimitiveNames]) hc).elim
-    natBLE := fun hc =>
-      (noContains ``Nat.ble (by simp [reflectedPrimitiveNames]) hc).elim
-    natLAnd := fun hc =>
-      (noContains ``Nat.land (by simp [reflectedPrimitiveNames]) hc).elim
-    natLOr := fun hc =>
-      (noContains ``Nat.lor (by simp [reflectedPrimitiveNames]) hc).elim
-    natXor := fun hc =>
-      (noContains ``Nat.xor (by simp [reflectedPrimitiveNames]) hc).elim
-    natShiftLeft := fun hc =>
-      (noContains ``Nat.shiftLeft
-        (by simp [reflectedPrimitiveNames]) hc).elim
-    natShiftRight := fun hc =>
-      (noContains ``Nat.shiftRight
-        (by simp [reflectedPrimitiveNames]) hc).elim
-    charOfNat := fun hci =>
-      (noLookup ``Char.ofNat (by simp [reflectedPrimitiveNames]) hci).elim
-    stringOfList := fun hci =>
-      (noLookup ``String.ofList
-        (by simp [reflectedPrimitiveNames]) hci).elim }
+    env.HasPrimitives :=
+  Lean4Lean.VEnv.HasPrimitives.of_avoids h
 
-/-- A fresh Theory constant leaves every other lookup unchanged. -/
+/-- Compatibility shim for the consumer-neutral Theory theorem. -/
+@[deprecated Lean4Lean.VEnv.addConst_other (since := "2026-08-11")]
 theorem VEnv.addConst_other
     {env env' : VEnv} {name other : Name} {ci : VConstant}
     (hadd : env.addConst name ci = some env')
     (hne : name ≠ other) :
-    env'.constants other = env.constants other := by
-  unfold Lean4Lean.VEnv.addConst at hadd
-  split at hadd <;> cases hadd
-  simp [hne]
+    env'.constants other = env.constants other :=
+  Lean4Lean.VEnv.addConst_other hadd hne
 
-/-- Inserting a non-primitive constant preserves the verified checker's
-primitive-reflection contract. The computational reflection equations are
-transported monotonically; the primitive constant lookups themselves are
-unchanged. -/
+/-- Compatibility shim for the consumer-neutral Theory theorem. -/
+@[deprecated Lean4Lean.VEnv.HasPrimitives.addConst (since := "2026-08-11")]
 theorem VEnv.HasPrimitives.addConst
     {env env' : VEnv} {name : Name} {ci : VConstant}
     (H : env.HasPrimitives)
     (hname : name ∉ reflectedPrimitiveNames)
     (hadd : env.addConst name ci = some env') :
-    env'.HasPrimitives := by
-  have lookup (other : Name) (hother : other ∈ reflectedPrimitiveNames) :
-      env'.constants other = env.constants other :=
-    VEnv.addConst_other hadd (by
-      intro h
-      apply hname
-      simpa only [h] using hother)
-  have oldContains (other : Name)
-      (hother : other ∈ reflectedPrimitiveNames) :
-      env'.contains other → env.contains other := by
-    rintro ⟨value, hvalue⟩
-    exact ⟨value, by simpa only [lookup other hother] using hvalue⟩
-  have newContains (other : Name) :
-      env.contains other → env'.contains other := by
-    rintro ⟨value, hvalue⟩
-    exact ⟨value, (VEnv.addConst_le hadd).constants hvalue⟩
-  have hle := VEnv.addConst_le hadd
-  exact {
-    bool := fun h => by
-      obtain ⟨hfalse, htrue⟩ := H.bool (oldContains ``Bool
-        (by simp [reflectedPrimitiveNames]) h)
-      exact ⟨newContains _ hfalse, newContains _ htrue⟩
-    boolFalse := fun h => H.boolFalse (by
-      simpa only [lookup ``Bool.false
-        (by simp [reflectedPrimitiveNames])] using h)
-    boolTrue := fun h => H.boolTrue (by
-      simpa only [lookup ``Bool.true
-        (by simp [reflectedPrimitiveNames])] using h)
-    nat := fun h => by
-      obtain ⟨hzero, hsucc⟩ := H.nat (oldContains ``Nat
-        (by simp [reflectedPrimitiveNames]) h)
-      exact ⟨newContains _ hzero, newContains _ hsucc⟩
-    natZero := fun h => H.natZero (by
-      simpa only [lookup ``Nat.zero
-        (by simp [reflectedPrimitiveNames])] using h)
-    natSucc := fun h => H.natSucc (by
-      simpa only [lookup ``Nat.succ
-        (by simp [reflectedPrimitiveNames])] using h)
-    natAdd := fun h a b =>
-      (H.natAdd (oldContains ``Nat.add
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natSub := fun h a b =>
-      (H.natSub (oldContains ``Nat.sub
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natMul := fun h a b =>
-      (H.natMul (oldContains ``Nat.mul
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natPow := fun h a b =>
-      (H.natPow (oldContains ``Nat.pow
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natGcd := fun h a b =>
-      (H.natGcd (oldContains ``Nat.gcd
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natMod := fun h a b =>
-      (H.natMod (oldContains ``Nat.mod
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natDiv := fun h a b =>
-      (H.natDiv (oldContains ``Nat.div
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natBEq := fun h a b =>
-      (H.natBEq (oldContains ``Nat.beq
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natBLE := fun h a b =>
-      (H.natBLE (oldContains ``Nat.ble
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natLAnd := fun h a b =>
-      (H.natLAnd (oldContains ``Nat.land
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natLOr := fun h a b =>
-      (H.natLOr (oldContains ``Nat.lor
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natXor := fun h a b =>
-      (H.natXor (oldContains ``Nat.xor
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natShiftLeft := fun h a b =>
-      (H.natShiftLeft (oldContains ``Nat.shiftLeft
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    natShiftRight := fun h a b =>
-      (H.natShiftRight (oldContains ``Nat.shiftRight
-        (by simp [reflectedPrimitiveNames]) h) a b).mono hle
-    charOfNat := fun h => H.charOfNat (by
-      simpa only [lookup ``Char.ofNat
-        (by simp [reflectedPrimitiveNames])] using h)
-    stringOfList := fun h => by
-      obtain ⟨hconstant, hnil, hcons⟩ := H.stringOfList (by
-        simpa only [lookup ``String.ofList
-          (by simp [reflectedPrimitiveNames])] using h)
-      exact ⟨hconstant, hnil.mono hle, hcons.mono hle⟩ }
+    env'.HasPrimitives :=
+  Lean4Lean.VEnv.HasPrimitives.addConst H hname hadd
 
 /-- A verified implementation local context remains verified when the Theory
 environment grows.  Kernel local declarations and their free-variable names
@@ -662,7 +509,7 @@ def CandidateContextRun.root
   let context := VContext.mk' wf candidateContext.safety
     candidateContext.lparams candidateContext.fuel
   refine ⟨context, ?_, ?_, namePrefix_ne⟩
-  · simp [context, VContext.mk', MLCtx.lctx,
+  · simp [context, VContext.mk', VContext.mk1, MLCtx.lctx,
       AddInductive.Context.toTypeChecker, lctx_eq]
   · exact VState.WF.empty
 
@@ -1374,14 +1221,12 @@ theorem CandidateExprRun.exists_ofCandidate
       annotations.consumed fresh storedDomain' storedDomain_tr
         ⟨u, annotationDef.hasType.2⟩
     have bodyVenv : bodyCandidateRun.context.venv =
-        candidateRun.context.venv := by simp [bodyCandidateRun]
+        candidateRun.context.venv := rfl
     have bodyLparams : bodyCandidateRun.context.lparams =
-        candidateRun.context.lparams := by
-      simp [bodyCandidateRun, AddInductive.Context.pushLocalDecl]
+        candidateRun.context.lparams := rfl
     have bodyVlctx : bodyCandidateRun.context.vlctx =
         (some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam storedDomain') :: candidateRun.context.vlctx := by
-      simp [bodyCandidateRun]
+          .vlam storedDomain') :: candidateRun.context.vlctx := rfl
     have bodyDepth :
         (context.pushLocalDecl name binderInfo
           annotations.consumed).fuel.recDepth = whnfFuel + 1 := by
@@ -1481,14 +1326,12 @@ theorem CandidateExprRun.exists_ofIdentity
     let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
       annotations.consumed fresh domain' consumed_tr ⟨u, domainType⟩
     have bodyVenv : bodyCandidateRun.context.venv =
-        candidateRun.context.venv := by simp [bodyCandidateRun]
+        candidateRun.context.venv := rfl
     have bodyLparams : bodyCandidateRun.context.lparams =
-        candidateRun.context.lparams := by
-      simp [bodyCandidateRun, AddInductive.Context.pushLocalDecl]
+        candidateRun.context.lparams := rfl
     have bodyVlctx : bodyCandidateRun.context.vlctx =
         (some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam domain') :: candidateRun.context.vlctx := by
-      simp [bodyCandidateRun]
+          .vlam domain') :: candidateRun.context.vlctx := rfl
     have bodyDepth :
         (context.pushLocalDecl name binderInfo
           annotations.consumed).fuel.recDepth =
@@ -2038,6 +1881,46 @@ def CandidateExprSemanticRootInput.semanticOfIdentity
     refine ⟨inferred, ?_⟩
     simpa only [input.venv_eq, input.lparams_eq, input.vlctx_eq] using
       recursive
+
+/-- Interpret a staged root at the deterministic translation of its
+checker-selected view.  For a projection-free view the recursive semantic
+run's endpoint is pinned by strict-translation agreement
+(`CandidateExprRun.view_tr_strict` plus `TrExprS.trExprS?_eq`), so the
+retained `view` field is computed by `trExprS?` and the `Nonempty`
+interpretation is transferred onto it; no choice operator selects data.
+Unlike `semanticOfIdentity` this covers non-identity normalizations, at the
+cost of the executable view-uniqueness certificate. -/
+def CandidateExprSemanticRootInput.semanticOfUnique
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (input : CandidateExprSemanticRootInput env Us candidate source')
+    (unique : CandidateExprTraceViewIsUnique candidate.trace) :
+    CandidateExprSemanticRootRun env Us candidate source' :=
+  match hview : trExprS? Us [] candidate.trace.view with
+  | some view =>
+    { contextRun := input.contextRun
+      venv_eq := input.venv_eq
+      lparams_eq := input.lparams_eq
+      vlctx_eq := input.vlctx_eq
+      source_tr := input.source_tr
+      whnfFuel := input.whnfFuel
+      whnfDepth := input.whnfDepth
+      view := view
+      recursive := by
+        obtain ⟨w⟩ := input.exists
+        obtain ⟨inferred, run⟩ := w.recursive
+        cases Option.some.inj
+          (((run.view_tr_strict unique).trExprS?_eq unique.view).symm.trans
+            hview)
+        exact ⟨inferred, run⟩ }
+  | none =>
+      absurd
+        (show (trExprS? Us [] candidate.trace.view).isSome by
+          obtain ⟨w⟩ := input.exists
+          obtain ⟨inferred, run⟩ := w.recursive
+          exact TrExprS.trExprS?_isSome
+            ⟨w.view, run.view_tr_strict unique⟩ unique.view)
+        (by simp [hview])
 
 /-- One explicitly verified root stage shared by every candidate expression
 interpreted before or after family insertion.
@@ -3585,12 +3468,17 @@ structure CandidateFamilyStagedInput
   typeEnv : VEnv
   addInduct : AddInductConstant .induct familyContext.env.constants env
     raw.toVConstVal constructorContext.env.constants typeEnv
+  /-- The staged family environment has not yet completed a new projection
+  artifact; any already-complete host structure remains backed by a registered
+  Theory view. -/
+  projectionReady : ProjectionReady constructorContext.env typeEnv
+  structureEtaReady : StructureEtaReady constructorContext.env typeEnv
   family_lctx_eq : familyContext.lctx = {}
   constructorContext_eq : constructorContext =
     { familyContext with env := constructorContext.env }
   quotInit_eq : constructorContext.env.quotInit =
     familyContext.env.quotInit
-  name_not_reflected : raw.name ∉ TypeChecker.reflectedPrimitiveNames
+  name_not_reflected : raw.name ∉ VEnv.reflectedPrimitiveNames
   name_not_primitive :
     Environment.primitives.contains raw.name = false
 
@@ -3622,7 +3510,7 @@ def CandidateFamilyStagedInput.postContext
     have H : env.HasPrimitives := by
       simpa only [preFamily.venv_eq] using
         preFamily.contextRun.context.hasPrimitives
-    exact TypeChecker.VEnv.HasPrimitives.addConst H
+    exact VEnv.HasPrimitives.addConst H
       input.name_not_reflected input.addInduct.env_add
   safePrimitives := by
     intro n ci
@@ -3648,6 +3536,8 @@ def CandidateFamilyStagedInput.postContext
       rw [input.constructorContext_eq]]
     rw [input.quotInit_eq]
     exact postTr
+  projectionReady := input.projectionReady
+  structureEtaReady := input.structureEtaReady
   mlctx := .nil
   mlctx_wf := trivial
   lctx_eq := by
@@ -3765,6 +3655,8 @@ theorem CandidateFamilyStagedInput.validationContextRunFromPre
         have postVenv : input.postContext.venv = input.typeEnv := rfl
         simpa only [validationSafety, postEnv, postVenv] using
           input.postContext.trenv
+      projectionReady := input.postContext.projectionReady
+      structureEtaReady := input.postContext.structureEtaReady
       mlctx_wf := by
         simpa only [terminalLparams] using postMLWF }
   have validationContextEq : validationContext.toContext =
@@ -5403,26 +5295,15 @@ def GenerationCandidateSemanticRun.producedPackage
   run.run.producedPackage context nparams numNested isUnsafe produced
 
 /-
-The evidence types mention exact verifier executions, so these semantic
-interpretation roots intentionally inherit the same transitional Verify
+The evidence types mention exact verifier executions, so the semantic
+interpretation roots below intentionally inherit the same transitional Verify
 closure as `WhnfRun.isDefEq`. Exact guards ensure that the generic assembler
-does not silently widen it.
+does not silently widen it. Theory-only helper closures are guarded by
+`Tests.TheoryConsumerSurface` without importing Verify.
 -/
-/--
-info: 'Lean4Lean.TypeChecker.VEnv.HasPrimitives.addConst' depends on axioms: [propext, Classical.choice, Quot.sound]
--/
-#guard_msgs in
-#print axioms TypeChecker.VEnv.HasPrimitives.addConst
-
-/--
-info: 'Lean4Lean.TypeChecker.VEnv.addConst_other' depends on axioms: [propext, Quot.sound]
--/
-#guard_msgs in
-#print axioms TypeChecker.VEnv.addConst_other
 
 /--
 info: 'Lean4Lean.TypeChecker.AddInductConstant.safePrimitives' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
@@ -5433,46 +5314,31 @@ info: 'Lean4Lean.TypeChecker.AddInductConstant.safePrimitives' depends on axioms
 #print axioms TypeChecker.AddInductConstant.safePrimitives
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_env' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_env' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateContextRun.context_env
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lctx' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lctx' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateContextRun.context_lctx
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_safety' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_safety' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateContextRun.context_safety
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lparams' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_lparams' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateContextRun.context_lparams
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_fuel' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.context_fuel' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateContextRun.context_fuel
@@ -5501,9 +5367,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_isType_of_terminalSort' depen
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5534,9 +5403,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5545,7 +5417,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewParameters' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -5554,7 +5425,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewParameters' depend
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewIndices' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -5562,7 +5432,7 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewIndices' depends o
 #print axioms TypeChecker.CandidateExprSemanticRootRun.viewIndices
 
 /--
-info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms CandidateFamilyStagedInput
@@ -5591,9 +5461,12 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.rawWF' depends on axioms
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5624,9 +5497,12 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContext' depends on 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5657,9 +5533,12 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postContextRun' depends 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5690,9 +5569,12 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyStagedInput.postFamily' depends on a
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5724,9 +5606,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.exists' depends on a
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5757,9 +5642,12 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticListInput.exists' depen
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5790,9 +5678,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticInput.exists_ofProduc
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5823,9 +5714,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.exists' d
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5856,9 +5750,12 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilySemanticGenerationRun.run' depends o
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5889,9 +5786,12 @@ info: 'Lean4Lean.VInductDecl.CandidateSemanticNormalizedCtorListRun.run' depends
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5922,9 +5822,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.run' depends on axio
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5955,9 +5858,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticShapeRun.run' depends on
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5980,7 +5886,6 @@ info: 'Lean4Lean.VInductDecl.normalizationCandidateGenerationShape' depends on a
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticGenerationShapeList.ofCheck' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -5989,7 +5894,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticGenerationShapeList.ofC
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.generationShape' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6031,9 +5935,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.package' depends on 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6064,9 +5971,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.producedPackage' dep
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6075,7 +5985,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.producedPackage' dep
 
 /--
 info: 'Lean4Lean.TypeChecker.VState.WF.empty_of_reserves' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -6096,7 +6005,6 @@ info: 'Lean4Lean.TypeChecker.candidateFreshFVarId_reserved' depends on axioms: [
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateContextRun.root' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -6108,7 +6016,6 @@ info: 'Lean4Lean.TypeChecker.CandidateContextRun.root' depends on axioms: [prope
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateContextRun.pushLocalDecl' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -6145,9 +6052,12 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6155,7 +6065,7 @@ info: 'Lean4Lean.TypeChecker.candidateCheckTypeStep_exists_translation' depends 
 #print axioms TypeChecker.candidateCheckTypeStep_exists_translation
 
 /--
-info: 'Lean4Lean.TypeChecker.IsDefEqRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.IsDefEqRun.ofCandidateStep' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.IsDefEqRun.ofCandidateStep
@@ -6184,9 +6094,12 @@ info: 'Lean4Lean.TypeChecker.IsDefEqRun.isDefEqU' depends on axioms: [propext,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6201,7 +6114,6 @@ info: 'Lean4Lean.TypeChecker.candidateTypeAnnotation_fvarsIn' does not depend on
 
 /--
 info: 'Lean4Lean.TypeChecker.candidateTypeAnnotation_exists_translation' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6232,9 +6144,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6265,9 +6180,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends o
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6275,19 +6193,19 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidateFVars' depends o
 #print axioms TypeChecker.CandidateExprRun.exists_ofCandidateFVars
 
 /--
-info: 'Lean4Lean.TypeChecker.WhnfRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.WhnfRun.ofCandidateStep' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.WhnfRun.ofCandidateStep
 
 /--
-info: 'Lean4Lean.TypeChecker.CheckTypeRun.ofCandidateStep' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.CheckTypeRun.ofCandidateStep' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CheckTypeRun.ofCandidateStep
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateNodeRun.ofCandidate' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateNodeRun.ofCandidate' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateNodeRun.ofCandidate
@@ -6316,9 +6234,12 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.exists_ofCandidate' depends on axi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6349,9 +6270,12 @@ info: 'Lean4Lean.TypeChecker.CandidateNodeRun.evidence' depends on axioms: [prop
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6382,9 +6306,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.evidence' depends on axioms: [prop
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6392,7 +6319,7 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.evidence' depends on axioms: [prop
 #print axioms TypeChecker.CandidateExprRun.evidence
 
 /--
-info: 'Lean4Lean.TypeChecker.CandidateExprRun.source_tr' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.source_tr' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateExprRun.source_tr
@@ -6421,9 +6348,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.view_tr' depends on axioms: [prope
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6454,9 +6384,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRootRun.evidence' depends on axioms: [
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6487,9 +6420,12 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6497,7 +6433,7 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.telDefEq' depends on axioms: [prop
 #print axioms TypeChecker.TelDefEqEvidence.telDefEq
 
 /--
-info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.ofTelDefEq' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.ofTelDefEq' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TypeChecker.TelDefEqEvidence.ofTelDefEq
@@ -6526,9 +6462,12 @@ info: 'Lean4Lean.TypeChecker.TelResultDefEqEvidence.replacePrefix' depends on ax
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6559,9 +6498,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.spineEvidence' depends on axioms: 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6592,9 +6534,12 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6603,7 +6548,6 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.normalization_eq' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6612,7 +6556,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.normalization_eq' depends on
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.sourceType_eq' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6621,7 +6564,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.sourceType_eq' depends on
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.familyViewType_eq' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6629,10 +6571,7 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.familyViewType_eq' depend
 #print axioms NormalizationCandidateRun.familyViewType_eq
 
 /--
-info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyView_eq' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyView_eq' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms GenerationCandidateRun.familyView_eq
@@ -6661,9 +6600,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.typeEnv_wf' depends on axiom
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6694,9 +6636,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.familyConst_hasType' depends
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6727,9 +6672,12 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.rightType_ofChecked' dep
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6737,10 +6685,7 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.rightType_ofChecked' dep
 #print axioms CandidateNormalizedCtorRun.rightType_ofChecked
 
 /--
-info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.viewTel_eq' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.viewTel_eq' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms CandidateNormalizedCtorRun.viewTel_eq
@@ -6769,9 +6714,12 @@ info: 'Lean4Lean.VInductDecl.CandidateNormalizedCtorRun.normalizedCtorRun' depen
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6802,9 +6750,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.wf' depends on axioms: [prop
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6813,7 +6764,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.wf' depends on axioms: [prop
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.sameHeaders' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6844,9 +6794,12 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on ax
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6855,7 +6808,6 @@ info: 'Lean4Lean.VInductDecl.CandidateConstructorListRun.evidence' depends on ax
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalization' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -6886,9 +6838,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateRun.normalizationRun' depends
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6919,9 +6874,12 @@ info: 'Lean4Lean.VInductDecl.NormalizedCtorRun.wf' depends on axioms: [propext,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6952,9 +6910,12 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6962,17 +6923,13 @@ info: 'Lean4Lean.VInductDecl.GenerationRun.wf' depends on axioms: [propext,
 #print axioms GenerationRun.wf
 
 /--
-info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.package' depends on axioms: [propext,
- sorryAx,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.package' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms GenerationCandidateRun.package
 
 /--
 info: 'Lean4Lean.VInductDecl.GenerationCandidateRun.producedPackage' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -7003,9 +6960,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.certificate' depends on 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7036,9 +6996,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidatePackage.addInductTrace' depends 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7069,9 +7032,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateSemanticInput.construct
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7102,9 +7068,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationBlockRun.wf' depends on axioms: [prope
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7135,9 +7104,12 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.sameHeaders' de
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7168,9 +7140,12 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.evidence' depen
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7201,9 +7176,12 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticInput.exists' depends o
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7234,9 +7212,12 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListInput.exists' depen
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7267,9 +7248,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticInput.exists' de
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -7300,9 +7284,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticInput.exists_ofP
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

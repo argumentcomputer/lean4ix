@@ -20,12 +20,10 @@ structure VInductDecl where
   types : List VInductiveType
 
 inductive VDecl where
-  /-- Reserve a constant name, which cannot be used in expressions.
-  Used to represent unsafe declarations in safe mode -/
-  | block (n : Name)
   | axiom (_ : VConstVal)
   | def (_ : VDefVal)
   | opaque (_ : VDefVal)
   | example (_ : VDefVal)
   | quot
   | induct (_ : VInductDecl)
+  | mutualDef (_ : List VDefVal)

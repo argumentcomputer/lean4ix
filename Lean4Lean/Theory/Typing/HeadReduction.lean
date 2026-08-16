@@ -61,6 +61,7 @@ inductive WHRed (Γ : List VExpr) : VExpr → VExpr → Prop where
   | major : IsMajorPremise f → Γ ⊢ a ⤳ a' → Γ ⊢ .app f a ⤳ .app f a'
   | beta : Γ ⊢ .app (.lam A e) a ⤳ e.inst a
   | extra : Pat p r → p.Matches e m1 m2 → r.2.OK (IsDefEqU env univs Γ) m1 m2 →
+    IsDefEqU env univs Γ e (r.1.apply m1 m2) →
     Γ ⊢ e ⤳ r.1.apply m1 m2
 
 theorem WHRed.defeqDFC (W : IsDefEqCtx env univs Γ₀ Γ₁ Γ₂)
@@ -69,16 +70,20 @@ theorem WHRed.defeqDFC (W : IsDefEqCtx env univs Γ₀ Γ₁ Γ₂)
   | app _ ih1 => exact .app (ih1 W)
   | major h1 _ ih1 => exact .major h1 (ih1 W)
   | beta => exact .beta
-  | extra h1 h2 h3 => exact .extra h1 h2 <| h3.map fun a b h => h.defeqDFC henv W
+  | extra h1 h2 h3 h4 =>
+    exact .extra h1 h2 (h3.map fun a b h => h.defeqDFC henv W) (h4.defeqDFC henv W)
 
 theorem WHRed.weak' (W : Ctx.Lift' ρ Γ Γ') :
     Γ ⊢ e1 ⤳ e2 → Γ' ⊢ e1.lift' ρ ⤳ e2.lift' ρ
   | .app h1 => .app (h1.weak' W)
   | .major h1 h2 => .major (IsMajorPremise.lift'.2 h1) (h2.weak' W)
   | .beta => by rw [VExpr.lift'_inst_hi]; exact .beta
-  | .extra h1 h2 h3 => by
+  | .extra h1 h2 h3 h4 => by
+    have h4 := h4.weak' henv W
+    rw [Pattern.RHS.apply_lift'] at h4
     rw [Pattern.RHS.apply_lift']
-    refine .extra h1 (Pattern.matches_lift'.2 ⟨_, h2, fun _ => rfl⟩) <| h3.map fun _ _ h => ?_
+    refine .extra h1 (Pattern.matches_lift'.2 ⟨_, h2, fun _ => rfl⟩)
+      (h3.map fun _ _ h => ?_) h4
     simp only [← Pattern.RHS.apply_lift']; exact h.weak' henv W
 
 theorem WHRed.weakN (W : Ctx.LiftN n k Γ Γ') (H : Γ ⊢ e1 ⤳ e2) :
@@ -97,10 +102,12 @@ theorem WHRed.weakU_inv (W : Ctx.Lift' ρ Γ Γ') (H : Γ' ⊢ e1.lift' ρ ⤳ e
   | beta =>
     let .app e1 _ := e1; let .lam .. := e1; cases he
     simp [← VExpr.lift'_inst_hi, VExpr.lift'_inj]; exact .beta
-  | extra h1 h2 h3 =>
+  | extra h1 h2 h3 hsound =>
     subst he
     obtain ⟨_, h4, h5⟩ := Pattern.matches_lift'.1 h2; cases funext h5
-    refine ⟨_, (Pattern.RHS.apply_lift' _).symm, .extra h1 h4 <| h3.map fun _ _ h => ?_⟩
+    rw [← Pattern.RHS.apply_lift'] at hsound
+    refine ⟨_, (Pattern.RHS.apply_lift' _).symm, .extra h1 h4 (h3.map fun _ _ h => ?_)
+      ((IsDefEqU.weak'_iff henv hΓ W).1 hsound)⟩
     simp only [← Pattern.RHS.apply_lift'] at h
     exact (IsDefEqU.weak'_iff henv hΓ W).1 h
 
@@ -109,7 +116,7 @@ theorem WHRed.parRed (H : Γ ⊢ e1 ⤳ e2) : Γ ⊢ e1 ≫ e2 := by
   | app _ ih => exact .app ih .rfl
   | major _ _ ih => exact .app .rfl ih
   | beta => exact .beta .rfl .rfl
-  | extra h1 h2 h3 => exact .extra h1 h2 h3 fun _ => .rfl
+  | extra h1 h2 h3 h4 => exact .extra h1 h2 h3 h4 fun _ => .rfl
 
 variable! (hΓ : OnCtx Γ (IsType env univs)) in
 theorem WHRed.defeq (H : Γ ⊢ e1 ⤳ e2) (he : Γ ⊢ e1 : A) : Γ ⊢ e1 ≡ e2 : A :=
@@ -125,9 +132,11 @@ theorem WHRed.instN (W : Ctx.InstN Γ₀ a A₀ k Γ₁ Γ)
   | app _ ih => exact .app ih
   | major h1 _ ih => exact .major h1.instN ih
   | beta => rw [(by apply inst_inst_hi : (inst ..).inst _ _ = _)]; exact .beta
-  | extra h1 h2 h3 =>
+  | extra h1 h2 h3 h4 =>
+    have h4 := h4.instN henv W H₀
+    rw [Pattern.RHS.instN_apply] at h4
     rw [Pattern.RHS.instN_apply]
-    exact .extra h1 (Pattern.matches_instN h2) (h3.instN W H₀)
+    exact .extra h1 (Pattern.matches_instN h2) (h3.instN W H₀) h4
 
 def WHNF (Γ : List VExpr) (e : VExpr) := ∀ e', ¬Γ ⊢ e ⤳ e'
 
@@ -429,19 +438,33 @@ theorem StRed.triangle (W : IsDefEqCtx env univs Γ₀ Γ₁ Γ₂)
     have ⟨⟨_, u1⟩, _, u2⟩ := (c1.uniqU henv hΓ (hA.lam he)).forallE_inv henv hΓ
     exact .whRed (a1.trans a4.app |>.tail .beta) <|
       (ih2 W ha a3).instN (u1.defeq ha) .zero (ih1 (W.succ (a5.defeq hΓ hA)) he a6)
-  | @extra p r e₁ m1 m2 Γ₂ m2' h1 h2 h3 _ ih =>
+  | @extra p r e₀ m1 m2 Γ₂ m2' h1 h2 h3 h4 _ ih =>
     have hΓ := W.isType' hΓ₀
-    suffices ∀ p' m1 m2, Subpattern p' p → p'.Matches e₁ m1 m2 →
+    suffices ∀ p' m1 m2, Subpattern p' p → p'.Matches e₀ m1 m2 →
          ∃ e₁ m3, Γ₁ ⊢ e ⤳* e₁ ∧ p'.Matches e₁ m1 m3 ∧ (∀ x, Γ₁ ⊢ m3 x ⤳< m2 x) by
       let ⟨e₁, m3, a1, a2, a3⟩ := this _ _ _ .refl h2
-      have := (a1.hasType hΓ h).matches_inv hΓ a2
-      refine .whRed (.tail a1 (.extra h1 a2 <| h3.map fun a b ⟨_, h⟩ => ?_))
-        (.apply_pat _ fun x => let ⟨_, h⟩ := this x; ih x W h (a3 x))
-      replace h := h.defeqDFC henv (W.symm henv)
-      refine have {r} := IsDefEq.apply_pat hΓ (r := r) fun a A h => ?_
-        ⟨_, (this h.hasType.1).symm.trans <| h.trans (this h.hasType.2)⟩
-      let ⟨_, h'⟩ := this a; exact ⟨_, ((a3 a).defeq hΓ h').symm⟩
-    clear h2 ih h; intro p' m1 m2 hp h2
+      have hcap := (a1.hasType hΓ h).matches_inv hΓ a2
+      have hcheck : r.2.OK (IsDefEqU env univs Γ₁) m1 m3 :=
+        h3.map fun a b ⟨_, hc⟩ => by
+        replace hc := hc.defeqDFC henv (W.symm henv)
+        have move {rhs : p.RHS} {T}
+            (ht : Γ₁ ⊢ rhs.apply m1 m2 : T) :
+            Γ₁ ⊢ rhs.apply m1 m2 ≡ rhs.apply m1 m3 : T :=
+          IsDefEq.apply_pat hΓ
+            (fun a _ _ => let ⟨_, ha⟩ := hcap a; ⟨_, ((a3 a).defeq hΓ ha).symm⟩) ht
+        exact ⟨_, (move hc.hasType.1).symm.trans <| hc.trans (move hc.hasType.2)⟩
+      have hsound₀ := h4.defeqDFC henv (W.symm henv)
+      have he' : IsDefEqU env univs Γ₁ e₁ e₀ :=
+        ⟨_, (a1.defeq hΓ h).symm.trans (H1.defeq hΓ h)⟩
+      have hrhs : IsDefEqU env univs Γ₁ (r.1.apply m1 m2) (r.1.apply m1 m3) :=
+        ⟨_, IsDefEq.apply_pat hΓ
+          (fun a _ _ => let ⟨_, ha⟩ := hcap a; ⟨_, ((a3 a).defeq hΓ ha).symm⟩)
+          hsound₀.choose_spec.hasType.2⟩
+      have hsound := IsDefEqU.trans henv hΓ he'
+        (IsDefEqU.trans henv hΓ hsound₀ hrhs)
+      refine .whRed (.tail a1 (.extra h1 a2 hcheck hsound))
+        (.apply_pat _ fun x => let ⟨_, h⟩ := hcap x; ih x W h (a3 x))
+    clear h2 h4 ih h; intro p' m1 m2 hp h2
     induction h2 generalizing e with
     | const => let .const H1 := H1; exact ⟨_, _, H1, .const, nofun⟩
     | app l1 l2 ih1 ih2 =>
@@ -466,7 +489,7 @@ variable! (hΓ : OnCtx Γ (IsType env univs)) in
 theorem ParRedS.standard (h : Γ ⊢ e : A) (H : Γ ⊢ e ≫* e') : Γ ⊢ e ⤳< e' :=
   .triangleS hΓ .zero h .rfl H
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.Extension] (hΓ : OnCtx Γ (IsType env univs)) in
 theorem IsDefEq.reduce_sort (H : Γ ⊢ e ≡ .sort u : A) :
     ∃ u', Γ ⊢ e ⤳* .sort u' ∧ u' ≈ u := by
   have ⟨_, _, e', _, h1, h2, h3⟩ := H.church_rosser hΓ
@@ -477,6 +500,7 @@ theorem IsDefEq.reduce_sort (H : Γ ⊢ e ≡ .sort u : A) :
     | refl => exact ⟨_, rfl, rfl⟩
     | sortDF _ _ h => exact ⟨_, rfl, h⟩
     | etaL h => cases ((HasType.sort hu).uniqU henv hΓ h).sort_forallE_inv henv hΓ
+    | structural hs => exact (hs.not_sort_r hΓ hu).elim
     | proofIrrel h1 _ h3 =>
       have := h1.defeqU_l henv hΓ ((HasType.sort hu).uniqU henv hΓ h3).symm
       have := ((HasType.sort (by exact hu)).uniqU henv hΓ this).sort_inv henv hΓ
@@ -484,7 +508,7 @@ theorem IsDefEq.reduce_sort (H : Γ ⊢ e ≡ .sort u : A) :
   let .sort h1 := h1.standard hΓ H.hasType.1
   exact ⟨_, h1, a1⟩
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.Extension] (hΓ : OnCtx Γ (IsType env univs)) in
 theorem IsDefEq.reduce_forallE (H : Γ ⊢ e ≡ .forallE A B : V) :
     ∃ A' B', Γ ⊢ e ⤳* .forallE A' B' := by
   have ⟨_, _, e', _, h1, h2, h3⟩ := H.church_rosser hΓ
@@ -497,6 +521,7 @@ theorem IsDefEq.reduce_forallE (H : Γ ⊢ e ≡ .forallE A B : V) :
     | refl
     | forallEDF _ _ h => exact ⟨_, _, rfl⟩
     | etaL h => cases ((hA₁.hasType.2.forallE hB₁).uniqU henv hΓ h).sort_forallE_inv henv hΓ
+    | structural hs => exact (hs.not_forallE_r hΓ (hA₁.hasType.2.forallE hB₁)).elim
     | proofIrrel h1 _ h3 =>
       have := h1.defeqU_l henv hΓ ((hA₁.hasType.2.forallE hB₁).uniqU henv hΓ h3).symm
       have := ((HasType.sort (by exact this.sort_inv henv)).uniqU henv hΓ this).sort_inv henv hΓ
@@ -629,7 +654,7 @@ theorem InferType.inst (H₀ : Γ ⊢ a ▷ A₀) (H : A₀::Γ ⊢ e ▷ A) :
   have ⟨_, hA⟩ := (H₀.hasType hΓ).isType henv hΓ
   .instN hΓ (by exact ⟨hΓ, _, hA⟩) H₀ .zero H
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.Extension] (hΓ : OnCtx Γ (IsType env univs)) in
 theorem InferType.exists (H : Γ ⊢ a : A) : ∃ A', Γ ⊢ a ▷ A' := by
   replace H := (H.strong henv hΓ).hasType'.1
   generalize true = b at H

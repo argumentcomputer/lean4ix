@@ -57,7 +57,7 @@ def l4l05EmptyVEnvs : VEnvs where
   venv _ := VEnv.empty
 
 theorem l4l05EmptyHasPrimitives : VEnv.HasPrimitives VEnv.empty := by
-  apply TypeChecker.VEnv.HasPrimitives.of_avoids
+  apply VEnv.HasPrimitives.of_avoids
   intro name membership
   rfl
 
@@ -79,6 +79,16 @@ theorem cvmEmptyVEnvsWF :
   hasPrimitives := l4l05EmptyHasPrimitives
   safePrimitives := cvmEmptySafePrimitives
   mono := fun _ => .rfl
+  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+    intro name info h
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
+    simp [SMap.find?] at h
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
+    intro name info h
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
+    simp [SMap.find?] at h
 
 theorem prbEmptySafePrimitives :
     propRecursiveBoundaryContext.env.find? name = some info →
@@ -98,6 +108,16 @@ theorem prbEmptyVEnvsWF :
   hasPrimitives := l4l05EmptyHasPrimitives
   safePrimitives := prbEmptySafePrimitives
   mono := fun _ => .rfl
+  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+    intro name info h
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
+    simp [SMap.find?] at h
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
+    intro name info h
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
+    simp [SMap.find?] at h
 
 def cvmExecutionResult :=
   AddInductive.buildNormalizationCandidateExecution 2
@@ -544,6 +564,24 @@ def cvmDeclaredInfo : ConstantInfo :=
     0 false
     cvmCandidate.families.singleton.familyType.type.trace.terminalContext
 
+theorem cvmDeclaredInfo_isRec :
+    (AddInductive.singletonDeclaredInfo
+      cvmFamilyValidationRun.stats 2 0 constructorValidityMatrixKernelType
+      0 false
+      cvmCandidate.families.singleton.familyType.type.trace.terminalContext).isRec =
+      true := by
+  simp only [AddInductive.singletonDeclaredInfo]
+  rw [cvmFamilyValidationRun.stats_eq]
+  simp [cvmFamilyValidationRun,
+    AddInductive.CandidateExprTrace.singletonCandidateInductiveStats,
+    AddInductive.isRec, AddInductive.isRec.loop,
+    AddInductive.hasIndOcc,
+    constructorValidityMatrixKernelType,
+    constructorValidityMatrixKernelCtor,
+    constructorValidityMatrixInfo, constructorValidityMatrixMkInfo,
+    ConstantInfo.name, ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.constName!]
+
 theorem cvmFamilyNames_eq :
     constructorValidityMatrixKernelType.name =
       constructorValidityMatrixType.name := by
@@ -562,6 +600,66 @@ theorem cvmFamilyMap_add :
       0 false
       cvmCandidate.families.singleton.familyType.type.trace.terminalContext
       cvmExecution.familyEnv cvmStatsNindices_eq h
+
+theorem cvmConstructorContext_noProjectionReady (name : Name) :
+    cvmConstructorContext.env.isProjectionReadyStructure name = false := by
+  have hConstants :
+      cvmConstructorContext.env.constants =
+        ({} : ConstMap).insert constructorValidityMatrixType.name
+          cvmDeclaredInfo := by
+    simp only [cvmConstructorContext]
+    rw [cvmFamilyMap_add, cvmTerminalEnv_eq]
+    rfl
+  have hMap :
+      (({} : ConstMap).insert constructorValidityMatrixType.name
+        cvmDeclaredInfo).WF :=
+    SMap.WF.empty.insert _ _ (by simp [SMap.find?])
+  by_cases hName : constructorValidityMatrixType.name = name
+  · subst name
+    apply Kernel.Environment.isProjectionReadyStructure_false_of_no_ctorInfo
+      (info := AddInductive.singletonDeclaredInfo
+        cvmFamilyValidationRun.stats 2 0 constructorValidityMatrixKernelType
+        0 false
+        cvmCandidate.families.singleton.familyType.type.trace.terminalContext)
+    · rw [hConstants, hMap.find?'_eq_find?,
+        SMap.WF.find?_insert
+          (s := ({} : ConstMap)) SMap.WF.empty]
+      simp [cvmDeclaredInfo]
+    · intro ctor ctorInfo hctor
+      rw [hConstants, hMap.find?'_eq_find?,
+        SMap.WF.find?_insert
+          (s := ({} : ConstMap)) SMap.WF.empty] at hctor
+      split at hctor
+      · cases hctor
+      · simp [SMap.find?] at hctor
+  · apply Kernel.Environment.isProjectionReadyStructure_false_of_not_found
+    rw [hConstants, hMap.find?'_eq_find?,
+      SMap.WF.find?_insert
+        (s := ({} : ConstMap)) SMap.WF.empty]
+    simp [hName, SMap.find?]
+
+theorem cvmConstructorContext_noCtorInfo (name : Name)
+    (info : ConstructorVal) :
+    cvmConstructorContext.env.find? name ≠ some (.ctorInfo info) := by
+  intro h
+  have hConstants :
+      cvmConstructorContext.env.constants =
+        ({} : ConstMap).insert constructorValidityMatrixType.name
+          cvmDeclaredInfo := by
+    simp only [cvmConstructorContext]
+    rw [cvmFamilyMap_add, cvmTerminalEnv_eq]
+    rfl
+  have hMap :
+      (({} : ConstMap).insert constructorValidityMatrixType.name
+        cvmDeclaredInfo).WF :=
+    SMap.WF.empty.insert _ _ (by simp [SMap.find?])
+  change cvmConstructorContext.env.constants.find?' name =
+    some (.ctorInfo info) at h
+  rw [hConstants, hMap.find?'_eq_find?,
+    SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty] at h
+  split at h
+  · cases h
+  · simp [SMap.find?] at h
 
 def cvmTypeEnv : VEnv :=
   (VEnv.empty.addConst constructorValidityMatrixType.name
@@ -626,6 +724,10 @@ def cvmFamilyStage :
   validation := cvmFamilyValidationRun
   typeEnv := cvmTypeEnv
   addInduct := cvmAddType
+  projectionReady := ProjectionReady.of_no_ctorInfo
+    cvmConstructorContext_noCtorInfo
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo
+    cvmConstructorContext_noCtorInfo
   family_lctx_eq := rfl
   constructorContext_eq := rfl
   quotInit_eq := by
@@ -1789,6 +1891,60 @@ theorem prbTerminalEnv_eq :
       congrArg AddInductive.Context.env prbFamilyCandidateContext_eq
     _ = propRecursiveBoundaryContext.env := rfl
 
+theorem prbConstructorContext_noProjectionReady (name : Name) :
+    prbConstructorContext.env.isProjectionReadyStructure name = false := by
+  have hConstants :
+      prbConstructorContext.env.constants =
+        ({} : ConstMap).insert propRecursiveBoundaryType.name
+          prbDeclaredInfo := by
+    simp only [prbConstructorContext]
+    rw [prbFamilyMap_add, prbTerminalEnv_eq]
+    rfl
+  have hMap :
+      (({} : ConstMap).insert propRecursiveBoundaryType.name
+        prbDeclaredInfo).WF :=
+    SMap.WF.empty.insert _ _ (by simp [SMap.find?])
+  by_cases hName : propRecursiveBoundaryType.name = name
+  · subst name
+    apply Kernel.Environment.isProjectionReadyStructure_false_of_numIndices_ne
+      (info := AddInductive.singletonDeclaredInfo
+        prbFamilyValidationRun.stats 1 1 propRecursiveBoundaryKernelType
+        0 false
+        prbCandidate.families.singleton.familyType.type.trace.terminalContext)
+    · rw [hConstants, hMap.find?'_eq_find?,
+        SMap.WF.find?_insert
+          (s := ({} : ConstMap)) SMap.WF.empty]
+      simp [prbDeclaredInfo]
+    · simp [AddInductive.singletonDeclaredInfo]
+  · apply Kernel.Environment.isProjectionReadyStructure_false_of_not_found
+    rw [hConstants, hMap.find?'_eq_find?,
+      SMap.WF.find?_insert
+        (s := ({} : ConstMap)) SMap.WF.empty]
+    simp [hName, SMap.find?]
+
+theorem prbConstructorContext_noCtorInfo (name : Name)
+    (info : ConstructorVal) :
+    prbConstructorContext.env.find? name ≠ some (.ctorInfo info) := by
+  intro h
+  have hConstants :
+      prbConstructorContext.env.constants =
+        ({} : ConstMap).insert propRecursiveBoundaryType.name
+          prbDeclaredInfo := by
+    simp only [prbConstructorContext]
+    rw [prbFamilyMap_add, prbTerminalEnv_eq]
+    rfl
+  have hMap :
+      (({} : ConstMap).insert propRecursiveBoundaryType.name
+        prbDeclaredInfo).WF :=
+    SMap.WF.empty.insert _ _ (by simp [SMap.find?])
+  change prbConstructorContext.env.constants.find?' name =
+    some (.ctorInfo info) at h
+  rw [hConstants, hMap.find?'_eq_find?,
+    SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty] at h
+  split at h
+  · cases h
+  · simp [SMap.find?] at h
+
 theorem prbDeclaredInfo_tr :
     TrConstVal .safe VEnv.empty prbDeclaredInfo
       propRecursiveBoundaryType.toVConstVal := by
@@ -1842,6 +1998,10 @@ def prbFamilyStage :
   validation := prbFamilyValidationRun
   typeEnv := prbTypeEnv
   addInduct := prbAddType
+  projectionReady := ProjectionReady.of_no_ctorInfo
+    prbConstructorContext_noCtorInfo
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo
+    prbConstructorContext_noCtorInfo
   family_lctx_eq := rfl
   constructorContext_eq := rfl
   quotInit_eq := by
@@ -3628,14 +3788,14 @@ private theorem prbCandidateWhnfResult_eq
   rw [self] at other
   exact (Except.ok.inj other).symm
 
-noncomputable def prbConstructorValidation :
+def prbConstructorValidation :
     AddInductive.ConstructorValidationRun propRecursiveBoundaryKernelType
       prbFamilyValidationRun.stats false
       prbConstructorValidationContext :=
   AddInductive.ConstructorValidationRun.of_run (by
     simpa [prbConstructorValidationContext] using prbCheckConstructorsRun)
 
-noncomputable def prbStagedUniverseInput :
+def prbStagedUniverseInput :
     VInductDecl.StagedNormalizationCandidateUniverseInput
       prbFamilyContext prbConstructorContext VEnv.empty [`u]
       prbCandidate propRecursiveBoundaryDecl where
@@ -3712,7 +3872,7 @@ private def prbValidationNextDomainAnnotations :
   ⟨AddInductive.candidateIsDefEqRefl prbValidationAContext
     prbValidationNextDomain⟩
 
-private noncomputable def prbValidationAlphaPositivityAlignment
+private def prbValidationAlphaPositivityAlignment
     (trace : AddInductive.ConstructorPositivityModeTrace
       prbStagedUniverseInput.staged.family.validation.stats false
       propRecursiveBoundaryKernelCtor.name 1 prbValidationRootContext
@@ -3766,7 +3926,7 @@ private def prbTransportPositivityAlignment
   subst source'
   exact alignment
 
-private noncomputable def prbValidationNextPositivityAlignment
+private def prbValidationNextPositivityAlignment
     (trace : AddInductive.ConstructorPositivityModeTrace
       prbStagedUniverseInput.staged.family.validation.stats false
       propRecursiveBoundaryKernelCtor.name 2 prbValidationAContext
@@ -3940,7 +4100,7 @@ private def prbTransportViewAlignmentIndexed
 
 set_option pp.universes false in
 set_option pp.all false in
-noncomputable def prbStagedPostFamilyInput :
+def prbStagedPostFamilyInput :
     VInductDecl.StagedNormalizationCandidatePostFamilyInput
       prbFamilyContext prbConstructorContext VEnv.empty [`u]
       prbCandidate propRecursiveBoundaryDecl where
@@ -5457,7 +5617,7 @@ theorem prbSafetyRun :
     VInductDecl.StagedNormalizationCandidatePostFamilyInput.ofRun] using
     prbSafetyRunDirect
 
-noncomputable def prbStagedPreFamilyInput :
+def prbStagedPreFamilyInput :
     VInductDecl.StagedNormalizationCandidatePreFamilyInput
       prbFamilyContext prbConstructorContext VEnv.empty [`u]
       prbCandidate propRecursiveBoundaryDecl :=
@@ -6716,7 +6876,7 @@ theorem cvmCtorTerminalValidationShapeTest :
     AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
     Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
 
-noncomputable def cvmConstructorValidationTest :
+def cvmConstructorValidationTest :
     AddInductive.ConstructorValidationRun
       constructorValidityMatrixKernelType cvmFamilyValidationRun.stats false
       cvmValidationRootContextTest :=
@@ -8402,7 +8562,7 @@ def cvmValidationFunctionPosBodyCheckedTest :
       rw [cvmValidationPFindInFunctionPosTest]
       rfl) cvmValidationFunctionPosBodyCheckTest
 
-noncomputable def cvmStagedUniverseInputTest :
+def cvmStagedUniverseInputTest :
     VInductDecl.StagedNormalizationCandidateUniverseInput
       cvmFamilyContext cvmConstructorContext VEnv.empty [`u]
       cvmCandidate constructorValidityMatrixDecl where
@@ -8673,7 +8833,7 @@ def cvmTransportPositivityFuelAlignmentTest
   subst fuel'
   exact alignment
 
-noncomputable def cvmAbsentPositivityAlignmentCoreTest
+def cvmAbsentPositivityAlignmentCoreTest
     (self : AddInductive.CandidateWhnfStep.Valid
       ⟨context, source, source⟩)
     (notForall : source.isForall = false)
@@ -8701,7 +8861,7 @@ noncomputable def cvmAbsentPositivityAlignmentCoreTest
       rw [noOccurrence] at occurs
       contradiction
 
-noncomputable def cvmTargetPositivityAlignmentCoreTest
+def cvmTargetPositivityAlignmentCoreTest
     (self : AddInductive.CandidateWhnfStep.Valid
       ⟨context, source, source⟩)
     (notForall : source.isForall = false)
@@ -8729,7 +8889,7 @@ noncomputable def cvmTargetPositivityAlignmentCoreTest
       subst result
       exact .target checked
 
-noncomputable def cvmAbsentPositivityModeAlignmentTest
+def cvmAbsentPositivityModeAlignmentTest
     (self : AddInductive.CandidateWhnfStep.Valid
       ⟨context, source, source⟩)
     (notForall : source.isForall = false)
@@ -8750,7 +8910,7 @@ noncomputable def cvmAbsentPositivityModeAlignmentTest
       exact cvmTransportPositivityFuelAlignmentTest
         inductiveFuel positivityTrace normalizedAlignment
 
-noncomputable def cvmTargetPositivityModeAlignmentTest
+def cvmTargetPositivityModeAlignmentTest
     (self : AddInductive.CandidateWhnfStep.Valid
       ⟨context, source, source⟩)
     (notForall : source.isForall = false)
@@ -8771,7 +8931,7 @@ noncomputable def cvmTargetPositivityModeAlignmentTest
       exact cvmTransportPositivityFuelAlignmentTest
         inductiveFuel positivityTrace normalizedAlignment
 
-noncomputable def cvmValidationXPositivityAlignmentTest
+def cvmValidationXPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 2
@@ -8781,7 +8941,7 @@ noncomputable def cvmValidationXPositivityAlignmentTest
     (by rw [cvmCtorXDomainValidationShapeTest]; rfl)
     cvmValidationXHasNoIndOccTest cvmValidationXCheckedTest (by rfl) trace
 
-noncomputable def cvmValidationProofPositivityAlignmentTest
+def cvmValidationProofPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 3
@@ -8792,7 +8952,7 @@ noncomputable def cvmValidationProofPositivityAlignmentTest
     cvmValidationProofHasNoIndOccTest cvmValidationProofCheckedTest
     (by rfl) trace
 
-noncomputable def cvmValidationDirectPositivityAlignmentTest
+def cvmValidationDirectPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 4
@@ -8803,7 +8963,7 @@ noncomputable def cvmValidationDirectPositivityAlignmentTest
     cvmValidationDirectHasIndOccTest cvmValidationDirectCheckedTest
     (by rfl) trace
 
-noncomputable def cvmValidationLaterPositivityAlignmentTest
+def cvmValidationLaterPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 6
@@ -8814,7 +8974,7 @@ noncomputable def cvmValidationLaterPositivityAlignmentTest
     cvmValidationLaterHasNoIndOccTest cvmValidationLaterCheckedTest
     (by rfl) trace
 
-noncomputable def cvmValidationLaterProofPositivityAlignmentTest
+def cvmValidationLaterProofPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 7
@@ -8850,7 +9010,7 @@ def cvmTransportPositivityAlignmentTest
   subst source'
   exact alignment
 
-noncomputable def cvmValidationFunctionPositivityAlignmentTest
+def cvmValidationFunctionPositivityAlignmentTest
     (trace : AddInductive.ConstructorPositivityModeTrace
       cvmStagedUniverseInputTest.staged.family.validation.stats false
       constructorValidityMatrixKernelCtor.name 5
@@ -9061,7 +9221,7 @@ def cvmTransportViewAlignmentIndexedTest
 
 set_option pp.universes false in
 set_option pp.all false in
-noncomputable def cvmStagedPostFamilyInputTest :
+def cvmStagedPostFamilyInputTest :
     VInductDecl.StagedNormalizationCandidatePostFamilyInput
       cvmFamilyContext cvmConstructorContext VEnv.empty [`u]
       cvmCandidate constructorValidityMatrixDecl where
@@ -11234,7 +11394,7 @@ theorem cvmSafetyRunTest :
         .ok () := by
   simpa [cvmStagedPostFamilyInputTest] using cvmSafetyRunDirectTest
 
-noncomputable def cvmStagedPreFamilyInputTest :
+def cvmStagedPreFamilyInputTest :
     VInductDecl.StagedNormalizationCandidatePreFamilyInput
       cvmFamilyContext cvmConstructorContext VEnv.empty [`u]
       cvmCandidate constructorValidityMatrixDecl :=
@@ -11254,11 +11414,11 @@ theorem cvmUniverseRun :
     rw [cvmConstructorValidationContextTest_root]
     exact cvmUniverseRunTest
 
-noncomputable def cvmConstructorValidation := cvmConstructorValidationTest
+def cvmConstructorValidation := cvmConstructorValidationTest
 
-noncomputable def cvmStagedUniverseInput := cvmStagedUniverseInputTest
+def cvmStagedUniverseInput := cvmStagedUniverseInputTest
 
-noncomputable def cvmStagedPostFamilyInput := cvmStagedPostFamilyInputTest
+def cvmStagedPostFamilyInput := cvmStagedPostFamilyInputTest
 
 theorem cvmSafetyRunDirect :
     AddInductive.checkConstructorPreFamilySafety
@@ -11278,7 +11438,7 @@ theorem cvmSafetyRun :
         .ok () :=
   cvmSafetyRunTest
 
-noncomputable def cvmStagedPreFamilyInput := cvmStagedPreFamilyInputTest
+def cvmStagedPreFamilyInput := cvmStagedPreFamilyInputTest
 
 /- The accepted CVM package may inherit the ordinary verified-checker
 transition frontier and the one exact L4L-01E execution witness, but no
@@ -11308,9 +11468,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.cvmStagedPreFamilyInput' depends on axi
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert,
  cvmExecutionResult_isOk._native.native_decide.ax_1_1]
@@ -11362,7 +11525,7 @@ theorem cvmCanonicalCandidate_produced :
   rw [← cvmCandidate_eq_canonical]
   exact cvmCandidate_produced
 
-noncomputable abbrev cvmCanonicalStagedPreFamilyInput :
+abbrev cvmCanonicalStagedPreFamilyInput :
     VInductDecl.StagedNormalizationCandidatePreFamilyInput
       cvmFamilyContext cvmConstructorContext VEnv.empty [`u]
       cvmCanonicalCandidate constructorValidityMatrixDecl :=
@@ -11466,19 +11629,24 @@ theorem cvmExactProducedGenerationCandidatePackage_exists :
       constructorValidityMatrixGenerationChecked
     cvmCandidate_analysis
 
-private noncomputable def cvmExactProducedGenerationCandidatePackage :
+private def cvmExactProducedGenerationCandidatePackage :
     VInductDecl.ExactProducedGenerationCandidatePackage VEnv.empty [`u]
       cvmProducedGenerationShapeCandidate
       constructorValidityMatrixGenerationChecked :=
-  Classical.choice cvmExactProducedGenerationCandidatePackage_exists
+  cvmProducedGenerationShapeCandidate.exactProducedPackage
+    cvmCanonicalStagedPreFamilyInput
+      (stagedPreFamily_transport_raw cvmCandidate_eq_canonical
+        cvmStagedPreFamilyInput).symm
+      constructorValidityMatrixGenerationChecked
+    cvmCandidate_analysis
 
-noncomputable def cvmGenerationCandidateSemanticRun :
+def cvmGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       cvmExactProducedGenerationCandidatePackage.normalization
       constructorValidityMatrixGenerationChecked :=
   cvmExactProducedGenerationCandidatePackage.semantic
 
-noncomputable def cvmProducedGenerationCandidatePackage :
+def cvmProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage VEnv.empty [`u] :=
   cvmExactProducedGenerationCandidatePackage.package
 
@@ -11557,7 +11725,7 @@ theorem prbCanonicalCandidate_produced :
   rw [← prbCandidate_eq_canonical]
   exact prbCandidate_produced
 
-noncomputable abbrev prbCanonicalStagedPreFamilyInput :
+abbrev prbCanonicalStagedPreFamilyInput :
     VInductDecl.StagedNormalizationCandidatePreFamilyInput
       prbFamilyContext prbConstructorContext VEnv.empty [`u]
       prbCanonicalCandidate propRecursiveBoundaryDecl :=
@@ -11661,19 +11829,23 @@ theorem prbExactProducedGenerationCandidatePackage_exists :
       prbStagedPreFamilyInput).symm propRecursiveBoundaryGenerationChecked
     prbCandidate_analysis
 
-private noncomputable def prbExactProducedGenerationCandidatePackage :
+private def prbExactProducedGenerationCandidatePackage :
     VInductDecl.ExactProducedGenerationCandidatePackage VEnv.empty [`u]
       prbProducedGenerationShapeCandidate
       propRecursiveBoundaryGenerationChecked :=
-  Classical.choice prbExactProducedGenerationCandidatePackage_exists
+  prbProducedGenerationShapeCandidate.exactProducedPackage
+    prbCanonicalStagedPreFamilyInput
+    (stagedPreFamily_transport_raw prbCandidate_eq_canonical
+      prbStagedPreFamilyInput).symm propRecursiveBoundaryGenerationChecked
+    prbCandidate_analysis
 
-noncomputable def prbGenerationCandidateSemanticRun :
+def prbGenerationCandidateSemanticRun :
     VInductDecl.GenerationCandidateSemanticRun
       prbExactProducedGenerationCandidatePackage.normalization
       propRecursiveBoundaryGenerationChecked :=
   prbExactProducedGenerationCandidatePackage.semantic
 
-noncomputable def prbProducedGenerationCandidatePackage :
+def prbProducedGenerationCandidatePackage :
     VInductDecl.ProducedGenerationCandidatePackage VEnv.empty [`u] :=
   prbExactProducedGenerationCandidatePackage.package
 
@@ -11823,7 +11995,7 @@ theorem cvmReplayRec_fresh :
     SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty]
   simp [constructorValidityMatrixType, SMap.find?]
 
-noncomputable def cvmAddInductTraceChecked :
+def cvmAddInductTraceChecked :
     AddInductTrace ({} : ConstMap) VEnv.empty constructorValidityMatrixDecl
       cvmReplayMap cvmCertifiedFinalEnv := by
   refine cvmProducedGenerationCandidatePackage.package.addInductTrace
@@ -12064,7 +12236,7 @@ theorem prbReplayRec_fresh :
     SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty]
   simp [propRecursiveBoundaryType, SMap.find?]
 
-noncomputable def prbAddInductTraceChecked :
+def prbAddInductTraceChecked :
     AddInductTrace ({} : ConstMap) VEnv.empty propRecursiveBoundaryDecl
       prbReplayMap prbCertifiedFinalEnv := by
   refine prbProducedGenerationCandidatePackage.package.addInductTrace

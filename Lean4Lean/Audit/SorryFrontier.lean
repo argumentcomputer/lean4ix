@@ -2,8 +2,11 @@ import Lean4Lean.Theory
 import Lean4Lean.Theory.ConstructorValidityFixtures
 import Lean4Lean.Theory.Inductive
 import Lean4Lean.Theory.InductiveFixtures
+import Lean4Lean.Theory.Literals
+import Lean4Lean.Theory.LocalContext
 import Lean4Lean.Theory.Meta
 import Lean4Lean.Theory.MutualInductiveFixtures
+import Lean4Lean.Theory.Projection
 import Lean4Lean.Theory.Quot
 import Lean4Lean.Theory.SingletonParity
 import Lean4Lean.Theory.Typing.Basic
@@ -11,6 +14,7 @@ import Lean4Lean.Theory.Typing.ChurchRosser
 import Lean4Lean.Theory.Typing.Env
 import Lean4Lean.Theory.Typing.EnvLemmas
 import Lean4Lean.Theory.Typing.HeadReduction
+import Lean4Lean.Theory.Typing.InductiveCertificate
 import Lean4Lean.Theory.Typing.InductiveLemmas
 import Lean4Lean.Theory.Typing.Injectivity
 import Lean4Lean.Theory.Typing.Lemmas
@@ -31,6 +35,7 @@ import Lean4Lean.Verify.Environment.CandidateIdentityReplay
 import Lean4Lean.Verify.Environment.ConstructorValidation
 import Lean4Lean.Verify.Environment.ConstructorValidityMatrix
 import Lean4Lean.Verify.Environment.ConstructorValidityReplay
+import Lean4Lean.Verify.Environment.DeepNestedReplay
 import Lean4Lean.Verify.Environment.Elimination
 import Lean4Lean.Verify.Environment.EliminationFixtures
 import Lean4Lean.Verify.Environment.EliminationFixturesCommon
@@ -46,6 +51,7 @@ import Lean4Lean.Verify.Environment.IndexedVecConstructors
 import Lean4Lean.Verify.Environment.IndexedVecOuterReplay
 import Lean4Lean.Verify.Environment.IndexedVecSemanticReplay
 import Lean4Lean.Verify.Environment.InductiveFixtures
+import Lean4Lean.Verify.Environment.InductiveReplayMatrix
 import Lean4Lean.Verify.Environment.Lemmas
 import Lean4Lean.Verify.Environment.MutualInductiveFixtures
 import Lean4Lean.Verify.Environment.Normalization
@@ -81,7 +87,7 @@ token), so it can never drift from Lean's lexer over comments, string/char
 literals, or nested block comments. Attribution is by SOURCE MODULE via
 `getModuleIdxFor?`, so a declaration is charged to the file that defines it even
 when it sits in a foreign namespace (e.g. `Lean.Level.isEquiv_wf` lives in
-`Lean4Lean.Verify.Level`).
+`Lean4Lean.Verify.LevelStd`).
 
 The audited surface is exactly the modules reachable from this file's imports:
 importing a `Theory`/`Verify` module here is what brings it into scope. A sorry
@@ -126,30 +132,46 @@ private def surfacePrefixes : Array Lean.Name := #[`Lean4Lean.Theory, `Lean4Lean
 S (missing specification), P (stated but sorried, blocked on S), V (checker
 verification, blocked on S/P), R (research-grade metatheory, upstream-driven). -/
 private def allowlist : Array Lean.Name := #[
-  -- Tier S — missing specification
-  `Lean4Lean.TrProj,
-  -- Tier P — blocked only on Tier S
-  `Lean4Lean.TrProj.weak',
-  `Lean4Lean.TrProj.weak'_inv,
-  `Lean4Lean.TrProj.defeqDFC,
-  `Lean4Lean.TrProj.wf,
-  `Lean4Lean.TrProj.uniq,
-  `Lean4Lean.TrProj.instN,
-  `Lean4Lean.TrProj.instL,
-  -- Tier V — checker verification, blocked on Tiers S/P
-  -- (NormLevel.subsumption_eval and Level.isEquiv_wf were proved on the
-  -- formalization line, 2026-08-05/07, and left the frontier.)
+  -- Tier V — checker verification, blocked on Tier P
+  -- (NormLevel.subsumption_eval and the primed-comparator soundness were
+  -- proved on the formalization line, 2026-08-05/07, and left the frontier;
+  -- the v4.33 reconciliation then absorbed upstream's stronger level
+  -- verification.)
+  -- After upstream #28 (v4.33 reconciliation), `addDecl.WF` is proved for
+  -- every declaration kind except `inductDecl`, whose case is the remaining
+  -- sorry (L4L-19B territory).
   `Lean4Lean.addDecl.WF,
-  `Lean4Lean.TypeChecker.Inner.inferProj.WF,
+  -- Upstream's front-end trust boundary for the syntactic primitive-definition
+  -- recognizer (Verify/Environment/Boundaries.lean), added by #28 at the
+  -- v4.33 reconciliation.
+  `Lean4Lean.checkPrimitiveDef.WF,
+  -- `ProjectionReady`/registered `StructureEtaReady` transport across the
+  -- front-end environment extensions (Verify/Environment/Extension.lean):
+  -- upstream's proved v4.33 declaration chains do not establish these fork
+  -- obligations on `VContext`; the transport proofs are L4L-19B content. The
+  -- mutual-block entry is the compiled recursive functional of
+  -- `VEnvAt.addAxioms`.
+  `Lean4Lean.VEnvAt.addAxioms._f,
+  `Lean4Lean.addConstCore.WF,
+  `Lean4Lean.addDef.WF,
+  `Lean4Lean.addMutualBlock.WF,
+  `Lean4Lean.addUnsafeDef.WF,
+  -- Quotient initialization (Verify/Environment.lean): upstream's v4.33
+  -- proof was vacuous via the fork-refutable `TrEnv'.no_inductInfo`; the
+  -- constructive connection to the Theory quotient transaction is L4L-19B
+  -- content.
+  `Lean4Lean.addQuot.WF,
+  -- v4.33 reconciliation repair debt: the exact alignment-run fixture's
+  -- `build.eq_def` stepping no longer elaborates; the closed checker-run
+  -- statement is unchanged (Verify/Environment/InductiveFixtures.lean).
+  `Lean4Lean.InductiveReplayFixtures.aliasFormerAlignmentRun,
   `Lean4Lean.TypeChecker.Inner.reduceRecursor.WF,
-  `Lean4Lean.TypeChecker.Inner.reduceProj.WF,
-  `Lean4Lean.TypeChecker.Inner.tryEtaStructCore.WF,
-  `Lean4Lean.TypeChecker.Inner.isDefEqUnitLike.WF,
   -- Tier R — research-grade metatheory (upstream-driven, not scheduled)
   `Lean4Lean.VEnv.IsDefEqU.sort_inv,
   `Lean4Lean.VEnv.IsDefEqU.forallE_inv_stratified,
   `Lean4Lean.VEnv.IsDefEqU.sort_forallE_inv,
   `Lean4Lean.VEnv.IsDefEqU.weakN_iff,
+  `Lean4Lean.VEnv.WF.registeredStructureHeadInversion,
   `Lean4Lean.VEnv.NormalEq.parRed,
   -- Tier F — deliberately kernel-rejected inductive fixtures. Elaborator error
   -- recovery admits the invalid `inductive` with `sorryAx`, so the constant

@@ -892,13 +892,13 @@ def build :
       let viewDomainCheck ← checkConstructorAlignedExpr context viewDomain
       let parameterTypeCheck ← checkConstructorAlignedExpr context
         parameterType
-      match param with
+      match hparam : param with
       | .fvar fv =>
         if parameterPresent : (context.lctx.find? fv).isSome = true then
           let tail ← build tailTrace
-            (viewBody.instantiate1 (.fvar fv))
+            (viewBody.instantiate1 param)
           pure <| .parameter domainCheck viewDomainCheck parameterTypeCheck
-            rfl parameterPresent tailTrace tail
+            hparam parameterPresent tailTrace tail
         else
           throw <| .other
             "constructor parameter is absent from validation context"
@@ -1070,6 +1070,24 @@ theorem nonempty_of_check
       change Except.error error = Except.ok () at success
       contradiction
   | ok alignment => exact ⟨alignment⟩
+
+/-- A successful alignment audit guarantees the retained builder returns its
+trace, so audit owners can replay `build` instead of choosing from
+`Nonempty`. -/
+theorem build_ok_of_check
+    {validationTrace : ConstructorListValidationTrace stats isUnsafe familyIdx
+      context seen constructors}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor constructors}
+    (success : check validationTrace candidates context = .ok ()) :
+    ∃ alignment, build validationTrace candidates = .ok alignment := by
+  unfold check at success
+  cases h : build validationTrace candidates with
+  | error error =>
+      rw [h] at success
+      change Except.error error = Except.ok () at success
+      contradiction
+  | ok alignment => exact ⟨alignment, rfl⟩
 
 end ConstructorCandidateAlignmentTrace
 
@@ -1877,7 +1895,8 @@ theorem ConstructorUniverseTrace.nonempty_of_semanticGe
   · cases hstruct : levelStructGe resultLevel fieldLevel with
     | true => exact ⟨.structural hstruct⟩
     | false =>
-        exact ⟨.fallback hstruct (by simp [prop])⟩
+        exact ⟨.fallback hstruct
+          (by cases resultLevel <;> simp_all [Level.isZero, Level.isAlwaysZero])⟩
   · cases hstruct : levelStructGe resultLevel fieldLevel with
     | true => exact ⟨.structural hstruct⟩
     | false =>
@@ -1896,7 +1915,7 @@ theorem constructorUniverseSemanticGe_ofLevel
   rcases valid with structural | prop | ⟨_core, verified⟩
   · exact .inr (levelStructGe_ofLevel structural result_tr field_tr)
   · exact .inl (ofLevel_eq_zero_of_isZero prop result_tr)
-  · exact .inr (Level.geq'_wf verified result_tr field_tr)
+  · exact .inr (Level.geq'_wf result_tr field_tr verified)
 
 /-- Agreement between the ordinary and verified normalized comparisons opens
 the semantic fallback without weakening the ordinary acceptance boundary. -/
@@ -1959,7 +1978,11 @@ info: 'Lean4Lean.AddInductive.levelStructGe_ofLevel' depends on axioms: [propext
 /--
 info: 'Lean4Lean.AddInductive.constructorUniverseSemanticGe_ofLevel' depends on axioms: [propext,
  Classical.choice,
- Quot.sound]
+ Quot.sound,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ Std.TreeMap.all_eq_all_toList]
 -/
 #guard_msgs in
 #print axioms constructorUniverseSemanticGe_ofLevel
@@ -2408,7 +2431,7 @@ theorem nonempty_at
         arguments' := []
         result' := expected'
         arguments_tr := .nil
-        spine := rfl }⟩
+        spine := .nil }⟩
   | cons name domain body binderInfo argument arguments telescopeCheck
       step tail ih =>
       obtain ⟨domain', body', rfl, domainType, bodyType, domain_tr,
@@ -2473,7 +2496,7 @@ theorem nonempty_at
         arguments' := argumentRun.source' :: tailRun.arguments'
         result' := tailRun.result'
         arguments_tr := .cons argument_tr tailRun.arguments_tr
-        spine := ⟨domain', body', rfl, argumentType, tailRun.spine⟩ }⟩
+        spine := .cons argumentType tailRun.spine }⟩
 
 /-- Every successful operational spine trace has a verified interpretation;
 the initial strict endpoint is selected by the trace's own root `checkType`. -/
@@ -3937,6 +3960,32 @@ theorem ConstructorPreFamilyListTrace.nonempty_of_check
               exact ⟨⟨translationUnique, familyIndices, parameters,
                 constructors⟩⟩
 
+/-- A successful executable D3 gate guarantees the retained builder returns
+its trace, so gate owners can replay `buildConstructorPreFamilySafety`
+instead of choosing from `Nonempty`. -/
+theorem buildConstructorPreFamilySafety_ok_of_check
+    (success : checkConstructorPreFamilySafety stats familyView candidates
+      context = .ok ()) :
+    ∃ trace, buildConstructorPreFamilySafety stats familyView candidates
+      context = .ok trace := by
+  unfold checkConstructorPreFamilySafety at success
+  unfold buildConstructorPreFamilySafety
+  split
+  next translationUnique =>
+    simp [translationUnique] at success
+  next translationUnique =>
+    split
+    next error parameters =>
+      simp [translationUnique, parameters, Bind.bind, Except.bind] at success
+    next familyIndices parameters =>
+      cases hbuild : ConstructorPreFamilyListTrace.build stats 0 familyIndices
+          context candidates with
+      | error error =>
+          simp [translationUnique, parameters, hbuild,
+            Bind.bind, Except.bind] at success
+      | ok constructors =>
+          exact ⟨_, rfl⟩
+
 end AddInductive
 
 namespace TypeChecker
@@ -4331,8 +4380,10 @@ structure StagedNormalizationCandidatePostFamilyInput
 
 /-- Package a successful executable alignment audit into the staged D2 owner.
 The direct `alignment` field also permits proof-oriented clients to assemble
-the same indexed trace from already-retained checker observations. -/
-noncomputable def StagedNormalizationCandidatePostFamilyInput.ofRun
+the same indexed trace from already-retained checker observations.  The
+retained trace is computed by replaying the alignment builder; the audit
+premise only discharges its impossible error branch. -/
+def StagedNormalizationCandidatePostFamilyInput.ofRun
     {familyContext constructorContext : AddInductive.Context}
     {env : VEnv} {Us : List Name} {source : InductiveType}
     {candidate : AddInductive.NormalizationCandidate [source]}
@@ -4347,9 +4398,16 @@ noncomputable def StagedNormalizationCandidatePostFamilyInput.ofRun
     StagedNormalizationCandidatePostFamilyInput familyContext
       constructorContext env Us candidate rawDecl where
   universeInput := universeInput
-  alignment := Classical.choice <|
-    AddInductive.ConstructorCandidateAlignmentTrace.nonempty_of_check
-      alignmentRun
+  alignment :=
+    match h : AddInductive.ConstructorCandidateAlignmentTrace.build
+        universeInput.staged.constructorValidation.trace
+        candidate.families.singleton.constructors with
+    | .ok alignment => alignment
+    | .error _ =>
+        absurd
+          (AddInductive.ConstructorCandidateAlignmentTrace.build_ok_of_check
+            alignmentRun)
+          (by simp [h])
 
 /-- The exact output of D2: the established produced semantic hierarchy plus
 the actual post-family validation context, retained source/candidate
@@ -4454,8 +4512,10 @@ structure StagedNormalizationCandidatePreFamilyInput
 
 /-- Package a successful executable D3 gate into the staged owner. The gate
 itself, rather than a caller-supplied Theory premise, selects the retained
-parameter-instantiated family telescope and constructor traces. -/
-noncomputable def StagedNormalizationCandidatePreFamilyInput.ofRun
+parameter-instantiated family telescope and constructor traces.  The trace
+is computed by replaying the safety builder; the gate premise only
+discharges its impossible error branch. -/
+def StagedNormalizationCandidatePreFamilyInput.ofRun
     {familyContext constructorContext : AddInductive.Context}
     {env : VEnv} {Us : List Name} {source : InductiveType}
     {candidate : AddInductive.NormalizationCandidate [source]}
@@ -4471,8 +4531,17 @@ noncomputable def StagedNormalizationCandidatePreFamilyInput.ofRun
     StagedNormalizationCandidatePreFamilyInput familyContext
       constructorContext env Us candidate rawDecl where
   postFamilyInput := postFamilyInput
-  safety := Classical.choice <|
-    AddInductive.ConstructorPreFamilyListTrace.nonempty_of_check safetyRun
+  safety :=
+    match h : AddInductive.buildConstructorPreFamilySafety
+        postFamilyInput.universeInput.staged.family.validation.stats
+        candidate.families.singleton.familyType.type.view
+        candidate.families.singleton.constructors
+        candidate.families.singleton.familyType.type.trace.terminalContext with
+    | .ok safety => safety
+    | .error _ =>
+        absurd
+          (AddInductive.buildConstructorPreFamilySafety_ok_of_check safetyRun)
+          (by simp [h])
 
 /-- D3's produced meaning: D2's post-family semantics together with the exact
 verified pre-family context and source-ordered family-free replay selected by
@@ -5151,21 +5220,6 @@ theorem Closed.getAppArgsList
   | bvar | fvar | mvar | sort | const | lit | mdata | proj | lam | forallE |
       letE => simp [Expr.getAppArgsList]
 
-theorem FVarsIn.getAppArgsList
-    (fvars : FVarsIn predicate expression) :
-    ∀ argument ∈ expression.getAppArgsList,
-      FVarsIn predicate argument := by
-  induction expression with
-  | app function argument functionIH argumentIH =>
-      intro candidate member
-      rw [Expr.getAppArgsList, expr_getAppArgsList_acc] at member
-      simp only [List.mem_append, List.mem_singleton] at member
-      rcases member with member | rfl
-      · exact functionIH fvars.1 candidate member
-      · exact fvars.2
-  | bvar | fvar | mvar | sort | const | lit | mdata | proj | lam | forallE |
-      letE => simp [Expr.getAppArgsList]
-
 private theorem vexpr_appHead_appN (head : VExpr) (arguments : List VExpr) :
     VExpr.appHead (VExpr.appN head arguments) = VExpr.appHead head := by
   induction arguments generalizing head with
@@ -5263,29 +5317,6 @@ theorem forall₂_tr_mono
   induction run with
   | nil => exact .nil
   | cons head tail ih => exact .cons (head.mono add) ih
-
-/-- General verified context weakening for an application spine. -/
-theorem VEnv.SpineWF.weak'
-    {env : VEnv} (henv : env.Ordered)
-    {U : Nat} {lift : Lift} {context enlarged : List VExpr}
-    (extension : Ctx.Lift' lift context enlarged) :
-    ∀ {arguments : List VExpr} {source target : VExpr},
-      env.SpineWF U context source arguments target →
-      env.SpineWF U enlarged (source.lift' lift)
-        (arguments.map fun argument => argument.lift' lift)
-        (target.lift' lift) := by
-  intro arguments
-  induction arguments with
-  | nil =>
-      intro source target run
-      exact congrArg (fun expression => expression.lift' lift) run
-  | cons argument arguments ih =>
-      intro source target run
-      obtain ⟨domain, body, rfl, argumentType, tail⟩ := run
-      refine ⟨domain.lift' lift, body.lift' lift.cons, rfl,
-        argumentType.weak' henv extension, ?_⟩
-      have weakened := ih tail
-      rwa [VExpr.lift'_inst_hi] at weakened
 
 theorem isValidIndAppIdx_shape
     {stats : AddInductive.InductiveStats} {source : Expr}
@@ -5456,74 +5487,6 @@ theorem TrExprS.forall₂_weakFV_inv_defeq
       subst target
       exact ⟨headBase :: tailBase, .cons headBaseRun tailBaseRuns, by
         simp only [List.map_cons, tailEq]⟩
-
-/-- Invert weakening of every component of an application-spine judgment when
-the enlarged context is well formed. -/
-theorem VEnv.SpineWF.weakN_inv
-    {env : VEnv} {U n k : Nat} {context enlarged : List VExpr}
-    (henv : VEnv.WF env) (enlargedWF : OnCtx enlarged (env.IsType U))
-    (extension : Ctx.LiftN n k context enlarged) :
-    ∀ {arguments : List VExpr} {source target : VExpr},
-      env.SpineWF U enlarged (source.liftN n k)
-        (arguments.map fun argument => argument.liftN n k)
-        (target.liftN n k) →
-      env.SpineWF U context source arguments target := by
-  intro arguments
-  induction arguments with
-  | nil =>
-      intro source target run
-      exact VExpr.liftN_inj.1 run
-  | cons argument arguments ih =>
-      intro source target run
-      obtain ⟨domain', body', sourceEq, argumentType, tail⟩ := run
-      cases source with
-      | bvar index => cases sourceEq
-      | sort level => cases sourceEq
-      | const name levels => cases sourceEq
-      | app fn argument => cases sourceEq
-      | lam domain body => cases sourceEq
-      | forallE domain body =>
-        injection sourceEq with domainEq bodyEq
-        subst domain'
-        subst body'
-        refine ⟨domain, body, rfl,
-          (HasType.weakN_iff henv enlargedWF extension).1 argumentType, ?_⟩
-        rw [← VExpr.liftN_inst_hi] at tail
-        exact ih tail
-
-/-- Invert a general verified context lift componentwise across an
-application-spine judgment. -/
-theorem VEnv.SpineWF.weak'_inv
-    {env : VEnv} {U : Nat} {lift : Lift} {context enlarged : List VExpr}
-    (henv : VEnv.WF env) (enlargedWF : OnCtx enlarged (env.IsType U))
-    (extension : Ctx.Lift' lift context enlarged) :
-    ∀ {arguments : List VExpr} {source target : VExpr},
-      env.SpineWF U enlarged (source.lift' lift)
-        (arguments.map fun argument => argument.lift' lift)
-        (target.lift' lift) →
-      env.SpineWF U context source arguments target := by
-  intro arguments
-  induction arguments with
-  | nil =>
-      intro source target run
-      exact VExpr.lift'_inj.1 run
-  | cons argument arguments ih =>
-      intro source target run
-      obtain ⟨domain', body', sourceEq, argumentType, tail⟩ := run
-      cases source with
-      | bvar index => cases sourceEq
-      | sort level => cases sourceEq
-      | const name levels => cases sourceEq
-      | app fn argument => cases sourceEq
-      | lam domain body => cases sourceEq
-      | forallE domain body =>
-        injection sourceEq with domainEq bodyEq
-        subst domain'
-        subst body'
-        refine ⟨domain, body, rfl,
-          (HasType.weak'_iff henv enlargedWF extension).1 argumentType, ?_⟩
-        rw [← VExpr.lift'_inst_hi] at tail
-        exact ih tail
 
 theorem ConstructorPreFamilyIndexSpineSemanticRun.expected_eq_of_family_lift
     {env : VEnv} {Us : List Name} {context : AddInductive.Context}
@@ -6496,57 +6459,6 @@ private theorem forallN_hasConst_of_terminal
       simp only [VExpr.forallN, VExpr.hasConst, Bool.or_eq_true]
       exact .inr ih
 
-/-- Context lifting changes only bound-variable indices and therefore
-preserves the set of constants occurring in a Theory expression. -/
-private theorem VExpr.hasConst_lift' (expression : VExpr) (lift : Lift)
-    (name : Name) :
-    (expression.lift' lift).hasConst name = expression.hasConst name := by
-  induction expression generalizing lift <;>
-    simp [VExpr.hasConst, *]
-
-/-- A typed Theory expression cannot mention a constant absent from its
-environment. -/
-theorem VEnv.HasType.hasConst_false_of_absent
-    {env : VEnv} {U : Nat} {context : List VExpr}
-    {familyName : Name} {expression type : VExpr}
-    (henv : env.Ordered) (contextWF : OnCtx context (env.IsType U))
-    (absent : env.constants familyName = none)
-    (typed : env.HasType U context expression type) :
-    expression.hasConst familyName = false := by
-  induction expression generalizing context type with
-  | bvar | sort => rfl
-  | const name levels =>
-      by_cases equality : name = familyName
-      · subst name
-        obtain ⟨constant, present, levelWF, arity⟩ :=
-          typed.const_inv henv contextWF
-        rw [absent] at present
-        contradiction
-      · simpa [VExpr.hasConst, equality]
-  | app function argument functionIH argumentIH =>
-      obtain ⟨domain, body, functionType, argumentType⟩ :=
-        typed.app_inv henv contextWF
-      simp only [VExpr.hasConst, functionIH contextWF functionType,
-        argumentIH contextWF argumentType, Bool.false_or]
-  | lam domain body domainIH bodyIH =>
-      obtain ⟨domainType, bodyWF⟩ := typed.lam_inv henv contextWF
-      obtain ⟨domainLevel, domainHasType⟩ := domainType
-      obtain ⟨bodyType, bodyHasType⟩ := bodyWF
-      have nextContextWF : OnCtx (domain :: context) (env.IsType U) := by
-        change OnCtx context (env.IsType U) ∧ env.IsType U context domain
-        exact ⟨contextWF, ⟨domainLevel, domainHasType⟩⟩
-      simp only [VExpr.hasConst, domainIH contextWF domainHasType,
-        bodyIH nextContextWF bodyHasType, Bool.false_or]
-  | forallE domain body domainIH bodyIH =>
-      obtain ⟨domainType, bodyType⟩ := typed.forallE_inv henv
-      obtain ⟨domainLevel, domainHasType⟩ := domainType
-      obtain ⟨bodyLevel, bodyHasType⟩ := bodyType
-      have nextContextWF : OnCtx (domain :: context) (env.IsType U) := by
-        change OnCtx context (env.IsType U) ∧ env.IsType U context domain
-        exact ⟨contextWF, ⟨domainLevel, domainHasType⟩⟩
-      simp only [VExpr.hasConst, domainIH contextWF domainHasType,
-        bodyIH nextContextWF bodyHasType, Bool.false_or]
-
 theorem recArg?_eq_none_of_hasConst_false
     (free : field.hasConst familyName = false) :
     VInductDecl.recArg? U familyName np ni fieldIndex field = none := by
@@ -7236,9 +7148,7 @@ theorem constructorFields_exactAnalyzer
                     have nextWF := nextD3ContextRun.candidate.context.Δwf
                     rw [nextD3ContextRun.venv_eq,
                       nextD3ContextRun.lparams_eq] at nextWF
-                    simpa only [nextD3ContextRun,
-                      AddInductive.ConstructorContextRun.pushLocalDecl,
-                      CandidateContextRun.pushLocalDecl_vlctx] using nextWF
+                    exact nextWF
                   have postViewTr : TrExprS typeEnv Us
                       d2ContextRun.candidate.context.vlctx domain
                       viewDomainRun₂.source' := by
@@ -7349,10 +7259,7 @@ theorem constructorFields_exactAnalyzer
                           (consumeTypeAnnotations domain).fvarsList),
                         .vlam (commonDomain.lift' viewLift)) :: d3ViewContext)
                       (.consN fullLift 1) (.consN viewLift 1) := by
-                    simpa only [vlctxCons, nextD3ContextRun,
-                      AddInductive.ConstructorContextRun.pushLocalDecl,
-                      CandidateContextRun.pushLocalDecl_vlctx] using
-                      nextD3State
+                    exact nextD3State
                   have nextAnalyzerState' : AnalyzerPostContextState
                       typeEnv Us
                       ((some (context.freshFVarId,
@@ -8577,6 +8484,102 @@ theorem StagedNormalizationCandidatePreFamilyInput.normalization_eq
     rw [familyEq]
   exact Normalization.eq_of_view_eq viewDeclEq
 
+/-- Choice-free constructor-root interpretation: the semantic root's view is
+computed by the deterministic translator under the constructor's strict-view
+uniqueness certificate. -/
+def CandidateConstructorSemanticInput.semanticOfUnique
+    {env : VEnv} {Us : List Name} {source : Constructor}
+    {candidate : AddInductive.CandidateConstructor source} {raw : VConstVal}
+    (input : CandidateConstructorSemanticInput env Us candidate raw)
+    (unique : TypeChecker.CandidateExprTraceViewIsUnique
+      candidate.type.trace) :
+    CandidateConstructorSemanticRun env Us candidate raw where
+  name_eq := input.name_eq
+  uvars_eq := input.uvars_eq
+  type := input.type.semanticOfUnique unique
+
+/-- Choice-free source-ordered interpretation of a complete constructor list
+under its source-ordered strict-view certificate. -/
+def CandidateConstructorSemanticListInput.semanticOfUnique
+    {env : VEnv} {Us : List Name} :
+    {sources : List Constructor} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources} →
+    {raws : List VConstVal} →
+    CandidateConstructorSemanticListInput env Us candidates raws →
+    candidates.ViewTranslationUnique →
+    CandidateConstructorSemanticListRun env Us candidates raws
+  | _, _, _, .nil, _ => .nil
+  | _, _, _, .cons head tail, unique =>
+    .cons (head.semanticOfUnique unique.1) (tail.semanticOfUnique unique.2)
+
+/-- Choice-free family interpretation: the family type and every
+post-insertion constructor view are computed by the deterministic
+translator. -/
+def CandidateFamilySemanticInput.semanticOfUnique
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.CandidateFamily source} {raw : VInductiveType}
+    (input : CandidateFamilySemanticInput env Us candidate raw)
+    (uniqueType : TypeChecker.CandidateExprTraceViewIsUnique
+      candidate.familyType.type.trace)
+    (uniqueCtors : candidate.constructors.ViewTranslationUnique) :
+    CandidateFamilySemanticRun env Us candidate raw where
+  name_eq := input.name_eq
+  uvars_eq := input.uvars_eq
+  type := input.type.semanticOfUnique uniqueType
+  typeEnv := input.typeEnv
+  addType := input.addType
+  constructors := input.constructors.semanticOfUnique uniqueCtors
+
+/-- Choice-free singleton semantic hierarchy: every normalized Theory view
+in the family and constructor list is computed by the deterministic
+translator, with `Nonempty` interpretation transferred onto the computed
+values. -/
+def NormalizationCandidateSemanticInput.semanticOfUnique
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : NormalizationCandidateSemanticInput env Us candidate rawDecl)
+    (uniqueType : TypeChecker.CandidateExprTraceViewIsUnique
+      candidate.families.singleton.familyType.type.trace)
+    (uniqueCtors :
+      candidate.families.singleton.constructors.ViewTranslationUnique) :
+    NormalizationCandidateSemanticRun env Us candidate rawDecl where
+  raw := input.raw
+  raw_types_eq := input.raw_types_eq
+  uvars_eq := input.uvars_eq
+  family := input.family.semanticOfUnique uniqueType uniqueCtors
+
+/-- The executable D3 gate's uniqueness Bool supplies the family strict-view
+certificate consumed by the choice-free semantic assembly. -/
+theorem StagedNormalizationCandidatePreFamilyInput.familyViewUnique
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : StagedNormalizationCandidatePreFamilyInput familyContext
+      constructorContext env Us candidate rawDecl) :
+    TypeChecker.CandidateExprTraceViewIsUnique
+      candidate.families.singleton.familyType.type.trace := by
+  have h := input.safety.translationUnique
+  simp only [Bool.and_eq_true] at h
+  exact AddInductive.CandidateExprTrace.viewTranslationUnique_sound _
+    ((AddInductive.CandidateExprTrace.viewTranslationUnique_eq _).trans h.1)
+
+/-- The executable D3 gate's uniqueness Bool likewise supplies the
+constructor-list strict-view certificate. -/
+theorem StagedNormalizationCandidatePreFamilyInput.constructorViewsUnique
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name} {source : InductiveType}
+    {candidate : AddInductive.NormalizationCandidate [source]}
+    {rawDecl : VInductDecl}
+    (input : StagedNormalizationCandidatePreFamilyInput familyContext
+      constructorContext env Us candidate rawDecl) :
+    candidate.families.singleton.constructors.ViewTranslationUnique := by
+  have h := input.safety.translationUnique
+  simp only [Bool.and_eq_true] at h
+  exact AddInductive.CandidateList.viewTranslationUnique_sound _ h.2
+
 /-- Exact, source-indexed refinement of the public producer package.
 
 The public `ProducedGenerationCandidatePackage` deliberately erases its
@@ -8612,6 +8615,41 @@ def ExactProducedGenerationCandidatePackage.package
     ProducedGenerationCandidatePackage env Us :=
   exact.semantic.producedPackage context source.nparams numNested isUnsafe
     producedCandidate.produced
+
+/-- Close one strengthened singleton producer choice-free.  The semantic
+hierarchy is computed by the deterministic translator under the executable
+D3 strict-view gate carried by the staged owner, so the retained package is
+data rather than a `Classical.choice` selection from `Nonempty`. -/
+def ProducedGenerationShapeCandidate.exactProducedPackage
+    {familyContext constructorContext : AddInductive.Context}
+    {env : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {source : VInductDecl}
+    {raw : VInductiveType} {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (producedCandidate : ProducedGenerationShapeCandidate source raw
+      kernelSource numNested isUnsafe context)
+    (input : StagedNormalizationCandidatePreFamilyInput familyContext
+      constructorContext env Us producedCandidate.candidate source)
+    (rawOwnerEq : raw =
+      input.postFamilyInput.universeInput.staged.raw)
+    (generation : GenerationChecked source)
+    (analysis : ∀ normalization : NormalizationCandidateSemanticRun env Us
+        producedCandidate.candidate source,
+      normalization.root.normalization.generation? = some generation) :
+    ExactProducedGenerationCandidatePackage env Us
+      producedCandidate generation :=
+  let normalization :=
+    input.postFamilyInput.universeInput.staged.semanticInput.semanticOfUnique
+      input.familyViewUnique input.constructorViewsUnique
+  { normalization := normalization
+    raw_eq := rawOwnerEq
+    semantic := GenerationCandidateSemanticRun.ofGenerationShape input
+      normalization generation (analysis normalization)
+      (by
+        have hraw : normalization.raw =
+            input.postFamilyInput.universeInput.staged.raw := rfl
+        simpa only [NormalizationCandidateSemanticRun.generationShape,
+          rawOwnerEq, hraw] using producedCandidate.shape) }
 
 /-- Close one strengthened singleton producer from the staged D1--D4 owner
 without choosing a semantic hierarchy at the API boundary, while retaining
@@ -8707,9 +8745,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8740,9 +8781,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8773,9 +8817,12 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8806,9 +8853,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8839,9 +8889,12 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8872,9 +8925,12 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8905,9 +8961,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8938,9 +8997,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8952,7 +9014,6 @@ new universe bridge itself remains separately guarded above; staging does not
 hide the transitional dependencies already present in the semantic owner. -/
 /--
 info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.semanticValidation' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -8961,7 +9022,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.semanticV
 
 /--
 info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.universeSemantics' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -8992,9 +9052,12 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

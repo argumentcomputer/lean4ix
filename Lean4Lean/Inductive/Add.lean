@@ -474,7 +474,7 @@ where
         if levelStructGe stats.resultLevel s.sortLevel! then
           pure ()
         else
-          unless stats.resultLevel.isZero || stats.resultLevel.geq s.sortLevel! do
+          unless stats.resultLevel.isAlwaysZero || stats.resultLevel.geq s.sortLevel! do
             throw <| .other s!"universe level of type_of(arg #{i + 1}) of '{n}' \
               is too big for the corresponding inductive datatype"
         if !isUnsafe then
@@ -504,12 +504,20 @@ def checkConstructorFold (env : Environment) (stats : InductiveStats)
     checkConstructorType stats isUnsafe idx n t
     checkConstructorFold env stats isUnsafe idx seen ctors
 
+/-- The named family recursion of `checkConstructors`.  Naming the loop keeps
+the executable shell and its validation-trace mirror aligned without depending
+on proof terms synthesized by `for` notation. -/
+def checkConstructorsLoop (env : Environment) (stats : InductiveStats)
+    (isUnsafe : Bool) : Nat → List InductiveType → M Unit
+  | _, [] => pure ()
+  | idx, indType :: rest => do
+    _ ← checkConstructorFold env stats isUnsafe idx {} indType.ctors
+    checkConstructorsLoop env stats isUnsafe (idx + 1) rest
+
 def checkConstructors (indTypes : Array InductiveType)
     (stats : InductiveStats) (isUnsafe : Bool) : M Unit := do
   let env ← getEnv
-  for h : idx in [:indTypes.size] do
-    let indType := indTypes[idx]
-    _ ← checkConstructorFold env stats isUnsafe idx {} indType.ctors
+  checkConstructorsLoop env stats isUnsafe 0 indTypes.toList
 
 /-- One observed WHNF node in the executable normalization-candidate pass.
 The complete `AddInductive.Context` is retained because Verify must replay the
@@ -1228,9 +1236,11 @@ theorem checkInductiveTypes_singleton_of_candidate
   rw [hterminal]
   simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
   rw [hensure]
-  simp only [Except.bind, Expr.sortLevel!]
-  simp only [InductiveStats.initial, Nat.zero_add]
-  rw [if_pos (by rfl : #[].isEmpty = true)]
+  simp only [Except.bind]
+  rw [if_pos (show ((InductiveStats.initial
+      (List.map Level.param context.lparams)).indConsts).isEmpty = true from
+    rfl)]
+  simp only [Expr.sortLevel!, InductiveStats.initial, Nat.zero_add]
   simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
     Except.bind]
   rw [checkInductiveTypes.loopInd.eq_1]
@@ -1424,8 +1434,8 @@ where
         match observeCandidateWhnf context e with
         | .error err => throw err
         | .ok ⟨view, valid⟩ =>
-          match view with
-          | .forallE name domain body binderInfo =>
+          match view, valid with
+          | .forallE name domain body binderInfo, valid =>
             match hfresh : context.lctx.find? context.freshFVarId with
             | some _ =>
               throw (Exception.other
@@ -1443,7 +1453,7 @@ where
               return .forallE context e inferred name domain body
                 binderInfo hfresh annotations annotationsEq checked valid
                 domainCandidate bodyCandidate
-          | result =>
+          | result, valid =>
             return .terminal context e inferred result checked valid
 
 /-- One terminal recursive step of `buildCandidateExpr`, with its traversal
@@ -2449,7 +2459,7 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
         withLocalDecl name bi (consumeTypeAnnotations dom) fun arg => do
           let mut toCheck := toCheck
           if i ≥ stats.params.size then
-            if !(← ensureType dom).sortLevel!.isZero then
+            if !(← ensureType dom).sortLevel!.isAlwaysZero then
               toCheck := toCheck.push arg
           loop (body.instantiate1 arg) (i + 1) toCheck fuel
       else
@@ -2488,7 +2498,7 @@ def isKTargetCtor (nparams : Nat) : Nat → Expr → Bool
 
 def isKTarget (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
   let #[indType] := indTypes | return false
-  unless stats.resultLevel.isZero do return false
+  unless stats.resultLevel.isAlwaysZero do return false
   let [ctor] := indType.ctors | return false
   return isKTargetCtor stats.params.size 0 ctor.type
 
@@ -2926,9 +2936,21 @@ def mkAuxRecNameMap (env' : Environment) (types : List InductiveType) :
     oldRecNames := oldRecNames.push oldRecName
   return (oldRecNames.toList, recMap)
 
+def checkNoNestedAux (n : Name) (e : Expr) : Except Exception Unit := do
+  if (e.find? fun
+      | .const c _ => (`_nested).isPrefixOf c
+      | .proj s _ _ => (`_nested).isPrefixOf s
+      | _ => false).isSome then
+    throw <| .other s!"invalid declaration '{n}', it uses the reserved prefix '_nested'"
+
 def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (fuel : FuelConfig := {}) :
     Except Exception Environment := do
+  for indType in types do
+    env.checkNoMVarNoFVar indType.name indType.type
+    for ctor in indType.ctors do
+      env.checkNoMVarNoFVar ctor.name ctor.type
+      checkNoNestedAux ctor.name ctor.type
   let res ← ElimNestedInductive.run fuel.inductiveFuel nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size

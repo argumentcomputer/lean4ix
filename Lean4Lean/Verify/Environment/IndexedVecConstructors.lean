@@ -919,7 +919,7 @@ theorem nilCandidateInductiveReduceRec
 
 theorem nilCandidateReduceRecursor
     (methods : TypeChecker.Methods) (state : TypeChecker.State) :
-    TypeChecker.Inner.reduceRecursor nilCandidateBody false false
+    TypeChecker.Inner.reduceRecursor nilCandidateBody
       methods (tcContext nilCandidateAlphaLctx) state =
         .ok (none, state) := by
   unfold TypeChecker.Inner.reduceRecursor
@@ -933,14 +933,14 @@ theorem nilCandidateReduceRecursor
 
 @[simp] theorem nilCandidateWhnfCoreFamily (n state) :
     TypeChecker.Inner.whnfCore
-      (.const ``IndexedVec [.param `u]) false false
+      (.const ``IndexedVec [.param `u]) false
       (TypeChecker.Methods.withFuel (n + 1))
       (tcContext nilCandidateAlphaLctx) state =
         .ok (.const ``IndexedVec [.param `u], state) := by
   rfl
 
 theorem nilCandidateWhnfCoreInitial (n : Nat) :
-    TypeChecker.Inner.whnfCore' nilCandidateBody false false
+    TypeChecker.Inner.whnfCore' nilCandidateBody false
       (TypeChecker.Methods.withFuel (n + 1))
       (tcContext nilCandidateAlphaLctx) ({} : TypeChecker.State) =
         .ok (nilCandidateBody, ({} : TypeChecker.State)) := by
@@ -948,7 +948,7 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
   change TypeChecker.Inner.whnfCore'
     (.app (.app (.const ``IndexedVec [.param `u])
       (.fvar nilCandidateAlphaId)) (.const ``Nat.zero []))
-    false false (TypeChecker.Methods.withFuel (n + 1))
+    false (TypeChecker.Methods.withFuel (n + 1))
     (tcContext nilCandidateAlphaLctx) ({} : TypeChecker.State) = _
   unfold TypeChecker.Inner.whnfCore'
   simp only [nilRecMPure, nilRecMBind, nilRecMGet,
@@ -1724,7 +1724,7 @@ theorem ctorIndexedVecReduceRecursor
     (lctx : LocalContext) (alpha index : Expr)
     (methods : TypeChecker.Methods) (state : TypeChecker.State) :
     TypeChecker.Inner.reduceRecursor (ctorIndexedVecApp alpha index)
-      false false methods (tcContext lctx) state =
+      methods (tcContext lctx) state =
         .ok (none, state) := by
   unfold TypeChecker.Inner.reduceRecursor
   have hquot : ctorEnv.quotInit = false := by rfl
@@ -1738,7 +1738,7 @@ theorem ctorIndexedVecReduceRecursor
 @[simp] theorem ctorIndexedVecWhnfCoreFamily
     (lctx : LocalContext) (n : Nat) (state : TypeChecker.State) :
     TypeChecker.Inner.whnfCore
-      (.const ``IndexedVec [.param `u]) false false
+      (.const ``IndexedVec [.param `u]) false
       (TypeChecker.Methods.withFuel (n + 1)) (tcContext lctx) state =
         .ok (.const ``IndexedVec [.param `u], state) := by
   rfl
@@ -1746,7 +1746,7 @@ theorem ctorIndexedVecReduceRecursor
 theorem ctorIndexedVecWhnfCoreInitial
     (lctx : LocalContext) (alpha index : Expr) (n : Nat) :
     TypeChecker.Inner.whnfCore' (ctorIndexedVecApp alpha index)
-      false false (TypeChecker.Methods.withFuel (n + 1))
+      false (TypeChecker.Methods.withFuel (n + 1))
       (tcContext lctx) ({} : TypeChecker.State) =
         .ok (ctorIndexedVecApp alpha index, ({} : TypeChecker.State)) := by
   unfold ctorIndexedVecApp TypeChecker.Inner.whnfCore'

@@ -71,6 +71,20 @@ inductive IsDefEqStrong : List VExpr → VExpr → VExpr → VExpr → Prop wher
     A::Γ ⊢ e.lift : .forallE A.lift (B.liftN 1 1) →
     A::Γ ⊢ A.lift : .sort u →
     Γ ⊢ .lam A (.app e.lift (.bvar 0)) ≡ e : .forallE A B
+  | structEta :
+    env.structEtas rule →
+    (∀ level ∈ levels, level.WF uvars) →
+    levels.length = rule.uvars →
+    params.length = rule.nparams →
+    env.SpineWF uvars Γ (rule.familyType.instL levels)
+      params (.sort resultLevel) →
+    u.WF uvars →
+    Γ ⊢ rule.structureType levels params : .sort u →
+    Γ ⊢ major : rule.structureType levels params →
+    Γ ⊢ rule.rebuild levels params major :
+      rule.structureType levels params →
+    Γ ⊢ rule.rebuild levels params major ≡ major :
+      rule.structureType levels params
   | proofIrrel :
     Γ ⊢ p : .sort .zero → Γ ⊢ h : p → Γ ⊢ h' : p →
     Γ ⊢ h ≡ h' : p
@@ -173,6 +187,22 @@ theorem IsDefEqStrong.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEqStrong U 
       rwa [← lift_liftN', ← lift_liftN'] at ih5
     · have ih6 := ih6 W.succ
       rwa [← lift_liftN'] at ih6
+  | @structEta rule levels _ params _ u major hreg hlevels
+      hlevelsLength hparamsLength hparamsSpine hu _ _ _ ihType ihMajor ihRebuild =>
+    have hparamsSpine' := hparamsSpine.weakN henv W
+    rw [(henv.structEtaWF hreg).familyType_closed.instL.liftN_eq
+      (Nat.zero_le _)] at hparamsSpine'
+    have htype := ihType W
+    rw [VStructEta.structureType_liftN] at htype
+    have hmajor := ihMajor W
+    rw [VStructEta.structureType_liftN] at hmajor
+    have hrebuild := ihRebuild W
+    rw [VStructEta.rebuild_liftN rule levels params major
+      hparamsLength n k, VStructEta.structureType_liftN] at hrebuild
+    have hout := IsDefEqStrong.structEta hreg hlevels hlevelsLength
+      (by simpa using hparamsLength) hparamsSpine' hu htype hmajor hrebuild
+    simpa only [VStructEta.rebuild_liftN rule levels params major
+      hparamsLength n k, VStructEta.structureType_liftN] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel (ih1 W) (ih2 W) (ih3 W)
   | extra h1 h2 h3 h4 h5 h6 h7 _ _ _ _ _ ih4 ih5 =>
     have ⟨⟨hA1, _⟩, hA2, hA3⟩ := henv.closed.2 h1
@@ -195,6 +225,10 @@ theorem IsDefEqStrong.defeq (H : IsDefEqStrong env U Γ e1 e2 A) : env.IsDefEq U
   | defeqDF _ _ _ ih1 ih2 => exact .defeqDF ih1 ih2
   | beta _ _ _ _ _ _ _ _ _ _ ih1 ih2 => exact .beta ih1 ih2
   | eta _ _ _ _ _ _ _ _ _ _ _ ih => exact .eta ih
+  | structEta hreg hlevels hlevelsLength hparamsLength hparamsSpine
+      _ _ _ _ _ ihMajor ihRebuild =>
+    exact .structEta hreg hlevels hlevelsLength hparamsLength
+      hparamsSpine ihMajor ihRebuild
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel ih1 ih2 ih3
   | extra h1 h2 h3 => exact .extra h1 h2 h3
 
@@ -214,6 +248,10 @@ theorem IsDefEqStrong.mono
   | defeqDF h1 _ _ ih1 ih2 => exact .defeqDF h1 ih1 ih2
   | beta h1 h2 _ _ _ _ _ _ ih1 ih2 ih3 ih4 ih5 ih6 => exact .beta h1 h2 ih1 ih2 ih3 ih4 ih5 ih6
   | eta h1 h2 _ _ _ _ _ _ ih1 ih2 ih3 ih4 ih5 ih6 => exact .eta h1 h2 ih1 ih2 ih3 ih4 ih5 ih6
+  | structEta hreg hlevels hlevelsLength hparamsLength hparamsSpine
+      hu _ _ _ ihType ihMajor ihRebuild =>
+    exact .structEta (henv.structEtas hreg) hlevels hlevelsLength
+      hparamsLength (hparamsSpine.mono henv) hu ihType ihMajor ihRebuild
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel ih1 ih2 ih3
   | extra h1 h2 h3 h4 _ _ _ _ _ ih1 ih2 ih3 ih4 ih5 =>
     exact .extra (henv.2 h1) h2 h3 h4 ih1 ih2 ih3 ih4 ih5
@@ -257,6 +295,8 @@ theorem EqUpToLevels.instL (H : env.IsDefEqStrong U' Γ e1 e2 A) :
   | defeqDF _ _ _ _ ih => exact ih
   | beta _ _ _ _ _ _ _ _ ih1 _ ih3 ih4 _ ih6 => exact ⟨.app (.lam ih1.1 ih3.1) ih4.1, ih6.2⟩
   | eta _ _ _ _ _ _ _ _ ih1 _ _ ih4 ih5 => exact ⟨.lam ih1.1 (.app ih5.1 .bvar), ih4.1⟩
+  | structEta _ _ _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    exact ⟨ihRebuild.1, ihMajor.2⟩
 
 
 variable! {env : VEnv} (W : OnCtx Γ fun _ A => A.LevelWF U) in
@@ -327,6 +367,24 @@ theorem IsDefEqStrong.instL (H : env.IsDefEqStrong U Γ e1 e2 A) :
     simpa [VExpr.instL] using .eta (.inst hls) (.inst hls) ih1 ih2
       (by simpa [VExpr.instL] using ih3) ih4
       (by simpa [VExpr.instL] using ih5) (by simpa [VExpr.instL] using ih6)
+  | @structEta rule levels _ params _ u major hreg hlevels
+      hlevelsLength hparamsLength hparamsSpine _ _ _ _ ihType ihMajor ihRebuild =>
+    have hlevels' : ∀ level ∈ levels.map (VLevel.inst ls),
+        level.WF U' := by
+      intro level hlevel
+      obtain ⟨source, _, heq⟩ := List.mem_map.1 hlevel
+      rw [← heq]
+      exact VLevel.WF.inst hls
+    rw [VStructEta.structureType_instL] at ihType ihMajor
+    rw [VStructEta.rebuild_instL,
+      VStructEta.structureType_instL] at ihRebuild
+    have hparamsSpine' := hparamsSpine.instL hls
+    rw [VExpr.instL_instL] at hparamsSpine'
+    have hout := IsDefEqStrong.structEta hreg hlevels'
+      (by simpa using hlevelsLength) (by simpa using hparamsLength)
+      hparamsSpine' (VLevel.WF.inst hls) ihType ihMajor ihRebuild
+    simpa only [VStructEta.rebuild_instL,
+      VStructEta.structureType_instL] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 =>
     exact .proofIrrel ih1 ih2 ih3
   | extra h1 h2 h3 _ _ _ _ _ _ ih1 ih2 ih3 ih4 ih5 =>
@@ -410,6 +468,22 @@ theorem IsDefEqStrong.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.
         (by simpa [inst, ← lift_instN_lo] using ih6 W.succ hΓ')
     rw [lift, liftN_instN_lo (hj := Nat.zero_le _), Nat.add_comm] at this
     simpa [inst]
+  | @structEta rule levels _ params _ u major hreg hlevels
+      hlevelsLength hparamsLength hparamsSpine hu _ _ _ ihType ihMajor ihRebuild =>
+    have hparamsSpine' := SpineWF.instN henv W h₀.defeq hparamsSpine
+    rw [(henv.structEtaWF hreg).familyType_closed.instL.instN_eq
+      (Nat.zero_le _)] at hparamsSpine'
+    have htype := ihType W hΓ
+    rw [VStructEta.structureType_instN] at htype
+    have hmajor := ihMajor W hΓ
+    rw [VStructEta.structureType_instN] at hmajor
+    have hrebuild := ihRebuild W hΓ
+    rw [VStructEta.rebuild_instN rule levels params major e₀
+      hparamsLength k, VStructEta.structureType_instN] at hrebuild
+    have hout := IsDefEqStrong.structEta hreg hlevels hlevelsLength
+      (by simpa using hparamsLength) hparamsSpine' hu htype hmajor hrebuild
+    simpa only [VStructEta.rebuild_instN rule levels params major e₀
+      hparamsLength k, VStructEta.structureType_instN] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel (ih1 W hΓ) (ih2 W hΓ) (ih3 W hΓ)
   | extra h1 h2 h3 h4 h5 h6 h7 _ _ _ _ _ ih4 ih5 =>
     have ⟨⟨hA1, _⟩, hA2, hA3⟩ := henv.closed.2 h1
@@ -460,6 +534,10 @@ theorem IsDefEqStrong.forallE_inv' (hΓ : CtxStrong env U Γ)
   | eta _ _ _ _ _ _ _ _ _ _ _ ih =>
     obtain ⟨⟨⟩⟩ | eq := eq
     exact ih hΓ (.inl eq)
+  | structEta _ _ _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    obtain eq | eq := eq
+    · exact ihRebuild hΓ (.inl eq)
+    · exact ihMajor hΓ (.inl eq)
   | @extra df ls _ Γ h1 h2 =>
     suffices ∀ e, VExpr.instL ls e = VExpr.forallE A B →
         EnvStrong env df.uvars e df.type →
@@ -498,6 +576,8 @@ theorem IsDefEqStrong.isType' (hΓ : CtxStrong env U Γ) (H : env.IsDefEqStrong 
   | defeqDF _ h2 => exact ⟨_, h2.hasType.2⟩
   | beta _ _ _ h4 _ h6 => exact ⟨_, h6.hasType.1.instN henv hΓ .zero h4 hΓ⟩
   | eta _ _ _ _ _ _ _ _ _ _ _ ih => exact ih hΓ
+  | @structEta _ _ _ _ _ u _ _ _ _ _ _ _ htype _ _ _ _ _ =>
+    exact ⟨u, htype⟩
   | proofIrrel h1 => exact ⟨_, h1⟩
   | extra h1 h2 =>
     have ⟨_, h⟩ := (envIH.2 h1).2.2.1
@@ -601,6 +681,14 @@ theorem EqUpToLevels.defeq (H : env.IsDefEqStrong U Γ e1 e2 A)
       (.symm <| .lamDF h1 h2 c1.symm h4 (.defeqDF_l henv W c1.symm h4) c3.symm
         (.defeqDF_l henv W c1.symm c3.symm)) ?_
     exact .trans (.eta h1 h2 h3 h4 h5 h6 h7 h8) (ih4 W (EqUpToLevels.refl W.levelWF h6).1 H2)
+  | structEta hreg hlevels hlevelsLength hparamsLength hparamsSpine hu htype hmajor
+      hrebuild _ ihMajor ihRebuild =>
+    have hrebuildRefl := (EqUpToLevels.refl W.levelWF hrebuild).2
+    have hmajorRefl := (EqUpToLevels.refl W.levelWF hmajor).1
+    exact (ihRebuild W H1 hrebuildRefl).trans <|
+      (IsDefEqStrong.structEta hreg hlevels hlevelsLength hparamsLength
+        hparamsSpine hu htype hmajor hrebuild).trans
+      (ihMajor W hmajorRefl H2)
   | proofIrrel h1 _ _ _ ih1 ih2 => exact .proofIrrel h1 (ih1 W H1 H1) (ih2 W H2 H2)
   | extra h1 h2 h3 h4 h5 h6 h7 h8 h9 _ ih1 ih2 =>
     have c1 := ih1 trivial H1 (EqUpToLevels.refl (by trivial) h6).2
@@ -613,7 +701,8 @@ theorem IsDefEq.strong' (hΓ : CtxStrong env U Γ)
     (H : env.IsDefEq U Γ e1 e2 A) : env.IsDefEqStrong U Γ e1 e2 A := by
   have hctx {Γ} (H : OnCtx Γ fun Γ A => ∃ u, env.IsDefEqStrong U Γ A A (.sort u)) :
      OnCtx Γ (env.IsType U) := H.mono fun ⟨_, h⟩ => ⟨_, h.defeq⟩
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True) with
   | bvar h =>
     let ⟨u, hA⟩ := hΓ.lookup henv h
     exact .bvar h (hA.defeq.sort_r henv (hctx hΓ)) hA
@@ -660,11 +749,19 @@ theorem IsDefEq.strong' (hΓ : CtxStrong env U Γ)
     have hΓ' : CtxStrong env U (_::_) := ⟨hΓ, _, hA⟩
     exact .eta (hA.defeq.sort_r henv hΓ.defeq) (hB.defeq.sort_r henv hΓ'.defeq)
       hA hB (hB.weakN henv (.succ .one)) he (he.weakN henv .one) (hA.weakN henv .one)
+  | structEta hreg hlevels hlevelsLength hparamsLength hparamsSpine
+      _ _ _ ihMajor ihRebuild =>
+    have hmajor := ihMajor hΓ
+    have hrebuild := ihRebuild hΓ
+    let ⟨u, htype⟩ := hmajor.isType' henv envIH hΓ
+    exact .structEta hreg hlevels hlevelsLength hparamsLength
+      hparamsSpine (htype.defeq.sort_r henv hΓ.defeq) htype hmajor hrebuild
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel (ih1 hΓ) (ih2 hΓ) (ih3 hΓ)
   | extra h1 h2 h3 =>
     let ⟨⟨hl, ⟨_, ht⟩, _⟩, hr, _, _⟩ := envIH.2 h1
     exact .extra h1 h2 h3 (.inst h2) (ht.instL h2)
       (hl.instL h2) (hr.instL h2) ((hl.instL h2).weak0 henv) ((hr.instL h2).weak0 henv)
+  | nil | cons => trivial
 
 theorem CtxStrong.strong' (henv : Ordered env) (envIH : env.OnTypes (EnvStrong env))
     (hΓ : OnCtx Γ (env.IsType U)) : CtxStrong env U Γ := by
@@ -743,6 +840,8 @@ theorem IsDefEqStrong.hasType' {env : VEnv}
     rw [instN_bvar0] at this; specialize this ih2.1
     refine ⟨.base <| .lam h1 h2 ih1.1 ih2.1 (.base this) ?_, ih4.1⟩
     exact .base <| .forallE h1 h2 ih1.1 ih2.1
+  | structEta _ _ _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    exact ⟨ihRebuild.1, ihMajor.1⟩
   | extra h1 h2 h3 h4 h5 h6 h7 _ _ _ _ _ ih4 ih5 => exact ⟨ih4.1, ih5.1⟩
 
 theorem HasTypeStrong.refl {env : VEnv}

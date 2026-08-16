@@ -101,6 +101,168 @@ theorem WF.weak' (wf : WF env Us Δ m) : WF env Us Δ' m where
 
 end EquivManager
 
+/-- Exact alignment between one host structure record and the registered
+Theory artifact used to interpret primitive projections.  The positional
+metadata is retained explicitly because ordinary constant translation checks
+types but does not identify the kernel's parameter/constructor roles. -/
+structure ProjectionArtifact (env : Environment) (name : Name)
+    (info : InductiveVal) (venv : VEnv) where
+  view : VStructureView
+  name_eq : view.name = name
+  viewWF : view.WF venv
+  constructorInfo : ConstructorVal
+  constructor_find : env.find? view.constructorName =
+    some (.ctorInfo constructorInfo)
+  constructor_numParams_eq : constructorInfo.numParams = view.nparams
+  constructor_numFields_eq : constructorInfo.numFields = view.fields.length
+  levelParams_length : info.levelParams.length = view.uvars
+  numParams_eq : info.numParams = view.nparams
+  numIndices_eq : info.numIndices = 0
+  ctors_eq : info.ctors = [view.constructorName]
+  rawResult_sort : ∃ resultLevel,
+    view.generation.block.rawResult = .sort resultLevel
+  programsWF : view.ProgramsWF venv
+
+/-- Host/Theory coherence needed by primitive projections.
+
+Inference obtains one complete registered artifact from ready family
+metadata. Reduction additionally relies on the positional host fact that a
+constructor's cached `numParams` agrees with the registered Theory view;
+ordinary constant translation checks the constructor type but does not
+identify which leading binders the host metadata classifies as parameters. -/
+structure ProjectionReady (env : Environment) (venv : VEnv) : Prop where
+  infer : ∀ name info, env.find? name = some (.inductInfo info) →
+    env.isProjectionReadyStructure name = true →
+    Nonempty (ProjectionArtifact env name info venv)
+  constructorNumParams : ∀ (view : VStructureView) (info : ConstructorVal),
+    view.WF venv →
+    env.find? view.constructorName = some (.ctorInfo info) →
+    info.numParams = view.nparams
+
+/-- Exact host/Theory alignment for one constructor/family pair accepted by
+the runtime structure-eta heuristics.  The underlying projection artifact
+supplies the registered Theory view and its typed projector programs; the two
+equalities identify that artifact with the precise host constructor lookup
+which triggered the heuristic. -/
+structure StructureEtaArtifact (env : Environment) (familyName : Name)
+    (familyInfo : InductiveVal) (constructorName : Name)
+    (constructorInfo : ConstructorVal) (venv : VEnv) where
+  projection : ProjectionArtifact env familyName familyInfo venv
+  constructor_name_eq : projection.view.constructorName = constructorName
+  constructor_info_eq : projection.constructorInfo = constructorInfo
+  /-- The ordered registry proof fixes the exact descriptor generated from
+  the checked view.  It contains no equality oracle: the associated
+  subject-reduction package is recovered by `Ordered.structEtaWF`. -/
+  etaOrdered : venv.Ordered
+  etaRegistered : venv.structEtas
+    (projection.viewWF.toStructEta etaOrdered)
+
+/-- Host-metadata coherence required whenever the executable checker accepts
+a family/constructor pair as a nonrecursive structure.  This deliberately
+contains no Theory equality: `VEnv.HasStructureEta` is the separate semantic
+capability consumed by the verification theorem. -/
+structure StructureEtaReady (env : Environment) (venv : VEnv) : Prop where
+  resolve : ∀ familyName familyInfo constructorName constructorInfo,
+    env.find? familyName = some (.inductInfo familyInfo) →
+    env.find? constructorName = some (.ctorInfo constructorInfo) →
+    env.isNonRecStructure familyName = true →
+    Nonempty (StructureEtaArtifact env familyName familyInfo
+      constructorName constructorInfo venv)
+
+/-- Resolve the family artifact named by a constructor lookup after the
+runtime nonrecursive-structure test has succeeded. -/
+theorem StructureEtaReady.resolveConstructor
+    (self : StructureEtaReady env venv)
+    (hctor : env.find? constructorName = some (.ctorInfo constructorInfo))
+    (hnonrec : env.isNonRecStructure constructorInfo.induct = true) :
+    ∃ familyInfo,
+      env.find? constructorInfo.induct = some (.inductInfo familyInfo) ∧
+      Nonempty (StructureEtaArtifact env constructorInfo.induct familyInfo
+        constructorName constructorInfo venv) := by
+  have hshape := hnonrec
+  unfold Kernel.Environment.isNonRecStructure at hshape
+  generalize hfamily : env.find? constructorInfo.induct = found at hshape
+  cases found with
+  | none => simp at hshape
+  | some info => cases info with
+    | inductInfo familyInfo =>
+      exact ⟨familyInfo, rfl,
+        self.resolve _ _ _ _ hfamily hctor hnonrec⟩
+    | axiomInfo _ => simp at hshape
+    | defnInfo _ => simp at hshape
+    | thmInfo _ => simp at hshape
+    | opaqueInfo _ => simp at hshape
+    | quotInfo _ => simp at hshape
+    | ctorInfo _ => simp at hshape
+    | recInfo _ => simp at hshape
+
+/-- Consume the exact registered descriptor retained by a resolved host
+structure artifact.  Reconstruction typing comes from the registry's
+`VStructEta.WF` certificate; the equality is precisely the primitive Theory
+rule. -/
+theorem StructureEtaArtifact.eta
+    (self : StructureEtaArtifact env familyName familyInfo constructorName
+      constructorInfo venv)
+    {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr}
+    (hΓ : OnCtx Γ (venv.IsType U))
+    (hlevels : ∀ level ∈ levels, level.WF U)
+    (hlevelsLength : levels.length = self.projection.view.uvars)
+    (hparamsLength : params.length = self.projection.view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      venv.SpineWF U Γ
+        (self.projection.view.familyType.instL levels)
+        params (.sort resultLevel))
+    (hmajor : venv.HasType U Γ major
+      (self.projection.view.structureType levels params)) :
+    venv.IsDefEq U Γ
+      (self.projection.view.etaRebuild levels params major) major
+      (self.projection.view.structureType levels params) := by
+  let rule := self.projection.viewWF.toStructEta self.etaOrdered
+  have hruleWF : rule.WF venv :=
+    self.etaOrdered.structEtaWF self.etaRegistered
+  obtain ⟨resultLevel, hparamsSpine⟩ := hparamsSpine
+  have hrebuild := hruleWF.rebuild_hasType VEnv.LE.rfl hΓ hlevels
+    hlevelsLength hparamsLength ⟨resultLevel, hparamsSpine⟩ hmajor
+  have heta := VEnv.IsDefEq.structEta self.etaRegistered hlevels
+    hlevelsLength hparamsLength hparamsSpine hmajor hrebuild
+  simpa [rule] using heta
+
+/-- Environments which contain no constructor metadata satisfy projection
+readiness vacuously.  This is the common staging case for validation fixtures:
+families may already be present, but their constructors have not been
+installed yet. -/
+theorem ProjectionReady.of_no_ctorInfo
+    (hnoCtor : ∀ name info,
+      env.find? name ≠ some (.ctorInfo info)) :
+    ProjectionReady env venv where
+  infer name _info hfind hready := by
+    have hfalse :=
+      Kernel.Environment.isProjectionReadyStructure_false_of_no_ctorInfo
+        hfind hnoCtor
+    rw [hfalse] at hready
+    contradiction
+  constructorNumParams _view info _hview hfind :=
+    (hnoCtor _ info hfind).elim
+
+/-- Environments with no constructor metadata also satisfy structure-eta
+readiness vacuously. -/
+theorem StructureEtaReady.of_no_ctorInfo
+    (hnoCtor : ∀ name info,
+      env.find? name ≠ some (.ctorInfo info)) :
+    StructureEtaReady env venv where
+  resolve _ _ constructorName constructorInfo _ hctor _ :=
+    (hnoCtor constructorName constructorInfo hctor).elim
+
+/-- A convenient negative readiness witness for staging/indexed environments
+where the host recognizes no eta-eligible structure family. -/
+theorem StructureEtaReady.of_no_nonRecStructure
+    (hnone : ∀ name, env.isNonRecStructure name = false) :
+    StructureEtaReady env venv where
+  resolve familyName _ _ _ _ _ hnonrec := by
+    rw [hnone familyName] at hnonrec
+    contradiction
+
 namespace TypeChecker
 
 inductive MLCtx where
@@ -193,6 +355,8 @@ structure VContext extends Context where
   safePrimitives : env.find? n = some ci →
     Environment.primitives.contains n → ci.safety = .safe ∧ ci.levelParams = []
   trenv : TrEnv safety env venv
+  projectionReady : ProjectionReady env venv
+  structureEtaReady : StructureEtaReady env venv
   mlctx : MLCtx
   mlctx_wf : mlctx.WF venv lparams
   lctx_eq : mlctx.lctx = lctx
@@ -315,7 +479,7 @@ structure Methods.WF (m : Methods) where
   isDefEqCore : c.TrExprS e₁ e₁' → c.TrExprS e₂ e₂' →
     (m.isDefEqCore e₁ e₂).WF c s fun b _ => b → c.IsDefEqU e₁' e₂'
   whnfCore : c.TrExprS e e' →
-    (m.whnfCore e cheapRec cheapProj).WF c s fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e'
+    (m.whnfCore e cheapProj).WF c s fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e'
   whnf : c.TrExprS e e' →
     (m.whnf e).WF c s fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e'
   inferType : e.FVarsIn (· ∈ c.vlctx.fvars) →
@@ -847,6 +1011,13 @@ theorem MLCtx.WF.mkLambda_eq {c : MLCtx} (wf : c.WF env Us) (n hn)
 
 namespace Inner
 
+/-- A successful host-environment lookup returns exactly the constant found
+at the requested name.  Kept in the common checker layer so both inference
+and WHNF reduction can consume the same lookup certificate. -/
+theorem envGet.WF {c : VContext} :
+    (c.env.get name).WF fun ci => c.env.find? name = some ci := by
+  simp [Environment.get]; split <;> [refine .pure ‹_›; exact .throw]
+
 theorem whnf.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
     RecM.WF c s (whnf e) fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' :=
   fun _ wf => wf.whnf he
@@ -880,7 +1051,7 @@ theorem checkType.WF {c : VContext} {s : VState} (h1 : e.FVarsIn (· ∈ c.vlctx
   inferType.WF' h1 nofun
 
 theorem whnfCore.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
-    RecM.WF c s (whnfCore e cheapRec cheapProj) fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' :=
+    RecM.WF c s (whnfCore e cheapProj) fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' :=
   fun _ wf => wf.whnfCore he
 
 theorem isDelta_is_some : isDelta env e = some ci ↔
@@ -917,7 +1088,7 @@ theorem unfoldDefinitionCore.WF {c : VContext} {s : VState} (he : c.TrExprS e e'
     · exact (List.mapM_eq_some.1 a2).length_eq.symm.trans <| a3.trans b2.symm
   split <;> [rename_i h5; exact .pure this]
   refine .pureBind <| .get ?_
-  split <;> [rename_i eq; refine .pureBind ?_]
+  split <;> [rename_i eq; skip]
   · refine .stateWF fun wf => .pure ?_
     obtain ⟨_, _, _, ⟨⟩, a1, rfl⟩ := wf.unfold_wf eq
     cases h3.symm.trans a1; exact this
@@ -954,3 +1125,19 @@ theorem ensureSortCore.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
   · let .sort _ := e
     exact .pure ⟨⟨_, rfl⟩, he, hb⟩
   exact .getEnv <| .getLCtx .throw
+
+theorem getSortLevel.WF
+    (he : c.TrExprS e e') : (getSortLevel e).WF c s fun l _ =>
+      ∃ u', VLevel.ofLevel c.lparams l = some u' ∧ c.HasType e' (.sort u') := by
+  refine (inferType.WF he).bind fun ty _ le ⟨ty', _, _, h1, h2⟩ => ?_
+  refine (ensureSortCore.WF h1).bind fun ty _ le h => ?_
+  obtain ⟨⟨u, rfl⟩, ⟨ty₂, h3, h4⟩, _⟩ := h
+  let .sort hu := h3
+  exact .pure ⟨_, hu, h2.defeqU_r c.Ewf c.Δwf h4.symm⟩
+
+theorem isProp.WF
+    (he : c.TrExprS e e') : (isProp e).WF c s fun b _ =>
+      b → c.HasType e' (.sort .zero) := by
+  refine (getSortLevel.WF he).bind fun l _ le ⟨u', hu, h⟩ => .pure fun H => ?_
+  exact h.defeqU_r c.Ewf c.Δwf
+    ⟨_, .sortDF (.of_ofLevel hu) trivial (ofLevel_isAlwaysZero hu H)⟩

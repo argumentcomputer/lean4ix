@@ -15,7 +15,7 @@
     nixpkgs.follows = "lean4-nix/nixpkgs";
 
     # Lean 4 & Lake
-    lean4-nix.url = "github:lenianiva/lean4-nix";
+    lean4-nix.url = "github:argumentcomputer/lean4-nix";
 
     # Helper: flake-parts for easier outputs; follows the copy lean4-nix
     # already locks so the lock file carries a single flake-parts node
@@ -42,8 +42,12 @@
         pkgs,
         ...
       }: let
+        # Pinned Lean toolchain (a single sysroot derivation: bin/lean,
+        # bin/lake, lib, include), resolved from ./lean-toolchain by
+        # lean4-nix's vendored release table.
+        lean = lean4-nix.lib.${system}.fromToolchainFile ./lean-toolchain;
         # Lake package
-        lake2nix = pkgs.callPackage lean4-nix.lake {};
+        lake2nix = pkgs.callPackage lean4-nix.lake {inherit lean;};
         # Restrict the Lake build inputs to Lean-relevant files so edits to
         # unrelated files (CI, docs, the flake itself) don't invalidate the
         # cached Lean derivations. Covers the library/CLI/proof/test/audit
@@ -62,26 +66,17 @@
             (pkgs.lib.fileset.fileFilter (f: f.hasExt "lean") ./.)
           ];
         };
-        # Batteries v4.31.0 accidentally split deprecated recycling modules
-        # into a second Lake library with a dependency back to Batteries.  Its
-        # shared/static facets therefore form a cycle, which matters here
-        # because lake2nix exports those facets for downstream consumers.
-        # Backport the upstream fix released after the v4.31.0 tag.
-        batteries431CycleFix = pkgs.fetchurl {
-          url = "https://github.com/leanprover-community/batteries/commit/ba9a97018925ecc18fd8411d8c53de6056cf9dff.patch";
-          hash = "sha256-HjF68B7QUeioDcGT/q6SWQEqPp8o5OQqErfw5D9rdIY=";
-        };
         # Dependencies from lake-manifest.json (batteries). lean4-nix's
-        # default target guess ("batteries" -> "Batteries") is correct, so
-        # only the v4.31 shared/static cycle backport is needed.
+        # default target guess ("batteries" -> "Batteries") is correct, and
+        # batteries ≥ v4.32 ships the shared/static cycle fix that v4.31
+        # needed as a backported patch here.
         lakeDeps = lake2nix.buildDeps {
           src = leanSrc;
-          depOverride.batteries.patches = [batteries431CycleFix];
         };
         # System inputs every Lake build/derivation here needs.
         leanBuildInputs = [
           pkgs.gmp
-          pkgs.lean.lean-all
+          lean
           pkgs.rsync
         ];
         lakeBuildArgs = {
@@ -151,7 +146,7 @@
             test -x ${lean4leanCLIRaw}/bin/lean4lean
             mkdir -p $out/bin
             makeWrapper ${lean4leanCLIRaw}/bin/lean4lean $out/bin/lean4lean \
-              --set LEAN_SYSROOT "${pkgs.lean.lean-all}" \
+              --set LEAN_SYSROOT "${lean}" \
               --prefix LEAN_PATH : "${leanPath}"
           '';
 
@@ -250,12 +245,8 @@
           ${lean4leanCLI}/bin/lean4lean > out
         '';
       in {
-        # Lean overlay
         _module.args.pkgs = import nixpkgs {
           inherit system;
-          overlays = [
-            (lean4-nix.readToolchainFile ./lean-toolchain)
-          ];
         };
 
         packages = {
@@ -284,8 +275,8 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            lean.lean-all
+          packages = [
+            lean
           ];
         };
 

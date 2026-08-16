@@ -1,6 +1,7 @@
 import Lean4Lean.Theory.Typing.Lemmas
 import Lean4Lean.Theory.Typing.Env
 import Lean4Lean.Theory.Typing.Meta
+import Lean4Lean.Theory.Typing.Strong
 
 namespace Lean4Lean
 
@@ -41,12 +42,6 @@ theorem instL_forallN (ls : List VLevel) (As : List VExpr) (e : VExpr) :
   induction As with
   | nil => rfl
   | cons A As ih => simp [forallN, instL, ih]
-
-theorem instL_appN (ls : List VLevel) (as : List VExpr) (f : VExpr) :
-    (appN f as).instL ls = appN (f.instL ls) (as.map (instL ls)) := by
-  induction as generalizing f with
-  | nil => rfl
-  | cons a as ih => simp [appN, instL, ih]
 
 /-- Substituting a variable for the sole loose variable is a lift. -/
 theorem inst_bvar_of_closedN (h : ClosedN e (k+1)) :
@@ -91,14 +86,6 @@ theorem appN_append (f : VExpr) : ∀ (as bs : List VExpr),
     f.appN (as ++ bs) = (f.appN as).appN bs
   | [], _ => rfl
   | a :: as, bs => appN_append (f.app a) as bs
-
-theorem liftN_appN (n k : Nat) (f : VExpr) : ∀ (as : List VExpr),
-    (f.appN as).liftN n k = appN (f.liftN n k) (as.map (liftN n · k))
-  | [] => rfl
-  | a :: as => by
-    show (VExpr.appN (f.app a) as).liftN n k = _
-    rw [liftN_appN n k (f.app a) as]
-    rfl
 
 theorem bvarRevRange_liftN_low : ∀ (m off n : Nat),
     (bvarRevRange off m).map (liftN n · 0) = bvarRevRange (n + off) m
@@ -318,14 +305,6 @@ theorem liftTelN_liftN_midN :
     congr 1
     rw [show j+d+1 = j+1+d from by omega]
     exact liftTelN_liftN_midN tel a k d (Nat.succ_le_succ hc)
-
-theorem instN_appN (a : VExpr) (k : Nat) (f : VExpr) : ∀ (as : List VExpr),
-    (f.appN as).inst a k = appN (f.inst a k) (as.map (·.inst a k))
-  | [] => rfl
-  | e :: as => by
-    show (VExpr.appN (f.app e) as).inst a k = _
-    rw [instN_appN a k (f.app e) as]
-    rfl
 
 /-- Instantiation under a telescope: the entry at depth `q` instantiates
 at `k+q`. -/
@@ -1529,6 +1508,49 @@ theorem getElem?_stack_mid {α} (Δ mid Γ : List α) {i : Nat}
 
 namespace VEnv
 
+/-- A typed Theory expression cannot mention a constant absent from its
+environment. -/
+theorem HasType.hasConst_false_of_absent
+    {env : VEnv} {U : Nat} {Γ : List VExpr}
+    {name : Name} {e A : VExpr}
+    (henv : env.Ordered) (hΓ : OnCtx Γ (env.IsType U))
+    (absent : env.constants name = none)
+    (typed : env.HasType U Γ e A) :
+    e.hasConst name = false := by
+  induction e generalizing Γ A with
+  | bvar | sort => rfl
+  | const constant levels =>
+      by_cases equality : constant = name
+      · subst constant
+        obtain ⟨ci, present, levelWF, arity⟩ :=
+          typed.const_inv henv hΓ
+        rw [absent] at present
+        contradiction
+      · simpa [VExpr.hasConst, equality]
+  | app function argument functionIH argumentIH =>
+      obtain ⟨domain, body, functionType, argumentType⟩ :=
+        typed.app_inv henv hΓ
+      simp only [VExpr.hasConst, functionIH hΓ functionType,
+        argumentIH hΓ argumentType, Bool.false_or]
+  | lam domain body domainIH bodyIH =>
+      obtain ⟨domainType, bodyWF⟩ := typed.lam_inv henv hΓ
+      obtain ⟨domainLevel, domainHasType⟩ := domainType
+      obtain ⟨bodyType, bodyHasType⟩ := bodyWF
+      have nextContextWF : OnCtx (domain :: Γ) (env.IsType U) := by
+        change OnCtx Γ (env.IsType U) ∧ env.IsType U Γ domain
+        exact ⟨hΓ, ⟨domainLevel, domainHasType⟩⟩
+      simp only [VExpr.hasConst, domainIH hΓ domainHasType,
+        bodyIH nextContextWF bodyHasType, Bool.false_or]
+  | forallE domain body domainIH bodyIH =>
+      obtain ⟨domainType, bodyType⟩ := typed.forallE_inv henv
+      obtain ⟨domainLevel, domainHasType⟩ := domainType
+      obtain ⟨bodyLevel, bodyHasType⟩ := bodyType
+      have nextContextWF : OnCtx (domain :: Γ) (env.IsType U) := by
+        change OnCtx Γ (env.IsType U) ∧ env.IsType U Γ domain
+        exact ⟨hΓ, ⟨domainLevel, domainHasType⟩⟩
+      simp only [VExpr.hasConst, domainIH hΓ domainHasType,
+        bodyIH nextContextWF bodyHasType, Bool.false_or]
+
 /-- The spine `bvarRevRange Δ.length As.length` selects exactly the binders
 `As` (reversed into the context past `Δ`), when all of `As` are closed. -/
 theorem hasType_bvarRevRange {env : VEnv} {U : Nat} :
@@ -1702,47 +1724,39 @@ theorem SpineWF.hasType_appN {env : VEnv} {U : Nat} {Γ : List VExpr} :
     env.HasType U Γ f A → env.HasType U Γ (f.appN es) B := by
   intro es
   induction es with intro A B f h hf
-  | nil => exact h ▸ hf
+  | nil => cases h; exact hf
   | cons e es ih =>
-    obtain ⟨A₁, A₂, rfl, he, hrest⟩ := h
-    exact ih hrest (hf.app he)
+      cases h with
+      | cons he hrest =>
+        exact ih hrest (hf.app he)
+
+/-- Concatenate two adjacent, well-typed application spines. -/
+theorem SpineWF.append {env : VEnv} {U : Nat} {Γ : List VExpr} :
+    ∀ {es : List VExpr} {A B : VExpr}, env.SpineWF U Γ A es B →
+      ∀ {es' : List VExpr} {C : VExpr}, env.SpineWF U Γ B es' C →
+        env.SpineWF U Γ A (es ++ es') C
+  | [], _, _, .nil, _, _, h' => h'
+  | _ :: _, _, _, .cons he hrest, _, _, h' =>
+      .cons he (SpineWF.append hrest h')
+
+/-- Split a well-typed application spine at an explicit list prefix. -/
+theorem SpineWF.split {env : VEnv} {U : Nat} {Γ : List VExpr} :
+    ∀ {front suffix : List VExpr} {A B : VExpr},
+      env.SpineWF U Γ A (front ++ suffix) B →
+      ∃ cursor, env.SpineWF U Γ A front cursor ∧
+        env.SpineWF U Γ cursor suffix B
+  | [], suffix, A, B, h => ⟨A, .nil, by simpa using h⟩
+  | _ :: front, suffix, _, _, .cons he hrest => by
+      obtain ⟨cursor, hfront, hsuffix⟩ := SpineWF.split hrest
+      exact ⟨cursor, .cons he hfront, hsuffix⟩
 
 /-- Extend a well-typed application spine by one final argument. -/
 theorem SpineWF.snoc {env : VEnv} {U : Nat} {Γ : List VExpr} {e D C : VExpr} :
     ∀ {es : List VExpr} {A : VExpr}, env.SpineWF U Γ A es (.forallE D C) →
     env.HasType U Γ e D → env.SpineWF U Γ A (es ++ [e]) (C.inst e)
-  | [], A, h, he => by
-    subst A
-    exact ⟨D, C, rfl, he, rfl⟩
-  | a :: es, A, ⟨A₁, A₂, hA, ha, hrest⟩, he =>
-    ⟨A₁, A₂, hA, ha, SpineWF.snoc hrest he⟩
-
-theorem SpineWF.mono {env env' : VEnv} (henv : env ≤ env') {U : Nat} {Γ : List VExpr} :
-    ∀ {es : List VExpr} {A B : VExpr}, env.SpineWF U Γ A es B → env'.SpineWF U Γ A es B
-  | [], _, _, h => h
-  | _ :: _, _, _, ⟨A₁, A₂, hA, he, hrest⟩ =>
-    ⟨A₁, A₂, hA, he.mono henv, SpineWF.mono henv hrest⟩
-
-theorem SpineWF.instL {env : VEnv} {U U' : Nat} {ls : List VLevel}
-    (hls : ∀ l ∈ ls, l.WF U') {Γ : List VExpr} :
-    ∀ {es : List VExpr} {A B : VExpr}, env.SpineWF U Γ A es B →
-    env.SpineWF U' (Γ.map (VExpr.instL ls)) (A.instL ls)
-      (es.map (VExpr.instL ls)) (B.instL ls)
-  | [], _, _, h => congrArg (VExpr.instL ls) h
-  | _ :: es, _, _, ⟨A₁, A₂, rfl, he, hrest⟩ =>
-    ⟨A₁.instL ls, A₂.instL ls, rfl, he.instL hls, by
-      have := SpineWF.instL hls (es := es) hrest
-      rwa [VExpr.instL_instN] at this⟩
-
-theorem SpineWF.weakN {env : VEnv} (henv : env.Ordered) {U n k : Nat} {Γ Γ' : List VExpr}
-    (W : Ctx.LiftN n k Γ Γ') :
-    ∀ {es : List VExpr} {A B : VExpr}, env.SpineWF U Γ A es B →
-    env.SpineWF U Γ' (A.liftN n k) (es.map (VExpr.liftN n · k)) (B.liftN n k)
-  | [], _, _, h => congrArg (VExpr.liftN n · k) h
-  | _ :: es, _, _, ⟨A₁, A₂, rfl, he, hrest⟩ =>
-    ⟨A₁.liftN n k, A₂.liftN n (k+1), rfl, he.weakN henv W, by
-      have := SpineWF.weakN henv W (es := es) hrest
-      rwa [VExpr.liftN_inst_hi] at this⟩
+  | [], _, .nil, he => .cons he .nil
+  | _ :: _, _, .cons ha hrest, he =>
+    .cons ha (SpineWF.snoc hrest he)
 
 /-- Retarget a spine judgment along a pi with the same domains: the
 result is the iterated instantiation of the new codomain. -/
@@ -1756,23 +1770,22 @@ theorem SpineWF.retarget {env : VEnv} {U : Nat} {Γ : List VExpr} {es : List VEx
       cases Δ with
       | nil => rfl
       | cons _ _ => simp at hlen
-    exact rfl
+    cases h
+    exact .nil
   | cons e es ih =>
     cases Δ with
     | nil => simp at hlen
     | cons A Δ =>
-      obtain ⟨A₁, A₂, hA, he, hrest⟩ := h
-      rw [show VExpr.forallN (A :: Δ) C = .forallE A (VExpr.forallN Δ C) from rfl] at hA
-      injection hA with h1 h2
-      subst h1; subst h2
-      have hlen' : es.length = Δ.length := by simpa using hlen
-      refine ⟨A, VExpr.forallN Δ C', rfl, he, ?_⟩
-      rw [VExpr.instN_forallN] at hrest
-      have := ih hrest (by simp [VExpr.instTelN_length, hlen']) (C'.inst e Δ.length)
-      show env.SpineWF U Γ ((VExpr.forallN Δ C').inst e) es
-        (VExpr.instRev (C'.inst e es.length) es)
-      rw [VExpr.instN_forallN, Nat.zero_add, hlen']
-      exact this
+      cases h with
+      | cons he hrest =>
+        have hlen' : es.length = Δ.length := by simpa using hlen
+        refine .cons he ?_
+        rw [VExpr.instN_forallN] at hrest
+        have := ih hrest (by simp [VExpr.instTelN_length, hlen']) (C'.inst e Δ.length)
+        show env.SpineWF U Γ ((VExpr.forallN Δ C').inst e) es
+          (VExpr.instRev (C'.inst e es.length) es)
+        rw [VExpr.instN_forallN, Nat.zero_add, hlen']
+        exact this
 
 /-- A spine consuming a full telescope and ending in the same sort has
 exactly one argument per telescope binder. -/
@@ -1781,20 +1794,14 @@ theorem SpineWF.forallN_sort_length
     ∀ {As es}, env.SpineWF U Γ (VExpr.forallN As (.sort l)) es (.sort l) →
       es.length = As.length
   | [], [], _ => rfl
-  | [], _ :: _, h => by
-    obtain ⟨A₁, A₂, hA, -⟩ := h
-    simp [VExpr.forallN] at hA
-  | _ :: _, [], h => by
-    simp [VEnv.SpineWF, VExpr.forallN] at h
+  | [], _ :: _, h => by cases h
+  | _ :: _, [], h => by cases h
   | A :: As, e :: es, h => by
-    obtain ⟨A₁, A₂, hA, he, hrest⟩ := h
-    simp only [VExpr.forallN] at hA
-    injection hA with h₁ h₂
-    subst A₁
-    subst A₂
-    rw [VExpr.instN_forallN] at hrest
-    have hlen := SpineWF.forallN_sort_length hrest
-    simpa [VExpr.instTelN_length] using congrArg Nat.succ hlen
+    cases h with
+    | cons he hrest =>
+      rw [VExpr.instN_forallN] at hrest
+      have hlen := SpineWF.forallN_sort_length hrest
+      simpa [VExpr.instTelN_length] using congrArg Nat.succ hlen
 
 end VEnv
 
@@ -2494,12 +2501,7 @@ theorem TelDefEq.spine_sort {env : VEnv} {U : Nat} (ord : env.Ordered) :
   | _, [], [], [], _, _, hsp, _ => by simpa using hsp
   | _, [], [], _ :: _, _, _, _, hlen => by simp at hlen
   | Γ, A :: As, A' :: As', e :: es, l, ⟨⟨_, hA⟩, hT⟩,
-      ⟨D, C, hshape, he, hrest⟩, hlen => by
-    change VExpr.forallE A' (VExpr.forallN As' (.sort l)) =
-      VExpr.forallE D C at hshape
-    injection hshape with hD hC
-    subst D
-    subst C
+      .cons he hrest, hlen => by
     have heRaw : env.HasType U Γ e A := hA.defeq' he
     have hTinst := TelDefEq.instN ord heRaw (.zero) hT
     have hrest' : env.SpineWF U Γ
@@ -2512,7 +2514,7 @@ theorem TelDefEq.spine_sort {env : VEnv} {U : Nat} (ord : env.Ordered) :
       rw [VExpr.instTelN_length]
       exact hlen'
     have hout := TelDefEq.spine_sort ord hTinst hrest' hlenInst
-    refine ⟨A, VExpr.forallN As (.sort l), rfl, heRaw, ?_⟩
+    refine .cons heRaw ?_
     simpa [VExpr.instN_forallN] using hout
 
 /-- Extend a definitionally equal context by the same well-formed telescope
@@ -2588,10 +2590,9 @@ contexts. -/
 theorem SpineWF.defeqDFC {env : VEnv} {U : Nat} (ord : env.Ordered)
     {Γ₀ Γ₁ Γ₂ : List VExpr} (hΓ : IsDefEqCtx env U Γ₀ Γ₁ Γ₂) :
     ∀ {A es B}, SpineWF env U Γ₁ A es B → SpineWF env U Γ₂ A es B
-  | _, [], _, h => h
-  | _, _ :: _, _, ⟨A₁, A₂, hA, he, hT⟩ =>
-    ⟨A₁, A₂, hA, he.defeqDFC ord hΓ,
-      SpineWF.defeqDFC ord hΓ hT⟩
+  | _, [], _, .nil => .nil
+  | _, _ :: _, _, .cons he hT =>
+    .cons (he.defeqDFC ord hΓ) (SpineWF.defeqDFC ord hΓ hT)
 
 /--
 info: 'Lean4Lean.VEnv.TelDefEq.raw_onTel' depends on axioms: [propext]

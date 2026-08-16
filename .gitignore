@@ -1,6 +1,20 @@
 /.lake
-/result
+/result*
 /.direnv
 # Keep scratch plans local while versioning the authoritative execution ladder.
 /plans/*
 !/plans/roadmap.md
+!/plans/l4l-15-structure-eta-design.md
+!/plans/l4l-16-sort-inversion-decision.md
+!/plans/l4l-18b-extension-interface-design.md
+!/plans/l4l-16-completion-plan.md
+!/plans/l4l-16c-adequacy-log.md
+!/plans/l4l-16c-buildp-premortem.md
+!/plans/l4l-16d0-slice-map.md
+!/plans/l4l-16e-promotion-map.md
+!/plans/l4l-16-weakn-design.md
+!/plans/l4l-16-generic-instance-design.md
+!/plans/l4l-18a-prime-scope.md
+!/plans/l4l-16-stratified-observation-design.md
+!/plans/l4l-16-registered-pi-design.md
+!/plans/l4l-16-typedview-design.md

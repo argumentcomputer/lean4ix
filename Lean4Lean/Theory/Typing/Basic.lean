@@ -7,6 +7,12 @@ inductive Lookup : List VExpr → Nat → VExpr → Prop where
   | zero : Lookup (ty::Γ) 0 ty.lift
   | succ : Lookup Γ n ty → Lookup (A::Γ) (n+1) ty.lift
 
+/-- A context-wide predicate, exposing each binder in its preceding context. -/
+def OnCtx (Γ : List VExpr) (P : List VExpr → VExpr → Prop) : Prop :=
+  match Γ with
+  | [] => True
+  | A::Γ => OnCtx Γ P ∧ P Γ A
+
 namespace VEnv
 
 section
@@ -14,6 +20,8 @@ set_option hygiene false
 local notation:65 Γ " ⊢ " e " : " A:30 => IsDefEq Γ e e A
 local notation:65 Γ " ⊢ " e1 " ≡ " e2 " : " A:30 => IsDefEq Γ e1 e2 A
 variable (env : VEnv) (uvars : Nat)
+
+mutual
 
 inductive IsDefEq : List VExpr → VExpr → VExpr → VExpr → Prop where
   | bvar : Lookup Γ i A → Γ ⊢ .bvar i : A
@@ -48,12 +56,38 @@ inductive IsDefEq : List VExpr → VExpr → VExpr → VExpr → Prop where
   | eta :
     Γ ⊢ e : .forallE A B →
     Γ ⊢ .lam A (.app e.lift (.bvar 0)) ≡ e : .forallE A B
+  | structEta :
+    env.structEtas rule →
+    (∀ level ∈ levels, level.WF uvars) →
+    levels.length = rule.uvars →
+    params.length = rule.nparams →
+    SpineWF Γ (rule.familyType.instL levels) params (.sort resultLevel) →
+    Γ ⊢ major : rule.structureType levels params →
+    Γ ⊢ rule.rebuild levels params major :
+      rule.structureType levels params →
+    Γ ⊢ rule.rebuild levels params major ≡ major :
+      rule.structureType levels params
   | proofIrrel :
     Γ ⊢ p : .sort .zero → Γ ⊢ h : p → Γ ⊢ h' : p →
     Γ ⊢ h ≡ h' : p
   | extra :
     env.defeqs df → (∀ l ∈ ls, l.WF uvars) → ls.length = df.uvars →
     Γ ⊢ df.lhs.instL ls ≡ df.rhs.instL ls : df.type.instL ls
+
+/-- Typing of an application spine against an iterated pi type: peeling the
+expressions of `es` off `A` one instantiation at a time ends at `B`.
+
+This judgment is mutually inductive with `IsDefEq` so rules whose validity
+depends on an exact application spine retain induction hypotheses for every
+argument typing derivation. -/
+inductive SpineWF : List VExpr → VExpr → List VExpr → VExpr → Prop where
+  | nil : SpineWF Γ A [] A
+  | cons :
+    IsDefEq Γ e e A₁ →
+    SpineWF Γ (A₂.inst e) es B →
+    SpineWF Γ (.forallE A₁ A₂) (e :: es) B
+
+end
 
 end
 
@@ -74,3 +108,26 @@ def VConstant.WF (env : VEnv) (ci : VConstant) : Prop := env.IsType ci.uvars [] 
 
 def VDefEq.WF (env : VEnv) (df : VDefEq) : Prop :=
   env.HasType df.uvars [] df.lhs df.type ∧ env.HasType df.uvars [] df.rhs df.type
+
+/-- Subject-reduction package attached to a registered structure-eta
+descriptor.  It consumes the exact family parameter spine but contains no
+equality premise. -/
+structure VStructEta.WF (rule : VStructEta) (env : VEnv) : Prop where
+  /-- The retained family declaration is a closed constant type.  This is the
+  syntactic fact which lets an exact parameter-spine certificate survive term
+  weakening and substitution. -/
+  familyType_closed : rule.familyType.ClosedN
+  rebuild_hasType :
+    ∀ {env' : VEnv}, env ≤ env' →
+      ∀ {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+      {params : List VExpr} {major : VExpr},
+      OnCtx Γ (env'.IsType U) →
+      (∀ level ∈ levels, level.WF U) →
+      levels.length = rule.uvars →
+      params.length = rule.nparams →
+      (∃ resultLevel,
+        env'.SpineWF U Γ (rule.familyType.instL levels)
+          params (.sort resultLevel)) →
+      env'.HasType U Γ major (rule.structureType levels params) →
+      env'.HasType U Γ (rule.rebuild levels params major)
+        (rule.structureType levels params)

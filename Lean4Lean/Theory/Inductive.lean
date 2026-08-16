@@ -33,9 +33,13 @@ def VExpr.hasConst (n : Name) : VExpr → Bool
   | .const c _ => c == n
   | .app e1 e2 | .lam e1 e2 | .forallE e1 e2 => e1.hasConst n || e2.hasConst n
 
-def VExpr.appN (f : VExpr) : List VExpr → VExpr
-  | [] => f
-  | a :: as => (f.app a).appN as
+/-- Context lifting changes only bound-variable indices and therefore
+preserves the constants occurring in a Theory expression. -/
+@[simp] theorem VExpr.hasConst_lift' (expression : VExpr) (lift : Lift)
+    (name : Name) :
+    (expression.lift' lift).hasConst name = expression.hasConst name := by
+  induction expression generalizing lift <;>
+    simp [VExpr.hasConst, *]
 
 /-- `[.bvar (off+m-1), ..., .bvar off]`: the spine referring to the last `m`
 binders, skipping the innermost `off`. -/
@@ -108,16 +112,6 @@ def VEnv.TelDefEq (env : VEnv) (U : Nat) :
     (∃ u, env.IsDefEq U Γ A A' (.sort u)) ∧
       TelDefEq env U (A :: Γ) As As'
   | _, _, _ => False
-
-/-- Typing of an application spine against an iterated pi type: peeling the
-expressions of `es` off `A` one instantiation at a time ends at `B`. This is
-the pointwise typing evidence for index spines; `addInduct_WF` consumes it
-wherever a recursive field or a constructor result applies the block to
-index arguments. -/
-def VEnv.SpineWF (env : VEnv) (U : Nat) (Γ : List VExpr) : VExpr → List VExpr → VExpr → Prop
-  | A, [], B => A = B
-  | A, e :: es, B => ∃ A₁ A₂, A = .forallE A₁ A₂ ∧ env.HasType U Γ e A₁ ∧
-    SpineWF env U Γ (A₂.inst e) es B
 
 namespace VInductDecl
 
@@ -649,6 +643,15 @@ inductive ElimMode where
   | large
   | small
   deriving DecidableEq, Repr
+
+/-- Interpret the ordinary checker's Boolean large-elimination result in the
+consumer-neutral Theory representation. -/
+def ElimMode.ofBool : Bool → ElimMode
+  | false => .small
+  | true => .large
+
+@[simp] theorem ElimMode.ofBool_false : ElimMode.ofBool false = .small := rfl
+@[simp] theorem ElimMode.ofBool_true : ElimMode.ofBool true = .large := rfl
 
 /-- Universe-slot offset used by recursor metadata. Large elimination inserts
 the fresh motive universe before the declaration universes; small elimination

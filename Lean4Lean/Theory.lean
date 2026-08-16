@@ -1,5 +1,9 @@
 import Lean4Lean.Theory.Typing.EnvLemmas
+import Lean4Lean.Theory.Typing.InductiveCertificate
 import Lean4Lean.Theory.Typing.Strong
 import Lean4Lean.Theory.Typing.UniqueTyping
 import Lean4Lean.Theory.Typing.ChurchRosser
 import Lean4Lean.Theory.Typing.HeadReduction
+import Lean4Lean.Theory.LocalContext
+import Lean4Lean.Theory.Literals
+import Lean4Lean.Theory.Projection

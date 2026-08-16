@@ -1604,7 +1604,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.candidateIsDefEqSelfValid' depends on a
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecFamily_candidateTrace' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -1628,7 +1627,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecFamily_candidateTrace' depend
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVec_checkInductiveTypes' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -1653,7 +1651,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVec_checkInductiveTypes' depends
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_nindices' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,
@@ -1677,7 +1674,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_nindi
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_params' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,

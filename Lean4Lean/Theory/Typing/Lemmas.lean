@@ -9,7 +9,7 @@ inductive Ctx.LiftN (n : Nat) : Nat → List VExpr → List VExpr → Prop where
   | zero (As) (h : As.length = n := by rfl) : Ctx.LiftN n 0 Γ (As ++ Γ)
   | succ : Ctx.LiftN n k Γ Γ' → Ctx.LiftN n (k+1) (A::Γ) (A.liftN n k :: Γ')
 
-def Ctx.LiftN.one : Ctx.LiftN 1 0 Γ (A::Γ) := .zero [_]
+theorem Ctx.LiftN.one : Ctx.LiftN 1 0 Γ (A::Γ) := .zero [_]
 
 theorem Ctx.LiftN.isSuffix (H : Ctx.LiftN n k Γ Γ') :
     ∃ Γ₀ As Δ Δ',
@@ -149,11 +149,6 @@ theorem Lookup.instL : Lookup Γ i A → Lookup (Γ.map (VExpr.instL ls)) i (A.i
   | .zero => instL_liftN ▸ .zero
   | .succ h => instL_liftN ▸ .succ h.instL
 
-def OnCtx (Γ : List VExpr) (P : List VExpr → VExpr → Prop) : Prop :=
-  match Γ with
-  | [] => True
-  | A::Γ => OnCtx Γ P ∧ P Γ A
-
 theorem OnCtx.lookup (h : OnCtx Γ P) (hL : Lookup Γ n A)
     (hP : ∀ {Γ A B}, P Γ A → P (B::Γ) A.lift) : P Γ A :=
   match hL, h with
@@ -177,6 +172,12 @@ theorem Ctx.LiftN.right (h : CtxClosed Γ) (Γ') : Ctx.LiftN Γ'.length Γ.lengt
   | A :: Γ, ⟨h1, h2⟩ => by
     simpa [h2.liftN_eq (Nat.le_refl _)] using LiftN.succ (LiftN.right h1 Γ') (A := A)
 
+theorem VStructEta.WF.mono {rule : VStructEta} {env env' : VEnv}
+    (henv : env ≤ env') (self : VStructEta.WF rule env) :
+    VStructEta.WF rule env' where
+  familyType_closed := self.familyType_closed
+  rebuild_hasType hle := self.rebuild_hasType (henv.trans hle)
+
 inductive VObject where
   | const (n : Name) (ci : VConstant)
   | defeq (df : VDefEq)
@@ -185,7 +186,7 @@ namespace VEnv
 
 theorem addConst_le {env env' : VEnv} (h : env.addConst n ci = some env') : env ≤ env' := by
   unfold addConst at h; split at h <;> cases h
-  exact ⟨fun _ => by simp; split <;> simp_all, by simp [*]⟩
+  exact ⟨fun _ => by simp; split <;> simp_all, by simp [*], by simp [*]⟩
 
 theorem addConst_self {env env' : VEnv} (h : env.addConst n ci = some env') :
     env'.constants n = some ci := by
@@ -212,7 +213,8 @@ theorem LE.addConst {env₁ env₂ env₁' env₂' : VEnv} (henv : env₁ ≤ en
       simp at h ⊢
       split at h <;> split <;> simp_all
       exact henv.constants h
-    defeqs := henv.defeqs }
+    defeqs := henv.defeqs
+    structEtas := henv.structEtas }
 
 /-- Absence of a constant pulls back along environment growth. -/
 theorem LE.constants_none {env env' : VEnv} (henv : env ≤ env')
@@ -224,9 +226,15 @@ theorem LE.constants_none {env env' : VEnv} (henv : env ≤ env')
     rw [h] at this
     contradiction
 
-theorem addDefEq_le {env : VEnv} : env ≤ env.addDefEq df := ⟨id, .inr⟩
+theorem addDefEq_le {env : VEnv} : env ≤ env.addDefEq df := ⟨id, .inr, id⟩
 
 theorem addDefEq_self {env : VEnv} : (env.addDefEq df).defeqs df := .inl rfl
+
+theorem addStructEta_le {env : VEnv} : env ≤ env.addStructEta rule :=
+  ⟨id, id, .inr⟩
+
+theorem addStructEta_self {env : VEnv} :
+    (env.addStructEta rule).structEtas rule := .inl rfl
 
 def HasObjects (env : VEnv) : List VObject → Prop
   | [] => True
@@ -289,6 +297,7 @@ inductive Ordered : VEnv → Prop where
     Ordered env → ci.WF env →
     env.addConst n ci = some env' → Ordered env'
   | defeq : Ordered env → df.WF env → Ordered (env.addDefEq df)
+  | structEta : Ordered env → rule.WF env → Ordered (env.addStructEta rule)
 
 def OnTypes (env : VEnv) (P : Nat → VExpr → VExpr → Prop) : Prop :=
   (∀ {n ci}, env.constants n = some ci → ∃ u, P ci.uvars ci.type (.sort u)) ∧
@@ -322,6 +331,8 @@ theorem Ordered.induction (motive : VEnv → Nat → VExpr → VExpr → Prop)
     · let ⟨hl, hr⟩ := h2
       exact ⟨type h1 ih hl, type h1 ih hr⟩
     · exact ih.2 hdf
+  | structEta _ _ ih =>
+    exact OnTypes.mono .rfl (mono addStructEta_le) ih
 
 variable (env : VEnv) (U : Nat) (Γ₀ : List VExpr) in
 inductive IsDefEqCtx : List VExpr → List VExpr → Prop
@@ -353,7 +364,8 @@ theorem IsDefEqCtx.refl : ∀ {Γ}, OnCtx Γ (env.IsType U) → IsDefEqCtx env U
 variable! (henv : OnTypes env fun _ e A => e.ClosedN ∧ A.ClosedN) in
 theorem IsDefEq.closedN' (H : env.IsDefEq U Γ e1 e2 A) (hΓ : CtxClosed Γ) :
     e1.ClosedN Γ.length ∧ e2.ClosedN Γ.length ∧ A.ClosedN Γ.length := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True) with
   | bvar h => exact ⟨h.lt, h.lt, hΓ.lookup h⟩
   | constDF h1 =>
     let ⟨_, h, _⟩ := henv.1 h1
@@ -381,6 +393,10 @@ theorem IsDefEq.closedN' (H : env.IsDefEq U Γ e1 e2 A) (hΓ : CtxClosed Γ) :
   | eta _ ih =>
     let ⟨he, _, hA, hB⟩ := ih hΓ
     exact ⟨⟨hA, he.liftN, Nat.succ_pos _⟩, he, hA, hB⟩
+  | structEta _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    let ⟨hmajor, _, htype⟩ := ihMajor hΓ
+    let ⟨hrebuild, _, _⟩ := ihRebuild hΓ
+    exact ⟨hrebuild, hmajor, htype⟩
   | proofIrrel _ _ _ _ ih2 ih3 =>
     let ⟨hh, _, _⟩ := ih2 hΓ
     let ⟨hh', _, hp⟩ := ih3 hΓ
@@ -391,6 +407,7 @@ theorem IsDefEq.closedN' (H : env.IsDefEq U Γ e1 e2 A) (hΓ : CtxClosed Γ) :
       hl.instL.mono (Nat.zero_le _),
       hr.instL.mono (Nat.zero_le _),
       hA.instL.mono (Nat.zero_le _)⟩
+  | nil | cons => trivial
 
 theorem Ordered.closed (H : Ordered env) : env.OnTypes fun _ e A => e.ClosedN ∧ A.ClosedN :=
   H.induction _ (fun _ => id) fun _ ih h => (IsDefEq.closedN' ih h trivial).2
@@ -417,7 +434,8 @@ theorem IsDefEqCtx.closed (H : CtxClosed Γ₀) :
 
 variable! {env env' : VEnv} (henv : env ≤ env') in
 theorem IsDefEq.mono (H : env.IsDefEq U Γ e1 e2 A) : env'.IsDefEq U Γ e1 e2 A := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun Γ A es B _ => env'.SpineWF U Γ A es B) with
   | bvar h => exact .bvar h
   | constDF h1 h2 h3 h4 h5 => exact .constDF (henv.1 h1) h2 h3 h4 h5
   | sortDF h1 h2 h3 => exact .sortDF h1 h2 h3
@@ -429,11 +447,35 @@ theorem IsDefEq.mono (H : env.IsDefEq U Γ e1 e2 A) : env'.IsDefEq U Γ e1 e2 A 
   | defeqDF _ _ ih1 ih2 => exact .defeqDF ih1 ih2
   | beta _ _ ih1 ih2 => exact .beta ih1 ih2
   | eta _ ih => exact .eta ih
+  | structEta hreg hlevels hlevelsLength hparamsLength _ _ _
+      ihSpine ihMajor ihRebuild =>
+    exact .structEta (henv.structEtas hreg) hlevels hlevelsLength
+      hparamsLength ihSpine ihMajor ihRebuild
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel ih1 ih2 ih3
   | extra h1 h2 h3 => exact .extra (henv.2 h1) h2 h3
+  | nil => exact .nil
+  | cons _ _ ihType ihRest => exact .cons ihType ihRest
 
 theorem HasType.mono {env env' : VEnv} (henv : env ≤ env') :
     env.HasType U Γ e A → env'.HasType U Γ e A := IsDefEq.mono henv
+
+theorem SpineWF.mono {env env' : VEnv} (henv : env ≤ env') {U : Nat}
+    {Γ : List VExpr} : ∀ {es A B}, env.SpineWF U Γ A es B →
+      env'.SpineWF U Γ A es B
+  | [], _, _, .nil => .nil
+  | _ :: _, _, _, .cons he hrest =>
+    .cons (he.mono henv) (SpineWF.mono henv hrest)
+
+theorem SpineWF.nil_inv {env : VEnv} (h : env.SpineWF U Γ A [] B) : A = B := by
+  cases h
+  rfl
+
+theorem SpineWF.cons_inv {env : VEnv}
+    (h : env.SpineWF U Γ A (e :: es) B) :
+    ∃ A₁ A₂, A = .forallE A₁ A₂ ∧
+      env.HasType U Γ e A₁ ∧ env.SpineWF U Γ (A₂.inst e) es B := by
+  cases h with
+  | cons he hrest => exact ⟨_, _, rfl, he, hrest⟩
 
 theorem IsType.mono {env env' : VEnv} (henv : env ≤ env') : env.IsType U Γ A → env'.IsType U Γ A
   | ⟨u, h⟩ => ⟨u, h.mono henv⟩
@@ -467,6 +509,7 @@ theorem Ordered.constWF (H : Ordered env) (h : env.constants n = some ci) : ci.W
     · cases h; exact h2
     · exact ih h
   | defeq _ _ ih => exact .mono addDefEq_le (ih h)
+  | structEta _ _ ih => exact .mono addStructEta_le (ih h)
 
 theorem Ordered.defEqWF (H : Ordered env) (h : env.defeqs df) : df.WF env := by
   induction H with
@@ -479,6 +522,22 @@ theorem Ordered.defEqWF (H : Ordered env) (h : env.defeqs df) : df.WF env := by
     obtain rfl | h := h
     · assumption
     · exact ih h
+  | structEta _ _ ih => exact .mono addStructEta_le (ih h)
+
+theorem Ordered.structEtaWF (H : Ordered env) (h : env.structEtas rule) :
+    VStructEta.WF rule env := by
+  induction H with
+  | empty => cases h
+  | const _ _ hadd ih =>
+    refine VStructEta.WF.mono (addConst_le hadd) (ih ?_)
+    unfold VEnv.addConst at hadd
+    split at hadd <;> cases hadd
+    exact h
+  | defeq _ _ ih => exact VStructEta.WF.mono addDefEq_le (ih h)
+  | structEta _ hwf ih =>
+    obtain rfl | h := h
+    · exact VStructEta.WF.mono addStructEta_le hwf
+    · exact VStructEta.WF.mono addStructEta_le (ih h)
 
 variable! (henv : Ordered env) in
 theorem CtxWF.closed (h : OnCtx Γ (IsType env U)) : CtxClosed Γ :=
@@ -489,7 +548,8 @@ theorem CtxWF.closed (h : OnCtx Γ (IsType env U)) : CtxClosed Γ :=
 variable {env : VEnv} in
 theorem IsDefEq.levelWF (H : env.IsDefEq U Γ e1 e2 A) (W : OnCtx Γ fun _ A => A.LevelWF U) :
     e1.LevelWF U ∧ e2.LevelWF U ∧ A.LevelWF U := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True) with
   | bvar h =>
     refine ⟨⟨⟩, ⟨⟩, ?_⟩
     induction h with
@@ -513,10 +573,15 @@ theorem IsDefEq.levelWF (H : env.IsDefEq U Γ e1 e2 A) (W : OnCtx Γ fun _ A => 
     let ⟨he', _, hA⟩ := ih2 W; let ⟨he, _, hB⟩ := ih1 ⟨W, hA⟩
     exact ⟨⟨⟨hA, he⟩, he'⟩, he.inst he', hB.inst he'⟩
   | eta _ ih => let ⟨he, _, hA, hB⟩ := ih W; exact ⟨⟨hA, he.liftN, ⟨⟩⟩, he, hA, hB⟩
+  | structEta _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    let ⟨hmajor, _, htype⟩ := ihMajor W
+    let ⟨hrebuild, _, _⟩ := ihRebuild W
+    exact ⟨hrebuild, hmajor, htype⟩
   | proofIrrel _ _ _ _ ih2 ih3 =>
     let ⟨hh, _, hp⟩ := ih2 W; let ⟨hh', _, _⟩ := ih3 W
     exact ⟨hh, hh', hp⟩
   | extra _ h2 => exact ⟨.instL h2, .instL h2, .instL h2⟩
+  | nil | cons => trivial
 
 theorem HasType.const0 (H : env.constants c = some ci) (wf : ci.WF env) :
     HasType env ci.uvars [] (.const c (VLevel.params ci.uvars)) ci.type := by
@@ -533,7 +598,11 @@ theorem IsDefEq.extra0 (H : env.defeqs df) (wf : df.WF env) :
 variable! (henv : Ordered env) in
 theorem IsDefEq.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEq U Γ e1 e2 A) :
     env.IsDefEq U Γ' (e1.liftN n k) (e2.liftN n k) (A.liftN n k) := by
-  induction H generalizing k Γ' with
+  induction H using IsDefEq.rec
+      (motive_2 := fun Γ A es B _ => ∀ {k Γ'}, Ctx.LiftN n k Γ Γ' →
+        env.SpineWF U Γ' (A.liftN n k)
+          (es.map fun e => e.liftN n k) (B.liftN n k))
+      generalizing k Γ' with
   | bvar h => refine .bvar (h.weakN W)
   | symm _ ih => exact .symm (ih W)
   | trans _ _ ih1 ih2 => exact .trans (ih1 W) (ih2 W)
@@ -550,6 +619,21 @@ theorem IsDefEq.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEq U Γ e1 e2 A) 
   | eta _ ih =>
     have := IsDefEq.eta (ih W)
     simp [liftN]; rwa [← lift_liftN']
+  | @structEta rule levels _ params _ major hreg hlevels
+      hlevelsLength hparamsLength _ _ _
+      ihSpine ihMajor ihRebuild =>
+    have hparamsSpine := ihSpine W
+    rw [(henv.structEtaWF hreg).familyType_closed.instL.liftN_eq
+      (Nat.zero_le _)] at hparamsSpine
+    have hmajor := ihMajor W
+    rw [VStructEta.structureType_liftN] at hmajor
+    have hrebuild := ihRebuild W
+    rw [VStructEta.rebuild_liftN rule levels params major
+      hparamsLength n k, VStructEta.structureType_liftN] at hrebuild
+    have hout := IsDefEq.structEta hreg hlevels hlevelsLength
+      (by simpa using hparamsLength) hparamsSpine hmajor hrebuild
+    simpa only [VStructEta.rebuild_liftN rule levels params major
+      hparamsLength n k, VStructEta.structureType_liftN] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel (ih1 W) (ih2 W) (ih3 W)
   | extra h1 h2 h3 =>
     have ⟨⟨hA1, _⟩, hA2, hA3⟩ := henv.closed.2 h1
@@ -558,10 +642,24 @@ theorem IsDefEq.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEq U Γ e1 e2 A) 
       hA2.instL.liftN_eq (Nat.zero_le _),
       hA3.instL.liftN_eq (Nat.zero_le _)]
     exact .extra h1 h2 h3
+  | nil => exact .nil
+  | cons _ _ ihType ihRest =>
+    exact .cons (ihType (by assumption)) (by
+      simpa only [VExpr.liftN_inst_hi] using ihRest (by assumption))
 
 variable! (henv : Ordered env) in
 theorem HasType.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.HasType U Γ e A) :
     env.HasType U Γ' (e.liftN n k) (A.liftN n k) := IsDefEq.weakN henv W H
+
+theorem SpineWF.weakN {env : VEnv} (henv : env.Ordered)
+    (W : Ctx.LiftN n k Γ Γ') :
+    ∀ {es A B}, env.SpineWF U Γ A es B →
+      env.SpineWF U Γ' (A.liftN n k)
+        (es.map fun e => e.liftN n k) (B.liftN n k)
+  | [], _, _, .nil => .nil
+  | _ :: _, _, _, .cons he hrest =>
+    .cons (he.weakN henv W) (by
+      simpa only [VExpr.liftN_inst_hi] using SpineWF.weakN henv W hrest)
 
 variable! (henv : Ordered env) in
 theorem IsType.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsType U Γ A) :
@@ -627,7 +725,10 @@ theorem IsType.lookup (henv : Ordered env) (h : OnCtx Γ (IsType env U)) (hL : L
 variable! {env : VEnv} {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U') in
 theorem IsDefEq.instL (H : env.IsDefEq U Γ e1 e2 A) :
     env.IsDefEq U' (Γ.map (VExpr.instL ls)) (e1.instL ls) (e2.instL ls) (A.instL ls) := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun Γ A es B _ =>
+        env.SpineWF U' (Γ.map (VExpr.instL ls)) (A.instL ls)
+          (es.map (VExpr.instL ls)) (B.instL ls)) with
   | bvar h => refine .bvar h.instL
   | symm _ ih => exact .symm ih
   | trans _ _ ih1 ih2 => exact .trans ih1 ih2
@@ -643,13 +744,43 @@ theorem IsDefEq.instL (H : env.IsDefEq U Γ e1 e2 A) :
   | defeqDF _ _ ih1 ih2 => exact .defeqDF ih1 ih2
   | beta _ _ ih1 ih2 => simpa using .beta ih1 ih2
   | eta _ ih => simpa [VExpr.instL] using .eta ih
+  | @structEta rule levels _ params _ major hreg hlevels
+      hlevelsLength hparamsLength _ _ _
+      ihSpine ihMajor ihRebuild =>
+    have hlevels' : ∀ level ∈ levels.map (VLevel.inst ls),
+        level.WF U' := by
+      intro level hlevel
+      obtain ⟨source, hsource, heq⟩ := List.mem_map.1 hlevel
+      rw [← heq]
+      exact VLevel.WF.inst hls
+    rw [VStructEta.structureType_instL] at ihMajor
+    rw [VStructEta.rebuild_instL,
+      VStructEta.structureType_instL] at ihRebuild
+    rw [VExpr.instL_instL] at ihSpine
+    have hout := IsDefEq.structEta hreg hlevels'
+      (by simpa using hlevelsLength)
+      (by simpa using hparamsLength) ihSpine ihMajor ihRebuild
+    simpa only [VStructEta.rebuild_instL,
+      VStructEta.structureType_instL] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel ih1 ih2 ih3
   | extra h1 h2 h3 =>
     simp [VExpr.instL_instL]
     exact .extra h1 (by simp [VLevel.WF.inst hls]) (by simp [h3])
+  | nil => exact .nil
+  | cons _ _ ihType ihRest =>
+    exact .cons ihType (by simpa using ihRest)
 
 theorem HasType.instL {env : VEnv} (hls : ∀ l ∈ ls, l.WF U') (H : env.HasType U Γ e A) :
     env.HasType U' (Γ.map (VExpr.instL ls)) (e.instL ls) (A.instL ls) := IsDefEq.instL hls H
+
+theorem SpineWF.instL {env : VEnv} (hls : ∀ l ∈ ls, l.WF U') :
+    ∀ {es A B}, env.SpineWF U Γ A es B →
+      env.SpineWF U' (Γ.map (VExpr.instL ls)) (A.instL ls)
+        (es.map (VExpr.instL ls)) (B.instL ls)
+  | [], _, _, .nil => .nil
+  | _ :: _, _, _, .cons he hrest =>
+    .cons (he.instL hls) (by
+      simpa using SpineWF.instL hls hrest)
 
 theorem IsType.instL {env : VEnv} (hls : ∀ l ∈ ls, l.WF U') (H : env.IsType U Γ A) :
     env.IsType U' (Γ.map (VExpr.instL ls)) (A.instL ls) := let ⟨_, h⟩ := H; ⟨_, h.instL hls⟩
@@ -666,7 +797,11 @@ theorem _root_.Lean4Lean.OnCtx.instL {env : VEnv} (hls : ∀ l ∈ ls, l.WF U') 
 variable! (henv : Ordered env) (h₀ : env.HasType U Γ₀ e₀ A₀) in
 theorem IsDefEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.IsDefEq U Γ₁ e1 e2 A) :
     env.IsDefEq U Γ (e1.inst e₀ k) (e2.inst e₀ k) (A.inst e₀ k) := by
-  induction H generalizing Γ k with
+  induction H using IsDefEq.rec
+      (motive_2 := fun Γ₁ A es B _ => ∀ {Γ k}, Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ →
+        env.SpineWF U Γ (A.inst e₀ k)
+          (es.map fun e => e.inst e₀ k) (B.inst e₀ k))
+      generalizing Γ k with
   | @bvar _ i ty h =>
     dsimp [inst]
     induction W generalizing i ty with
@@ -694,6 +829,21 @@ theorem IsDefEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.IsDefE
     have := IsDefEq.eta (ih W)
     rw [lift, VExpr.liftN_instN_lo (hj := Nat.zero_le _), Nat.add_comm] at this
     simpa [inst]
+  | @structEta rule levels _ params _ major hreg hlevels
+      hlevelsLength hparamsLength _ _ _
+      ihSpine ihMajor ihRebuild =>
+    have hparamsSpine := ihSpine W
+    rw [(henv.structEtaWF hreg).familyType_closed.instL.instN_eq
+      (Nat.zero_le _)] at hparamsSpine
+    have hmajor := ihMajor W
+    rw [VStructEta.structureType_instN] at hmajor
+    have hrebuild := ihRebuild W
+    rw [VStructEta.rebuild_instN rule levels params major e₀
+      hparamsLength k, VStructEta.structureType_instN] at hrebuild
+    have hout := IsDefEq.structEta hreg hlevels hlevelsLength
+      (by simpa using hparamsLength) hparamsSpine hmajor hrebuild
+    simpa only [VStructEta.rebuild_instN rule levels params major e₀
+      hparamsLength k, VStructEta.structureType_instN] using hout
   | proofIrrel _ _ _ ih1 ih2 ih3 => exact .proofIrrel (ih1 W) (ih2 W) (ih3 W)
   | extra h1 h2 h3 =>
     have ⟨⟨hA1, _⟩, hA2, hA3⟩ := henv.closed.2 h1
@@ -702,6 +852,22 @@ theorem IsDefEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.IsDefE
       hA2.instL.instN_eq (Nat.zero_le _),
       hA3.instL.instN_eq (Nat.zero_le _)]
     exact .extra h1 h2 h3
+  | nil => exact .nil
+  | cons _ _ ihType ihRest =>
+    exact .cons (ihType (by assumption)) (by
+      simpa only [VExpr.inst0_inst_hi] using ihRest (by assumption))
+
+theorem SpineWF.instN {env : VEnv} (henv : env.Ordered)
+    (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
+    (h₀ : env.HasType U Γ₀ e₀ A₀) :
+    ∀ {es A B}, env.SpineWF U Γ₁ A es B →
+      env.SpineWF U Γ (A.inst e₀ k)
+        (es.map fun e => e.inst e₀ k) (B.inst e₀ k)
+  | [], _, _, .nil => .nil
+  | _ :: _, _, _, .cons he hrest =>
+    .cons (IsDefEq.instN henv h₀ W he) (by
+      simpa only [VExpr.inst0_inst_hi] using
+        SpineWF.instN henv W h₀ hrest)
 
 theorem HasType.instN {env : VEnv} (henv : env.Ordered) (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
     (H : env.HasType U Γ₁ e A) (h₀ : env.HasType U Γ₀ e₀ A₀) :
@@ -773,7 +939,9 @@ variable! (henv : Ordered env)
 theorem IsDefEq.forallE_inv'
     (H : env.IsDefEq U Γ e1 e2 V) (eq : e1 = A.forallE B ∨ e2 = A.forallE B) :
     env.IsType U Γ A ∧ env.IsType U (A::Γ) B := by
-  induction H generalizing A B with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True)
+      generalizing A B with
   | symm _ ih => exact ih eq.symm
   | trans _ _ ih1 ih2
   | proofIrrel _ _ _ _ ih1 ih2 =>
@@ -799,6 +967,10 @@ theorem IsDefEq.forallE_inv'
   | eta _ ih =>
     obtain ⟨⟨⟩⟩ | eq := eq
     exact ih (.inl eq)
+  | structEta _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    obtain eq | eq := eq
+    · exact ihRebuild (.inl eq)
+    · exact ihMajor (.inl eq)
   | @extra df ls Γ h1 h2 =>
     suffices ∀ e, VExpr.instL ls e = VExpr.forallE A B →
         (∀ A B, e = VExpr.forallE A B → IsType env df.uvars [] A ∧ IsType env df.uvars [A] B) →
@@ -814,6 +986,7 @@ theorem IsDefEq.forallE_inv'
     have C2 := (A2.instL h2).closedN henv ⟨⟨⟩, C1⟩
     rw [C1.liftN_eq (Nat.zero_le _), C2.liftN_eq (by exact Nat.le_refl _)] at this
     simpa [liftN]
+  | nil | cons => trivial
   | _ => nomatch eq
 
 theorem HasType.forallE_inv (henv : Ordered env) (H : env.HasType U Γ (A.forallE B) V) :
@@ -830,7 +1003,8 @@ theorem IsType.forallE_inv (henv : Ordered env) (H : env.IsType U Γ (A.forallE 
 variable! (henv : Ordered env) in
 theorem IsDefEq.sort_inv'
     (H : env.IsDefEq U Γ e1 e2 V) (eq : e1 = .sort u ∨ e2 = .sort u) : u.WF U := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True) with
   | symm _ ih => exact ih eq.symm
   | trans _ _ ih1 ih2
   | proofIrrel _ _ _ _ ih1 ih2 =>
@@ -847,6 +1021,10 @@ theorem IsDefEq.sort_inv'
   | eta _ ih =>
     obtain ⟨⟨⟩⟩ | eq := eq
     exact ih (.inl eq)
+  | structEta _ _ _ _ _ _ _ _ ihMajor ihRebuild =>
+    obtain eq | eq := eq
+    · exact ihRebuild (.inl eq)
+    · exact ihMajor (.inl eq)
   | @extra df ls _ h1 h2 =>
     suffices ∀ e, VExpr.instL ls e = .sort u → HasType env df.uvars [] e df.type → u.WF U by
       have ⟨A1, A2⟩ := henv.defEqWF h1
@@ -854,6 +1032,7 @@ theorem IsDefEq.sort_inv'
     intro e eq IH
     cases e <;> cases eq; rename_i u
     exact VLevel.WF.inst h2
+  | nil | cons => trivial
   | _ => nomatch eq
 
 theorem IsDefEq.sort_inv_l (henv : Ordered env) (H : env.IsDefEq U Γ (.sort u) e2 V) : u.WF U :=
@@ -872,7 +1051,8 @@ variable! (henv : Ordered env)
   (envIH : env.OnTypes fun U e A => env.HasType U [] e A ∧ env.IsType U [] A) in
 theorem IsDefEq.isType' (hΓ : OnCtx Γ (env.IsType U)) (H : env.IsDefEq U Γ e1 e2 A) :
     env.IsType U Γ A := by
-  induction H with
+  induction H using IsDefEq.rec
+      (motive_2 := fun _ _ _ _ _ => True) with
   | bvar h => exact .lookup henv hΓ h
   | proofIrrel h1 => exact ⟨_, h1⟩
   | extra h1 h2 =>
@@ -895,6 +1075,8 @@ theorem IsDefEq.isType' (hΓ : OnCtx Γ (env.IsType U)) (H : env.IsDefEq U Γ e1
     have ⟨_, h⟩ := ih2 hΓ
     exact (ih1 ⟨hΓ, _, h.hasType.2⟩).instN henv .zero h2
   | eta _ ih => exact ih hΓ
+  | structEta _ _ _ _ _ _ _ _ ihMajor _ => exact ihMajor hΓ
+  | nil | cons => trivial
 
 theorem Ordered.isType (H : Ordered env) :
     env.OnTypes fun U e A => env.HasType U [] e A ∧ env.IsType U [] A :=

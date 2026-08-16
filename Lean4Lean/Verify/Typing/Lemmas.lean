@@ -136,6 +136,17 @@ theorem Closed.getAppArgsList {e} (h : Closed e)
     {{a}} (ha : a ∈ e.getAppArgsList) : Closed a :=
   h.getAppArgsRevList (by simpa [← Expr.getAppArgsList_reverse])
 
+theorem FVarsIn.getAppArgsRevList {e} (h : FVarsIn P e)
+    {{a}} (ha : a ∈ e.getAppArgsRevList) : FVarsIn P a := by
+  revert a
+  unfold Expr.getAppArgsRevList
+  split <;> simp
+  exact ⟨h.2, FVarsIn.getAppArgsRevList h.1⟩
+
+theorem FVarsIn.getAppArgsList {e} (h : FVarsIn P e)
+    {{a}} (ha : a ∈ e.getAppArgsList) : FVarsIn P a :=
+  h.getAppArgsRevList (by simpa [← Expr.getAppArgsList_reverse])
+
 theorem Closed.looseBVarRange_le : Closed e k → e.looseBVarRange' ≤ k := by
   induction e generalizing k <;>
     simp +contextual [*, Closed, Expr.looseBVarRange', Nat.max_le]
@@ -144,56 +155,15 @@ theorem Closed.looseBVarRange_le : Closed e k → e.looseBVarRange' ≤ k := by
 theorem Closed.looseBVarRange_zero (H : Closed e) : e.looseBVarRange' = 0 := by
   simpa using H.looseBVarRange_le
 
-theorem VLocalDecl.lift'_consN_skipN {d : VLocalDecl} :
-    d.lift' (.consN (.skipN .refl n) k) = d.liftN n k := by
-  cases d <;> simp [VLocalDecl.lift', VLocalDecl.liftN, VExpr.lift'_consN_skipN]
-
 theorem VLocalDecl.WF.hasType : ∀ {d}, VLocalDecl.WF env U (VLCtx.toCtx Δ) d →
     env.HasType U (VLCtx.toCtx ((ofv, d) :: Δ)) d.value d.type
   | .vlam _, _ => .bvar .zero
   | .vlet .., hA => hA
 
-nonrec theorem VLocalDecl.WF.weakN (henv : env.Ordered) (W : Ctx.LiftN n k Γ Γ') :
-    ∀ {d}, WF env U Γ d → WF env U Γ' (d.liftN n k)
-  | .vlam _,  H | .vlet .., H => H.weakN henv W
-
-nonrec theorem VLocalDecl.WF.instN (henv : env.Ordered) (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
-    (h₀ : env.HasType U Γ₀ e₀ A₀) : ∀ {d}, WF env U Γ₁ d → WF env U Γ (d.inst e₀ k)
-  | .vlam _,  H | .vlet .., H => H.instN henv W h₀
-
-nonrec theorem VLocalDecl.WF.instL {env : VEnv} (hls : ∀ l ∈ ls, l.WF U') :
-    ∀ {d}, WF env ls.length Γ d → WF env U' (Γ.map (·.instL ls)) (d.instL ls)
-  | .vlam _,  H | .vlet .., H => H.instL hls
-
 theorem VLocalDecl.is_liftN {Δ : VLCtx} :
     ∀ {d}, Ctx.LiftN (VLocalDecl.depth d) 0 Δ.toCtx (VLCtx.toCtx ((ofv, d) :: Δ))
   | .vlam _ => .one
   | .vlet .. => .zero []
-
-variable! (env : VEnv) (U : Nat) (Γ : List VExpr) in
-inductive VLocalDecl.IsDefEq : VLocalDecl → VLocalDecl → Prop
-  | vlam : env.IsDefEq U Γ type₁ type₂ (.sort u) → VLocalDecl.IsDefEq (.vlam type₁) (.vlam type₂)
-  | vlet :
-    env.IsDefEq U Γ value₁ value₂ type₁ → env.IsDefEq U Γ type₁ type₂ (.sort u) →
-    VLocalDecl.IsDefEq (.vlet type₁ value₁) (.vlet type₂ value₂)
-
-@[simp] theorem VLocalDecl.lift'_depth {d : VLocalDecl} : (d.lift' n).depth = d.depth := by
-  cases d <;> rfl
-
-theorem VLocalDecl.lift'_comp {d : VLocalDecl} : d.lift' (.comp l₁ l₂) = (d.lift' l₁).lift' l₂ := by
-  cases d <;> simp [VLocalDecl.lift', VExpr.lift'_comp]
-
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) (W : Ctx.Lift' n Γ Γ') in
-theorem VLocalDecl.weak'_iff : VLocalDecl.WF env U Γ' (d.lift' n) ↔ VLocalDecl.WF env U Γ d :=
-  match d with
-  | .vlam .. => IsType.weak'_iff henv hΓ' W
-  | .vlet .. => HasType.weak'_iff henv hΓ' W
-
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) (W : Ctx.LiftN n k Γ Γ') in
-theorem VLocalDecl.weakN_iff : VLocalDecl.WF env U Γ' (d.liftN n k) ↔ VLocalDecl.WF env U Γ d :=
-  match d with
-  | .vlam .. => IsType.weakN_iff henv hΓ' W
-  | .vlet .. => HasType.weakN_iff henv hΓ' W
 
 namespace VLCtx
 
@@ -278,7 +248,7 @@ theorem FVLift'.fvars_sublist (W : FVLift' Δ Δ' dk n k) : Δ.fvars <+ Δ'.fvar
   induction W with
   | refl => exact .refl _
   | skip_fvar _ _ _ ih => exact .cons _ ih
-  | cons_fvar _ _ _ _ ih => exact .cons₂ _ ih
+  | cons_fvar _ _ _ _ ih => exact .cons_cons _ ih
   | cons_bvar _ _ ih => exact ih
 
 theorem FVLift'.bvars_eq (W : FVLift' Δ Δ' dk n k) : Δ'.bvars = Δ.bvars := by
@@ -565,12 +535,18 @@ inductive SortList : VLCtx → List VLevel → Prop
 
 end VLCtx
 
-theorem TrProj.weak' (W : Ctx.Lift' n Γ Γ')
-    (H : TrProj Γ s i e e') : TrProj Γ' s i (e.lift' n) (e'.lift' n) := sorry
+theorem TrProj.weak' (henv : env.Ordered) (W : Ctx.Lift' n Γ Γ')
+    (H : TrProj env U Γ s i e e') :
+    TrProj env U Γ' s i (e.lift' n) (e'.lift' n) := by
+  obtain ⟨view, levels, params, hname, hproj⟩ := H
+  exact ⟨view, levels, params.map (fun param => param.lift' n),
+    hname, hproj.weak' henv W⟩
 
-theorem TrProj.weakN (W : Ctx.LiftN n k Γ Γ')
-    (H : TrProj Γ s i e e') : TrProj Γ' s i (e.liftN n k) (e'.liftN n k) := by
-  simpa [VExpr.lift'_consN_skipN] using H.weak' <| Ctx.liftN_iff_lift'.1 W
+theorem TrProj.weakN (henv : env.Ordered) (W : Ctx.LiftN n k Γ Γ')
+    (H : TrProj env U Γ s i e e') :
+    TrProj env U Γ' s i (e.liftN n k) (e'.liftN n k) := by
+  simpa [VExpr.lift'_consN_skipN] using
+    H.weak' henv (Ctx.liftN_iff_lift'.1 W)
 
 /-! ## Replaying closed metadata types -/
 
@@ -620,10 +596,8 @@ theorem TrTypeExpr.to_trExprS
     exact .forallE ⟨u, hty⟩ ⟨v, hbody⟩
       (ihty hΔ ⟨_, hty⟩) (ihbody ⟨hΔ, ⟨u, hty⟩⟩ ⟨_, hbody⟩)
 
-/- `TrExprS` still contains the sorried `TrProj` branch, so even this
-projection-free fragment inherits that dependency through its result type. -/
 /--
-info: 'Lean4Lean.TrTypeExpr.to_trExprS' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+info: 'Lean4Lean.TrTypeExpr.to_trExprS' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TrTypeExpr.to_trExprS
@@ -650,7 +624,7 @@ theorem TrExprS.weakFV' (W : VLCtx.FVLift' Δ Δ' dk n k) (hΔ' : Δ'.WF env Us.
     exact .letE h1 (ih1 W hΔ') (ih2 W hΔ') (ih3 (W.cons_bvar _) ⟨hΔ', nofun, h1⟩)
   | lit h1 _ ih => exact .lit h1 (ih W hΔ')
   | mdata _ ih => exact .mdata (ih W hΔ')
-  | proj _ h2 ih => exact .proj (ih W hΔ') (h2.weak' W.toCtx)
+  | proj _ h2 ih => exact .proj (ih W hΔ') (h2.weak' henv W.toCtx)
 
 variable! (henv : WF env) in
 theorem TrExpr.weakFV' (W : VLCtx.FVLift' Δ Δ' dk n k) (hΔ' : Δ'.WF env Us.length)
@@ -689,7 +663,7 @@ theorem TrExprS.weakBV (W : VLCtx.BVLift Δ Δ' dn dk n k)
     refine .lit h1 (Expr.liftLooseBVars_eq_self ?_ ▸ ih W :)
     exact Closed.toConstructor.looseBVarRange_le
   | mdata _ ih => exact .mdata (ih W)
-  | proj _ h2 ih => exact .proj (ih W) (h2.weakN W.toCtx)
+  | proj _ h2 ih => exact .proj (ih W) (h2.weakN henv W.toCtx)
 
 variable! (henv : WF env) in
 theorem TrExpr.weakBV (W : VLCtx.BVLift Δ Δ' dn dk n k)
@@ -703,16 +677,30 @@ theorem HasType.skips (W : Ctx.LiftN n k Γ Γ')
   IsDefEq.skips henv hΓ' W h1 h2 h2
 
 theorem TrProj.weak'_inv (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U))
-    (W : Ctx.Lift' l Γ Γ') : TrProj Γ' s i (e.lift' l) e' → ∃ e', TrProj Γ s i e e' := sorry
+    (W : Ctx.Lift' l Γ Γ') :
+    TrProj env U Γ' s i (e.lift' l) e' →
+      ∃ e', TrProj env U Γ s i e e' := by
+  rintro ⟨view, levels, params, hname, hproj⟩
+  obtain ⟨params', result, hresult⟩ :=
+    henv.registeredStructureHeadInversion.weak'_inv hΓ' W hproj
+  exact ⟨result, view, levels, params', hname, hresult⟩
 
 theorem TrProj.defeqDFC (henv : VEnv.WF env) (hΓ : env.IsDefEqCtx U [] Γ₁ Γ₂)
-    (he : env.IsDefEqU U Γ₁ e₁ e₂) (H : TrProj Γ₁ s i e₁ e') :
-    ∃ e', TrProj Γ₂ s i e₂ e' := sorry
+    (he : env.IsDefEqU U Γ₁ e₁ e₂) (H : TrProj env U Γ₁ s i e₁ e') :
+    ∃ e', TrProj env U Γ₂ s i e₂ e' := by
+  obtain ⟨view, levels, params, hname, hproj⟩ := H
+  have he₂ : env.HasType U Γ₂ e₂
+      (view.structureType levels params) :=
+    (hproj.majorType.defeqU_l henv hΓ.isType he).defeqDFC
+      henv.ordered hΓ
+  obtain ⟨result, hresult⟩ :=
+    hproj.defeqDFC henv.ordered hΓ he₂
+  exact ⟨result, view, levels, params, hname, hresult⟩
 
-variable! {env env' : VEnv} (henv : env ≤ env') in
-nonrec theorem VEnv.ContainsLits.mono : ∀ {l}, env.ContainsLits l → env'.ContainsLits l
-  | .natVal _, ⟨_, H⟩ => ⟨_, henv.1 H⟩
-  | .strVal _, ⟨⟨_, H1⟩, ⟨_, H2⟩⟩ => ⟨⟨_, henv.1 H1⟩, ⟨_, henv.1 H2⟩⟩
+theorem TrProj.mono {env env' : VEnv} (henv : env ≤ env')
+    (H : TrProj env U Γ s i e e') : TrProj env' U Γ s i e e' := by
+  obtain ⟨view, levels, params, hname, hproj⟩ := H
+  exact ⟨view, levels, params, hname, hproj.mono henv⟩
 
 variable! {env env' : VEnv} (henv : env ≤ env') in
 theorem TrExprS.mono (H : TrExprS env Us Δ e e') : TrExprS env' Us Δ e e' := by
@@ -727,7 +715,7 @@ theorem TrExprS.mono (H : TrExprS env Us Δ e e') : TrExprS env' Us Δ e e' := b
   | letE h1 _ _ _ ih1 ih2 ih3 => exact .letE (h1.mono henv) ih1 ih2 ih3
   | lit h1 _ ih => refine .lit (h1.mono henv) ih
   | mdata _ ih => exact .mdata ih
-  | proj _ h2 ih => exact .proj ih h2
+  | proj _ h2 ih => exact .proj ih (h2.mono henv)
 
 variable! {env env' : VEnv} (henv : env ≤ env') in
 theorem TrExpr.mono (H : TrExpr env Us Δ e e') : TrExpr env' Us Δ e e' :=
@@ -741,11 +729,6 @@ inductive VLCtx.IsDefEq : VLCtx → VLCtx → Prop
     (∀ fv deps, ofv = some (fv, deps) → fv ∉ Δ₁.fvars ∧ deps ⊆ Δ₁.fvars) →
     VLocalDecl.IsDefEq env U Δ₁.toCtx d₁ d₂ →
     VLCtx.IsDefEq ((ofv, d₁) :: Δ₁) ((ofv, d₂) :: Δ₂)
-
-variable! (henv : Ordered env) (hΓ : OnCtx Γ (IsType env U)) in
-theorem VLocalDecl.IsDefEq.refl : ∀ {d}, VLocalDecl.WF env U Γ d → VLocalDecl.IsDefEq env U Γ d d
-  | .vlam _, ⟨_, h1⟩ => .vlam h1
-  | .vlet .., h1 => let ⟨_, h2⟩ := h1.isType henv hΓ; .vlet h1 h2
 
 variable! (henv : Ordered env) in
 theorem VLCtx.IsDefEq.refl : ∀ {Δ}, VLCtx.WF env U Δ → VLCtx.IsDefEq env U Δ Δ
@@ -771,19 +754,9 @@ theorem VLCtx.IsDefEq.bvars : VLCtx.IsDefEq env U Δ₁ Δ₂ → Δ₁.bvars = 
   | .cons (ofv := some _) h1 _ _ => by
       simp only [VLCtx.bvars, h1.bvars]
 
-theorem VLocalDecl.IsDefEq.wf : VLocalDecl.IsDefEq env U Γ d₁ d₂ → VLocalDecl.WF env U Γ d₁
-  | .vlam h3 => ⟨_, h3.hasType.1⟩
-  | .vlet h3 _ => h3.hasType.1
-
 theorem VLCtx.IsDefEq.wf : VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.WF env U Δ₁
   | .nil => ⟨⟩
   | .cons h1 h2 h3 => ⟨h1.wf, h2, h3.wf⟩
-
-theorem VLocalDecl.IsDefEq.mono (henv : env ≤ env') :
-    VLocalDecl.IsDefEq env U Γ d₁ d₂ →
-      VLocalDecl.IsDefEq env' U Γ d₁ d₂
-  | .vlam h => .vlam (h.mono henv)
-  | .vlet h₁ h₂ => .vlet (h₁.mono henv) (h₂.mono henv)
 
 theorem VLCtx.IsDefEq.mono (henv : env ≤ env') :
     VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.IsDefEq env' U Δ₁ Δ₂
@@ -871,16 +844,6 @@ theorem VLCtx.IsDefEqFVars.find?_uniq (henv : VEnv.WF env)
               cases hd with
               | vlam => exact ⟨h₂.weakN henv .one, h₃.weak henv⟩
               | vlet => simpa [VLocalDecl.depth] using ⟨h₂, h₃⟩
-
-theorem VLocalDecl.IsDefEq.symm :
-    VLocalDecl.IsDefEq env U Δ d₁ d₂ → VLocalDecl.IsDefEq env U Δ d₂ d₁
-  | .vlam h1 => .vlam h1.symm
-  | .vlet h1 h2 => .vlet (h2.defeqDF h1.symm) h2.symm
-
-theorem VLocalDecl.IsDefEq.defeqDFC (henv : Ordered env) (hΓ : IsDefEqCtx env U Γ₀ Γ₁ Γ₂)
-    : VLocalDecl.IsDefEq env U Γ₁ d₁ d₂ → VLocalDecl.IsDefEq env U Γ₂ d₁ d₂
-  | .vlam h1 => .vlam (h1.defeqDFC henv hΓ)
-  | .vlet h1 h2 => .vlet (h1.defeqDFC henv hΓ) (h2.defeqDFC henv hΓ)
 
 variable! (henv : Ordered env) in
 theorem VLCtx.IsDefEq.symm : VLCtx.IsDefEq env U Δ₁ Δ₂ → VLCtx.IsDefEq env U Δ₂ Δ₁
@@ -975,7 +938,11 @@ theorem TrExpr.fvarsIn (H : TrExpr env Us Δ e e') : FVarsIn (· ∈ Δ.fvars) e
 theorem TrExpr.fvarsList (H : TrExpr env Us Δ e e') : e.fvarsList ⊆ Δ.fvars :=
   (fvarsIn_iff.1 H.fvarsIn).1
 
-theorem TrProj.wf (H1 : TrProj Δ s i e e') (H2 : VExpr.WF env U Γ e) : VExpr.WF env U Γ e' := sorry
+theorem TrProj.wf (H1 : TrProj env U Γ s i e e')
+    (_H2 : VExpr.WF env U Γ e) : VExpr.WF env U Γ e' := by
+  obtain ⟨view, levels, params, _hname, hproj⟩ := H1
+  obtain ⟨code, _hcode, rfl, hprojector⟩ := hproj.program
+  exact ⟨_, hprojector.app hproj.majorType⟩
 
 theorem TrExpr.wf (H : TrExpr env Us Δ e e') : VExpr.WF env Us.length Δ.toCtx e' :=
   let ⟨_, _, _, H⟩ := H; ⟨_, H.hasType.2⟩
@@ -1018,9 +985,14 @@ theorem TrExpr.app (henv : VEnv.WF env) (hΔ : OnCtx Δ.toCtx (env.IsType Us.len
   ⟨_, .app h3.hasType.1 h4.hasType.1 s3 s4, _, h3.appDF h4⟩
 
 variable! (henv : VEnv.WF env) (hΓ : IsDefEqCtx env U [] Γ₁ Γ₂) in
-theorem TrProj.uniq (H1 : TrProj Γ₁ s₁ i e₁ e₁') (H2 : TrProj Γ₂ s₂ i e₂ e₂')
+theorem TrProj.uniq (H1 : TrProj env U Γ₁ s₁ i e₁ e₁')
+    (H2 : TrProj env U Γ₂ s₂ i e₂ e₂')
     (H : env.IsDefEqU U Γ₁ e₁ e₂) :
-    env.IsDefEqU U Γ₁ e₁' e₂' := sorry
+    env.IsDefEqU U Γ₁ e₁' e₂' := by
+  obtain ⟨view₁, levels₁, params₁, _hname₁, hproj₁⟩ := H1
+  obtain ⟨view₂, levels₂, params₂, _hname₂, hproj₂⟩ := H2
+  exact henv.registeredStructureHeadInversion.unique
+    hΓ hproj₁ hproj₂ H
 
 variable! (henv : VEnv.WF env) {Us : List Name} (hΔ : VLCtx.IsDefEq env Us.length Δ₁ Δ₂) in
 theorem TrExprS.uniq (H1 : TrExprS env Us Δ₁ e e₁) (H2 : TrExprS env Us Δ₂ e e₂) :
@@ -1253,7 +1225,8 @@ theorem TrExpr.mdata (h : TrExpr env Us Δ e e') : TrExpr env Us Δ (.mdata d e)
   let ⟨_, s2, h2⟩ := h; ⟨_, .mdata s2, h2⟩
 
 theorem TrExpr.proj {env Us Δ e e' s i e''} (henv : VEnv.WF env) (hΔ : VLCtx.WF env Us.length Δ)
-    (H : TrExpr env Us Δ e e') (H2 : TrProj Δ.toCtx s i e' e'') :
+    (H : TrExpr env Us Δ e e')
+    (H2 : TrProj env Us.length Δ.toCtx s i e' e'') :
     TrExpr env Us Δ (.proj s i e) e'' :=
   let ⟨_, s2, h2⟩ := H
   have ⟨_, H2'⟩ := H2.defeqDFC henv (.refl hΔ) h2.symm
@@ -1386,8 +1359,14 @@ theorem TrExprS.instN_var (W : VLCtx.InstN Δ₀ e₀' A₀ dk k Δ₁ Δ) (H : 
         refine ⟨_, _, h, ?_, rfl⟩
         cases d <;> simp [VLocalDecl.depth, VLocalDecl.inst, VExpr.lift_instN_lo]
 
-theorem TrProj.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
-    (H : TrProj Γ₁ s i e e') : TrProj Γ s i (e.inst e₀ k) (e'.inst e₀ k) := sorry
+theorem TrProj.instN (henv : env.Ordered)
+    (h₀ : env.HasType U Γ₀ e₀ A₀)
+    (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
+    (H : TrProj env U Γ₁ s i e e') :
+    TrProj env U Γ s i (e.inst e₀ k) (e'.inst e₀ k) := by
+  obtain ⟨view, levels, params, hname, hproj⟩ := H
+  exact ⟨view, levels, params.map (fun param => param.inst e₀ k),
+    hname, hproj.instN henv W h₀⟩
 
 variable! (henv : Ordered env) (h₀ : TrExprS env Us Δ₀ e₀ e₀')
   (t₀ : env.HasType Us.length Δ₀.toCtx e₀' A₀) in
@@ -1410,7 +1389,7 @@ theorem TrExprS.instN (W : VLCtx.InstN Δ₀ e₀' A₀ dk k Δ₁ Δ) (H : TrEx
     refine .lit h1 (Expr.instantiate1'_eq_self ?_ ▸ ih W :)
     exact Closed.toConstructor.looseBVarRange_le
   | mdata _ ih => exact .mdata (ih W)
-  | proj _ h2 ih => exact .proj (ih W) (h2.instN W.toCtx)
+  | proj _ h2 ih => exact .proj (ih W) (h2.instN henv t₀ W.toCtx)
 
 theorem TrExprS.inst {Δ : VLCtx} (henv : Ordered env)
     (t₀ : env.HasType Us.length Δ.toCtx e₀' A₀)
@@ -1616,7 +1595,7 @@ theorem ofLevel_isNeverZero (h : VLevel.ofLevel Us u = some u') (H : u.isNeverZe
     exact H.elim (ih1 h1 · _ h.1) (ih2 h2 · _ h.2)
   | imax _ _ ih1 ih2 =>
     obtain ⟨_, h1, _, h2, rfl⟩ := h
-    simp [VLevel.eval, Nat.imax, ih2 h2 H ls]
+    simp [VLevel.eval, Lean.Nat.imax, ih2 h2 H ls]
 
 theorem ofLevel_isAlwaysZero (h : VLevel.ofLevel Us u = some u') (H : u.isAlwaysZero) :
     u' ≈ .zero := by
@@ -1629,7 +1608,7 @@ theorem ofLevel_isAlwaysZero (h : VLevel.ofLevel Us u = some u') (H : u.isAlways
     simp [VLevel.eval, VLevel.equiv_def.1 (ih1 h1 H.1) ls, VLevel.equiv_def.1 (ih2 h2 H.2) ls]
   | imax _ _ _ ih2 =>
     obtain ⟨_, _, _, h2, rfl⟩ := h
-    simp [VLevel.eval, Nat.imax, VLevel.equiv_def.1 (ih2 h2 H) ls]
+    simp [VLevel.eval, Lean.Nat.imax, VLevel.equiv_def.1 (ih2 h2 H) ls]
 
 theorem ofLevel_mkLevelIMax'
     (h1 : VLevel.ofLevel Us u = some u') (h2 : VLevel.ofLevel Us v = some v') :
@@ -1654,9 +1633,114 @@ theorem ofLevel_mkLevelIMax'
   · simp_all; exact VLevel.imax_self.symm
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
-variable! {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U') in
-theorem TrProj.instL (H : TrProj Γ s i e e') :
-    TrProj (Γ.map (VExpr.instL ls)) s i (e.instL ls) (e'.instL ls) := sorry
+variable! {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U')
+    (hU : U = ls.length) in
+theorem TrProj.instL (H : TrProj env U Γ s i e e') :
+    TrProj env U' (Γ.map (VExpr.instL ls)) s i
+      (e.instL ls) (e'.instL ls) := by
+  obtain ⟨view, levels, params, hname, hproj⟩ := H
+  exact ⟨view, levels.map (VLevel.inst ls),
+    params.map (VExpr.instL ls), hname, hproj.instL hls⟩
+
+/-- The structural interface of Verify's projection translation.  The bundle
+keeps the seven laws available as one coherent capability while the named
+theorems above remain the compatibility surface for existing callers. -/
+structure TrProj.StructuralLaws (env : VEnv) : Prop where
+  weakening : ∀ {U n Γ Γ' s i e e'},
+    Ctx.Lift' n Γ Γ' → TrProj env U Γ s i e e' →
+      TrProj env U Γ' s i (e.lift' n) (e'.lift' n)
+  inverseWeakening : ∀ {U l Γ Γ' s i e e'},
+    OnCtx Γ' (env.IsType U) → Ctx.Lift' l Γ Γ' →
+      TrProj env U Γ' s i (e.lift' l) e' →
+        ∃ result, TrProj env U Γ s i e result
+  contextDefEq : ∀ {U Γ₁ Γ₂ s i e₁ e₂ result},
+    env.IsDefEqCtx U [] Γ₁ Γ₂ → env.IsDefEqU U Γ₁ e₁ e₂ →
+      TrProj env U Γ₁ s i e₁ result →
+        ∃ result', TrProj env U Γ₂ s i e₂ result'
+  wellFormed : ∀ {U Γ s i e result},
+    TrProj env U Γ s i e result → VExpr.WF env U Γ e →
+      VExpr.WF env U Γ result
+  unique : ∀ {U Γ₁ Γ₂ s₁ s₂ i e₁ e₂ result₁ result₂},
+    env.IsDefEqCtx U [] Γ₁ Γ₂ →
+      TrProj env U Γ₁ s₁ i e₁ result₁ →
+      TrProj env U Γ₂ s₂ i e₂ result₂ →
+      env.IsDefEqU U Γ₁ e₁ e₂ →
+        env.IsDefEqU U Γ₁ result₁ result₂
+  termSubstitution : ∀ {U Γ₀ Γ₁ Γ s i e e' e₀ A₀ k},
+    env.HasType U Γ₀ e₀ A₀ → Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ →
+      TrProj env U Γ₁ s i e e' →
+        TrProj env U Γ s i (e.inst e₀ k) (e'.inst e₀ k)
+  universeInstantiation : ∀ {U U' Γ s i e e'} {ls : List VLevel},
+    (∀ level ∈ ls, level.WF U') → U = ls.length →
+      TrProj env U Γ s i e e' →
+        TrProj env U' (Γ.map (VExpr.instL ls)) s i
+          (e.instL ls) (e'.instL ls)
+
+/-- Every well-formed environment supplies the complete projection structural
+interface. -/
+theorem TrProj.structuralLaws (henv : VEnv.WF env) :
+    TrProj.StructuralLaws env where
+  weakening W H := H.weak' henv.ordered W
+  inverseWeakening hΓ' W H := H.weak'_inv henv hΓ' W
+  contextDefEq hΓ he H := H.defeqDFC henv hΓ he
+  wellFormed H he := H.wf he
+  unique hΓ H1 H2 he := H1.uniq henv hΓ H2 he
+  termSubstitution h₀ W H := H.instN henv.ordered h₀ W
+  universeInstantiation hls hU H := H.instL hls hU
+
+/-!
+The guards below pin both the proved laws and the inherited Tier-R boundary.
+In particular, they distinguish local proof closure from the remaining public
+registered-head inversion dependency.
+-/
+
+/--
+info: 'Lean4Lean.TrProj.weak'' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.weak'
+
+/--
+info: 'Lean4Lean.TrProj.weak'_inv' depends on axioms: [propext, sorryAx, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.weak'_inv
+
+/--
+info: 'Lean4Lean.TrProj.defeqDFC' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.defeqDFC
+
+/--
+info: 'Lean4Lean.TrProj.wf' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.wf
+
+/--
+info: 'Lean4Lean.TrProj.uniq' depends on axioms: [propext, sorryAx, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.uniq
+
+/--
+info: 'Lean4Lean.TrProj.instN' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.instN
+
+/--
+info: 'Lean4Lean.TrProj.instL' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.instL
+
+/--
+info: 'Lean4Lean.TrProj.structuralLaws' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrProj.structuralLaws
 
 section
 
@@ -1764,7 +1848,7 @@ theorem TrExprS.instL (H : TrExprS env ps Δ e e') :
   | mdata _ ih => exact .mdata (ih hΔ)
   | proj _ h2 ih =>
     exact .proj henv (hΔ.instL Hls') (ih hΔ)
-      (VLCtx.instL_toCtx _ ▸ h2.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h2.instL Hls' eq')
 
 theorem TrExpr.instL (H : TrExpr env ps Δ e e') :
     TrExpr env Us (Δ.instL ls') (e.instantiateLevelParams ps ls) (e'.instL ls') :=
@@ -1874,15 +1958,192 @@ theorem TrExprS.unique' (hΔ : IsUniqueCtx Δ₁ Δ₂) (H : IsUnique e)
 theorem TrExprS.unique (H : IsUnique e)
     (H1 : TrExprS env Us Δ e e₁) (H2 : TrExprS env Us Δ e e₂) : e₁ = e₂ := H1.unique' .base H H2
 
+/-- A successful lookup transfers along value-preserving context alignment:
+the found value is identical and only the (discarded) type component may
+differ. -/
+theorem TrExprS.IsUniqueCtx.find?_transfer (hΔ : IsUniqueCtx Δ₁ Δ₂)
+    (H : Δ₁.find? v = some (e, A)) : ∃ A₂, Δ₂.find? v = some (e, A₂) := by
+  induction hΔ generalizing v e A with
+  | base => exact ⟨A, H⟩
+  | @cons Δ₁' Δ₂' d₁ d₂ ofv _ hd ih =>
+    revert H; simp only [VLCtx.find?]; split
+    next heq =>
+      simp only [Option.some.injEq, Prod.mk.injEq]
+      rintro ⟨rfl, rfl⟩
+      cases hd <;> exact ⟨_, rfl, rfl⟩
+    next v' heq =>
+      rintro h
+      simp only [Bind.bind, Option.bind_eq_some_iff] at h
+      obtain ⟨⟨e₁, A₁⟩, h1, h2⟩ := h
+      simp only [Option.some.injEq, Prod.mk.injEq] at h2
+      obtain ⟨rfl, rfl⟩ := h2
+      obtain ⟨A₂, h₂⟩ := ih h1
+      have hdep : d₁.depth = d₂.depth := by cases hd <;> rfl
+      refine ⟨VExpr.liftN d₂.depth A₂, ?_⟩
+      simp only [Bind.bind, Option.bind_eq_some_iff]
+      exact ⟨(e₁, A₂), h₂, by rw [hdep]⟩
+
+/-- Every strict translation of an unfolded natural-number literal is the
+canonical numeral: the constructor spine pins the Theory value
+syntactically. -/
+theorem TrExprS.natLitToConstructor_eq :
+    ∀ {n : Nat} {w}, TrExprS env Us Δ (Expr.natLitToConstructor n) w →
+      w = VExpr.natLit n
+  | 0, w, h => by
+    have h : TrExprS env Us Δ (.const ``Nat.zero []) w := h
+    cases h with
+    | const h1 h2 h3 =>
+      obtain rfl : _ = ([] : List VLevel) := by simpa using h2.symm
+      rfl
+  | n+1, w, h => by
+    have h : TrExprS env Us Δ (.app (.const ``Nat.succ []) (.lit (.natVal n))) w := h
+    cases h with
+    | app h1 h2 hf ha =>
+      cases hf with
+      | const hf1 hf2 hf3 =>
+        obtain rfl : _ = ([] : List VLevel) := by simpa using hf2.symm
+        cases ha with
+        | lit ha1 ha2 =>
+          cases natLitToConstructor_eq ha2
+          rfl
+
+/-- Every strict translation of an unfolded character-list literal is the
+canonical Theory list. -/
+theorem TrExprS.strLitToConstructor_chars_eq :
+    ∀ {cs : List Char} {w},
+      TrExprS env Us Δ
+        (cs.foldr (init := .app (.const ``List.nil [.zero]) (.const ``Char []))
+          fun c e =>
+            .app (.app (.app (.const ``List.cons [.zero]) (.const ``Char []))
+              (.app (.const ``Char.ofNat []) (.lit (.natVal c.toNat)))) e) w →
+      w = VExpr.listCharLit cs
+  | [], w, h => by
+    cases h with
+    | app h1 h2 hf ha =>
+      cases hf with
+      | const hf1 hf2 hf3 =>
+        simp [VLevel.ofLevel] at hf2
+        obtain rfl := hf2
+        cases ha with
+        | const ha1 ha2 ha3 =>
+          obtain rfl : _ = ([] : List VLevel) := by simpa using ha2.symm
+          rfl
+  | c :: cs, w, h => by
+    cases h with
+    | app h1 h2 hf ha =>
+      cases strLitToConstructor_chars_eq ha
+      cases hf with
+      | app hg1 hg2 hgf hga =>
+        cases hgf with
+        | app hh1 hh2 hhf hha =>
+          cases hhf with
+          | const hi1 hi2 hi3 =>
+            simp [VLevel.ofLevel] at hi2
+            obtain rfl := hi2
+            cases hha with
+            | const hj1 hj2 hj3 =>
+              obtain rfl : _ = ([] : List VLevel) := by simpa using hj2.symm
+              cases hga with
+              | app hk1 hk2 hkf hka =>
+                cases hkf with
+                | const hl1 hl2 hl3 =>
+                  obtain rfl : _ = ([] : List VLevel) := by simpa using hl2.symm
+                  cases hka with
+                  | lit hm1 hm2 =>
+                    cases natLitToConstructor_eq hm2
+                    rfl
+
+/-- Every strict translation of a literal's constructor unfolding is the
+canonical `VExpr.trLiteral` value. -/
+theorem TrExprS.toConstructor_eq {l : Literal} {w}
+    (h : TrExprS env Us Δ l.toConstructor w) : w = VExpr.trLiteral l := by
+  match l with
+  | .natVal n => exact natLitToConstructor_eq h
+  | .strVal s =>
+    have h : TrExprS env Us Δ (.app (.const ``String.ofList [])
+      (s.toList.foldr (init := .app (.const ``List.nil [.zero]) (.const ``Char []))
+        fun c e =>
+          .app (.app (.app (.const ``List.cons [.zero]) (.const ``Char []))
+            (.app (.const ``Char.ofNat []) (.lit (.natVal c.toNat)))) e)) w := h
+    cases h with
+    | app h1 h2 hf ha =>
+      cases strLitToConstructor_chars_eq ha
+      cases hf with
+      | const hf1 hf2 hf3 =>
+        obtain rfl : _ = ([] : List VLevel) := by simpa using hf2.symm
+        rfl
+
+/-- The Verify traversal of `Literal.toConstructor` and the direct Theory
+encoding form one ready, well-formed literal value. -/
+theorem TrExprS.toConstructor_ready {l : Literal} {w}
+    (hready : env.PreludeReady) (hcontains : env.ContainsLits l)
+    (h : TrExprS env Us Δ l.toConstructor w) :
+    w = VExpr.trLiteral l ∧ VExpr.WF env U [] w := by
+  have heq := h.toConstructor_eq
+  refine ⟨heq, ?_⟩
+  rw [heq]
+  exact hready.trLiteral_wf l hcontains
+
+/-- The deterministic translator agrees with every strict-translation
+derivation over any value-preserving context alignment: on the `IsUnique`
+fragment, `trExprS?` computes exactly the derivation's Theory value.  This
+is the replay engine for choice-free semantic packaging — a `Nonempty`
+translation witness plus this agreement pins the computed value. -/
+theorem TrExprS.trExprS?_eq' (hΔ : IsUniqueCtx Δ₁ Δ₂)
+    (H : TrExprS env Us Δ₁ e e') (hu : IsUnique e) :
+    trExprS? Us Δ₂ e = some e' := by
+  induction H generalizing Δ₂ with
+  | bvar h1 =>
+    obtain ⟨A₂, h2⟩ := hΔ.find?_transfer h1
+    simp [trExprS?, h2]
+  | fvar h1 =>
+    obtain ⟨A₂, h2⟩ := hΔ.find?_transfer h1
+    simp [trExprS?, h2]
+  | sort h1 => simp [trExprS?, h1]
+  | const h1 h2 h3 => simp [trExprS?, h2]
+  | app h1 h2 _ _ ih1 ih2 =>
+    simp [trExprS?, ih1 hΔ hu.1, ih2 hΔ hu.2]
+  | lam h1 _ _ ih1 ih2 =>
+    simp [trExprS?, ih1 hΔ hu.1, ih2 (hΔ.cons .vlam) hu.2]
+  | forallE h1 h2 _ _ ih1 ih2 =>
+    simp [trExprS?, ih1 hΔ hu.1, ih2 (hΔ.cons .vlam) hu.2]
+  | letE h1 _ _ _ ih1 ih2 ih3 =>
+    simp [trExprS?, ih2 hΔ hu.1, ih3 (hΔ.cons .vlet) hu.2]
+  | lit h1 h2 ih =>
+    cases h2.toConstructor_eq
+    simp [trExprS?]
+  | mdata _ ih => simpa [trExprS?] using ih hΔ hu
+  | proj h1 h2 => cases hu
+
+/-- Deterministic-translator agreement in a fixed context. -/
+theorem TrExprS.trExprS?_eq (H : TrExprS env Us Δ e e') (hu : IsUnique e) :
+    trExprS? Us Δ e = some e' :=
+  H.trExprS?_eq' .base hu
+
+/-- Executable totality on the unique fragment: any translation witness
+guarantees the deterministic translator succeeds. -/
+theorem TrExprS.trExprS?_isSome (hex : ∃ e', TrExprS env Us Δ e e')
+    (hu : IsUnique e) : (trExprS? Us Δ e).isSome := by
+  obtain ⟨e', H⟩ := hex
+  simp [H.trExprS?_eq hu]
+
+/-- Replay transfer: an existential translation witness holds of the computed
+translation itself.  Choice-free packagers pin their Theory data with this:
+compute by `trExprS?`, then transfer the `Nonempty`-level witness onto the
+computed value. -/
+theorem TrExprS.of_trExprS?_eq (hex : ∃ e', TrExprS env Us Δ e e')
+    (hu : IsUnique e) (h : trExprS? Us Δ e = some v) :
+    TrExprS env Us Δ e v := by
+  obtain ⟨e', H⟩ := hex
+  cases Option.some.inj ((H.trExprS?_eq hu).symm.trans h)
+  exact H
+
 theorem TrExprS.boolFalse (henv : env.HasPrimitives) (H : env.contains ``Bool) :
     TrExprS env Us Δ (toExpr false) .boolFalse ∧
     env.HasType Us.length Δ.toCtx .boolFalse .bool := by
   let ⟨⟨_, H⟩, _⟩ := henv.bool H
   cases henv.boolFalse H
   exact ⟨.const H rfl rfl, .const H nofun rfl⟩
-
-@[simp] theorem VExpr.instL_boolFalse : VExpr.boolFalse.instL ls = VExpr.boolFalse := by
-  simp [boolFalse, instL]
 
 theorem TrExprS.boolTrue (henv : env.HasPrimitives) (H : env.contains ``Bool) :
     TrExprS env Us Δ (toExpr true) .boolTrue ∧
@@ -1891,9 +2152,6 @@ theorem TrExprS.boolTrue (henv : env.HasPrimitives) (H : env.contains ``Bool) :
   cases henv.boolTrue H
   exact ⟨.const H rfl rfl, .const H nofun rfl⟩
 
-@[simp] theorem VExpr.instL_boolTrue : VExpr.boolTrue.instL ls = VExpr.boolTrue := by
-  simp [boolTrue, instL]
-
 theorem TrExprS.boolLit (henv : env.HasPrimitives) (H : env.contains ``Bool) (b : Bool) :
     TrExprS env Us Δ (toExpr b) (.boolLit b) ∧
     env.HasType Us.length Δ.toCtx (.boolLit b) .bool := by
@@ -1901,20 +2159,7 @@ theorem TrExprS.boolLit (henv : env.HasPrimitives) (H : env.contains ``Bool) (b 
   | false => exact TrExprS.boolFalse henv H
   | true => exact TrExprS.boolTrue henv H
 
-@[simp] theorem VExpr.instL_boolLit : (VExpr.boolLit b).instL ls = VExpr.boolLit b := by
-  cases b <;> simp [boolLit]
-
 theorem FVarsIn.boolLit {b : Bool} : FVarsIn P (toExpr b) := by cases b <;> exact nofun
-
-theorem VExpr.WF.boolLit_has_type (wf : env.Ordered) (henv : env.HasPrimitives)
-    (hΓ : OnCtx Γ (env.IsType U)) (H : VExpr.WF env U Γ (.boolLit b)) : env.contains ``Bool := by
-  suffices env.HasType U Γ (.boolLit b) .bool by
-    have ⟨_, H⟩ := this.isType wf hΓ
-    have ⟨_, H, _⟩ := HasType.const_inv wf hΓ H
-    exact ⟨_, H⟩
-  cases b with have ⟨_, h1, h2, h3⟩ := let ⟨_, H⟩ := H; HasType.const_inv wf hΓ H
-  | false => cases henv.boolFalse h1; exact .const h1 h2 h3
-  | true => cases henv.boolTrue h1; exact .const h1 h2 h3
 
 theorem TrExprS.lit_has_type (H : TrExprS env Us Δ (.lit l) e') : env.ContainsLits l :=
   let .lit H _ := H; H
@@ -1932,9 +2177,6 @@ theorem TrExprS.natZero (henv : env.HasPrimitives) (H : env.contains ``Nat) :
   cases henv.natZero H
   exact ⟨.const H rfl rfl, .const H nofun rfl⟩
 
-@[simp] theorem VExpr.instL_natZero : VExpr.natZero.instL ls = .natZero := by
-  simp [natZero, instL]
-
 theorem TrExprS.natSucc (henv : env.HasPrimitives) (H : env.contains ``Nat) :
     TrExprS env Us Δ .natSucc .natSucc ∧
     env.HasType Us.length Δ.toCtx .natSucc (.forallE .nat .nat) := by
@@ -1942,18 +2184,12 @@ theorem TrExprS.natSucc (henv : env.HasPrimitives) (H : env.contains ``Nat) :
   cases henv.natSucc H
   exact ⟨.const H rfl rfl, .const H nofun rfl⟩
 
-@[simp] theorem VExpr.instL_natSucc : VExpr.natSucc.instL ls = .natSucc := by
-  simp [natSucc, instL]
-
 theorem TrExprS.natLit (henv : env.HasPrimitives) (H : env.contains ``Nat) (n) :
     TrExprS env Us Δ (.lit (.natVal n)) (.natLit n) ∧
     env.HasType Us.length Δ.toCtx (.natLit n) .nat := by
   induction n with
   | zero => exact let ⟨h1, h2⟩ := natZero henv H; ⟨.lit H h1, h2⟩
   | succ n ih => exact let ⟨h1, h2⟩ := natSucc henv H; ⟨.lit H (.app h2 ih.2 h1 ih.1), .app h2 ih.2⟩
-
-@[simp] theorem VExpr.instL_natLit : (VExpr.natLit n).instL ls = VExpr.natLit n := by
-  induction n <;> simp [*, natLit, instL]
 
 theorem TrExprS.stringOfList (henv : env.HasPrimitives) (H : env.contains ``String.ofList) :
     TrExprS env Us Δ (.const ``String.ofList []) .stringOfList ∧
@@ -1968,14 +2204,6 @@ theorem TrExprS.charOfNat (henv : env.HasPrimitives) (H : env.contains ``Char.of
   let ⟨_, H⟩ := H
   cases henv.charOfNat H
   exact ⟨.const H rfl rfl, .const H nofun rfl⟩
-
-theorem VEnv.HasPrimitives.nat_of_charOfNat (wf : Ordered env) (henv : env.HasPrimitives)
-    (H : env.contains ``Char.ofNat) : env.contains ``Nat := by
-  let ⟨_, H⟩ := H
-  have ⟨_, H⟩ := wf.constWF (henv.charOfNat H ▸ H)
-  let ⟨⟨_, H⟩, _⟩ := H.forallE_inv wf
-  let ⟨_, H, _⟩ := H.const_inv wf trivial
-  exact ⟨_, H⟩
 
 theorem TrExprS.listChar (wf : env.Ordered) (henv : env.HasPrimitives)
     (H : env.contains ``String.ofList) :
@@ -2046,10 +2274,6 @@ theorem TrExprS.trLiteral (wf : env.Ordered) (henv : env.HasPrimitives)
     have a := TrExprS.stringOfList henv H.2 (Us := Us) (Δ := Δ)
     have b := TrExprS.listCharLit wf henv H (Us := Us) (Δ := Δ) s.toList
     exact ⟨.lit H (.app a.2 b.2 a.1 (String.foldr_eq .. ▸ b.1)), a.2.app b.2⟩
-
-def VLocalDecl.ClosedN : VLocalDecl → (k : Nat := 0) → Prop
-  | .vlam A, k => A.ClosedN k
-  | .vlet A e, k => A.ClosedN k ∧ e.ClosedN k
 
 def VLCtx.Closed : VLCtx → Prop
   | [] => True
@@ -2396,3 +2620,41 @@ theorem AppStack.append {e : Expr} (H : AppStack env Us Δ (e.mkAppList as) e' b
 
 theorem AppStack.build {e : Expr} (H : TrExprS env Us Δ (e.mkAppList as) e') :
     ∃ e', AppStack env Us Δ e e' as := by simpa using AppStack.append (.head H)
+
+/-- Recover the pointwise strict translations of an application spine and
+rebuild the complete translated application.  Unlike the checker-facing
+`AppStack.toSpineWF`, this purely syntactic projection needs no expected
+function type and is therefore available to WHNF reduction. -/
+theorem AppStack.argsTranslation
+    (H : AppStack env Us Δ f f' args) :
+    ∃ args', args.Forall₂ (TrExprS env Us Δ) args' ∧
+      TrExprS env Us Δ (f.mkAppList args) (VExpr.appN f' args') := by
+  induction H with
+  | head h => exact ⟨[], .nil, by simpa⟩
+  | app hfun harg hf ha H ih =>
+    obtain ⟨args', hargs, hfull⟩ := ih
+    refine ⟨_ :: args', .cons ha hargs, ?_⟩
+    simpa [Expr.mkAppList, VExpr.appN] using hfull
+
+/-- A successful lookup on the left side of a pointwise list relation has a
+related lookup at the same position on the right. -/
+theorem List.Forall₂.getElem?_left
+    {α : Type u} {β : Type v} {R : α → β → Prop}
+    {xs : List α} {ys : List β} {i : Nat} {x : α}
+    (H : List.Forall₂ R xs ys) (hx : xs[i]? = some x) :
+    ∃ y : β, ys[i]? = some y ∧ R x y := by
+  induction H generalizing i with
+  | nil => simp at hx
+  | cons hxy _ ih =>
+    cases i with
+    | zero =>
+      simp at hx
+      subst x
+      exact ⟨_, rfl, hxy⟩
+    | succ i => simpa using ih (i := i) (by simpa using hx)
+
+/--
+info: 'Lean4Lean.TrExprS.toConstructor_ready' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrExprS.toConstructor_ready

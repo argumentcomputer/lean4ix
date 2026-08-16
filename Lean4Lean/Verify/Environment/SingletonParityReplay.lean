@@ -22,6 +22,7 @@ structure SingletonReplayArtifact where
   source : VInductDecl
   inputMap : ConstMap
   inputEnv : VEnv
+  inputMapWF : inputMap.WF
   outputMap : ConstMap
   outputEnv : VEnv
   inputOrdered : inputEnv.Ordered
@@ -150,6 +151,7 @@ def natReplay07 : SingletonReplayArtifact where
   source := natDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := natMap
   outputEnv := natFinalEnv
   inputOrdered := .empty
@@ -161,6 +163,7 @@ def eqReplay07 : SingletonReplayArtifact where
   source := eqDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := eqMap
   outputEnv := eqFinalEnv
   inputOrdered := .empty
@@ -172,6 +175,7 @@ def accReplay07 : SingletonReplayArtifact where
   source := accDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := accMap
   outputEnv := accFinalEnv
   inputOrdered := .empty
@@ -183,6 +187,7 @@ def aliasFormerReplay07 : SingletonReplayArtifact where
   source := aliasFormerRawDecl
   inputMap := typeFamilyAliasMap
   inputEnv := typeFamilyAliasEnv
+  inputMapWF := typeFamilyAliasMap_wf
   outputMap := aliasFormerMap
   outputEnv := aliasFormerFinalEnv
   inputOrdered := typeFamilyAliasEnv_ordered
@@ -194,6 +199,7 @@ def aliasRecReplay07 : SingletonReplayArtifact where
   source := aliasRecRawDecl
   inputMap := recAliasMap
   inputEnv := recAliasEnv
+  inputMapWF := recAliasMap_wf
   outputMap := aliasRecMap
   outputEnv := aliasRecFinalEnv
   inputOrdered := recAliasEnv_ordered
@@ -205,17 +211,19 @@ def normalizationMatrixReplay07 : SingletonReplayArtifact where
   source := normalizationMatrixRawDecl
   inputMap := matrixAliasMap
   inputEnv := normalizationMatrixAliasEnv
+  inputMapWF := matrixAliasMap_wf
   outputMap := normalizationMatrixMap
   outputEnv := normalizationMatrixFinalEnv
   inputOrdered := normalizationMatrixAliasEnv_ordered
   transaction := normalizationMatrix_addInduct
   aligned := normalizationMatrix_aligned
 
-noncomputable def annotatedPiReplay07 : SingletonReplayArtifact where
+def annotatedPiReplay07 : SingletonReplayArtifact where
   label := ``AnnotatedPi
   source := annotatedPiRawDecl
   inputMap := _
   inputEnv := outParamEnv
+  inputMapWF := annotatedReplayInputMap_wf
   outputMap := _
   outputEnv := annotatedPiFinalEnv
   inputOrdered := outParamEnv_ordered
@@ -227,6 +235,7 @@ def annotatedParamReplay07 : SingletonReplayArtifact where
   source := annotatedParamRawDecl
   inputMap := _
   inputEnv := outParamEnv
+  inputMapWF := annotatedReplayInputMap_wf
   outputMap := _
   outputEnv := annotatedParamFinalEnv
   inputOrdered := outParamEnv_ordered
@@ -251,15 +260,13 @@ theorem boolDeclWF07 : boolDecl.WF VEnv.empty := by
     · constructor
       · change True
         trivial
-      · change VExpr.sort (.succ .zero) = VExpr.sort (.succ .zero)
-        rfl
+      · exact .nil
     · have hctor' := List.mem_singleton.1 hctor
       subst ctor
       constructor
       · change True
         trivial
-      · change VExpr.sort (.succ .zero) = VExpr.sort (.succ .zero)
-        rfl
+      · exact .nil
 
 def boolGenerationWF07 : boolGenerationChecked.WF VEnv.empty := by
   exact (boolChecked.wf_of_decl boolDeclWF07).identityGeneration .empty
@@ -431,6 +438,7 @@ def boolReplay07 : SingletonReplayArtifact where
   source := boolDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := boolMap07
   outputEnv := boolFinalEnv07
   inputOrdered := .empty
@@ -449,7 +457,7 @@ theorem listCheckedWF07 : listChecked.WF VEnv.empty := by
     · constructor
       · change True
         trivial
-      · rfl
+      · exact .nil
     · have hctor' := List.mem_singleton.1 hctor
       subst ctor
       constructor
@@ -467,9 +475,9 @@ theorem listCheckedWF07 : listChecked.WF VEnv.empty := by
         · exact .inl rfl
         constructor
         · intro _
-          rfl
+          exact .nil
         · trivial
-      · rfl
+      · exact .nil
 
 def listGenerationWF07 : listGenerationChecked.WF VEnv.empty := by
   exact listCheckedWF07.identityGeneration .empty
@@ -655,6 +663,7 @@ def listReplay07 : SingletonReplayArtifact where
   source := listDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := listMap07
   outputEnv := listFinalEnv07
   inputOrdered := .empty
@@ -678,7 +687,7 @@ theorem optionDeclWF07 : optionDecl.WF VEnv.empty := by
     · constructor
       · change True
         trivial
-      · rfl
+      · exact .nil
     · have hctor' := List.mem_singleton.1 hctor
       subst ctor
       constructor
@@ -691,7 +700,7 @@ theorem optionDeclWF07 : optionDecl.WF VEnv.empty := by
         · intro recursive
           contradiction
         · trivial
-      · rfl
+      · exact .nil
 
 def optionGenerationWF07 : optionGenerationChecked.WF VEnv.empty := by
   exact (optionChecked.wf_of_decl optionDeclWF07).identityGeneration .empty
@@ -877,6 +886,7 @@ def optionReplay07 : SingletonReplayArtifact where
   source := optionDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := optionMap07
   outputEnv := optionFinalEnv07
   inputOrdered := .empty
@@ -913,7 +923,7 @@ theorem prodCheckedWF07 : prodChecked.WF VEnv.empty := by
       · intro recursive
         contradiction
       · trivial
-    · rfl
+    · exact .nil
 
 def prodGenerationWF07 : prodGenerationChecked.WF VEnv.empty := by
   exact prodCheckedWF07.identityGeneration .empty
@@ -1051,6 +1061,7 @@ def prodReplay07 : SingletonReplayArtifact where
   source := prodDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := prodMap07
   outputEnv := prodFinalEnv07
   inputOrdered := .empty
@@ -1081,7 +1092,7 @@ theorem andCheckedWF07 : andChecked.WF VEnv.empty := by
       · intro recursive
         contradiction
       · trivial
-    · rfl
+    · exact .nil
 
 def andGenerationWF07 : andGenerationChecked.WF VEnv.empty := by
   exact andCheckedWF07.identityGeneration .empty
@@ -1219,6 +1230,7 @@ def andReplay07 : SingletonReplayArtifact where
   source := andDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := andMap07
   outputEnv := andFinalEnv07
   inputOrdered := .empty
@@ -1243,7 +1255,7 @@ theorem orCheckedWF07 : orChecked.WF VEnv.empty := by
         · intro recursive
           contradiction
         · trivial
-      · rfl
+      · exact .nil
     · have hctor' := List.mem_singleton.1 hctor
       subst ctor
       constructor
@@ -1255,7 +1267,7 @@ theorem orCheckedWF07 : orChecked.WF VEnv.empty := by
         · intro recursive
           contradiction
         · trivial
-      · rfl
+      · exact .nil
 
 def orGenerationWF07 : orGenerationChecked.WF VEnv.empty := by
   exact orCheckedWF07.identityGeneration .empty
@@ -1437,6 +1449,7 @@ def orReplay07 : SingletonReplayArtifact where
   source := orDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := orMap07
   outputEnv := orFinalEnv07
   inputOrdered := .empty
@@ -1463,8 +1476,7 @@ theorem heqCheckedWF07 : heqChecked.WF VEnv.empty := by
         (.forallE (.sort (.param 0))
           (.forallE (.bvar 0) (.sort .zero)))
         [.bvar 1, .bvar 0] (.sort .zero)
-      refine ⟨_, _, rfl, (by type_tac), ?_⟩
-      exact ⟨_, _, rfl, (by type_tac), rfl⟩
+      exact .cons (by type_tac) <| .cons (by type_tac) .nil
 
 def heqGenerationWF07 : heqGenerationChecked.WF VEnv.empty := by
   exact heqCheckedWF07.identityGeneration .empty
@@ -1602,6 +1614,7 @@ def heqReplay07 : SingletonReplayArtifact where
   source := heqDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := heqMap07
   outputEnv := heqFinalEnv07
   inputOrdered := .empty
@@ -1889,7 +1902,7 @@ theorem finCheckedWF07 : finChecked.WF finInputEnv07 := by
       · intro recursive
         contradiction
       · trivial
-    · rfl
+    · exact .nil
 
 def finGenerationWF07 : finGenerationChecked.WF finInputEnv07 := by
   exact finCheckedWF07.identityGeneration finInputEnv_ordered07
@@ -2053,6 +2066,7 @@ def finReplay07 : SingletonReplayArtifact where
   source := finDecl
   inputMap := finInputMap07
   inputEnv := finInputEnv07
+  inputMapWF := finInputMapWF07
   outputMap := finMap07
   outputEnv := finFinalEnv07
   inputOrdered := finInputEnv_ordered07
@@ -2258,7 +2272,7 @@ theorem vectorCheckedWF07 : vectorChecked.WF vectorInputEnv07 := by
       · intro recursive
         contradiction
       · trivial
-    · rfl
+    · exact .nil
 
 def vectorGenerationWF07 :
     vectorGenerationChecked.WF vectorInputEnv07 := by
@@ -2430,6 +2444,7 @@ def vectorReplay07 : SingletonReplayArtifact where
   source := vectorDecl
   inputMap := vectorInputMap07
   inputEnv := vectorInputEnv07
+  inputMapWF := vectorInputMapWF07
   outputMap := vectorMap07
   outputEnv := vectorFinalEnv07
   inputOrdered := vectorInputEnv_ordered07
@@ -2570,6 +2585,7 @@ def punitReplay07 : SingletonReplayArtifact where
   source := punitDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := punitMap07
   outputEnv := punitFinalEnv07
   inputOrdered := .empty
@@ -2669,6 +2685,7 @@ def emptyReplay07 : SingletonReplayArtifact where
   source := emptyDecl
   inputMap := {}
   inputEnv := .empty
+  inputMapWF := SMap.WF.empty
   outputMap := emptyMap07
   outputEnv := emptyFinalEnv07
   inputOrdered := .empty
@@ -2686,13 +2703,13 @@ def singletonFixedReplays : List SingletonReplayArtifact :=
 
 /-- The focused non-identity normalization rows use the same public replay
 artifact as the standard-library matrix. -/
-noncomputable def singletonNormalizationReplays :
+def singletonNormalizationReplays :
     List SingletonReplayArtifact :=
   [aliasFormerReplay07, aliasRecReplay07, normalizationMatrixReplay07,
     annotatedPiReplay07, annotatedParamReplay07]
 
 /-- The sole public L4L-07 environment replay inventory. -/
-noncomputable def singletonReplayMatrix : List SingletonReplayArtifact :=
+def singletonReplayMatrix : List SingletonReplayArtifact :=
   singletonFixedReplays ++ singletonNormalizationReplays
 
 example : singletonFixedReplays.map (·.label) =
@@ -2719,7 +2736,6 @@ example : singletonReplayMatrix.length = 19 := rfl
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.SingletonReplayArtifact.outputOrdered' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound]
 -/
@@ -2728,7 +2744,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.SingletonReplayArtifact.outputOrdered' 
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.singletonFixedReplays' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
@@ -2762,9 +2777,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonNormalizationReplays' depends 
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -2795,9 +2813,12 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonReplayMatrix' depends on axiom
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

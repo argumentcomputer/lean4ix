@@ -1,4 +1,5 @@
 import Lean4Lean.Verify.Environment.IndexedVecConsReplay
+import Lean4Lean.Verify.Name
 
 /-!
 # IndexedVec outer normalization-candidate replay
@@ -1320,13 +1321,13 @@ theorem indexedVecValidationConsLoopTail :
   simp only [ReaderT.bind, Bind.bind]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationTailEnsureTypeM]
-  simp only [Except.bind, Expr.sortLevel!]
-  rw [show AddInductive.levelStructGe
+  simp only [Except.bind]
+  rw [if_pos (show AddInductive.levelStructGe
       indexedVecCandidateInductiveStats.resultLevel
-      (.succ (.param `u)) = true by
-    simp [indexedVecCandidateInductiveStats_resultLevel,
-      AddInductive.levelStructGe, AddInductive.levelStructEq]]
-  simp only [if_true, Bool.not_false,
+      (Expr.sort (.succ (.param `u))).sortLevel! = true from by
+    simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe, AddInductive.levelStructEq])]
+  simp only [↓reduceIte, Bool.not_false,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
   rw [indexedVecValidationTailPositivity]
@@ -1357,13 +1358,13 @@ theorem indexedVecValidationConsLoopHead :
   simp only [ReaderT.bind, Bind.bind]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationAlphaEnsureTypeM]
-  simp only [Except.bind, Expr.sortLevel!]
-  rw [show AddInductive.levelStructGe
+  simp only [Except.bind]
+  rw [if_pos (show AddInductive.levelStructGe
       indexedVecCandidateInductiveStats.resultLevel
-      (.succ (.param `u)) = true by
-    simp [indexedVecCandidateInductiveStats_resultLevel,
-      AddInductive.levelStructGe, AddInductive.levelStructEq]]
-  simp only [if_true, Bool.not_false,
+      (Expr.sort (.succ (.param `u))).sortLevel! = true from by
+    simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe, AddInductive.levelStructEq])]
+  simp only [↓reduceIte, Bool.not_false,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
   rw [indexedVecValidationAlphaPositivity]
@@ -1400,13 +1401,13 @@ theorem indexedVecValidationConsLoopN :
   simp only [ReaderT.bind, Bind.bind]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationNatEnsureTypeM]
-  simp only [Except.bind, Expr.sortLevel!]
-  rw [show AddInductive.levelStructGe
-      indexedVecCandidateInductiveStats.resultLevel (.succ .zero) =
-      true by
-    simp [indexedVecCandidateInductiveStats_resultLevel,
-      AddInductive.levelStructGe]]
-  simp only [if_true, Bool.not_false,
+  simp only [Except.bind]
+  rw [if_pos (show AddInductive.levelStructGe
+      indexedVecCandidateInductiveStats.resultLevel
+      (Expr.sort (.succ .zero)).sortLevel! = true from by
+    simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe])]
+  simp only [↓reduceIte, Bool.not_false,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
   rw [indexedVecValidationNatPositivity]
@@ -1507,11 +1508,12 @@ theorem indexedVecValidationConsUniverseLoopTail :
   simp only [ReaderT.bind, Bind.bind, AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationTailEnsureTypeM]
   simp only [Except.bind]
-  simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
-    indexedVecCandidateInductiveStats_resultLevel,
-    AddInductive.levelStructGe, AddInductive.levelStructEq, Pure.pure]
-  simp only [ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
-    Except.pure, Except.bind]
+  rw [if_pos (show AddInductive.constructorUniverseSemanticGe
+      indexedVecCandidateInductiveStats.resultLevel
+      (Expr.sort (.succ (.param `u))).sortLevel! = true from by
+    simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
+      indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe, AddInductive.levelStructEq])]
   rw [AddInductive.withLocalDecl_apply]
   simpa [indexedVecValidationTailContext,
     AddInductive.Context.pushLocalDecl,
@@ -1533,11 +1535,12 @@ theorem indexedVecValidationConsUniverseLoopHead :
   simp only [ReaderT.bind, Bind.bind, AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationAlphaEnsureTypeM]
   simp only [Except.bind]
-  simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
-    indexedVecCandidateInductiveStats_resultLevel,
-    AddInductive.levelStructGe, AddInductive.levelStructEq, Pure.pure]
-  simp only [ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
-    Except.pure, Except.bind]
+  rw [if_pos (show AddInductive.constructorUniverseSemanticGe
+      indexedVecCandidateInductiveStats.resultLevel
+      (Expr.sort (.succ (.param `u))).sortLevel! = true from by
+    simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
+      indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe, AddInductive.levelStructEq])]
   rw [AddInductive.withLocalDecl_apply]
   simpa [indexedVecValidationHeadContext,
     AddInductive.Context.pushLocalDecl,
@@ -1560,11 +1563,12 @@ theorem indexedVecValidationConsUniverseLoopN :
   simp only [ReaderT.bind, Bind.bind, AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationNatEnsureTypeM]
   simp only [Except.bind]
-  simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
-    indexedVecCandidateInductiveStats_resultLevel,
-    AddInductive.levelStructGe, Pure.pure]
-  simp only [ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
-    Except.pure, Except.bind]
+  rw [if_pos (show AddInductive.constructorUniverseSemanticGe
+      indexedVecCandidateInductiveStats.resultLevel
+      (Expr.sort (.succ .zero)).sortLevel! = true from by
+    simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
+      indexedVecCandidateInductiveStats_resultLevel,
+      AddInductive.levelStructGe])]
   rw [AddInductive.withLocalDecl_apply]
   simpa [indexedVecValidationNContext,
     AddInductive.Context.pushLocalDecl,
@@ -1643,10 +1647,12 @@ theorem indexedVecValidationEmptyDoesNotContainNil :
 theorem indexedVecValidationNilSetDoesNotContainCons :
     ((∅ : NameSet).insert indexedVecKernelNil.name).contains
       indexedVecKernelCons.name = false := by
-  simp +decide [indexedVecKernelNil, indexedVecKernelCons,
+  simp only [indexedVecKernelNil, indexedVecKernelCons,
     indexedVecNilInfo, indexedVecConsInfo,
-    ConstantInfo.name, NameSet.contains, NameSet.insert,
-    Std.TreeSet.contains_insert]
+    ConstantInfo.name, ConstantInfo.toConstantVal,
+    NameSet.contains, NameSet.insert]
+  rw [Std.TreeSet.contains_insert (t := (∅ : NameSet))]
+  simp +decide [beq_iff_eq, Std.LawfulBEqCmp.compare_eq_iff_beq]
 
 set_option linter.unusedSimpArgs false in
 theorem indexedVecValidationCheckConstructors :
@@ -1658,14 +1664,9 @@ theorem indexedVecValidationCheckConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationGetEnvM]
   simp only [Except.bind]
-  unfold AddInductive.checkConstructorFold
-  simp only [indexedVecKernelType,
-    Std.Legacy.Range.forIn'_eq_forIn'_range', Std.Legacy.Range.size,
-    List.range', List.forIn'_cons, List.forIn'_nil,
-    List.forIn_cons, List.forIn_nil,
-    List.size_toArray, List.length_cons, List.length_nil,
-    List.getElem_toArray, List.getElem_cons_zero,
-    Nat.sub_zero, Nat.zero_add, Nat.add_sub_cancel, Nat.div_one]
+  unfold AddInductive.checkConstructorsLoop AddInductive.checkConstructorFold
+  simp only [indexedVecKernelType, List.toList_toArray,
+    ReaderT.bind, Bind.bind, Except.bind]
   rw [indexedVecValidationEmptyDoesNotContainNil]
   simp only [Bool.false_eq_true, if_false,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
@@ -1739,7 +1740,6 @@ theorem indexedVecNormalizationCandidateProduced :
 
 /--
 info: 'Lean4Lean.InductiveReplayFixtures.indexedVecNormalizationCandidateProduced' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  Expr.eqv_eq,

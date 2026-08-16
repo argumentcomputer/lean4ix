@@ -574,6 +574,11 @@ theorem treeStage :
     VEnv.empty.stageInductiveTypes treeDecl.types = some treeBlockEnv := by
   rfl
 
+theorem empty_le_treeBlockEnv : VEnv.empty ≤ treeBlockEnv where
+  constants h := by simp [VEnv.empty] at h
+  defeqs h := h.elim
+  structEtas h := h.elim
+
 theorem treeFamilyTypeWF (type : VInductiveType)
     (h : type = treeType ∨ type = treeListType) :
     type.type.WF VEnv.empty type.uvars [] := by
@@ -636,7 +641,7 @@ theorem treeLeafSemantic :
   rw [show (CheckedCtor.ofBlock treeDecl treeType.ctors[0]).resultIndices =
       [] by rfl]
   exact ⟨⟨⟨.succ (.param 0), .bvar .zero,
-    .inr (VLevel.le_refl _)⟩, trivial⟩, rfl⟩
+    .inr (VLevel.le_refl _)⟩, trivial⟩, .nil⟩
 
 theorem treeNodeSemantic :
     let constructor := CheckedCtor.ofBlock treeDecl treeType.ctors[1]
@@ -659,7 +664,7 @@ theorem treeNodeSemantic :
         indices := [] } : RecArg)] by rfl]
   rw [show (CheckedCtor.ofBlock treeDecl treeType.ctors[1]).resultIndices =
       [] by rfl]
-  exact ⟨⟨⟨rfl, trivial, rfl⟩, trivial⟩, rfl⟩
+  exact ⟨⟨⟨rfl, trivial, .nil⟩, trivial⟩, .nil⟩
 
 theorem treeBranchSemantic :
     let constructor := CheckedCtor.ofBlock treeDecl treeType.ctors[2]
@@ -684,9 +689,9 @@ theorem treeBranchSemantic :
   rw [show (CheckedCtor.ofBlock treeDecl treeType.ctors[2]).resultIndices =
       [] by rfl]
   exact ⟨
-    ⟨⟨rfl, ⟨⟨⟨.succ (.param 0), .bvar .zero⟩, trivial⟩, rfl⟩⟩,
+    ⟨⟨rfl, ⟨⟨⟨.succ (.param 0), .bvar .zero⟩, trivial⟩, .nil⟩⟩,
       trivial⟩,
-    rfl⟩
+    .nil⟩
 
 theorem treeListNilSemantic :
     let constructor := CheckedCtor.ofBlock treeDecl treeListType.ctors[0]
@@ -705,7 +710,7 @@ theorem treeListNilSemantic :
       [] by rfl]
   rw [show (CheckedCtor.ofBlock treeDecl treeListType.ctors[0]).resultIndices =
       [] by rfl]
-  exact ⟨trivial, rfl⟩
+  exact ⟨trivial, .nil⟩
 
 theorem treeListConsSemantic :
     let constructor := CheckedCtor.ofBlock treeDecl treeListType.ctors[1]
@@ -735,9 +740,9 @@ theorem treeListConsSemantic :
   rw [show (CheckedCtor.ofBlock treeDecl treeListType.ctors[1]).resultIndices =
       [] by rfl]
   exact ⟨
-    ⟨⟨rfl, trivial, rfl⟩,
-      ⟨⟨rfl, trivial, rfl⟩, trivial⟩⟩,
-    rfl⟩
+    ⟨⟨rfl, trivial, .nil⟩,
+      ⟨⟨rfl, trivial, .nil⟩, trivial⟩⟩,
+    .nil⟩
 
 theorem treeCheckedBlockWF :
     treeChecked.WF VEnv.empty (.succ (.param 0)) := by
@@ -875,8 +880,7 @@ theorem indexedTreeLeafSemantic :
         some InductiveFixtures.natType.toVConstant := rfl
     have hZero : natFinalEnv.constants ``Nat.zero =
         some InductiveFixtures.natType.ctors[0].toVConstant := rfl
-    exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-      (by type_tac), rfl⟩
+    exact .cons (by type_tac) .nil
 
 theorem indexedTreeNodeSemantic :
     let constructor := CheckedCtor.ofBlock indexedTreeDecl
@@ -914,10 +918,8 @@ theorem indexedTreeNodeSemantic :
   refine ⟨?_, ?_⟩
   · refine ⟨⟨.succ .zero, (by type_tac),
         .inr (VLevel.succ_le_succ VLevel.zero_le)⟩, ?_⟩
-    exact ⟨⟨rfl, trivial, ⟨.const ``Nat [],
-      .sort (.succ (.param 0)), rfl, (by type_tac), rfl⟩⟩, trivial⟩
-  · exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-      (by type_tac), rfl⟩
+    exact ⟨⟨rfl, trivial, .cons (by type_tac) .nil⟩, trivial⟩
+  · exact .cons (by type_tac) .nil
 
 theorem indexedTreeListNilSemantic :
     let constructor := CheckedCtor.ofBlock indexedTreeDecl
@@ -945,8 +947,7 @@ theorem indexedTreeListNilSemantic :
       some InductiveFixtures.natType.toVConstant := rfl
   have hZero : natFinalEnv.constants ``Nat.zero =
       some InductiveFixtures.natType.ctors[0].toVConstant := rfl
-  exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-    (by type_tac), rfl⟩
+  exact .cons (by type_tac) .nil
 
 theorem indexedTreeListConsSemantic :
     let constructor := CheckedCtor.ofBlock indexedTreeDecl
@@ -992,12 +993,9 @@ theorem indexedTreeListConsSemantic :
   refine ⟨?_, ?_⟩
   · refine ⟨⟨.succ .zero, (by type_tac),
         .inr (VLevel.succ_le_succ VLevel.zero_le)⟩, ?_⟩
-    refine ⟨⟨rfl, trivial, ⟨.const ``Nat [],
-      .sort (.succ (.param 0)), rfl, (by type_tac), rfl⟩⟩, ?_⟩
-    exact ⟨⟨rfl, trivial, ⟨.const ``Nat [],
-      .sort (.succ (.param 0)), rfl, (by type_tac), rfl⟩⟩, trivial⟩
-  · exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-      (by type_tac), rfl⟩
+    refine ⟨⟨rfl, trivial, .cons (by type_tac) .nil⟩, ?_⟩
+    exact ⟨⟨rfl, trivial, .cons (by type_tac) .nil⟩, trivial⟩
+  · exact .cons (by type_tac) .nil
 
 theorem indexedTreeCheckedBlockWF :
     indexedTreeChecked.WF natFinalEnv (.succ (.param 0)) := by
@@ -1106,7 +1104,7 @@ theorem treeLeafGenerationWF :
   · intro recursive hrecursive
     change recursive ∈ [] at hrecursive
     nomatch hrecursive
-  · exact treeLeafSemantic.2
+  · exact treeLeafSemantic.2.mono empty_le_treeBlockEnv
 
 theorem treeNodeGenerationWF :
     NormalizedBlockCtor.WF treeGeneration treeGeneration.flatCtors[1]
@@ -1160,8 +1158,8 @@ theorem treeNodeGenerationWF :
     refine ⟨treeGeneration.families[1], ?_, rfl, ?_, ?_⟩
     · exact .tail _ (.head _)
     · exact ⟨.app (.const ``TreeList [.param 0]) (.bvar 0), rfl, rfl⟩
-    · exact ⟨trivial, rfl⟩
-  · exact treeNodeSemantic.2
+    · exact ⟨trivial, .nil⟩
+  · exact treeNodeSemantic.2.mono empty_le_treeBlockEnv
 
 theorem treeBranchGenerationWF :
     NormalizedBlockCtor.WF treeGeneration treeGeneration.flatCtors[2]
@@ -1202,7 +1200,7 @@ theorem treeBranchGenerationWF :
     emittedResult := hresult
     owner := ?_
     recursive := ?_
-    resultSpine := treeBranchSemantic.2 }
+    resultSpine := treeBranchSemantic.2.mono empty_le_treeBlockEnv }
   · refine ⟨treeGeneration.families[0], ?_, rfl, rfl, rfl⟩
     exact .head _
   · intro recursive hrecursive
@@ -1217,7 +1215,7 @@ theorem treeBranchGenerationWF :
     · exact .tail _ (.head _)
     · exact ⟨.forallE (.bvar 0)
         (.app (.const ``TreeList [.param 0]) (.bvar 1)), rfl, rfl⟩
-    · exact ⟨⟨⟨_, VEnv.HasType.bvar .zero⟩, trivial⟩, rfl⟩
+    · exact ⟨⟨⟨_, VEnv.HasType.bvar .zero⟩, trivial⟩, .nil⟩
 
 theorem treeListNilGenerationWF :
     NormalizedBlockCtor.WF treeGeneration treeGeneration.flatCtors[3]
@@ -1243,7 +1241,7 @@ theorem treeListNilGenerationWF :
     emittedResult := hresult
     owner := ?_
     recursive := ?_
-    resultSpine := treeListNilSemantic.2 }
+    resultSpine := treeListNilSemantic.2.mono empty_le_treeBlockEnv }
   · refine ⟨treeGeneration.families[1], ?_, rfl, rfl, rfl⟩
     exact .tail _ (.head _)
   · intro recursive hrecursive
@@ -1292,7 +1290,7 @@ theorem treeListConsGenerationWF :
     emittedResult := hresult
     owner := ?_
     recursive := ?_
-    resultSpine := treeListConsSemantic.2 }
+    resultSpine := treeListConsSemantic.2.mono empty_le_treeBlockEnv }
   · refine ⟨treeGeneration.families[1], ?_, rfl, rfl, rfl⟩
     exact .tail _ (.head _)
   · intro recursive hrecursive
@@ -1310,11 +1308,11 @@ theorem treeListConsGenerationWF :
     · refine ⟨treeGeneration.families[0], ?_, rfl, ?_, ?_⟩
       · exact .head _
       · exact ⟨.app (.const ``Tree [.param 0]) (.bvar 0), rfl, rfl⟩
-      · exact ⟨trivial, rfl⟩
+      · exact ⟨trivial, .nil⟩
     · refine ⟨treeGeneration.families[1], ?_, rfl, ?_, ?_⟩
       · exact .tail _ (.head _)
       · exact ⟨.app (.const ``TreeList [.param 0]) (.bvar 1), rfl, rfl⟩
-      · exact ⟨trivial, rfl⟩
+      · exact ⟨trivial, .nil⟩
 
 theorem treeBlockGenerationWF :
     treeGeneration.WF VEnv.empty treeBlockEnv := by
@@ -1531,8 +1529,7 @@ theorem indexedTreeNodeGenerationWF :
         (.app (.const ``IndexedTreeList [.param 0]) (.bvar 1))
         (.bvar 0), rfl, rfl⟩
     · refine ⟨trivial, ?_⟩
-      exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-        VEnv.HasType.bvar .zero, rfl⟩
+      exact .cons (VEnv.HasType.bvar .zero) .nil
 
 theorem indexedTreeListConsGenerationWF :
     NormalizedBlockCtor.WF indexedTreeGeneration
@@ -1628,16 +1625,14 @@ theorem indexedTreeListConsGenerationWF :
           (.app (.const ``IndexedTree [.param 0]) (.bvar 1))
           (.bvar 0), rfl, rfl⟩
       · refine ⟨trivial, ?_⟩
-        exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-          VEnv.HasType.bvar .zero, rfl⟩
+        exact .cons (VEnv.HasType.bvar .zero) .nil
     · refine ⟨indexedTreeGeneration.families[1], ?_, rfl, ?_, ?_⟩
       · exact .tail _ (.head _)
       · exact ⟨.app
           (.app (.const ``IndexedTreeList [.param 0]) (.bvar 2))
           (.bvar 1), rfl, rfl⟩
       · refine ⟨trivial, ?_⟩
-        exact ⟨.const ``Nat [], .sort (.succ (.param 0)), rfl,
-          VEnv.HasType.bvar (.succ .zero), rfl⟩
+        exact .cons (VEnv.HasType.bvar (.succ .zero)) .nil
 
 theorem indexedTreeBlockGenerationWF :
     indexedTreeGeneration.WF natFinalEnv indexedTreeBlockEnv := by
@@ -3120,12 +3115,11 @@ info: 'Lean4Lean.MutualInductiveReplayFixtures.indexedTreeFinalEnv_ordered' depe
 #guard_msgs in
 #print axioms indexedTreeFinalEnv_ordered
 
-/- The implementation metadata replay inherits only the already classified
-Verify relation and persistent-map contracts; fixture-local native-decision
+/- The implementation metadata replay is now `sorryAx`-free and inherits only
+the already classified persistent-map contracts; fixture-local native-decision
 axioms are deliberately absent. -/
 /--
 info: 'Lean4Lean.MutualInductiveReplayFixtures.treeAddInductBlock' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
@@ -3137,7 +3131,6 @@ info: 'Lean4Lean.MutualInductiveReplayFixtures.treeAddInductBlock' depends on ax
 
 /--
 info: 'Lean4Lean.MutualInductiveReplayFixtures.indexedTreeAddInductBlock' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
@@ -3149,7 +3142,6 @@ info: 'Lean4Lean.MutualInductiveReplayFixtures.indexedTreeAddInductBlock' depend
 
 /--
 info: 'Lean4Lean.MutualInductiveReplayFixtures.tree_verify_aligned' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
@@ -3161,7 +3153,6 @@ info: 'Lean4Lean.MutualInductiveReplayFixtures.tree_verify_aligned' depends on a
 
 /--
 info: 'Lean4Lean.MutualInductiveReplayFixtures.indexedTree_verify_aligned' depends on axioms: [propext,
- sorryAx,
  Classical.choice,
  Quot.sound,
  PersistentHashMap.findAux_isSome,
