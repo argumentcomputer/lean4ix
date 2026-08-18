@@ -255,7 +255,7 @@ theorem cvmFamilyCandidateBuild :
       constructorValidityMatrixContext] using produced
   exact exactProduced.singleton_build
 
-def cvmFamilyIdentityEvidence :
+theorem cvmFamilyIdentityEvidence :
     TypeChecker.CandidateExprIdentityReplay.Evidence
       cvmFamilyIdentityReplay
       cvmCandidate.families.singleton.familyType.type.trace :=
@@ -824,39 +824,39 @@ def cvmCtorFunctionArgContext : AddInductive.Context :=
   cvmCtorDirectContext.pushLocalDecl `y .default
     cvmCtorFunctionDomain.bindingDomain!
 
-def cvmCtorRootLocalRun :
+theorem cvmCtorRootLocalRun :
     TypeChecker.CandidateLocalContextRun cvmConstructorContext :=
   .empty _ rfl
 
-def cvmCtorAlphaLocalRun :
+theorem cvmCtorAlphaLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorAlphaContext :=
   cvmCtorRootLocalRun.push `α .implicit cvmCtorAlphaDomain
 
-def cvmCtorPLocalRun :
+theorem cvmCtorPLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorPContext :=
   cvmCtorAlphaLocalRun.push `P .implicit cvmCtorPDomain
 
-def cvmCtorXLocalRun :
+theorem cvmCtorXLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorXContext :=
   cvmCtorPLocalRun.push `x .default cvmCtorXDomain
 
-def cvmCtorProofLocalRun :
+theorem cvmCtorProofLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorProofContext :=
   cvmCtorXLocalRun.push `proof .default cvmCtorProofDomain
 
-def cvmCtorDirectLocalRun :
+theorem cvmCtorDirectLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorDirectContext :=
   cvmCtorProofLocalRun.push `direct .default cvmCtorDirectDomain
 
-def cvmCtorFunctionLocalRun :
+theorem cvmCtorFunctionLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorFunctionContext :=
   cvmCtorDirectLocalRun.push `function .default cvmCtorFunctionDomain
 
-def cvmCtorLaterLocalRun :
+theorem cvmCtorLaterLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorLaterContext :=
   cvmCtorFunctionLocalRun.push `later .default cvmCtorLaterDomain
 
-def cvmCtorLaterProofLocalRun :
+theorem cvmCtorLaterProofLocalRun :
     TypeChecker.CandidateLocalContextRun cvmCtorLaterProofContext :=
   cvmCtorLaterLocalRun.push `laterProof .default cvmCtorLaterProofDomain
 
@@ -1336,7 +1336,7 @@ def cvmCtorIdentityReplay :
       constructorValidityMatrixKernelCtor.type :=
   cvmCtorIdentityShape.replay
 
-def cvmCtorIdentityEvidence :
+theorem cvmCtorIdentityEvidence :
     TypeChecker.CandidateExprIdentityReplay.Evidence
       cvmCtorIdentityReplay
       cvmCandidate.families.singleton.constructors.singleton.type.trace :=
@@ -1545,7 +1545,7 @@ theorem prbFamilyCandidateBuild :
       propRecursiveBoundaryContext] using produced
   exact exactProduced.singleton_build
 
-def prbFamilyIdentityEvidence :
+theorem prbFamilyIdentityEvidence :
     TypeChecker.CandidateExprIdentityReplay.Evidence
       prbFamilyIdentityReplay
       prbCandidate.families.singleton.familyType.type.trace :=
@@ -2341,7 +2341,7 @@ def prbCtorIdentityReplay :
       propRecursiveBoundaryKernelCtor.type :=
   prbCtorIdentityShape.replay
 
-def prbCtorIdentityEvidence :
+theorem prbCtorIdentityEvidence :
     TypeChecker.CandidateExprIdentityReplay.Evidence
       prbCtorIdentityReplay
       prbCandidate.families.singleton.constructors.singleton.type.trace :=
@@ -2497,8 +2497,7 @@ theorem prbFamilyTerminalContext_eq :
       omega
   | forallE domainCandidate bodyCandidate source_eq consumed_eq
       domainIdentity bodyIdentity =>
-      simp only [AddInductive.CandidateExprTrace.spineLength,
-        AddInductive.CandidateExprTrace.terminalContext]
+      simp only [AddInductive.CandidateExprTrace.terminalContext]
       cases bodyIdentity with
       | terminal result_eq =>
           simp only [AddInductive.CandidateExprTrace.spineLength] at spineLength
@@ -2532,12 +2531,12 @@ theorem prbConstructorValidationContext_eq :
       { prbValidationFamilyContext with env := prbConstructorContext.env } := by
   rw [prbConstructorValidationContext, prbFamilyTerminalContext_eq]
 
-def prbValidationAlphaLocalRun :
+theorem prbValidationAlphaLocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationAlphaContext :=
   (TypeChecker.CandidateLocalContextRun.empty prbFamilyContext rfl).push
     `α .default (.sort (.succ (.param `u)))
 
-def prbValidationFamilyLocalRun :
+theorem prbValidationFamilyLocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationFamilyContext :=
   prbValidationAlphaLocalRun.push prbValidationAName .default
     prbFamilyContext.freshExpr
@@ -2545,7 +2544,7 @@ def prbValidationFamilyLocalRun :
 def prbValidationRootContext : AddInductive.Context :=
   { prbValidationFamilyContext with env := prbConstructorContext.env }
 
-def prbValidationRootLocalRun :
+theorem prbValidationRootLocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationRootContext where
   wf := prbValidationFamilyLocalRun.wf
   reserves := prbValidationFamilyLocalRun.reserves
@@ -2727,27 +2726,20 @@ theorem prbValidationAfterParam_shape :
 theorem prbValidationAfterA_shape :
     prbValidationAfterParam.bindingBody!.instantiate1
       prbValidationAExpr = prbValidationAfterA := by
-  simp [prbValidationAfterParam, prbValidationAfterA,
-    prbValidationNextDomain, prbValidationTerminal,
-    prbValidationFamilyApp, prbValidationAExpr,
-    prbValidationRootContext, prbValidationFamilyContext,
-    prbValidationAlphaContext, prbFamilyContext,
+  simp [prbValidationAfterParam, prbValidationAfterA, prbValidationNextDomain,
+    prbValidationFamilyApp, prbValidationAExpr, prbValidationRootContext,
+    prbValidationFamilyContext, prbValidationAlphaContext, prbFamilyContext,
     propRecursiveBoundaryContext, AddInductive.Context.freshExpr,
-    TypeChecker.candidateLiftLooseBVarsFVar,
-    Expr.bindingBody!,
-    Expr.instantiate1_eq, Expr.instantiate1']
+    TypeChecker.candidateLiftLooseBVarsFVar, Expr.bindingBody!, Expr.instantiate1_eq,
+    Expr.instantiate1']
 
 theorem prbValidationTerminal_shape :
     prbValidationAfterA.bindingBody!.instantiate1
       prbValidationAContext.freshExpr = prbValidationTerminal := by
-  simp [prbValidationAfterA, prbValidationTerminal,
-    prbValidationFamilyApp, prbValidationAExpr,
-    prbValidationRootContext, prbValidationAContext,
-    prbValidationFamilyContext, prbValidationAlphaContext,
-    prbFamilyContext, propRecursiveBoundaryContext,
-    AddInductive.Context.freshExpr,
-    TypeChecker.candidateInstantiateFVar,
-    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
+  simp [prbValidationAfterA, prbValidationTerminal, prbValidationFamilyApp, prbValidationAExpr,
+    prbValidationRootContext, prbValidationAContext, prbValidationFamilyContext,
+    prbValidationAlphaContext, prbFamilyContext, propRecursiveBoundaryContext,
+    AddInductive.Context.freshExpr, Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
 
 theorem prbValidationTarget_shape :
     prbValidationNextDomain.bindingBody!.instantiate1
@@ -2756,15 +2748,15 @@ theorem prbValidationTarget_shape :
     prbValidationFamilyApp, Expr.bindingBody!,
     Expr.instantiate1_eq, Expr.instantiate1']
 
-def prbValidationALocalRun :
+theorem prbValidationALocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationAContext :=
   prbValidationRootLocalRun.push `a .default prbValidationAlpha
 
-def prbValidationNextLocalRun :
+theorem prbValidationNextLocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationNextContext :=
   prbValidationALocalRun.push `next .default prbValidationNextDomain
 
-def prbValidationBLocalRun :
+theorem prbValidationBLocalRun :
     TypeChecker.CandidateLocalContextRun prbValidationBContext :=
   prbValidationALocalRun.push `b .default prbValidationAlpha
 
@@ -2883,18 +2875,12 @@ theorem prbValidationFamilyGet :
       Level.getUndefParam, Level.forEach,
       Level.hasParam_eq, Level.hasParam']
     rfl
-  simp [
-    propRecursiveBoundaryKernelType, propRecursiveBoundaryInfo,
-    ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Syntax.structEq_eq,
-    Level.substParams', hsafety, hlparams,
+  simp [propRecursiveBoundaryKernelType, propRecursiveBoundaryInfo, ConstantInfo.levelParams,
+    ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq, hsafety, hlparams,
     hlevel, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams',
-    propRecursiveBoundaryKernelType, propRecursiveBoundaryInfo,
-    ConstantInfo.type, ConstantInfo.toConstantVal]
+  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+    ConstantInfo.toConstantVal]
 
 def prbValidationFamilyTail (alpha : Expr) : Expr :=
   .forallE prbValidationAName alpha (.sort .zero) .default
@@ -2982,10 +2968,8 @@ theorem prbInferAppCoreOf
               (stateArg.inferTypeC.insert
                 (.app fn arg) (body.instantiate1 arg)) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [hclosed, hcache, hfn, harg, heager,
-    prbEnsureForallExact, prbSelfDefEq,
-    Expr.instantiate1_eq, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp [hclosed, hcache, hfn, harg, heager, prbSelfDefEq, Expr.instantiate1_eq, Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
 
 theorem prbInferTypeForallCore
     (fuel : Nat) (context : TypeChecker.Context)
@@ -3011,8 +2995,7 @@ theorem prbInferTypeForallCore
 open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] theorem prbMkLevelIMaxSuccParamZero :
     mkLevelIMax' (.succ (.param `u)) .zero = .zero := by
-  simp [mkLevelIMax', mkLevelIMaxCore, mkLevelMax', mkLevelMaxCore,
-    Level.isNeverZero, Level.isZero]
+  simp [mkLevelIMax', mkLevelIMaxCore, Level.isNeverZero, Level.isZero]
 
 def prbValidationConstState (state : TypeChecker.State) : TypeChecker.State :=
   prbReplayInsert state
@@ -3112,12 +3095,8 @@ theorem prbValidationNextInternalFresh :
   simp only [List.not_mem_nil, or_false] at membership
   rcases membership with rfl | rfl | rfl
   all_goals
-    simp [LocalDecl.fvarId, prbValidationNextInternalBId,
-      prbValidationNextAlphaState, prbReplayInsert,
-      prbValidationAlpha, prbValidationAId, prbValidationIndexId,
-      prbValidationAlphaId, prbValidationRootContext,
-      prbValidationFamilyContext, prbValidationAlphaContext,
-      prbFamilyContext, propRecursiveBoundaryContext,
+    simp [LocalDecl.fvarId, prbValidationNextInternalBId, prbValidationNextAlphaState,
+      prbReplayInsert, prbValidationAlpha, prbFamilyContext, propRecursiveBoundaryContext,
       AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId] at equal
   all_goals injection equal
   all_goals simp [NameGenerator.next] at *
@@ -3366,8 +3345,7 @@ theorem prbValidationNextBodyInferExists :
     (.fvar prbValidationNextInternalBId)
     (.fvar prbValidationAlphaId) (.sort .zero)
     prbValidationAName .default
-    (by simp [prbValidationFamilyApp, prbValidationFirstApp,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
     appMiss firstRun argRun (by rfl)
   refine ⟨prbValidationCachedFamilyAppState prbValidationNextBodyState
     prbValidationAlphaId prbValidationNextInternalBId, ?_⟩
@@ -3428,8 +3406,7 @@ theorem prbValidationNextDomainCheckValid :
           ).instantiateRev #[Expr.fvar prbValidationNextInternalBId] =
           prbValidationFamilyApp
             (.fvar prbValidationNextInternalBId) by
-      simp [prbValidationFamilyApp, Expr.instantiateRev_eq,
-        Expr.instantiate_eq, Expr.instantiate1_eq, Expr.instantiate1']]
+      simp [prbValidationFamilyApp, Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1']]
     simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
     rw [show TypeChecker.Inner.inferType
         (prbValidationFamilyApp
@@ -3450,8 +3427,7 @@ theorem prbValidationNextDomainCheckValid :
     prbValidationAContext.toTypeChecker ({} : TypeChecker.State)
     bodyFinalState `b prbValidationAlpha
     (prbValidationFamilyApp (.bvar 0)) (.sort .zero) .default
-    (by simp [prbValidationNextDomain, prbValidationFamilyApp,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [prbValidationFamilyApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
     Std.HashMap.getElem?_empty
     (by simpa [prbValidationNextDomain] using forallRun)
   unfold AddInductive.CandidateCheckTypeStep.Valid
@@ -3504,8 +3480,7 @@ theorem prbValidationInferFirstAppCore
     (.fvar alphaId) (.sort (.succ (.param `u)))
     (.forallE prbValidationAName (.bvar 0) (.sort .zero) .default)
     `α .default
-    (by simp [prbValidationFirstApp, Expr.hasLooseBVars,
-      Expr.looseBVarRange']) happ
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange']) happ
     (by simpa [prbValidationAName, propRecursiveBoundaryKernelType,
       propRecursiveBoundaryInfo, ConstantInfo.type,
       ConstantInfo.toConstantVal, Expr.bindingBody!,
@@ -3548,16 +3523,13 @@ theorem prbValidationFamilyAppCheckValid
   have argMiss : (prbValidationFirstAppState initial alphaId).inferTypeC[
       (.fvar argId : Expr)]? = none := by
     have initialMiss : initial.inferTypeC[(.fvar argId : Expr)]? = none := by
-      simpa [initial] using
-        (Std.HashMap.getElem?_empty (k := (.fvar argId : Expr))
-          (v := Expr))
+      simp [initial]
     have idBeq : ((.fvar alphaId : Expr) == .fvar argId) = false := by
       change Expr.eqv (.fvar alphaId) (.fvar argId) = false
       rw [Expr.eqv_eq]
       simp [Expr.eqv', hne]
-    simp [prbValidationFirstAppState, prbValidationAlphaState,
-      prbValidationConstState, prbReplayInsert,
-      prbValidationFirstApp, idBeq, initialMiss]
+    simp [prbValidationFirstAppState, prbValidationAlphaState, prbValidationConstState,
+      prbReplayInsert, prbValidationFirstApp, idBeq]
     intro hmem
     have hsome := Std.HashMap.mem_iff_isSome_getElem?.mp hmem
     simp [initialMiss] at hsome
@@ -3575,9 +3547,8 @@ theorem prbValidationFamilyAppCheckValid
     (prbValidationArgumentState initial alphaId argId)
     (prbValidationFirstApp (.fvar alphaId)) (.fvar argId)
     (.fvar alphaId) (.sort .zero) prbValidationAName .default
-    (by simp [prbValidationFamilyApp, prbValidationFirstApp,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [initial, prbValidationFamilyApp]) firstRun argRun (by rfl)
+    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [initial]) firstRun argRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
     context.lparams context.fuel
@@ -4331,8 +4302,7 @@ def prbStagedPostFamilyInput :
         rw [prbStagedStats_eq, prbStatsParams_eq] at noParameter
         simp at noParameter
       | terminal context source fuel argIdx terminal valid =>
-        simp [propRecursiveBoundaryKernelType, propRecursiveBoundaryKernelCtor,
-          propRecursiveBoundaryMkInfo, ConstantInfo.type,
+        simp [propRecursiveBoundaryKernelCtor, propRecursiveBoundaryMkInfo, ConstantInfo.type,
           ConstantInfo.toConstantVal, Expr.isForall] at terminal
 
 def prbPreFamilyContextReplay : AddInductive.Context :=
@@ -4560,9 +4530,7 @@ theorem prbPreFamilyInferSortZeroCoreReplay
         .ok (.sort (.succ .zero),
           prbReplayInsert state (.sort .zero) (.sort (.succ .zero))) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', miss,
-    prbPreFamilyCheckLevelZeroReplay,
-    prbReplayInsert, Bind.bind, ReaderT.bind,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', miss, prbReplayInsert, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
 theorem prbPreFamilyIndexTelescopeCheckValidReplay
@@ -4652,9 +4620,7 @@ theorem prbPreFamilyIndexTelescopeCheckValidReplay
     prbValidationAName prbValidationAlpha (.sort .zero)
     (.sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero)))
     .default
-    (by simp [prbPreFamilyIndexTelescopeReplay,
-      prbValidationAlpha_shape, Expr.hasLooseBVars,
-      Expr.looseBVarRange']) Std.HashMap.getElem?_empty forallRun
+    (by simp [prbValidationAlpha_shape, Expr.hasLooseBVars, Expr.looseBVarRange']) Std.HashMap.getElem?_empty forallRun
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
     context.lparams context.fuel
@@ -4822,12 +4788,9 @@ theorem prbPreFamilyFamilyAppValidReplay (arg : Expr)
       #[.const propRecursiveBoundaryKernelType.name [.param `u]] arg =
         false := by
     simpa [prbStagedIndConstsReplay_eq] using argFree
-  simp +decide [AddInductive.isValidIndAppIdx,
-    prbStagedParamsReplay_eq, prbStagedNindicesReplay_eq,
-    prbStagedIndConstsReplay_eq,
-    prbValidationFamilyAppGetAppFnReplay,
-    prbValidationFamilyAppGetAppArgsReplay,
-    prbExprBneSelfReplay, parameterSelf, argFree', Expr.constName!]
+  simp +decide [AddInductive.isValidIndAppIdx, prbStagedParamsReplay_eq, prbStagedNindicesReplay_eq,
+    prbStagedIndConstsReplay_eq, prbValidationFamilyAppGetAppFnReplay,
+    prbValidationFamilyAppGetAppArgsReplay, prbExprBneSelfReplay, argFree']
 
 theorem prbPreFamilyTargetValidReplay :
     AddInductive.isValidIndAppIdx
@@ -4835,8 +4798,7 @@ theorem prbPreFamilyTargetValidReplay :
       prbValidationTarget 0 = true := by
   apply prbPreFamilyFamilyAppValidReplay
   rw [prbStagedIndConstsReplay_eq]
-  simp [AddInductive.hasIndOcc, prbValidationTarget,
-    prbValidationFamilyApp, prbValidationBExpr_shape]
+  simp [AddInductive.hasIndOcc, prbValidationBExpr_shape]
 
 theorem prbPreFamilyTerminalValidReplay :
     AddInductive.isValidIndAppIdx
@@ -4844,8 +4806,7 @@ theorem prbPreFamilyTerminalValidReplay :
       prbValidationTerminal 0 = true := by
   apply prbPreFamilyFamilyAppValidReplay
   rw [prbStagedIndConstsReplay_eq]
-  simp [AddInductive.hasIndOcc, prbValidationTerminal,
-    prbValidationFamilyApp, prbValidationAExpr_shape]
+  simp [AddInductive.hasIndOcc, prbValidationAExpr_shape]
 
 theorem prbPreFamilyAIdNeRemovedReplay :
     prbValidationAId ≠ prbPreFamilyAContextReplay.freshFVarId := by
@@ -5327,8 +5288,7 @@ theorem prbSafetyRunDirect :
         (prbValidationFamilyApp prbValidationAExpr) .default)
       2 [] false 998 =
         .ok recursiveViewTrace := by
-    simp only [prbValidationAfterA,
-      AddInductive.ConstructorPreFamilyViewTrace.build]
+    simp only [AddInductive.ConstructorPreFamilyViewTrace.build]
     split
     · rename_i parameter parameterAt
       rw [noParameterTwo] at parameterAt
@@ -5429,7 +5389,7 @@ theorem prbSafetyRunDirect :
           rootAlphaConsumed.check_eq]
         simp only [Bind.bind, Except.bind]
         rw [rootAlphaAnnotations.observe_eq]
-        simp only [Bind.bind, Except.bind]
+        simp only []
         rw [dif_pos prbPreFamilyRootFreshReplay]
         have ordinaryTailRun' :
             AddInductive.ConstructorPreFamilyViewTrace.build
@@ -5655,8 +5615,7 @@ theorem cvmFamilyTerminalContextTest_eq :
       omega
   | forallE domainCandidate bodyCandidate source_eq consumed_eq
       domainIdentity bodyIdentity =>
-      simp only [AddInductive.CandidateExprTrace.spineLength,
-        AddInductive.CandidateExprTrace.terminalContext]
+      simp only [AddInductive.CandidateExprTrace.terminalContext]
       cases bodyIdentity with
       | terminal result_eq =>
           simp only [AddInductive.CandidateExprTrace.spineLength] at spineLength
@@ -5698,16 +5657,16 @@ theorem cvmConstructorValidationContextTest_root :
   rw [cvmConstructorValidationContextTest_eq]
   rfl
 
-def cvmValidationAlphaLocalRunTest :
+theorem cvmValidationAlphaLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationAlphaContextTest :=
   (TypeChecker.CandidateLocalContextRun.empty cvmFamilyContext rfl).push
     `α .default (.sort (.succ (.param `u)))
 
-def cvmValidationFamilyLocalRunTest :
+theorem cvmValidationFamilyLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationFamilyContextTest :=
   cvmValidationAlphaLocalRunTest.push `P .default cvmValidationPDomainTest
 
-def cvmValidationRootLocalRunTest :
+theorem cvmValidationRootLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationRootContextTest where
   wf := cvmValidationFamilyLocalRunTest.wf
   reserves := cvmValidationFamilyLocalRunTest.reserves
@@ -5933,7 +5892,7 @@ theorem cvmEnsureTypeOfInferOnlyTest
     simpa [AddInductive.Context.toTypeChecker] using run]
   rfl
 
-def cvmValidationXLocalRunTest :
+theorem cvmValidationXLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationXContextTest :=
   cvmValidationRootLocalRunTest.push `x .default
     (AddInductive.consumeTypeAnnotations cvmCtorXDomain)
@@ -6004,14 +5963,11 @@ theorem cvmValidationProofInferOnlyTest :
           #[.fvar cvmValidationXIdTest] := by
     rfl
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferApp, TypeChecker.Inner.inferApp.loop,
-    appFn, appArgs, pRun, cvmValidationPDomainTest,
-    cvmValidationProofFinalStateTest,
-    cvmValidationProofPStateTest, cvmInferOnlyInsertTest,
-    cvmCtorProofDomainValidationShapeTest, Expr.instantiateRev_eq,
-    Expr.instantiate_eq, Expr.instantiate1_eq, Expr.instantiate1',
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferApp,
+    TypeChecker.Inner.inferApp.loop, appFn, appArgs, pRun, cvmValidationPDomainTest,
+    cvmValidationProofFinalStateTest, cvmValidationProofPStateTest, cvmInferOnlyInsertTest,
+    cvmCtorProofDomainValidationShapeTest, Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiate1', Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem cvmValidationProofEnsureTest :
     AddInductive.ConstructorEnsureTypeStep.Valid
@@ -6069,15 +6025,12 @@ theorem cvmCtorAfterProofForallTest :
     exact cvmTerminalLparams_eq
   unfold cvmDeclaredInfo AddInductive.singletonDeclaredInfo
   rw [terminalLparams]
-  simp [constructorValidityMatrixKernelType,
-    constructorValidityMatrixInfo, ConstantInfo.levelParams,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams', Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams',
-    constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
-    ConstantInfo.type, ConstantInfo.toConstantVal]
+  simp [constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
+    ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+    ConstantInfo.toConstantVal]
 
 theorem cvmKernelFamilyTypeShapeTest :
     constructorValidityMatrixKernelType.type =
@@ -6336,12 +6289,12 @@ theorem cvmCtorAfterDirectForallTest :
       cvmCtorAfterDirect.bindingBody! .default := by
   simp_cvm_ctor_expr
 
-def cvmValidationProofLocalRunTest :
+theorem cvmValidationProofLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationProofContextTest :=
   cvmValidationXLocalRunTest.push `proof .default
     (AddInductive.consumeTypeAnnotations cvmCtorProofDomain)
 
-def cvmValidationDirectLocalRunTest :
+theorem cvmValidationDirectLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationDirectContextTest :=
   cvmValidationProofLocalRunTest.push `direct .default
     (AddInductive.consumeTypeAnnotations cvmCtorDirectDomain)
@@ -6512,8 +6465,7 @@ theorem cvmValidationFunctionInferOnlyTest :
         ((.const constructorValidityMatrixKernelType.name
           [.param `u] : Expr).app (.fvar cvmValidationAlphaIdTest)).app
           (.fvar cvmValidationPIdTest) by
-      simp [Expr.instantiateRev_eq, Expr.instantiate_eq,
-        Expr.instantiate1_eq, Expr.instantiate1']]
+      simp [Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1']]
     simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
     have bodyRunExplicit : TypeChecker.Inner.inferType'
         (((.const constructorValidityMatrixKernelType.name
@@ -6602,7 +6554,7 @@ theorem cvmCtorAfterFunctionForallTest :
       cvmCtorAfterFunction.bindingBody! .default := by
   simp_cvm_ctor_expr
 
-def cvmValidationFunctionLocalRunTest :
+theorem cvmValidationFunctionLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationFunctionContextTest :=
   cvmValidationDirectLocalRunTest.push `function .default
     (AddInductive.consumeTypeAnnotations cvmCtorFunctionDomain)
@@ -6731,13 +6683,10 @@ theorem cvmInferTypePredicateApplicationOnlyTest
     rfl
   unfold TypeChecker.Inner.inferType'
   rw [closed]
-  simp [TypeChecker.Inner.inferApp, TypeChecker.Inner.inferApp.loop,
-    appFn, appArgs, predicateRun, cvmValidationPDomainTest,
-    cvmValidationPredicateApplicationTest,
-    cvmValidationPredicateApplicationStateTest,
-    cvmValidationPredicateStateTest, cvmInferOnlyInsertTest,
-    Expr.instantiateRev_eq, Expr.instantiate_eq,
-    Expr.instantiate1_eq, Expr.instantiate1',
+  simp [TypeChecker.Inner.inferApp, TypeChecker.Inner.inferApp.loop, appFn, appArgs, predicateRun,
+    cvmValidationPDomainTest, cvmValidationPredicateApplicationTest,
+    cvmValidationPredicateApplicationStateTest, cvmValidationPredicateStateTest,
+    cvmInferOnlyInsertTest, Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem cvmValidationPFindInProofTest :
@@ -6767,7 +6716,7 @@ theorem cvmValidationPFindInFunctionTest :
     (AddInductive.consumeTypeAnnotations cvmCtorFunctionDomain)
     cvmValidationPFindInDirectTest
 
-def cvmValidationLaterLocalRunTest :
+theorem cvmValidationLaterLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationLaterContextTest :=
   cvmValidationFunctionLocalRunTest.push `later .default
     (AddInductive.consumeTypeAnnotations cvmCtorLaterDomain)
@@ -6787,24 +6736,18 @@ def cvmValidationLaterIdTest : FVarId :=
 theorem cvmCtorLaterProofDomainValidationShapeTest :
     cvmCtorLaterProofDomain = cvmValidationPredicateApplicationTest
       cvmValidationPIdTest (.fvar cvmValidationLaterIdTest) := by
-  simp [cvmCtorLaterProofDomain, cvmCtorAfterLater,
-    cvmCtorAfterFunction, cvmCtorAfterDirect, cvmCtorAfterProof,
-    cvmCtorAfterX, cvmCtorAfterP, cvmCtorAfterAlpha,
-    cvmValidationPredicateApplicationTest, cvmValidationPIdTest,
-    cvmValidationLaterIdTest, cvmValidationFunctionContextTest,
-    cvmValidationDirectContextTest, cvmValidationProofContextTest,
-    cvmValidationXContextTest, cvmValidationRootContextTest,
-    cvmValidationFamilyContextTest, cvmValidationAlphaContextTest,
-    cvmValidationPDomainTest, cvmFamilyContext,
-    cvmCtorFunctionContext, cvmCtorDirectContext,
-    cvmCtorProofContext, cvmCtorXContext, cvmCtorPContext,
-    cvmCtorAlphaContext, cvmConstructorContext,
-    constructorValidityMatrixContext, constructorValidityMatrixKernelCtor,
-    constructorValidityMatrixMkInfo, ConstantInfo.type,
-    ConstantInfo.toConstantVal, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
-    AddInductive.consumeTypeAnnotations, Expr.bindingDomain!,
-    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
+  simp [cvmCtorLaterProofDomain, cvmCtorAfterLater, cvmCtorAfterFunction, cvmCtorAfterDirect,
+    cvmCtorAfterProof, cvmCtorAfterX, cvmCtorAfterP, cvmCtorAfterAlpha,
+    cvmValidationPredicateApplicationTest, cvmValidationPIdTest, cvmValidationLaterIdTest,
+    cvmValidationFunctionContextTest, cvmValidationDirectContextTest, cvmValidationProofContextTest,
+    cvmValidationXContextTest, cvmValidationRootContextTest, cvmValidationFamilyContextTest,
+    cvmValidationAlphaContextTest, cvmValidationPDomainTest, cvmFamilyContext,
+    cvmCtorFunctionContext, cvmCtorDirectContext, cvmCtorProofContext, cvmCtorXContext,
+    cvmCtorPContext, cvmCtorAlphaContext, cvmConstructorContext, constructorValidityMatrixContext,
+    constructorValidityMatrixKernelCtor, constructorValidityMatrixMkInfo, ConstantInfo.type,
+    ConstantInfo.toConstantVal, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshExpr,
+    AddInductive.Context.freshFVarId, Expr.bindingDomain!, Expr.bindingBody!, Expr.instantiate1_eq,
+    Expr.instantiate1']
 
 theorem cvmValidationLaterDepthTest :
     cvmValidationLaterContextTest.fuel.recDepth = 10000 := by
@@ -6955,11 +6898,8 @@ theorem cvmUniverseSemanticsTest :
                       have universeSemantic : universeTrace.semantic = true := by
                         unfold AddInductive.ConstructorUniverseTrace.semantic
                         rw [cvmStatsResultLevelTest]
-                        simp [Expr.sortLevel!,
-                          AddInductive.ConstructorUniverseTrace.semantic,
-                          AddInductive.constructorUniverseSemanticGe,
-                          AddInductive.levelStructGe,
-                          AddInductive.levelStructEq]
+                        simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
+                          AddInductive.levelStructGe, AddInductive.levelStructEq]
                       rw [universeSemantic]
                       simp only [Bool.true_and]
                       let sourceEq := cvmFirstFieldSourceTest.trans
@@ -6987,10 +6927,8 @@ theorem cvmUniverseSemanticsTest :
                           have universeSemantic : universeTrace.semantic = true := by
                             unfold AddInductive.ConstructorUniverseTrace.semantic
                             rw [cvmStatsResultLevelTest]
-                            simp [Expr.sortLevel!,
-                              AddInductive.constructorUniverseSemanticGe,
-                              AddInductive.levelStructGe,
-                              AddInductive.levelStructEq]
+                            simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
+                              AddInductive.levelStructGe]
                           rw [universeSemantic]
                           simp only [Bool.true_and]
                           let sourceEq := cvmSecondFieldSourceTest.trans
@@ -7122,8 +7060,7 @@ theorem cvmUniverseSemanticsTest :
                                             rw [cvmStatsResultLevelTest]
                                             simp [Expr.sortLevel!,
                                               AddInductive.constructorUniverseSemanticGe,
-                                              AddInductive.levelStructGe,
-                                              AddInductive.levelStructEq]
+                                              AddInductive.levelStructGe]
                                           rw [universeSemantic]
                                           simp only [Bool.true_and]
                                           let sourceEq := cvmSixthFieldSourceTest.trans
@@ -7378,16 +7315,13 @@ theorem cvmValidationFamilyGetTest :
       Level.getUndefParam, Level.forEach,
       Level.hasParam_eq, Level.hasParam']
     rfl
-  simp [constructorValidityMatrixKernelType,
-    constructorValidityMatrixInfo, ConstantInfo.levelParams,
-    ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams,
+  simp [constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
+    ConstantInfo.levelParams, ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams,
     ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Syntax.structEq_eq, Level.substParams', safety, lparams,
-    levelCheck, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams',
-    constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
-    ConstantInfo.type, ConstantInfo.toConstantVal]
+    Expr.instantiateLevelParams_eq, safety, lparams, levelCheck, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
+  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+    ConstantInfo.toConstantVal]
 
 def cvmValidationFamilyConstStateTest
     (state : TypeChecker.State) : TypeChecker.State :=
@@ -7504,7 +7438,7 @@ theorem cvmValidationFamilyApplicationCheckTest
       (.sort (.succ (.param `u))) .default)
     `α .default
     (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [initial, cvmValidationFirstAppFullTest])
+    (by simp [initial])
     (by simpa [cvmKernelFamilyTypeShapeTest] using familyRun)
     alphaRun (by rfl)
   have firstRun' : TypeChecker.Inner.inferType'
@@ -7547,10 +7481,8 @@ theorem cvmValidationFamilyApplicationCheckTest
     (.forallE cvmValidationIndexNameTest (.fvar alphaId)
       (.sort .zero) .default)
     (.sort (.succ (.param `u))) `P .default
-    (by simp [cvmValidationFamilyApplicationTest,
-      cvmValidationFirstAppFullTest, Expr.hasLooseBVars,
-      Expr.looseBVarRange'])
-    (by simp [initial, cvmValidationFamilyApplicationTest])
+    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [initial])
     firstRun' predicateRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
@@ -7648,9 +7580,8 @@ theorem cvmValidationPredicateApplicationCheckTest
     (.fvar predicateId) (.fvar argumentId)
     (.fvar cvmValidationAlphaIdTest) (.sort .zero)
     cvmValidationIndexNameTest .default
-    (by simp [cvmValidationPredicateApplicationTest,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [initial, cvmValidationPredicateApplicationTest])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [initial])
     predicateRun argumentRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
@@ -7774,7 +7705,7 @@ theorem cvmValidationDirectCheckTest :
     cvmValidationAlphaFindInProofTest cvmValidationPFindInProofTest
     (by rfl) (by rfl) (by rfl) (by rfl)
 
-def cvmValidationLaterProofLocalRunTest :
+theorem cvmValidationLaterProofLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationLaterProofContextTest :=
   cvmValidationLaterLocalRunTest.push `laterProof .default
     (AddInductive.consumeTypeAnnotations cvmCtorLaterProofDomain)
@@ -7882,8 +7813,7 @@ theorem cvmValidationInferFirstAppAlphaCachedCoreTest
         (.sort .zero) .default)
       (.sort (.succ (.param `u))) .default)
     `α .default
-    (by simp [cvmValidationFirstAppFullTest,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
     firstMiss
     (by simpa [cvmKernelFamilyTypeShapeTest] using familyRun)
     alphaRun (by rfl)
@@ -7945,9 +7875,7 @@ theorem cvmValidationFamilyApplicationAlphaCachedCoreTest
     (.forallE cvmValidationIndexNameTest (.fvar alphaId)
       (.sort .zero) .default)
     (.sort (.succ (.param `u))) `P .default
-    (by simp [cvmValidationFamilyApplicationTest,
-      cvmValidationFirstAppFullTest,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange'])
     applicationMiss firstRun predicateRun (by rfl)
   simpa [cvmValidationFamilyApplicationTest,
     cvmValidationFirstAppFullTest,
@@ -8001,12 +7929,8 @@ theorem cvmValidationFunctionFullInternalFreshTest :
   rcases membership with rfl | rfl | rfl | rfl | rfl
   all_goals
     simp [LocalDecl.fvarId, cvmValidationFunctionFullInternalIdTest,
-      cvmValidationFunctionFullAlphaStateTest, prbReplayInsert,
-      cvmValidationXIdTest, cvmValidationPIdTest,
-      cvmValidationAlphaIdTest, cvmValidationRootContextTest,
-      cvmValidationFamilyContextTest, cvmValidationAlphaContextTest,
-      cvmFamilyContext, constructorValidityMatrixContext,
-      AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId]
+      cvmValidationFunctionFullAlphaStateTest, prbReplayInsert, cvmValidationAlphaIdTest,
+      cvmFamilyContext, constructorValidityMatrixContext, AddInductive.Context.freshFVarId]
       at equal
   all_goals injection equal
   all_goals simp [NameGenerator.next] at *
@@ -8066,12 +7990,9 @@ theorem cvmValidationFunctionCheckTest :
     · simp [cvmValidationFunctionFullInternalStateTest,
         cvmValidationFunctionFullAlphaStateTest,
         cvmValidationFirstAppFullTest, prbReplayInsert]
-    · simp [cvmValidationFamilyCachedFirstAppStateTest,
-        cvmValidationFamilyConstStateTest,
-        cvmValidationFunctionFullInternalStateTest,
-        cvmValidationFunctionFullAlphaStateTest,
-        cvmValidationFirstAppFullTest, prbReplayInsert,
-        cvmValidationAlphaNePTest]
+    · simp [cvmValidationFamilyCachedFirstAppStateTest, cvmValidationFamilyConstStateTest,
+        cvmValidationFunctionFullInternalStateTest, cvmValidationFunctionFullAlphaStateTest,
+        cvmValidationFirstAppFullTest, prbReplayInsert]
     · simp [cvmValidationFunctionFullInternalStateTest,
         cvmValidationFunctionFullAlphaStateTest,
         cvmValidationFamilyApplicationTest, prbReplayInsert]
@@ -8126,8 +8047,7 @@ theorem cvmValidationFunctionCheckTest :
         ((.const constructorValidityMatrixKernelType.name
           [.param `u] : Expr).app (.fvar cvmValidationAlphaIdTest)).app
           (.fvar cvmValidationPIdTest) by
-      simp [Expr.instantiateRev_eq, Expr.instantiate_eq,
-        Expr.instantiate1_eq, Expr.instantiate1']]
+      simp [Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1']]
     simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
     have bodyRunExplicit : TypeChecker.Inner.inferType'
         (((.const constructorValidityMatrixKernelType.name
@@ -8252,7 +8172,7 @@ def cvmValidationProofCheckedTest :
       cvmCtorProofDomain :=
   cvmCheckedOfValidTest _ _ _ (by
     rw [cvmCtorProofDomainValidationShapeTest]
-    simp [cvmValidationPredicateApplicationTest, FVarsIn, Level.hasMVar']
+    simp [FVarsIn]
     constructor
     · change (cvmValidationXContextTest.lctx.find?
         cvmValidationPIdTest).isSome = true
@@ -8309,7 +8229,7 @@ def cvmValidationLaterProofCheckedTest :
       cvmCtorLaterProofDomain :=
   cvmCheckedOfValidTest _ _ _ (by
     rw [cvmCtorLaterProofDomainValidationShapeTest]
-    simp [cvmValidationPredicateApplicationTest, FVarsIn, Level.hasMVar']
+    simp [cvmValidationPredicateApplicationTest, FVarsIn]
     constructor
     · change (cvmValidationLaterContextTest.lctx.find?
         cvmValidationPIdTest).isSome = true
@@ -8346,8 +8266,7 @@ def cvmValidationTerminalCheckedTest :
     AddInductive.consumeTypeAnnotations cvmCtorProofDomain =
       cvmCtorProofDomain := by
   rw [cvmCtorProofDomainValidationShapeTest]
-  simp [cvmValidationPredicateApplicationTest,
-    AddInductive.consumeTypeAnnotations]
+  simp [AddInductive.consumeTypeAnnotations]
 
 @[simp] theorem cvmValidationConsumeDirectTest :
     AddInductive.consumeTypeAnnotations cvmCtorDirectDomain =
@@ -8382,8 +8301,7 @@ theorem cvmCtorPDomainValidationShapeTest :
     cvmCtorPDomain = .forallE cvmCtorPDomain.bindingName!
       (.fvar cvmValidationAlphaIdTest) (.sort .zero) .default := by
   simp_cvm_ctor_expr
-  simp [cvmValidationAlphaIdTest, cvmFamilyContext,
-    cvmConstructorContext, constructorValidityMatrixContext,
+  simp [cvmValidationAlphaIdTest, cvmFamilyContext, constructorValidityMatrixContext,
     AddInductive.Context.freshFVarId]
 
 theorem cvmValidationCtorPDomainCheckTest :
@@ -8512,7 +8430,7 @@ def cvmValidationFunctionPosContextTest : AddInductive.Context :=
   cvmValidationDirectContextTest.pushLocalDecl `y .default
     (.fvar cvmValidationAlphaIdTest)
 
-def cvmValidationFunctionPosLocalRunTest :
+theorem cvmValidationFunctionPosLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmValidationFunctionPosContextTest :=
   cvmValidationDirectLocalRunTest.push `y .default
     (.fvar cvmValidationAlphaIdTest)
@@ -8615,8 +8533,7 @@ theorem cvmValidationProofHasNoIndOccTest :
       cvmCtorProofDomain = false := by
   rw [cvmStagedIndConstsTest_eq,
     cvmCtorProofDomainValidationShapeTest]
-  simp [AddInductive.hasIndOcc,
-    cvmValidationPredicateApplicationTest]
+  simp [AddInductive.hasIndOcc]
 
 theorem cvmValidationDirectHasIndOccTest :
     AddInductive.hasIndOcc
@@ -9706,7 +9623,7 @@ def cvmPreFamilyFunctionInnerContextTest : AddInductive.Context :=
   cvmPreFamilyAfterDirectContextTest.pushLocalDecl `y .default
     (.fvar cvmValidationAlphaIdTest)
 
-def cvmAdvanceLocalRunTest
+theorem cvmAdvanceLocalRunTest
     (run : TypeChecker.CandidateLocalContextRun context) :
     TypeChecker.CandidateLocalContextRun context.advanceFresh where
   wf := run.wf
@@ -9715,41 +9632,41 @@ def cvmAdvanceLocalRunTest
     exact NameGenerator.Reserves.mono NameGenerator.LE.next
       (run.reserves decl membership)
 
-def cvmPreFamilyRootLocalRunTest :
+theorem cvmPreFamilyRootLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmPreFamilyContextTest :=
   cvmValidationFamilyLocalRunTest
 
-def cvmPreFamilyXLocalRunTest :
+theorem cvmPreFamilyXLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmPreFamilyXContextTest :=
   cvmPreFamilyRootLocalRunTest.push `x .default
     (AddInductive.consumeTypeAnnotations cvmCtorXDomain)
 
-def cvmPreFamilyProofLocalRunTest :
+theorem cvmPreFamilyProofLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmPreFamilyProofContextTest :=
   cvmPreFamilyXLocalRunTest.push `proof .default
     (AddInductive.consumeTypeAnnotations cvmCtorProofDomain)
 
-def cvmPreFamilyAfterDirectLocalRunTest :
+theorem cvmPreFamilyAfterDirectLocalRunTest :
     TypeChecker.CandidateLocalContextRun
       cvmPreFamilyAfterDirectContextTest :=
   cvmAdvanceLocalRunTest cvmPreFamilyProofLocalRunTest
 
-def cvmPreFamilyAfterFunctionLocalRunTest :
+theorem cvmPreFamilyAfterFunctionLocalRunTest :
     TypeChecker.CandidateLocalContextRun
       cvmPreFamilyAfterFunctionContextTest :=
   cvmAdvanceLocalRunTest cvmPreFamilyAfterDirectLocalRunTest
 
-def cvmPreFamilyLaterLocalRunTest :
+theorem cvmPreFamilyLaterLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmPreFamilyLaterContextTest :=
   cvmPreFamilyAfterFunctionLocalRunTest.push `later .default
     (AddInductive.consumeTypeAnnotations cvmCtorLaterDomain)
 
-def cvmPreFamilyLaterProofLocalRunTest :
+theorem cvmPreFamilyLaterProofLocalRunTest :
     TypeChecker.CandidateLocalContextRun cvmPreFamilyLaterProofContextTest :=
   cvmPreFamilyLaterLocalRunTest.push `laterProof .default
     (AddInductive.consumeTypeAnnotations cvmCtorLaterProofDomain)
 
-def cvmPreFamilyFunctionInnerLocalRunTest :
+theorem cvmPreFamilyFunctionInnerLocalRunTest :
     TypeChecker.CandidateLocalContextRun
       cvmPreFamilyFunctionInnerContextTest :=
   cvmPreFamilyAfterDirectLocalRunTest.push `y .default
@@ -10098,7 +10015,7 @@ def cvmPreFamilyPredicateCheckedTest
       (cvmValidationPredicateApplicationTest cvmValidationPIdTest
         (.fvar argumentId)) :=
   .ofRun (by
-      simp [cvmValidationPredicateApplicationTest, FVarsIn, Level.hasMVar']
+      simp [cvmValidationPredicateApplicationTest, FVarsIn]
       constructor
       · change (context.lctx.find? cvmValidationPIdTest).isSome = true
         rw [predicateFind]
@@ -10517,7 +10434,7 @@ theorem cvmPreFamilyOrdinaryBuildEqTest
         consumedCheck.check_eq]
       simp only [Bind.bind, Except.bind]
       rw [annotations.observe_eq]
-      simp only [Bind.bind, Except.bind]
+      simp only []
       rw [dif_pos fresh, tailRun]
       rfl
     · rename_i recursive

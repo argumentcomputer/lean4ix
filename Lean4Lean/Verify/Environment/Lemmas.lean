@@ -91,7 +91,7 @@ still available at that step's output boundary. -/
 theorem AddInductConstant.map_lookup
     (H : AddInductConstant kind C₁ env₁ ci C₂ env₂)
     (wf : C₁.WF) : C₂.find? ci.name = some H.info := by
-  simpa [H.map_add, wf.find?_insert]
+  simp [H.map_add, wf.find?_insert]
 
 /-- An inductive-metadata insertion preserves every lookup already present in
 the input map.  Freshness rules out the only key at which `insert` could

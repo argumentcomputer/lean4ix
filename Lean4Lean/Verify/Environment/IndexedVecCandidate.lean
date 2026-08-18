@@ -869,13 +869,11 @@ theorem indexedVecPreFamilyNatCheckTypeM (lctx : LocalContext) :
       (indexedVecTypeCheckerContext lctx) ``Nat [] true =
         .ok (.sort (.succ .zero)) := by
   unfold Lean4Lean.TypeChecker.Inner.inferConstant
-  simp [indexedVecTypeCheckerContext, indexedVecKernel_get_nat,
-    natInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+  simp [indexedVecTypeCheckerContext, indexedVecKernel_get_nat, natInfo, ConstantInfo.levelParams,
     ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams', Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq,
+    Expr.instantiateLevelParamsCore', Level.substParams', Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
 
 private def indexedVecPreFamilyNatInferOnlyState :
     Lean4Lean.TypeChecker.State :=
@@ -938,9 +936,7 @@ private theorem indexedVecPreFamilyIndexNatCore (lctx : LocalContext) :
       (indexedVecTypeCheckerContext lctx)
       ({} : Lean4Lean.TypeChecker.State) =
         .ok (.sort (.succ .zero), indexedVecInnerNatState) := by
-  simpa [indexedVecInnerNatState] using
-    (indexedVecInferTypeNatCore 9998 lctx
-      ({} : Lean4Lean.TypeChecker.State) Std.HashMap.getElem?_empty)
+  simp [indexedVecInnerNatState]
 
 private theorem indexedVecPreFamilyIndexWithLocalDecl
     (lctx : LocalContext)

@@ -2110,7 +2110,7 @@ def NormalizedFamily.generationShape (np : Nat)
     family.ctorPairs.all (NormalizedCtor.generationShape np)
 
 def NormalizedCheckedBlock.rawParams {source : VInductDecl}
-    (block : NormalizedCheckedBlock source) : List VExpr :=
+    (_block : NormalizedCheckedBlock source) : List VExpr :=
   blockParams source.nparams source.types
 
 def NormalizedCheckedBlock.familyPairs {source : VInductDecl}
@@ -2727,7 +2727,7 @@ def NormalizedBlockCtor.rawResult {source : VInductDecl}
 
 /-- Normalized constructor result reconstructed with the stored owner name. -/
 def NormalizedBlockCtor.resultTarget {source : VInductDecl}
-    (gen : BlockGenerationChecked source)
+    (_gen : BlockGenerationChecked source)
     (constructor : NormalizedBlockCtor) : VExpr :=
   VExpr.appN
     (.const constructor.familyName (VLevel.params source.uvars))

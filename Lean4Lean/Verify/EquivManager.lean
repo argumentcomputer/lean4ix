@@ -330,7 +330,7 @@ theorem isDefEq.WF {c : VContext} {s : VState}
   · rename_i heq
     exact .pure fun _ =>
       (he₁.eqv heq).uniq c.Ewf (.refl c.Ewf c.Δwf) he₂
-  simp only [pure_bind]
+  simp only []
   refine (isDefEqCore.WF he₁ he₂).bind fun b _ _ hb => ?_
   simp; split
   · exact (addEquiv.WF he₁ ⟨_, he₂, (hb ‹_›).symm⟩).map fun _ _ _ _ => hb

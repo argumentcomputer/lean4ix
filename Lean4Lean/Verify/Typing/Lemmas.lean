@@ -1633,8 +1633,7 @@ theorem ofLevel_mkLevelIMax'
   · simp_all; exact VLevel.imax_self.symm
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
-variable! {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U')
-    (hU : U = ls.length) in
+variable! {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U') in
 theorem TrProj.instL (H : TrProj env U Γ s i e e') :
     TrProj env U' (Γ.map (VExpr.instL ls)) s i
       (e.instL ls) (e'.instL ls) := by
@@ -1686,7 +1685,7 @@ theorem TrProj.structuralLaws (henv : VEnv.WF env) :
   wellFormed H he := H.wf he
   unique hΓ H1 H2 he := H1.uniq henv hΓ H2 he
   termSubstitution h₀ W H := H.instN henv.ordered h₀ W
-  universeInstantiation hls hU H := H.instL hls hU
+  universeInstantiation hls _ H := H.instL hls
 
 /-!
 The guards below pin both the proved laws and the inherited Tier-R boundary.
@@ -1848,7 +1847,7 @@ theorem TrExprS.instL (H : TrExprS env ps Δ e e') :
   | mdata _ ih => exact .mdata (ih hΔ)
   | proj _ h2 ih =>
     exact .proj henv (hΔ.instL Hls') (ih hΔ)
-      (VLCtx.instL_toCtx _ ▸ h2.instL Hls' eq')
+      (VLCtx.instL_toCtx _ ▸ h2.instL Hls')
 
 theorem TrExpr.instL (H : TrExpr env ps Δ e e') :
     TrExpr env Us (Δ.instL ls') (e.instantiateLevelParams ps ls) (e'.instL ls') :=

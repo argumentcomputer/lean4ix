@@ -111,7 +111,7 @@ theorem biBoxCheckedWF : biBoxChecked.WF VEnv.empty := by
         hresult, hindices, hparams]
       exact .nil
 
-def biBoxGenerationWF : biBoxGeneration.WF VEnv.empty := by
+theorem biBoxGenerationWF : biBoxGeneration.WF VEnv.empty := by
   exact biBoxCheckedWF.identityGeneration .empty
 
 def biBoxTypeEnv : VEnv :=
@@ -145,7 +145,7 @@ theorem biBoxTypeEnvOrdered : biBoxTypeEnv.Ordered :=
 theorem biBoxCtorEnvOrdered : biBoxCtorEnv.Ordered :=
   replayCtorEnv_ordered07 biBoxGenerationWF rfl biBoxTypeEnvOrdered rfl
 
-def biBoxGenerationEnv :
+theorem biBoxGenerationEnv :
     VInductDecl.GenerationEnv biBoxGeneration biBoxCtorEnv :=
   replayGenerationEnv07 biBoxGenerationWF rfl rfl biBoxCtorEnvOrdered
 

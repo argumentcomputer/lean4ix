@@ -116,16 +116,16 @@ theorem indexedVecKernelEnv_noProjectionReady (name : Name) :
     (s := ({} : ConstMap)) SMap.WF.empty]
   by_cases hRec : ``Nat.rec = name
   · subst name
-    simp [SMap.find?, natRecInfo]
+    simp [natRecInfo]
   · by_cases hSucc : ``Nat.succ = name
     · subst name
-      simp [hRec, SMap.find?, natSuccInfo]
+      simp [hRec, natSuccInfo]
     · by_cases hZero : ``Nat.zero = name
       · subst name
-        simp [hRec, hSucc, SMap.find?, natZeroInfo]
+        simp [hRec, hSucc, natZeroInfo]
       · by_cases hNat : ``Nat = name
         · subst name
-          simp [hRec, hSucc, hZero, SMap.find?, natInfo]
+          simp [hRec, hSucc, hZero, natInfo]
         · simp [hRec, hSucc, hZero, hNat, SMap.find?]
 
 theorem indexedVecKernelEnv_noStructureEta (name : Name) :
@@ -140,16 +140,16 @@ theorem indexedVecKernelEnv_noStructureEta (name : Name) :
     (s := ({} : ConstMap)) SMap.WF.empty]
   by_cases hRec : ``Nat.rec = name
   · subst name
-    simp [SMap.find?, natRecInfo]
+    simp [natRecInfo]
   · by_cases hSucc : ``Nat.succ = name
     · subst name
-      simp [hRec, SMap.find?, natSuccInfo]
+      simp [hRec, natSuccInfo]
     · by_cases hZero : ``Nat.zero = name
       · subst name
-        simp [hRec, hSucc, SMap.find?, natZeroInfo]
+        simp [hRec, hSucc, natZeroInfo]
       · by_cases hNat : ``Nat = name
         · subst name
-          simp [hRec, hSucc, hZero, SMap.find?, natInfo]
+          simp [hRec, hSucc, hZero, natInfo]
         · simp [hRec, hSucc, hZero, hNat, SMap.find?]
 
 theorem indexedVecTypeEnv_noProjectionReady (name : Name) :
@@ -166,19 +166,19 @@ theorem indexedVecTypeEnv_noProjectionReady (name : Name) :
     (s := ({} : ConstMap)) SMap.WF.empty]
   by_cases hVec : ``IndexedVec = name
   · subst name
-    simp [SMap.find?, indexedVecInfo]
+    simp [indexedVecInfo]
   · by_cases hRec : ``Nat.rec = name
     · subst name
-      simp [hVec, SMap.find?, natRecInfo]
+      simp [hVec, natRecInfo]
     · by_cases hSucc : ``Nat.succ = name
       · subst name
-        simp [hVec, hRec, SMap.find?, natSuccInfo]
+        simp [hVec, hRec, natSuccInfo]
       · by_cases hZero : ``Nat.zero = name
         · subst name
-          simp [hVec, hRec, hSucc, SMap.find?, natZeroInfo]
+          simp [hVec, hRec, hSucc, natZeroInfo]
         · by_cases hNat : ``Nat = name
           · subst name
-            simp [hVec, hRec, hSucc, hZero, SMap.find?, natInfo]
+            simp [hVec, hRec, hSucc, hZero, natInfo]
           · simp [hVec, hRec, hSucc, hZero, hNat, SMap.find?]
 
 theorem indexedVecTypeEnv_noStructureEta (name : Name) :
@@ -194,19 +194,19 @@ theorem indexedVecTypeEnv_noStructureEta (name : Name) :
     (s := ({} : ConstMap)) SMap.WF.empty]
   by_cases hVec : ``IndexedVec = name
   · subst name
-    simp [SMap.find?, indexedVecInfo]
+    simp [indexedVecInfo]
   · by_cases hRec : ``Nat.rec = name
     · subst name
-      simp [hVec, SMap.find?, natRecInfo]
+      simp [hVec, natRecInfo]
     · by_cases hSucc : ``Nat.succ = name
       · subst name
-        simp [hVec, hRec, SMap.find?, natSuccInfo]
+        simp [hVec, hRec, natSuccInfo]
       · by_cases hZero : ``Nat.zero = name
         · subst name
-          simp [hVec, hRec, hSucc, SMap.find?, natZeroInfo]
+          simp [hVec, hRec, hSucc, natZeroInfo]
         · by_cases hNat : ``Nat = name
           · subst name
-            simp [hVec, hRec, hSucc, hZero, SMap.find?, natInfo]
+            simp [hVec, hRec, hSucc, hZero, natInfo]
           · simp [hVec, hRec, hSucc, hZero, hNat, SMap.find?]
 
 private theorem addConst_constants {env env' : VEnv} {name : Name}
@@ -1889,7 +1889,7 @@ private theorem indexedVecPreFamilySuccFVarCheckTypeM
     (.const ``Nat.succ []) (.fvar id) (.const ``Nat [])
     (.const ``Nat []) `n .default
     (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [replaySuccApp]) succRun argumentRun (by rfl)
+    (by simp) succRun argumentRun (by rfl)
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType' (replaySuccApp (.fvar id)) false
       (TypeChecker.Methods.withFuel 9999)
@@ -2609,7 +2609,7 @@ private theorem indexedVecPreFamilySafetyRun :
           simp [AddInductive.constructorIndependentOf])]
         simp only [Bind.bind, Except.bind]
         rw [alphaAnnotations.observe_eq]
-        simp only [Bind.bind, Except.bind]
+        simp only []
         rw [dif_pos nFresh]
         rw [explicitHeadTailRun]
         exact ⟨_, rfl⟩
@@ -2698,7 +2698,7 @@ private theorem indexedVecPreFamilySafetyRun :
           simp [AddInductive.constructorIndependentOf])]
         simp only [Bind.bind, Except.bind]
         rw [baseNatAnnotations.observe_eq]
-        simp only [Bind.bind, Except.bind]
+        simp only []
         rw [dif_pos baseFresh]
         rw [explicitNTailRun]
         exact ⟨_, rfl⟩
@@ -2812,10 +2812,8 @@ private theorem indexedVecPreFamilySafetyRun :
     rw [indexedVecPreFamilyIndexTelescope_eq]
     rw [indexedVecValidationStatsParams]
     rw [indexedVecInfoTypeShape]
-    simp [AddInductive.instantiateFamilyParameters, vecFamilyTail,
-      vecIndexName,
-      indexedVecPreFamilyIndexTelescope, Expr.instantiate1_eq,
-      Expr.instantiate1', Pure.pure, Except.pure]
+    simp [AddInductive.instantiateFamilyParameters, vecFamilyTail, vecIndexName,
+      Expr.instantiate1_eq, Expr.instantiate1', Pure.pure, Except.pure]
   unfold AddInductive.checkConstructorPreFamilySafety
   have translationUnique :
       (AddInductive.theoryTranslationUnique indexedVecInfo.type &&
@@ -3020,21 +3018,21 @@ theorem indexedVecSemantic_normalization_eq :
     indexedVecSemanticNormalizationCandidateRun.normalization =
       indexedVecChecked.identityGeneration.block.normalization := rfl
 
-def indexedVecSemanticFamilySpineRun :
+theorem indexedVecSemanticFamilySpineRun :
     TypeChecker.CandidateExprSpineRun natFinalEnv [`u]
       indexedVecFamilyCandidate indexedVecType.type
       indexedVecType.type :=
   indexedVecSemanticFamilySemanticRootRun.spine
     indexedVecFamilyCandidate_identity.storedSpine
 
-def indexedVecSemanticNilSpineRun :
+theorem indexedVecSemanticNilSpineRun :
     TypeChecker.CandidateExprSpineRun indexedVecTypeEnv [`u]
       nilCandidate indexedVecType.ctors[0].type
       indexedVecType.ctors[0].type :=
   indexedVecSemanticNilSemanticRootRun.spine
     nilCandidate_identity.storedSpine
 
-def indexedVecSemanticConsSpineRun :
+theorem indexedVecSemanticConsSpineRun :
     TypeChecker.CandidateExprSpineRun indexedVecTypeEnv [`u]
       consCandidate indexedVecType.ctors[1].type
       indexedVecType.ctors[1].type :=

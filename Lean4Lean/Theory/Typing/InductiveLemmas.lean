@@ -51,7 +51,7 @@ theorem inst_bvar_of_closedN (h : ClosedN e (k+1)) :
     simp only [instVar]
     rcases Nat.lt_trichotomy i k with h' | rfl | h'
     · simp [h', liftVar_lt h']
-    · simp [liftVar_le (Nat.le_refl _), liftN, liftVar_base, Nat.add_comm]
+    · simp [liftVar_le (Nat.le_refl _), liftN]
     · omega
 
 theorem ClosedN.appN {f : VExpr} (hf : f.ClosedN k) {as : List VExpr}
@@ -1526,7 +1526,7 @@ theorem HasType.hasConst_false_of_absent
           typed.const_inv henv hΓ
         rw [absent] at present
         contradiction
-      · simpa [VExpr.hasConst, equality]
+      · simp [VExpr.hasConst, equality]
   | app function argument functionIH argumentIH =>
       obtain ⟨domain, body, functionType, argumentType⟩ :=
         typed.app_inv henv hΓ
@@ -1672,7 +1672,7 @@ theorem onTel_of_free {env : VEnv} {U : Nat} : ∀ {As Γ},
     (∀ A ∈ As, ∀ Γ', env.IsType U Γ' A) → OnTel env U Γ As
   | [], _, _ => trivial
   | _ :: _, _, h =>
-    ⟨h _ (.head _) _, onTel_of_free fun A h' Γ' => h _ (.tail _ h') Γ'⟩
+    ⟨h _ (.head _) _, onTel_of_free fun _ h' Γ' => h _ (.tail _ h') Γ'⟩
 
 theorem OnTel.append {env : VEnv} {U : Nat} : ∀ {As Bs Γ},
     OnTel env U Γ As → OnTel env U (As.reverse ++ Γ) Bs → OnTel env U Γ (As ++ Bs)
@@ -1705,7 +1705,7 @@ theorem OnTel.weakN {env : VEnv} {U n : Nat} (henv : env.Ordered) :
     ∀ {As Γ Γ' k}, Ctx.LiftN n k Γ Γ' → OnTel env U Γ As →
     OnTel env U Γ' (VExpr.liftTelN n As k)
   | [], _, _, _, _, _ => trivial
-  | _ :: As, _, _, _, W, ⟨hA, hT⟩ =>
+  | _ :: _, _, _, _, W, ⟨hA, hT⟩ =>
     ⟨hA.weakN henv W, OnTel.weakN henv W.succ hT⟩
 
 /-- Universe instantiation of a telescope. -/
@@ -1888,7 +1888,7 @@ theorem recArgs_ge {U : Nat} {T : Name} {np ni : Nat} : ∀ {Bs : List VExpr} {j
     split at h
     · next r₀ hr₀ =>
       rcases List.mem_cons.1 h with rfl | h
-      · simpa [(recArg?_eq hr₀).1]
+      · simp [(recArg?_eq hr₀).1]
       · exact Nat.le_of_succ_le (recArgs_ge _ h)
     · exact Nat.le_of_succ_le (recArgs_ge _ h)
 
@@ -2111,7 +2111,7 @@ previous IH binders. -/
 theorem RecArg.minorIH_shift (r : RecArg) (m p : Nat)
     (hj : r.fieldIndex < m) :
     r.minorIH m p = (r.minorIH m 0).liftN p := by
-  simp only [RecArg.minorIH, VExpr.liftN_forallN, VExpr.liftTelN_length]
+  simp only [RecArg.minorIH, VExpr.liftN_forallN]
   rw [← r.minorBinders_shift m p]
   rw [show (r.minorBinders m 0).length = r.binders.length by
     simp [RecArg.minorBinders, VExpr.liftTelN_length], Nat.zero_add]
@@ -2131,7 +2131,7 @@ theorem RecArg.minorIH_shift (r : RecArg) (m p : Nat)
       simp only [Function.comp_apply, Nat.add_zero]
       rw [VExpr.liftN'_liftN_hi]
     · congr 1
-      simp only [Function.comp_apply, Nat.add_zero, VExpr.liftN_appN]
+      simp only [Nat.add_zero, VExpr.liftN_appN]
       rw [show (VExpr.bvar (m - 1 - r.fieldIndex + r.binders.length)).liftN
           p r.binders.length =
           .bvar (m - 1 - r.fieldIndex + p + r.binders.length) from by
@@ -2169,7 +2169,7 @@ theorem RecArg.minorIH_zero_lift_ruleIH (r : RecArg) (m k : Nat)
             (r.fieldIndex + r.binders.length) + (m-r.fieldIndex) from by omega,
           VExpr.liftN_liftN_mid e k (m-r.fieldIndex) (by omega)]
       · congr 1
-        simp only [Function.comp_apply, VExpr.liftN_appN]
+        simp only [VExpr.liftN_appN]
         rw [show (VExpr.bvar (m - 1 - r.fieldIndex + r.binders.length)).liftN
             k (m + r.binders.length) =
             .bvar (m - 1 - r.fieldIndex + r.binders.length) from by
@@ -3501,13 +3501,11 @@ theorem familyApp_hasType {family : NormalizedFamily}
   simp only [List.map_reverse] at hresult
   have hctxChecked := ((S.emittedFamilyTel hfamily).instL
     (U' := gen.recUvars) gen.sourceLevels_wf).ctx
-  simp only [List.map_nil, List.append_nil,
-    List.map_reverse] at hctxChecked
+  simp only [List.map_nil, List.append_nil] at hctxChecked
   have hresultChecked := hresult.defeqDFC S.ord hctxChecked
   have hctxGeneration := ((S.generationFamilyTel hfamily).instL
     (U' := gen.recUvars) gen.sourceLevels_wf).ctx
-  simp only [List.map_nil, List.append_nil,
-    List.map_reverse] at hctxGeneration
+  simp only [List.map_nil, List.append_nil] at hctxGeneration
   have hresultGeneration := hresultChecked.defeqDFC S.ord
     (hctxGeneration.symm S.ord)
   have hresult' : env.IsDefEq gen.recUvars
@@ -3575,6 +3573,9 @@ namespace GenerationEnv
 variable {source : VInductDecl} {gen : GenerationChecked source}
   {env : VEnv} (S : GenerationEnv gen env)
 include S
+-- `S` is included throughout so every lemma below is reachable as `S.lemma`,
+-- including those whose statement and proof never mention it.
+set_option linter.unusedSectionVars false
 
 /-- The final mixed-generation invariant is monotone once the larger
 environment is known to remain ordered. -/
@@ -3988,13 +3989,11 @@ theorem familyApp_hasType :
   simp only [List.map_reverse] at hresult
   have hctxChecked := (S.emittedFamilyTel.instL
     (U' := gen.recUvars) gen.sourceLevels_wf).ctx
-  simp only [List.map_nil, List.append_nil,
-    List.map_reverse] at hctxChecked
+  simp only [List.map_nil, List.append_nil] at hctxChecked
   have hresultChecked := hresult.defeqDFC S.ord hctxChecked
   have hctxGeneration := (S.generationFamilyTel.instL
     (U' := gen.recUvars) gen.sourceLevels_wf).ctx
-  simp only [List.map_nil, List.append_nil,
-    List.map_reverse] at hctxGeneration
+  simp only [List.map_nil, List.append_nil] at hctxGeneration
   have hresultGeneration := hresultChecked.defeqDFC S.ord
     (hctxGeneration.symm S.ord)
   have hresult' : env.IsDefEq (gen.recUvars)
@@ -5977,9 +5976,7 @@ theorem recBase_hasType {family : NormalizedFamily}
     exact S.recursor_hasType hfamily hrec
   have hspine := VEnv.HasType.appN_selfSpine
     (env := env) (U := gen.recUvars) hf
-  simp only [BlockGenerationChecked.recType,
-    List.reverse_append, List.append_nil, List.append_assoc,
-    List.length_append, List.length_reverse,
+  simp only [List.reverse_append, List.append_nil, List.append_assoc, List.length_append,
     gen.minorTypes_length, gen.motiveTypes_length] at hspine
   rw [show gen.paramsTel.length = source.nparams from by
       simpa [BlockGenerationChecked.paramsTel] using
@@ -6601,8 +6598,7 @@ theorem blockRuleCall_hasType
   have hbaseLift :
       (gen.recBase m r.targetType).liftN r.binders.length =
         gen.recBase (m+r.binders.length) r.targetType := by
-    simp only [BlockGenerationChecked.recBase, VExpr.liftN_appN,
-      VExpr.liftN, List.map_map]
+    simp only [BlockGenerationChecked.recBase, VExpr.liftN_appN, VExpr.liftN]
     rw [bvarRevRange_liftN_ge _ _ _ _ (Nat.zero_le _)]
     apply congrArg (VExpr.appN _)
     apply VExpr.bvarRevRange_congr
@@ -6845,7 +6841,7 @@ theorem minorApp_hasType {i : Nat}
         rw [show m+0+rs.length = m+rs.length by omega,
           VExpr.liftN_liftN_midN e d k rs.length (Nat.zero_le _)]
       · congr 1
-        simp only [Function.comp_apply]
+        simp only []
         rw [show m+0+rs.length = m+rs.length by omega,
           VExpr.liftN_appN, VExpr.liftN_appN,
           List.map_append, List.map_append,
@@ -6982,6 +6978,9 @@ namespace GenerationEnv
 variable {source : VInductDecl} {gen : GenerationChecked source}
   {env : VEnv} (S : GenerationEnv gen env)
 include S
+-- `S` is included throughout so every lemma below is reachable as `S.lemma`,
+-- including those whose statement and proof never mention it.
+set_option linter.unusedSectionVars false
 
 /-- Checked field semantics for one paired constructor, re-indexed onto the
 raw block header used by mixed generation. -/
@@ -7251,8 +7250,7 @@ theorem recArg_transport {ctor : NormalizedCtor}
     (hprefix.symm S.ord)
   have hfull := htelGeneration.extendDefEqCtx hprefix
   have hspGeneration := hspChecked.defeqDFC S.ord (hfull.symm S.ord)
-  simp only [RecArg.instL, VExpr.instL_forallN,
-    VExpr.liftTelN_instL, List.map_reverse] at htelGeneration hspGeneration
+  simp only [VExpr.instL_forallN, VExpr.liftTelN_instL] at htelGeneration hspGeneration
   have hjlen :
       ((ctor.fieldsR source.uvars source.nparams gen.elimination).take
         r₀.fieldIndex).length = r₀.fieldIndex := by
@@ -7436,6 +7434,9 @@ namespace GenerationEnv
 variable {source : VInductDecl} {gen : GenerationChecked source}
   {env : VEnv} (S : GenerationEnv gen env)
 include S
+-- `S` is included throughout so every lemma below is reachable as `S.lemma`,
+-- including those whose statement and proof never mention it.
+set_option linter.unusedSectionVars false
 
 /-- One mixed generalized induction-hypothesis entry is a type. The bound
 field keeps its raw domain; `emittedField_defeq` converts it to the retained
@@ -8655,6 +8656,9 @@ namespace GenerationEnv
 variable {source : VInductDecl} {gen : GenerationChecked source}
   {env : VEnv} (S : GenerationEnv gen env)
 include S
+-- `S` is included throughout so every lemma below is reachable as `S.lemma`,
+-- including those whose statement and proof never mention it.
+set_option linter.unusedSectionVars false
 
 /-! ## Mixed iota-rule preservation -/
 
@@ -8784,12 +8788,8 @@ theorem recBase_hasType
     exact S.recursor_hasType hrec
   have hspine := HasType.appN_selfSpine
     (env := env) (U := gen.recUvars) hf
-  simp only [GenerationChecked.recType,
-    List.reverse_append, List.reverse_cons,
-    List.append_nil, List.append_assoc,
-    List.singleton_append, List.length_append,
-    List.length_cons, List.length_reverse,
-    gen.minorTypes_length] at hspine
+  simp only [List.reverse_append, List.reverse_cons, List.append_nil, List.append_assoc,
+    List.singleton_append, List.length_append, List.length_cons, gen.minorTypes_length] at hspine
   rw [show gen.paramsTel.length = source.nparams from by
       simp [GenerationChecked.paramsTel,
         S.generationParams_length],
@@ -9807,8 +9807,7 @@ theorem minorApp_hasType {i : Nat} {ctor : NormalizedCtor}
                 source.uvars source.nparams gen.elimination).length)).liftN
           (ctor.fieldsR
             source.uvars source.nparams gen.elimination).length := by
-    simp only [GenerationChecked.minorType,
-      rs, hrs]
+    simp only [GenerationChecked.minorType, rs]
     conv => lhs; rw [VExpr.liftN_forallN,
         VExpr.liftTelN_liftTelN,
         liftTelN_congr _ _
@@ -10015,7 +10014,7 @@ theorem minorApp_hasType {i : Nat} {ctor : NormalizedCtor}
             gen.block.ctorPairs.length rs.length
             (Nat.zero_le _)]
       · congr 1
-        simp only [Function.comp_apply]
+        simp only []
         rw [show
             (ctor.fieldsR
                 source.uvars source.nparams gen.elimination).length +
@@ -10500,6 +10499,9 @@ structure Stage3Env (env : VEnv) (U : Nat) (T : Name) (np : Nat) (l : VLevel)
 variable {env : VEnv} {U : Nat} {T : Name} {np : Nat} {l : VLevel} {ty : VInductiveType}
   (S : Stage3Env env U T np l ty)
 include S
+-- `S` is included throughout so every lemma below is reachable as `S.lemma`,
+-- including those whose statement and proof never mention it.
+set_option linter.unusedSectionVars false
 
 theorem Stage3Env.mono {env' : VEnv} (henv : env ≤ env') (ord' : env'.Ordered) :
     Stage3Env env' U T np l ty where
@@ -10824,8 +10826,7 @@ theorem Stage3Env.recArg_transport {c : VConstVal} (hc : c ∈ ty.ctors)
     simp [ctorFieldsR, paramsTel, List.map_reverse, List.map_take]
   rw [hctx] at htel₁
   rw [List.map_append, List.map_reverse, hctx] at hsp₁
-  simp only [RecArg.instL, VExpr.instL_forallN, VExpr.liftTelN_instL,
-    List.map_reverse] at htel₁ hsp₁
+  simp only [VExpr.instL_forallN, VExpr.liftTelN_instL] at htel₁ hsp₁
   have hjlen : ((ctorFieldsR U np c).take r₀.fieldIndex).length =
       r₀.fieldIndex := by
     simp only [ctorFieldsR, List.length_take, List.length_map]
@@ -11937,9 +11938,8 @@ theorem Stage3Env.recBase_hasType
       S.recType_closedN.liftN_eq (Nat.zero_le _)]
     exact S.recConst_hasType hrec
   have hspine := HasType.appN_selfSpine (env := env) (U := U+1) hf
-  simp only [recType, List.reverse_append, List.reverse_cons, List.append_nil,
-    List.append_assoc, List.singleton_append, List.length_append, List.length_cons,
-    List.length_reverse, minorTypes_length] at hspine
+  simp only [List.reverse_append, List.reverse_cons, List.append_nil, List.append_assoc,
+    List.singleton_append, List.length_append, List.length_cons, minorTypes_length] at hspine
   rw [show (paramsTel U np ty).length = np from by
       simp [paramsTel, List.length_map, S.hlen],
     VExpr.bvarRevRange_congr' Δ.length (show
@@ -11986,9 +11986,8 @@ theorem Stage3Env.recBaseRec_hasType
       S.recTypeRec_closedN.liftN_eq (Nat.zero_le _)]
     exact S.recConstRec_hasType hrec
   have hspine := HasType.appN_selfSpine (env := env) (U := U+1) hf
-  simp only [recTypeRec, List.reverse_append, List.reverse_cons, List.append_nil,
-    List.append_assoc, List.singleton_append, List.length_append, List.length_cons,
-    List.length_reverse, minorTypesRec_length] at hspine
+  simp only [List.reverse_append, List.reverse_cons, List.append_nil, List.append_assoc,
+    List.singleton_append, List.length_append, List.length_cons, minorTypesRec_length] at hspine
   rw [show (paramsTel U np ty).length = np from by
       simp [paramsTel, List.length_map, S.hlen],
     VExpr.bvarRevRange_congr' Δ.length (show
@@ -12362,8 +12361,8 @@ theorem Stage3Env.ctorAppRule_hasType {c : VConstVal} (hc : c ∈ ty.ctors) :
   have hlen : (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
       (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
   rw [hlen] at h
-  simp only [List.nil_append, List.length_nil, Nat.zero_add, VExpr.liftN_appN,
-    VExpr.liftN, List.map_append, List.map_map] at h
+  simp only [List.length_nil, Nat.zero_add, VExpr.liftN_appN, VExpr.liftN, List.map_append,
+    List.map_map] at h
   rw [VExpr.liftTelN_liftTelN,
     bvarRevRange_liftN_ge _ _ _ _ (by omega),
     VExpr.bvarRevRange_liftN_high _ _ _ _ (by omega)] at h
@@ -12403,8 +12402,8 @@ theorem Stage3Env.ctorAppRuleRec_hasType {c : VConstVal} (hc : c ∈ ty.ctors) :
   have hlen : (VExpr.liftTelN 1 (ctorFieldsR U np c) 0).length =
       (ctorFieldsR U np c).length := VExpr.liftTelN_length ..
   rw [hlen] at h
-  simp only [List.nil_append, List.length_nil, Nat.zero_add, VExpr.liftN_appN,
-    VExpr.liftN, List.map_append, List.map_map] at h
+  simp only [List.length_nil, Nat.zero_add, VExpr.liftN_appN, VExpr.liftN, List.map_append,
+    List.map_map] at h
   rw [VExpr.liftTelN_liftTelN,
     bvarRevRange_liftN_ge _ _ _ _ (by omega),
     VExpr.bvarRevRange_liftN_high _ _ _ _ (by omega)] at h
@@ -12974,7 +12973,7 @@ theorem Stage3Env.minorApp_hasType {i : Nat} {c : VConstVal}
                   VExpr.bvarRevRange rs.length (ctorFieldsR U np c).length)]))).liftN
             ty.ctors.length (ctorFieldsR U np c).length)).liftN
         (ctorFieldsR U np c).length := by
-    simp only [minorType, rs, hrs, ElimMode.large_sourceLevels]
+    simp only [minorType, rs, ElimMode.large_sourceLevels]
     conv => lhs; rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
         liftTelN_congr _ _ (show (1:Nat) +
           ((ctorFieldsR U np c).length + ty.ctors.length) =
@@ -13049,7 +13048,7 @@ theorem Stage3Env.minorApp_hasType {i : Nat} {c : VConstVal}
           (ctorFieldsR U np c).length + rs.length from by omega,
           VExpr.liftN_liftN_mid e ty.ctors.length rs.length (Nat.zero_le _)]
       · congr 1
-        simp only [Function.comp_apply]
+        simp only []
         rw [show (ctorFieldsR U np c).length + 0 + rs.length =
           (ctorFieldsR U np c).length + rs.length from by omega]
         rw [VExpr.liftN_appN, VExpr.liftN_appN, List.map_append, List.map_append,
@@ -13167,7 +13166,7 @@ theorem Stage3Env.minorAppRec_hasType {i : Nat} {c : VConstVal}
                   VExpr.bvarRevRange rs.length (ctorFieldsR U np c).length)]))).liftN
             ty.ctors.length (ctorFieldsR U np c).length)).liftN
         (ctorFieldsR U np c).length := by
-    simp only [minorTypeRec, rs, hrs, ElimMode.large_sourceLevels]
+    simp only [minorTypeRec, rs, ElimMode.large_sourceLevels]
     conv => lhs; rw [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
         liftTelN_congr _ _ (show (1:Nat) +
           ((ctorFieldsR U np c).length + ty.ctors.length) =
@@ -13242,7 +13241,7 @@ theorem Stage3Env.minorAppRec_hasType {i : Nat} {c : VConstVal}
           (ctorFieldsR U np c).length + rs.length from by omega,
           VExpr.liftN_liftN_mid e ty.ctors.length rs.length (Nat.zero_le _)]
       · congr 1
-        simp only [Function.comp_apply]
+        simp only []
         rw [show (ctorFieldsR U np c).length + 0 + rs.length =
           (ctorFieldsR U np c).length + rs.length from by omega]
         rw [VExpr.liftN_appN, VExpr.liftN_appN, List.map_append, List.map_append,

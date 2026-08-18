@@ -115,7 +115,7 @@ theorem replayCtorEnv_ordered07
 /-- Reconstruct the precise mixed-generation environment after the family and
 constructor constants have been inserted.  Its recursor certificate is what
 turns exact kernel recursor metadata into a `TrConstVal`. -/
-def replayGenerationEnv07
+theorem replayGenerationEnv07
     {source : VInductDecl} {generation : source.GenerationChecked}
     {inputEnv typeEnv ctorEnv : VEnv}
     (generationWF : generation.WF inputEnv)
@@ -268,7 +268,7 @@ theorem boolDeclWF07 : boolDecl.WF VEnv.empty := by
         trivial
       · exact .nil
 
-def boolGenerationWF07 : boolGenerationChecked.WF VEnv.empty := by
+theorem boolGenerationWF07 : boolGenerationChecked.WF VEnv.empty := by
   exact (boolChecked.wf_of_decl boolDeclWF07).identityGeneration .empty
 
 def boolTypeEnv07 : VEnv :=
@@ -308,7 +308,7 @@ theorem boolCtorEnv_ordered07 : boolCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 boolGenerationWF07 rfl
     boolTypeEnv_ordered07 rfl
 
-def boolGenerationEnv07 :
+theorem boolGenerationEnv07 :
     VInductDecl.GenerationEnv boolGenerationChecked boolCtorEnv07 :=
   replayGenerationEnv07 boolGenerationWF07 rfl rfl
     boolCtorEnv_ordered07
@@ -479,7 +479,7 @@ theorem listCheckedWF07 : listChecked.WF VEnv.empty := by
         · trivial
       · exact .nil
 
-def listGenerationWF07 : listGenerationChecked.WF VEnv.empty := by
+theorem listGenerationWF07 : listGenerationChecked.WF VEnv.empty := by
   exact listCheckedWF07.identityGeneration .empty
 
 def listTypeEnv07 : VEnv :=
@@ -525,7 +525,7 @@ theorem listCtorEnv_ordered07 : listCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 listGenerationWF07 rfl
     listTypeEnv_ordered07 rfl
 
-def listGenerationEnv07 :
+theorem listGenerationEnv07 :
     VInductDecl.GenerationEnv listGenerationChecked listCtorEnv07 :=
   replayGenerationEnv07 listGenerationWF07 rfl rfl
     listCtorEnv_ordered07
@@ -702,7 +702,7 @@ theorem optionDeclWF07 : optionDecl.WF VEnv.empty := by
         · trivial
       · exact .nil
 
-def optionGenerationWF07 : optionGenerationChecked.WF VEnv.empty := by
+theorem optionGenerationWF07 : optionGenerationChecked.WF VEnv.empty := by
   exact (optionChecked.wf_of_decl optionDeclWF07).identityGeneration .empty
 
 def optionTypeEnv07 : VEnv :=
@@ -748,7 +748,7 @@ theorem optionCtorEnv_ordered07 : optionCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 optionGenerationWF07 rfl
     optionTypeEnv_ordered07 rfl
 
-def optionGenerationEnv07 :
+theorem optionGenerationEnv07 :
     VInductDecl.GenerationEnv optionGenerationChecked optionCtorEnv07 :=
   replayGenerationEnv07 optionGenerationWF07 rfl rfl
     optionCtorEnv_ordered07
@@ -925,7 +925,7 @@ theorem prodCheckedWF07 : prodChecked.WF VEnv.empty := by
       · trivial
     · exact .nil
 
-def prodGenerationWF07 : prodGenerationChecked.WF VEnv.empty := by
+theorem prodGenerationWF07 : prodGenerationChecked.WF VEnv.empty := by
   exact prodCheckedWF07.identityGeneration .empty
 
 def prodTypeEnv07 : VEnv :=
@@ -958,7 +958,7 @@ theorem prodCtorEnv_ordered07 : prodCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 prodGenerationWF07 rfl
     prodTypeEnv_ordered07 rfl
 
-def prodGenerationEnv07 :
+theorem prodGenerationEnv07 :
     VInductDecl.GenerationEnv prodGenerationChecked prodCtorEnv07 :=
   replayGenerationEnv07 prodGenerationWF07 rfl rfl
     prodCtorEnv_ordered07
@@ -1094,7 +1094,7 @@ theorem andCheckedWF07 : andChecked.WF VEnv.empty := by
       · trivial
     · exact .nil
 
-def andGenerationWF07 : andGenerationChecked.WF VEnv.empty := by
+theorem andGenerationWF07 : andGenerationChecked.WF VEnv.empty := by
   exact andCheckedWF07.identityGeneration .empty
 
 def andTypeEnv07 : VEnv :=
@@ -1127,7 +1127,7 @@ theorem andCtorEnv_ordered07 : andCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 andGenerationWF07 rfl
     andTypeEnv_ordered07 rfl
 
-def andGenerationEnv07 :
+theorem andGenerationEnv07 :
     VInductDecl.GenerationEnv andGenerationChecked andCtorEnv07 :=
   replayGenerationEnv07 andGenerationWF07 rfl rfl
     andCtorEnv_ordered07
@@ -1269,7 +1269,7 @@ theorem orCheckedWF07 : orChecked.WF VEnv.empty := by
         · trivial
       · exact .nil
 
-def orGenerationWF07 : orGenerationChecked.WF VEnv.empty := by
+theorem orGenerationWF07 : orGenerationChecked.WF VEnv.empty := by
   exact orCheckedWF07.identityGeneration .empty
 
 def orTypeEnv07 : VEnv :=
@@ -1315,7 +1315,7 @@ theorem orCtorEnv_ordered07 : orCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 orGenerationWF07 rfl
     orTypeEnv_ordered07 rfl
 
-def orGenerationEnv07 :
+theorem orGenerationEnv07 :
     VInductDecl.GenerationEnv orGenerationChecked orCtorEnv07 :=
   replayGenerationEnv07 orGenerationWF07 rfl rfl
     orCtorEnv_ordered07
@@ -1478,7 +1478,7 @@ theorem heqCheckedWF07 : heqChecked.WF VEnv.empty := by
         [.bvar 1, .bvar 0] (.sort .zero)
       exact .cons (by type_tac) <| .cons (by type_tac) .nil
 
-def heqGenerationWF07 : heqGenerationChecked.WF VEnv.empty := by
+theorem heqGenerationWF07 : heqGenerationChecked.WF VEnv.empty := by
   exact heqCheckedWF07.identityGeneration .empty
 
 def heqTypeEnv07 : VEnv :=
@@ -1511,7 +1511,7 @@ theorem heqCtorEnv_ordered07 : heqCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 heqGenerationWF07 rfl
     heqTypeEnv_ordered07 rfl
 
-def heqGenerationEnv07 :
+theorem heqGenerationEnv07 :
     VInductDecl.GenerationEnv heqGenerationChecked heqCtorEnv07 :=
   replayGenerationEnv07 heqGenerationWF07 rfl rfl
     heqCtorEnv_ordered07
@@ -1904,7 +1904,7 @@ theorem finCheckedWF07 : finChecked.WF finInputEnv07 := by
       · trivial
     · exact .nil
 
-def finGenerationWF07 : finGenerationChecked.WF finInputEnv07 := by
+theorem finGenerationWF07 : finGenerationChecked.WF finInputEnv07 := by
   exact finCheckedWF07.identityGeneration finInputEnv_ordered07
 
 def finTypeEnv07 : VEnv :=
@@ -1931,7 +1931,7 @@ theorem finTypeEnv_ordered07 : finTypeEnv07.Ordered :=
 theorem finCtorEnv_ordered07 : finCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 finGenerationWF07 rfl finTypeEnv_ordered07 rfl
 
-def finGenerationEnv07 :
+theorem finGenerationEnv07 :
     VInductDecl.GenerationEnv finGenerationChecked finCtorEnv07 :=
   replayGenerationEnv07 finGenerationWF07 rfl rfl finCtorEnv_ordered07
 
@@ -2274,7 +2274,7 @@ theorem vectorCheckedWF07 : vectorChecked.WF vectorInputEnv07 := by
       · trivial
     · exact .nil
 
-def vectorGenerationWF07 :
+theorem vectorGenerationWF07 :
     vectorGenerationChecked.WF vectorInputEnv07 := by
   exact vectorCheckedWF07.identityGeneration vectorInputEnv_ordered07
 
@@ -2306,7 +2306,7 @@ theorem vectorCtorEnv_ordered07 : vectorCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 vectorGenerationWF07 rfl
     vectorTypeEnv_ordered07 rfl
 
-def vectorGenerationEnv07 :
+theorem vectorGenerationEnv07 :
     VInductDecl.GenerationEnv vectorGenerationChecked vectorCtorEnv07 :=
   replayGenerationEnv07 vectorGenerationWF07 rfl rfl
     vectorCtorEnv_ordered07
@@ -2453,7 +2453,7 @@ def vectorReplay07 : SingletonReplayArtifact where
 
 /-! ### Unit/Empty edge cases -/
 
-def punitGenerationWF07 : punitGenerationChecked.WF VEnv.empty := by
+theorem punitGenerationWF07 : punitGenerationChecked.WF VEnv.empty := by
   exact (punitChecked.wf_of_decl punitDecl_wf).identityGeneration .empty
 
 def punitTypeEnv07 : VEnv :=
@@ -2486,7 +2486,7 @@ theorem punitCtorEnv_ordered07 : punitCtorEnv07.Ordered :=
   replayCtorEnv_ordered07 punitGenerationWF07 rfl
     punitTypeEnv_ordered07 rfl
 
-def punitGenerationEnv07 :
+theorem punitGenerationEnv07 :
     VInductDecl.GenerationEnv punitGenerationChecked punitCtorEnv07 :=
   replayGenerationEnv07 punitGenerationWF07 rfl rfl
     punitCtorEnv_ordered07
@@ -2592,7 +2592,7 @@ def punitReplay07 : SingletonReplayArtifact where
   transaction := punitAddInduct07
   aligned := punitAligned07
 
-def emptyGenerationWF07 : emptyGenerationChecked.WF VEnv.empty := by
+theorem emptyGenerationWF07 : emptyGenerationChecked.WF VEnv.empty := by
   exact (emptyChecked.wf_of_decl emptyDecl_wf).identityGeneration .empty
 
 def emptyTypeEnv07 : VEnv :=
@@ -2614,7 +2614,7 @@ def emptyMap07 : ConstMap :=
 theorem emptyTypeEnv_ordered07 : emptyTypeEnv07.Ordered :=
   replayTypeEnv_ordered07 .empty emptyGenerationWF07 rfl
 
-def emptyGenerationEnv07 :
+theorem emptyGenerationEnv07 :
     VInductDecl.GenerationEnv emptyGenerationChecked emptyTypeEnv07 :=
   replayGenerationEnv07 emptyGenerationWF07 rfl rfl
     emptyTypeEnv_ordered07

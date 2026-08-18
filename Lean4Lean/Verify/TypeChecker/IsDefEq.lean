@@ -187,7 +187,7 @@ theorem isDefEqArgs.WF {c : VContext} {s : VState}
   unfold isDefEqArgs; split <;> (unfold Expr.getAppFn at H)
   · let .app a1 a2 a3 a4 := he₁
     let .app b1 b2 b3 b4 := he₂
-    refine (isDefEq.WF a4 b4).bind fun _ _ _ h2 => ?_; extract_lets F
+    refine (isDefEq.WF a4 b4).bind fun _ _ _ h2 => ?_; extract_lets
     split <;> [exact .pure nofun; rename_i hb2]
     refine (isDefEqArgs.WF H a3 b3).mono fun _ _ _ h1 hb1 => ?_
     simp at hb2
@@ -296,7 +296,7 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
   refine .getEnv ?_
   refine (M.WF.liftExcept envGet.WF).lift.bind fun _ci _ _ hfind => ?_
   split <;> [skip; exact .pure nofun]
-  extract_lets F1 F2
+  extract_lets F1
   split <;> [skip; exact .pure nofun]
   rename_i hostHead ctorName ctorLevels hhead state hstate hostInfo ctorInfo
     hargs
@@ -376,8 +376,7 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
   let params := args'.take artifact.projection.view.nparams
   let fields := args'.drop artifact.projection.view.nparams
   have hargsSplit : args' = params ++ fields := by
-    simpa [params, fields] using
-      (List.take_append_drop artifact.projection.view.nparams args').symm
+    simp [params, fields]
   have hparamsLength : params.length = artifact.projection.view.nparams := by
     simp [params, hargsLength]
   have hfieldsLength : fields.length = artifact.projection.view.fields.length := by
@@ -449,9 +448,8 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
         artifact.projection.view.generation.block
         artifact.projection.view.constructor).instL levels).instRev args' =
       artifact.projection.view.structureType levels params := by
-    simp only [VInductDecl.NormalizedCtor.resultTarget,
-      VExpr.instL_appN, VExpr.instL, VExpr.instRev_appN, VExpr.instRev,
-      VExpr.bvarRevRange_map_instL, hresultIndices, List.append_nil]
+    simp only [VInductDecl.NormalizedCtor.resultTarget, VExpr.instL_appN, VExpr.instL,
+      VExpr.instRev_appN, VExpr.bvarRevRange_map_instL, hresultIndices, List.append_nil]
     rw [VLevel.inst_map_id hlevelsLength]
     rw [VExpr.instRev_closedN args' (by trivial)]
     rw [hrange']
@@ -513,14 +511,13 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
         e₂.getAppArgsList[ctorInfo.numParams + j]? =
           some F1[ctorInfo.numParams + j] := by
       rw [← Expr.getAppArgs_toList]
-      simpa [F1] using List.getElem?_eq_getElem hi
+      simp [F1]
     obtain ⟨translated, htranslated, htr⟩ :=
       Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
     have hfieldGet : args'[ctorInfo.numParams + j]? = some fields[j] := by
       rw [hargsSplit, List.getElem?_append_right]
-      · simpa [hnumParams, hparamsLength] using
-          (List.getElem?_eq_getElem hj)
-      · simpa [hnumParams, hparamsLength]
+      · simp [hnumParams, hparamsLength]
+      · simp [hnumParams, hparamsLength]
     have : translated = fields[j] :=
       Option.some.inj (htranslated.symm.trans hfieldGet)
     subst translated
@@ -606,7 +603,7 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
               · exact hrest.1 hnone k hk,
             hrest.2⟩)
         simpa only [etaStep, tryEtaStructFieldStep, pure_bind] using htail
-      · simp only [hbtrue, if_neg, pure_bind]
+      · simp only [hbtrue]
         exact .pure (by simp)
   have hparamsLe : ctorInfo.numParams ≤ F1.size := by
     rw [hF1Size, hargsLength, ← hnumParams]
@@ -844,7 +841,7 @@ def _root_.Lean4Lean.TypeChecker.ReductionStatus.WF
   | .unknown e₁ e₂ => c.TrExpr e₁ e₁' ∧ c.TrExpr e₂ e₂'
   | .bool b => b → c.IsDefEqU e₁' e₂'
 
-def _root_.Lean4Lean.TypeChecker.ReductionStatus.WF.defeq
+theorem _root_.Lean4Lean.TypeChecker.ReductionStatus.WF.defeq
     (h1 : c.IsDefEqU e₁' e₁'') (h2 : c.IsDefEqU e₂' e₂'')
     (H : ReductionStatus.WF c e₁' e₂' ac r) : ReductionStatus.WF c e₁'' e₂'' ac r :=
   match r, H with

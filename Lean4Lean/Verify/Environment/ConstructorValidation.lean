@@ -727,10 +727,10 @@ def build :
     (positivityTrace : ConstructorPositivityTrace stats ctor argIdx context
       source fuel) →
       Except Exception (ConstructorPositivityAlignmentTrace positivityTrace)
-  | .absent context source result fuel whnfStep occurs => do
+  | .absent context source _ fuel whnfStep occurs => do
       let sourceCheck ← checkConstructorAlignedExpr context source
       pure <| .absent sourceCheck
-  | .forallE context source fuel name domain body binderInfo whnfStep occurs
+  | .forallE context source fuel _ domain _ _ _ occurs
       domainFree tailTrace => do
       let sourceCheck ← checkConstructorAlignedExpr context source
       let domainCheck ← checkConstructorAlignedExpr context domain
@@ -749,7 +749,7 @@ def build :
       | _ =>
         throw <| .other
           "consumed positivity domain did not check as a type"
-  | .target context source result fuel targetIdx whnfStep occurs terminal
+  | .target context source _ fuel _ _ occurs terminal
       valid => do
       let sourceCheck ← checkConstructorAlignedExpr context source
       pure <| .target sourceCheck
@@ -791,8 +791,8 @@ def build :
       argIdx context source) →
       Except Exception
         (ConstructorPositivityModeAlignmentTrace positivityTrace)
-  | .skipped unsafeEq => pure <| .skipped
-  | .safe unsafeEq positivityTrace => do
+  | .skipped _ => pure <| .skipped
+  | .safe _ positivityTrace => do
       let alignment ← ConstructorPositivityAlignmentTrace.build
         positivityTrace
       pure <| .safe alignment
@@ -885,8 +885,8 @@ def build :
     (view : Expr) →
       Except Exception (ConstructorViewAlignmentTrace validationTrace view)
   | .parameter context parameterFuel parameterArgIdx parameterName domain
-      parameterBody parameterBinderInfo param parameterType parameterAt
-      parameterTypeRun validationDefEq tailTrace,
+      parameterBody parameterBinderInfo param parameterType _
+      _ _ tailTrace,
       .forallE viewName viewDomain viewBody viewBinderInfo => do
       let domainCheck ← checkConstructorAlignedExpr context domain
       let viewDomainCheck ← checkConstructorAlignedExpr context viewDomain
@@ -907,7 +907,7 @@ def build :
   | .parameter .., _ =>
       throw <| .other "candidate and validation constructor telescopes differ"
   | .ordinary context ordinaryFuel ordinaryArgIdx name domain body binderInfo
-      sortResult noParameter ensureType universeTrace positivityTrace tailTrace,
+      _ _ _ _ positivityTrace tailTrace,
       .forallE viewName viewDomain viewBody viewBinderInfo => do
       let domainCheck ← checkConstructorAlignedExpr context domain
       let viewDomainCheck ← checkConstructorAlignedExpr context viewDomain
@@ -1024,7 +1024,7 @@ def build :
         (ConstructorCandidateAlignmentTrace stats isUnsafe familyIdx context
           validationTrace candidates)
   | .nil seen, .nil => pure <| .nil seen
-  | .cons seen head tail fresh closed rootCheck typeTrace tailTrace,
+  | .cons seen head tail _ _ _ typeTrace tailTrace,
       .cons candidate candidates => do
       let rootScope ← checkConstructorAlignedExpr
         context.withEmptyLocalContext head.type
@@ -1698,7 +1698,7 @@ theorem ConstructorTypeValidationTrace.universeLoop_of_semantics
           sortResult.sortLevel! = true := by
         simpa only [ConstructorUniverseTrace.semantic] using semantic.1
       rw [valid]
-      simp only [Pure.pure]
+      simp only []
       exact ih semantic.2
   | terminal context source fuel argIdx terminal valid =>
       cases source <;> try rfl
@@ -1809,7 +1809,7 @@ theorem ConstructorTypeValidationTrace.universeSemantics_of_loop
           cases success
       | true =>
           rw [valid] at success
-          simp only [Pure.pure] at success
+          simp only [] at success
           exact ⟨valid, ih success⟩
   | terminal => rfl
 
@@ -2665,7 +2665,7 @@ theorem ConstructorPreFamilyRecursiveTrace.forallE_build_eq
   rw [domainCheck.check_eq, ensureType.observe_eq, consumedCheck.check_eq]
   simp only [Bind.bind, Except.bind]
   rw [annotations.observe_eq]
-  simp only [Bind.bind, Except.bind]
+  simp only []
   rw [dif_pos fresh, tailRun]
   rfl
 
@@ -3280,7 +3280,7 @@ private theorem drop_eq_cons_of_getElem?_eq_some
       cases index with
       | zero =>
           simp at atIndex
-          simpa [atIndex]
+          simp [atIndex]
       | succ index =>
           simp at atIndex ⊢
           simpa [Nat.add_assoc, Nat.add_comm 1] using ih atIndex
@@ -3368,7 +3368,7 @@ theorem afterParameters
       rw [sizeEq] at argIdxEq
       subst argIdx
       have dropEq : stats.params.toList.drop stats.params.size = [] := by
-        simpa using List.drop_length stats.params.toList
+        simp
       rw [dropEq] at instantiation
       have viewEq : (.forallE name domain body binderInfo) = rest :=
         Except.ok.inj (by
@@ -3394,7 +3394,7 @@ theorem afterParameters
       rw [sizeEq] at argIdxEq
       subst argIdx
       have dropEq : stats.params.toList.drop stats.params.size = [] := by
-        simpa using List.drop_length stats.params.toList
+        simp
       rw [dropEq] at instantiation
       have viewEq : (.forallE name domain body binderInfo) = rest :=
         Except.ok.inj (by
@@ -3412,7 +3412,7 @@ theorem afterParameters
       by_cases argIdxEq : argIdx = stats.params.size
       · subst argIdx
         have dropEq : stats.params.toList.drop stats.params.size = [] := by
-          simpa using List.drop_length stats.params.toList
+          simp
         rw [dropEq] at instantiation
         have viewEq : source = rest :=
           Except.ok.inj (by
@@ -3537,7 +3537,7 @@ theorem afterParameters
           rw [sizeEq] at argIdxEq
           subst argIdx
           have dropEq : stats.params.toList.drop stats.params.size = [] := by
-            simpa using List.drop_length stats.params.toList
+            simp
           rw [dropEq] at instantiation
           injection instantiation with restEq
           subst rest
@@ -3566,7 +3566,7 @@ theorem afterParameters
           by_cases argIdxEq : argIdx = stats.params.size
           · subst argIdx
             have dropEq : stats.params.toList.drop stats.params.size = [] := by
-              simpa using List.drop_length stats.params.toList
+              simp
             rw [dropEq] at instantiation
             have viewEq : view = rest := Except.ok.inj instantiation
             subst rest
@@ -3997,10 +3997,9 @@ private theorem abstract1_instantiate_self
     (expression.abstract1 id depth).instantiate1' (.fvar id) depth =
       expression := by
   induction expression generalizing depth <;>
-    simp_all [Closed, Expr.abstract1, Expr.instantiate1', beq_iff_eq] <;>
-    split <;>
-      simp_all [Expr.instantiate1', Expr.liftLooseBVars'] <;>
-      omega
+    simp_all [Closed, Expr.abstract1, Expr.instantiate1', beq_iff_eq]
+  split <;>
+    simp_all [Expr.instantiate1', Expr.liftLooseBVars']
 
 private theorem abstract_instantiate_self
     (expression : Expr) (id : FVarId) (closed : Closed expression) :
@@ -5039,7 +5038,7 @@ theorem FVarsIn.consumeTypeAnnotations
     (scope : FVarsIn predicate source) :
     FVarsIn predicate (AddInductive.consumeTypeAnnotations source) := by
   fun_induction AddInductive.consumeTypeAnnotations source <;>
-    simp_all [AddInductive.consumeTypeAnnotations, FVarsIn]
+    simp_all [FVarsIn]
 
 theorem instantiateFamilyParameters_unique
     (sourceUnique : TrExprS.IsUnique source)
@@ -5712,11 +5711,11 @@ theorem ConstructorPreFamilyIndexSpineSemanticRun.baseSpine_lift
 sort after removing a verified free-variable context extension. -/
 theorem ensureTypeRun_baseType
     {env typeEnv : VEnv} {Us : List Name}
-    {base actual view : VLCtx} {source result : Expr}
+    {base actual view : VLCtx} {source : Expr}
     {source' actual' : VExpr} {fieldLevel : VLevel} {n : Lift}
     (henv : VEnv.WF env) (typeEnvOrdered : VEnv.Ordered typeEnv)
     (addType : env ≤ typeEnv)
-    (baseWF : VLCtx.WF env Us.length base)
+    (_baseWF : VLCtx.WF env Us.length base)
     (viewDefEq : VLCtx.IsDefEq env Us.length actual view)
     (viewUnique : TrExprS.IsUniqueCtx actual view)
     (viewLift : VLCtx.FVLift' base view 0 n 0)
@@ -5765,7 +5764,7 @@ theorem ensureTypeRun_baseType_mono
     (actualType : typeEnv.HasType Us.length actual.toCtx actual'
       (.sort fieldLevel)) :
     typeEnv.HasType Us.length base.toCtx source' (.sort fieldLevel) := by
-  exact ensureTypeRun_baseType (result := source) typeEnvWF
+  exact ensureTypeRun_baseType typeEnvWF
     typeEnvWF.ordered VEnv.LE.rfl
     (baseWF.mono addType) (viewDefEq.mono addType) viewUnique viewLift
     sourceUnique sourceClosed sourceFVars sourceTr (actualTr.mono addType)
@@ -5802,7 +5801,7 @@ theorem ensureTypeRun_commonType
   have fullEq : fullTarget = baseTarget.lift' fullLift :=
     fullTr.unique sourceUnique
       (baseTr.weakFV' typeEnvWF.ordered fullExtension fullWF)
-  have baseType := ensureTypeRun_baseType (result := source)
+  have baseType := ensureTypeRun_baseType
     henv typeEnvWF.ordered
     addType baseWF viewDefEq viewUnique viewExtension sourceUnique
     sourceClosed sourceFVars baseTr actualTr actualType
@@ -6565,8 +6564,8 @@ theorem AnalyzerPostContextState.push
     (typeEnvWF : VEnv.WF typeEnv)
     {source : Expr} {analyzer postRaw postView postConsumed : VExpr}
     {rawLevel : VLevel} {fv : FVarId} {postDeps : List FVarId}
-    (sourceUnique : TrExprS.IsUnique source)
-    (sourceClosed : Closed source)
+    (_sourceUnique : TrExprS.IsUnique source)
+    (_sourceClosed : Closed source)
     (analyzerTr : TrExprS typeEnv Us full source analyzer)
     (postViewTr : TrExprS typeEnv Us postActual source postView)
     (postRawType : typeEnv.HasType Us.length postActual.toCtx postRaw
@@ -6693,7 +6692,7 @@ theorem ordinaryField_baseTypes
     env.HasType Us.length base.toCtx source' (.sort fieldLevel) ∧
       fieldLevel ≈ rawLevel ∧
       (resultLevel = .zero ∨ fieldLevel ≤ resultLevel) := by
-  have baseField := ensureTypeRun_baseType (result := source) henv
+  have baseField := ensureTypeRun_baseType henv
     typeEnvWF.ordered addType baseWF viewDefEq viewUnique viewLift
     sourceUnique sourceClosed sourceFVars sourceTr actualTr actualType
   have postViewType : typeEnv.HasType Us.length postActual.toCtx postView'
@@ -6725,7 +6724,7 @@ theorem ordinaryField_baseTypes
 
 theorem ordinaryConsumed_defeq
     {env typeEnv : VEnv} {Us : List Name}
-    {actual postActual : VLCtx} {source rawSource rawConsumed sourceConsumed : Expr}
+    {actual postActual : VLCtx} {source _rawSource _rawConsumed _sourceConsumed : Expr}
     {actualSource' actualConsumed' postRaw' postView' postConsumed' : VExpr}
     (typeEnvWF : VEnv.WF typeEnv) (addType : env ≤ typeEnv)
     (actualWF : VLCtx.WF env Us.length actual)
@@ -6799,7 +6798,10 @@ end ConstructorValidation
 
 
 namespace ConstructorValidation
-open AddInductive TypeChecker VEnv
+open AddInductive TypeChecker
+-- `VEnv` here resolves to these two namespaces; `_root_.Lean4Lean.VEnv` is
+-- shadowed by the enclosing namespace, so name both explicitly.
+open _root_.Lean4Lean.ConstructorValidation.VEnv _root_.Lean4Lean.TypeChecker.VEnv
 
 /-- Every full-context free variable not deliberately omitted by D3 is still
 present in the family-free common context. -/
@@ -6901,10 +6903,8 @@ theorem terminal_exactAnalyzer
     {stats : AddInductive.InductiveStats} {familyIdx : Nat}
     {familyIndices : Expr} {context : AddInductive.Context}
     {contextRun : AddInductive.ConstructorContextRun env Us context}
-    {source : Expr} {argIdx : Nat} {removed : List FVarId}
-    {recursiveStarted : Bool}
+    {source : Expr}
     {valid : AddInductive.isValidIndAppIdx stats source familyIdx = true}
-    {independent : AddInductive.constructorIndependentOf source removed = true}
     {spineTrace : AddInductive.ConstructorPreFamilyIndexSpineTrace context
       familyIndices (source.getAppArgs.toList.drop stats.params.size)}
     {expected' : VExpr}
@@ -7345,7 +7345,7 @@ theorem constructorFields_exactAnalyzer
                         (consumeTypeAnnotations domain)).ngen =
                       (d2Context.pushLocalDecl name₂ binderInfo₂
                         (consumeTypeAnnotations rawDomain)).ngen := by
-                    simpa only [AddInductive.Context.pushLocalDecl, ngenEq]
+                    simp only [AddInductive.Context.pushLocalDecl, ngenEq]
                   have nextIndexLength :
                       (VExpr.liftTelN 1 commonIndices 0).length =
                         stats.nindices[familyIdx]! := by
@@ -7385,7 +7385,7 @@ theorem constructorFields_exactAnalyzer
                       List.append_assoc, VLCtx.toCtx, List.length_cons,
                       VExpr.liftN_liftN, Nat.add_comm] using tailSpine
       | terminal sourceRun₂ viewRun₂ =>
-          cases d2Alignment <;> simp_all [Expr.isForall]
+          cases d2Alignment; simp_all [Expr.isForall]
   | @recursive context recursiveArgIdx removed recursiveStarted name domain
       body binderInfo noParameter isRecursive independent fieldTrace fresh
       tailTrace contextRun recursiveRun tail ih =>
@@ -7636,7 +7636,7 @@ theorem constructorFields_exactAnalyzer
                       List.append_assoc, VLCtx.toCtx, List.length_cons,
                       VExpr.liftN_liftN, Nat.add_comm] using tailSpine
       | terminal sourceRun₂ viewRun₂ =>
-          cases d2Alignment <;> simp_all [Expr.isForall]
+          cases d2Alignment; simp_all [Expr.isForall]
   | @terminal context source terminalArgIdx removed recursiveStarted valid
       independent spineTrace contextRun expected spine =>
       have shape := isValidIndAppIdx_shape valid
@@ -7652,9 +7652,7 @@ theorem constructorFields_exactAnalyzer
           unfold ConstructorFieldsRunResult
           refine ⟨trivial, ?_⟩
           simpa using terminal_exactAnalyzer
-            (argIdx := terminalArgIdx) (removed := removed)
-            (recursiveStarted := recursiveStarted) (valid := valid)
-            (independent := independent) (resultTarget := resultTarget)
+            (valid := valid) (resultTarget := resultTarget)
             spine henv typeEnvWF addType d3State
             familyCommonTr familyFullTr familyUnique indexLength familyHead
             sourceUnique sourceClosed
@@ -7679,7 +7677,7 @@ theorem stagedIndexCount_eq
       constructorContext env Us candidate source)
     (normalization : NormalizationCandidateSemanticRun env Us candidate source)
     (generation : GenerationChecked source)
-    (analysis : normalization.root.normalization.generation? =
+    (_analysis : normalization.root.normalization.generation? =
       some generation)
     (shape : normalization.generationShape = true) :
     (input.postFamilyInput.universeInput.staged.family.validation.stats

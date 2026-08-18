@@ -23,16 +23,18 @@ jobs:
 
       # Installs the toolchain pinned in `lean-toolchain` and runs `lake build`,
       # i.e. the `defaultTargets`: the `Lean4Lean` library, the `lean4lean` exe,
-      # `Lean4Lean.Theory`, `Lean4Lean.Verify` and `Lean4Lean.Tests`. The proofs
-      # in `Verify` deliberately contain `sorry`s, so warnings must not fail the
-      # build. `Lean4Lean.Experimental` is WIP and is not a default target.
+      # `Lean4Lean.Theory`, `Lean4Lean.Verify` and `Lean4Lean.Tests`. `--wfail`
+      # keeps that surface warning-free for consumers that build it that way;
+      # the frontier `sorry`s are annotated at their declarations, so they no
+      # longer count. `Lean4Lean.Experimental` is not a default target.
       - name: Build
         uses: leanprover/lean-action@v1
         with:
-          use-mathlib-cache: false
+          build-args: --wfail
 
       # `Lean4Lean.Experimental` is WIP and deliberately not a default target, but it still has to
-      # compile. `sorry`s here are expected, as in `Verify`.
+      # compile. No `--wfail`: this is parked proof work outside the audited surface, so its
+      # `sorry`s are unannotated on purpose and stay visible as warnings.
       - name: Build Lean4Lean.Experimental
         run: lake build Lean4Lean.Experimental
 
@@ -43,7 +45,7 @@ jobs:
       # literals the way a source grep can. Not a default target, so it is built
       # explicitly here; the surface it imports is already built above.
       - name: Check sorry frontier
-        run: lake build Lean4Lean.Audit.SorryFrontier
+        run: lake build --wfail Lean4Lean.Audit.SorryFrontier
 
       # `lake build` only establishes that lean4lean compiles; these check that it still
       # *works*. The two modes exercise different code paths, so both are worth running.

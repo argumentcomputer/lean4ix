@@ -64,7 +64,7 @@ structure CandidateLocalContextRun
 
 namespace CandidateLocalContextRun
 
-def empty (context : AddInductive.Context)
+theorem empty (context : AddInductive.Context)
     (h : context.lctx = ({} : LocalContext)) :
     CandidateLocalContextRun context where
   wf := by rw [h]; exact LocalContext.WF.nil
@@ -85,7 +85,7 @@ theorem fresh (run : CandidateLocalContextRun context) :
   exact NameGenerator.not_reserves_self (by
     simpa [AddInductive.Context.freshFVarId] using reserved)
 
-def push (run : CandidateLocalContextRun context)
+theorem push (run : CandidateLocalContextRun context)
     (name : Name) (binderInfo : BinderInfo) (type : Expr) :
     CandidateLocalContextRun
       (context.pushLocalDecl name binderInfo type) where
@@ -309,7 +309,7 @@ private theorem candidateReduceRecursorFVarApp_none
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker state =
         .ok (context.env, state) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [hquot]
   have hfn : (.app (.fvar fnId) (.fvar argId) : Expr).getAppFn =
       .fvar fnId := by rfl
@@ -328,15 +328,13 @@ private theorem candidateWhnfCoreFVarAppFVar_refl
       .ok (.app (.fvar fnId) (.fvar argId),
         ({} : TypeChecker.State)) := by
   unfold TypeChecker.Inner.whnfCore'
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [show (get : TypeChecker.RecM TypeChecker.State)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (({} : TypeChecker.State), ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind, Std.HashMap.getElem?_empty]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp only [Std.HashMap.getElem?_empty]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   have hfn : (.app (.fvar fnId) (.fvar argId) : Expr).getAppFn =
       .fvar fnId := by rfl
   have hargs : (.app (.fvar fnId) (.fvar argId) : Expr).getAppRevArgs =
@@ -411,18 +409,16 @@ private theorem candidateWhnfLoopFVarAppFVar_refl
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (context.env, ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [candidateWhnfCoreFVarAppFVar_refl context fnId argId
     hquot hnotlet]
-  simp only [Except.bind]
+  simp only []
   rw [candidateReduceNativeFVarAppFVar_none context fnId argId
     ({} : TypeChecker.State)]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [candidateReduceNatFVarAppFVar_none context fnId argId
     ({} : TypeChecker.State)]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   rw [candidateUnfoldDefinitionFVarAppFVar_none context fnId argId
     ({} : TypeChecker.State)]
   rfl
@@ -451,21 +447,19 @@ theorem candidateWhnfFVarAppFVar_refl
       context.toTypeChecker ({} : TypeChecker.State)) =
         .ok (.app (.fvar fnId) (.fvar argId))
   unfold TypeChecker.Inner.whnf'
-  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [show (get : TypeChecker.RecM TypeChecker.State)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (({} : TypeChecker.State), ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind, Std.HashMap.getElem?_empty]
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+  simp only [Std.HashMap.getElem?_empty]
+  simp only [readThe, MonadReaderOf.read, ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
     ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
   rw [show (liftM read : TypeChecker.RecM TypeChecker.Context)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (context.toTypeChecker, ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [show context.toTypeChecker.eagerReduce = false by rfl]
   simp only [Bool.false_eq_true, ↓reduceIte]
   rw [show context.toTypeChecker.fuel.whnf = 100000 by
@@ -500,7 +494,7 @@ private theorem candidateReduceRecursorConstFVarFVar_none
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker state =
         .ok (context.env, state) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [hquot]
   have hfn :
       (.app (.app (.const constName levels) (.fvar arg1))
@@ -523,15 +517,13 @@ private theorem candidateWhnfCoreConstFVarFVar_refl
       .ok (.app (.app (.const constName levels) (.fvar arg1))
         (.fvar arg2), ({} : TypeChecker.State)) := by
   unfold TypeChecker.Inner.whnfCore'
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [show (get : TypeChecker.RecM TypeChecker.State)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (({} : TypeChecker.State), ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind, Std.HashMap.getElem?_empty]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp only [Std.HashMap.getElem?_empty]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   have hfn :
       (.app (.app (.const constName levels) (.fvar arg1))
         (.fvar arg2) : Expr).getAppFn = .const constName levels := by
@@ -575,7 +567,7 @@ private theorem candidateUnfoldDefinitionCoreConst_none
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker state =
         .ok (context.env, state) by rfl]
-  simp only [Except.bind]
+  simp only []
   unfold TypeChecker.Inner.isDelta
   rw [show (Expr.const constName levels).getAppFn =
     .const constName levels by rfl]
@@ -605,8 +597,7 @@ private theorem candidateUnfoldDefinitionConstFVarFVar_none
   simp only [if_true, ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   rw [candidateUnfoldDefinitionCoreConst_none context constName levels
     state info hfind]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
 
 private theorem candidateWhnfLoopConstFVarFVar_refl
     (context : AddInductive.Context) (constName : Name)
@@ -633,17 +624,15 @@ private theorem candidateWhnfLoopConstFVarFVar_refl
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (context.env, ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [candidateWhnfCoreConstFVarFVar_refl context constName levels
     arg1 arg2 info hquot hfind]
-  simp only [Except.bind]
+  simp only []
   rw [candidateReduceNativeConstFVarFVar_none context constName levels
     arg1 arg2 ({} : TypeChecker.State)]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [hreduceNat]
-  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   rw [candidateUnfoldDefinitionConstFVarFVar_none context constName levels
     arg1 arg2 ({} : TypeChecker.State) info hfind]
   rfl
@@ -681,21 +670,19 @@ theorem candidateWhnfConstFVarFVar_refl
         .ok (.app (.app (.const constName levels) (.fvar arg1))
           (.fvar arg2))
   unfold TypeChecker.Inner.whnf'
-  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind, Pure.pure]
   rw [show (get : TypeChecker.RecM TypeChecker.State)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (({} : TypeChecker.State), ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind, Std.HashMap.getElem?_empty]
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+  simp only [Std.HashMap.getElem?_empty]
+  simp only [readThe, MonadReaderOf.read, ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
     ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
   rw [show (liftM read : TypeChecker.RecM TypeChecker.Context)
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State) =
         .ok (context.toTypeChecker, ({} : TypeChecker.State)) by rfl]
-  simp only [Except.bind]
+  simp only []
   rw [show context.toTypeChecker.eagerReduce = false by rfl]
   simp only [Bool.false_eq_true, ↓reduceIte]
   rw [show context.toTypeChecker.fuel.whnf = 100000 by

@@ -49,9 +49,8 @@ theorem validationFamilyEnvNotContains :
 
 theorem validationFamilyEnvCheckName :
     indexedVecKernelEnv.checkName ``IndexedVec false = .ok () := by
-  simp [Kernel.Environment.checkName, validationFamilyEnvNotContains,
-    Kernel.Environment.primitives, NameSet.ofList, NameSet.contains,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp [Kernel.Environment.checkName, validationFamilyEnvNotContains, Kernel.Environment.primitives,
+    NameSet.ofList, NameSet.contains, Pure.pure, Except.pure]
 
 theorem indexedVecDeclareRoot :
     AddInductive.declareInductiveTypes indexedVecCandidateInductiveStats 1
@@ -1213,9 +1212,7 @@ theorem indexedVecValidationTailPositivity :
       indexedVecValidationAlpha indexedVecValidationNExpr]
   simp only [Except.bind]
   rw [indexedVecValidationTailHasIndOcc]
-  simp only [Bool.not_true, Bool.false_eq_true, if_false,
-    ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
-    Except.bind, Except.pure]
+  simp only [Bool.not_true, Bool.false_eq_true, if_false, Pure.pure]
   rw [indexedVecValidationAppIsValid indexedVecValidationNExpr
     indexedVecValidationNHasNoIndOcc]
   rfl
@@ -1259,9 +1256,7 @@ theorem indexedVecValidationNilLoop :
   simp only [Except.bind]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationParamIsDefEq]
-  simp only [if_true,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [if_true]
   simpa [indexedVecValidationNilResult, ctorIndexedVecApp,
     indexedVecKernelNil, indexedVecNilInfo, ConstantInfo.name,
     ConstantInfo.toConstantVal,
@@ -1327,9 +1322,7 @@ theorem indexedVecValidationConsLoopTail :
       (Expr.sort (.succ (.param `u))).sortLevel! = true from by
     simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
       AddInductive.levelStructGe, AddInductive.levelStructEq])]
-  simp only [↓reduceIte, Bool.not_false,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [↓reduceIte, Bool.not_false, ReaderT.bind, Bind.bind, Except.bind]
   rw [indexedVecValidationTailPositivity]
   rw [AddInductive.withLocalDecl_apply]
   rw [indexedVecValidationConsumeTail]
@@ -1364,9 +1357,7 @@ theorem indexedVecValidationConsLoopHead :
       (Expr.sort (.succ (.param `u))).sortLevel! = true from by
     simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
       AddInductive.levelStructGe, AddInductive.levelStructEq])]
-  simp only [↓reduceIte, Bool.not_false,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [↓reduceIte, Bool.not_false, ReaderT.bind, Bind.bind, Except.bind]
   rw [indexedVecValidationAlphaPositivity]
   rw [AddInductive.withLocalDecl_apply]
   rw [indexedVecValidationConsumeAlpha]
@@ -1407,9 +1398,7 @@ theorem indexedVecValidationConsLoopN :
       (Expr.sort (.succ .zero)).sortLevel! = true from by
     simp [Expr.sortLevel!, indexedVecCandidateInductiveStats_resultLevel,
       AddInductive.levelStructGe])]
-  simp only [↓reduceIte, Bool.not_false,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [↓reduceIte, Bool.not_false, ReaderT.bind, Bind.bind, Except.bind]
   rw [indexedVecValidationNatPositivity]
   rw [AddInductive.withLocalDecl_apply]
   rw [indexedVecValidationConsumeNat]
@@ -1454,9 +1443,7 @@ theorem indexedVecValidationConsLoop :
   simp only [Except.bind]
   rw [AddInductive.liftTypeChecker_apply]
   rw [indexedVecValidationParamIsDefEq]
-  simp only [if_true,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [if_true]
   simpa [indexedVecValidationConsAfterParam] using
     indexedVecValidationConsLoopN
 
@@ -1652,7 +1639,7 @@ theorem indexedVecValidationNilSetDoesNotContainCons :
     ConstantInfo.name, ConstantInfo.toConstantVal,
     NameSet.contains, NameSet.insert]
   rw [Std.TreeSet.contains_insert (t := (∅ : NameSet))]
-  simp +decide [beq_iff_eq, Std.LawfulBEqCmp.compare_eq_iff_beq]
+  simp +decide
 
 set_option linter.unusedSimpArgs false in
 theorem indexedVecValidationCheckConstructors :

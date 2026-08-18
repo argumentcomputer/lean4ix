@@ -2964,9 +2964,7 @@ private theorem annotatedPiExceptPure
         ``outParam [.succ .zero] false =
       .ok (.forallE `α (.sort (.succ .zero))
         (.sort (.succ .zero)) .default) := by
-  simpa [annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker] using
-    annotatedPiInferConstantOutParam ({} : LocalContext)
+  simp [annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker]
 
 @[simp] private theorem annotatedPiEnsureForall
     (name dom body bi source methods context state) :
@@ -3107,7 +3105,7 @@ private def annotatedPiOuterName : Name :=
 @[simp] private theorem annotatedPiFamilyType_noLooseBVars :
     annotatedPiInfo.type.hasLooseBVars = false := by
   rw [show annotatedPiInfo.type = .sort (.succ .zero) by rfl]
-  simp [annotatedPiInfo, Expr.hasLooseBVars, Expr.looseBVarRange']
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange']
 
 @[simp] private theorem emptyCheckTypeCache_annotatedPiFamily :
     (({} : TypeChecker.State).inferTypeC)[annotatedPiInfo.type]? = none := by
@@ -3117,9 +3115,8 @@ private def annotatedPiOuterName : Name :=
     TypeChecker.Inner.checkLevel
       annotatedPiFamilyCandidateContext.toTypeChecker (.succ .zero) =
       .ok () := by
-  simp [TypeChecker.Inner.checkLevel, annotatedPiFamilyCandidateContext,
-    AddInductive.Context.toTypeChecker, Level.getUndefParam, Level.forEach,
-    Level.hasParam_eq, Level.hasParam']
+  simp [TypeChecker.Inner.checkLevel, Level.getUndefParam, Level.forEach, Level.hasParam_eq,
+    Level.hasParam']
   rfl
 
 @[simp] private theorem annotatedPiRecMGet (methods context state) :
@@ -3293,9 +3290,8 @@ private theorem annotatedPiFamily_checkTypeInner :
       .ok (.sort (.succ (.succ .zero)),
         annotatedPiFamilyCheckTypeState)
   unfold TypeChecker.Inner.inferType'
-  simp [annotatedPiFamilyCheckTypeState, annotatedPiInfo,
-    Expr.hasLooseBVars, Expr.looseBVarRange', Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp [annotatedPiFamilyCheckTypeState, Expr.hasLooseBVars, Expr.looseBVarRange', Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
 
 private theorem annotatedPiFamily_checkTypeM :
     TypeChecker.M.run annotatedPiFamilyCandidateContext.env
@@ -3358,20 +3354,12 @@ private theorem annotatedPiCtor_checkTypeM :
         ({} : TypeChecker.State)) =
       .ok (.sort (.succ .zero))
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-    Expr.eqv_eq, Std.HashMap.getElem?_insert,
-    TypeChecker.Inner.inferType',
-    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-    TypeChecker.Inner.inferApp,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferType',
+    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Bind.bind, ReaderT.bind,
+    StateT.bind, Except.bind]
   rw [annotatedPiIsDefEqSort 9997]
-  simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, Expr.bindingBody!,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker,
-    Std.HashMap.getElem?_insert,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.instantiate1', annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
+    AddInductive.Context.toTypeChecker, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiInferTypeFamilyCached (hcache := by
     apply annotatedPiFamilyCacheAfterForall)]
   simp [Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero]
@@ -3942,16 +3930,10 @@ private theorem checkTypeAliasFormerCandidate :
         (.sort (.succ .zero)) .default) := by
   unfold TypeChecker.Inner.inferConstant
   rw [aliasRecNormalization_getRecAlias]
-  simp [recAliasInfo, recAliasKernelDef,
-    Bind.bind, Except.bind,
-    normalizationExceptPure,
-    aliasRecNormalization_checkLevelSuccZero,
-    ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+  simp [recAliasInfo, recAliasKernelDef, Bind.bind, Except.bind, normalizationExceptPure,
+    ConstantInfo.levelParams, ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams,
+    ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
+    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore', Level.substParams']
 
 @[simp] private theorem inferConstantAliasRec :
     TypeChecker.Inner.inferConstant aliasRecNormalizationRawContext
@@ -4035,16 +4017,11 @@ private theorem unfoldTypeFamilyAlias (methods state) :
     TypeChecker.Inner.unfoldDefinitionCore (.const ``TypeFamilyAlias [])
         methods aliasFormerNormalizationRawContext state =
       .ok (some (.sort (.succ .zero)), state)
-  simp [TypeChecker.Inner.unfoldDefinitionCore, TypeChecker.Inner.isDelta,
-    Expr.getAppFn, aliasFormerNormalizationRawContext,
-    aliasFormerNormalization_lookup, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind, typeFamilyAliasInfo,
-    typeFamilyAliasKernelDef, ConstantInfo.deltaValue?,
-    TypeChecker.Inner.instantiateDeltaValue,
-    ConstantInfo.numLevelParams,
-    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams,
-    ConstantInfo.value!, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams]
+  simp [TypeChecker.Inner.unfoldDefinitionCore, TypeChecker.Inner.isDelta, Expr.getAppFn,
+    aliasFormerNormalizationRawContext, aliasFormerNormalization_lookup, Bind.bind, ReaderT.bind,
+    StateT.bind, Except.bind, typeFamilyAliasInfo, typeFamilyAliasKernelDef,
+    ConstantInfo.deltaValue?, TypeChecker.Inner.instantiateDeltaValue, ConstantInfo.numLevelParams,
+    ConstantInfo.levelParams, ConstantInfo.toConstantVal, Expr.instantiateLevelParams]
 
 private theorem unfoldAliasFormer (methods state) :
     TypeChecker.Inner.unfoldDefinition (.const ``AliasFormer [])
@@ -4314,10 +4291,8 @@ private theorem annotatedPiOutParamWhnfKernelExpr_eq :
     annotatedPiOutParamWhnfKernelExpr =
       .lam `α (.sort (.succ .zero)) (.bvar 0) .default := by
   simp [annotatedPiOutParamWhnfKernelExpr, annotationOutParamInfo,
-    outParamKernelDef, ConstantInfo.instantiateValueLevelParams!,
-    ConstantInfo.levelParams, ConstantInfo.value!,
-    ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams, ConstantInfo.value!,
+    ConstantInfo.toConstantVal, Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
     Level.substParams']
 
 private def annotatedPiOutParamUnfoldState (state : TypeChecker.State) :
@@ -4394,8 +4369,7 @@ private theorem annotatedPiWhnfCoreDomainInitial (n) :
       .ok (.app (.const ``outParam [.succ .zero]) (.sort .zero),
         ({} : TypeChecker.State))
   unfold TypeChecker.Inner.whnfCore'
-  simp only [normalizationRecMPure, normalizationRecMBind,
-    normalizationRecMGet, Std.HashMap.getElem?_empty]
+  simp only [normalizationRecMBind, normalizationRecMGet, Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [normalizationRecMBind]
   rw [show
@@ -4403,9 +4377,7 @@ private theorem annotatedPiWhnfCoreDomainInitial (n) :
       (.sort .zero)).getAppFn =
         .const ``outParam [.succ .zero] by rfl]
   rw [annotatedPiWhnfCoreOutParamConst n ({} : TypeChecker.State)]
-  simp [annotatedPiRawDomainKernel, annotatedPiReduceRecursorDomain,
-    Expr.structuralEq,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     .app (.const ``outParam [.succ .zero]) (.sort .zero) =
       annotatedPiRawDomainKernel by rfl]
@@ -4419,17 +4391,13 @@ private theorem annotatedPiUnfoldOutParamCoreInitial (methods) :
         ({} : TypeChecker.State) =
       .ok (some annotatedPiOutParamWhnfKernelExpr,
         annotatedPiOutParamUnfoldState {}) := by
-  simp [TypeChecker.Inner.unfoldDefinitionCore, TypeChecker.Inner.isDelta,
-    Expr.getAppFn, annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker, annotatedPiType_lookup_outParam,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
-    annotationOutParamInfo, outParamKernelDef, ConstantInfo.deltaValue?,
-    TypeChecker.Inner.instantiateDeltaValue,
-    ConstantInfo.numLevelParams,
-    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams,
-    ConstantInfo.value!, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams, annotatedPiOutParamWhnfKernelExpr,
-    annotatedPiOutParamUnfoldState]
+  simp [TypeChecker.Inner.unfoldDefinitionCore, TypeChecker.Inner.isDelta, Expr.getAppFn,
+    annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
+    annotatedPiType_lookup_outParam, Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
+    annotationOutParamInfo, ConstantInfo.deltaValue?, TypeChecker.Inner.instantiateDeltaValue,
+    ConstantInfo.numLevelParams, ConstantInfo.instantiateValueLevelParams!,
+    ConstantInfo.levelParams, ConstantInfo.value!, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParams, annotatedPiOutParamWhnfKernelExpr, annotatedPiOutParamUnfoldState]
 
 private theorem annotatedPiUnfoldDomainInitial (methods) :
     TypeChecker.Inner.unfoldDefinition annotatedPiRawDomainKernel
@@ -4498,8 +4466,7 @@ private theorem annotatedPiWhnfCoreDomainBeta (n) :
   rw [annotatedPiDomainBetaKernel,
     annotatedPiOutParamWhnfKernelExpr_eq]
   unfold TypeChecker.Inner.whnfCore'
-  simp only [normalizationRecMPure, normalizationRecMBind,
-    normalizationRecMGet, annotatedPiOutParamUnfoldState,
+  simp only [normalizationRecMBind, normalizationRecMGet, annotatedPiOutParamUnfoldState,
     Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [normalizationRecMBind]
@@ -4513,15 +4480,10 @@ private theorem annotatedPiWhnfCoreDomainBeta (n) :
     (Expr.app
       (.lam `α (.sort (.succ .zero)) (.bvar 0) .default)
       (.sort .zero)).getAppRevArgs = #[.sort .zero] by rfl]
-  simp [TypeChecker.Inner.whnfCore'.loop,
-    TypeChecker.Inner.whnfCore'.loop.cont,
-    TypeChecker.Inner.whnfCore'.save,
-    annotatedPiDomainBetaKernel,
-    annotatedPiOutParamWhnfKernelExpr_eq,
-    annotatedPiOutParamUnfoldState, annotatedPiDomainBetaState,
-    Expr.instantiateRange, Expr.instantiateRevRange,
-    Expr.instantiate1_eq, Expr.instantiate1', Expr.eqv_eq,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [TypeChecker.Inner.whnfCore'.loop, TypeChecker.Inner.whnfCore'.loop.cont,
+    TypeChecker.Inner.whnfCore'.save, annotatedPiDomainBetaKernel,
+    annotatedPiOutParamWhnfKernelExpr_eq, annotatedPiDomainBetaState, Expr.instantiate1', Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
 
 @[simp] private theorem annotatedPiReduceNativeDomain
     (env methods state) :
@@ -4556,21 +4518,21 @@ private theorem annotatedPiWhnfLoopDomain :
   rw [show 9999 = 9998 + 1 by rfl]
   simp only [normalizationRecMBind, normalizationRecMGetEnv]
   rw [annotatedPiWhnfCoreDomainInitial]
-  simp only [normalizationRecMBind]
+  simp only []
   rw [annotatedPiReduceNativeDomain]
-  simp only [normalizationRecMBind, normalizationRecMPure]
+  simp only [normalizationRecMBind]
   rw [annotatedPiReduceNatDomain]
-  simp only [normalizationRecMBind, normalizationRecMPure]
+  simp only [normalizationRecMBind]
   rw [annotatedPiUnfoldDomainInitial]
-  simp only [normalizationRecMBind, normalizationRecMPure]
+  simp only []
   unfold TypeChecker.Inner.whnf'.loop
   simp only [normalizationRecMBind, normalizationRecMGetEnv]
   rw [annotatedPiWhnfCoreDomainBeta]
-  simp only [normalizationRecMBind]
+  simp only []
   rw [normalizationReduceNativeSort]
-  simp only [normalizationRecMBind, normalizationRecMPure]
+  simp only [normalizationRecMBind]
   rw [normalizationReduceNatSort]
-  simp only [normalizationRecMBind, normalizationRecMPure]
+  simp only [normalizationRecMBind]
   rw [normalizationUnfoldSort]
   rfl
 
@@ -4608,14 +4570,10 @@ private theorem annotatedPiDomain_checkTypeM :
         ({} : TypeChecker.State)) =
       .ok (.sort (.succ .zero))
   unfold annotatedPiRawDomainKernel TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferType', TypeChecker.Inner.inferApp,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferType', Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiIsDefEqSort 9999]
-  simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, Expr.bindingBody!,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rfl
 
 private theorem annotatedPiDomain_whnfM :
@@ -4682,11 +4640,8 @@ private theorem annotatedPiEmptyEqv_isEquivDomainSort :
   · rfl
   · have hroot (n : Nat) :
         ({} : Batteries.UnionFind).rootD n = n := by rfl
-    simp [annotatedPiRawDomainKernel, Expr.isBVar,
-      annotatedPiApp_beq_sort,
-      StateT.pure, pure, Bind.bind, StateT.bind,
-      EquivManager.toNode, EquivManager.find,
-      EquivManager.merge, hroot]
+    simp [annotatedPiRawDomainKernel, Expr.isBVar, annotatedPiApp_beq_sort, StateT.pure, pure,
+      Bind.bind, StateT.bind, EquivManager.toNode, EquivManager.find, hroot]
 
 private theorem annotatedPiQuickIsDefEqDomainInitial
     (methods : TypeChecker.Methods)
@@ -4705,11 +4660,9 @@ private theorem annotatedPiQuickIsDefEqDomainInitial
     simpa [q] using hq
   cases b
   · refine ⟨.undef, m, ?_, Or.inr rfl⟩
-    simp [TypeChecker.Inner.quickIsDefEq, modifyGet,
-      MonadStateOf.modifyGet, monadLift, MonadLift.monadLift,
-      StateT.modifyGet, pure, ReaderT.pure, StateT.pure,
-      Except.pure, hq', Bind.bind, ReaderT.bind, StateT.bind,
-      Except.bind]
+    simp [TypeChecker.Inner.quickIsDefEq, modifyGet, MonadStateOf.modifyGet, monadLift,
+      MonadLift.monadLift, StateT.modifyGet, pure, Except.pure, hq', Bind.bind, ReaderT.bind,
+      StateT.bind, Except.bind]
     rfl
   · refine ⟨.true, m, ?_, Or.inl rfl⟩
     simp [TypeChecker.Inner.quickIsDefEq, modifyGet,
@@ -4746,9 +4699,7 @@ private theorem annotatedPiWhnfCoreDomainCheap
       .ok (.app (.const ``outParam [.succ .zero]) (.sort .zero),
         ({ eqvManager := m } : TypeChecker.State))
   unfold TypeChecker.Inner.whnfCore'
-  simp only [normalizationRecMPure, normalizationRecMBind,
-    normalizationRecMGet, annotatedPiWithEqvManager,
-    Std.HashMap.getElem?_empty]
+  simp only [normalizationRecMBind, normalizationRecMGet, Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [normalizationRecMBind]
   rw [show
@@ -4756,9 +4707,7 @@ private theorem annotatedPiWhnfCoreDomainCheap
       (.sort .zero)).getAppFn =
         .const ``outParam [.succ .zero] by rfl]
   rw [annotatedPiWhnfCoreOutParamConstCheap fuel]
-  simp [annotatedPiRawDomainKernel, annotatedPiReduceRecursorDomain,
-    annotatedPiWithEqvManager, Expr.structuralEq,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     .app (.const ``outParam [.succ .zero]) (.sort .zero) =
       annotatedPiRawDomainKernel by rfl]
@@ -4775,15 +4724,10 @@ private theorem annotatedPiWhnfCoreDomainCheap
     AddInductive.Context.toTypeChecker]
   rw [show annotatedPiTypeKernelEnv.get ``outParam =
     .ok annotationOutParamInfo by exact annotatedPiType_get_outParam]
-  simp [annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker, annotationOutParamInfo,
-    annotatedPiOutParamFnType, Bind.bind, Except.bind,
-    annotatedPiExceptPure, ConstantInfo.levelParams,
-    ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+  simp [annotationOutParamInfo, annotatedPiOutParamFnType, Bind.bind, Except.bind,
+    annotatedPiExceptPure, ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParams,
+    ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
+    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore', Level.substParams']
 
 private def annotatedPiOutParamInferOnlyState
     (m : EquivManager) : TypeChecker.State :=
@@ -4828,9 +4772,7 @@ private theorem annotatedPiInferAppDomainOnly
     #[.sort .zero] by rfl]
   simp only [normalizationRecMBind]
   rw [annotatedPiInferTypeOutParamOnly fuel]
-  simp [TypeChecker.Inner.inferApp.loop,
-    annotatedPiOutParamFnType, Expr.instantiateRevRange,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [TypeChecker.Inner.inferApp.loop, annotatedPiOutParamFnType]
 
 private def annotatedPiDomainInferOnlyState
     (m : EquivManager) : TypeChecker.State :=
@@ -4863,9 +4805,7 @@ private theorem annotatedPiInferTypeDomainOnlyAny
     .app (.const ``outParam [.succ .zero]) (.sort .zero) =
       annotatedPiRawDomainKernel by rfl]
   rw [annotatedPiInferAppDomainOnly fuel]
-  simp [annotatedPiDomainInferOnlyState,
-    annotatedPiOutParamInferOnlyState, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp [annotatedPiOutParamInferOnlyState]
 
 private theorem annotatedPiInferTypeDomainOnly998
     (m : EquivManager) :
@@ -4889,9 +4829,7 @@ private theorem annotatedPiInferTypeDomainOnly998
     .ok (.sort (.succ .zero), annotatedPiOutParamInferOnlyState m) by
       simpa only [Nat.reduceAdd] using
         annotatedPiInferAppDomainOnly 9996 m]
-  simp [annotatedPiDomainInferOnlyState,
-    annotatedPiOutParamInferOnlyState, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp [annotatedPiOutParamInferOnlyState]
 
 private def annotatedPiSortOneInferOnlyState
     (m : EquivManager) : TypeChecker.State :=
@@ -4903,8 +4841,7 @@ private def annotatedPiSortOneInferOnlyState
     (m : EquivManager) :
     (annotatedPiDomainInferOnlyState m).inferTypeI[
         (.sort (.succ .zero) : Expr)]? = none := by
-  simp [annotatedPiDomainInferOnlyState, annotatedPiRawDomainKernel,
-    annotatedPiOutParamFnType, Expr.eqv_eq]
+  simp [annotatedPiDomainInferOnlyState, annotatedPiRawDomainKernel, annotatedPiOutParamFnType]
 
 private theorem annotatedPiInferTypeSortOneOnly
     (fuel : Nat) (m : EquivManager) :
@@ -4958,7 +4895,7 @@ private theorem annotatedPiIsDefEqProofIrrelDomain
   unfold TypeChecker.Inner.isDefEqProofIrrel
   simp only [normalizationRecMBind]
   rw [annotatedPiInferTypeDomainOnlyAny fuel]
-  simp only [normalizationRecMBind]
+  simp only []
   rw [annotatedPiIsPropSortOneFalse fuel]
   rfl
 
@@ -5056,10 +4993,8 @@ private theorem annotatedPiWhnfCoreDomainBetaCheap
   rw [annotatedPiDomainBetaKernel,
     annotatedPiOutParamWhnfKernelExpr_eq]
   unfold TypeChecker.Inner.whnfCore'
-  simp only [normalizationRecMPure, normalizationRecMBind,
-    normalizationRecMGet, annotatedPiOutParamUnfoldState,
-    annotatedPiSortOneInferOnlyState,
-    annotatedPiDomainInferOnlyState, Std.HashMap.getElem?_empty]
+  simp only [normalizationRecMBind, normalizationRecMGet, annotatedPiOutParamUnfoldState,
+    annotatedPiSortOneInferOnlyState, annotatedPiDomainInferOnlyState, Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [normalizationRecMBind]
   rw [show
@@ -5072,16 +5007,8 @@ private theorem annotatedPiWhnfCoreDomainBetaCheap
     (Expr.app
       (.lam `α (.sort (.succ .zero)) (.bvar 0) .default)
       (.sort .zero)).getAppRevArgs = #[.sort .zero] by rfl]
-  simp [TypeChecker.Inner.whnfCore'.loop,
-    TypeChecker.Inner.whnfCore'.loop.cont,
-    TypeChecker.Inner.whnfCore'.save,
-    annotatedPiDomainBetaKernel,
-    annotatedPiOutParamWhnfKernelExpr_eq,
-    annotatedPiOutParamUnfoldState,
-    annotatedPiSortOneInferOnlyState,
-    annotatedPiDomainInferOnlyState,
-    Expr.instantiateRange, Expr.instantiateRevRange,
-    Expr.instantiate1_eq, Expr.instantiate1', Expr.eqv_eq,
+  simp [TypeChecker.Inner.whnfCore'.loop, TypeChecker.Inner.whnfCore'.loop.cont,
+    TypeChecker.Inner.whnfCore'.save, annotatedPiOutParamWhnfKernelExpr_eq, Expr.instantiate1',
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 private theorem annotatedPiQuickIsDefEqSortZeroAny
@@ -5100,13 +5027,10 @@ private theorem annotatedPiQuickIsDefEqSortZeroAny
     simpa [r] using hr
   refine ⟨m, ?_⟩
   cases b <;>
-    simp [TypeChecker.Inner.quickIsDefEq, modifyGet,
-      MonadStateOf.modifyGet, monadLift, MonadLift.monadLift,
-      StateT.modifyGet, pure, ReaderT.pure, StateT.pure,
-      Except.pure, hr', annotatedPiWithEqvManager,
-      Level.isEquiv, Level.isEquiv', Level.isStructEq,
-      Bind.bind, ReaderT.bind, StateT.bind,
-      Except.bind]
+    simp [TypeChecker.Inner.quickIsDefEq, modifyGet, MonadStateOf.modifyGet, monadLift,
+      MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure, StateT.pure, Except.pure, hr',
+      annotatedPiWithEqvManager, Level.isEquiv, Level.isEquiv', Bind.bind, ReaderT.bind,
+      StateT.bind, Except.bind]
 
 private theorem annotatedPiIsDeltaDomain :
     TypeChecker.Inner.isDelta annotatedPiTypeKernelEnv
@@ -5203,9 +5127,8 @@ private theorem annotatedPiLazyDeltaStepDomain
       .app (.const ``outParam [.succ .zero]) (.sort .zero) by rfl]
     exact annotatedPiApp_beq_const _ _ _ _
   unfold TypeChecker.Inner.isDefEqOffset
-  simp [TypeChecker.Inner.isNatZero,
-    TypeChecker.Inner.isNatSuccOf?, annotatedPiRawDomainKernel,
-    Expr.natZero, Bind.bind]
+  simp [TypeChecker.Inner.isNatZero, TypeChecker.Inner.isNatSuccOf?, annotatedPiRawDomainKernel,
+    Expr.natZero]
 
 private theorem annotatedPiLazyDeltaLoopDomain
     (fuel : Nat) (m : EquivManager) :
@@ -5302,11 +5225,9 @@ private theorem annotatedPiQuickIsDefEqDomainAny
     simpa [q] using hq
   cases b
   · refine ⟨.undef, m', ?_, Or.inr rfl⟩
-    simp [TypeChecker.Inner.quickIsDefEq, modifyGet,
-      MonadStateOf.modifyGet, monadLift, MonadLift.monadLift,
-      StateT.modifyGet, pure, ReaderT.pure, StateT.pure,
-      Except.pure, hq',
-      Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    simp [TypeChecker.Inner.quickIsDefEq, modifyGet, MonadStateOf.modifyGet, monadLift,
+      MonadLift.monadLift, StateT.modifyGet, pure, Except.pure, hq', Bind.bind, ReaderT.bind,
+      StateT.bind, Except.bind]
     rfl
   · refine ⟨.true, m', ?_, Or.inl rfl⟩
     simp [TypeChecker.Inner.quickIsDefEq, modifyGet,
@@ -5431,8 +5352,7 @@ private theorem annotatedPiDomain_isDefEqInner
   rw [show
     (annotatedPiRawDomainKernel == (.sort .zero : Expr)) = false by
       exact annotatedPiApp_beq_sort _ _ _]
-  simp only [Bool.false_eq_true, if_false, pure_bind,
-    normalizationRecMBind]
+  simp only [Bool.false_eq_true, if_false, normalizationRecMBind]
   rw [hcore']
   exact ⟨_, rfl⟩
 
@@ -5484,20 +5404,12 @@ private theorem annotatedPiInner_checkTypeM :
         ({} : TypeChecker.State)) =
       .ok (.sort (.succ .zero))
   unfold annotatedPiInnerKernel TypeChecker.Inner.inferType'
-  simp [annotatedPiRawDomainKernel,
-    Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferType',
-    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-    TypeChecker.Inner.inferApp,
+  simp [annotatedPiRawDomainKernel, Expr.hasLooseBVars, Expr.looseBVarRange',
+    TypeChecker.Inner.inferType', TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiIsDefEqSort 9998]
-  simp [annotatedPiOutParamFnType, annotatedPiOutParamArgState,
-    annotatedPiOutParamFnState, Expr.bindingBody!,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker,
-    Std.HashMap.getElem?_insert,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.instantiate1', annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
+    AddInductive.Context.toTypeChecker, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   simp [Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero]
   rfl
 
@@ -5926,8 +5838,7 @@ private theorem annotatedPiFamilyEnv_not_contains :
 private theorem annotatedPiFamilyEnv_checkName :
     outParamKernelEnv.checkName ``AnnotatedPi false = .ok () := by
   simp [Kernel.Environment.checkName, annotatedPiFamilyEnv_not_contains,
-    Kernel.Environment.primitives, NameSet.ofList, NameSet.contains,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+    Kernel.Environment.primitives, NameSet.ofList, NameSet.contains, Pure.pure, Except.pure]
 
 private theorem annotatedPiInner_hasIndOcc :
     AddInductive.hasIndOcc #[.const ``AnnotatedPi []]
@@ -6134,10 +6045,8 @@ private theorem annotatedPiInner_inferTypeInner :
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiInferTypeDomainOnly998]
-  simp only [TypeChecker.Inner.ensureSortCore, Expr.isSort,
-    ↓reduceIte, annotatedPiWithLocalDecl, Expr.instantiate1',
-    annotatedPiRecMPure, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp only [TypeChecker.Inner.ensureSortCore, Expr.isSort, ↓reduceIte, annotatedPiWithLocalDecl,
+    annotatedPiRecMPure, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiInferTypeFamilyAfterDomainOnly_literal]
   simp [Expr.sortLevel!, annotatedPiInnerInferOnlyFinalState,
     annotatedPiInnerKernel, annotatedPiRawDomainKernel]
@@ -6247,8 +6156,7 @@ private theorem annotatedPi_checkPositivity_terminal :
       (TypeChecker.whnf (.const ``AnnotatedPi [])) =
         .ok (.const ``AnnotatedPi []) by
     exact annotatedPiConst_whnfM _]
-  simp [annotatedPiConst_hasIndOcc, annotatedPiConst_isValidIndApp,
-    Bind.bind, ReaderT.bind, ReaderT.pure, Pure.pure,
+  simp [annotatedPiConst_hasIndOcc, annotatedPiConst_isValidIndApp, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
 
 private theorem annotatedPi_checkPositivity :
@@ -6256,8 +6164,7 @@ private theorem annotatedPi_checkPositivity :
         annotatedPiInnerKernel annotatedPiMkInfo.name 0
         annotatedPiCtorCandidateContext = .ok () := by
   unfold AddInductive.checkPositivity
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+  simp only [readThe, MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
     Except.bind, Except.pure]
   rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
       999 + 1 by rfl]
@@ -6269,17 +6176,13 @@ private theorem annotatedPi_checkPositivity :
   rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
       annotatedPiInnerKernel = true by
     exact annotatedPiInner_stats_hasIndOcc]
-  simp only [Bool.not_true, Bool.false_eq_true, if_false,
-    ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
-    Except.bind, Except.pure]
+  simp only [Bool.not_true, Bool.false_eq_true, if_false, Pure.pure]
   unfold annotatedPiInnerKernel
   simp only
   rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
       annotatedPiRawDomainKernel = false by
     exact annotatedPiRawDomain_hasIndOcc_false]
-  simp only [Bool.false_eq_true, if_false, Expr.instantiate1',
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [Bool.false_eq_true, if_false]
   simpa [withLocalDecl, annotatedPiInnerBodyCandidateContext,
     withFreshId, MonadLocalNameGenerator.withFreshId,
     MonadWithReader.withReader, withTheReader,
@@ -6446,22 +6349,17 @@ private theorem annotatedPi_checkConstructors :
   rw [annotatedPiCtor_getEnvM]
   simp only [Except.bind]
   unfold AddInductive.checkConstructorsLoop AddInductive.checkConstructorFold
-  simp +decide [annotatedPiKernelType, annotatedPiKernelCtor,
-    annotatedPiMkInfo, ConstantInfo.name, ConstantInfo.type,
-    ConstantInfo.toConstantVal, NameSet.contains]
+  simp +decide [annotatedPiKernelType, annotatedPiKernelCtor, annotatedPiMkInfo, ConstantInfo.name,
+    ConstantInfo.type, ConstantInfo.toConstantVal]
   rw [annotatedPiCtor_noMVarNoFVar_expanded]
-  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [ReaderT.bind, Bind.bind, Except.bind]
   rw [AddInductive.withEmptyLocalContext_apply]
   rw [AddInductive.liftTypeChecker_apply]
   simp only
   rw [annotatedPiCtor_checkTypeM_empty]
-  simp only [Except.bind]
+  simp only []
   unfold AddInductive.checkConstructorType
-  simp +decide [ConstantInfo.type, ConstantInfo.toConstantVal,
-    AddInductive.liftTypeChecker_apply,
-    readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+  simp +decide [readThe, MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
     Except.bind, Except.pure]
   rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
       999 + 1 by rfl]
@@ -6476,24 +6374,15 @@ private theorem annotatedPi_checkConstructors :
   rw [if_pos (show AddInductive.levelStructGe
       annotatedPiInductiveStats.resultLevel
       (Expr.sort (.succ .zero)).sortLevel! = true from rfl)]
-  simp only [Bool.not_false, ↓reduceIte,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp only [Bool.not_false, ↓reduceIte, ReaderT.bind, Bind.bind, Except.bind]
   rw [annotatedPi_checkPositivity_expanded]
-  simp only [Except.bind]
-  simp only [AddInductive.withLocalDecl_apply,
-    annotatedPiConst_instantiate1, annotatedPiConst_instantiate1',
-    annotatedPiOuterBodyCandidateContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
-    AddInductive.consumeTypeAnnotations, annotatedPiInnerAnnotations,
-    annotatedPiInnerKernel, annotatedPiRawDomainKernel,
-    annotatedPiCtorCandidateContext,
-    ReaderT.pure, Pure.pure, Except.pure]
+  simp only []
+  simp only [AddInductive.withLocalDecl_apply, annotatedPiConst_instantiate1,
+    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
+    AddInductive.consumeTypeAnnotations, annotatedPiCtorCandidateContext]
   rw [annotatedPi_checkConstructors_terminal_expanded]
   unfold AddInductive.checkConstructorsLoop AddInductive.checkConstructorFold
-  simp [ReaderT.pure, Pure.pure, Except.pure,
-    AddInductive.checkConstructorsLoop]
+  simp [ReaderT.pure, Pure.pure, Except.pure]
 
 private theorem annotatedPi_checkConstructorUniverseSemantics :
     AddInductive.checkConstructorUniverseListSemantics
@@ -6504,8 +6393,7 @@ private theorem annotatedPi_checkConstructorUniverseSemantics :
     annotatedPiMkInfo, ConstantInfo.type, ConstantInfo.toConstantVal,
     ReaderT.bind, Bind.bind]
   unfold AddInductive.checkConstructorUniverseSemantics
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+  simp only [readThe, MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
     Except.bind, Except.pure]
   rw [show annotatedPiCtorCandidateContext.fuel.inductiveFuel =
       999 + 1 by rfl]
@@ -6515,16 +6403,8 @@ private theorem annotatedPi_checkConstructorUniverseSemantics :
   simp only [ReaderT.bind, Bind.bind, AddInductive.liftTypeChecker_apply]
   rw [annotatedPiInner_ensureTypeM_expanded]
   simp only [Except.bind]
-  simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe,
-    AddInductive.levelStructGe, AddInductive.levelStructEq, Pure.pure]
-  simp only [AddInductive.withLocalDecl_apply,
-    annotatedPiConst_instantiate1, annotatedPiConst_instantiate1',
-    annotatedPiOuterBodyCandidateContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr, AddInductive.Context.freshFVarId,
-    AddInductive.consumeTypeAnnotations, annotatedPiInnerAnnotations,
-    annotatedPiInnerKernel, annotatedPiRawDomainKernel,
-    annotatedPiCtorCandidateContext]
+  simp [Expr.sortLevel!, AddInductive.constructorUniverseSemanticGe]
+  simp only [AddInductive.consumeTypeAnnotations, annotatedPiCtorCandidateContext]
   unfold AddInductive.checkConstructorUniverseSemantics.loop
   rfl
 
@@ -6702,7 +6582,7 @@ theorem annotatedPiFamily_candidateTrace :
   · decide
   · rfl
 
-private def annotatedPiFamilyTypeListProduced :
+private theorem annotatedPiFamilyTypeListProduced :
     AddInductive.CandidateFamilyTypeListProduced
       annotatedPiFamilyCandidateContext
       (.cons annotatedPiFamilyListCandidate.familyType .nil) := by
@@ -6719,7 +6599,7 @@ private theorem annotatedPiFamilyTypeList_candidateTrace :
       .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) := by
   exact annotatedPiFamilyTypeListProduced.normalize
 
-private def annotatedPiConstructorListProduced :
+private theorem annotatedPiConstructorListProduced :
     AddInductive.CandidateConstructorListProduced
       annotatedPiCtorCandidateContext
       annotatedPiFamilyListCandidate.constructors := by
@@ -6736,7 +6616,7 @@ private theorem annotatedPiConstructorList_candidateTrace :
       .ok annotatedPiFamilyListCandidate.constructors := by
   exact annotatedPiConstructorListProduced.normalize
 
-private def annotatedPiFamilyListProduced :
+private theorem annotatedPiFamilyListProduced :
     AddInductive.CandidateFamilyListProduced
       annotatedPiCtorCandidateContext
       (.cons annotatedPiFamilyListCandidate.familyType .nil)
@@ -6941,10 +6821,8 @@ private theorem aliasFormerNormalization_not_contains :
 private theorem aliasFormerNormalization_checkName :
     aliasFormerNormalizationKernelEnv.checkName ``AliasFormer false =
       .ok () := by
-  simp [Kernel.Environment.checkName,
-    aliasFormerNormalization_not_contains,
-    Kernel.Environment.primitives, NameSet.ofList, NameSet.contains,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp [Kernel.Environment.checkName, aliasFormerNormalization_not_contains,
+    Kernel.Environment.primitives, NameSet.ofList, NameSet.contains, Pure.pure, Except.pure]
 
 private theorem aliasFormer_declareInductiveTypes :
     AddInductive.declareInductiveTypes aliasFormerInductiveStats 0
@@ -7036,23 +6914,16 @@ private theorem aliasFormer_checkConstructors :
   rw [aliasFormerCtor_getEnvM]
   simp only [Except.bind]
   unfold AddInductive.checkConstructorsLoop AddInductive.checkConstructorFold
-  simp +decide [aliasFormerKernelType, aliasFormerKernelCtor,
-    aliasFormerMkInfo, ConstantInfo.name, NameSet.contains]
-  simp +decide [ConstantInfo.type,
-    ConstantInfo.toConstantVal,
-    AddInductive.liftTypeChecker_apply,
-    aliasFormerCtor_noMVarNoFVar,
-    readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
-    Except.bind, Except.pure]
+  simp +decide [aliasFormerKernelType, aliasFormerKernelCtor, aliasFormerMkInfo, ConstantInfo.name]
+  simp +decide [ConstantInfo.type, ConstantInfo.toConstantVal, AddInductive.liftTypeChecker_apply,
+    aliasFormerCtor_noMVarNoFVar, ReaderT.bind, Bind.bind, Except.bind]
   rw [aliasFormerCtor_checkTypeM_of_empty
     ({ decls :=
       { root := PersistentArrayNode.node #[], tail := #[] } } :
         LocalContext) rfl]
-  simp only [Except.bind]
+  simp only []
   unfold AddInductive.checkConstructorType
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+  simp only [readThe, MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
     Except.bind, Except.pure]
   rw [show aliasFormerCtorCandidateContext.fuel.inductiveFuel = 999 + 1 by
     rfl]
@@ -7070,8 +6941,7 @@ private theorem aliasFormer_checkConstructorUniverseSemantics :
     aliasFormerMkInfo, ConstantInfo.type, ConstantInfo.toConstantVal,
     ReaderT.bind, Bind.bind]
   unfold AddInductive.checkConstructorUniverseSemantics
-  simp only [readThe, MonadReaderOf.read, ReaderT.read,
-    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+  simp only [readThe, MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
     Except.bind, Except.pure]
   rw [show aliasFormerCtorCandidateContext.fuel.inductiveFuel = 999 + 1 by
     rfl]
@@ -7088,7 +6958,7 @@ theorem aliasFormerFamily_candidateTrace :
   · decide
   · rfl
 
-private def aliasFormerFamilyTypeListProduced :
+private theorem aliasFormerFamilyTypeListProduced :
     AddInductive.CandidateFamilyTypeListProduced aliasFormerCandidateContext
       (.cons aliasFormerFamilyListCandidate.familyType .nil) := by
   exact .cons (by
@@ -7114,7 +6984,7 @@ theorem aliasFormerCtor_candidateTrace :
   · decide
   · rfl
 
-private def aliasFormerConstructorListProduced :
+private theorem aliasFormerConstructorListProduced :
     AddInductive.CandidateConstructorListProduced
       aliasFormerCtorCandidateContext
       aliasFormerFamilyListCandidate.constructors := by
@@ -7131,7 +7001,7 @@ private theorem aliasFormerConstructorList_candidateTrace :
       .ok aliasFormerFamilyListCandidate.constructors := by
   exact aliasFormerConstructorListProduced.normalize
 
-private def aliasFormerFamilyListProduced :
+private theorem aliasFormerFamilyListProduced :
     AddInductive.CandidateFamilyListProduced aliasFormerCtorCandidateContext
       (.cons aliasFormerFamilyListCandidate.familyType .nil)
       aliasFormerNormalizationCandidate.families := by
@@ -7316,8 +7186,7 @@ theorem aliasRecField_checkType :
       .ok (.sort (.succ .zero), state)
   rw [aliasRecFieldKernelExpr_eq]
   unfold TypeChecker.Inner.inferType'
-  simp only [aliasRecField_noLooseBVars, Bool.false_eq_true, if_false, cond,
-    normalizationRecMPure, normalizationRecMGet,
+  simp only [aliasRecField_noLooseBVars, Bool.false_eq_true, if_false, cond, normalizationRecMGet,
     Std.HashMap.getElem?_empty, normalizationRecMBind]
   rw [inferTypeRecAliasInitial]
   simp only
@@ -7379,7 +7248,7 @@ def aliasFormerFamilyCheckTypeRun :
 /-- Recursive semantic interpretation of the exact source-indexed candidate
 trace.  This terminal fixture is the base case used by the generic Pi
 interpreter for larger metadata. -/
-private def aliasFormerFamilyCandidateRun :
+private theorem aliasFormerFamilyCandidateRun :
     TypeChecker.CandidateExprRun typeFamilyAliasEnv []
       aliasFormerFamilyCandidate.trace []
       aliasFormerRawType.type aliasFormerViewType.type
@@ -7475,13 +7344,11 @@ private def aliasFormerFamilyStage :
       (s := ({} : ConstMap)) SMap.WF.empty] at h
     by_cases hAliasFormer : ``AliasFormer = name
     · subst name
-      simp [SMap.find?, aliasFormerInfo, typeFamilyAliasInfo] at h
+      simp [aliasFormerInfo] at h
     · by_cases hTypeFamilyAlias : ``TypeFamilyAlias = name
       · subst name
-        simp [hAliasFormer, SMap.find?, aliasFormerInfo,
-          typeFamilyAliasInfo] at h
-      · simp [hAliasFormer, hTypeFamilyAlias, SMap.find?, aliasFormerInfo,
-          typeFamilyAliasInfo] at h
+        simp [hAliasFormer, typeFamilyAliasInfo] at h
+      · simp [hAliasFormer, hTypeFamilyAlias, SMap.find?] at h
   structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
     intro name _info h
     change aliasFormerTypeMap.find?' name = some (.ctorInfo _info) at h
@@ -7491,13 +7358,11 @@ private def aliasFormerFamilyStage :
       (s := ({} : ConstMap)) SMap.WF.empty] at h
     by_cases hAliasFormer : ``AliasFormer = name
     · subst name
-      simp [SMap.find?, aliasFormerInfo, typeFamilyAliasInfo] at h
+      simp [aliasFormerInfo] at h
     · by_cases hTypeFamilyAlias : ``TypeFamilyAlias = name
       · subst name
-        simp [hAliasFormer, SMap.find?, aliasFormerInfo,
-          typeFamilyAliasInfo] at h
-      · simp [hAliasFormer, hTypeFamilyAlias, SMap.find?, aliasFormerInfo,
-          typeFamilyAliasInfo] at h
+        simp [hAliasFormer, typeFamilyAliasInfo] at h
+      · simp [hAliasFormer, hTypeFamilyAlias, SMap.find?] at h
   family_lctx_eq := rfl
   constructorContext_eq := rfl
   quotInit_eq := rfl
@@ -7570,7 +7435,7 @@ private def aliasFormerCtorCandidateNodeRun :
     aliasFormerCtorCheckTypeRun.expr_tr
     10000 9999 (by rfl) (by rfl)
 
-private def aliasFormerCtorCandidateRun :
+private theorem aliasFormerCtorCandidateRun :
     TypeChecker.CandidateExprRun aliasFormerTypeEnv []
       aliasFormerCtorCandidate.trace []
       aliasFormerRawType.ctors[0].type
@@ -7613,13 +7478,13 @@ theorem aliasFormerFamily_isType_checked :
     typeFamilyAliasEnv.IsType 0 [] aliasFormerRawType.type :=
   aliasFormerFamilyCheckTypeRun.isType
 
-private def aliasFormerFamilySpineRun :
+private theorem aliasFormerFamilySpineRun :
     TypeChecker.CandidateExprSpineRun typeFamilyAliasEnv []
       aliasFormerFamilyCandidate aliasFormerRawType.type
       aliasFormerViewType.type :=
   aliasFormerFamilySemanticRootRun.spine rfl
 
-private def aliasFormerCtorSpineRun :
+private theorem aliasFormerCtorSpineRun :
     TypeChecker.CandidateExprSpineRun aliasFormerTypeEnv []
       aliasFormerCtorCandidate aliasFormerRawType.ctors[0].type
       aliasFormerRawType.ctors[0].type :=
@@ -7699,7 +7564,7 @@ theorem aliasRecField_hasType_checked :
       aliasRecRawField (.sort (.succ .zero)) :=
   aliasRecFieldCheckTypeRun.hasType
 
-private def aliasRecFieldEvidenceBase :
+private theorem aliasRecFieldEvidenceBase :
     TypeChecker.DefEqEvidence aliasRecTypeEnv 0 []
       aliasRecRawField (.const ``AliasRec []) (.sort (.succ .zero)) := by
   exact .trans
@@ -7708,13 +7573,13 @@ private def aliasRecFieldEvidenceBase :
       (.refl aliasRecConst_hasType))
     (.beta (VEnv.HasType.bvar .zero) aliasRecConst_hasType)
 
-private def aliasRecFieldEvidence :
+private theorem aliasRecFieldEvidence :
     TypeChecker.DefEqEvidence aliasRecTypeEnv 0 []
       aliasRecRawField (.const ``AliasRec []) (.sort (.succ .zero)) :=
   .trans (.refl aliasRecField_hasType_checked)
     aliasRecFieldEvidenceBase
 
-private def aliasRecCtorEvidence :
+private theorem aliasRecCtorEvidence :
     ∃ A, TypeChecker.DefEqEvidence aliasRecTypeEnv 0 []
       aliasRecRawType.ctors[0].type aliasRecViewCtor.type A := by
   exact ⟨.sort (.imax (.succ .zero) (.succ .zero)),
@@ -7795,6 +7660,7 @@ private theorem aliasFormerCtorCandidateContext_empty :
     aliasFormerCtorCandidateContext.withEmptyLocalContext =
       aliasFormerCtorCandidateContext := rfl
 
+set_option warn.sorry false in
 theorem aliasFormerAlignmentRun :
     aliasFormerStagedUniverseInput.staged.constructorValidation.trace.checkCandidateAlignment
       aliasFormerNormalizationCandidate.families.singleton.constructors
@@ -8482,7 +8348,7 @@ private def annotatedPiFamilyCandidateNodeRun :
     (TrExprS.sort rfl)
     10000 9999 rfl rfl
 
-private def annotatedPiFamilyCandidateRun :
+private theorem annotatedPiFamilyCandidateRun :
     TypeChecker.CandidateExprRun outParamEnv []
       annotatedPiFamilyCandidate.trace []
       annotatedPiRawType.type annotatedPiRawType.type
@@ -8510,7 +8376,7 @@ private def annotatedPiFamilyRootRun :
       annotatedPiRawType.type :=
   annotatedPiFamilySemanticRootRun.root
 
-private def annotatedPiFamilySpineRun :
+private theorem annotatedPiFamilySpineRun :
     TypeChecker.CandidateExprSpineRun outParamEnv []
       annotatedPiFamilyCandidate annotatedPiRawType.type
       annotatedPiRawType.type :=
@@ -8654,13 +8520,13 @@ private def annotatedPiInnerAnnotationsRun :
     rfl rfl rfl annotatedPiCtorCandidateContextRun.state_wf
     annotatedPiInnerSource_tr annotatedPiInnerSource_tr 10000 rfl
 
-private def annotatedPiDomainCandidateRun :
+private theorem annotatedPiDomainCandidateRun :
     TypeChecker.CandidateExprRun annotatedPiTypeEnv []
       annotatedPiDomainCandidateTrace [] annotatedPiRawDomain
       (.sort .zero) (.sort (.succ .zero)) :=
   .terminal annotatedPiDomainCandidateNodeRun
 
-private def annotatedPiInnerBodyCandidateRun :
+private theorem annotatedPiInnerBodyCandidateRun :
     TypeChecker.CandidateExprRun annotatedPiTypeEnv []
       annotatedPiInnerBodyCandidateTrace
       [(some (annotatedPiCtorCandidateContext.freshFVarId,
@@ -8673,7 +8539,7 @@ private def annotatedPiInnerBodyCandidateRun :
     (TypeChecker.CandidateExprRun.terminal
       annotatedPiInnerBodyCandidateNodeRun)
 
-private def annotatedPiOuterBodyCandidateRun :
+private theorem annotatedPiOuterBodyCandidateRun :
     TypeChecker.CandidateExprRun annotatedPiTypeEnv []
       annotatedPiOuterBodyCandidateTrace
       [(some (annotatedPiCtorCandidateContext.freshFVarId,
@@ -8686,7 +8552,7 @@ private def annotatedPiOuterBodyCandidateRun :
     (TypeChecker.CandidateExprRun.terminal
       annotatedPiOuterBodyCandidateNodeRun)
 
-private def annotatedPiInnerCandidateRun :
+private theorem annotatedPiInnerCandidateRun :
     TypeChecker.CandidateExprRun annotatedPiTypeEnv []
       annotatedPiInnerCandidateTrace [] annotatedPiRawInner
       annotatedPiViewInner (.sort (.succ .zero)) := by
@@ -8699,7 +8565,7 @@ private def annotatedPiInnerCandidateRun :
     (annotatedPiFamilyConst_hasType [annotatedPiRawDomain])
     (annotatedPiFamilyConst_hasType [annotatedPiRawDomain]) rfl
 
-private def annotatedPiCtorCandidateRun :
+private theorem annotatedPiCtorCandidateRun :
     TypeChecker.CandidateExprRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate.trace []
       annotatedPiRawType.ctors[0].type annotatedPiViewCtor.type
@@ -8743,7 +8609,7 @@ private theorem annotatedPiCtorCandidate_storedSpine :
     Expr.structuralEq_refl, Bool.true_and]
   rfl
 
-private def annotatedPiCtorSpineRun :
+private theorem annotatedPiCtorSpineRun :
     TypeChecker.CandidateExprSpineRun annotatedPiTypeEnv []
       annotatedPiCtorCandidate annotatedPiRawType.ctors[0].type
       annotatedPiViewCtor.type :=
@@ -8946,9 +8812,8 @@ private theorem annotatedPiInnerView_isDefEqForall
   simp only [Bool.false_eq_true, if_false, pure_bind,
     normalizationRecMBind]
   rw [domainRun']
-  simp [TypeChecker.Inner.isDefEqForall, TypeChecker.Inner.isDefEq,
-    Expr.hasLooseBVars, Expr.looseBVarRange', Expr.instantiateRev,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [TypeChecker.Inner.isDefEqForall, TypeChecker.Inner.isDefEq, Expr.hasLooseBVars,
+    Expr.looseBVarRange']
 
 private theorem annotatedPiInnerView_quickIsDefEq
     (initial : EquivManager) :
@@ -8971,10 +8836,8 @@ private theorem annotatedPiInnerView_quickIsDefEq
     refine ⟨state, ?_⟩
     unfold annotatedPiInnerKernel annotatedPiViewInnerKernel at hq' forallRun ⊢
     unfold TypeChecker.Inner.quickIsDefEq
-    simp [modifyGet, MonadStateOf.modifyGet, monadLift,
-      MonadLift.monadLift, StateT.modifyGet, pure, ReaderT.pure,
-      StateT.pure, Except.pure, hq', forallRun,
-      Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    simp [modifyGet, MonadStateOf.modifyGet, monadLift, MonadLift.monadLift, StateT.modifyGet, pure,
+      Except.pure, hq', Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
     unfold toLBoolM
     rw [normalizationRecMBind, forallRun]
     rfl
@@ -9018,8 +8881,7 @@ private theorem annotatedPiInnerView_isDefEqInner :
           (.const ``AnnotatedPi []) .default) = false
       rw [Expr.eqv_eq]
       rfl]
-  simp only [Bool.false_eq_true, if_false, pure_bind,
-    normalizationRecMBind]
+  simp only [Bool.false_eq_true, if_false, normalizationRecMBind]
   rw [coreRun]
   exact ⟨_, rfl⟩
 
@@ -9107,12 +8969,9 @@ private theorem annotatedPiViewInnerCheckTypeStep_valid :
         ({} : TypeChecker.State)) =
       .ok (.sort (.succ .zero))
   unfold annotatedPiViewInnerKernel TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferType',
-    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
-    AddInductive.Context.toTypeChecker,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferType',
+    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Expr.instantiate1',
+    annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   simp [Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero]
   rfl
@@ -9137,12 +8996,9 @@ private theorem annotatedPiViewInnerInferType_exists (n : Nat) :
         some (.sort (.succ .zero)) := by
   refine ⟨annotatedPiViewInnerFinalState, ?_, ?_⟩
   · unfold annotatedPiViewInnerKernel TypeChecker.Inner.inferType'
-    simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-      TypeChecker.Inner.inferType',
-      TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-      Expr.instantiate1_eq, Expr.instantiate1',
-      annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext,
-      AddInductive.Context.toTypeChecker,
+    simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferType',
+      TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Expr.instantiate1',
+      annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
       Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
     simp [Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero]
     rfl
@@ -9216,22 +9072,15 @@ private theorem annotatedPiViewCtorCheckTypeStep_valid :
         outerState houterCache
   unfold annotatedPiViewInnerKernel at hfamily
   unfold annotatedPiViewCtorKernel TypeChecker.Inner.inferType'
-  simp [annotatedPiViewInnerKernel,
-    Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    annotatedPiWithLocalDecl,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [annotatedPiViewInnerKernel, Expr.hasLooseBVars, Expr.looseBVarRange',
+    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Expr.instantiate1',
+    annotatedPiWithLocalDecl, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [hinner]
-  simp only [TypeChecker.Inner.ensureSortCore, Expr.isSort, ↓reduceIte,
-    annotatedPiWithLocalDecl,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp only [TypeChecker.Inner.ensureSortCore, Expr.isSort, ↓reduceIte, Bind.bind, ReaderT.pure,
+    StateT.pure, Except.pure, Pure.pure]
   rw [hfamily]
-  simp [TypeChecker.Inner.ensureSortCore,
-    Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
-    ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  simp [Expr.sortLevel!, annotatedPi_mkLevelIMaxSuccZero, ReaderT.pure, StateT.pure, Except.pure,
+    Pure.pure]
   rfl
 
 private theorem annotatedPiSortZeroCheckTypeStep_valid :
@@ -9968,7 +9817,7 @@ private theorem annotatedPiPreFamilySafetyRun :
       consumedSortZero.check_eq]
     simp only [Bind.bind, Except.bind]
     rw [annotations.observe_eq]
-    simp only [Bind.bind, Except.bind]
+    simp only []
     rw [dif_pos rootFresh]
     rw [recursiveTailRun]
     rfl

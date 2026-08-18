@@ -363,16 +363,15 @@ theorem Pattern.varN_const_inter_some :
     intro n' p h
     cases n' with
     | zero =>
-      simp [Pattern.varN, Pattern.inter] at h
+      simp [Pattern.inter] at h
       exact ⟨h.1, rfl, h.2.symm⟩
-    | succ n' => simp [Pattern.varN, Pattern.inter] at h
+    | succ n' => simp [Pattern.inter] at h
   | succ n ih =>
     intro n' p h
     cases n' with
-    | zero => simp [Pattern.varN, Pattern.inter] at h
+    | zero => simp [Pattern.inter] at h
     | succ n' =>
-      simp only [Pattern.varN, Pattern.inter, bind, Option.bind_eq_some_iff,
-        Option.pure_def, Option.some.injEq] at h
+      simp only [Pattern.inter, bind, Option.bind_eq_some_iff, Option.pure_def, Option.some.injEq] at h
       obtain ⟨q, hq, rfl⟩ := h
       obtain ⟨rfl, rfl, rfl⟩ := ih hq
       exact ⟨rfl, rfl, rfl⟩
@@ -396,10 +395,9 @@ theorem Pattern.app_inter_varN_const_some {f a : Pattern}
     ∃ n' q, n = n' + 1 ∧ f.inter (Pattern.varN (.const c) n') = some q ∧
       p = .app q a := by
   cases n with
-  | zero => simp [Pattern.varN, Pattern.inter] at h
+  | zero => simp [Pattern.inter] at h
   | succ n' =>
-    simp only [Pattern.varN, Pattern.inter, bind, Option.bind_eq_some_iff,
-      Option.pure_def, Option.some.injEq] at h
+    simp only [Pattern.inter, bind, Option.bind_eq_some_iff, Option.pure_def, Option.some.injEq] at h
     obtain ⟨q, hq, rfl⟩ := h
     exact ⟨n', q, rfl, hq, rfl⟩
 

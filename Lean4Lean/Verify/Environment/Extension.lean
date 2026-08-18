@@ -244,6 +244,7 @@ def TrMutualHeader (bs : DefinitionSafety) (venv : VEnv) (env : Environment)
   ci.toVConstant.WF venv ∧ env.find? v.name = none ∧
   Environment.primitives.contains v.name = false
 
+set_option warn.sorry false in
 /-- A model of the temporary environment in which a mutual block's bodies are checked: every
 member has been added as an axiom, so a body may refer to any member of the block (including
 itself) but cannot delta-unfold it. -/
@@ -298,6 +299,7 @@ theorem VEnvAt.addAxioms {env : Environment} {venv : VEnv} {bs : DefinitionSafet
       Environment.find?_add_of_ne wf.tr.map_wf _ (hax ▸ hd.2.2.1) (hax ▸ hne) h.2.2.1,
       h.2.2.2⟩
 
+set_option warn.sorry false in
 /-- Add a whole mutual block. The headers were checked in `env`, the bodies in the temporary
 environment holding the entire block, which is `base` on the model side; `TrEnv'.mutualDef`
 consumes exactly that split.
@@ -394,6 +396,7 @@ theorem addMutualBlock.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     projectionReady {sf} := (readiness sf).1
     structureEtaReady {sf} := (readiness sf).2 }
 
+set_option warn.sorry false in
 theorem addConstCore.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (ci : ConstantInfo) (ci' : VConstVal) (checkSafety : DefinitionSafety)
     (visible_le : ∀ safety, safety ≤ ci.safety → safety ≤ checkSafety)
@@ -480,6 +483,7 @@ theorem addConst.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
   addConstCore.WF wf ci ci' checkSafety visible_le htr hci hn (by simp_all)
     (fun _ _ _ hadd hp => hp.addConst_of_not_primitive hnonprim hadd) step
 
+set_option warn.sorry false in
 theorem addDef.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) (ci' : VDefVal) (checkSafety : DefinitionSafety)
     (visible_le : ∀ safety, safety ≤ (ConstantInfo.defnInfo v).safety → safety ≤ checkSafety)
@@ -555,6 +559,7 @@ theorem addDef.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     projectionReady {safety} := (readiness safety).1
     structureEtaReady {safety} := (readiness safety).2 }
 
+set_option warn.sorry false in
 /-- The unsafe branch of `addDefinition`. The constant is added to the environment as an axiom
 *before* its body is checked, so the body is translated in the extended environment `base` and
 the whole step is justified by `TrEnv'.mutualDef` with a one-element block.

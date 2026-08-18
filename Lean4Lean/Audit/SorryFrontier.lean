@@ -105,6 +105,15 @@ is intentionally not imported.
 
 Runs as a build-time `run_cmd`, not an executable: `lake build` of this module
 is the whole check.
+
+Because this audit is what guards the frontier, every allowlisted declaration
+that would log Lean's "declaration uses `sorry`" warning carries `set_option
+warn.sorry false in` at its definition, which keeps `lake build --wfail` clean
+for downstream consumers. (The `#guard_msgs`-pinned fixtures below need no
+annotation: their warning is captured by the pinned message.) Suppressing the
+warning costs no safety here, since the check reads `sorryAx` out of the
+environment: a sorry that is new, moved, or renamed still fails this build, and
+one added without the annotation also still fails `--wfail`.
 -/
 
 open Lean Lean.Elab.Command

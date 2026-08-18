@@ -3,6 +3,7 @@ import Lean4Lean.Verify.TypeChecker.Reduce
 namespace Lean4Lean.TypeChecker.Inner
 open Lean hiding Environment Exception
 
+set_option warn.sorry false in
 theorem reduceRecursor.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
     RecM.WF c s (reduceRecursor e) fun oe _ =>
       ∀ e₁, oe = some e₁ → c.FVarsBelow e e₁ ∧ c.TrExpr e₁ e' := sorry

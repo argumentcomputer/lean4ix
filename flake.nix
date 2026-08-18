@@ -48,24 +48,15 @@
         lean = lean4-nix.lib.${system}.fromToolchainFile ./lean-toolchain;
         # Lake package
         lake2nix = pkgs.callPackage lean4-nix.lake {inherit lean;};
-        # Restrict the Lake build inputs to Lean-relevant files so edits to
-        # unrelated files (CI, docs, the flake itself) don't invalidate the
-        # cached Lean derivations. Covers the library/CLI/proof/test/audit
-        # sources, the manifests lean4-nix reads while evaluating, and the
+        # Restrict the Lake build inputs to the files `lake build` reads, so
+        # edits to unrelated files (CI, docs, the flake itself) don't
+        # invalidate the cached Lean derivations. Keeps `.lean`/`.toml`, the
+        # manifests lean4-nix reads while evaluating, and the
         # downstream-consumer fixture built from `${leanSrc}/nix/fixtures`.
-        # NOTE: a fileset source is left unrealized under `nix flake check
-        # --no-build` (fails with "path '…-source' is not valid"), so the nix
-        # CI job builds for real rather than eval-only.
-        leanSrc = pkgs.lib.fileset.toSource {
-          root = ./.;
-          fileset = pkgs.lib.fileset.unions [
-            ./lakefile.toml
-            ./lake-manifest.json
-            ./lean-toolchain
-            ./nix/fixtures
-            (pkgs.lib.fileset.fileFilter (f: f.hasExt "lean") ./.)
-          ];
-        };
+        # NOTE: a filtered source is left unrealized under `nix flake check
+        # --no-build` (fails with "path '…-lake-source' is not valid"), so the
+        # nix CI job builds for real rather than eval-only.
+        leanSrc = lake2nix.cleanLakeSource ./.;
         # Dependencies from lake-manifest.json (batteries). lean4-nix's
         # default target guess ("batteries" -> "Batteries") is correct, and
         # batteries ≥ v4.32 ships the shared/static cycle fix that v4.31
@@ -153,7 +144,7 @@
         # A check that builds extra Lake targets over the library artifact and
         # installs nothing: the build — including any elaboration-time
         # assertions in those targets — is the test.
-        mkLakeCheck = name: buildTargets:
+        mkLakeCheck = name: targets:
           lake2nix.mkPackage (
             lakeBuildArgs
             // reuseLibArgs
@@ -161,7 +152,7 @@
               inherit name;
               buildPhase = ''
                 runHook preBuild
-                ${buildTargets}
+                lake build ${pkgs.lib.concatStringsSep " " targets}
                 runHook postBuild
               '';
             }
@@ -174,16 +165,17 @@
         # declaration gains, loses, or renames a `sorry` versus its allowlist.
         # It is not a default target, so building it over the just-built
         # surface is the whole check.
-        proofs = mkLakeCheck "Lean4Lean-proofs" ''
-          lake build Lean4Lean.Theory Lean4Lean.Verify
-          lake build Lean4Lean.Audit.SorryFrontier
-        '';
+        proofs = mkLakeCheck "Lean4Lean-proofs" [
+          "Lean4Lean.Theory"
+          "Lean4Lean.Verify"
+          "Lean4Lean.Audit.SorryFrontier"
+        ];
 
         # Basic test suite: the `Lean4Lean.Tests.*` regression modules (the
         # nested-inductive kernel checks and the toolchain audit) run their
         # assertions at elaboration via `run_meta`/`#guard`, so building the
         # target is the test run.
-        tests = mkLakeCheck "Lean4Lean-tests" "lake build Lean4Lean.Tests";
+        tests = mkLakeCheck "Lean4Lean-tests" ["Lean4Lean.Tests"];
 
         # Downstream-consumer check: a minimal Lake package that requires
         # lean4lean, links an executable against the read-only dependency

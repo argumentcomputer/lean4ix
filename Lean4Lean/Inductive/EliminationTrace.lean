@@ -104,8 +104,7 @@ theorem run
       rw [isLargeEliminator.loop.eq_2, withLocalDecl_apply]
       have notField : ¬ argIdx ≥ stats.params.size :=
         Nat.not_le.mpr isParameter
-      simp only [notField, if_false, ReaderT.pure, Pure.pure,
-        ReaderT.bind, Bind.bind, Except.bind, Except.pure]
+      simp only [notField, if_false, Bind.bind]
       exact ih
   | proofField context fuel argIdx toCheck name domain body binderInfo
       sortResult isField ensureStep isProp tail ih =>
@@ -114,8 +113,7 @@ theorem run
       simp only [isField, if_true, ReaderT.bind, Bind.bind,
         liftTypeChecker_apply]
       rw [ensureStep]
-      simp only [Except.bind, isProp, Bool.not_true, Bool.false_eq_true,
-        if_false, Pure.pure]
+      simp only [Except.bind, isProp, Bool.not_true, Bool.false_eq_true, if_false]
       exact ih
   | dataField context fuel argIdx toCheck name domain body binderInfo
       sortResult isField ensureStep isProp tail ih =>
@@ -124,7 +122,7 @@ theorem run
       simp only [isField, if_true, ReaderT.bind, Bind.bind,
         liftTypeChecker_apply]
       rw [ensureStep]
-      simp only [Except.bind, isProp, Bool.not_false, if_true, Pure.pure]
+      simp only [Except.bind, isProp, Bool.not_false, if_true]
       exact ih
   | terminal context source fuel argIdx toCheck notForall =>
       cases source <;>

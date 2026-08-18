@@ -264,13 +264,10 @@ theorem checkInductiveTypes_singleton_zero_of_whnf_sort
   cases hfuel_eq : context.fuel.inductiveFuel with
   | zero => omega
   | succ fuel =>
-    simp [checkInductiveTypes, checkInductiveTypes.loopInd,
-      checkInductiveTypes.loopInd.loop, singletonInductiveStats,
-      readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
-      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure,
-      Except.bind, Except.pure, liftTypeChecker_apply,
-      hclosed, hcheck, hwhnf, hensure, hfuel_eq,
-      InductiveStats.initial, Expr.sortLevel!]
+    simp [checkInductiveTypes, checkInductiveTypes.loopInd, checkInductiveTypes.loopInd.loop,
+      singletonInductiveStats, readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, Except.bind, Except.pure, liftTypeChecker_apply, hclosed,
+      hcheck, hwhnf, hensure, hfuel_eq, InductiveStats.initial, Expr.sortLevel!]
 
 /-- Transparent occurrence test for constants in the inductive block.
 
@@ -1241,8 +1238,7 @@ theorem checkInductiveTypes_singleton_of_candidate
       (List.map Level.param context.lparams)).indConsts).isEmpty = true from
     rfl)]
   simp only [Expr.sortLevel!, InductiveStats.initial, Nat.zero_add]
-  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
-    Except.bind]
+  simp only [ReaderT.bind, Bind.bind, Except.pure, Except.bind]
   rw [checkInductiveTypes.loopInd.eq_1]
   have hdone : ¬1 < #[indType].size := by simp
   rw [dif_neg hdone]
@@ -1320,7 +1316,7 @@ def isDefEqSteps :
       domainCandidate.isDefEqSteps ++ bodyCandidate.isDefEqSteps
 
 /-- Every retained WHNF observation is an exact checker execution. -/
-def allValid : (candidate : CandidateExprTrace context source) →
+theorem allValid : (candidate : CandidateExprTrace context source) →
     ∀ step ∈ candidate.steps, step.Valid
   | .terminal context source _ result _ valid, step, h => by
     simp only [steps, List.mem_singleton] at h
@@ -1334,7 +1330,7 @@ def allValid : (candidate : CandidateExprTrace context source) →
     · exact body.allValid step h
 
 /-- Every retained full-check observation is an exact checker execution. -/
-def allChecksValid : (candidate : CandidateExprTrace context source) →
+theorem allChecksValid : (candidate : CandidateExprTrace context source) →
     ∀ step ∈ candidate.checkSteps, step.Valid
   | .terminal context source inferred _ checked _, step, h => by
     simp only [checkSteps, List.mem_singleton] at h
@@ -1349,7 +1345,7 @@ def allChecksValid : (candidate : CandidateExprTrace context source) →
 
 /-- Every retained binder-domain equality is an exact successful checker
 execution. -/
-def allIsDefEqValid : (candidate : CandidateExprTrace context source) →
+theorem allIsDefEqValid : (candidate : CandidateExprTrace context source) →
     ∀ step ∈ candidate.isDefEqSteps, step.Valid
   | .terminal .., step, h => by simp [isDefEqSteps] at h
   | .forallE _ _ _ _ _ _ _ _ _ annotationsEq _ _ domain body,

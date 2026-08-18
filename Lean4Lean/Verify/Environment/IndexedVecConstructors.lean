@@ -116,10 +116,8 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
   rw [ConstantInfo.instantiateTypeLevelParams,
     ConstantVal.instantiateTypeLevelParams,
     Expr.instantiateLevelParams_eq]
-  simp [indexedVecInfo, ConstantInfo.type,
-    ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParamsCore', Level.substParams',
-    Syntax.structEq_eq]
+  simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCore', Level.substParams']
 
 @[simp] theorem inferConstantFamily (lctx) :
     TypeChecker.Inner.inferConstant (tcContext lctx) ``IndexedVec
@@ -134,13 +132,7 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
       ({ env := ctorEnv, lctx := lctx, lparams := [`u] } :
         TypeChecker.Context) (.param `u) = .ok () by
     simpa [tcContext] using checkLevelParam lctx]
-  simp [indexedVecInfo, indexedVecInfoInstantiate,
-    ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams', Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+  simp [indexedVecInfo, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[simp] theorem inferConstantNat (lctx) :
     TypeChecker.Inner.inferConstant (tcContext lctx) ``Nat [] false =
@@ -382,10 +374,8 @@ theorem inferAppCoreOf
               (stateArg.inferTypeC.insert
                 (.app fn arg) (body.instantiate1 arg)) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [hclosed, hcache, hfn, harg,
-    heager, ensureForallExact, selfDefEq,
-    Expr.instantiate1_eq, Bind.bind, ReaderT.bind,
-    StateT.bind, Except.bind]
+  simp [hclosed, hcache, hfn, harg, heager, selfDefEq, Expr.instantiate1_eq, Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
 
 theorem inferTypeForallCore
     (fuel : Nat) (context : TypeChecker.Context)
@@ -457,9 +447,7 @@ theorem inferNilFamily :
         .ok (indexedVecInfo.type, nilFamilyState) := by
   simpa [nilFamilyState] using
     (inferTypeFamilyCore 9998 nilAlphaLctx nilBodyInitialState (by
-      simp [nilBodyInitialState, nilRootSortState,
-        Std.HashMap.getElem?_insert,
-        Expr.eqv_eq]))
+      simp [nilBodyInitialState, nilRootSortState]))
 
 theorem inferNilAlpha :
     TypeChecker.Inner.inferType' (.fvar nilAlphaId) false
@@ -470,8 +458,7 @@ theorem inferNilAlpha :
     (inferTypeFVarCore 9998 nilAlphaLctx nilFamilyState nilAlphaId
       (.sort (.succ (.param `u))) (index := 0) (name := `α)
       (bi := .implicit) (kind := .default) (by
-        simp [nilFamilyState, nilBodyInitialState, nilRootSortState,
-          Std.HashMap.getElem?_insert, Expr.eqv_eq]) nilAlphaFind)
+        simp [nilFamilyState, nilBodyInitialState, nilRootSortState]) nilAlphaFind)
 
 theorem inferNilFirstApp :
     TypeChecker.Inner.inferType' nilFirstApp false
@@ -485,9 +472,7 @@ theorem inferNilFirstApp :
     (by
       simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
     (by
-      simp [nilBodyInitialState, nilRootSortState,
-        Std.HashMap.getElem?_insert,
-        Expr.eqv_eq])
+      simp [nilBodyInitialState, nilRootSortState])
     (by simpa [indexedVecInfoTypeShape] using inferNilFamily)
     inferNilAlpha (by rfl)
   simpa [nilFirstApp, nilFirstAppState, vecFamilyTail,
@@ -500,9 +485,8 @@ theorem inferNilZero :
         .ok (.const ``Nat [], nilZeroState) := by
   simpa [nilZeroState] using
     (inferTypeZeroCore 9998 nilAlphaLctx nilFirstAppState (by
-      simp [nilFirstAppState, nilAlphaState, nilFamilyState,
-        nilBodyInitialState, nilRootSortState, nilFirstApp,
-        Std.HashMap.getElem?_insert, Expr.eqv_eq]))
+      simp [nilFirstAppState, nilAlphaState, nilFamilyState, nilBodyInitialState, nilRootSortState,
+        nilFirstApp]))
 
 theorem inferNilBodyExists : ∃ finalState,
     TypeChecker.Inner.inferType nilBodyExpr false
@@ -519,10 +503,8 @@ theorem inferNilBodyExists : ∃ finalState,
     nilBodyInitialState nilFirstAppState nilZeroState
     nilFirstApp (.const ``Nat.zero []) (.const ``Nat [])
     (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilBodyExpr, nilFirstApp,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [nilBodyExpr, nilBodyInitialState, nilRootSortState,
-      Std.HashMap.getElem?_insert, Expr.eqv_eq])
+    (by simp [nilFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [nilBodyInitialState, nilRootSortState])
     (by simpa [vecFamilyTail] using inferNilFirstApp)
     inferNilZero (by rfl)
   simpa [nilBodyExpr, nilFirstApp,
@@ -604,9 +586,8 @@ theorem nilRootInferForallExists : ∃ finalState,
       (((.const ``IndexedVec [.param `u] : Expr).app (.bvar 0)).app
         (.const ``Nat.zero [])).instantiateRev
       (#[] |>.push (.fvar nilAlphaId)) = nilBodyExpr by
-    simp [nilCtorBodyRaw, nilBodyExpr, nilAlphaId,
-      Expr.instantiateRev_eq, Expr.instantiate_eq,
-      Expr.instantiate1', Expr.liftLooseBVars_zero]]
+    simp [nilBodyExpr, nilAlphaId, Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
+      Expr.liftLooseBVars_zero]]
   simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [hbody]
   simp only
@@ -813,9 +794,8 @@ theorem inferNilCandidateFirstApp :
     nilCandidateAlphaState (.const ``IndexedVec [.param `u])
     (.fvar nilCandidateAlphaId) (.sort (.succ (.param `u)))
     vecFamilyTail `α .default
-    (by simp [nilCandidateFirstApp, Expr.hasLooseBVars,
-      Expr.looseBVarRange'])
-    (by simp [nilCandidateFirstApp]) inferNilCandidateFamily
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp) inferNilCandidateFamily
     (by simpa [indexedVecInfoTypeShape] using inferNilCandidateAlpha)
     (by rfl)
   simpa [nilCandidateFirstApp, nilCandidateFirstAppState,
@@ -830,9 +810,8 @@ theorem inferNilCandidateZero :
   simpa [nilCandidateZeroState] using
     (inferTypeZeroCore 9999 nilCandidateAlphaLctx
       nilCandidateFirstAppState (by
-        simp [nilCandidateFirstAppState, nilCandidateAlphaState,
-          nilCandidateFamilyState, nilCandidateFirstApp,
-          Expr.eqv_eq]))
+        simp [nilCandidateFirstAppState, nilCandidateAlphaState, nilCandidateFamilyState,
+          nilCandidateFirstApp]))
 
 theorem inferNilCandidateBodyExists : ∃ finalState,
     TypeChecker.Inner.inferType nilCandidateBody false
@@ -850,9 +829,8 @@ theorem inferNilCandidateBodyExists : ∃ finalState,
     ({} : TypeChecker.State) nilCandidateFirstAppState
     nilCandidateZeroState nilCandidateFirstApp (.const ``Nat.zero [])
     (.const ``Nat []) (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilCandidateBodyExpr, nilCandidateFirstApp,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
-    (by simp [nilCandidateBodyExpr]) inferNilCandidateFirstApp
+    (by simp [nilCandidateFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp) inferNilCandidateFirstApp
     inferNilCandidateZero (by rfl)
   simpa [nilCandidateBodyExpr, nilCandidateFirstApp,
     Expr.instantiate1_eq, Expr.instantiate1'] using h
@@ -927,7 +905,7 @@ theorem nilCandidateReduceRecursor
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [show (tcContext nilCandidateAlphaLctx).env = ctorEnv by rfl]
   rw [hquot]
-  simp only [Bool.false_eq_true, if_false, nilRecMBind, nilRecMPure]
+  simp only [Bool.false_eq_true, if_false, nilRecMBind]
   rw [nilCandidateInductiveReduceRec methods state]
   rfl
 
@@ -951,8 +929,7 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
     false (TypeChecker.Methods.withFuel (n + 1))
     (tcContext nilCandidateAlphaLctx) ({} : TypeChecker.State) = _
   unfold TypeChecker.Inner.whnfCore'
-  simp only [nilRecMPure, nilRecMBind, nilRecMGet,
-    Std.HashMap.getElem?_empty]
+  simp only [nilRecMBind, nilRecMGet, Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [nilRecMBind]
   rw [show
@@ -962,9 +939,8 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
       (Expr.const ``Nat.zero [])).getAppFn =
         (Expr.const ``IndexedVec [.param `u]) by rfl]
   rw [nilCandidateWhnfCoreFamily n ({} : TypeChecker.State)]
-  simp [nilCandidateBodyShape, nilCandidateBodyExpr,
-    nilCandidateFirstApp, nilCandidateReduceRecursor,
-    Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [nilCandidateBodyExpr, nilCandidateFirstApp, Expr.structuralEq, Bind.bind, ReaderT.bind,
+    StateT.bind, Except.bind]
   rw [show
     .app (.app (.const ``IndexedVec [.param `u])
       (.fvar nilCandidateAlphaId)) (.const ``Nat.zero []) =
@@ -990,9 +966,8 @@ theorem nilCandidateWhnfCoreInitial (n : Nat) :
         methods (tcContext nilCandidateAlphaLctx) state =
       .ok (none, state) := by
   rw [nilCandidateBodyShape]
-  simp [TypeChecker.Inner.reduceNat, nilCandidateBodyExpr,
-    nilCandidateFirstApp, Expr.getAppNumArgs_eq,
-    Expr.getAppArgsRevList, Expr.appFn!, Expr.structuralEq]
+  simp [TypeChecker.Inner.reduceNat, nilCandidateBodyExpr, nilCandidateFirstApp,
+    Expr.getAppNumArgs_eq, Expr.getAppArgsRevList]
 
 theorem nilCandidateIsDeltaFamily :
     TypeChecker.Inner.isDelta ctorEnv
@@ -1042,11 +1017,11 @@ theorem nilCandidateWhnfLoop :
   rw [show 9999 = 9998 + 1 by rfl]
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [nilCandidateWhnfCoreInitial 9998]
-  simp only [nilRecMBind]
+  simp only []
   rw [nilCandidateReduceNative]
-  simp only [nilRecMBind, nilRecMPure]
+  simp only [nilRecMBind]
   rw [nilCandidateReduceNat]
-  simp only [nilRecMBind, nilRecMPure]
+  simp only [nilRecMBind]
   rw [nilCandidateUnfoldBody]
   rfl
 
@@ -1399,42 +1374,30 @@ def consTerminal : Expr :=
 theorem consAfterAlphaShape :
     consNTypeRaw.instantiate1 consRootContext.freshExpr =
       consAfterAlpha := by
-  simp [consNTypeRaw, consHeadTypeRaw, consTailTypeRaw,
-    consTerminalRaw, consAfterAlpha, consAlphaExpr,
-    consRootContext, ctorContext,
-    AddInductive.Context.freshExpr,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    Expr.liftLooseBVars_zero]
+  simp [consNTypeRaw, consHeadTypeRaw, consTailTypeRaw, consTerminalRaw, consAfterAlpha,
+    consAlphaExpr, consRootContext, ctorContext, AddInductive.Context.freshExpr,
+    Expr.instantiate1_eq, Expr.instantiate1']
 
 theorem consAfterNShape :
     consAfterAlpha.bindingBody!.instantiate1
       consAlphaContext.freshExpr = consAfterN := by
-  simp [consAfterAlpha, consAfterN, consAlphaExpr, consNExpr,
-    consRootContext, consAlphaContext, ctorContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr,
-    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
-    Expr.liftLooseBVars_zero]
+  simp [consAfterAlpha, consAfterN, consAlphaExpr, consNExpr, consRootContext, consAlphaContext,
+    ctorContext, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshExpr,
+    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
 
 theorem consAfterHeadShape :
     consAfterN.bindingBody!.instantiate1
       consNContext.freshExpr = consAfterHead := by
-  simp [consAfterN, consAfterHead, consTailDomain,
-    consAlphaExpr, consNExpr, consRootContext, consAlphaContext,
-    consNContext, ctorContext, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr,
-    Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1',
-    Expr.liftLooseBVars_zero]
+  simp [consAfterN, consAfterHead, consTailDomain, consAlphaExpr, consNExpr, consRootContext,
+    consAlphaContext, consNContext, ctorContext, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshExpr, Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
 
 theorem consTerminalShape :
     consAfterHead.bindingBody!.instantiate1
       consHeadContext.freshExpr = consTerminal := by
-  simp [consAfterHead, consTerminal, consAlphaExpr, consNExpr,
-    consRootContext, consAlphaContext, consNContext,
-    consHeadContext, ctorContext, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr, Expr.bindingBody!,
-    Expr.instantiate1_eq, Expr.instantiate1',
-    Expr.liftLooseBVars_zero]
+  simp [consAfterHead, consTerminal, consAlphaExpr, consNExpr, consRootContext, consAlphaContext,
+    consNContext, consHeadContext, ctorContext, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshExpr, Expr.bindingBody!, Expr.instantiate1_eq, Expr.instantiate1']
 
 @[simp] theorem consAlphaExprShape :
     consAlphaExpr = .fvar consAlphaId := by
@@ -1548,66 +1511,48 @@ theorem consAlphaFindInHead :
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consHeadContextWF.find?_eq_find?_toList]
-  simp [consHeadContext, consNContext, consAlphaContext,
-    consRootContext, ctorContext, consAlphaId, consNId, consHeadId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
+    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
+    LocalContext.toList, LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consAlphaFindInN :
     consNContext.lctx.find? consAlphaId =
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consNContextWF.find?_eq_find?_toList]
-  simp [consNContext, consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, consNId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
+    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
+    LocalContext.toList, LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consNFindInHead :
     consHeadContext.lctx.find? consNId =
       some (.cdecl 1 consNId consNName (.const ``Nat [])
         .implicit .default) := by
   rw [consHeadContextWF.find?_eq_find?_toList]
-  simp [consHeadContext, consNContext, consAlphaContext,
-    consRootContext, ctorContext, consAlphaId, consNId, consHeadId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
+    consNId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
+    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
+    NameGenerator.curr]
 
 theorem consAlphaFindInTail :
     consTailContext.lctx.find? consAlphaId =
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consTailContextWF.find?_eq_find?_toList]
-  simp [consTailContext, consHeadContext, consNContext,
-    consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, consNId, consHeadId, consTailId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
+    ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
+    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
+    NameGenerator.curr]
 
 theorem consNFindInTail :
     consTailContext.lctx.find? consNId =
       some (.cdecl 1 consNId consNName (.const ``Nat [])
         .implicit .default) := by
   rw [consTailContextWF.find?_eq_find?_toList]
-  simp [consTailContext, consHeadContext, consNContext,
-    consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, consNId, consHeadId, consTailId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
+    ctorContext, consAlphaId, consNId, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 /-! ## Reusable post-family atom observations -/
 
@@ -1694,7 +1639,7 @@ theorem ctorFVarWhnfM
     (TypeChecker.Methods.withFuel 9999)
     (tcContext lctx) ({} : TypeChecker.State) =
       .ok (lctx, ({} : TypeChecker.State)) by rfl]
-  simp [TypeChecker.Inner.isLetFVar, hfind, nilRecMPure]
+  simp [TypeChecker.Inner.isLetFVar, hfind]
   rfl
 
 /-! A uniform WHNF observation for opaque applications of the inserted
@@ -1731,7 +1676,7 @@ theorem ctorIndexedVecReduceRecursor
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [show (tcContext lctx).env = ctorEnv by rfl]
   rw [hquot]
-  simp only [Bool.false_eq_true, if_false, nilRecMBind, nilRecMPure]
+  simp only [Bool.false_eq_true, if_false, nilRecMBind]
   rw [ctorIndexedVecInductiveReduceRec]
   rfl
 
@@ -1750,16 +1695,14 @@ theorem ctorIndexedVecWhnfCoreInitial
       (tcContext lctx) ({} : TypeChecker.State) =
         .ok (ctorIndexedVecApp alpha index, ({} : TypeChecker.State)) := by
   unfold ctorIndexedVecApp TypeChecker.Inner.whnfCore'
-  simp only [nilRecMPure, nilRecMBind, nilRecMGet,
-    Std.HashMap.getElem?_empty]
+  simp only [nilRecMBind, nilRecMGet, Std.HashMap.getElem?_empty]
   rw [Expr.withRevApp_eq]
   simp only [nilRecMBind]
   rw [show
     (Expr.app (Expr.app (Expr.const ``IndexedVec [.param `u]) alpha)
       index).getAppFn = Expr.const ``IndexedVec [.param `u] by rfl]
   rw [ctorIndexedVecWhnfCoreFamily lctx n ({} : TypeChecker.State)]
-  simp [ctorIndexedVecApp, ctorIndexedVecReduceRecursor,
-    Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.structuralEq, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     Expr.app (Expr.app (Expr.const ``IndexedVec [.param `u]) alpha)
       index = ctorIndexedVecApp alpha index by rfl]
@@ -1782,9 +1725,8 @@ theorem ctorIndexedVecWhnfCoreInitial
     (methods : TypeChecker.Methods) (state : TypeChecker.State) :
     TypeChecker.Inner.reduceNat (ctorIndexedVecApp alpha index)
       methods (tcContext lctx) state = .ok (none, state) := by
-  simp [ctorIndexedVecApp, TypeChecker.Inner.reduceNat,
-    Expr.getAppNumArgs_eq, Expr.getAppArgsRevList,
-    Expr.appFn!, Expr.structuralEq]
+  simp [ctorIndexedVecApp, TypeChecker.Inner.reduceNat, Expr.getAppNumArgs_eq,
+    Expr.getAppArgsRevList]
 
 theorem ctorIndexedVecUnfoldFamily
     (lctx : LocalContext) (methods : TypeChecker.Methods)
@@ -1822,11 +1764,11 @@ theorem ctorIndexedVecWhnfLoop
   rw [show 9999 = 9998 + 1 by rfl]
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [ctorIndexedVecWhnfCoreInitial lctx alpha index 9998]
-  simp only [nilRecMBind]
+  simp only []
   rw [ctorIndexedVecReduceNative]
-  simp only [nilRecMBind, nilRecMPure]
+  simp only [nilRecMBind]
   rw [ctorIndexedVecReduceNat]
-  simp only [nilRecMBind, nilRecMPure]
+  simp only [nilRecMBind]
   rw [ctorIndexedVecUnfold]
   rfl
 

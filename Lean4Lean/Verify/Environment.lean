@@ -111,6 +111,7 @@ theorem addOpaque.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : Op
     exact .opaque (ci' := ci') ⟨⟨htr, hname⟩, hvalue.mono hto⟩
       (by rwa [← old.map_wf.find?'_eq_find?]) (hci.mono hto) hadd old
 
+set_option warn.sorry false in
 /- Tier V (L4L-19B): upstream's v4.33 proof of this statement was vacuous —
 it derived `False` from a successful `checkEqType` run via
 `TrEnv'.no_inductInfo`, which is refutable on this fork (the inductive
@@ -205,6 +206,7 @@ theorem addMutual.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
   · obtain ⟨v, -, h⟩ := this.forall_exists_r ci hc; exact h.2.1
   · obtain ⟨v, -, h⟩ := hbody.forall_exists_r ci hc; exact h.2
 
+set_option warn.sorry false in
 /-- Successful checked addition preserves well-formedness and extends every safety-indexed
 abstract environment. The only declaration form still outstanding is inductives, which need a
 constructive `AddInduct` model. -/

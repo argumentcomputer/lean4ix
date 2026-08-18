@@ -385,7 +385,7 @@ namespace NestedBlockChecked
 variable {source : VInductDecl}
 
 /-- The main family name owning the restored recursor inventory. -/
-def mainName (nested : NestedBlockChecked source) : Name :=
+def mainName (_nested : NestedBlockChecked source) : Name :=
   match source.types with
   | ty :: _ => ty.name
   | [] => .anonymous

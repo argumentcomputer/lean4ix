@@ -1845,6 +1845,7 @@ theorem StructEq.parRed_right (H : StructEq Γ e₁ e₂)
   have ⟨_, heq⟩ := H.defeq hΓ
   exact H.trans_right hΓ ⟨_, R.defeq hΓ heq.hasType.2⟩
 
+set_option warn.sorry false in
 variable! (hΓ : OnCtx Γ (IsType env univs)) in
 theorem NormalEq.parRed (H1 : Γ ⊢ e₁ ≡ₚ e₂) (H2 : Γ ⊢ e₂ ≫ e₂') :
     ∃ e₁', Γ ⊢ e₁ ≫* e₁' ∧ Γ ⊢ e₁' ≡ₚ e₂' := by

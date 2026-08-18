@@ -62,12 +62,9 @@ def replayFirstApp (alpha : Expr) : Expr :=
     ((consAlphaExpr : Expr) == consNExpr) = false := by
   change Expr.eqv consAlphaExpr consNExpr = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', consAlphaExpr, consNExpr, consAlphaId, consNId,
-    consAlphaContext, consRootContext, ctorContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshExpr,
-    AddInductive.Context.freshFVarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [Expr.eqv', consAlphaExpr, consNExpr, consAlphaContext, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshExpr,
+    AddInductive.Context.freshFVarId, NameGenerator.next, NameGenerator.curr]
 
 @[simp] theorem replayAlphaIdBeqNId :
     ((.fvar consAlphaId : Expr) == .fvar consNId) = false := by
@@ -393,9 +390,8 @@ theorem replayInferConsHeadFirstApp (fuel : Nat) :
     (replayInferFirstAppFVarCore fuel consHeadContext.lctx
       ({} : TypeChecker.State) consAlphaId
       (by simp)
-      (by simp [replayInsert, Expr.eqv_eq])
-      (by simp [replayFirstApp, consAlphaExprShape,
-        Expr.eqv_eq])
+      (by simp [replayInsert])
+      (by simp [replayFirstApp])
       consAlphaFindInHead)
 
 theorem replayInferConsHeadN (fuel : Nat) :
@@ -408,8 +404,7 @@ theorem replayInferConsHeadN (fuel : Nat) :
       consHeadFirstAppState consNId (.const ``Nat [])
       (index := 1) (name := consNName) (bi := .implicit)
       (kind := .default)
-      (by simp [consHeadFirstAppState, replayInsert,
-        replayFirstApp, replayAlphaBeqN])
+      (by simp [consHeadFirstAppState, replayInsert, replayFirstApp])
       consNFindInHead)
 
 theorem replayInferConsTailDomainCore (fuel : Nat) :
@@ -424,8 +419,7 @@ theorem replayInferConsTailDomainCore (fuel : Nat) :
       consAlphaExpr consNExpr
       (by simp [ctorIndexedVecApp, consAlphaExprShape,
         consNExprShape, Expr.hasLooseBVars, Expr.looseBVarRange'])
-      (by simp [ctorIndexedVecApp, consAlphaExprShape,
-        consNExprShape, Expr.eqv_eq])
+      (by simp [ctorIndexedVecApp, consAlphaExprShape, consNExprShape])
       (replayInferConsHeadFirstApp fuel) (replayInferConsHeadN fuel) (by rfl))
 
 theorem replayInferConsTailDomain :
@@ -478,8 +472,8 @@ theorem replayInferConsTailFirstApp :
     (replayInferFirstAppFVarCore 9999 consTailContext.lctx
       ({} : TypeChecker.State) consAlphaId
       (by simp)
-      (by simp [replayInsert, Expr.eqv_eq])
-      (by simp [replayFirstApp, Expr.eqv_eq])
+      (by simp [replayInsert])
+      (by simp [replayFirstApp])
       consAlphaFindInTail)
 
 theorem replayInferConsTailSucc :
@@ -490,12 +484,10 @@ theorem replayInferConsTailSucc :
   simpa [consTailSuccState, consNExprShape] using
     (replayInferSuccFVarCore 9999 consTailContext.lctx
       consTailFirstAppState consNId
-      (by simp [consTailFirstAppState, replayInsert,
-        replayFirstApp, Expr.eqv_eq])
+      (by simp [consTailFirstAppState, replayInsert, replayFirstApp])
       (by simp [consTailFirstAppState, replayInsert,
         replayFirstApp])
-      (by simp [consTailFirstAppState, replayInsert,
-        replaySuccApp, replayFirstAppBeqSuccApp])
+      (by simp [consTailFirstAppState, replayInsert, replaySuccApp])
       consNFindInTail)
 
 theorem replayInferConsTerminal :
@@ -513,8 +505,7 @@ theorem replayInferConsTerminal :
       consAlphaExpr (replaySuccApp consNExpr)
       (by simp [ctorIndexedVecApp, replaySuccApp,
         Expr.hasLooseBVars, Expr.looseBVarRange'])
-      (by simp [ctorIndexedVecApp, replaySuccApp,
-        Expr.eqv_eq, Expr.eqv'])
+      (by simp [ctorIndexedVecApp, replaySuccApp])
       replayInferConsTailFirstApp replayInferConsTailSucc
       (by rfl))
 
@@ -591,7 +582,7 @@ def consAfterHeadCheckState : TypeChecker.State :=
     (ctorIndexedVecApp (.fvar consAlphaId) (.fvar consNId))
     (replaySuccApp (.fvar consNId)) = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', ctorIndexedVecApp, replayFirstApp, replaySuccApp]
+  simp [Expr.eqv', ctorIndexedVecApp, replaySuccApp]
 
 @[simp] theorem replayTailDomainBeqTerminal :
     (ctorIndexedVecApp (.fvar consAlphaId) (.fvar consNId) ==
@@ -602,7 +593,7 @@ def consAfterHeadCheckState : TypeChecker.State :=
     (ctorIndexedVecApp (.fvar consAlphaId)
       (replaySuccApp (.fvar consNId))) = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', ctorIndexedVecApp, replayFirstApp, replaySuccApp]
+  simp [Expr.eqv', ctorIndexedVecApp, replaySuccApp]
 
 @[simp] theorem replayFirstAppBeqTerminal :
     (replayFirstApp (.fvar consAlphaId) ==
@@ -669,9 +660,7 @@ theorem consAfterHeadCheckFirstCache :
   unfold consHeadNState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show (consNExpr == replayFirstApp (.fvar consAlphaId)) = false by
-    simpa [consNExprShape, replayFirstApp] using
-      (replayFVarBeqApp consNId
-        (.const ``IndexedVec [.param `u]) (.fvar consAlphaId))]
+    simp [consNExprShape, replayFirstApp]]
   simp only [Bool.false_eq_true, if_false]
   unfold consHeadFirstAppState replayInsert
   rw [Std.HashMap.getElem?_insert]
@@ -700,27 +689,21 @@ theorem consAfterHeadCheckNCache :
 theorem consAfterHeadCheckSuccMiss :
     consAfterHeadCheckState.inferTypeC[(.const ``Nat.succ [] : Expr)]? =
       none := by
-  simp [consAfterHeadCheckState, consTailDomainFinalState,
-    consHeadNState, consHeadFirstAppState, replayInsert,
-    consTailDomain, replayFirstApp, Std.HashMap.getElem?_insert,
-    Expr.eqv_eq, Expr.eqv']
+  simp [consAfterHeadCheckState, consTailDomainFinalState, consHeadNState, consHeadFirstAppState,
+    replayInsert, consTailDomain, replayFirstApp]
 
 theorem consAfterHeadCheckSuccAppMiss :
     consAfterHeadCheckState.inferTypeC[
       replaySuccApp (.fvar consNId)]? = none := by
-  simp [consAfterHeadCheckState, consTailDomainFinalState,
-    consHeadNState, consHeadFirstAppState, replayInsert,
-    consTailDomain, replayFirstApp, replaySuccApp,
-    Std.HashMap.getElem?_insert, Expr.eqv_eq, Expr.eqv']
+  simp [consAfterHeadCheckState, consTailDomainFinalState, consHeadNState, consHeadFirstAppState,
+    replayInsert, consTailDomain, replayFirstApp, replaySuccApp]
 
 theorem consAfterHeadCheckTerminalMiss :
     consAfterHeadCheckState.inferTypeC[
       ctorIndexedVecApp (.fvar consAlphaId)
         (replaySuccApp (.fvar consNId))]? = none := by
-  simp [consAfterHeadCheckState, consTailDomainFinalState,
-    consHeadNState, consHeadFirstAppState, replayInsert,
-    consTailDomain, ctorIndexedVecApp, replayFirstApp, replaySuccApp,
-    Std.HashMap.getElem?_insert, Expr.eqv_eq, Expr.eqv']
+  simp [consAfterHeadCheckState, consTailDomainFinalState, consHeadNState, consHeadFirstAppState,
+    replayInsert, consTailDomain, ctorIndexedVecApp, replayFirstApp, replaySuccApp]
 
 def consAfterHeadCheckSuccState : TypeChecker.State :=
   replayInsert consAfterHeadCheckState (.const ``Nat.succ [])
@@ -766,10 +749,8 @@ theorem replayConsAfterHeadCheckTypeM :
       (TypeChecker.Methods.withFuel 9999)
       (tcContext consHeadContext.lctx) ({} : TypeChecker.State)) = _
   unfold consAfterHead consTailDomain TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
-    TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
-    TypeChecker.Inner.inferApp,
-    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferForall,
+    TypeChecker.Inner.inferForall.loop, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show TypeChecker.Inner.inferType'
       (.app
         (.app (.const ``IndexedVec [.param `u]) (.fvar consAlphaId))
@@ -845,14 +826,10 @@ theorem consAfterNCheckHeadFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consAfterNCheckHeadId) consNContextWF
   rw [h]
-  simp [consAfterNCheckHeadId, consAfterNHeadDomainState,
-    replayInsert, consNContext, consAlphaContext, consRootContext,
-    ctorContext, consAlphaId, consNId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterNCheckHeadId, consAfterNHeadDomainState, replayInsert, consNContext,
+    consAlphaContext, consRootContext, ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
   intro x hx
   change some x ∈
     (PersistentArray.empty : PersistentArray (Option LocalDecl)).toList' at hx
@@ -868,14 +845,10 @@ theorem consAfterNCheckNFind :
       some (.cdecl 1 consNId consNName (.const ``Nat [])
         .implicit .default) := by
   rw [consAfterNCheckLctxWF.find?_eq_find?_toList]
-  simp [consAfterNCheckLctx, consAfterNCheckHeadId,
-    consAfterNHeadDomainState, replayInsert,
-    consNContext, consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, consNId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterNCheckLctx, consAfterNCheckHeadId, consAfterNHeadDomainState, replayInsert,
+    consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId, consNId,
+    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
+    LocalContext.toList, LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consAfterNCheckAlphaCache :
     consAfterNCheckState.inferTypeC[(.fvar consAlphaId : Expr)]? =
@@ -996,30 +969,24 @@ theorem consAfterNCheckTailNCache :
 theorem consAfterNCheckTailSuccMiss :
     consAfterNCheckTailState.inferTypeC[
       (.const ``Nat.succ [] : Expr)]? = none := by
-  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState,
-    consAfterNCheckNState, consAfterNCheckFirstAppState,
-    consAfterNCheckState, consAfterNHeadDomainState,
-    replayInsert, ctorIndexedVecApp, replayFirstApp,
-    Expr.eqv_eq, Expr.eqv']
+  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState, consAfterNCheckNState,
+    consAfterNCheckFirstAppState, consAfterNCheckState, consAfterNHeadDomainState, replayInsert,
+    ctorIndexedVecApp, replayFirstApp]
 
 theorem consAfterNCheckTailSuccAppMiss :
     consAfterNCheckTailState.inferTypeC[
       replaySuccApp (.fvar consNId)]? = none := by
-  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState,
-    consAfterNCheckNState, consAfterNCheckFirstAppState,
-    consAfterNCheckState, consAfterNHeadDomainState,
-    replayInsert, ctorIndexedVecApp, replayFirstApp, replaySuccApp,
-    Expr.eqv_eq, Expr.eqv']
+  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState, consAfterNCheckNState,
+    consAfterNCheckFirstAppState, consAfterNCheckState, consAfterNHeadDomainState, replayInsert,
+    ctorIndexedVecApp, replayFirstApp, replaySuccApp]
 
 theorem consAfterNCheckTailTerminalMiss :
     consAfterNCheckTailState.inferTypeC[
       ctorIndexedVecApp (.fvar consAlphaId)
         (replaySuccApp (.fvar consNId))]? = none := by
-  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState,
-    consAfterNCheckNState, consAfterNCheckFirstAppState,
-    consAfterNCheckState, consAfterNHeadDomainState,
-    replayInsert, ctorIndexedVecApp, replayFirstApp, replaySuccApp,
-    Expr.eqv_eq, Expr.eqv']
+  simp [consAfterNCheckTailState, consAfterNCheckTailDomainState, consAfterNCheckNState,
+    consAfterNCheckFirstAppState, consAfterNCheckState, consAfterNHeadDomainState, replayInsert,
+    ctorIndexedVecApp, replayFirstApp, replaySuccApp]
 
 def consAfterNCheckSuccState : TypeChecker.State :=
   replayInsert consAfterNCheckTailState (.const ``Nat.succ [])
@@ -1100,7 +1067,7 @@ theorem replayConsAfterNCheckTypeM :
   rw [htail]
   simp only [ensureSortExact]
   rw [withLocalDeclEq]
-  simp only [Expr.instantiate1']
+  simp only []
   have hterminal :
       TypeChecker.Inner.inferType
         (((.const ``IndexedVec [.param `u] : Expr).app
@@ -1135,11 +1102,8 @@ open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] theorem replayMkLevelIMaxSuccZeroSuccParam :
     mkLevelIMax' (.succ .zero) (.succ (.param `u)) =
       .succ (.param `u) := by
-  simp [mkLevelIMax', mkLevelIMaxCore, mkLevelMax', mkLevelMaxCore,
-    Level.isNeverZero, Level.isZero, Level.isExplicit,
-    Level.hasMVar', Level.hasParam',
-    Level.getOffset,
-    Level.getOffsetAux, Level.getLevelOffset]
+  simp [mkLevelIMax', mkLevelIMaxCore, mkLevelMax', mkLevelMaxCore, Level.isNeverZero, Level.isZero,
+    Level.isExplicit, Level.hasMVar', Level.hasParam', Level.getOffset, Level.getOffsetAux]
 
 def consAfterAlphaNatState : TypeChecker.State :=
   replayInsert ({} : TypeChecker.State) (.const ``Nat [])
@@ -1170,13 +1134,10 @@ theorem consAfterAlphaCheckNFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consAfterAlphaCheckNId) consAlphaContextWF
   rw [h]
-  simp [consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert,
-    consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert, consAlphaContext,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
   intro x hx
   change some x ∈
     (PersistentArray.empty : PersistentArray (Option LocalDecl)).toList' at hx
@@ -1193,14 +1154,10 @@ theorem consAfterAlphaCheckAlphaFind :
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consAfterAlphaCheckNLctxWF.find?_eq_find?_toList]
-  simp [consAfterAlphaCheckNLctx, consAfterAlphaCheckNId,
-    consAfterAlphaNatState, replayInsert,
-    consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterAlphaCheckNLctx, consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert,
+    consAlphaContext, consRootContext, ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consAfterAlphaCheckAlphaMiss :
     consAfterAlphaCheckNState.inferTypeC[
@@ -1240,16 +1197,11 @@ theorem consAfterAlphaCheckHeadFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consAfterAlphaCheckHeadId) consAfterAlphaCheckNLctxWF
   rw [h]
-  simp [consAfterAlphaCheckHeadId, consAfterAlphaHeadDomainState,
-    consAfterAlphaCheckNState, consAfterAlphaCheckNId,
-    consAfterAlphaNatState, replayInsert,
-    consAfterAlphaCheckNLctx, consAlphaContext,
-    consRootContext, ctorContext, consAlphaId,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterAlphaCheckHeadId, consAfterAlphaHeadDomainState, consAfterAlphaCheckNState,
+    consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert, consAfterAlphaCheckNLctx,
+    consAlphaContext, consRootContext, ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
   intro x hx
   change some x ∈
     (PersistentArray.empty : PersistentArray (Option LocalDecl)).toList' at hx
@@ -1267,16 +1219,12 @@ theorem consAfterAlphaCheckNFind :
       some (.cdecl 1 consAfterAlphaCheckNId consNName
         (.const ``Nat []) .implicit .default) := by
   rw [consAfterAlphaCheckHeadLctxWF.find?_eq_find?_toList]
-  simp [consAfterAlphaCheckHeadLctx, consAfterAlphaCheckHeadId,
-    consAfterAlphaHeadDomainState, consAfterAlphaCheckNState,
-    consAfterAlphaCheckNLctx, consAfterAlphaCheckNId,
-    consAfterAlphaNatState, replayInsert,
-    consAlphaContext, consRootContext, ctorContext,
-    consAlphaId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consAfterAlphaCheckHeadLctx, consAfterAlphaCheckHeadId, consAfterAlphaHeadDomainState,
+    consAfterAlphaCheckNState, consAfterAlphaCheckNLctx, consAfterAlphaCheckNId,
+    consAfterAlphaNatState, replayInsert, consAlphaContext, consRootContext, ctorContext,
+    consAlphaId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
+    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
+    NameGenerator.curr]
 
 theorem consAfterAlphaCheckAlphaCache :
     consAfterAlphaCheckHeadState.inferTypeC[
@@ -1304,12 +1252,8 @@ theorem consAfterAlphaCheckAlphaCache :
   change Expr.eqv (.fvar consAlphaId)
     (.fvar consAfterAlphaCheckNId) = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', consAlphaId, consAfterAlphaCheckNId,
-    consAfterAlphaNatState, replayInsert,
-    consAlphaContext, consRootContext, ctorContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [Expr.eqv', consAlphaId, consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert,
+    consRootContext, ctorContext, AddInductive.Context.freshFVarId, NameGenerator.curr]
 
 theorem consAfterAlphaCheckFamilyMiss :
     consAfterAlphaCheckHeadState.inferTypeC[
@@ -1394,12 +1338,8 @@ def consAfterAlphaCheckTailState : TypeChecker.State :=
   change Expr.eqv (.fvar consAfterAlphaCheckNId)
     (.fvar consAlphaId) = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', consAlphaId, consAfterAlphaCheckNId,
-    consAfterAlphaNatState, replayInsert,
-    consAlphaContext, consRootContext, ctorContext,
-    AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [Expr.eqv', consAlphaId, consAfterAlphaCheckNId, consAfterAlphaNatState, replayInsert,
+    consRootContext, ctorContext, AddInductive.Context.freshFVarId, NameGenerator.curr]
 
 @[simp] theorem replayNatConstBeqSucc :
     ((.const ``Nat [] : Expr) == .const ``Nat.succ []) = false := by
@@ -1421,7 +1361,7 @@ def consAfterAlphaCheckTailState : TypeChecker.State :=
   change Expr.eqv (ctorIndexedVecApp alpha n)
     (replaySuccApp n) = false
   rw [Expr.eqv_eq]
-  simp [Expr.eqv', ctorIndexedVecApp, replayFirstApp, replaySuccApp]
+  simp [Expr.eqv', ctorIndexedVecApp, replaySuccApp]
 
 @[simp] theorem replayIndexedVecAppBeqIndexedVecSucc
     (alpha : Expr) (id : FVarId) :
@@ -1656,7 +1596,7 @@ theorem replayConsAfterAlphaCheckTypeM :
   rw [htail]
   simp only [ensureSortExact]
   rw [withLocalDeclEq]
-  simp [Expr.instantiate1']
+  simp
   have hterminal :
       TypeChecker.Inner.inferType
         (((.const ``IndexedVec [.param `u] : Expr).app
@@ -1742,11 +1682,9 @@ theorem consRootCheckAlphaFind :
       some (.cdecl 0 consRootCheckAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consRootCheckAlphaLctxWF.find?_eq_find?_toList]
-  simp [consRootCheckAlphaLctx, consRootCheckAlphaId,
-    consRootContext, ctorContext, nilRootSortState,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consRootCheckAlphaLctx, consRootCheckAlphaId, consRootContext, ctorContext,
+    nilRootSortState, LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
+    NameGenerator.curr]
 
 theorem consRootCheckNatMiss :
     consRootCheckAlphaState.inferTypeC[
@@ -1781,13 +1719,10 @@ theorem consRootCheckNFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consRootCheckNId) consRootCheckAlphaLctxWF
   rw [h]
-  simp [consRootCheckNId, consRootCheckNatState,
-    consRootCheckAlphaState, consRootCheckAlphaLctx,
-    consRootCheckAlphaId, nilRootSortState, replayInsert,
-    consRootContext, ctorContext,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consRootCheckNId, consRootCheckNatState, consRootCheckAlphaState, consRootCheckAlphaLctx,
+    consRootCheckAlphaId, nilRootSortState, replayInsert, consRootContext, ctorContext,
+    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
+    NameGenerator.curr]
   intro x hx
   change some x ∈
     (PersistentArray.empty : PersistentArray (Option LocalDecl)).toList' at hx
@@ -1804,12 +1739,9 @@ theorem consRootCheckAlphaFindInN :
       some (.cdecl 0 consRootCheckAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
   rw [consRootCheckNLctxWF.find?_eq_find?_toList]
-  simp [consRootCheckNLctx, consRootCheckNId,
-    consRootCheckNatState, consRootCheckAlphaState,
-    consRootCheckAlphaLctx, consRootCheckAlphaId,
-    nilRootSortState, replayInsert, consRootContext, ctorContext,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
+  simp [consRootCheckNLctx, consRootCheckNId, consRootCheckNatState, consRootCheckAlphaState,
+    consRootCheckAlphaLctx, consRootCheckAlphaId, nilRootSortState, replayInsert, consRootContext,
+    ctorContext, LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId,
     NameGenerator.next, NameGenerator.curr]
 
 theorem consRootCheckAlphaMiss :
@@ -1849,14 +1781,11 @@ theorem consRootCheckHeadFresh :
   have h := LocalContext.WF.find?_eq_find?_toList
     (fv := consRootCheckHeadId) consRootCheckNLctxWF
   rw [h]
-  simp [consRootCheckHeadId, consRootCheckHeadDomainState,
-    consRootCheckNState, consRootCheckNId, consRootCheckNatState,
-    consRootCheckAlphaState, consRootCheckAlphaLctx,
-    consRootCheckAlphaId, nilRootSortState, replayInsert,
-    consRootCheckNLctx, consRootContext, ctorContext,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consRootCheckHeadId, consRootCheckHeadDomainState, consRootCheckNState, consRootCheckNId,
+    consRootCheckNatState, consRootCheckAlphaState, consRootCheckAlphaLctx, consRootCheckAlphaId,
+    nilRootSortState, replayInsert, consRootCheckNLctx, consRootContext, ctorContext,
+    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
+    NameGenerator.curr]
   intro x hx
   change some x ∈
     (PersistentArray.empty : PersistentArray (Option LocalDecl)).toList' at hx
@@ -1873,15 +1802,11 @@ theorem consRootCheckNFind :
       some (.cdecl 1 consRootCheckNId consNName
         (.const ``Nat []) .implicit .default) := by
   rw [consRootCheckHeadLctxWF.find?_eq_find?_toList]
-  simp [consRootCheckHeadLctx, consRootCheckHeadId,
-    consRootCheckHeadDomainState, consRootCheckNState,
-    consRootCheckNLctx, consRootCheckNId, consRootCheckNatState,
-    consRootCheckAlphaState, consRootCheckAlphaLctx,
-    consRootCheckAlphaId, nilRootSortState, replayInsert,
-    consRootContext, ctorContext,
-    LocalContext.mkLocalDecl_toList, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  simp [consRootCheckHeadLctx, consRootCheckHeadId, consRootCheckHeadDomainState,
+    consRootCheckNState, consRootCheckNLctx, consRootCheckNId, consRootCheckNatState,
+    consRootCheckAlphaState, consRootCheckAlphaLctx, consRootCheckAlphaId, nilRootSortState,
+    replayInsert, consRootContext, ctorContext, LocalContext.mkLocalDecl, LocalContext.toList,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 @[simp] theorem replayConsRootAlphaIdBeqNId :
     ((.fvar consRootCheckAlphaId : Expr) ==
@@ -2166,7 +2091,7 @@ theorem replayConsRootCheckTypeM :
   rw [hhead]
   simp only [ensureSortExact]
   rw [withLocalDeclEq]
-  simp [Expr.instantiate1']
+  simp
   have htail :
       TypeChecker.Inner.inferType
         (((.const ``IndexedVec [.param `u] : Expr).app
@@ -2192,7 +2117,7 @@ theorem replayConsRootCheckTypeM :
   rw [htail]
   simp only [ensureSortExact]
   rw [withLocalDeclEq]
-  simp [Expr.instantiate1']
+  simp
   have hterminal :
       TypeChecker.Inner.inferType
         (((.const ``IndexedVec [.param `u] : Expr).app
@@ -2267,8 +2192,7 @@ theorem consHeadAnnotationTraceBuild :
 theorem consTailAnnotationTraceBuild :
     AddInductive.CandidateTypeAnnotationTrace.build consTailDomain =
       ⟨consTailDomain, .identity _⟩ := by
-  simp [AddInductive.CandidateTypeAnnotationTrace.build,
-    consTailDomain, consAlphaExprShape, consNExprShape]
+  simp [AddInductive.CandidateTypeAnnotationTrace.build, consTailDomain]
 
 theorem consAlphaAnnotationsBuild :
     AddInductive.buildCandidateTypeAnnotations
@@ -2863,7 +2787,7 @@ def indexedVecNormalizationCandidate :
   families := .cons indexedVecFamilyListCandidate .nil
 
 /-- Source-indexed evidence for the complete `IndexedVec` family-type list. -/
-def indexedVecFamilyTypeListProduced :
+theorem indexedVecFamilyTypeListProduced :
     AddInductive.CandidateFamilyTypeListProduced
       indexedVecFamilyCandidateContext
       (.cons indexedVecFamilyListCandidate.familyType .nil) := by
@@ -2886,7 +2810,7 @@ theorem indexedVecFamilyTypeListCandidateProduced :
 /-- The two constructor positions are assembled in source order.  The
 dependent list indices rule out truncating, swapping, or reusing either
 constructor proof. -/
-def indexedVecConstructorListProduced :
+theorem indexedVecConstructorListProduced :
     AddInductive.CandidateConstructorListProduced ctorContext
       indexedVecFamilyListCandidate.constructors := by
   have hnil : AddInductive.buildCandidateExpr indexedVecNilInfo.type
@@ -2915,7 +2839,7 @@ theorem indexedVecConstructorListCandidateProduced :
 
 /-- Source-indexed evidence for complete family assembly after constructor
 normalization. -/
-def indexedVecFamilyListProduced :
+theorem indexedVecFamilyListProduced :
     AddInductive.CandidateFamilyListProduced ctorContext
       (.cons indexedVecFamilyListCandidate.familyType .nil)
       indexedVecNormalizationCandidate.families := by

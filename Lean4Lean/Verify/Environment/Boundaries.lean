@@ -27,6 +27,7 @@ structure PrimitiveResult (checked : VEnv) (v : DefinitionVal) (allow : Bool) : 
     venv.addConst v.name ci'.toVConstant = some env' →
     (env'.addDefEq ci'.toDefEq).HasPrimitives
 
+set_option warn.sorry false in
 /-- Verification boundary for Lean4Lean's syntactic primitive-definition recognizer. -/
 theorem checkPrimitiveDef.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) :
