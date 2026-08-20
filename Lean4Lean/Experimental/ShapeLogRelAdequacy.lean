@@ -3567,6 +3567,235 @@ theorem LR.FixedHeadTerminalDominance.nil
       outTy outTy :=
   fun K => K outTy TShape.LE.rfl (LR.FixedHeadTelescope.nil htyped)
 
+/-- Level rigidity of the packed telescopes, type side: any monotone packed
+telescope has at least as many sigma-levels in its head-type observation as
+it has capture paths.  Each `cons` locks its layer's element, domain, and
+function shapes to one sigma-level `n` with the head observation at `n + 1`,
+and the type-side index chain descends by exactly one level per path. -/
+theorem LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.paths_le_headTyLevel
+    {p : Pattern} {m2 : p.Path → TShape}
+    {Cap : ∀ {n}, p.Path → WShape n → WShape n → Prop}
+    {head out headTy outTy : TShape} {paths : List p.Path}
+    (H : LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE
+      (m2 := m2) Cap head paths out headTy outTy) :
+    paths.length ≤ headTy.1 := by
+  induction H with
+  | nil _ _ => exact Nat.zero_le _
+  | cons _ _ _ _ _ _ ih => simpa using Nat.succ_le_succ ih
+
+/-- Any monotone packed telescope bounds its path count by the sigma-level
+of the *head term* observation as well (at a nonempty path list the head and
+head-type observations are locked to the same constructor level). -/
+theorem LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.paths_le_headLevel
+    {p : Pattern} {m2 : p.Path → TShape}
+    {Cap : ∀ {n}, p.Path → WShape n → WShape n → Prop}
+    {head out headTy outTy : TShape} {paths : List p.Path}
+    (H : LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE
+      (m2 := m2) Cap head paths out headTy outTy) :
+    paths.length ≤ head.1 := by
+  cases H with
+  | nil _ _ => exact Nat.zero_le _
+  | cons _ _ _ _ _ tail => simpa using Nat.succ_le_succ tail.paths_le_headTyLevel
+
+/-- The exact packed telescope satisfies the same bound (it is the reflexive
+case of the monotone one). -/
+theorem LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCaptures.paths_le_headLevel
+    {p : Pattern} {m2 : p.Path → TShape}
+    {Cap : ∀ {n}, p.Path → WShape n → WShape n → Prop}
+    {head out headTy outTy : TShape} {paths : List p.Path}
+    (H : LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCaptures
+      (m2 := m2) Cap head paths out headTy outTy) :
+    paths.length ≤ head.1 :=
+  H.toLE.paths_le_headLevel
+
+/-- **The necessary level-adequacy precondition of the concrete spine
+instance.**  Any inhabitant of `LR.FixedHeadProducer` forces the head
+observation's sigma-level to be at least the rule's capture-path count.
+Nothing at the leaf callback bounds the abstract evaluator's head
+observation from below (the `R`-evaluator may observe the registered RHS
+shallowly), so this bound — or the head witness it follows from — is a
+genuine input of any producer discharge, not bookkeeping. -/
+theorem LR.FixedHeadProducer.forces_headLevel
+    {Γ₀ : List SExpr} {ρ : Valuation}
+    {n : Nat} {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)} {head : TShape}
+    {mx my captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {outTy : WShape (n + 1)}
+    {hshape : LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+      head rule.capturePaths out.T}
+    (P : LR.FixedHeadProducer Γ₀ ρ rule mx my captureType hshape
+      (recLs := recLs) (outTy := outTy)) :
+    rule.capturePaths.length ≤ head.1 := by
+  refine P ?_
+  intro headTy htel _hTyReg
+  exact LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.paths_le_headLevel
+    htel
+
+/-- The same bound is forced by any dominance value at the spine, so the
+concrete-spine producer below cannot be stated for an arbitrary spine head:
+level adequacy is a genuine premise of its layer package. -/
+theorem LR.FixedHeadTerminalDominance.forces_headLevel
+    {Γ₀ : List SExpr}
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {head out : TShape} {paths : List p.Path}
+    {spine : LE_Interp.RHS.ShapeSpine mcap head paths out}
+    {headTy outTy : TShape}
+    (D : LR.FixedHeadTerminalDominance Γ₀ mx my captureType
+      spine headTy outTy) :
+    paths.length ≤ head.1 :=
+  D fun _reachedTy _hle tel =>
+    LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCaptures.paths_le_headLevel tel
+
+/-- Transport a caller typing to a level-`n` representative of the type
+observation.  This is the only fact needed to canonicalize the terminal
+datum of the concrete-spine dominance to `w := outTy.2.lift n` whenever the
+caller's observation fits below the innermost layer level. -/
+theorem TShape.HasType.liftTy {out outTy : TShape} {n : Nat}
+    (h : out.HasType outTy) (hfit : outTy.1 ≤ n) :
+    out.HasType (outTy.2.lift n).T := by
+  have h1 : out.1 ≤ max out.1 n := Nat.le_max_left ..
+  have h2 : outTy.1 ≤ max out.1 n :=
+    Nat.le_trans hfit (Nat.le_max_right ..)
+  have hW := (TShape.HasType.def h1 h2).1 h
+  refine (TShape.HasType.def h1 (Nat.le_max_right ..)).2 ?_
+  rwa [WShape.lift_lift (.inl hfit)]
+
+/-- The concrete-spine dominance layers: one aligned capture per spine step,
+at consecutive descending sigma-levels, closed by the terminal datum
+`(w, out.HasType w.T, outTy ≤ w.T)` at the observation actually reached.
+
+Per layer the singleton Pi tower is chosen from the aligned capture itself:
+the domain is the capture's own `typeShape`, the function is
+`WShapeFun.single` at the capture's `elemShape`, and the accumulated tower
+rides in the last index.  The terminal fact is a *datum* at the reached
+observation — never a law quantified over observations — and `.nil`'s
+comparison `outTy ≤ w.T` is the single point where the caller's result-type
+observation enters. -/
+inductive LR.FixedHeadDominanceSpine (Γ₀ : List SExpr) {p : Pattern}
+    (mcap : p.Path → TShape) (mx my captureType : p.Path → SExpr)
+    (outTy : TShape) :
+    {n : Nat} → TShape → List p.Path → TShape → WShape n → Prop where
+  | nil {n : Nat} {out : TShape} {w : WShape n}
+      (hw : out.HasType w.T) (hle : outTy ≤ w.T) :
+      FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy out [] out w
+  | cons {n : Nat} {f : WShape (n + 1)} {a argCap tyDom inner : WShape n}
+      {m out : TShape} {path : p.Path} {paths : List p.Path}
+      (harg : a.T ≤ mcap path) (happ : m ≤ (f.app a).T)
+      (capture : LRS.CaptureDefEqAligned.AtShapes (LR Γ₀)
+        (mcap path) (mx path) (my path) (captureType path) argCap tyDom)
+      (tail : FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy
+        m paths out inner) :
+      FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy
+        f.T (path :: paths) out (.forallE tyDom (.single argCap inner))
+
+/-- Recover the semantic application spine retained by a layer package. -/
+theorem LR.FixedHeadDominanceSpine.spine
+    {Γ₀ : List SExpr} {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {outTy head out : TShape} {paths : List p.Path}
+    {n : Nat} {tower : WShape n}
+    (H : LR.FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy
+      head paths out tower) :
+    LE_Interp.RHS.ShapeSpine mcap head paths out := by
+  induction H with
+  | nil _ _ => exact .nil
+  | cons harg happ _ _ ih => exact .cons harg happ ih
+
+/-- The level-fitted terminal layer: when the caller's `outTy` fits at the
+innermost layer level, the terminal datum is canonical
+(`w := outTy.2.lift n`) and the package base needs only the caller's own
+typing — exactly the data the leaf callback holds. -/
+theorem LR.FixedHeadDominanceSpine.nilFit
+    {Γ₀ : List SExpr} {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {out outTy : TShape} {n : Nat}
+    (houtTy : out.HasType outTy) (hfit : outTy.1 ≤ n) :
+    LR.FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy
+      out [] out (outTy.2.lift n) :=
+  .nil (houtTy.liftTy hfit) (TShape.lift_eqv hfit).2
+
+/-- **The general concrete-spine producer**, strictly between `.nil` (empty
+spine) and `.of_exact` (exact terminal index): a layer package produces the
+terminal dominance at its own singleton Pi tower observation, for any
+semantic spine over the same head, paths, and result indices.  Each `cons`
+folds one `LR.FixedHeadTelescope.cons` with one `WShapeFun.single_app`
+rewrite; the base reads the terminal datum. -/
+theorem LR.FixedHeadTerminalDominance.of_layers
+    {Γ₀ : List SExpr} {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {outTy head out : TShape} {paths : List p.Path}
+    {n : Nat} {tower : WShape n}
+    (H : LR.FixedHeadDominanceSpine Γ₀ mcap mx my captureType outTy
+      head paths out tower)
+    (spine : LE_Interp.RHS.ShapeSpine mcap head paths out) :
+    LR.FixedHeadTerminalDominance Γ₀ mx my captureType spine tower.T outTy := by
+  induction H with
+  | nil hw hle =>
+    intro C K
+    exact K _ hle (LR.FixedHeadTelescope.nil hw)
+  | @cons n f a argCap tyDom inner m out path paths harg happ capture tail ih =>
+    intro C K
+    refine ih tail.spine ?_
+    intro reachedTy hle tel
+    refine K reachedTy hle ?_
+    have happEq : (WShapeFun.single argCap inner).app argCap = inner := by
+      rw [WShapeFun.single_app]; exact if_pos WShape.LE.rfl
+    refine LR.FixedHeadTelescope.cons harg happ tail.spine capture ?_
+    rw [happEq]
+    exact tel
+
+/-- Non-vacuity of the concrete-spine producer at a *nonempty* spine — the
+certificate the landed `.nil` producer (empty spine) does not provide:
+pattern `(.const c).var` (path `none`), capture `x = y = .sort 0` aligned at
+element shape `.bot` / type shape `.sort true`, head observation
+`.lam' (single .bot (.sort true))`, result observation `sort true`. -/
+theorem LR.fixedHeadTerminalDominance_cons_nonvacuous (c : Name) :
+    ∃ spine : LE_Interp.RHS.ShapeSpine
+        (p := Pattern.varN (.const c) 1)
+        (fun _ => (WShape.bot (n := 0)).T)
+        (WShape.lam' (WShapeFun.single (WShape.bot (n := 0))
+          (WShape.sort (n := 0) true))).T
+        [(none : Option Empty)]
+        (WShape.sort (n := 0) true).T,
+      LR.FixedHeadTerminalDominance []
+        (fun _ => SExpr.sort .zero) (fun _ => SExpr.sort .zero)
+        (fun _ => SExpr.sort (.succ .zero))
+        spine
+        (WShape.forallE (WShape.sort (n := 0) true)
+          (WShapeFun.single (WShape.bot (n := 0))
+            (WShape.sort (n := 0) true))).T
+        (WShape.sort (n := 0) true).T := by
+  have happ : (WShape.sort (n := 0) true).T ≤
+      ((WShape.lam' (WShapeFun.single (WShape.bot (n := 0))
+        (WShape.sort (n := 0) true))).app (WShape.bot (n := 0))).T := by
+    simp only [WShape.lam'_app, WShapeFun.single_app, WShape.bot_le,
+      if_pos]
+    exact TShape.LE.rfl
+  have capture : LRS.CaptureDefEqAligned.AtShapes (LR [])
+      ((WShape.bot (n := 0)).T) (SExpr.sort .zero) (SExpr.sort .zero)
+      (SExpr.sort (.succ .zero)) (WShape.bot (n := 0))
+      (WShape.sort (n := 0) true) := by
+    refine ⟨TShape.LE.rfl, .bot' .sort, ?_, .sort, (LR []).bot .sort⟩
+    exact (LR []).sort_iff_ty.2 ⟨_, .rfl, .rfl⟩
+  have hw : (WShape.sort (n := 0) true).T.HasType
+      (WShape.sort (n := 0) true).T :=
+    WShape.HasType.T (WShape.HasType.sort (n := 0) (r := true))
+  have harg : (WShape.bot (n := 0)).T ≤
+      (fun _ : (Pattern.varN (.const c) 1).Path =>
+        (WShape.bot (n := 0)).T) none :=
+    TShape.LE.rfl
+  exact ⟨.cons harg happ .nil,
+    LR.FixedHeadTerminalDominance.of_layers
+      (.cons harg happ capture (.nil hw TShape.LE.rfl))
+      (.cons harg happ .nil)⟩
+
 /-- The four leaf-local `producer` hypotheses reduce to the registered type's
 own observation, the caller's own result typing, and the terminal dominance.
 
@@ -4152,7 +4381,13 @@ The semantic `R` callback and its recursive result are selected together,
 so lowering the reached head cannot silently reselect a different constant
 evaluator.  This is the exact-leaf half of the final normalized consumer:
 constructor materialization remains local, while the generated RHS is
-discharged by the proof-independent canonical `FixedHeadResult`. -/
+discharged by the proof-independent canonical `FixedHeadResult`.
+
+`producer` carries the caller's own result typing `out.HasType outTyP`:
+without that premise the ∀-quantified `outTyP` could be instantiated at
+`.bot`, and `LR.FixedHeadTelescopeLE.outHasType` would force `out.T ≤ ⊥` —
+an undischargeable demand, since every invocation below runs strictly after
+the bottom result shape has been discharged. -/
 theorem LRS.iotaDefEq_of_ctorExactAt_fixedHead
     {n : Nat}
     {R : TShape → SExpr → Prop} {ρ : Valuation}
@@ -4183,6 +4418,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_fixedHead
       (mx my captureType :
         (RecursorIotaPattern rec major ctor arity).Path → SExpr)
       {outTyP : WShape (n + 1)}
+      (houtP : out.HasType outTyP)
       (hshape : LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
         head rule.capturePaths out.T),
       LR.FixedHeadProducer Γ₀ ρ rule mx my captureType hshape
@@ -4210,7 +4446,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_fixedHead
     exact LR.FixedHeadResult.mono (ρ := ρ) (hX := hM) hle H
   · intro head mx my captureType A outTy hhead hfixed _hstrong hshape
       _htyped hspineX hspineY hcap hout hA
-    refine producer rule mx my captureType hshape (outTyP := outTy) ?_
+    refine producer rule mx my captureType hout hshape (outTyP := outTy) ?_
     intro headTy htel hTyReg
     exact hfixed W rfl .rfl (rule.rhsStrong recLs) hshape htel hTyReg
       hspineX hspineY hcap hout hA
@@ -4228,7 +4464,10 @@ substitution.  Nothing is truncated by this move: the semantic spine, the
 typed lower head, both raw capture telescopes, and the aligned logical
 captures are already valuation-free, and `Witness.closedAt` preserves the
 entire evaluator tree of the selected witness rather than reselecting a
-public interpretation. -/
+public interpretation.
+
+`producer` carries the caller's own result typing `out.HasType outTyP`; see
+`iotaDefEq_of_ctorExactAt_fixedHead` for why the premise is required. -/
 theorem LRS.iotaDefEq_of_ctorExactAt_closedFixedHead
     {n : Nat}
     {R : TShape → SExpr → Prop} {ρ : Valuation}
@@ -4259,6 +4498,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_closedFixedHead
       (mx my captureType :
         (RecursorIotaPattern rec major ctor arity).Path → SExpr)
       {outTyP : WShape (n + 1)}
+      (houtP : out.HasType outTyP)
       (hshape : LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
         head rule.capturePaths out.T),
       LR.FixedHeadProducer Γ₀ Valuation.nil rule mx my captureType hshape
@@ -4285,7 +4525,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_closedFixedHead
     _htyped hspineX hspineY hcap hout' hA'
   have hclosed : (SExpr.mkInst recLs rule.df.rhs).ClosedN :=
     rule.rhsClosed.mkInstS
-  refine producer rule mx my captureType hshape (outTyP := outTy') ?_
+  refine producer rule mx my captureType hout' hshape (outTyP := outTy') ?_
   intro headTy htel hTyReg
   exact fixedHead (hhead.closedAt hclosed) LR.SubstWF.id rfl .rfl
     hstrong hshape htel hTyReg hspineX hspineY hcap hout' hA'
@@ -6112,7 +6352,10 @@ This is the formal statement of the residual gap at the abstract-evaluator
 leaf: once `CoherentRetainedNatStep` is instantiated, every closed-valuation
 witness carries the full coherent result, whose fixed-head half discharges
 the generated RHS obligation of one native exact link through
-`iotaDefEq_of_ctorExactAt_closedFixedHead`. -/
+`iotaDefEq_of_ctorExactAt_closedFixedHead`.
+
+`producer` carries the caller's own result typing `out.HasType outTyP`; see
+`iotaDefEq_of_ctorExactAt_fixedHead` for why the premise is required. -/
 theorem LRS.iotaDefEq_of_ctorExactAt_natStep
     {n : Nat}
     {R : TShape → SExpr → Prop} {ρ : Valuation}
@@ -6132,6 +6375,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_natStep
       (mx my captureType :
         (RecursorIotaPattern rec major ctor arity).Path → SExpr)
       {outTyP : WShape (n + 1)}
+      (houtP : out.HasType outTyP)
       (hshape : LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
         head rule.capturePaths out.T),
       LR.FixedHeadProducer Γ₀ Valuation.nil rule mx my captureType hshape
@@ -6171,7 +6415,10 @@ Unlike `iotaDefEq_of_ctorExactAt_fixedHead`, this theorem does not erase a
 local guarded restart into an all-depth result.  A genuine semantic child
 chooses the registered RHS's native stratification depth from its all-depth
 result.  Only a local child needs the RHS typing raised to the exact `depth`
-carried by its right injection. -/
+carried by its right injection.
+
+`producer` carries the caller's own result typing `out.HasType outTyP`; see
+`iotaDefEq_of_ctorExactAt_fixedHead` for why the premise is required. -/
 theorem LRS.iotaDefEq_of_ctorExactAt_coherent
     {n : Nat}
     {R : TShape → SExpr → Prop} {ρ : Valuation}
@@ -6205,6 +6452,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_coherent
       (mx my captureType :
         (RecursorIotaPattern rec major ctor arity).Path → SExpr)
       {outTyP : WShape (n + 1)}
+      (houtP : out.HasType outTyP)
       (hshape : LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
         head rule.capturePaths out.T),
       LR.FixedHeadProducer Γ₀ ρ rule mx my captureType hshape
@@ -6244,7 +6492,7 @@ theorem LRS.iotaDefEq_of_ctorExactAt_coherent
         (SExpr.mkInst recLs rule.df.rhs)
         (SExpr.mkInst recLs rule.df.type) :=
       rule.rhsStrong recLs
-    refine producer rule mx my captureType hshape (outTyP := outTy) ?_
+    refine producer rule mx my captureType hout hshape (outTyP := outTy) ?_
     intro headTy htel hTyReg
     cases hseed with
     | inl hall =>

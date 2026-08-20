@@ -16651,3 +16651,564 @@ info: 'Lean4Lean.SExpr.LRS.CtorFrame.rect' depends on axioms: [propext, Classica
 -/
 #guard_msgs in
 #print axioms LRS.CtorFrame.rect
+
+/-! ## Banking probe W16 — the rec-app-observation frame: the `RecAppFrame`
+widening
+
+`plans/probes/probeW16-rectframe-recapp.lean` discharged the remaining
+`RectFrame` transport instance of the coherent iota leaf: the one at the
+recursor-application observation `(out, outTy)`.  The rec-app observation at
+a frame vertex with major observation `m` is `(f.app m, g.app m)` for the
+spine's result/result-type shape functions.  Unlike the `.indTy` type shape
+of the constructor observation — constant, lift-rigid, and recoverable at
+every vertex — the rec-app TYPE observation `g.app m` *moves* along the
+frame's `mono` steps (`WShapeFun.app_mono_r`), while `LRS.RectFrame.mono`
+holds its type shape fixed.  That is a theorem, not a style choice: the
+landed frame's type observation is rigid up to lifts
+(`LRS.RectFrame.tyShape_rigid`), and the moving two-point family
+`LRS.RecAppMoving` below is connected by the widened frame
+(`LRS.recAppFrame_reaches`) but provably by no `RectFrame`
+(`LRS.rectFrame_cannot_recApp`).
+
+So the honest instance is a *minimal widening*: `LRS.RecAppFrame` is
+`RectFrame` with the `mono` constructor allowed to lower the type shape
+alongside the element shape, carrying exactly the coherence facts the
+composite `DefEqRect.mono_l ∘ DefEqRect.mono_r_2` spends.  Every
+widened-`mono` premise is derivable at applied observations from *diagonal*
+data only — the pointwise typings `(f.app x).HasType (g.app x)` and
+sort-typedness of `g.app`, i.e. the `WShape.HasTypeLam.iff'`/`HasTypePi.iff'`
+components the spine already retains — so no independent re-selection of the
+type observation occurs (N2-compliant): `appMono`/`appLift`/`appUnlift` are
+the per-frame-step producers and `ofApp_le` the one-step instance.
+`LRS.RecAppSync` packages the whole obligation the way `toRectFrame` did:
+it refines `CtorFrame` with the per-vertex function pair,
+`RecAppSync.toRecAppFrame` is the rec-app-observation instance, and
+`RecAppSync.rect` is the end-to-end transport whose hypothesis is the exact
+conclusion type of the leaf rectangle producer.  Finally the landed
+ctor-observation instance factors through the widening
+(`LRS.CtorFrame.toRecAppFrame_indTy`), so one transport type serves both
+observations. -/
+
+/-- `LRS.RectFrame` with a type-shape-moving `mono`.  Fields of `mono`, in
+order: element order, type order, the target diagonal `m.HasType a`, the
+cross fact `m.HasType a'`, the source diagonal `m'.HasType a'`, and
+`a'.HasType .type` (spent by `DefEqRect.mono_r_2`).  `refl`/`lift`/`unlift`
+are verbatim `RectFrame`'s. -/
+inductive LRS.RecAppFrame (Γ : List SExpr) :
+    {n k : Nat} → LogRel Γ n → WShape n → WShape n →
+      LogRel Γ k → WShape k → WShape k → Prop where
+  | refl : RecAppFrame Γ IH m a IH m a
+  | mono : m ≤ m' → a ≤ a' → m.HasType a → m.HasType a' → m'.HasType a' →
+      WShape.HasType a' .type →
+      RecAppFrame Γ IH m' a' J p q → RecAppFrame Γ IH m a J p q
+  | lift {IH : LogRel Γ n} {IH' : LogRel Γ n'} (le : n ≤ n')
+      (E : LogRel.LiftEquiv IH IH' le) (hma : m.HasType a) :
+      RecAppFrame Γ IH m a J p q →
+      RecAppFrame Γ IH' (m.lift n') (a.lift n') J p q
+  | unlift {IH : LogRel Γ n} {IH' : LogRel Γ n'} (le : n ≤ n')
+      (E : LogRel.LiftEquiv IH IH' le) (hma : m.HasType a) :
+      RecAppFrame Γ IH' (m.lift n') (a.lift n') J p q →
+      RecAppFrame Γ IH m a J p q
+
+/-- **The widened frame layer is still mechanical.**  `mono` is the composite
+`DefEqRect.mono_l` (element down, at the source type shape) then
+`DefEqRect.mono_r_2` (type down, at the target element shape); the other
+cases are `RectFrame.rect`'s one-liners. -/
+theorem LRS.RecAppFrame.rect {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} {J : LogRel Γ k} {p q : WShape k}
+    {M₁ M₂ N₁ N₂ A : SExpr}
+    (F : LRS.RecAppFrame Γ IH m a J p q)
+    (H : LogRel.DefEqRect J M₁ M₂ N₁ N₂ A p q) :
+    LogRel.DefEqRect IH M₁ M₂ N₁ N₂ A m a := by
+  induction F with
+  | refl => exact H
+  | mono hm ha hma hma' hm'a' ha' _ ih =>
+    exact ((ih H).mono_l hm hma' hm'a').mono_r_2 ha hma ha'
+  | lift le E hma _ ih => exact (E.rect hma).2 (ih H)
+  | unlift le E hma _ ih => exact (E.rect hma).1 (ih H)
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.rect' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.rect
+
+/-- The transported rectangle with both rows flipped, from the same frame. -/
+theorem LRS.RecAppFrame.symm_rect {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} {J : LogRel Γ k} {p q : WShape k}
+    {M₁ M₂ N₁ N₂ A : SExpr}
+    (F : LRS.RecAppFrame Γ IH m a J p q)
+    (H : LogRel.DefEqRect J M₁ M₂ N₁ N₂ A p q) :
+    LogRel.DefEqRect IH M₂ M₁ N₂ N₁ A m a :=
+  let R := F.rect H
+  ⟨IH.symm R.left, IH.symm R.right,
+    IH.trans (IH.symm R.left) (IH.trans R.cross (IH.symm R.right))⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.symm_rect' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.symm_rect
+
+/-- The widened frame composes, so it is a usable index. -/
+theorem LRS.RecAppFrame.trans {Γ : List SExpr} {n k l : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} {J : LogRel Γ k} {p q : WShape k}
+    {K : LogRel Γ l} {x y : WShape l}
+    (F : LRS.RecAppFrame Γ IH m a J p q) (G : LRS.RecAppFrame Γ J p q K x y) :
+    LRS.RecAppFrame Γ IH m a K x y := by
+  induction F with
+  | refl => exact G
+  | mono hm ha hma hma' hm'a' ha' _ ih => exact .mono hm ha hma hma' hm'a' ha' (ih G)
+  | lift le E hma _ ih => exact .lift le E hma (ih G)
+  | unlift le E hma _ ih => exact .unlift le E hma (ih G)
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.trans
+
+/-- Nothing is lost: every landed `RectFrame` is a `RecAppFrame` (the
+degenerate type move, with `a'.HasType .type` recovered from the frame's own
+diagonal via `WShape.HasType.isType`). -/
+theorem LRS.RectFrame.toRecAppFrame {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} {J : LogRel Γ k} {p q : WShape k}
+    (F : LRS.RectFrame Γ IH m a J p q) :
+    LRS.RecAppFrame Γ IH m a J p q := by
+  induction F with
+  | refl => exact .refl
+  | mono hle hm hm' _ ih => exact .mono hle WShape.LE.rfl hm hm hm' hm'.isType ih
+  | lift le E hma _ ih => exact .lift le E hma ih
+  | unlift le E hma _ ih => exact .unlift le E hma ih
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RectFrame.toRecAppFrame' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RectFrame.toRecAppFrame
+
+/-- Vacuity discipline: inhabited by `refl` at every `(IH, m, a)`. -/
+theorem LRS.recAppFrame_nonvacuous {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} : LRS.RecAppFrame Γ IH m a IH m a := .refl
+
+/--
+info: 'Lean4Lean.SExpr.LRS.recAppFrame_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.recAppFrame_nonvacuous
+
+/-! ### The applied-observation step producers
+
+One producer per `CtorFrame` constructor shape, each consuming only data the
+spine retains: the *diagonal* pointwise typings `(f.app x).HasType (g.app x)`
+(the third component of `WShape.HasTypeLam.iff'`) and sort-typedness of the
+type-side application (the second component of `WShape.HasTypePi.iff'`).
+The cross fact `(f.app m).HasType (g.app m')` is *derived* —
+`WShape.HasType.mono_r` raises the diagonal along `WShapeFun.app_mono_r` —
+never chosen, which is what keeps the N2 discipline intact. -/
+
+/-- One frame-`mono` step at the rec-app observation, from diagonal data. -/
+theorem LRS.RecAppFrame.appMono {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {J : LogRel Γ k} {p q : WShape k}
+    {f g : WShapeFun n} {m m' : WShape n} {r : Bool}
+    (hle : m ≤ m')
+    (hdm : (f.app m).HasType (g.app m))
+    (hdm' : (f.app m').HasType (g.app m'))
+    (hsort : (g.app m').HasType (.sort r))
+    (F : LRS.RecAppFrame Γ IH (f.app m') (g.app m') J p q) :
+    LRS.RecAppFrame Γ IH (f.app m) (g.app m) J p q :=
+  .mono (WShapeFun.app_mono_r hle) (WShapeFun.app_mono_r hle)
+    hdm (WShape.HasType.mono_r (WShapeFun.app_mono_r hle) hsort hdm) hdm'
+    hsort.toType F
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.appMono' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.appMono
+
+/-- One frame-`lift` step at the rec-app observation: the function pair
+lifts, and `WShapeFun.lift_app` commutes the applied observation. -/
+theorem LRS.RecAppFrame.appLift {Γ : List SExpr} {n n' k : Nat}
+    {IH : LogRel Γ n} {IH' : LogRel Γ n'} {J : LogRel Γ k} {p q : WShape k}
+    (le : n ≤ n') (E : LogRel.LiftEquiv IH IH' le)
+    {f g : WShapeFun n} {x : WShape n}
+    (hd : (f.app x).HasType (g.app x))
+    (F : LRS.RecAppFrame Γ IH (f.app x) (g.app x) J p q) :
+    LRS.RecAppFrame Γ IH' ((f.lift n').app (x.lift n'))
+      ((g.lift n').app (x.lift n')) J p q := by
+  rw [← WShapeFun.lift_app le, ← WShapeFun.lift_app le]
+  exact .lift le E hd F
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.appLift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.appLift
+
+/-- One frame-`unlift` step at the rec-app observation. -/
+theorem LRS.RecAppFrame.appUnlift {Γ : List SExpr} {n n' k : Nat}
+    {IH : LogRel Γ n} {IH' : LogRel Γ n'} {J : LogRel Γ k} {p q : WShape k}
+    (le : n ≤ n') (E : LogRel.LiftEquiv IH IH' le)
+    {f g : WShapeFun n} {x : WShape n}
+    (hd : (f.app x).HasType (g.app x))
+    (F : LRS.RecAppFrame Γ IH' ((f.lift n').app (x.lift n'))
+      ((g.lift n').app (x.lift n')) J p q) :
+    LRS.RecAppFrame Γ IH (f.app x) (g.app x) J p q := by
+  rw [← WShapeFun.lift_app le, ← WShapeFun.lift_app le] at F
+  exact .unlift le E hd F
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.appUnlift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.appUnlift
+
+/-- The same-level rec-app-observation instance in one step: any `m ≤ m'`
+induces the widened frame between the two applied observations, from
+diagonal data alone.  (This is the `toRectFrame` analogue for the fragment
+of a `CtorFrame` that stays at one level.) -/
+theorem LRS.RecAppFrame.ofApp_le {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} {f g : WShapeFun n} {m m' : WShape n} {r : Bool}
+    (hle : m ≤ m')
+    (hdm : (f.app m).HasType (g.app m))
+    (hdm' : (f.app m').HasType (g.app m'))
+    (hsort : (g.app m').HasType (.sort r)) :
+    LRS.RecAppFrame Γ IH (f.app m) (g.app m) IH (f.app m') (g.app m') :=
+  LRS.RecAppFrame.appMono hle hdm hdm' hsort .refl
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppFrame.ofApp_le' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppFrame.ofApp_le
+
+/-- For contrast, where the landed frame already suffices: a family whose
+type observation is a *constant* shape transports through plain
+`RectFrame.mono` from the diagonal alone. -/
+theorem LRS.RectFrame.ofApp_le_constTy {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} {f : WShapeFun n} {c : WShape n} {m m' : WShape n}
+    (hle : m ≤ m')
+    (hdm : (f.app m).HasType c) (hdm' : (f.app m').HasType c) :
+    LRS.RectFrame Γ IH (f.app m) c IH (f.app m') c :=
+  .mono (WShapeFun.app_mono_r hle) hdm hdm' .refl
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RectFrame.ofApp_le_constTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RectFrame.ofApp_le_constTy
+
+/-! ### Separation: the widening is necessary, not stylistic
+
+The landed `RectFrame`'s type observation is rigid up to lifts, as a
+theorem; and the concrete two-point rec-app family `LRS.RecAppMoving` moves
+its type observation, so no `RectFrame` connects its endpoints while
+`ofApp_le` does.  The moving family also serves as the off-diagonal
+non-vacuity witness for the step producers. -/
+
+/-- The landed frame's type observation is constant up to lift-erasure. -/
+theorem LRS.RectFrame.tyShape_rigid {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m a : WShape n} {J : LogRel Γ k} {p q : WShape k}
+    (F : LRS.RectFrame Γ IH m a J p q) : a.T ≤ q.T ∧ q.T ≤ a.T := by
+  induction F with
+  | refl => exact ⟨TShape.LE.rfl, TShape.LE.rfl⟩
+  | mono _ _ _ _ ih => exact ih
+  | lift le E hma _ ih =>
+    exact ⟨(TShape.lift_eqv le).1.trans ih.1, ih.2.trans (TShape.lift_eqv le).2⟩
+  | unlift le E hma _ ih =>
+    exact ⟨(TShape.lift_eqv le).2.trans ih.1, ih.2.trans (TShape.lift_eqv le).1⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RectFrame.tyShape_rigid' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RectFrame.tyShape_rigid
+
+/-- A sort shape never sits below bottom (the two-point separation witness
+needs this inversion at both of its vertices). -/
+theorem WShape.sort_not_le_bot {n : Nat} {r : Bool} :
+    ¬((WShape.sort r : WShape n) ≤ .bot) := by
+  intro h
+  have h' := WShape.le_bot.1 h
+  have h'' : (WShape.sort r : WShape n).1 = (WShape.bot : WShape n).1 :=
+    congrArg Subtype.val h'
+  cases n <;> simp [WShape.sort, WShape.bot, Shape.sort, Shape.bot] at h''
+
+/-- Bottom is typed at bottom, at every level. -/
+theorem WShape.hasType_bot_bot {n : Nat} :
+    (WShape.bot : WShape n).HasType .bot :=
+  WShape.HasType.bot' (WShape.HasType.bot' WShape.HasType.sort)
+
+/-- The moving rec-app family, element side: `.bot ↦ .bot`,
+`.sort true ↦ .sort false`. -/
+abbrev LRS.RecAppMoving.f {n : Nat} : WShapeFun n :=
+  WShapeFun.single (.sort true) (.sort false)
+
+/-- The moving rec-app family, type side: `.bot ↦ .bot`,
+`.sort true ↦ .sort true`. -/
+abbrev LRS.RecAppMoving.g {n : Nat} : WShapeFun n :=
+  WShapeFun.single (.sort true) (.sort true)
+
+theorem LRS.RecAppMoving.f_bot {n : Nat} :
+    (LRS.RecAppMoving.f (n := n)).app .bot = .bot := by
+  rw [LRS.RecAppMoving.f, WShapeFun.single_app, if_neg WShape.sort_not_le_bot]
+
+theorem LRS.RecAppMoving.f_sort {n : Nat} :
+    (LRS.RecAppMoving.f (n := n)).app (.sort true) = .sort false := by
+  rw [LRS.RecAppMoving.f, WShapeFun.single_app, if_pos WShape.LE.rfl]
+
+theorem LRS.RecAppMoving.g_bot {n : Nat} :
+    (LRS.RecAppMoving.g (n := n)).app .bot = .bot := by
+  rw [LRS.RecAppMoving.g, WShapeFun.single_app, if_neg WShape.sort_not_le_bot]
+
+theorem LRS.RecAppMoving.g_sort {n : Nat} :
+    (LRS.RecAppMoving.g (n := n)).app (.sort true) = .sort true := by
+  rw [LRS.RecAppMoving.g, WShapeFun.single_app, if_pos WShape.LE.rfl]
+
+/-- Diagonal typing of the moving family at `.bot`. -/
+theorem LRS.RecAppMoving.diag_bot {n : Nat} :
+    ((LRS.RecAppMoving.f (n := n)).app .bot).HasType
+      ((LRS.RecAppMoving.g (n := n)).app .bot) := by
+  rw [LRS.RecAppMoving.f_bot, LRS.RecAppMoving.g_bot]
+  exact WShape.hasType_bot_bot
+
+/-- Diagonal typing of the moving family at `.sort true`. -/
+theorem LRS.RecAppMoving.diag_sort {n : Nat} :
+    ((LRS.RecAppMoving.f (n := n)).app (.sort true)).HasType
+      ((LRS.RecAppMoving.g (n := n)).app (.sort true)) := by
+  rw [LRS.RecAppMoving.f_sort, LRS.RecAppMoving.g_sort]
+  exact WShape.HasType.sort
+
+/-- Sort-typedness of the moving family's type side at `.sort true`. -/
+theorem LRS.RecAppMoving.sortTy_sort {n : Nat} :
+    ((LRS.RecAppMoving.g (n := n)).app (.sort true)).HasType (.sort true) := by
+  rw [LRS.RecAppMoving.g_sort]
+  exact WShape.HasType.sort
+
+/-- **Separation, negative half.**  No landed `RectFrame` connects the moving
+family's two observations: the family's type observation moves from `.bot`
+to `.sort true` while `tyShape_rigid` pins any `RectFrame`'s type observation
+up to lift-erasure. -/
+theorem LRS.rectFrame_cannot_recApp {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} :
+    ¬ LRS.RectFrame Γ IH ((LRS.RecAppMoving.f (n := n)).app .bot)
+        ((LRS.RecAppMoving.g (n := n)).app .bot)
+        IH ((LRS.RecAppMoving.f (n := n)).app (.sort true))
+        ((LRS.RecAppMoving.g (n := n)).app (.sort true)) := by
+  intro F
+  have h := F.tyShape_rigid.2
+  rw [LRS.RecAppMoving.g_bot, LRS.RecAppMoving.g_sort] at h
+  exact WShape.sort_not_le_bot (WShape.LE.of_T h)
+
+/--
+info: 'Lean4Lean.SExpr.LRS.rectFrame_cannot_recApp' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.rectFrame_cannot_recApp
+
+/-- **Separation, positive half** (and the step producers' off-diagonal
+non-vacuity witness): the widened frame connects the same two observations
+from the diagonal data alone. -/
+theorem LRS.recAppFrame_reaches {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} :
+    LRS.RecAppFrame Γ IH ((LRS.RecAppMoving.f (n := n)).app .bot)
+      ((LRS.RecAppMoving.g (n := n)).app .bot)
+      IH ((LRS.RecAppMoving.f (n := n)).app (.sort true))
+      ((LRS.RecAppMoving.g (n := n)).app (.sort true)) :=
+  LRS.RecAppFrame.ofApp_le WShape.bot_le LRS.RecAppMoving.diag_bot
+    LRS.RecAppMoving.diag_sort LRS.RecAppMoving.sortTy_sort
+
+/--
+info: 'Lean4Lean.SExpr.LRS.recAppFrame_reaches' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.recAppFrame_reaches
+
+/-- The witness really is off-diagonal: both observations move. -/
+theorem LRS.RecAppMoving.moves {n : Nat} :
+    (LRS.RecAppMoving.f (n := n)).app .bot ≠
+      (LRS.RecAppMoving.f (n := n)).app (.sort true) := by
+  rw [LRS.RecAppMoving.f_bot, LRS.RecAppMoving.f_sort]
+  intro h
+  have h' : (WShape.bot : WShape n).1 = (WShape.sort false : WShape n).1 :=
+    congrArg Subtype.val h
+  cases n <;> simp [WShape.sort, WShape.bot, Shape.sort, Shape.bot] at h'
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppMoving.moves' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppMoving.moves
+
+/-! ### The synchronized producer along a constructor frame
+
+`LRS.RecAppSync` refines `LRS.CtorFrame` with the per-vertex result-shape
+function pair: constant across `mono` (a `mono` step moves only the major
+observation), lifted across `lift`/`unlift` (a level step lifts the whole
+spine — `LR.PatternLeafSpine.lift` lifts `resultShape`/`resultTypeShape` by
+exactly `WShapeFun.lift`, and `LE_Interp.Matches.lift`/`.unlift` move the
+match data in both directions).  Each constructor carries the diagonal facts
+the step producers spend.  `toCtorFrame` shows it is a refinement;
+`toRecAppFrame` is **the rec-app-observation instance**; `rect` is the
+end-to-end transport whose hypothesis is the exact conclusion type of
+`LRS.iotaDefEqRect_of_ctorExactAt` at the native leaf. -/
+
+/-- A constructor frame synchronized with its rec-app observation data. -/
+inductive LRS.RecAppSync (Γ : List SExpr) :
+    {n k : Nat} → LogRel Γ n → WShape (n + 1) →
+      WShapeFun (n + 1) → WShapeFun (n + 1) →
+      LogRel Γ k → WShape (k + 1) →
+      WShapeFun (k + 1) → WShapeFun (k + 1) → Prop where
+  | refl : RecAppSync Γ IH m f g IH m f g
+  | mono {n k : Nat} {IH : LogRel Γ n} {J : LogRel Γ k}
+      {m m' : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+      {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)} {r : Bool} :
+      m ≤ m' →
+      (f.app m).HasType (g.app m) →
+      (f.app m').HasType (g.app m') →
+      (g.app m').HasType (.sort r) →
+      RecAppSync Γ IH m' f g J p f₀ g₀ →
+      RecAppSync Γ IH m f g J p f₀ g₀
+  | lift {n n' k : Nat} {IH : LogRel Γ n} {IH' : LogRel Γ n'} {J : LogRel Γ k}
+      {m : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+      {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)}
+      (le : n ≤ n') (E : LogRel.LiftEquiv IH IH' le) :
+      (f.app m).HasType (g.app m) →
+      RecAppSync Γ IH m f g J p f₀ g₀ →
+      RecAppSync Γ IH' (m.lift (n' + 1)) (f.lift (n' + 1)) (g.lift (n' + 1))
+        J p f₀ g₀
+  | unlift {n n' k : Nat} {IH : LogRel Γ n} {IH' : LogRel Γ n'} {J : LogRel Γ k}
+      {m : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+      {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)}
+      (le : n ≤ n') (E : LogRel.LiftEquiv IH IH' le) :
+      (f.app m).HasType (g.app m) →
+      RecAppSync Γ IH' (m.lift (n' + 1)) (f.lift (n' + 1)) (g.lift (n' + 1))
+        J p f₀ g₀ →
+      RecAppSync Γ IH m f g J p f₀ g₀
+
+/-- The synchronization is a refinement: forgetting the function pair
+recovers the unpaired constructor frame, step for step. -/
+theorem LRS.RecAppSync.toCtorFrame {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+    {J : LogRel Γ k} {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)}
+    (S : LRS.RecAppSync Γ IH m f g J p f₀ g₀) :
+    LRS.CtorFrame Γ IH m J p := by
+  induction S with
+  | refl => exact .refl
+  | mono hle _ _ _ _ ih => exact .mono hle ih
+  | lift le E _ _ ih => exact .lift le E ih
+  | unlift le E _ _ ih => exact .unlift le E ih
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppSync.toCtorFrame' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppSync.toCtorFrame
+
+/-- **The rec-app-observation instance.**  A synchronized constructor frame
+yields the widened paired frame between the root's rec-app observation
+`(f.app m, g.app m)` and the native leaf's `(f₀.app p, g₀.app p)`, one shape
+level up — exactly where `LRS.CtorFrame.toRectFrame` puts the constructor
+observation's instance. -/
+theorem LRS.RecAppSync.toRecAppFrame {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+    {J : LogRel Γ k} {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)}
+    (S : LRS.RecAppSync Γ IH m f g J p f₀ g₀) :
+    LRS.RecAppFrame Γ (LRS IH) (f.app m) (g.app m)
+      (LRS J) (f₀.app p) (g₀.app p) := by
+  induction S with
+  | refl => exact .refl
+  | mono hle hd hd' hs _ ih => exact LRS.RecAppFrame.appMono hle hd hd' hs ih
+  | lift le E hd _ ih =>
+    exact LRS.RecAppFrame.appLift (Nat.succ_le_succ le) E.succ hd ih
+  | unlift le E hd _ ih =>
+    exact LRS.RecAppFrame.appUnlift (Nat.succ_le_succ le) E.succ hd ih
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppSync.toRecAppFrame' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppSync.toRecAppFrame
+
+/-- **End to end**: the synchronized frame transports the rectangle produced
+at the native leaf's recursor-application observation — the conclusion type
+of `LRS.iotaDefEqRect_of_ctorExactAt` — back to the root's. -/
+theorem LRS.RecAppSync.rect {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {f g : WShapeFun (n + 1)}
+    {J : LogRel Γ k} {p : WShape (k + 1)} {f₀ g₀ : WShapeFun (k + 1)}
+    {M₁ M₂ N₁ N₂ A : SExpr}
+    (S : LRS.RecAppSync Γ IH m f g J p f₀ g₀)
+    (H : LogRel.DefEqRect (LRS J) M₁ M₂ N₁ N₂ A (f₀.app p) (g₀.app p)) :
+    LogRel.DefEqRect (LRS IH) M₁ M₂ N₁ N₂ A (f.app m) (g.app m) :=
+  S.toRecAppFrame.rect H
+
+/--
+info: 'Lean4Lean.SExpr.LRS.RecAppSync.rect' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.RecAppSync.rect
+
+/-- Vacuity discipline: the synchronization is inhabited by `refl` at every
+`(IH, m, f, g)`. -/
+theorem LRS.recAppSync_nonvacuous {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {f g : WShapeFun (n + 1)} :
+    LRS.RecAppSync Γ IH m f g IH m f g := .refl
+
+/--
+info: 'Lean4Lean.SExpr.LRS.recAppSync_nonvacuous' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.recAppSync_nonvacuous
+
+/-- Off-diagonal non-vacuity: a synchronization with a genuine `mono` step —
+the separation's moving family one level up, so the two ends' rec-app
+observations differ (`LRS.RecAppMoving.moves`). -/
+theorem LRS.recAppSync_offDiagonal {Γ : List SExpr} {n : Nat}
+    {IH : LogRel Γ n} :
+    LRS.RecAppSync Γ IH (.bot) (LRS.RecAppMoving.f (n := n + 1))
+      (LRS.RecAppMoving.g (n := n + 1))
+      IH (.sort true) (LRS.RecAppMoving.f (n := n + 1))
+      (LRS.RecAppMoving.g (n := n + 1)) :=
+  .mono WShape.bot_le LRS.RecAppMoving.diag_bot LRS.RecAppMoving.diag_sort
+    LRS.RecAppMoving.sortTy_sort .refl
+
+/--
+info: 'Lean4Lean.SExpr.LRS.recAppSync_offDiagonal' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.recAppSync_offDiagonal
+
+/-! ### The landed instance factors through the widening
+
+The constructor observation's instance (`LRS.CtorFrame.toRectFrame`) lands
+inside the widened frame unchanged, so one transport type serves both the
+ctor observation and the rec-app observation. -/
+
+theorem LRS.CtorFrame.toRecAppFrame_indTy {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {J : LogRel Γ k} {p : WShape (k + 1)}
+    (F : LRS.CtorFrame Γ IH m J p) (hp : p.HasType .indTy) :
+    LRS.RecAppFrame Γ (LRS IH) m .indTy (LRS J) p .indTy :=
+  (F.toRectFrame hp).toRecAppFrame
+
+/--
+info: 'Lean4Lean.SExpr.LRS.CtorFrame.toRecAppFrame_indTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.CtorFrame.toRecAppFrame_indTy
+
+/-- And the ctor-observation rectangle transport re-derives through the
+widened frame — same statement as the landed `LRS.CtorFrame.rect`. -/
+theorem LRS.CtorFrame.rect_via_recAppFrame {Γ : List SExpr} {n k : Nat}
+    {IH : LogRel Γ n} {m : WShape (n + 1)} {J : LogRel Γ k} {p : WShape (k + 1)}
+    (F : LRS.CtorFrame Γ IH m J p) (hp : p.HasType .indTy)
+    {M₁ M₂ N₁ N₂ A : SExpr}
+    (H : LogRel.DefEqRect (LRS J) M₁ M₂ N₁ N₂ A p .indTy) :
+    LogRel.DefEqRect (LRS IH) M₁ M₂ N₁ N₂ A m .indTy :=
+  (F.toRecAppFrame_indTy hp).rect H
+
+/--
+info: 'Lean4Lean.SExpr.LRS.CtorFrame.rect_via_recAppFrame' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.CtorFrame.rect_via_recAppFrame
