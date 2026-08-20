@@ -83,11 +83,11 @@ required for the final release; they can be reached in separate milestones.
 
 | Fact | Value |
 |---|---|
-| Ladder position | **L4L-16R next** (integration-only upstream reconcile), then the lane phase (§5). **L4L-16C′w completed 2026-08-20** at checkpoint `e73d29fd` with the full §6 gate + Experimental green: the 16C′ conditional closure is executed — `Experimental/` carries zero sorry tokens and zero `stop`-hidden admissions, and every gate endpoint (`sort_invS`, `adequacy`, the inversion trio's SExpr forms, `uniq_sort`) is conditional on the two named leaf inputs `LRS.PiPathInv` and `LR.MajorLinkRect` (the second surfaced by the 2026-08-20 leaf-proof measurement), both discharged at 16N-N5, all measuring exactly `[propext, Classical.choice, Quot.sound]`. The semantic content that discharges the inputs is milestone **L4L-16N** (§5). L4L-18B (D020) stands; 16D0/D1 complete and D2 landed-conditional (`D2TreeCheckedStep` and D1-quot are 16N/16F-gated) |
+| Ladder position | **Lane phase next** (§5): Lane R = L4L-16N (critical path), Lane V = checker pre-closure, Lane D = D-ladder volume, with L4L-16E promotion mechanics in slack. **L4L-16C′w completed 2026-08-20** (checkpoint `e73d29fd` pre-rebase; full §6 gate + Experimental green): `Experimental/` carries zero sorry tokens and zero `stop`-hidden admissions, every gate endpoint conditional on the two named leaf inputs `LRS.PiPathInv` and `LR.MajorLinkRect`, both discharged at 16N-N5, all measuring exactly `[propext, Classical.choice, Quot.sound]`. **L4L-16R completed 2026-08-20** (merge `29d67a7c`): all five drift commits absorbed, the fork's reshaped `reduceProj.WF` proves upstream's new `reduceProjCore.WF` outright (ledger D022, upstream-contribution candidate), D012 narrowed, D021 added, frontier unchanged at 22. L4L-18B (D020) stands; 16D0/D1 complete and D2 landed-conditional (`D2TreeCheckedStep` and D1-quot are 16N/16F-gated) |
 | Current formalization source | **`jcb/formalization3`** — the former `jcb/formalization2` line was squash-merged into `dev` as PR #4 (`3d1390a`, tree-equal to `06f13e02` modulo repo housekeeping), PR #5 ("chore: Fix warnings", 34 Theory/Verify files + `warn.sorry` frontier annotations + flake churn) landed on top (`4844eda4`), and the branch was deleted on origin (2026-08-18). The five 16C′w-era commits were segment-rebased onto `origin/dev` `4844eda4` on 2026-08-20 (one trivial `result-1` conflict; Lake gates + 22-entry frontier re-verified green on the rebased line); pre-squash history remains recoverable locally |
 | Parent lineage | the squash flattened git ancestry: all content through digama `upstream/master` `b292275c` (the v4.33 reconciliation `99a7f8ae`) is absorbed in the squash, but the published line no longer carries the merge commits, so the L4L-16R merge will see an old git merge-base — the same situation the post-PR#3 line was in when `99a7f8ae` landed green, so precedent stands. Lean on v4.33.0 final, lean4-nix on `argumentcomputer/lean4-nix` (upstream still pins v4.33.0-rc2 — ledger D018, re-verified 2026-08-20) |
 | Fixed `master` baseline | historical baseline `1a16b72d2e35932a82aa501beb29ef2c3d072580`; the tracked local `master` bookmark auto-advanced to `origin/master` `715bfaff` at the 2026-08-20 fetch (content already absorbed in-tree) |
-| Remote drift (re-scanned 2026-08-20: `gh api` + `git fetch upstream`, remote-tracking refs only) | digama master is **five** commits past the merged `b292275c`, tip `e0e3f6bc`: stage-2 replay perf (clean-apply), the level-algorithm enable (half-absorbed; residue = the `geq → geq'` flip in `checkConstructors`), the `lazyDeltaProjReduction` restructure (moderate; the fork's already-proved `reduceProj.WF` must reshape onto the `reduceProjCore` split — and can likely discharge upstream's new `reduceProjCore.WF` sorry, an upstream-contribution opportunity), the K-target phase alignment + divergences doc, and the self-contained `Theory/LevelSat.lean` (coNP-hardness; clean-apply). In-flight PRs that raise the cost of waiting: **#43** (third-party iota-reduction formalization, base = `b292275c`, 16 of 20 files collide with fork-modified files, 12 `IOTA-TODO` sorries incl. the CR `.pat` case, unreviewed by Mario) and **#32** (+24k-line HasPrimitives verification overlapping the fork's D017 Tier-V debt); **#27** would prove two of the fork's three forbidden cached-field axioms. Decision analysis + 2026-08-20 addendum in the now-tracked `plans/l4l-16-boundary-digama-drift.md`: **reconcile all five at the next checkpoint boundary as integration-only L4L-16R** (§5) |
+| Remote drift | **reconciled at L4L-16R** (2026-08-20, merge `29d67a7c`): local and merged upstream tip = `e0e3f6bc`; nothing unabsorbed. Standing watch items, re-checked at every checkpoint boundary (§7): **PR #43** (third-party iota-reduction formalization — 16 of 20 files collide with fork-modified files; unreviewed by Mario; the fork's appDF×`.extra` refutation applies to its CR `.pat` TODO and the design comparison lives in the drift note + ledger D022 context), **PR #32** (+24k-line HasPrimitives verification overlapping D017 Tier-V debt — the V4 absorb-don't-duplicate tripwire), **#27** (would prove two of the three forbidden cached-field axioms — absorb at the next reconcile). History: `plans/l4l-16-boundary-digama-drift.md` |
 | Trust frontier | exactly 16 sorried proof declarations, one token each (10 Tier V, 6 Tier R; the `NormalEq.parRed` `constDF` half closed 2026-08-15, its remaining token is the `appDF`×`.extra` case) plus six kernel-rejection recovery declarations — 22 compiled allowlist entries — and 34 custom-axiom declarations; all pinned by exact audits. `Experimental/` carries **zero** sorry tokens and zero `stop`-hidden admissions since the 16C′w wrap (2026-08-20): the former three tokens closed by conditionalization on the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`) and by the E3 chain deletion, and the token-carrying scratch prototypes were deleted (jj-recoverable). Every mainline sorry has a named closure route in §5.0 |
 | Gates | the full §6 gate plus the Experimental build ran green on the pre-rebase checkpoint `e73d29fd` (2026-08-20): Theory/Verify, 22-entry frontier OK, 212-job default build, 138-job Experimental build, whitespace, `nix build` both targets, `nix flake check` all-passed, `nix fmt`. After the segment rebase onto `dev` all four Lake gates + the frontier re-verified green on the rebased line; the nix legs re-run on the rebased base (PR #5 touched `flake.nix`/`flake.lock`) gate the `jcb/formalization3` publication |
 
@@ -622,12 +622,12 @@ and fallbacks in the owning milestone entry).
 | V3 | `addDecl.WF` `inductDecl` case (`Verify/Environment.lean:222`) | L4L-19B | the generic front-end of what all 25 replay rows do concretely: checker inductive path → `buildNormalizationCandidate` → `GenerationCertificate`/`addInductCertified` → `TrEnv'.inductBlock`/`inductNested`, mirroring `addMutual.WF`'s structure, plus V1's transport; this is the "no semantic placeholders" criterion's `Verify.Environment.AddInduct` model | engineering, multi-session |
 | V4 | `checkPrimitiveDef.WF` (`Boundaries.lean:35`) | Lane V, #32-gated | upstream PR #32 (+24k lines) verifies exactly this recognizer; absorb and adapt if Mario merges it, prove in-fork (M.WF-style run proof producing `PrimitiveResult`) if it stalls past the 18A′ checkpoint | engineering |
 | V5 | `reduceRecursor.WF` (`Verify/TypeChecker/WHNF.lean:8`) | L4L-19A | selected rule/match/checks/RHS translation/result typing from certified generated metadata via `pat_wf` (sheds its transitional closure at 16X) and the block-certificate pattern surface; quot branch against the quot lemmas; nested branch needs the σ̂ β-collapse bridge plus `NestedBlockCertificate` pattern facts | engineering, multi-session |
-| V6 | `aliasFormerAlignmentRun` (`InductiveFixtures.lean:7808`) | L4L-16R | pure repair of a true closed-run statement whose `build.eq_def` stepping no longer elaborates on v4.33; fold into the reconcile session (same elaborator-repair flavor) | certain |
+| V6 | `aliasFormerAlignmentRun` (`InductiveFixtures.lean`, the file's one sorry) | Lane V | attempted at L4L-16R (2026-08-20), recipe banked in the declaration comment: `simp only [aliasFormerKernelType]` first re-enables `rw [build.eq_def]`, and `simp only [context_eq] at closed rootCheck` aligns the record-update trace hypotheses; the residual is firing the dependent match — trace-slot metavars type-check at reducible transparency against fuel/name-indexed binder types, so the fixture defs need pre-normalization across goal and hypothesis types (then the same for `ConstructorViewAlignmentTrace.build` and the recursive nil case) | certain, one focused session |
 
 The six remaining allowlist entries are deliberate kernel-rejection fixture
 recoveries, not debt; L4L-19C reduces the allowlist to exactly those.
 
-### Metatheory closure (L4L-16R–L4L-18S)
+### Metatheory closure (lane phase–L4L-18S)
 
 The former 16C′ experimental admissions are closed as of the 16C′w
 checkpoint `e73d29fd` (2026-08-20): `Experimental/` carries zero sorry
@@ -635,44 +635,7 @@ tokens, and the gate endpoints are conditional on the two named leaf
 inputs `LRS.PiPathInv` and `LR.MajorLinkRect`, both discharged at
 16N-N5. The remaining sorries are exactly the 16 mainline rows above.
 
-**L4L-16R — v4.33-drift reconciliation (integration-only; next).** The
-next checkpoint after the completed 16C′w, per the 2026-08-20 addendum in
-`plans/l4l-16-boundary-digama-drift.md` (superseding its 2026-08-14 defer
-recommendation: the tree is clean, and in-flight PRs #43/#32 would stack
-large colliding deltas on the current five-commit drift). Contents, one
-session, dominated by item 3:
-
-1. `aaeeb156` stage-2 replay perf and `e0e3f6bc` `Theory/LevelSat.lean` —
-   clean-apply.
-2. `3f6e8f92` level-algorithm enable — half-absorbed (the `isEquivList`
-   change converges to a no-op with D012); absorb the `geq → geq'` flip in
-   `checkConstructors` and re-discharge the fixture proofs that unfold it
-   (`IndexedVecOuterReplay.lean`, `MutualInductiveFixtures.lean`; concrete
-   goals expected to survive the `geq' = geq || _` short-circuit). Narrows
-   ledger D012.
-3. `62441418` `lazyDeltaProjReduction` — reshape the fork's already-proved
-   `reduceProj.WF` onto the `reduceProjCore` split and re-anchor the
-   frontier/axiom guards; then offer upstream the discharge of their new
-   `reduceProjCore.WF` sorry (upstream-contribution opportunity, strongest
-   while fresh).
-4. `4b60e53d` K-target phase alignment + upstream `divergences.md` intel —
-   textual-clean.
-5. Fold in V6 (`aliasFormerAlignmentRun` repair, same elaborator-repair
-   flavor) and delete the remaining zero-token parked stubs
-   (`StepIndexed`, `CoinductiveLogRel`, `Stratified`,
-   `StratifiedUntyped`, `Stronger` — the token-carrying scratch set was
-   already deleted by the 16C′w wrap).
-6. Record the PR #43 design comparison (the fork's proof-carrying
-   `Pattern.Action`/L4L-18B interface vs #43's `VEnv.pats` +
-   `IsDefEq.pat`; the fork's appDF×`.extra` refutation applies verbatim to
-   #43's CR `.pat` TODO and is worth communicating upstream before review
-   concludes) and set the PR #32 watch tripwire for V4. Toolchain stays
-   v4.33.0 (upstream remains on v4.33.0-rc2).
-
-*Exit:* merge checkpoint green on the full §6 gate; divergence ledger
-refreshed (D012 narrowed, new rows as needed); §2 drift row cleared.
-
-**Lane phase (L4L-16R → L4L-16X).** Lane R runs L4L-16N (critical path).
+**Lane phase (now → L4L-16X).** Lane R runs L4L-16N (critical path).
 Lane V runs the V1 → V2 rows of §5.0, starts the V3 skeleton
 (statement-level decomposition with named holes), holds V4 on the #32
 watch, and takes R6's independent statement repair in its first
@@ -1164,8 +1127,9 @@ assume an oracle or axiom.
 - **Upstream collision.** Repeat the ancestry and overlap check at every
   milestone boundary; if upstream advances again, insert another explicit
   integration checkpoint rather than hiding merge work inside a semantic
-  milestone. The 2026-08-20 scan found five commits of drift (decision:
-  L4L-16R, §5) and two large in-flight PRs. **PR #43 is a competing
+  milestone. The 2026-08-20 drift (five commits) was absorbed the same
+  day at L4L-16R (merge `29d67a7c`); two large in-flight PRs remain the
+  live exposure. **PR #43 is a competing
   iota-reduction design** touching 16 fork-modified files — if Mario
   merges it, the next reconciliation confronts `VEnv.pats`/`IsDefEq.pat`
   head-on against the fork's L4L-18B proof-carrying interface, and the
