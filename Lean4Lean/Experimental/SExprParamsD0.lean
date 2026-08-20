@@ -6966,21 +6966,27 @@ def d0DeltaRank (univs : Nat) :
     exact ⟨2, 0, by decide, d0ZeroCertR univs Gamma⟩
 
 /-- End-to-end D0a smoke theorem: the generated Nat fixture supplies every
-semantic certificate required by the experimental sort-injectivity bridge. -/
+semantic certificate required by the experimental sort-injectivity bridge.
+Conditional on the two L4L-16C′w leaf inputs at the fixture instance. -/
 theorem natSortInvS (univs : Nat) {Gamma : List VExpr} {u v : VLevel}
+    (piInv : @LRS.PiPathInv (natParams univs))
+    (linkRect : ∀ Γ, @LR.MajorLinkRect (natParams univs) Γ)
     (hGamma : OnCtx Gamma (natFinalEnv.IsType univs))
     (h : natFinalEnv.IsDefEqU univs Gamma (.sort u) (.sort v)) : u ≈ v := by
   letI : Params := natParams univs
   letI : Params.Semantic := natSemantic univs
-  exact VEnv.IsDefEqU.sort_invS hGamma h
+  exact VEnv.IsDefEqU.sort_invS piInv linkRect hGamma h
 
-/-- End-to-end D0b endpoint for the combined L4L-16/17 deliverable. -/
+/-- End-to-end D0b endpoint for the combined L4L-16/17 deliverable.
+Conditional on the two L4L-16C′w leaf inputs at the fixture instance. -/
 theorem d0SortInvS (univs : Nat) {Gamma : List VExpr} {u v : VLevel}
+    (piInv : @LRS.PiPathInv (d0Params univs))
+    (linkRect : ∀ Γ, @LR.MajorLinkRect (d0Params univs) Γ)
     (hGamma : OnCtx Gamma (d0Env.IsType univs))
     (h : d0Env.IsDefEqU univs Gamma (.sort u) (.sort v)) : u ≈ v := by
   letI : Params := d0Params univs
   letI : Params.Semantic := d0Semantic univs
-  exact VEnv.IsDefEqU.sort_invS hGamma h
+  exact VEnv.IsDefEqU.sort_invS piInv linkRect hGamma h
 
 /--
 info: 'Lean4Lean.SExpr.ParamsD0.d0SortInvS' depends on axioms: [propext,

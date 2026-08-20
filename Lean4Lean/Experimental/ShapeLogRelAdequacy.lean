@@ -4549,6 +4549,7 @@ change shape depth, while the already accumulated spine must only be lifted
 or enlarged, never projected. -/
 theorem LR.constDefEq
     {c : Name} {ls : List SLevel} {R : TShape → SExpr → Prop}
+    (piInv : LRS.PiPathInv) (hΓ₀ : Ctx.WF Γ₀)
     (hRmono : ∀ {m m' M}, m ≤ m' → R m' M → R m M)
     {n : Nat} {rargs : List (WShape n)} {mout : TShape}
     (hC : LE_Interp.Const c ls R rargs mout)
@@ -4642,7 +4643,7 @@ theorem LR.constDefEq
             hPiK.2 hp hxy.hasType.1 ((LR Γ₀).left hv)
           obtain ⟨uA, hAType⟩ := hAType
           have hAeqPi : Γ₀ ⊢ A ≡ .forallE B₁ F₁ : .sort uA :=
-            rA.defeq hAType
+            rA.defeq_of_piPathInv piInv hΓ₀ hAType
           have htailPi : Γ₀ ⊢
               (zs.foldr (fun a f => f.app a) (.const c ls)) ≡
               (zs'.foldr (fun a f => f.app a) (.const c ls)) :
@@ -7878,6 +7879,7 @@ reached iota leaf consumes `CoherentIotaLeafStep` at the witness's own
 seeds under the ambient substitution certificate.  Neither the global
 `iotaWitnessStep` obligation nor any same-depth adequacy is consumed. -/
 theorem LR.SelfAdequateConstStep.of_steps
+    (piInv : LRS.PiPathInv)
     (hΓ₀ : Ctx.WF Γ₀)
     (leafStep : LR.CoherentIotaLeafStep Γ₀)
     (defnStep : LR.ConstDefnDeepInstStep Γ₀) :
@@ -7954,7 +7956,7 @@ theorem LR.SelfAdequateConstStep.of_steps
                 (hTy.strong.subst W.left.toSubstEq).hasType.1
             have hTypePi : Γ₀ ⊢
                 mkInst ls ci.type ≡ .forallE A₁ A₂ : .sort u :=
-              hred.defeq hType₀
+              hred.defeq_of_piPathInv piInv hΓ₀ hType₀
             have hConstPi : Γ₀ ⊢ .const c ls : .forallE A₁ A₂ :=
               hTypePi.defeqDF (.const hreg hlen)
             have hAppTerm : Γ₀ ⊢
@@ -8025,7 +8027,7 @@ theorem LR.SelfAdequateConstStep.of_steps
               LR.PatternLeafDefEqAt.of_iota
                 (leafStep (depth + 1) hR hΓ₀ W pR cR lower k)
             simpa only [List.foldr_cons, List.foldr_nil] using
-              LR.constDefEq (fun le hr => hr.mono le)
+              LR.constDefEq piInv hΓ₀ (fun le hr => hr.mono le)
                 (hrec x₀ y₀ hmem₀) evalPat
                 (.cons hx₀ .nil) hAppLeaf
                 hAppTerm ⟨u₂, hAppType⟩ (.const hreg hlen) hAppSpineX hAppSpineY
@@ -8130,40 +8132,44 @@ theorem LR.SelfAdequateConstStep.of_steps
 /-- The complete constant self-adequacy producer, modulo the independently
 staged rank recursion and coherent iota leaf. -/
 theorem LR.SelfAdequateConstStep.of_deltaRank [Params.DeltaRank]
+    (piInv : LRS.PiPathInv)
     (hGamma : Ctx.WF Γ₀) (leafStep : LR.CoherentIotaLeafStep Γ₀)
     (restart : ∀ c : Name,
       LR.DeltaRankRestart Γ₀ (Params.DeltaRank.rank c)) :
     LR.SelfAdequateConstStep Γ₀ :=
-  LR.SelfAdequateConstStep.of_steps hGamma leafStep
+  LR.SelfAdequateConstStep.of_steps piInv hGamma leafStep
     (LR.ConstDefnDeepInstStep.of_deltaRank restart)
 
 /-- Assemble the self-adequacy half of the coherent Nat algebra from its
 two remaining leaf-shaped obligations and the conversion callback. -/
 theorem LR.CoherentSelfStep.of_leafSteps
+    (piInv : LRS.PiPathInv)
     (hΓ₀ : Ctx.WF Γ₀)
     (defeqStep : ∀ depth, LR.SelfAdequateDefeqStepAt Γ₀ depth)
     (leafStep : LR.CoherentIotaLeafStep Γ₀)
     (defnStep : LR.ConstDefnDeepInstStep Γ₀) :
     LR.CoherentSelfStep Γ₀ :=
   LR.coherentSelfStep_of_steps defeqStep hΓ₀
-    (LR.SelfAdequateConstStep.of_steps hΓ₀ leafStep defnStep)
+    (LR.SelfAdequateConstStep.of_steps piInv hΓ₀ leafStep defnStep)
 
 /-- The same assembly against the strictly smaller definitional-unfold
 obligation.  Together with `MajorChainFoldStep` this is the current minimal
 hypothesis inventory of the coherent self-adequacy half. -/
 theorem LR.CoherentSelfStep.of_leafStepsDeep
+    (piInv : LRS.PiPathInv)
     (hΓ₀ : Ctx.WF Γ₀)
     (defeqStep : ∀ depth, LR.SelfAdequateDefeqStepAt Γ₀ depth)
     (leafStep : LR.CoherentIotaLeafStep Γ₀)
     (deepStep : LR.ConstDefnDeepStepR Γ₀) :
     LR.CoherentSelfStep Γ₀ :=
-  LR.CoherentSelfStep.of_leafSteps hΓ₀ defeqStep leafStep
+  LR.CoherentSelfStep.of_leafSteps piInv hΓ₀ defeqStep leafStep
     (LR.ConstDefnDeepInstStep.of_deepStepR deepStep)
 
 /-- Derivation induction once the recursive constructor-major leaf has been
 supplied explicitly.  This is the non-circular adequacy core used by the
 level-indexed joint construction. -/
 theorem LR.adequacy_of_iotaWitnessStep
+    (piInv : LRS.PiPathInv)
     (iotaStep : LR.IotaWitnessStep Γ₀)
     (hΓ₀ : Ctx.WF Γ₀)
     (H : IsDefEqStrong Γ M N A)
@@ -8265,7 +8271,7 @@ theorem LR.adequacy_of_iotaWitnessStep
                   (hTy.subst W.left.toSubstEq).hasType.1
               have hTypePi : Γ₀ ⊢
                   mkInst ls ci.type ≡ .forallE A₁ A₂ : .sort u :=
-                hred.defeq hType₀
+                hred.defeq_of_piPathInv piInv hΓ₀ hType₀
               have hConstPi : Γ₀ ⊢ .const c ls : .forallE A₁ A₂ :=
                 hTypePi.defeqDF (.const h1 h2)
               have hAppTerm : Γ₀ ⊢
@@ -8338,7 +8344,7 @@ theorem LR.adequacy_of_iotaWitnessStep
                   (LE_Interp.Lower R) :=
                 LR.PatternLeafDefEqAt.of_iota (iotaStep hΓ₀ hRI)
               simpa only [List.foldr_cons, List.foldr_nil] using
-                LR.constDefEq (fun le hr => hr.mono le)
+                LR.constDefEq piInv hΓ₀ (fun le hr => hr.mono le)
                   (hrec x₀ y₀ hmem₀) evalPat
                   (.cons hx₀ .nil) hAppLeaf
                   hAppTerm ⟨u₂, hAppType⟩ (.const h1 h2) hAppSpineX hAppSpineY
@@ -8859,6 +8865,7 @@ root certificate cannot bound the leaf instances reached through `trans`
 or evaluator descent.  Whatever depth bound a leaf producer needs must
 come from its own registered-rule certificates. -/
 theorem LR.contextualAdequacyAtDepth_of_iotaSteps
+    (piInv : LRS.PiPathInv)
     (steps : ∀ d, LR.ContextualIotaWitnessStepAtDepth d) :
     ∀ d, LR.ContextualAdequacyAtDepth d := by
   intro d
@@ -8866,7 +8873,7 @@ theorem LR.contextualAdequacyAtDepth_of_iotaSteps
   | ind d ih =>
     intro Γ₀ hΓ₀
     intro n Γ ρ M N A B core m a H _hstrat hM hA hmem
-    exact LR.adequacy_of_iotaWitnessStep (steps d ih) hΓ₀ H hM hA hmem
+    exact LR.adequacy_of_iotaWitnessStep piInv (steps d ih) hΓ₀ H hM hA hmem
 
 /-- Contextual adequacy at every shape level from the complete depth
 tower: a strong equality stratifies its left endpoint at some finite
@@ -8886,10 +8893,11 @@ theorem LR.contextualAdequacyAt_of_adequacyAtDepth
 depth-indexed leaf family yields every level-indexed contextual adequacy
 package. -/
 theorem LR.contextualAdequacyAt_of_iotaSteps
+    (piInv : LRS.PiPathInv)
     (steps : ∀ d, LR.ContextualIotaWitnessStepAtDepth d) (n : Nat) :
     LR.ContextualAdequacyAt n :=
   LR.contextualAdequacyAt_of_adequacyAtDepth
-    (LR.contextualAdequacyAtDepth_of_iotaSteps steps) n
+    (LR.contextualAdequacyAtDepth_of_iotaSteps piInv steps) n
 
 /-! #### The conditional wrap of the joint iota leaf (L4L-16C′w)
 
@@ -9273,56 +9281,25 @@ theorem LR.iotaWitnessStep_of_piPathInv
       hlastPair.major.hasType.2
     exact (hfold hlastPair.major.hasType.1).1.cross
 
-/-- The active joint-leaf obligation.  Its body is intentionally isolated
-from `adequacy_of_iotaWitnessStep`: completing it may consume only the
-well-founded fixed-head and predecessor-uniqueness packages, never the final
-polymorphic adequacy theorem. -/
-theorem LR.iotaWitnessStep : LR.IotaWitnessStep Γ₀ := by
-  intro hΓ₀ ρ c ls R hR
-  intro nI rargsI rec major ctor arity rI mcapI
-    xsI ysI CHeadI AI outI outTyI hpatI hmatchI hrhsI hleafI
-    htermI hAIType hheadI hspineXI hspineYI houtI hAI
-  cases hmatchI with
-  | @app fPat nCtor head recShapes mrec aPat ctorHead
-      ctorShapes mctor hmfI hmaI =>
-    rcases hleafI with
-      ⟨majorX, recXs, majorY, recYs, majorShape, recShapesI,
-        majorTypeShape, resultShape, resultTypeShape,
-        hxs, hys, hrargs, houtEq, houtTyEq, hlastPair,
-        hpMajor, hresultType, htyMajor, hvMajor, halignedI, hPiI⟩
-    subst xsI
-    subst ysI
-    simp only [List.cons.injEq] at hrargs
-    rcases hrargs with ⟨hmajorShape, hrecShapes⟩
-    subst majorShape
-    subst recShapesI
-    subst outI
-    subst outTyI
-    have hctorHead : ctor = ctorHead := hmaI.varN_const_head
-    subst ctorHead
-    have hctorClass : Params.classify ctor =
-        some (.ctor ctorShapes.reverse.length) := by
-      simpa using hmaI.head_wf_eq (Params.pat_wf hpatI).2
-    have hmajorCtor := LR.DefEq.ctor'_inv hctorClass hpMajor hvMajor
-    have hrecargsI : LRS.CtorArgsDefEq (LR Γ₀)
-        recXs recYs recShapes :=
-      halignedI.args.tail
-    sorry
-
-/-- Main adequacy theorem, now a thin consumer of the isolated joint leaf. -/
+/-- Main adequacy theorem, now a thin consumer of the conditional joint
+leaf: the two leaf inputs `piInv` and `linkRect` are hypotheses, and
+`LR.iotaWitnessStep_of_piPathInv` closes everything else. -/
 theorem LR.adequacy (H : IsDefEqStrong Γ M N A)
     (hΓ₀ : Ctx.WF Γ₀)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ₀)
     (hM : LE_Interp ρ m.T M) (hA : LE_Interp ρ a.T A)
     (hmem : m.HasType a) :
     Adequate (n := n) Γ₀ Γ ρ M N A m a :=
-  LR.adequacy_of_iotaWitnessStep LR.iotaWitnessStep hΓ₀ H hM hA hmem
+  LR.adequacy_of_iotaWitnessStep piInv
+    (LR.iotaWitnessStep_of_piPathInv piInv linkRect) hΓ₀ H hM hA hmem
 
 /-- The polymorphic theorem supplies each individual level package.  Keeping
 this adapter separate is what lets the joint proof replace it with the
 strictly earlier package during well-founded recursion. -/
-theorem LR.adequacyAt (Γ₀ : List SExpr) (hΓ₀ : Ctx.WF Γ₀) (n : Nat) :
+theorem LR.adequacyAt (Γ₀ : List SExpr) (hΓ₀ : Ctx.WF Γ₀)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ₀) (n : Nat) :
     LR.AdequacyAt Γ₀ n :=
-  fun H hM hA hmem => LR.adequacy H hΓ₀ hM hA hmem
+  fun H hM hA hmem => LR.adequacy H hΓ₀ piInv linkRect hM hA hmem
 
 /-- Pi-head inversion from adequacy at one positive shape level.  Domain and
 codomain conversions are retained as paths because the weak judgment does
@@ -9349,10 +9326,11 @@ theorem forallE_whRed_l_of_adequacy
 
 theorem forallE_whRed_l
     (hΓ : Ctx.WF Γ)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ)
     (d : IsDefEqStrong Γ A₀ (SExpr.forallE B₁ F₁) (.sort s)) :
     ∃ B₀ F₀, Γ ⊢ A₀ ⤳* .forallE B₀ F₀ ∧ ∃ u v,
       TypeDefEqPath Γ B₀ B₁ u ∧ TypeDefEqPath (B₀ :: Γ) F₀ F₁ v :=
-  forallE_whRed_l_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ 1) d
+  forallE_whRed_l_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ piInv linkRect 1) d
 
 /-- Collapse path-valued Pi-head inversion using contextual raw type
 uniqueness.  The domain path supplies the typing needed to establish that
@@ -9382,10 +9360,11 @@ theorem forallE_inv_of_adequacy
 
 theorem forallE_inv
     (hΓ : Ctx.WF Γ)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ)
     (H : IsDefEqStrong Γ (SExpr.forallE A₀ B₀) (SExpr.forallE A₁ B₁) (.sort s)) :
     ∃ u v, TypeDefEqPath Γ A₀ A₁ u ∧
       TypeDefEqPath (A₀ :: Γ) B₀ B₁ v :=
-  forallE_inv_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ 1) H
+  forallE_inv_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ piInv linkRect 1) H
 
 /-- Ordinary Pi injectivity recovered from the path-valued adequacy result
 at the precise contextual-uniqueness boundary. -/
@@ -9407,9 +9386,10 @@ theorem sort_forallE_inv_of_adequacy
   fun H => have ⟨_, _, H⟩ := forallE_whRed_l_of_adequacy adequacy H
     nomatch WHNF.sort.whRedS H.1
 
-theorem sort_forallE_inv (hΓ : Ctx.WF Γ) :
+theorem sort_forallE_inv (hΓ : Ctx.WF Γ)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ) :
     ¬IsDefEqStrong Γ (.sort u) (SExpr.forallE A₁ B₁) (.sort s) :=
-  sort_forallE_inv_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ 1)
+  sort_forallE_inv_of_adequacy (n := 0) (LR.adequacyAt Γ hΓ piInv linkRect 1)
 
 /-- Sort injectivity: if two sorts are definitionally equal, their levels are equal. -/
 theorem sort_inv_of_adequacy
@@ -9470,20 +9450,22 @@ theorem JointStratifiedInversion.of_adequacy_and_typeUniq
     exact ⟨⟨uL, hAA, hAL⟩, vL, hBB, hBL, hBR⟩
 
 theorem sort_inv (hΓ : Ctx.WF Γ)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ)
     (d : IsDefEqStrong Γ (SExpr.sort u) (SExpr.sort v) V) : u = v :=
-  sort_inv_of_adequacy (k := 0) (LR.adequacyAt Γ hΓ 1) d
+  sort_inv_of_adequacy (k := 0) (LR.adequacyAt Γ hΓ piInv linkRect 1) d
 
 /-- Experimental end-to-end sort injectivity for `VExpr`, assuming the rewrite-rule
 infrastructure packaged by `SExpr.Params`. -/
 theorem _root_.Lean4Lean.VEnv.IsDefEqU.sort_invS
     [Params.Semantic]
+    (piInv : LRS.PiPathInv) (linkRect : ∀ Γ, LR.MajorLinkRect Γ)
     (hΓ : OnCtx Γ (Params.env.IsType Params.univs))
     (h : Params.env.IsDefEqU Params.univs Γ (.sort u) (.sort v)) : u ≈ v := by
   obtain ⟨A, h⟩ := h
   have hΓwf := (VEnv.CtxStrong.strong Params.henv hΓ).levelWF
   have hu : u.WF Params.univs := (h.levelWF hΓwf).1
   have hv : v.WF Params.univs := (h.levelWF hΓwf).2.1
-  have huv := SExpr.sort_inv (Ctx.WF.mkS hΓ)
+  have huv := SExpr.sort_inv (Ctx.WF.mkS hΓ) piInv (linkRect _)
     ((h.strong Params.henv hΓ).mkS)
   apply VLevel.equiv_def'.2
   rw [← SLevel.mk_val hu, ← SLevel.mk_val hv, huv]
