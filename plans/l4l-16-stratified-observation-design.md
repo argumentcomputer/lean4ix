@@ -61,6 +61,12 @@ What L3 **does not** cover:
   chain-wall repair left `PiPathInv` as the *single* residual
   (roadmap.md:708-715, SLR:11404-11416).
 
+> **2026-08-20:** the L3 residual above is dissolved — and additively,
+> contrary to the "not an additive change" assessment: the landed
+> `LRS.CtorFrame.toRectFrame` recovers the paired type shape at the
+> recoverable `.indTy` type shape, so no producer index upgrade was needed;
+> probeR13-rectframe is superseded by the landed form.
+
 **L3 verdict:** worth doing *if and when* the leaf's semantic content
 closes, as a mechanical cleanup of the frame layer; it closes nothing on
 the `PiPathInv` path and is not a lever on the milestone's open question.
@@ -336,12 +342,6 @@ loop at arbitrary abstraction domains; the *leaf's* chain-fold demands are
 constructor/registered-headed, so the registered-endpoint narrowing is a
 genuinely different, unrefuted question.
 
-**Single next action:** probe the registered-endpoint narrowing — restate
-the leaf's two `PiPathInv` call sites (`SpineWF.result_path`'s layers on
-constructor spines, SLR:11430; the `rootRed` residual's type paths,
-roadmap.md:712-715) as Pi inversion at registered-telescope endpoints,
-measure whether both sites fall inside the class, and attempt the
-per-declaration telescope induction for it.  If that class also escapes,
-the leaf's remaining cost is the full semantic content
-(sort/Pi-disjointness + standardization) with no structural shortcut left
-on the map.
+**Single next action:** *(executed — 2026-08-20 note)* the
+registered-endpoint narrowing was probed and measured; see
+`plans/l4l-16-registered-pi-design.md` (probeU).

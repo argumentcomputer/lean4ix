@@ -1,27 +1,8 @@
 # L4L-16E promotion map — executable checklist
 
-**Addendum (2026-08-15, later the same day, after checkpoints
-`7b8a1b5e`/`b6896de1`).** Line references below predate two deletions
-(SExpr.lean −48 lines, ShapeLogRelAdequacy.lean −171; the leaf sorry is
-now ~ADQ:8583) — re-locate by declaration name. Status deltas against
-this map: (i) `InferType.hasType`/`InferTypeS.hasType` are DELETED
-(zero consumers, verified), as are `InferTypeS.weakU_inv`,
-`LRS.iotaDefEq_of_exactAt`, `LR.iotaActions_of_exact`; SExpr.lean's
-sorry count is now 2. (ii) The "dead chain" claim for
-`WHRed(S).weakU_inv` was WRONG: `WHRedS.weakU_inv` is live via the
-proved `InferType.weakU_inv`'s app/forallE cases and
-`Experimental/LogRel.lean:210` (`LRIsType.weak'` stuck case) — the
-`.extra` sorry stays, correctly documented in-source. (iii)
-`WHRedS.defeq` live sites are now exactly 3, all adequacy-trunk
-(`constDefEq`, `SelfAdequateConstStep.of_steps`,
-`adequacy_of_iotaWitnessStep`) — the delete-and-migrate disposition
-(iv) is therefore moot until the leaf closes; the sites shed with it.
-(iv) The `CtorBundle.hu0` deletion (decision (iii) below) is REFUTED —
-see `plans/probes/probeA1-hu0.lean` and the completion plan's corrected
-record; the Prop wall needs a Matches/classification-level design.
-(v) The stratification lever for the leaf is machine-refuted:
-`plans/l4l-16-stratified-observation-design.md` +
-`plans/probes/probeT-stratpi.lean`.
+*(The 2026-08-15 same-day addendum was folded into the body on 2026-08-20;
+sorry counts below re-measured 2026-08-20.  Line references drift — always
+re-locate by declaration name.)*
 
 Produced 2026-08-15 by a read-only recon session over the working tree
 (all citations verified against the live sources; draft statements
@@ -36,7 +17,7 @@ draft them; it proves them (and re-pins their guards).
 
 ## (a) Co-deliverable dossiers
 
-### A1. `IsDefEqU.weakN_iff` — forward direction. Verdict: REAL WORK, open design. Top 16E risk.
+### A1. `IsDefEqU.weakN_iff` — forward direction. Verdict: see `plans/l4l-16-weakn-design.md` (research-grade; re-scope decision pending).
 
 - Statement exists at `Lean4Lean/Theory/Typing/UniqueTyping.lean:171-174`;
   the backward direction is proved (`h.weakN henv W`); the sole
@@ -134,9 +115,9 @@ requires zero sorries + stable API).
 
 | Module (current, Experimental/) | Suggested target | Notes |
 |---|---|---|
-| `SExpr.lean` | `Theory/Typing/SExpr.lean` | 4 live sorries must close/delete first: :3810 `WHRed.weakU_inv` `.extra`; :4033 `WHRedS.defeq` (superseded by `WHRedS.defeq_of_stratified_inversion` — delete/restate, migrate its two root-anchor consumers); :4136 `InferType.hasType`; :4202 `InferTypeS.hasType` |
-| `ShapeLogRel.lean` | `Theory/Typing/ShapeLogRel.lean` | live-sorry-free today |
-| `ShapeLogRelAdequacy.lean` | `Theory/Typing/ShapeLogRelAdequacy.lean` | 1 sorry (the 16C′ leaf) |
+| `SExpr.lean` | `Theory/Typing/SExpr.lean` | 2 live sorries (measured 2026-08-20) must close/delete first: :4206 `WHRed.weakU_inv` `.extra` (documented off-path, in-source); :4429 `WHRedS.defeq` (the gate-path admission — live sites all adequacy-trunk, they shed with the 16C′ leaf) |
+| `ShapeLogRel.lean` | `Theory/Typing/ShapeLogRel.lean` | zero live sorries (re-measured 2026-08-20) |
+| `ShapeLogRelAdequacy.lean` | `Theory/Typing/ShapeLogRelAdequacy.lean` | 1 sorry (`LR.iotaWitnessStep`, :8680 — the 16C′ leaf; re-measured 2026-08-20) |
 | `UniqueTyping.lean` | fold into the adequacy module, or rename (e.g. `SExprUniqueTyping.lean`) | FILENAME COLLISION with `Theory/Typing/UniqueTyping.lean`; holds one compat theorem `IsDefEqStrong.uniq_sort` |
 | `SExprParamsD0.lean` (and D1+) | `Verify/Environment/SExprParamsD0.lean` (or Tests) | imports Verify fixtures — cannot go to Theory/ (Theory-imports-Verify gate) |
 
@@ -231,19 +212,24 @@ with defer recommendation already in
    design pass early; `WHRed.weakU_inv` `.extra` (SExpr.lean:3810) is a
    prerequisite of any derivation-induction attempt and is currently an
    off-path deferral.
-3. Promotion is blocked on the 4 off-path SExpr.lean sorries (:3810,
-   :4033, :4136, :4202) — they do NOT close with the 16C′ leaf; they
-   need their own pre-promotion step.
+3. Promotion-blocker recount (2026-08-20): `SExpr.lean` now carries
+   exactly TWO sorries — `WHRed.weakU_inv` `.extra` (:4206, documented
+   off-path; needs its own pre-promotion step) and `WHRedS.defeq`
+   (:4429, the gate-path admission; its live sites are all
+   adequacy-trunk and shed with the 16C′ leaf).  The former four-sorry
+   list (:3810/:4033/:4136/:4202) is stale: `InferType.hasType`/
+   `InferTypeS.hasType` were deleted (zero consumers), as were
+   `InferTypeS.weakU_inv`, `LRS.iotaDefEq_of_exactAt`,
+   `LR.iotaActions_of_exact`.  `ShapeLogRel.lean` has zero live sorries;
+   `ShapeLogRelAdequacy.lean` has one (`LR.iotaWitnessStep`, :8680).
 4. SorryFrontier import-block regeneration at promotion (else silent
    audit-surface loss).
 5. `UniqueTyping.lean` filename collision; `Lean4Lean.Params` vs
    `VEnv.Params` near-collision first co-imports in the regenerated
    frontier.
-6. The instance-generalization step is implicit: `sort_invS` holds at
-   `[Params.Semantic]`, public `sort_inv` quantifies over arbitrary
-   `VEnv.WF env`. "Closes from the instances" requires the generic
-   `Params`/`Params.Semantic` construction from any WF history —
-   nowhere staged; decide at D4 exit whether it is D4's endpoint or a
-   named 16E step.
+6. The instance-generalization step: resolved by the design pass
+   `plans/l4l-16-generic-instance-design.md` — named successor milestone
+   L4L-16F ("live instance"); note its `hu0`-deletion recommendation has
+   since been refuted by probeA1 (`plans/probes/probeA1-hu0.lean`).
 7. Doc rot: "22→21" vs 17-at-full-exit (see (c)); completion-plan
    execution item 6 should point at the prepared digama note.

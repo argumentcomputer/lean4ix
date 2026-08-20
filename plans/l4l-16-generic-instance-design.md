@@ -32,6 +32,14 @@ independent walls**, two of which are owned by other milestones:
    (`hu0_impossible_at_prop`): under type uniqueness, *no* choice of
    `CtorBundle` can repair this — the failure is intrinsic, not a bad-bundle
    artifact.
+   **2026-08-20 note:** the repair this document recommends for this wall
+   (§5.1: delete `hu0` outright) was REFUTED 2026-08-15 by executed probe
+   `plans/probes/probeA1-hu0.lean` — the ADQ consumption site is free, but
+   `build_spine`'s post-deletion statement is FALSE for Prop-sorted
+   ctor-classified pattern-argument heads; `hu0` is the syntactic mirror of
+   `WShape.HasType.proofIrrel`'s `.indTy` non-Prop-sortedness requirement.
+   Resolving the Prop wall needs a Matches/classification-level design (a
+   Prop branch, or excluding Prop-recursor iota patterns from `Pat`).
 2. **Iota check discharge for parameters/indices** — `Semantic.iotaSite` must
    supply `IotaReductionSite.checked`; `gen.ruleCheck` emits one check per
    parameter and per result index; discharging them at a matched redex needs
@@ -353,6 +361,14 @@ and `proofIrrel` closes only rules whose *type* is a Prop, which fails for
 every large-eliminating Prop inductive (`Eq.rec`, `Acc.rec`, `False.rec`
 have Type-valued motives).
 
+> **2026-08-20:** the repair below is **REFUTED** — 2026-08-15, executed
+> probe `plans/probes/probeA1-hu0.lean`. The ADQ consumption site is indeed
+> free, but `build_spine`'s post-deletion statement is FALSE for Prop-sorted
+> ctor-classified pattern-argument heads: `hu0` is the syntactic mirror of
+> `WShape.HasType.proofIrrel`'s `.indTy` non-Prop-sortedness requirement.
+> Resolving the Prop wall needs a Matches/classification-level design (a
+> Prop branch, or excluding Prop-recursor iota patterns from `Pat`).
+
 **Recommended repair — and it is cheaper than both candidates in the D1 note.**
 The D1 record offers "typing-conditional `hu0`" or "restrict `Semantic.ctor`'s
 level quantification". Both add interface surface. **Simply delete `hu0`.**
@@ -497,8 +513,8 @@ All are typed in `plans/probes/probeG-generic-instance.lean` (green).
 | # | Obligation | Probe name | Difficulty | Depends on |
 |---|---|---|---|---|
 | **R0** | promotion is one instance wide | `sort_inv_of_generic` | **BANKED** | — |
-| **R1** | generic syntax transport (replaces ~1200 lines of D-ladder boilerplate) | `transportLevel`, `transportExpr`, `transportLevel_transportLevel` | **BANKED** | — |
-| **R2** | the per-step extension theorem | `Step`, `StepObligations`, `Semantic.step` | mechanical induction, ~1 week | R1 |
+| **R1** | generic syntax transport (replaces ~1200 lines of D-ladder boilerplate) | `transportLevel`, `transportExpr`, `transportLevel_transportLevel` | **LANDED 2026-08-15** (`Experimental/SExprTransport.lean`) | — |
+| **R2** | the per-step extension theorem | `Step`, `StepObligations`, `Semantic.step` | **LANDED 2026-08-15** (`Experimental/SExprGenericReplay.lean`, the generic iota replay engine) | R1 |
 | **R3** | `classify` + `pat_wf` from block certificates | `blockClassify`, `blockClassify_pat_wf` | needs new lemma (combinatorial) | — |
 | **R4** | `ExtSeparation` from the history | `extSeparation_intra`, `extSeparation_inter` | needs 6 new lemmas + `nodup_parts` visibility; pure bookkeeping | §4 gaps |
 | **R5** | `defn` rung at `uvars > 0` | `step_def` | small, mechanical | R2 |
@@ -508,8 +524,11 @@ All are typed in `plans/probes/probeG-generic-instance.lean` (green).
 | **R9** | generic `registered` tower descent + generic `iotaSite` | `genericInstance_of_WF'`, `step_induct` | the bulk (weeks) | R2–R6, R7, R8 |
 
 **Attackable today, with no interface decision and no other milestone:**
-R1 (done), R2, R3, R4, R5. Together these are the whole non-semantic half of
-the construction, and R1+R2 pay for themselves immediately on D2/D3/D4.
+R3, R4, R5. (R1 and R2 LANDED 2026-08-15 —
+`Experimental/SExprTransport.lean`, `Experimental/SExprGenericReplay.lean`,
+commit "experimental: land generic syntax transport and the generic iota
+replay engine".) Together with the landed R1+R2 these are the whole
+non-semantic half of the construction.
 
 **Blocked on a decision the 16C′ owner must take:** R6, R8.
 **Blocked on another milestone:** R7 (18A′).
@@ -547,7 +566,7 @@ the construction, and R1+R2 pay for themselves immediately on D2/D3/D4.
   promotion map's gate table needs that correction before execution.
 * **Add R1+R2 to the D-ladder now, ahead of D2.** They are banked/mechanical
   and they delete a repeated ~600-line-per-rung cost that D2, D3 and D4 would
-  otherwise each pay again.
+  otherwise each pay again. *(Executed — LANDED 2026-08-15.)*
 * **Raise §5.2 (iota check discharge) into the D2 line immediately.** D2's
   remaining work is "registry consumption along D1's template"; that template
   never exercised `checked`, and List's parameter check will stop it. Better
@@ -555,7 +574,8 @@ the construction, and R1+R2 pay for themselves immediately on D2/D3/D4.
 * **Put R6 (`hu0` deletion) in front of the 16C′ owner as a one-line
   decision** with the banked evidence: the Prop witness is free, so the
   repair costs a case split at two sites and no new interface surface; and it
-  simultaneously unblocks D1's parked quotient half.
+  simultaneously unblocks D1's parked quotient half. *(2026-08-20: REFUTED
+  by executed probe `plans/probes/probeA1-hu0.lean` — see the §5.1 note.)*
 
 **Two-strikes note.** No formalization attempt in this pass hit a second
 strike: R0, R1 and the two `hu0` facts went through on the first attempt; the

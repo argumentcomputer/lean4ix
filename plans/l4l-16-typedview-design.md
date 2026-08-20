@@ -305,12 +305,11 @@ remains is standardization/Church–Rosser-grade normalization for the typing
 judgment, which the interderivability results price at the leaf's own
 strength, outside the fixpoint).  There is no option (C).
 
-**Single next action:** no further probe on this leaf.  Update roadmap.md's
-16C′ section with verdict (ii) and the completed three-axis map
-(probeT/probeU/probeV), and take the milestone decision between (A)
-parameterizing on `LRS.PiPathInv` and (B) scheduling the semantic
-normalization work — recording, either way, that `CtorChainT` (probeV Part
-1) is the interface the leaf should consume the moment the leaf's Prop
-lands, since it makes the entire residual `LRS.PiPathInvReg`-shaped.  Do
-not re-open: stratification (probeT), sort narrowing (banked), registered
-path/derivation induction (U8 + V8), or view retention (V4/V5).
+**Single next action:** no further probe on this leaf.  *(2026-08-20 note:
+the roadmap update and the (A)/(B) decision are DONE — the roadmap took
+(A), `LRS.PiPathInv` as the single named open input, on 2026-08-15.)*
+`CtorChainT` (probeV Part 1) remains the interface the leaf should consume
+the moment the leaf's Prop lands, since it makes the entire residual
+`LRS.PiPathInvReg`-shaped.  Do not re-open: stratification (probeT), sort
+narrowing (banked), registered path/derivation induction (U8 + V8), or
+view retention (V4/V5).

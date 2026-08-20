@@ -322,11 +322,8 @@ scoped and additive-or-not-decidable in one probe:
   `LRS.piPathInv_iff_parRedSDefeq` has already shown is interderivable with the
   leaf — i.e. the leaf's cost is unchanged and the map is complete.
 
-**Single next action:** probe the *typed constructor view* — restate
-`LRS.CtorView` with a retained `IsDefEq Γ M X A`, check whether
-`LRS.CtorChain`/`toChain`/`foldRaw_of_anchorDiscipline` still close over it,
-and measure whether every producer of a view on the leaf path (in particular
-the `whr`/`unwhr` closure laws of `LogRel`, SLR:10064-10065, in **both** directions)
-can supply the typing.  Do **not** re-open the stratification axis (probeT) or
+**Single next action:** *(executed — 2026-08-20 note)* the
+typed-constructor-view probe ran; see `plans/l4l-16-typedview-design.md`
+(probeV).  Do **not** re-open the stratification axis (probeT) or
 the sort narrowing (banked); and do not re-attempt `LRS.PiPathInvReg` by any
 path-structural induction (U8).

@@ -7,6 +7,12 @@ v4.33 base at merge checkpoint `99a7f8ae7b89`. Upstream review is deferred to
 the L4L-20C PR series. This note is the mandatory pre-implementation design
 record for ledger entry D019.
 
+> **Trimmed 2026-08-20:** the "Exhaustive consumer inventory", "Checker
+> closure and fixtures", and "Confluence and standardization" sections were
+> deleted — all landed at L4L-15B. This note is retained as the D019
+> justification artifact (descriptor/registry/rule specification and the
+> removal path) for the L4L-20C PR series.
+
 ## Scope and kernel behavior
 
 Lean gives eta conversion to nonrecursive, single-constructor inductives with
@@ -132,81 +138,6 @@ typing is compared with the registered `const familyName ... |>.appN params`
 type via the existing strong unique-typing/inversion path. The reconstruction
 endpoint is constructor-headed. This keeps the existing L4L-16/L4L-17
 frontier visible rather than embedding injectivity in the descriptor.
-
-## Confluence and standardization
-
-Structure eta is represented in `NormalEq` by left and right reconstruction
-forms, analogously to function eta. The congruence payload relates the major
-terms and every parameter/projector occurrence at one registered descriptor.
-The descriptor naturality laws provide weakening and substitution directly.
-
-The parallel-reduction compatibility proof must cover these cases explicitly:
-
-1. constructor major versus generated projector iota;
-2. nested reconstruction, contracting either layer first;
-3. beta/delta/iota reduction inside the major and its repeated projector
-   occurrences;
-4. dependent later projector types after an earlier projection changes;
-5. proof fields and Prop-valued structures; and
-6. overlap with a registered `.extra` rule under the generic `[Params]`
-   pattern interface.
-
-No new `sorry`, axiom, or final-result field is added to `Params`. The generic
-development may gain primitive descriptor coverage/disjointness premises,
-but the actual triangle/join statements remain proved theorems. The concrete
-checked-view bridge must discharge those premises from constructor-headed
-syntax and the deterministic projector programs.
-
-`WHRed` does not contract structure eta: as in Lean's equality procedure it
-is a conversion rule, not weak-head computation. Head standardization gains
-only the cases needed to transport the enlarged `NormalEq` relation.
-
-## Exhaustive consumer inventory
-
-Before the rule lands, the direct constructor-aligned source inventory is:
-
-| File | Direct aligned sites | Required work |
-|---|---:|---|
-| `Typing/Basic.lean` | 1 | rule and subject-reduction-facing aliases |
-| `Typing/Lemmas.lean` | 9 | closure, levels, mono, weak/inst/context transport |
-| `Typing/Strong.lean` | 12 | strong relation, translations, inversion |
-| `Typing/NestedTransport.lean` | 1 | nested environment transport |
-| `Typing/ChurchRosser.lean` | 26 | `NormalEq`, parallel joins, CR translation |
-| `Typing/HeadReduction.lean` | 12 | standardization interaction |
-
-The compiler-driven audit also covers dependent consumers in
-`UniqueTyping`, `Injectivity`, `InductiveLemmas`, `Projection`, and Verify.
-Every failed exhaustive match after adding the constructor is treated as an
-inventory defect, not silenced with a wildcard.
-
-Environment-schema consumers are `VEnv`, `Typing.Lemmas` (`Ordered`),
-`Typing.Env`/`EnvLemmas`, Verify's `TrEnv'`/`VEnvAt` construction, and the few
-explicit `VEnv.LE` records in Verify environment extension proofs.
-
-## Checker closure and fixtures
-
-`ProjectionArtifact` and `ProjectionReady` retain the exact registered eta
-descriptor for any host family/constructor accepted by
-`isNonRecStructure`. This supplies both `StructureEtaReady` and descriptor
-membership. `VEnv.HasStructureEta` is then a theorem derived from
-`IsDefEq.structEta`, not a new assumption. The already proved
-`tryEtaStructCore.WF_of_structureEta` and
-`isDefEqUnitLike.WF_of_structureEta` become the bodies of the unconditional
-roots.
-
-Focused executable/Theory fixtures cover:
-
-- a dependent parameterized structure and neutral major;
-- a parameterized zero-field structure;
-- a proof field;
-- a Prop-valued one-constructor inductive; and
-- recursive, multi-constructor, and indexed negative cases.
-
-Exact `#print axioms` guards cover descriptor registration,
-`VStructEta.WF.rebuild_hasType`, the primitive equality step, its
-Church--Rosser translation, and both checker roots. The L4L-15B checkpoint may
-inherit already classified frontier dependencies, but its source diff adds
-no `sorry` and the compiled frontier may not grow.
 
 ## Removal and upstream path
 
