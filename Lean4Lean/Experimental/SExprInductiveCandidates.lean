@@ -54,6 +54,62 @@ the `Pattern.IotaReductionSite` assembly, and the stuck facts from the
 The head-dictionary and classification facts *are* discharged here at the
 production `d2Params`/`d0Params` instances (`d2Discharge`, `d0Discharge`),
 so the seam-facing normalization theorems fire on the real environments.
+
+*The N′1 record (see the `-- ### L4L-16N′1` sections below).*  Landed:
+
+* **Stuck majors, unconditional.**  `IsMajorPremise.stuckApp` /
+  `stuck_major_kripke` prove the `stuckT`/`stuckL`/`stuckN` field families
+  outright from the pattern-uniqueness suite (`IsMajorPremise.whnf`,
+  `Neutral.whnf`/`.noMatches`, `Params.pat_not_varS`), and the assemblers
+  `TreeRules.ofSteps`/`NatRules.ofSteps` close the stuck half of both
+  structures, reducing their inhabitation to the step families alone.
+* **The generated `WHRed.extra` steps.**  `Pattern.IotaReductionSite.whRed`
+  turns any reduction-site certificate into the untyped operational step;
+  `d0IotaWHRed` fires it at the production D0 instance for both Nat rules
+  outright (the landed `d0IotaSite` supplies the site from the typed-redex
+  premises the `Params.Semantic.iotaSite` interface already carries), and
+  `d2IotaWHRed`/`d2IotaWHRed_ofBlockStep`/`d2TreeIotaWHRed`/
+  `d2NatEntryIotaWHRed` fire it at the production D2 instance for all
+  seven rules — the five Tree/TreeList steps
+  conditional on `D2TreeCheckedStep` (the 18A′-gated `Pattern.Check`
+  discharge, routed through `D2CheckedStep.of_tree` exactly as
+  `d2SortInvSExact`'s regime already is; no regime change) plus the
+  per-rule capture-spine/collapse data that the generic engine takes as its
+  interface, while the two inherited Nat steps need no check premise at all
+  (`d2NatChecked`).
+* **Membership ⇒ `KripkeNormalizes`.**  `InCandTree.kripkeNormalizes` (and
+  the `TreeList`/`Nat` versions) prove the `Base.normalizes` field as a
+  theorem for candidate members, from `InCand*.lift'` + `toWHResult`; the
+  `Base`-assembly corollaries (`InCandTree.toBase`, …) take the judgmental
+  edge as a hypothesis — no typed-trace content is produced here, per the
+  betaFire boundary.  Instance forms: `d2InCandTree_kripkeNormalizes`,
+  `d0InCandNat_kripkeNormalizes`.
+
+*The N′1 finding (pinned).*  The one-step step fields of the landed
+`TreeRules`/`NatRules` above are **mock-shaped**: at a generated registry
+the unique available step out of a live redex is `WHRed.extra`, whose
+target is the applied right tower `r.1.applyS` — the registered closed
+lambda tower applied to the ordered captures (commons, then constructor
+fields; `captureArgs`).  For the `node`/`branch`/`cons`/`succ` shapes the
+landed single-step target (`(minorNd·ts)·(recL·ts)`, …) differs from every
+such tower application — its outermost argument *contains* the last capture
+instead of being it — so by `WHRed.determ` the two targets exclude each
+other (`tower_target_ne_nodeShape`/`oneStep_nodeShape_refuted`, stated at
+the representative `node` shape; `succ`/`cons` fail the same size test and
+`branch`'s lambda-packaged argument likewise).  Separately, the fields
+quantify over *raw* `SExpr` arguments, while a `Pattern.Action` carries
+`sound : IsDefEq`, so a step at an untypable argument has no certificate to
+fire.  The production interface is therefore the site step plus the
+untyped multi-beta collapse: `whRedS_foldl_app`/`whRedS_foldl_beta` walk
+the applied tower down one binder at a time, and the generated tower
+bodies (`BlockGenerationChecked.rule`) instantiate to exactly the landed
+contractum shapes — the captured minor premise applied to the fields and
+the lambda-packaged recursive calls — whose per-rule computation is the
+Lane-D-adjacent mechanical volume N′2 consumes.  Threading the
+typed/candidate argument restriction through the membership induction is
+N′2/N′3 content, where the landed `TreeRules`/`NatRules` engines remain
+the abstract interface.  A fully concrete premise-free production step is
+exhibited (`d0DefWHRed`: `d0def ⤳ Nat.zero` at `d0Params`, `sorryAx`-free).
 -/
 
 set_option maxHeartbeats 1000000
@@ -1056,6 +1112,659 @@ end Reducibility
 end SExpr
 end Lean4Lean
 
+/-! # L4L-16N′1 — real-rule steps, stuck facts, membership normalization
+
+The rung's generic layer: the stuck-major families, the site-to-step
+adapter, the untyped multi-beta collapse, the one-step shape finding, and
+membership normalization.  The production-instance layer follows in the
+next section. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-! ### L4L-16N′1 stuck majors
+
+A recursor spine missing only its major premise, applied to a neutral term,
+is weak-head normal: the spine itself is normal (`IsMajorPremise.whnf`),
+the neutral major is normal (`Neutral.whnf`) and matches no registered
+pattern (`Neutral.noMatches`), a major-premise spine is never a lambda
+(`IsMajorPremise.lam`), and no registered pattern is a bare variable
+(`Params.pat_not_varS`).  This is the entire production content of the
+`TreeRules.stuckT`/`stuckL` and `NatRules.stuckN` fields, discharged
+unconditionally and uniformly — no per-rule case analysis. -/
+
+/-- The pointed stuck-major fact. -/
+theorem _root_.Lean4Lean.SExpr.IsMajorPremise.stuckApp
+    {Γ : List SExpr} {f t : SExpr}
+    (hmaj : IsMajorPremise f) (hn : Neutral t) : WHNF Γ (f.app t) := by
+  intro e' hred
+  cases hred with
+  | app h1 => exact hmaj.whnf _ h1
+  | major _ h2 => exact hn.whnf _ h2
+  | beta => exact absurd hmaj IsMajorPremise.lam
+  | extra action =>
+    cases action.matched with
+    | var => exact Params.pat_not_varS action.pat
+    | app _ harg => exact hn.noMatches harg
+
+/-- The stuck-major family, in exactly the Kripke field shape of
+`TreeRules.stuckT`/`stuckL` and `NatRules.stuckN`. -/
+theorem stuck_major_kripke {Γ : List SExpr} {f : SExpr}
+    (hmaj : IsMajorPremise f) :
+    ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      ∀ {t : SExpr}, Neutral t → WHNF Δ ((f.lift' ρ).app t) := by
+  intro Δ ρ _ t hn
+  exact (IsMajorPremise.lift'.2 hmaj).stuckApp hn
+
+/-- Assemble a `TreeRules` pack from its five step families alone: the two
+major-premise facts are inputs and both stuck families are discharged by
+`stuck_major_kripke` — the stuck half of the structure is closed
+unconditionally.  What the production registry can and cannot supply for
+the five step inputs is the subject of the one-step finding below. -/
+def TreeRules.ofSteps {H : TreeHeads} {Γ : List SExpr} {α : SExpr}
+    {recT recL minorLf minorNd minorBr minorNl minorCs : SExpr}
+    (recT_major : IsMajorPremise recT) (recL_major : IsMajorPremise recL)
+    (leafStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ x,
+      WHRed Δ ((recT.lift' ρ).app (leafApp H (α.lift' ρ) x))
+        ((minorLf.lift' ρ).app x))
+    (nodeStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts,
+      WHRed Δ ((recT.lift' ρ).app (nodeApp H (α.lift' ρ) ts))
+        (((minorNd.lift' ρ).app ts).app ((recL.lift' ρ).app ts)))
+    (branchStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ f,
+      WHRed Δ ((recT.lift' ρ).app (branchApp H (α.lift' ρ) f))
+        (((minorBr.lift' ρ).app f).app
+          (.lam (α.lift' ρ)
+            (((recL.lift' ρ).lift).app ((f.lift).app (.bvar 0))))))
+    (nilStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      WHRed Δ ((recL.lift' ρ).app (nilApp H (α.lift' ρ)))
+        (minorNl.lift' ρ))
+    (consStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t ts,
+      WHRed Δ ((recL.lift' ρ).app (consApp H (α.lift' ρ) t ts))
+        (((((minorCs.lift' ρ).app t).app ts).app
+          ((recT.lift' ρ).app t)).app ((recL.lift' ρ).app ts))) :
+    TreeRules H Γ α where
+  recT := recT
+  recL := recL
+  minorLf := minorLf
+  minorNd := minorNd
+  minorBr := minorBr
+  minorNl := minorNl
+  minorCs := minorCs
+  recT_major := recT_major
+  recL_major := recL_major
+  stuckT := stuck_major_kripke recT_major
+  stuckL := stuck_major_kripke recL_major
+  leafStep := leafStep
+  nodeStep := nodeStep
+  branchStep := branchStep
+  nilStep := nilStep
+  consStep := consStep
+
+/-- `Nat` side of the step-family assembler: the stuck field is discharged
+by `stuck_major_kripke`. -/
+def NatRules.ofSteps {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {recN minorZ minorS : SExpr}
+    (recN_major : IsMajorPremise recN)
+    (zeroStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      WHRed Δ ((recN.lift' ρ).app (.const zeroC ls)) (minorZ.lift' ρ))
+    (succStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ n,
+      WHRed Δ ((recN.lift' ρ).app ((SExpr.const succC ls).app n))
+        (((minorS.lift' ρ).app n).app ((recN.lift' ρ).app n))) :
+    NatRules zeroC succC ls Γ where
+  recN := recN
+  minorZ := minorZ
+  minorS := minorS
+  recN_major := recN_major
+  stuckN := stuck_major_kripke recN_major
+  zeroStep := zeroStep
+  succStep := succStep
+
+/-! ### L4L-16N′1 the generated step, generically
+
+A reduction-site certificate immediately yields the *untyped* operational
+step: `WHRed.extra` on `IotaReductionSite.action`.  The one-step target is
+the applied right tower `r.1.applyS m1 m2` — the registered closed lambda
+tower applied to the ordered captures — NOT the collapsed minor-premise
+form; the collapse from the tower to the landed contractum shapes is the
+pure-syntax multi-beta run below (per-rule instantiation of the generated
+tower bodies is the mechanical volume Lane D already scopes). -/
+
+/-- **A generated reduction site steps.**  The untyped operational content
+of a site certificate: one `WHRed.extra` step from the matched redex to the
+applied registered right tower. -/
+theorem _root_.Lean4Lean.Pattern.IotaReductionSite.whRed
+    {rec ctor : Name} {major arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r}
+    {Γ : List SExpr} {recLs ctorLs : List SLevel}
+    {recArgs ctorArgs : List SExpr} {majorTerm A : SExpr}
+    {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {captureTyping : Pattern.CaptureTyping Γ mcap captureType}
+    (site : Pattern.IotaReductionSite Γ r rule recLs ctorLs recArgs ctorArgs
+      majorTerm A mcap captureType captureTyping) :
+    WHRed Γ
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const rec recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const ctor ctorLs)))
+      (r.1.applyS recLs mcap) :=
+  .extra site.action
+
+/-- Weak-head reduction is a congruence under a left application spine. -/
+theorem whRedS_foldl_app {Γ : List SExpr} :
+    ∀ (args : List SExpr) {e e' : SExpr}, WHRedS Γ e e' →
+      WHRedS Γ (args.foldl (fun (f a : SExpr) => f.app a) e)
+        (args.foldl (fun (f a : SExpr) => f.app a) e')
+  | [], _, _, H => H
+  | _ :: args, _, _, H => whRedS_foldl_app args H.app
+
+/-- One beta contraction under a left application spine: the engine of the
+applied-tower collapse.  Iterating it (once per tower binder, computing the
+instantiation each time) walks the applied right tower down to the fully
+collapsed contractum — the landed `TreeRules`/`NatRules` target shapes. -/
+theorem whRedS_foldl_beta {Γ : List SExpr} (A e a : SExpr)
+    (args : List SExpr) :
+    WHRedS Γ
+      (args.foldl (fun (f a : SExpr) => f.app a) ((SExpr.lam A e).app a))
+      (args.foldl (fun (f a : SExpr) => f.app a) (e.inst a)) :=
+  whRedS_foldl_app args (.tail .rfl .beta)
+
+/-! ### L4L-16N′1 the one-step shape finding
+
+The landed `TreeRules`/`NatRules` step fields demand a *single* `WHRed`
+step landing on the fully collapsed contractum.  At a generated registry
+the unique step out of a live redex is `WHRed.extra` onto the applied right
+tower, whose outermost argument is the last capture — a subterm of the
+redex — never the packaged recursive call the collapsed `node`/`succ`/
+`cons` shapes carry in that position.  `WHRed.determ` therefore refutes the
+landed one-step field at any redex whose actual step lands on a tower
+application: the landed one-step structures describe the mock registry of
+probe Z16, and the production interface is `IotaReductionSite.whRed` plus
+the multi-beta collapse above. -/
+
+/-- The collapsed `node` contractum shape is never a one-argument
+application ending in the bare capture: its outermost argument `recL·ts`
+strictly contains `ts`. -/
+theorem tower_target_ne_nodeShape (X mNd recL ts : SExpr) :
+    X.app ts ≠ (mNd.app ts).app (recL.app ts) := by
+  intro h
+  injection h with h1 h2
+  have hsize := congrArg sNodes h2
+  simp only [sNodes] at hsize
+  omega
+
+/-- Determinism turns the shape difference into a refutation: a redex whose
+real one-step target is a tower application ending in the capture `ts`
+admits no one-step reduction to the landed `nodeStep` contractum shape.
+The `succ` and `cons` shapes fail the same size test, and `branch`'s
+lambda-packaged second argument likewise differs from every capture. -/
+theorem oneStep_nodeShape_refuted {Γ : List SExpr}
+    {e X mNd recL ts : SExpr} (htower : WHRed Γ e (X.app ts)) :
+    ¬WHRed Γ e ((mNd.app ts).app (recL.app ts)) :=
+  fun h => tower_target_ne_nodeShape X mNd recL ts (htower.determ h)
+
+/-! ### L4L-16N′1 membership ⇒ `KripkeNormalizes`
+
+The assumed `Base.normalizes` field becomes a theorem for candidate
+members: lift stability (`InCand*.lift'`) carries membership into every
+future context, and the seam observation (`toWHResult`) normalizes it
+there.  The type index of `WHResult` is phantom, so the statement holds at
+every displayed type — exactly the shape `Reducibility.KripkeNormalizes`
+demands.  The `Base` corollaries take the judgmental edge as a hypothesis:
+no typed-trace content is derived here (betaFire boundary). -/
+
+/-- Members of the `Tree` candidate Kripke-normalize at every displayed
+type: `Base.normalizes` as a theorem. -/
+theorem InCandTree.kripkeNormalizes {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H)
+    (hM : InCandTree H P Γ α M) (hN : InCandTree H P Γ α N) :
+    KripkeNormalizes Γ M N A := by
+  intro Δ ρ W
+  exact ⟨(hM.lift' hP W).toWHResult C, (hN.lift' hP W).toWHResult C⟩
+
+/-- `TreeList` side of membership Kripke normalization. -/
+theorem InCandTreeList.kripkeNormalizes {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H)
+    (hM : InCandTreeList H P Γ α M) (hN : InCandTreeList H P Γ α N) :
+    KripkeNormalizes Γ M N A := by
+  intro Δ ρ W
+  exact ⟨(hM.lift' hP W).toWHResult C, (hN.lift' hP W).toWHResult C⟩
+
+/-- `Nat` calibration of membership Kripke normalization. -/
+theorem InCandNat.kripkeNormalizes {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {M N A : SExpr}
+    (hz : Params.classify zeroC = some (.ctor 0))
+    (hs : Params.classify succC = some (.ctor 1))
+    (hM : InCandNat zeroC succC ls Γ M)
+    (hN : InCandNat zeroC succC ls Γ N) :
+    KripkeNormalizes Γ M N A := by
+  intro Δ ρ W
+  exact ⟨(hM.lift' W).toWHResult hz hs, (hN.lift' W).toWHResult hz hs⟩
+
+/-- `Base` assembly for `Tree`-candidate members: the edge is supplied as a
+hypothesis (betaFire boundary — this rung derives no typed traces), and the
+normalization half is the theorem above. -/
+theorem InCandTree.toBase {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (edge : IsDefEqStrong Γ M N A)
+    (hM : InCandTree H P Γ α M) (hN : InCandTree H P Γ α N) :
+    Base Γ M N A :=
+  ⟨edge, InCandTree.kripkeNormalizes hP C hM hN⟩
+
+/-- `TreeList` side of the `Base` assembly. -/
+theorem InCandTreeList.toBase {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (edge : IsDefEqStrong Γ M N A)
+    (hM : InCandTreeList H P Γ α M) (hN : InCandTreeList H P Γ α N) :
+    Base Γ M N A :=
+  ⟨edge, InCandTreeList.kripkeNormalizes hP C hM hN⟩
+
+/-- `Nat` calibration of the `Base` assembly. -/
+theorem InCandNat.toBase {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {M N A : SExpr}
+    (hz : Params.classify zeroC = some (.ctor 0))
+    (hs : Params.classify succC = some (.ctor 1))
+    (edge : IsDefEqStrong Γ M N A)
+    (hM : InCandNat zeroC succC ls Γ M)
+    (hN : InCandNat zeroC succC ls Γ N) :
+    Base Γ M N A :=
+  ⟨edge, InCandNat.kripkeNormalizes hz hs hM hN⟩
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! # L4L-16N′1 — the production instances
+
+The step families at the real environments.  D0 discharges outright: the
+landed `d0IotaSite` builds the full reduction site from the typed-redex
+premises that the `Params.Semantic.iotaSite` interface already carries (the
+mechanical capture-spine and collapse content is landed inside it), and the
+Nat checks are discharged.  D2 fires for all seven rules of its inventory:
+the five Tree/TreeList steps conditional on `D2TreeCheckedStep` — the
+18A′-gated `Pattern.Check` discharge, routed through
+`D2CheckedStep.of_tree` exactly as `d2SortInvSExact`'s regime — plus the
+per-rule capture-spine/β-collapse hypotheses that the generic engine
+(`SExpr.iotaSiteOf`) takes as its interface; the two inherited Nat steps
+need no check premise (`d2NatChecked`).  The D0 theorems are the discharged
+premise-form witnesses for the conditional D2 shape. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+/-- **The two Nat `WHRed.extra` steps at the production D0 instance,
+discharged.**  Every premise is part of the landed
+`Params.Semantic.iotaSite` interface; the site is `d0IotaSite` and the step
+is its action. -/
+theorem d0IotaWHRed (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+      {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      (_rule : Pattern.IotaRule r)
+      (captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (_captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (_hGamma : ParamsD0.D0ContextValid univs Gamma)
+      (_typing : Pattern.IotaTyping Gamma rec ctor recLs ctorLs
+        recArgs ctorArgs majorTerm A)
+      (_matched : (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs))) recLs mcap)
+      (_redexSelf : IsDefEq Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs)))
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs))) A)
+      (_AType : ∃ u, IsDefEq Gamma A A (.sort u)),
+      WHRed Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs)))
+        (r.1.applyS recLs mcap) := by
+  letI : Params := ParamsD0.d0Params univs
+  intro rec major ctor arity r Gamma A majorTerm recLs ctorLs recArgs
+    ctorArgs mcap rule captureType captureTyping hGamma typing matched
+    redexSelf AType
+  exact WHRed.extra (ParamsD0.d0IotaSite univs rule captureType
+    captureTyping hGamma typing matched redexSelf AType).action
+
+/-- **The seven D2 `WHRed.extra` steps, generically over the registry.**
+Conditional on the 18A′-gated check discharge (`D2TreeCheckedStep`, lifted
+to the full inventory by `D2CheckedStep.of_tree` — the two Nat branches
+discharge internally) and on the rule's own capture-spine/β-collapse data,
+which is the generic engine's interface.  The level-arity field is proved
+internally (`d2IotaRule_levelsLength`). -/
+theorem d2IotaWHRed (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+      {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      (rule : Pattern.IotaRule r)
+      (_captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (_hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (_typing : Pattern.IotaTyping Gamma rec ctor recLs ctorLs
+        recArgs ctorArgs majorTerm A)
+      (_matched : (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs))) recLs mcap)
+      (_hspine : SpineWF Gamma (SExpr.mkInst recLs rule.df.type)
+        (rule.capturePaths.map mcap) A)
+      (_hcollapse : IsDefEq Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs)))
+        ((rule.capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs rule.df.lhs)) A),
+      WHRed Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs)))
+        (r.1.applyS recLs mcap) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro rec major ctor arity r Gamma A majorTerm recLs ctorLs recArgs
+    ctorArgs mcap captureType rule captureTyping hGamma typing matched
+    hspine hcollapse
+  have hchecked : ParamsD2.D2CheckedStep univs :=
+    ParamsD2.D2CheckedStep.of_tree univs checked
+  have hck := hchecked rule.pat captureTyping hGamma typing matched
+  exact WHRed.extra (SExpr.iotaSiteOf (ParamsD2.d2Replay univs) rule
+    captureTyping hGamma typing matched
+    (ParamsD2.d2IotaRule_levelsLength univs rule typing) hspine hcollapse
+    hck.choose hck.choose_spec.1 hck.choose_spec.2).action
+
+/-- The bundle-conditioned form: with the full `D2BlockStepExact` premise —
+exactly `d2SortInvSExact`'s conditioning — the per-rule capture-spine and
+collapse hypotheses discharge internally, and the D2 statement becomes the
+precise conditional analogue of the discharged `d0IotaWHRed` (modulo the
+`redexSelf`/`AType` inputs D2's engine route does not consume). -/
+theorem d2IotaWHRed_ofBlockStep (univs : Nat)
+    (h : ParamsD2.D2BlockStepExact univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+      {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      (_rule : Pattern.IotaRule r)
+      (_captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (_hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (_typing : Pattern.IotaTyping Gamma rec ctor recLs ctorLs
+        recArgs ctorArgs majorTerm A)
+      (_matched : (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs))) recLs mcap),
+      WHRed Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const ctor ctorLs)))
+        (r.1.applyS recLs mcap) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro rec major ctor arity r Gamma A majorTerm recLs ctorLs recArgs
+    ctorArgs mcap captureType rule captureTyping hGamma typing matched
+  exact d2IotaWHRed univs h.checked rule captureTyping hGamma typing
+    matched (h.captureSpine rule hGamma typing matched)
+    (h.lhsCollapse rule hGamma typing matched)
+
+/-- **The five Tree/TreeList `WHRed.extra` steps, pointed at the literal
+block entries.**  `hentry` ranges over exactly `TreeGen.flatCtors[0]?` …
+`[4]?` — `Tree.leaf`, `Tree.node`, `Tree.branch`, `TreeList.nil`,
+`TreeList.cons` — and the descriptor is the canonical
+`d2TreeIotaRule univs hentry`, so the registered equation and capture
+inventory compute.  Conditional exactly as `d2IotaWHRed`. -/
+theorem d2TreeIotaWHRed (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {i : Nat} {constructor : VInductDecl.NormalizedBlockCtor}
+      (hentry : ParamsD2.TreeGen.flatCtors[i]? = some constructor)
+      {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern constructor).toPattern).Path → SExpr}
+      (_captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (_hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (_typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName constructor)
+        constructor.ctor.raw.name recLs ctorLs
+        recArgs ctorArgs majorTerm A)
+      (_matched : ((ParamsD2.TreeGen.rulePattern constructor).toPattern).MatchesS
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName constructor) recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs))) recLs mcap)
+      (_hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs hentry).df.type)
+        ((ParamsD2.d2TreeIotaRule univs hentry).capturePaths.map mcap) A)
+      (_hcollapse : IsDefEq Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName constructor) recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs hentry).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs hentry).df.lhs)) A),
+      WHRed Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName constructor) recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs)))
+        ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure hentry).applyS
+          recLs mcap) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+    ctorArgs mcap captureType captureTyping hGamma typing matched
+    hspine hcollapse
+  exact d2IotaWHRed univs checked (ParamsD2.d2TreeIotaRule univs hentry)
+    captureTyping hGamma typing matched hspine hcollapse
+
+/-- **The two inherited Nat `WHRed.extra` steps at the D2 instance, pointed
+at the literal entries, with no check premise.**  The Nat checks are
+discharged (`d2NatChecked`); what remains conditional is only the rule's
+capture-spine/β-collapse data, which cannot transport down from D0 (the
+D2-instance typings may mention the block's constants) and is the generic
+engine's interface. -/
+theorem d2NatEntryIotaWHRed (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {i : Nat} {constructor : VInductDecl.NormalizedBlockCtor}
+      (hentry : ParamsD0.NatGeneration.flatCtors[i]? = some constructor)
+      {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+      {mcap captureType :
+        ((ParamsD0.NatGeneration.rulePattern constructor).toPattern).Path →
+          SExpr}
+      (_captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (_hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (_typing : Pattern.IotaTyping Gamma
+        (ParamsD0.NatGeneration.ruleRecName constructor)
+        constructor.ctor.raw.name recLs ctorLs
+        recArgs ctorArgs majorTerm A)
+      (_matched :
+        ((ParamsD0.NatGeneration.rulePattern constructor).toPattern).MatchesS
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName constructor)
+              recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs))) recLs mcap)
+      (_hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2NatEntryIotaRule univs hentry).df.type)
+        ((ParamsD2.d2NatEntryIotaRule univs hentry).capturePaths.map mcap) A)
+      (_hcollapse : IsDefEq Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName constructor)
+              recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs)))
+        (((ParamsD2.d2NatEntryIotaRule univs hentry).capturePaths.map
+            mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2NatEntryIotaRule univs hentry).df.lhs)) A),
+      WHRed Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName constructor)
+              recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs)))
+        ((ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+            hentry).applyS recLs mcap) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+    ctorArgs mcap captureType captureTyping hGamma typing matched
+    hspine hcollapse
+  have hck := ParamsD2.d2NatChecked univs (.mk hentry)
+    (Gamma := Gamma) (recLs := recLs) (mcap := mcap)
+  exact WHRed.extra (SExpr.iotaSiteOf (ParamsD2.d2Replay univs)
+    (ParamsD2.d2NatEntryIotaRule univs hentry)
+    captureTyping hGamma typing matched
+    (ParamsD2.d2IotaRule_levelsLength univs
+      (ParamsD2.d2NatEntryIotaRule univs hentry) typing)
+    hspine hcollapse
+    hck.choose hck.choose_spec.1 hck.choose_spec.2).action
+
+/-- A fully concrete, premise-free production `WHRed.extra` step: the D0
+environment's registered definition rule fires operationally,
+`d0def ⤳ Nat.zero`, in every context.  The `.extra` step mechanism the
+iota corollaries above run is therefore nonvacuously exhibited at a
+production instance with no hypotheses at all; the iota corollaries' own
+premise bundles are the landed `Params.Semantic.iotaSite` interface,
+exercised end-to-end by the D-ladder's semantic bridges
+(`d0Semantic`/`d2Semantic`). -/
+theorem d0DefWHRed (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ Gamma : List SExpr,
+      WHRed Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ``Nat.zero []) := by
+  letI : Params := ParamsD0.d0Params univs
+  intro Gamma
+  let r : (Pattern.const ParamsD0.d0DefVal.name).RHS ×
+      (Pattern.const ParamsD0.d0DefVal.name).Check :=
+    (.fixed ParamsD0.d0DefVal.value ParamsD0.d0DefClosed, .true)
+  let action : Pattern.Action Gamma r
+      (.const ParamsD0.d0DefVal.name []) [] Empty.elim
+      (.const ``Nat []) := {
+    pat := ParamsD0.D0Pat.defn
+    matched := by
+      refine cast ?_ (@Pattern.MatchesS.const (ParamsD0.d0Params univs)
+        ParamsD0.d0DefVal.name [])
+      congr 1
+      funext path
+      exact Empty.elim path
+    dfs := []
+    defeqs := rfl
+    checked := by simp
+    sound := by
+      have H := @IsDefEq.extra (ParamsD0.d0Params univs)
+        ParamsD0.d0DefVal.toDefEq Gamma [] VEnv.addDefEq_self rfl
+      change IsDefEq Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ``Nat.zero []) (.const ``Nat []) at H
+      exact H }
+  have step := WHRed.extra action
+  change WHRed Gamma (.const ParamsD0.d0DefVal.name [])
+    (.const ``Nat.zero []) at step
+  exact step
+
+/-! ### The production membership-normalization instances -/
+
+/-- The literal D2 head dictionary at one level instantiation. -/
+def d2TreeHeads (univs : Nat)
+    (l : @SLevel (ParamsD2.d2Params univs)) :
+    @TreeHeads (ParamsD2.d2Params univs) :=
+  @TreeHeads.mk (ParamsD2.d2Params univs) ``Tree.leaf ``Tree.node
+    ``Tree.branch ``TreeList.nil ``TreeList.cons [l]
+
+/-- The literal D2 head dictionary classifies at the production instance. -/
+theorem d2TreeHeads_classified (univs : Nat)
+    (l : @SLevel (ParamsD2.d2Params univs)) :
+    @TreeClassified (ParamsD2.d2Params univs) (d2TreeHeads univs l) := by
+  letI : Params := ParamsD2.d2Params univs
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
+/-- Membership ⇒ Kripke normalization at the production D2 instance: for
+members of the block candidates over the real environment,
+`Base.normalizes` is a theorem. -/
+theorem d2InCandTree_kripkeNormalizes (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ (l : SLevel) {P : CtxPred} {Γ : List SExpr} {α M N A : SExpr},
+      KripkeDomain P →
+      InCandTree (d2TreeHeads univs l) P Γ α M →
+      InCandTree (d2TreeHeads univs l) P Γ α N →
+      KripkeNormalizes Γ M N A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro l P Γ α M N A hP hM hN
+  exact InCandTree.kripkeNormalizes hP (d2TreeHeads_classified univs l)
+    hM hN
+
+/-- `TreeList` side of the production D2 membership normalization. -/
+theorem d2InCandTreeList_kripkeNormalizes (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ (l : SLevel) {P : CtxPred} {Γ : List SExpr} {α M N A : SExpr},
+      KripkeDomain P →
+      InCandTreeList (d2TreeHeads univs l) P Γ α M →
+      InCandTreeList (d2TreeHeads univs l) P Γ α N →
+      KripkeNormalizes Γ M N A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro l P Γ α M N A hP hM hN
+  exact InCandTreeList.kripkeNormalizes hP (d2TreeHeads_classified univs l)
+    hM hN
+
+/-- Membership ⇒ Kripke normalization at the production D0 instance. -/
+theorem d0InCandNat_kripkeNormalizes (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {ls : List SLevel} {Γ : List SExpr} {M N A : SExpr},
+      InCandNat ``Nat.zero ``Nat.succ ls Γ M →
+      InCandNat ``Nat.zero ``Nat.succ ls Γ N →
+      KripkeNormalizes Γ M N A := by
+  letI : Params := ParamsD0.d0Params univs
+  intro ls Γ M N A hM hN
+  exact InCandNat.kripkeNormalizes rfl rfl hM hN
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
 /-! ## Axiom pins
 
 The generic development stays inside the accepted Experimental baseline:
@@ -1162,3 +1871,323 @@ info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0Discharge' depends on axioms: [pro
 -/
 #guard_msgs in
 #print axioms d0Discharge
+
+/-! ### L4L-16N′1 pins
+
+The generic N′1 layer stays inside the accepted Experimental baseline.  The
+production step corollaries additionally inherit, verbatim, the closures of
+the landed machinery they fire: the generic engine's recorded `sorryAx`
+(through `SExpr.typeUniq` → `VEnv.IsDefEq.uniq`, the 16C′ leaf that
+`d0SortInvS`/`d2SortInvSExact` already carry) and the D-ladder fixtures'
+documented `native_decide` observations — contributed by those modules, not
+by this one's reasoning. -/
+
+/-- info: 'Lean4Lean.SExpr.IsMajorPremise.stuckApp' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.SExpr.IsMajorPremise.stuckApp
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.stuck_major_kripke' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms stuck_major_kripke
+
+/-- info: 'Lean4Lean.Pattern.IotaReductionSite.whRed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.Pattern.IotaReductionSite.whRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.whRedS_foldl_app' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms whRedS_foldl_app
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.whRedS_foldl_beta' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms whRedS_foldl_beta
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.tower_target_ne_nodeShape' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms tower_target_ne_nodeShape
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.oneStep_nodeShape_refuted' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms oneStep_nodeShape_refuted
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandTree.kripkeNormalizes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandTree.kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandTreeList.kripkeNormalizes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandTreeList.kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandNat.kripkeNormalizes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandNat.kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandTree.toBase' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandTree.toBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandTreeList.toBase' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandTreeList.toBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandNat.toBase' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandNat.toBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0IotaWHRed' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0IotaWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2IotaWHRed' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2IotaWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2TreeIotaWHRed' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2TreeIotaWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2NatEntryIotaWHRed' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2NatEntryIotaWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2TreeHeads_classified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2TreeHeads_classified
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2InCandTree_kripkeNormalizes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2InCandTree_kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2InCandTreeList_kripkeNormalizes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2InCandTreeList_kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0InCandNat_kripkeNormalizes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0InCandNat_kripkeNormalizes
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0DefWHRed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0DefWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.TreeRules.ofSteps' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms TreeRules.ofSteps
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.NatRules.ofSteps' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms NatRules.ofSteps
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2IotaWHRed_ofBlockStep' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2IotaWHRed_ofBlockStep
