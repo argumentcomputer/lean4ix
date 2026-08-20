@@ -83,13 +83,13 @@ required for the final release; they can be reached in separate milestones.
 
 | Fact | Value |
 |---|---|
-| Ladder position | **L4L-16C′w active** — the conditional wrap of the re-cut 16C′. The 2026-08-15 decision (A) re-cut 16C′ as a conditional closure parameterized on the single named Prop `LRS.PiPathInv` after machine-checked probes closed every structural axis to the leaf (§5 banked-refutations block); the semantic content that discharges the Prop is now its own scoped milestone **L4L-16N** (§5). L4L-18B (interface split, ledger D020) and the former L4L-17 merge-in stand as before; 16A/16B′ complete at `quyyrlks`/`pxluxmvm`; 16D0/D1 complete and D2 landed-conditional at `06f13e02` (generic replay engine + canonicalized obligations; `D2TreeCheckedStep` and D1-quot are 16N/16F-gated) |
+| Ladder position | **L4L-16R next** (integration-only upstream reconcile), then the lane phase (§5). **L4L-16C′w completed 2026-08-20** at checkpoint `e73d29fd` with the full §6 gate + Experimental green: the 16C′ conditional closure is executed — `Experimental/` carries zero sorry tokens and zero `stop`-hidden admissions, and every gate endpoint (`sort_invS`, `adequacy`, the inversion trio's SExpr forms, `uniq_sort`) is conditional on the two named leaf inputs `LRS.PiPathInv` and `LR.MajorLinkRect` (the second surfaced by the 2026-08-20 leaf-proof measurement), both discharged at 16N-N5, all measuring exactly `[propext, Classical.choice, Quot.sound]`. The semantic content that discharges the inputs is milestone **L4L-16N** (§5). L4L-18B (D020) stands; 16D0/D1 complete and D2 landed-conditional (`D2TreeCheckedStep` and D1-quot are 16N/16F-gated) |
 | Current formalization source | published `jcb/formalization2` = local bookmark = `06f13e02`; descends through the L4L-18B checkpoint (jj `oluxtqyk`) from the L4L-15B checkpoint `7c1e89fc` |
 | Parent lineage | the L4L-15B implementation descends from the v4.33 reconciliation merge `99a7f8ae7b89` (second parent: digama `upstream/master` `b292275c`); Lean on v4.33.0 final, lean4-nix on `argumentcomputer/lean4-nix` (upstream still pins v4.33.0-rc2 — ledger D018 stands, re-verified 2026-08-20) |
 | Fixed `master` baseline | `1a16b72d2e35932a82aa501beb29ef2c3d072580` — local `master` bookmark. The v4.33 reconciliation merged digama `upstream/master` `b292275c` as its second parent without moving `master`; `origin/master`'s one-commit advance (`715bfaff`) is already absorbed content |
 | Remote drift (re-scanned 2026-08-20: `gh api` + `git fetch upstream`, remote-tracking refs only) | digama master is **five** commits past the merged `b292275c`, tip `e0e3f6bc`: stage-2 replay perf (clean-apply), the level-algorithm enable (half-absorbed; residue = the `geq → geq'` flip in `checkConstructors`), the `lazyDeltaProjReduction` restructure (moderate; the fork's already-proved `reduceProj.WF` must reshape onto the `reduceProjCore` split — and can likely discharge upstream's new `reduceProjCore.WF` sorry, an upstream-contribution opportunity), the K-target phase alignment + divergences doc, and the self-contained `Theory/LevelSat.lean` (coNP-hardness; clean-apply). In-flight PRs that raise the cost of waiting: **#43** (third-party iota-reduction formalization, base = `b292275c`, 16 of 20 files collide with fork-modified files, 12 `IOTA-TODO` sorries incl. the CR `.pat` case, unreviewed by Mario) and **#32** (+24k-line HasPrimitives verification overlapping the fork's D017 Tier-V debt); **#27** would prove two of the fork's three forbidden cached-field axioms. Decision analysis + 2026-08-20 addendum in the now-tracked `plans/l4l-16-boundary-digama-drift.md`: **reconcile all five at the next checkpoint boundary as integration-only L4L-16R** (§5) |
-| Trust frontier | exactly 16 sorried proof declarations, one token each (10 Tier V, 6 Tier R; the `NormalEq.parRed` `constDF` half closed 2026-08-15, its remaining token is the `appDF`×`.extra` case) plus six kernel-rejection recovery declarations — 22 compiled allowlist entries — and 34 custom-axiom declarations; all pinned by exact audits. `Experimental/` carries exactly 3 live sorry tokens (`LR.iotaWitnessStep` ADQ:8680 — the gate-path leaf; `SExpr.WHRedS.defeq` :4429 — gate-path, subsumed by the leaf; `SExpr.WHRed.weakU_inv` :4206 — documented off-path) plus dead scratch files scheduled for deletion at L4L-16R. Every mainline sorry has a named closure route in §5.0 |
-| Gates | §6 requires the complete gate green before any publication and `06f13e02` is published; the last full §6 narrative is banked at the L4L-18B checkpoint, and the next full-gate evidence rebanks at the L4L-16C′w checkpoint |
+| Trust frontier | exactly 16 sorried proof declarations, one token each (10 Tier V, 6 Tier R; the `NormalEq.parRed` `constDF` half closed 2026-08-15, its remaining token is the `appDF`×`.extra` case) plus six kernel-rejection recovery declarations — 22 compiled allowlist entries — and 34 custom-axiom declarations; all pinned by exact audits. `Experimental/` carries **zero** sorry tokens and zero `stop`-hidden admissions since the 16C′w wrap (2026-08-20): the former three tokens closed by conditionalization on the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`) and by the E3 chain deletion, and the token-carrying scratch prototypes were deleted (jj-recoverable). Every mainline sorry has a named closure route in §5.0 |
+| Gates | the full §6 gate plus the Experimental build is green on the committed checkpoint `e73d29fd` (2026-08-20): Theory/Verify, the 22-entry frontier audit OK, the 212-job default build, the 138-job Experimental build, whitespace, `nix build` (both targets), `nix flake check` all-passed, `nix fmt`. Publication of the 16C′w checkpoint is unblocked; `origin/jcb/formalization2` still points at `06f13e02` until pushed |
 
 ### 2.1 What is green
 
@@ -370,18 +370,17 @@ below has a named closure route and milestone in §5.0.
 | Checker verification (Tier V, 10) | `Verify/Environment.lean` x2 (`addDecl.WF` — only its `inductDecl` case — and `addQuot.WF`, whose upstream v4.33 proof was vacuous); `Boundaries.lean` x1 (`checkPrimitiveDef.WF`); `Extension.lean` x5 (the D017 readiness transports at :274/:355/:439/:522/:587 — verified to share one `ProjectionReady ∧ StructureEtaReady` transport argument across declaration kinds); `Verify/TypeChecker/WHNF.lean` x1 (`reduceRecursor.WF`); `InductiveFixtures.lean` x1 (`aliasFormerAlignmentRun` — pure v4.33 elaborator-shape repair, statement true) |
 
 All Tier V entries are lane/L4L-19 territory; the eight added at the v4.33
-reconciliation are classified in ledger row D017. The `Experimental/` gate
-path carries exactly two admissions (`LR.iotaWitnessStep`,
-`SExpr.WHRedS.defeq`) plus one documented off-path sorry
-(`SExpr.WHRed.weakU_inv`); L4L-16C′w takes Experimental to zero tokens by
-conditionalizing on `LRS.PiPathInv`. Two audit blindspots are on record with
-scheduled mitigations: `Experimental/LogRel.lean` hides five admissions
-behind `stop` tactics (= `repeat sorry`, invisible to source greps) and
-`DomainTheory.lean` one more — the frontier audit's `surfacePrefixes` must
-be extended before any Experimental module is promoted (owned by L4L-16E) —
-and the `Thierry.lean`/`Thierry2.lean`/`LogRel.lean` scratch prototypes
-(40 sorries, ~70 axioms between them) plus the dead `NormalEq.lean`/
-`ParallelReduction.lean` stubs are deletion candidates owned by L4L-16R.
+reconciliation are classified in ledger row D017. `Experimental/` has
+carried zero sorry tokens and zero `stop`-hidden admissions since the
+16C′w wrap (2026-08-20): the gate-path admissions closed by
+conditionalization on the named leaf inputs (`LRS.PiPathInv`,
+`LR.MajorLinkRect`), the off-path `weakU_inv` chain and the
+token-carrying scratch prototypes were deleted (all jj-recoverable; the
+W4 `Pattern.Action` content re-enters at 18S). Standing mitigation from
+the old `stop`-blindspot record: the frontier audit's `surfacePrefixes`
+must be extended before any Experimental module is promoted (owned by
+L4L-16E), so hidden admissions can never enter the audited surface
+unseen.
 
 Non-sorry debt:
 
@@ -612,7 +611,7 @@ and fallbacks in the owning milestone entry).
 
 | # | Sorried declaration | Closes at | Route | Class |
 |---|---|---|---|---|
-| R1 | `IsDefEqU.sort_inv` (`Injectivity.lean:12`) | L4L-16X (instances), L4L-16F (public form) | `sort_invS` fires unconditionally once 16N-N5 discharges `LRS.PiPathInv`; the instance wiring (`d0SortInvS` … `d2SortInvSExact`) is in place; the bare-`VEnv.WF` public form comes from the 16F generic instance | engineering after 16N |
+| R1 | `IsDefEqU.sort_inv` (`Injectivity.lean:12`) | L4L-16X (instances), L4L-16F (public form) | `sort_invS` fires unconditionally once 16N-N5 discharges the leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`); the conditional wiring (`d0SortInvS` … `d2SortInvSExact`) is in place since 16C′w; the bare-`VEnv.WF` public form comes from the 16F generic instance | engineering after 16N |
 | R2 | `IsDefEqU.forallE_inv_stratified` (`Injectivity.lean:21`) | L4L-16X | literally the leaf — `piPathInv_iff_parRedSDefeq` identifies any proof of this statement with a proof of `LRS.PiPathInv`; reflection to the `VEnv` statement runs through the kernel-checked `AdequacyAt`/`mk`-at-`EqUpToLevels` interfaces | engineering after 16N |
 | R3 | `IsDefEqU.sort_forallE_inv` (`Injectivity.lean:34`) | L4L-16X | the SExpr disjointness block is already proved sorry-free (`ShapeLogRel.lean:14996-15501`, 48 results); reflection only — cheapest of the trio | engineering after 16N |
 | R4 | `IsDefEqU.weakN_iff` (`UniqueTyping.lean:174`, forward) | L4L-18S | SST route per `plans/l4l-16-weakn-design.md`: W0–W3 proved (probeE2, corrected dependency direction); W4 is the `Pattern.Action`-at-`:↑` repackaging decision; residual risk concentrated in W5+W6 (coupled `NormalEq`/per-depth-CR cores) | research, contained |
@@ -624,56 +623,20 @@ and fallbacks in the owning milestone entry).
 | V4 | `checkPrimitiveDef.WF` (`Boundaries.lean:35`) | Lane V, #32-gated | upstream PR #32 (+24k lines) verifies exactly this recognizer; absorb and adapt if Mario merges it, prove in-fork (M.WF-style run proof producing `PrimitiveResult`) if it stalls past the 18A′ checkpoint | engineering |
 | V5 | `reduceRecursor.WF` (`Verify/TypeChecker/WHNF.lean:8`) | L4L-19A | selected rule/match/checks/RHS translation/result typing from certified generated metadata via `pat_wf` (sheds its transitional closure at 16X) and the block-certificate pattern surface; quot branch against the quot lemmas; nested branch needs the σ̂ β-collapse bridge plus `NestedBlockCertificate` pattern facts | engineering, multi-session |
 | V6 | `aliasFormerAlignmentRun` (`InductiveFixtures.lean:7808`) | L4L-16R | pure repair of a true closed-run statement whose `build.eq_def` stepping no longer elaborates on v4.33; fold into the reconcile session (same elaborator-repair flavor) | certain |
-| E1 | `LR.iotaWitnessStep` (ADQ; the file's one sorry) | wrap at L4L-16C′w; discharge at 16N-N5 | **conditional theorem proved 2026-08-20**: `iotaWitnessStep_of_piPathInv (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ₀)` at exactly `[propext, Classical.choice, Quot.sound]` — the measurement added the second named leaf input `MajorLinkRect` (the fold algebra's `exact` field standalone), machine-characterized as unclosable from `piInv` + the landed transport surface (lift-image-only `LiftEquiv`, `mono`/`HasType` coherence at `lam`/`forallE`, level counting) and as `FixedHeadResult`-class semantic content; both inputs discharge at 16N-N5, with `lift_ctor_inv`/`CtorFrame.shape_ctor`/`CtorSpineDefEq.cons_inv` pre-banked for that discharge | wrap done; switchover mechanical; discharge is 16N |
-| E2 | `SExpr.WHRedS.defeq` (`SExpr.lean:4429`) | L4L-16C′w | not separate work: `WHRedS.defeq_of_piPathInv` is landed; migrate the call sites (measured 2026-08-20: four in four declarations — `LR.constDefEq`, which also gains a missing `Ctx.WF Γ₀`, `SelfAdequateConstStep.of_steps`, `adequacy_of_iotaWitnessStep`, and the `SExpr.WHRedS.crDefEq` wrapper, which is deleted outright since it lives upstream of `PiPathInv` and has zero consumers), delete the sorried general form | certain |
-| E3 | `SExpr.WHRed.weakU_inv` `.extra` case (`SExpr.lean:4206`, off-path) | L4L-16C′w | measured 2026-08-20: not a `PiPathInv` problem and not worth conditionalizing — the consumer chain (`WHRedS.weakU_inv` → `InferType.weakU_inv` → the dead `weak'_inv` + `LogRel.lean`) closes under deletion once `LogRel.lean` goes, so the wrap deletes the whole chain; the W4 `Pattern.Action`-at-`:↑` content re-enters at 18S when actually needed | certain |
 
 The six remaining allowlist entries are deliberate kernel-rejection fixture
 recoveries, not debt; L4L-19C reduces the allowlist to exactly those.
 
-### Metatheory closure (L4L-16C′w–L4L-18S)
+### Metatheory closure (L4L-16R–L4L-18S)
 
-**L4L-16C′w — conditional wrap (active).** The two mechanical
-obligations of the 2026-08-15 re-cut **landed 2026-08-20** (commit
-`5414d63d`), both probe-first with a correction each: (a) the literal
-"`RectFrame` at the rec-app observation" is machine-refuted
-(`RectFrame.tyShape_rigid` + a moving-family witness — the rec-app
-observation moves its type shape, which the landed frame forbids by
-design); the honest instance is the additive widening
-`LRS.RecAppFrame`/`LRS.RecAppSync` (`.rect` composes by type with
-`iotaDefEqRect_of_ctorExactAt`; `CtorFrame` factors through unchanged);
-(b) the dominance layer's ∀-`outTyP` producer hypothesis was
-machine-proved undischargeable as stated (vacuity bug: any inhabitant
-forced `out.T ≤ bot` under call sites assuming the negation) and is
-repaired with an `out.HasType outTyP` premise; the general List-indexed
-producer `FixedHeadTerminalDominance.of_layers` and the
-`forces_headLevel` necessity corollaries are landed. The conditional leaf theorem also
-**landed 2026-08-20**: `iotaWitnessStep_of_piPathInv` is proved additively
-at the standard clean closure, with the measurement surfacing the second
-named leaf input `LR.MajorLinkRect Γ₀` (see the E1 row — the conditional
-boundary is the input pair, both 16N-N5-discharged). Remaining wrap work,
-in order: (1) the mechanical switchover per the 2026-08-20 edit map —
-switch the one consumer to the conditional theorem, delete the sorried
-leaf, thread the leaf inputs through the 22 downstream declarations
-(16 ADQ, 1 UniqueTyping, 5 D-ladder endpoints, which introduce their
-`Params` via `letI` and need the instance spelled explicitly; match each
-declaration's generality for `linkRect`), execute the E2/E3 rows, and
-delete the scratch set `{Thierry, Thierry2, LogRel, DomainTheory,
-MoreStepIndexed, NormalEq, ParallelReduction}` (verified import-leaves) —
-taking `Experimental/` to zero sorry tokens and zero `stop`-hidden
-admissions; (2) re-measure the D-ladder `#guard_msgs` pins and bank the
-conditional gate endpoint at `[propext, Classical.choice, Quot.sound]`.
-Everything already banked stays banked: the depth tower,
-`SelfAdequateConstStep`, `CoherentFixedHeadStep`, the chain-wall repair
-(`CtorRetype`/`CtorSpineTypeUniqPath`), `MajorChainAnchorStep`, and the
-registered-narrowing consumption interface (`PiPathInvReg`,
-`regSpine_result_uniq`, `CtorChainT`).
-*Exit:* Experimental sorry-token count 0; every conditional endpoint
-carries the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`)
-explicitly; measured closures pinned; checkpoint published.
+The former 16C′ experimental admissions are closed as of the 16C′w
+checkpoint `e73d29fd` (2026-08-20): `Experimental/` carries zero sorry
+tokens, and the gate endpoints are conditional on the two named leaf
+inputs `LRS.PiPathInv` and `LR.MajorLinkRect`, both discharged at
+16N-N5. The remaining sorries are exactly the 16 mainline rows above.
 
-**L4L-16R — v4.33-drift reconciliation (integration-only).** Immediately
-after 16C′w, per the 2026-08-20 addendum in
+**L4L-16R — v4.33-drift reconciliation (integration-only; next).** The
+next checkpoint after the completed 16C′w, per the 2026-08-20 addendum in
 `plans/l4l-16-boundary-digama-drift.md` (superseding its 2026-08-14 defer
 recommendation: the tree is clean, and in-flight PRs #43/#32 would stack
 large colliding deltas on the current five-commit drift). Contents, one
