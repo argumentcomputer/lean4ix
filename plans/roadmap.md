@@ -84,7 +84,7 @@ required for the final release; they can be reached in separate milestones.
 
 | Fact | Value |
 |---|---|
-| Ladder position | **Lane R halted at L4L-16N/N2 on 2026-08-20** (§5): both authorized termination measures fail on the checked Tree/TreeList block (`L4L16NFailure.treeBranch_primaryMeasure_fails`, `tree_familyOrdinalFallback_false`), activating the recorded "halt and report; no third fallback" rule. N0/N1 are banked; N3–N5 did not run. The L4L-16C′w conditional regime therefore persists: `LRS.PiPathInv` and `LR.MajorLinkRect` remain explicit inputs. Lane V and the independent part of Lane D may continue; L4L-16X has no funded predecessor until a new normalization milestone is approved. Full record: `plans/l4l-16n-failure-report.md`. **L4L-16C′w completed 2026-08-20** (checkpoint `e73d29fd` pre-rebase; full §6 gate + Experimental green), and **L4L-16R completed 2026-08-20** (merge `29d67a7c`). L4L-18B (D020) stands; 16D0/D1 complete and D2 remains conditional |
+| Ladder position | **Lane R halted at L4L-16N/N2 on 2026-08-20** (§5): both authorized termination measures fail on the checked Tree/TreeList block (`L4L16NFailure.treeBranch_primaryMeasure_fails`, `tree_familyOrdinalFallback_false`), activating the recorded "halt and report; no third fallback" rule. N0/N1 are banked; N3–N5 did not run. The L4L-16C′w conditional regime therefore persists: `LRS.PiPathInv` and `LR.MajorLinkRect` remain explicit inputs. **The successor is approved and probe-validated (2026-08-20, same day): L4L-16N′** — normalization by mutual-inductive membership candidates, whose rung-0 evidence `plans/probes/probeZ16-indcand.lean` proves the exact killed `Tree.branch` transition by membership-derivation induction (no measure, no rank) with positivity settled on the kernel-accepted class; Lane R re-opens there, and L4L-16X queues behind N′4. Full halt record: `plans/l4l-16n-failure-report.md`. **L4L-16C′w completed 2026-08-20** (checkpoint `e73d29fd` pre-rebase; full §6 gate + Experimental green), and **L4L-16R completed 2026-08-20** (merge `29d67a7c`). L4L-18B (D020) stands; 16D0/D1 complete and D2 remains conditional |
 | Current formalization source | **`jcb/formalization3`** — the former `jcb/formalization2` line was squash-merged into `dev` as PR #4 (`3d1390a`, tree-equal to `06f13e02` modulo repo housekeeping), PR #5 ("chore: Fix warnings", 34 Theory/Verify files + `warn.sorry` frontier annotations + flake churn) landed on top (`4844eda4`), and the branch was deleted on origin (2026-08-18). The five 16C′w-era commits were segment-rebased onto `origin/dev` `4844eda4` on 2026-08-20 (one trivial `result-1` conflict; Lake gates + 22-entry frontier re-verified green on the rebased line); pre-squash history remains recoverable locally |
 | Parent lineage | the squash flattened git ancestry: all content through digama `upstream/master` `b292275c` (the v4.33 reconciliation `99a7f8ae`) is absorbed in the squash, but the published line no longer carries the merge commits, so the L4L-16R merge will see an old git merge-base — the same situation the post-PR#3 line was in when `99a7f8ae` landed green, so precedent stands. Lean on v4.33.0 final, lean4-nix on `argumentcomputer/lean4-nix` (upstream still pins v4.33.0-rc2 — ledger D018, re-verified 2026-08-20) |
 | Fixed `master` baseline | historical baseline `1a16b72d2e35932a82aa501beb29ef2c3d072580`; the tracked local `master` bookmark auto-advanced to `origin/master` `715bfaff` at the 2026-08-20 fetch (content already absorbed in-tree) |
@@ -266,7 +266,7 @@ arriving decomposed into recursor and constructor spines — precisely
 what a verified reduction site holds — at exactly the Church–Rosser
 development's transitional unique-typing closure, shedding `sorryAx`
 automatically only when a future replacement for the halted
-L4L-16N/L4L-16X route lands. The block-local assembler
+L4L-16N′/L4L-16X route lands. The block-local assembler
 (`Theory/Typing/InductivePatternEnv.lean`) builds environments whose
 defeq set is exactly one certified block's generated rules plus
 separately certified extension rules over a constant base
@@ -347,7 +347,7 @@ migrated API.
 certificates do not constitute the whole-live-environment
 `Params.Extension` instance; constructing it (consumed only by
 `IsDefEq.church_rosser`, and needing weakN-inversion-strength fields that
-were intended to arrive with the L4L-16N/L4L-16X co-deliverables) is
+were intended to arrive with the L4L-16N′/L4L-16X co-deliverables) is
 gated on their future replacement, while
 the D-ladder builds the SExpr-side instances that `sort_invS` consumes. Pattern coverage,
 checks, and registry membership never imply an operational rewrite without
@@ -398,7 +398,7 @@ Non-sorry debt:
   comparison closed at L4L-15B as a documented divergence (ledger D019) on
   the reconciled v4.33 base. `pat_wf` carries the Church–Rosser
   development's transitional unique-typing closure until a replacement for
-  the halted L4L-16N/L4L-16X route lands.
+  the L4L-16N′/L4L-16X route lands.
 - The L4L-15C consumer-neutral audit is complete. Generic spine laws,
   primitive-environment extension, literal typing, containment/absence, and
   elimination-mode conversion now have Theory-only homes, with a dedicated
@@ -616,8 +616,8 @@ and fallbacks in the owning milestone entry).
 
 | # | Sorried declaration | Closes at | Route | Class |
 |---|---|---|---|---|
-| R1 | `IsDefEqU.sort_inv` (`Injectivity.lean:12`) | successor to halted L4L-16N (unfunded), then L4L-16F for public form | `sort_invS` fires once a replacement normalization route discharges `LRS.PiPathInv` and `LR.MajorLinkRect`; the conditional wiring (`d0SortInvS` … `d2SortInvSExact`) remains in place from 16C′w | research input, then engineering |
-| R2 | `IsDefEqU.forallE_inv_stratified` (`Injectivity.lean:21`) | successor to halted L4L-16N (unfunded) | literally the open leaf — `piPathInv_iff_parRedSDefeq` identifies it with `LRS.PiPathInv`; the attempted N2 route and its two failed measures are recorded in `l4l-16n-failure-report.md` | research |
+| R1 | `IsDefEqU.sort_inv` (`Injectivity.lean:12`) | L4L-16X (instances, after 16N′-N′4), L4L-16F (public form) | `sort_invS` fires once 16N′-N′4 discharges `LRS.PiPathInv` and `LR.MajorLinkRect`; the conditional wiring (`d0SortInvS` … `d2SortInvSExact`) remains in place from 16C′w; rung-0 evidence for the discharging route is probe Z16 | engineering after 16N′ |
+| R2 | `IsDefEqU.forallE_inv_stratified` (`Injectivity.lean:21`) | L4L-16X (after 16N′-N′4) | literally the open leaf — `piPathInv_iff_parRedSDefeq` identifies it with `LRS.PiPathInv`; the halted measure route is recorded in `l4l-16n-failure-report.md`, the successor route in the L4L-16N′ entry | engineering after 16N′ |
 | R3 | `IsDefEqU.sort_forallE_inv` (`Injectivity.lean:34`) | after R2's replacement input | the SExpr disjointness block is already proved sorry-free (`ShapeLogRel.lean:14996-15501`, 48 results); reflection remains mechanical once the open leaf is supplied | engineering after research input |
 | R4 | `IsDefEqU.weakN_iff` (`UniqueTyping.lean:174`, forward) | L4L-18S | SST route per `plans/l4l-16-weakn-design.md`: W0–W3 proved (probeE2, corrected dependency direction); W4 is the `Pattern.Action`-at-`:↑` repackaging decision; residual risk concentrated in W5+W6 (coupled `NormalEq`/per-depth-CR cores) | research, contained |
 | R5 | `NormalEq.parRed` appDF×`.extra` (`ChurchRosser.lean:1893`) | L4L-18A′ | new `Params` field `PatArgProp` — "a registered contraction with a Prop-typed argument position has a Prop-typed result" (`probeCR2-extra.lean:208` closed the math; `normalEq_parRed_appDF_propArg` :219); every live instance satisfies it vacuously, and its falsity for `Acc.rec`/`Eq.rec`-class large elimination is the true boundary of this CR presentation (see 16N stretch tiers), not a route defect | engineering |
@@ -641,9 +641,9 @@ inputs `LRS.PiPathInv` and `LR.MajorLinkRect`. L4L-16N halted before
 discharging either input; the conditional endpoints remain the supported
 state. The remaining sorries are exactly the 16 mainline rows above.
 
-**Lane phase after the L4L-16N halt.** Lane R is closed with a
-machine-checked failure report; starting a third normalization route requires
-a newly approved milestone. Lane V runs the V1 → V2 rows of §5.0, starts the V3 skeleton
+**Lane phase after the L4L-16N halt.** Lane R re-opens at **L4L-16N′**
+(below) — the approved third route, whose rung-0 truth-status evidence is
+probe Z16. Lane V runs the V1 → V2 rows of §5.0, starts the V3 skeleton
 (statement-level decomposition with named holes), holds V4 on the #32
 watch, and takes R6's independent statement repair in its first
 Theory-touching session. Lane D runs the D-ladder volume: the three
@@ -654,7 +654,7 @@ as registered equations only; migration recipe in
 `plans/l4l-16d0-slice-map.md`) and D4 (registered structure eta from the
 L4L-15B registry certificate). `D2TreeCheckedStep` (stuck-inductive-
 application injectivity) and D1's quot instance stay conditional; they
-remain gated on a future replacement for 16N-N5 and on 16F-P1 respectively.
+are gated on 16N′-N′4 and on 16F-P1 respectively.
 L4L-16E promotion mechanics run in
 whichever lane has slack.
 
@@ -762,6 +762,70 @@ itself constructs from currently supported declaration forms produces the
 certificate as a transaction invariant. The premise-vs-funding decision
 is 16X's named exit decision.
 
+**L4L-16N′ — normalization by inductive candidates (Lane R re-opened;
+next).** The approved third route, superseding 16N's refuted measure
+architecture. Rung-0 truth-status evidence:
+`plans/probes/probeZ16-indcand.lean` (2026-08-20; compiled, zero sorries,
+nine pinned closures at `[propext, (Classical.choice,) Quot.sound]`)
+machine-validates the replacement **at the exact transition that killed
+N2**: mutual-inductive membership candidates for the real D2 spine shapes
+close the whole block's iota case by one application of the joint
+membership recursor — the grown `Tree.branch` contractum (verbatim the
+production `generatedMajor`) is reached because its membership is a
+sub-derivation premise, and the reverse `TreeList → Tree` edge that
+refuted every Nat rank is an ordinary mutual-recursor case. No term
+measure, no family rank.
+
+*Architecture — the one structural change to the landed N1 development:*
+the candidate at an inductive type stops degenerating to
+`Base` (edge + assumed `KripkeNormalizes`) and becomes
+constructor-generated membership: WH-reachability (untyped `WHRedS`
+trace, per the permanent `betaFire` boundary — typed data may ride on
+clause *arguments*, never on the exposed trace) of a neutral term or a
+classified constructor spine whose recursive fields, applied under their
+Pi telescopes, are members of the sibling families' candidates.
+Positivity is settled by the probe: the domain-candidate-as-**parameter**
+form is accepted and suffices for the entire kernel-accepted non-nested
+class (a checked block can never put a sibling family in a recursive
+field's Pi domain — the rejected sibling-in-domain form is pinned as
+evidence and never needed; Girard interleaving does not activate; nested
+blocks stay out of scope — D3 registers their rules as equations only).
+Write the clauses Kripke-style from the start (the probe's recorded
+lift-stability residual; fallback shape: Kripke-ize at the
+`Base.normalizes` level). Reuse: `LRS.CtorView` (head observation,
+WHRedS-stable both ways), `LRS.CtorSpineDefEq.cons` (the constructor
+clause's shape with the candidate in the `IH.DefEq` slot),
+`CtorChain.RawAlgebra`/`foldRaw` (the elimination discipline), `Neutral`
++ its whnf/noMatches suite, and the block-side `RecArg`/`blockRuleCall`
+data. The seam is unchanged: this milestone owes exactly the three open
+producers — the `Fundamental 0` source (was `TypedWHNormalization`),
+`HeadFundamental 0`, and `ConstFundamental` — and everything downstream
+through `Fundamental.succ` to `LRS.PiPathInv.of_candidateFundamental` is
+already proved and pinned. Scope stays per-instance (D0 Nat, D2
+Tree/TreeList; D1's definitions need only `DeltaRank`, which the
+refutations did not touch — δ-steps strictly decrease rank; D1-quot
+stays P1-gated); the generic-block candidate engine joins the generic
+`Params` instance at 16F, concrete-then-generic as always.
+
+| # | Rung | Deliverable | Kill criterion → fallback | Sessions |
+|---|---|---|---|---|
+| N′0 | Candidate architecture | transplant probe Z16 into `SExprReducibility`-adjacent modules: mutual-inductive candidates for D0/D2 with Kripke-style clauses, expansion closure over untyped `WHRed`, neutral clause, nonvacuity witnesses (incl. a non-normal and a higher-order-field member) | the Kripke reshaping breaks the clause shape → Kripke-ize at `Base.normalizes` instead (both shapes named in the probe) | 1–2 |
+| N′1 | Real-rule inhabitation + membership normalization | the five `WHRed.extra` steps from the `Pattern.IotaReductionSite` assembly (overlaps Lane D's three mechanical D2 steps; the `Pattern.Check` discharge remains 18A′-gated — D0's `d0IotaSite_nonempty` is the landed analogue); stuck cases via the `WHNF.subpattern`/pattern-uniqueness suite; membership ⇒ `KripkeNormalizes` at inductive types (`Base.normalizes` becomes a theorem) | the check discharge blocks the Tree rules → condition on `D2TreeCheckedStep` exactly as the D2 rows already do; no regime change | 2–4 |
+| N′2 | `ConstFundamental` + `HeadFundamental 0` | constants via `DeltaRank` descent (δ only); head observations at sorts/Pi from the landed `HeadLayer` machinery + membership | a head observation needs adequacy-strength input → isolate as a named Prop with nonvacuity witness; the conditional regime absorbs it | 1–3 |
+| N′3 | The fundamental theorem | rewrite the `∀ depth` proof suite (~450 lines; case content unchanged) to membership induction; complete the missing `SubstFundamental` cases — `lamDF`, `beta` (the landed `Env` substitution machinery), `.extra` (`PatternArgumentNonProp` + action soundness), `proofIrrel` (singletons + the landed disjointness block), `defeqDF`, structure eta — on top of the landed `symm`/`trans`/`bvar`/`sort`/`appDF`/`forallEDF` | a case demands a new semantic input → isolate as a named Prop; conditional regime absorbs it | 4–8, case-groups parallel |
+| N′4 | Assembly + consumer discharge | index-free `Fundamental` → `LRS.PiPathInv.of_candidateFundamental` fires verbatim modulo the index; discharge both leaf inputs at D0–D2 — `LR.MajorLinkRect` from membership + the pre-banked rectangle helpers (`lift_ctor_inv`/`CtorFrame.shape_ctor`/`CtorSpineDefEq.cons_inv`) — `sort_invS`/`d2SortInvSExact` unconditional; corollaries `IndTyAppInj`, `QuotAppInj` | `MajorLinkRect` needs more than membership + rectangles → it remains exactly the named input it is today; no worse than the current state | 2–4 |
+
+Total 10–21 staged sessions; wall-clock set by N′3. The honest risk
+concentration: N′3's `proofIrrel`/`.extra` cases and N′4's
+`MajorLinkRect` discharge — each with a named isolate-don't-force
+fallback that leaves the conditional regime intact. The stretch tiers
+(P1–P3) and their pre-approved statement-premise fallback carry over from
+16N unchanged.
+*Exit:* both named leaf inputs discharged at the D-ladder instances; the
+16C′w conditional endpoints fire unconditionally; the escape's measured
+closure stays `[propext, Classical.choice, Quot.sound]`; L4L-16X
+unblocks.
+
 **L4L-16E — promotion mechanics (slack lane).** Execute
 `plans/l4l-16e-promotion-map.md`: module moves out of `Experimental/`
 with stable APIs, the `SorryFrontier` import-block regeneration — and the
@@ -775,13 +839,12 @@ Experimental is sorry-free (post-16C′w) even while endpoints are
 conditional; supported roots still never import experiments — promotion
 is the move that makes them non-experiments.
 
-**L4L-16X — unconditional closure and the P-tier exit decision (BLOCKED by
-the L4L-16N halt).** Its intended predecessor did not produce N5.
-Instance-level closure therefore remains conditional, R1–R3 remain open, and
-the audit allowlist does not shrink. Resume this milestone only after a newly
-approved normalization milestone supplies both named leaf inputs; then take
-the P-tier decision (environment-class premise vs funding P2) and record it
-here.
+**L4L-16X — unconditional closure and the P-tier exit decision (queued
+behind L4L-16N′-N′4).** Its original predecessor halted; the approved
+successor L4L-16N′ supplies both named leaf inputs at N′4. Until then
+instance-level closure remains conditional, R1–R3 remain open, and the
+audit allowlist does not shrink. On N′4: take the P-tier decision
+(environment-class premise vs funding P2) and record it here.
 *Deferred exit:* the Injectivity trio's instance forms are sorry-free with exact
 accepted closures; no `sorryAx`, no `extra_pat`-style axiom, no
 environment oracle on any path; residual public-form debt is exactly the
@@ -871,6 +934,27 @@ named design docs and probe files.
 - **`FixedHeadTerminalRetarget`/`FixedHeadTerminalLink`** false as
   originally stated (premortem residue doc); the repaired dominance
   interface is landed.
+- **Syntactic termination measures for iota (L4L-16N/N2):** the
+  `(rank, size, depth)` lexicographic order cannot decrease on the
+  production `Tree.branch` rule — the RHS grows 123 → 127 nodes and iota
+  is not a δ-step (`L4L16NFailure.treeBranch_primaryMeasure_fails`,
+  kernel-checked `decide`); and NO `Nat → Nat` family rank exists for the
+  mutual block — the `Tree ⇄ TreeList` edges force contradictory
+  inequalities, and the `TreeList → TreeList` self-edge kills strict
+  ranking outright (`tree_familyOrdinalFallback_false`,
+  `tree_strictFamilyRanking_false`). These refute Nat-stratification, not
+  normalization; the least-fixed-point membership replacement is
+  probe-validated (Z16). Do not re-rank.
+- **Typed normalization traces (the `betaFire` boundary):** any
+  normalization interface whose trace links carry a displayed-type
+  equality already proves `LRS.BetaFire` — circular with the leaf
+  (`SubjectPreservingWHNormalization.betaFire`). Permanent constraint:
+  the exposed trace of any normalization result must be untyped
+  (`WHRedS`-valued); typed data may ride only on clause arguments.
+- **Sibling-family-in-domain candidate clauses:** rejected by the kernel's
+  positivity checker (pinned in probe Z16) — and never needed: checked
+  non-nested blocks cannot put a sibling family in a recursive field's Pi
+  domain, so the domain-candidate-as-parameter form covers the class.
 - **Literal `RectFrame` at the rec-app observation:** refuted 2026-08-20
   (`RectFrame.tyShape_rigid` + the `RecAppMoving` witness — the rec-app
   observation moves its type shape along `mono`, which the frame's rigid
@@ -1123,13 +1207,18 @@ assume an oracle or axiom.
   reconciliation conflicts wherever upstream's own `Params` and
   experimental work move — keep the redesign minimal, ledgered, and behind
   compatibility shims where feasible.
-- **Research-core honesty (L4L-16N).** The named worst case occurred on
-  2026-08-20: N2's primary recursion-under-Pi measure and its sole
-  family-ordinal fallback both fail on the checked Tree/TreeList block.
-  `SExprNormalizationFailure.lean` is the machine-checked record and
-  `plans/l4l-16n-failure-report.md` is the audit narrative. The conditional
-  regime persists; N3–N5 were not represented as completed work, and the
-  roadmap authorizes no third fallback inside L4L-16N.
+- **Research-core honesty (L4L-16N → L4L-16N′).** The named worst case
+  occurred on 2026-08-20 — both N2 measures failed on the checked
+  Tree/TreeList block (`SExprNormalizationFailure.lean`;
+  `plans/l4l-16n-failure-report.md`) — and the kill discipline held: no
+  third fallback was invented inside 16N. The approved successor
+  L4L-16N′ replaces ranking with least-fixed-point membership induction
+  and enters with rung-0 machine evidence (probe Z16 proves the exact
+  killed transition). Its honest risk concentration is N′3's
+  `proofIrrel`/`.extra` fundamental cases and N′4's `MajorLinkRect`
+  discharge, each with an isolate-don't-force fallback that leaves the
+  conditional regime intact — the worst case remains the current state,
+  not a regression.
   Separately, the unrestricted public statements sit behind the P2/P3
   large-elimination boundary, where the pre-approved fallback is an
   explicit environment-class premise; treat any temptation to "just
