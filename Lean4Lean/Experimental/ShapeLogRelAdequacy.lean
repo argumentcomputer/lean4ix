@@ -8891,6 +8891,388 @@ theorem LR.contextualAdequacyAt_of_iotaSteps
   LR.contextualAdequacyAt_of_adequacyAtDepth
     (LR.contextualAdequacyAtDepth_of_iotaSteps steps) n
 
+/-! #### The conditional wrap of the joint iota leaf (L4L-16C′w)
+
+The block below wraps the sorried `LR.iotaWitnessStep` as the conditional
+`LR.iotaWitnessStep_of_piPathInv`.  The wrap executes the seam map's chain
+fold exactly: `hmajorCtor.2` is folded through
+`LRS.CtorDefEq.foldRaw_of_majorChainAnchorStep`, conditional on
+`LRS.PiPathInv` via `LR.MajorChainAnchorStep.of_piPathInv`, with the
+fold's `Q` the root-level `LogRel.DefEqRect` in the major pair; `trans` is
+`DefEqRect.trans`, and `anchor` is `DefEqRect.whr` backward along
+`WHRedS.major` (both rec prefixes are major premises, certified from the
+match arities).  `Q` additionally threads the root-major bridge
+`IsDefEq Γ₀ majorX X domain` — available at `anchor` from the root
+callbacks and at `trans` by composition — so the per-link handler receives
+each chain vertex's raw connection to the original major.
+
+The algebra's `exact` field is the one seam-map step that is NOT closed
+here; it is isolated as the named premise `LR.MajorLinkRect` below.  The
+recorded deviation reason: firing `LRS.iotaDefEqRect_of_ctorExactAt`
+natively at the leaf's level requires the root spine package (the
+rec-prefix relations, the last-Pi edge, and the result-type interpretation)
+rebased to the leaf vertex's relation `J`, and the return rectangle
+transported back to the root observation.  Both transports cross the
+frame's `lift`/`unlift` steps only at observations that are exact lift
+images (`LogRel.LiftEquiv` constrains the higher relation nowhere else),
+while the package's observations — and, in the return direction, the native
+leaf's own field observations — are not lift images in general; the frame's
+`mono` steps additionally lose the `HasType` coherence at `lam`/`forallE`
+field shapes (`WShape.HasTypeLam.mono_l` needs both order directions).
+Level counting makes this an obstruction rather than a missing lemma: a
+frame that dips below the root level admits no level-`k` observation
+dominating a deeper root result observation, so no transported rectangle
+can end at the root pair.  The link handler therefore genuinely needs the
+semantic normalization content of L4L-16N (the registered RHS's fixed-head
+result and the leaf-field adequacy that `piInv` alone does not yet
+provide), and `LR.MajorLinkRect` names exactly that residual; it is
+discharged at 16N-N5 and nowhere before. -/
+
+/-- Argument-count rigidity of a semantic `varN` match: the matched list
+has exactly the pattern's arity. -/
+theorem LE_Interp.Matches.varN_length
+    {c c' : Name} {k : Nat} : ∀ {n : Nat} {rargs : List (WShape n)}
+      {m : (Pattern.varN (.const c) k).Path → TShape},
+    LE_Interp.Matches (Pattern.varN (.const c) k) c' rargs m →
+    rargs.length = k := by
+  induction k with
+  | zero =>
+    intro n rargs m H
+    cases H
+    rfl
+  | succ k ih =>
+    intro n rargs m H
+    cases H with
+    | var H => simpa using ih H
+
+/-- The type observation of an ordinary-constructor shape is forced to
+`WShape.indTy` (the `ctor'`-typing row of the shape table, extracted from
+the body of `LR.DefEq.ctor'_inv` so the wrap can pin the major type shape
+before the chain fold). -/
+theorem WShape.hasType_ctor'_indTy
+    {n : Nat} {c : Name} {fields : List (WShape n)} {a : WShape (n + 1)}
+    (hcl : Params.classify c = some (.ctor fields.length))
+    (ht : (WShape.ctor' c fields).HasType a) : a = WShape.indTy := by
+  have hwf : IsStruct c → WShape.ListNonZero fields := by
+    simp [IsStruct, hcl]
+  rw [WShape.ctor', dif_pos hwf] at ht
+  apply WShape.ext
+  change Shape.hasType (n := n + 1)
+    (ShapeS.ctor c (fields.map fun x : WShape n => x.1)) a.1 at ht
+  cases ha : a.1 <;> simp [ha, Shape.hasType, WShape.indTy] at ht ⊢
+
+/-- Reflect a constructor observation through an exact lift: if a lifted
+shape displays as a `.ctor` form, the shape already was that `.ctor` form
+one level down, with exactly lifted fields. -/
+theorem WShape.lift_ctor_inv {n m' : Nat} (le : n ≤ m')
+    {s : WShape (n + 1)} {c : Name} {l : List (WShape m')} {h}
+    (heq : s.lift (m' + 1) = WShape.ctor c l h) :
+    ∃ l₀ h₀, s = WShape.ctor c l₀ h₀ ∧ l = l₀.map (.lift m') := by
+  cases s using WShape.casesOn' with
+  | bot =>
+    rw [WShape.lift_bot] at heq
+    simp [WShape.ext_iff, WShape.bot, WShape.ctor, Shape.bot] at heq
+  | sort r =>
+    rw [WShape.lift_sort] at heq
+    simp [WShape.ext_iff, WShape.sort, WShape.ctor, Shape.sort] at heq
+  | forallE a f =>
+    rw [WShape.lift_forallE le] at heq
+    simp [WShape.ext_iff, WShape.forallE, WShape.ctor] at heq
+  | lam f hf =>
+    rw [WShape.lift_lam le] at heq
+    simp [WShape.ext_iff, WShape.lam, WShape.ctor] at heq
+  | ctor c₀ l₀ h₀ =>
+    rw [WShape.lift_ctor le] at heq
+    obtain ⟨rfl, hl⟩ := WShape.ctor.inj.1 heq
+    exact ⟨l₀, h₀, rfl, hl.symm⟩
+  | indTy =>
+    rw [WShape.lift_indTy] at heq
+    simp [WShape.ext_iff, WShape.indTy, WShape.ctor] at heq
+
+/-- A constructor frame preserves the constructor observation's head and
+field count: every shape a `CtorFrame` connects to a `.ctor`-rooted
+observation is itself a `.ctor` form with the same head and arity.  This is
+the first move of any discharge of `LR.MajorLinkRect`: it aligns the
+native leaf's constructor spine with the pattern arity matched at the
+root. -/
+theorem LRS.CtorFrame.shape_ctor {Γ : List SExpr}
+    {n k : Nat} {IH : LogRel Γ n} {J : LogRel Γ k}
+    {m : WShape (n + 1)} {p : WShape (k + 1)}
+    (F : LRS.CtorFrame Γ IH m J p) :
+    ∀ {c : Name} {l : List (WShape n)} {h},
+      m = WShape.ctor c l h →
+      ∃ l' h', p = WShape.ctor c l' h' ∧ l'.length = l.length := by
+  induction F with
+  | refl =>
+    intro c l h hm
+    exact ⟨l, h, hm, rfl⟩
+  | mono hle F' ih =>
+    intro c l h hm
+    subst hm
+    obtain ⟨l₂, h₂, rfl, hforall⟩ := WShape.ctor_le.1 hle
+    obtain ⟨l', h', rfl, hlen⟩ := ih rfl
+    exact ⟨l', h', rfl,
+      hlen.trans (Lean4Lean.List.Forall₂.length_eq hforall).symm⟩
+  | lift le E F' ih =>
+    intro c l h hm
+    obtain ⟨l₀, h₀, rfl, rfl⟩ := WShape.lift_ctor_inv le hm
+    obtain ⟨l', h', rfl, hlen⟩ := ih rfl
+    exact ⟨l', h', rfl, by simpa using hlen⟩
+  | unlift le E F' ih =>
+    intro c l h hm
+    subst hm
+    obtain ⟨l', h', rfl, hlen⟩ := ih (WShape.lift_ctor le)
+    exact ⟨l', h', rfl, by simpa using hlen⟩
+
+/-- Peel the newest field of a related constructor spine through any
+`ret` retypings: recover the remaining spine, the field step's own Pi edge
+and payload, and a `TypeDefEqPath` from the instantiated codomain to the
+displayed result type.  This is the vertex-spine rebuild step of the
+eventual `LR.MajorLinkRect` discharge: the path-valued result type is what
+lets the rebuilt spine at the chain vertices avoid identifying the two
+independently derived sorts (the chain-wall discipline). -/
+theorem LRS.CtorSpineDefEq.cons_inv
+    {Γ : List SExpr} {n : Nat} {IH : LogRel Γ n} {Head : SExpr}
+    {x y : SExpr} {xs ys : List SExpr} {q : WShape n} {ps : List (WShape n)}
+    {A : SExpr}
+    (H : LRS.CtorSpineDefEq IH Head (x :: xs) (y :: ys) (q :: ps) A) :
+    ∃ (A₀ D C : SExpr) (u v w : SLevel) (a : WShape n),
+      LRS.CtorSpineDefEq IH Head xs ys ps A₀ ∧
+      IsDefEq Γ A₀ (.forallE D C) (.sort u) ∧
+      q.HasType a ∧
+      IH.TyDefEq D D a ∧
+      IsDefEq Γ x y D ∧
+      IH.DefEq x y D q a ∧
+      IsDefEq Γ (C.inst y) (C.inst x) (.sort v) ∧
+      TypeDefEqPath Γ (C.inst x) A w := by
+  generalize hxxs : x :: xs = xxs at H
+  generalize hyys : y :: ys = yys at H
+  generalize hqps : q :: ps = qps at H
+  induction H with
+  | nil => cases hxxs
+  | cons hrest hPi hp hty hxy hv hresult =>
+    obtain ⟨rfl, rfl⟩ := List.cons.inj hxxs
+    obtain ⟨rfl, rfl⟩ := List.cons.inj hyys
+    obtain ⟨rfl, rfl⟩ := List.cons.inj hqps
+    exact ⟨_, _, _, _, _, _, _, hrest, hPi, hp, hty, hxy, hv, hresult,
+      .single hresult.hasType.2⟩
+  | ret hrest hresult ih =>
+    obtain ⟨A₀, D, C, u', v, w, a, hspine, hPi, hp, hty, hxy, hv, hres,
+      hpath⟩ := ih hxxs hyys hqps
+    exact ⟨A₀, D, C, u', v, w, a, hspine, hPi, hp, hty, hxy, hv, hres,
+      hpath.trans (.single hresult)⟩
+
+/-- **The isolated per-link residual of the conditional iota-leaf wrap.**
+
+One framed native constructor link of the major chain yields the
+root-level synchronized iota rectangle: given the root iota context (the
+pattern, the two matches, the registered-RHS interpretation at the root
+result observation, the rec-prefix relations, the last-Pi package with the
+major type shape pinned at `.indTy`, and the result observations), every
+`CtorFrame`-framed `CtorExact` leaf between chain vertices `X, Y` — with
+the vertices' raw equality and the root-major bridge `mX ≡ X` — produces
+the `LogRel.DefEqRect` of the four recursor applications at the root
+observation pair.
+
+This is exactly the `exact` field of the chain-fold algebra in
+`LR.iotaWitnessStep_of_piPathInv` below; the other algebra fields and the
+whole surrounding derivation are closed there.  Its discharge is 16N-N5's:
+the handler must fire `LRS.iotaDefEqRect_of_ctorExactAt` at the link and
+return through `LRS.RecAppSync.rect`/`LRS.CtorFrame.rect_via_recAppFrame`,
+which requires the semantic normalization inputs (the registered fixed
+head's `LR.FixedHeadResult` and leaf-field adequacy) that
+`LRS.PiPathInv` alone does not supply — see the section comment above for
+the machine-level obstruction record.
+
+Vacuity discipline: the observation-lattice-bottom test is
+`LR.MajorLinkRect.rect_at_bot` (the demanded rectangle is satisfiable
+outright at a bottom result-type observation), and
+`LR.MajorLinkRect.of_noIota` records the environment-conditional vacuous
+inhabitant (any `Params` instance registering no recursor iota patterns).
+Both are stated below, before this premise's sole consumer. -/
+def LR.MajorLinkRect (Γ₀ : List SExpr) : Prop :=
+  ∀ {nCtor : Nat} {rec ctor : Name} {major arity : Nat}
+    {rI : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {ls : List SLevel} {ρ : Valuation} {R : TShape → SExpr → Prop}
+    {recShapes : List (WShape (nCtor + 1))}
+    {ctorShapes : List (WShape nCtor)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs : List SExpr} {CHead A : SExpr} {mX mY : SExpr}
+    {resultShape resultTypeShape : WShapeFun (nCtor + 1)},
+    Ctx.WF Γ₀ →
+    (∀ {m M}, R m M → LE_Interp.Witness ρ m M) →
+    Params.Pat (RecursorIotaPattern rec major ctor arity) rI →
+    LE_Interp.Matches (n := nCtor + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec →
+    LE_Interp.Matches (n := nCtor)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor →
+    LE_Interp.RHS ls (Sum.elim mrec mctor) (LE_Interp.Lower R)
+      (resultShape.app (WShape.ctor' ctor ctorShapes.reverse)).T rI.1 →
+    LRS.CtorArgsDefEq (LR Γ₀) recXs recYs recShapes →
+    IsDefEq Γ₀ (.const rec ls) (.const rec ls) CHead →
+    (∃ u, IsDefEq Γ₀ A A (.sort u)) →
+    ∀ hpair : SExpr.SpineWF.LastPair Γ₀ CHead recXs recYs mX mY A,
+    WShape.HasTypePi resultTypeShape
+      (WShape.indTy (n := nCtor)) true →
+    (LR Γ₀).TyDefEq hpair.domain hpair.domain
+      (WShape.indTy (n := nCtor + 1)) →
+    LRS.PiDefEq (LR Γ₀) hpair.domain hpair.codomain hpair.codomain
+      (WShape.indTy (n := nCtor)) resultTypeShape →
+    (resultShape.app (WShape.ctor' ctor ctorShapes.reverse)).HasType
+      (resultTypeShape.app (WShape.ctor' ctor ctorShapes.reverse)) →
+    (LR Γ₀).TyDefEq A A
+      (resultTypeShape.app (WShape.ctor' ctor ctorShapes.reverse)) →
+    ∀ {k : Nat} {J : LogRel Γ₀ k} {p : WShape (k + 1)} {X Y : SExpr},
+      LRS.CtorFrame Γ₀ (LR Γ₀)
+        (WShape.ctor' ctor ctorShapes.reverse) J p →
+      LRS.CtorExact Γ₀ J X Y p →
+      IsDefEq Γ₀ X Y hpair.domain →
+      IsDefEq Γ₀ mX X hpair.domain →
+      LogRel.DefEqRect (LR Γ₀)
+        ((recXs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app X)
+        ((recXs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app Y)
+        ((recYs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app X)
+        ((recYs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app Y)
+        A (resultShape.app (WShape.ctor' ctor ctorShapes.reverse))
+        (resultTypeShape.app (WShape.ctor' ctor ctorShapes.reverse))
+
+/-- Vacuity-discipline check for `LR.MajorLinkRect` (the premortem's
+"instantiate at `TShape.bot`" test): at a bottom result-type observation
+the demanded rectangle is satisfiable outright, so the premise does not
+collapse at the observation-lattice bottom. -/
+theorem LR.MajorLinkRect.rect_at_bot
+    {Γ₀ : List SExpr} {n : Nat} {M₁ M₂ N₁ N₂ A : SExpr}
+    {out : WShape (n + 1)} :
+    LogRel.DefEqRect (LR Γ₀) M₁ M₂ N₁ N₂ A out .bot :=
+  ⟨trivial, trivial, trivial⟩
+
+/-- Environment-conditional vacuity record for `LR.MajorLinkRect`: in any
+`Params` instance registering no recursor iota patterns (e.g. a
+definitions-only instance), the premise holds outright. -/
+theorem LR.MajorLinkRect.of_noIota
+    (hno : ∀ {rec ctor : Name} {major arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check},
+      ¬ Params.Pat (RecursorIotaPattern rec major ctor arity) r) :
+    LR.MajorLinkRect Γ₀ := by
+  intro _nCtor _rec _ctor _major _arity _rI _ls _ρ _R _recShapes _ctorShapes
+    _mrec _mctor _recXs _recYs _CHead _A _mX _mY _resultShape _resultTypeShape
+    _hΓ₀ _hR hpat
+  exact absurd hpat hno
+
+/-- **The conditional wrap of the joint iota leaf** (L4L-16C′w, E1).
+
+Everything of the sorried `LR.iotaWitnessStep` except the per-link
+rectangle is closed here from `LRS.PiPathInv`: the match is split, the
+major type shape is pinned to `.indTy` (`WShape.hasType_ctor'_indTy`), the
+major pair's constructor observation is normalized through
+`LR.DefEq.ctor'_inv`, and the resulting free closure is folded by
+`LRS.CtorDefEq.foldRaw_of_majorChainAnchorStep` with the anchor step
+supplied by `LR.MajorChainAnchorStep.of_piPathInv piInv` — the wrap's only
+use of the leaf Prop, exactly as the 2026-08-15 re-cut prescribed.  The
+fold's `Q` is the root-level rectangle in the major pair with the
+root-major bridge threaded through; `trans` and `anchor` are discharged by
+`LogRel.DefEqRect.trans` and `LogRel.DefEqRect.whr` along `WHRedS.major`
+(the rec prefixes are major premises by `Pattern.varN_const_matchesS` at
+the match arities).  The rectangle's diagonal at the original majors is
+the leaf conclusion.
+
+`piInv` is a hypothesis, full stop: nothing here fires
+`LRS.PiPathInv.of_adequacy` or `.of_jointStratifiedPathInversion`, and the
+`linkRect` premise is the named residual discharged at 16N-N5. -/
+theorem LR.iotaWitnessStep_of_piPathInv
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ₀) :
+    LR.IotaWitnessStep Γ₀ := by
+  intro hΓ₀ ρ c ls R hR
+  intro nI rargsI rec major ctor arity rI mcapI
+    xsI ysI CHeadI AI outI outTyI hpatI hmatchI hrhsI hleafI
+    htermI hAIType hheadI hspineXI hspineYI houtI hAI
+  cases hmatchI with
+  | @app fPat nCtor head recShapes mrec aPat ctorHead
+      ctorShapes mctor hmfI hmaI =>
+    rcases hleafI with
+      ⟨majorX, recXs, majorY, recYs, majorShape, recShapesI,
+        majorTypeShape, resultShape, resultTypeShape,
+        hxs, hys, hrargs, houtEq, houtTyEq, hlastPair,
+        hpMajor, hresultType, htyMajor, hvMajor, halignedI, hPiI⟩
+    subst xsI
+    subst ysI
+    simp only [List.cons.injEq] at hrargs
+    rcases hrargs with ⟨hmajorShape, hrecShapes⟩
+    subst majorShape
+    subst recShapesI
+    subst outI
+    subst outTyI
+    have hctorHead : ctor = ctorHead := hmaI.varN_const_head
+    subst ctorHead
+    have hctorClass : Params.classify ctor =
+        some (.ctor ctorShapes.reverse.length) := by
+      simpa using hmaI.head_wf_eq (Params.pat_wf hpatI).2
+    have hmajorCtor := LR.DefEq.ctor'_inv hctorClass hpMajor hvMajor
+    have hrecargsI : LRS.CtorArgsDefEq (LR Γ₀)
+        recXs recYs recShapes :=
+      halignedI.args.tail
+    have hmts : majorTypeShape = WShape.indTy :=
+      WShape.hasType_ctor'_indTy hctorClass hpMajor
+    subst majorTypeShape
+    have hrecHead : rec = c := hmfI.varN_const_head
+    subst c
+    have hrecShapesLen : recShapes.length = major :=
+      hmfI.varN_length
+    obtain ⟨hXlen, hYlen⟩ := hrecargsI.lengths
+    have hmajorPremX : IsMajorPremise
+        (recXs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recXs.length = major := hXlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ := hlen ▸ Pattern.varN_const_matchesS rec ls recXs
+      exact ⟨_, ⟨rI, hpatI⟩, _, _, .refl, ls, m2, hm2⟩
+    have hmajorPremY : IsMajorPremise
+        (recYs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recYs.length = major := hYlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ := hlen ▸ Pattern.varN_const_matchesS rec ls recYs
+      exact ⟨_, ⟨rI, hpatI⟩, _, _, .refl, ls, m2, hm2⟩
+    have step := LR.MajorChainAnchorStep.of_piPathInv piInv hΓ₀
+    have hfold := LRS.CtorDefEq.foldRaw_of_majorChainAnchorStep
+      (D := hlastPair.domain)
+      (Q := fun X Y =>
+        IsDefEq Γ₀ majorX X hlastPair.domain →
+          LogRel.DefEqRect (LR Γ₀)
+            ((recXs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app X)
+            ((recXs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app Y)
+            ((recYs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app X)
+            ((recYs.foldr (fun a f => f.app a) (SExpr.const rec ls)).app Y)
+            AI (resultShape.app (WShape.ctor' ctor ctorShapes.reverse))
+            (resultTypeShape.app (WShape.ctor' ctor ctorShapes.reverse)) ∧
+          IsDefEq Γ₀ majorX Y hlastPair.domain)
+      step
+      { exact := fun {k J p X Y} F E hXY hbr =>
+          ⟨linkRect hΓ₀ hR hpatI hmfI hmaI hrhsI hrecargsI hheadI hAIType
+            hlastPair hresultType htyMajor hPiI houtI hAI F E hXY hbr,
+           hbr.trans hXY⟩
+        trans := fun h₁ h₂ => by
+          intro hbr
+          obtain ⟨r₁, hY⟩ := h₁ hbr
+          obtain ⟨r₂, hZ⟩ := h₂ hY
+          exact ⟨r₁.trans r₂, hZ⟩
+        anchor := fun {M N X Y} VM VN hMX hNY hQ => by
+          intro hbr
+          obtain ⟨rXY, hY⟩ := hQ (hbr.trans hMX)
+          cases VM with
+          | intro _ hredM =>
+            cases VN with
+            | intro _ hredN =>
+              exact ⟨(LogRel.DefEqRect.whr
+                (WHRedS.major hmajorPremX hredM)
+                (WHRedS.major hmajorPremX hredN)
+                (WHRedS.major hmajorPremY hredM)
+                (WHRedS.major hmajorPremY hredN)).2 rXY,
+                hY.trans hNY.symm⟩ }
+      hmajorCtor.2
+      hlastPair.major.hasType.1
+      hlastPair.major.hasType.2
+    exact (hfold hlastPair.major.hasType.1).1.cross
+
 /-- The active joint-leaf obligation.  Its body is intentionally isolated
 from `adequacy_of_iotaWitnessStep`: completing it may consume only the
 well-founded fixed-head and predecessor-uniqueness packages, never the final
