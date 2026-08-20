@@ -139,3 +139,104 @@ theorem reduceNat.WF {c : VContext} (he : c.TrExprS e e') :
     refine have ⟨p1, p2⟩ := TrExprS.natLit c.hasPrimitives hn _; ⟨_, p1, ?_⟩
     refine p2.toU.symm.trans c.Ewf c.Δwf ?_
     exact ⟨_, ha1.appDF <| a3.of_r c.Ewf c.Δwf ha2⟩
+
+theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i e) e') :
+    RecM.WF c s (reduceProjCore i e) fun oe _ =>
+      ∀ e₁, oe = some e₁ → c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e' := by
+  let .proj (e' := major) heMajor hproj := he
+  obtain ⟨view, levels, params, _hviewName, hsemantic⟩ := hproj
+  obtain ⟨code, hcode, hresult, hprojector⟩ := hsemantic.program
+  have finish {normal : Expr} {state : VState}
+      (hbelow : c.FVarsBelow e normal)
+      (htr : c.TrExpr normal major) :
+      RecM.WF c state
+        (normal.withApp fun mk args => do
+          let .const mkC _ := mk | return none
+          let env ← getEnv
+          let .ctorInfo mkInfo ← env.get mkC | return none
+          return args[mkInfo.numParams + i]?) (fun oe _ =>
+            ∀ e₁, oe = some e₁ →
+              c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e') := by
+    rw [Expr.withApp_eq]
+    split
+    · rename_i mkC hostLevels hheadShape
+      obtain ⟨runtimeMajor, hnormalS, hnormalEq⟩ := htr
+      have ⟨runtimeHead, hstack⟩ := AppStack.build
+        (normal.mkAppList_getAppArgsList ▸ hnormalS)
+      have hhead := hstack.tr
+      rw [hheadShape] at hhead
+      let .const (us' := runtimeLevels) _hconst _hlevelsMap
+          _hlevelsLength := hhead
+      obtain ⟨runtimeArgs, hargsTr, hfull⟩ := hstack.argsTranslation
+      rw [normal.mkAppList_getAppArgsList] at hfull
+      have hfullEq := hfull.uniq c.Ewf (.refl c.Ewf c.Δwf) hnormalS
+      have hmajorEq := hfullEq.trans c.Ewf c.Δwf hnormalEq
+      refine .getEnv ?_
+      refine (M.WF.liftExcept envGet.WF).lift.bind fun _ci _ _ hfind => ?_
+      split
+      · rename_i mkInfo
+        refine .pure ?_
+        intro selected hselected
+        have hconstructorName : mkC = view.constructorName :=
+          c.Ewf.registeredStructureHeadInversion.constructor_name_inv
+            c.Δwf hsemantic rfl hmajorEq
+        have hnumParams : mkInfo.numParams = view.nparams :=
+          c.projectionReady.constructorNumParams view mkInfo
+            hsemantic.viewWF (by
+              rw [← hconstructorName]
+              exact hfind)
+        have hselectedList :
+            normal.getAppArgsList[mkInfo.numParams + i]? = some selected := by
+          rw [← Expr.getAppArgs_toList, Array.getElem?_toList]
+          exact hselected
+        obtain ⟨runtimeField, hfieldGet, hfieldTr⟩ :=
+          Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
+        have hfieldGetCanonical :
+            runtimeArgs[view.nparams + i]? = some runtimeField := by
+          rw [← hnumParams]
+          exact hfieldGet
+        obtain ⟨alignment⟩ :=
+          c.Ewf.registeredStructureHeadInversion.constructor_inv
+            c.Δwf hsemantic hcode rfl hfieldGetCanonical hmajorEq
+        have hiota := hsemantic.projector_constructor_aligned
+          c.Ewf c.Δwf hcode hprojector alignment
+        have hmajorTyped := hmajorEq.of_r c.Ewf c.Δwf hsemantic.majorType
+        have hprojectorCongr : c.IsDefEqU
+            (.app code.projector
+              (VExpr.appN (.const mkC runtimeLevels) runtimeArgs))
+            (.app code.projector major) :=
+          ⟨_, hprojector.appDF hmajorTyped⟩
+        have hfieldTarget : c.IsDefEqU runtimeField e' := by
+          rw [hresult]
+          exact hiota.symm.trans c.Ewf c.Δwf hprojectorCongr
+        refine ⟨?_, ⟨runtimeField, hfieldTr, hfieldTarget⟩⟩
+        intro P hP hprojFv
+        exact FVarsIn.getAppArgsList (hbelow P hP hprojFv)
+          (List.mem_of_getElem? hselectedList)
+      · exact .pure nofun
+    · exact .pure nofun
+  unfold reduceProjCore
+  extract_lets c₀ jp
+  suffices hjp : ∀ {normal : Expr} {state : VState}, c.FVarsBelow e normal →
+      c.TrExpr normal major → RecM.WF c state (jp () normal) (fun oe _ =>
+        ∀ e₁, oe = some e₁ → c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e') by
+    unfold c₀
+    split
+    · let .lit _ hconstructorS := heMajor
+      refine (whnf.WF hconstructorS).bind fun expanded _ _ hexpanded => ?_
+      refine hjp ?_ hexpanded.2
+      exact FVarsBelow.trans (fun _ _ _ => FVarsIn.strLitToConstructor) hexpanded.1
+    · exact hjp .rfl (heMajor.trExpr c.Ewf c.Δwf)
+  intro normal state hbelow htr
+  exact finish hbelow htr
+
+theorem reduceProj.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i e) e') :
+    RecM.WF c s (reduceProj i e cheapProj) fun oe _ =>
+      ∀ e₁, oe = some e₁ → c.FVarsBelow (.proj n i e) e₁ ∧ c.TrExpr e₁ e' := by
+  unfold reduceProj
+  have .proj (e' := s) a1 a2 := he
+  refine .bind (Q := fun e₁ _ => c.FVarsBelow e e₁ ∧ c.TrExpr e₁ s) ?_ fun _ _ _ ⟨h1, h2⟩ => ?_
+  · split <;> [exact whnfCore.WF a1; exact whnf.WF a1]
+  have ⟨_, b1, b2⟩ := h2.proj c.Ewf c.Δwf a2
+  refine (reduceProjCore.WF b1).mono fun _ _ _ H _ eq => ?_
+  have ⟨c1, c2⟩ := H _ eq; exact ⟨h1.trans c1, c2.defeq c.Ewf c.Δwf b2⟩
