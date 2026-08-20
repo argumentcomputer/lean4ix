@@ -624,34 +624,53 @@ and fallbacks in the owning milestone entry).
 | V4 | `checkPrimitiveDef.WF` (`Boundaries.lean:35`) | Lane V, #32-gated | upstream PR #32 (+24k lines) verifies exactly this recognizer; absorb and adapt if Mario merges it, prove in-fork (M.WF-style run proof producing `PrimitiveResult`) if it stalls past the 18A′ checkpoint | engineering |
 | V5 | `reduceRecursor.WF` (`Verify/TypeChecker/WHNF.lean:8`) | L4L-19A | selected rule/match/checks/RHS translation/result typing from certified generated metadata via `pat_wf` (sheds its transitional closure at 16X) and the block-certificate pattern surface; quot branch against the quot lemmas; nested branch needs the σ̂ β-collapse bridge plus `NestedBlockCertificate` pattern facts | engineering, multi-session |
 | V6 | `aliasFormerAlignmentRun` (`InductiveFixtures.lean:7808`) | L4L-16R | pure repair of a true closed-run statement whose `build.eq_def` stepping no longer elaborates on v4.33; fold into the reconcile session (same elaborator-repair flavor) | certain |
-| E1 | `LR.iotaWitnessStep` (`ShapeLogRelAdequacy.lean:8680`) | wrap at L4L-16C′w; discharge at 16N-N5 | rewrap as `…_of_piPathInv` (consuming the landed `MajorChainAnchorStep.of_piPathInv`) after the two mechanical obligations land | wrap engineering; discharge is 16N |
-| E2 | `SExpr.WHRedS.defeq` (`SExpr.lean:4429`) | L4L-16C′w | not separate work: `WHRedS.defeq_of_piPathInv` is landed; migrate the two remaining call sites, delete the sorried general form | certain |
-| E3 | `SExpr.WHRed.weakU_inv` `.extra` case (`SExpr.lean:4206`, off-path) | L4L-16C′w or 18S-W4 | conditionalize its consumers (`InferType.weakU_inv`, `LRIsType.weak'`) at the wrap, or close outright via the shared W4 `Pattern.Action` repackaging | engineering |
+| E1 | `LR.iotaWitnessStep` (ADQ; the file's one sorry) | wrap at L4L-16C′w; discharge at 16N-N5 | **conditional theorem proved 2026-08-20**: `iotaWitnessStep_of_piPathInv (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ₀)` at exactly `[propext, Classical.choice, Quot.sound]` — the measurement added the second named leaf input `MajorLinkRect` (the fold algebra's `exact` field standalone), machine-characterized as unclosable from `piInv` + the landed transport surface (lift-image-only `LiftEquiv`, `mono`/`HasType` coherence at `lam`/`forallE`, level counting) and as `FixedHeadResult`-class semantic content; both inputs discharge at 16N-N5, with `lift_ctor_inv`/`CtorFrame.shape_ctor`/`CtorSpineDefEq.cons_inv` pre-banked for that discharge | wrap done; switchover mechanical; discharge is 16N |
+| E2 | `SExpr.WHRedS.defeq` (`SExpr.lean:4429`) | L4L-16C′w | not separate work: `WHRedS.defeq_of_piPathInv` is landed; migrate the call sites (measured 2026-08-20: four in four declarations — `LR.constDefEq`, which also gains a missing `Ctx.WF Γ₀`, `SelfAdequateConstStep.of_steps`, `adequacy_of_iotaWitnessStep`, and the `SExpr.WHRedS.crDefEq` wrapper, which is deleted outright since it lives upstream of `PiPathInv` and has zero consumers), delete the sorried general form | certain |
+| E3 | `SExpr.WHRed.weakU_inv` `.extra` case (`SExpr.lean:4206`, off-path) | L4L-16C′w | measured 2026-08-20: not a `PiPathInv` problem and not worth conditionalizing — the consumer chain (`WHRedS.weakU_inv` → `InferType.weakU_inv` → the dead `weak'_inv` + `LogRel.lean`) closes under deletion once `LogRel.lean` goes, so the wrap deletes the whole chain; the W4 `Pattern.Action`-at-`:↑` content re-enters at 18S when actually needed | certain |
 
 The six remaining allowlist entries are deliberate kernel-rejection fixture
 recoveries, not debt; L4L-19C reduces the allowlist to exactly those.
 
 ### Metatheory closure (L4L-16C′w–L4L-18S)
 
-**L4L-16C′w — conditional wrap (active).** Finish the two mechanical
-obligations left by the 2026-08-15 re-cut: the `RectFrame` transport from
-the native constructor observation to the recursor-application result
-(`LRS.CtorFrame.toRectFrame` is landed; the rec-app-observation instance
-remains — the only named obligation with no landed producer, so it goes
-first) and the terminal fixed-head dominance instance
-(`LR.FixedHeadTerminalDominance` with its `.nil`/`.of_exact` producers and
-`FixedHeadProducer.of_dominance` consumer are landed; the leaf's concrete
-spine instance remains). Then execute the E1/E2/E3 wrap rows of §5.0,
-taking `Experimental/` to zero sorry tokens, and measure the conditional
-gate endpoint at `[propext, Classical.choice, Quot.sound]` with an exact
-pin. Everything already banked stays banked: the depth tower,
+**L4L-16C′w — conditional wrap (active).** The two mechanical
+obligations of the 2026-08-15 re-cut **landed 2026-08-20** (commit
+`5414d63d`), both probe-first with a correction each: (a) the literal
+"`RectFrame` at the rec-app observation" is machine-refuted
+(`RectFrame.tyShape_rigid` + a moving-family witness — the rec-app
+observation moves its type shape, which the landed frame forbids by
+design); the honest instance is the additive widening
+`LRS.RecAppFrame`/`LRS.RecAppSync` (`.rect` composes by type with
+`iotaDefEqRect_of_ctorExactAt`; `CtorFrame` factors through unchanged);
+(b) the dominance layer's ∀-`outTyP` producer hypothesis was
+machine-proved undischargeable as stated (vacuity bug: any inhabitant
+forced `out.T ≤ bot` under call sites assuming the negation) and is
+repaired with an `out.HasType outTyP` premise; the general List-indexed
+producer `FixedHeadTerminalDominance.of_layers` and the
+`forces_headLevel` necessity corollaries are landed. The conditional leaf theorem also
+**landed 2026-08-20**: `iotaWitnessStep_of_piPathInv` is proved additively
+at the standard clean closure, with the measurement surfacing the second
+named leaf input `LR.MajorLinkRect Γ₀` (see the E1 row — the conditional
+boundary is the input pair, both 16N-N5-discharged). Remaining wrap work,
+in order: (1) the mechanical switchover per the 2026-08-20 edit map —
+switch the one consumer to the conditional theorem, delete the sorried
+leaf, thread the leaf inputs through the 22 downstream declarations
+(16 ADQ, 1 UniqueTyping, 5 D-ladder endpoints, which introduce their
+`Params` via `letI` and need the instance spelled explicitly; match each
+declaration's generality for `linkRect`), execute the E2/E3 rows, and
+delete the scratch set `{Thierry, Thierry2, LogRel, DomainTheory,
+MoreStepIndexed, NormalEq, ParallelReduction}` (verified import-leaves) —
+taking `Experimental/` to zero sorry tokens and zero `stop`-hidden
+admissions; (2) re-measure the D-ladder `#guard_msgs` pins and bank the
+conditional gate endpoint at `[propext, Classical.choice, Quot.sound]`.
+Everything already banked stays banked: the depth tower,
 `SelfAdequateConstStep`, `CoherentFixedHeadStep`, the chain-wall repair
 (`CtorRetype`/`CtorSpineTypeUniqPath`), `MajorChainAnchorStep`, and the
 registered-narrowing consumption interface (`PiPathInvReg`,
 `regSpine_result_uniq`, `CtorChainT`).
 *Exit:* Experimental sorry-token count 0; every conditional endpoint
-carries the single named Prop `LRS.PiPathInv` explicitly; measured
-closures pinned; checkpoint published.
+carries the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`)
+explicitly; measured closures pinned; checkpoint published.
 
 **L4L-16R — v4.33-drift reconciliation (integration-only).** Immediately
 after 16C′w, per the 2026-08-20 addendum in
@@ -676,10 +695,10 @@ session, dominated by item 3:
 4. `4b60e53d` K-target phase alignment + upstream `divergences.md` intel —
    textual-clean.
 5. Fold in V6 (`aliasFormerAlignmentRun` repair, same elaborator-repair
-   flavor) and the Experimental scratch deletion (`Thierry.lean`,
-   `Thierry2.lean`, `LogRel.lean`, and the dead `NormalEq.lean`/
-   `ParallelReduction.lean` stubs — all unreferenced; the parked
-   `Stratified`/`StratifiedUntyped`/`Stronger` stubs may go with them).
+   flavor) and delete the remaining zero-token parked stubs
+   (`StepIndexed`, `CoinductiveLogRel`, `Stratified`,
+   `StratifiedUntyped`, `Stronger` — the token-carrying scratch set was
+   already deleted by the 16C′w wrap).
 6. Record the PR #43 design comparison (the fork's proof-carrying
    `Pattern.Action`/L4L-18B interface vs #43's `VEnv.pats` +
    `IsDefEq.pat`; the fork's appDF×`.extra` refutation applies verbatim to
@@ -766,7 +785,7 @@ Rungs, probe-first, sessions per the staged-parallel calibration:
 | N2 | The Tait core: weak-head normalization | every `HasTypeStratifiedS`-typed term inhabits its type's candidate; cases β / δ (`DeltaRank`) / iota (N0 descent + determinism) / structEta (type-directed) / proofIrrel (singleton + landed disjointness) | the Tree iota case defeats the (rank, size, depth) lexicographic order → re-derive the measure from the block-wide target-family ordinals; if that also fails, the milestone halts and reports — no third fallback | 4–8, case-groups across 2–3 sub-lanes |
 | N3 | Fundamental theorem for defeq | `IsDefEqStrong` at sorts ⇒ related as types (matching whnf heads, related components); PER laws; `.extra` via N1's expansion closure | `trans` needs candidate-uniqueness at an unsupplied index (the probeS/probeT failure shape recurring) → localize to the Pi-observation fragment (all N4 consumes) | 3–6 |
 | N4 | Escape | related-Pi ⇒ `TypeDefEqPath` components; `LRS.PiPathInv` = per-edge N3 + PER + escape | escape needs `TypeDefEqPath.collapse` after all → acceptable if a dependency-walker probe confirms no cycle | 1–3 |
-| N5 | Consumer discharge | fire `iotaWitnessStep_of_piPathInv` at D0–D2; `sort_invS`/`d2SortInvSExact` unconditional; corollaries `IndTyAppInj`, `QuotAppInj` | — | 2–4 |
+| N5 | Consumer discharge | supply both leaf inputs — `LRS.PiPathInv` (from N4) and `LR.MajorLinkRect` (from the N2/N3 semantic content at `FixedHeadResult` strength; `lift_ctor_inv`/`CtorFrame.shape_ctor`/`CtorSpineDefEq.cons_inv` pre-banked 2026-08-20) — and fire `iotaWitnessStep_of_piPathInv` at D0–D2; `sort_invS`/`d2SortInvSExact` unconditional; corollaries `IndTyAppInj`, `QuotAppInj` | — | 2–4 |
 
 Total 13–27 staged sessions, wall-clock set by N2. Recorded payoffs: N2
 subsumes the restricted `TypeWHNFEx` and yields `SortHeadNorm`/
@@ -912,6 +931,19 @@ named design docs and probe files.
 - **`FixedHeadTerminalRetarget`/`FixedHeadTerminalLink`** false as
   originally stated (premortem residue doc); the repaired dominance
   interface is landed.
+- **Literal `RectFrame` at the rec-app observation:** refuted 2026-08-20
+  (`RectFrame.tyShape_rigid` + the `RecAppMoving` witness — the rec-app
+  observation moves its type shape along `mono`, which the frame's rigid
+  type observation forbids). The honest transport is the landed widening
+  `RecAppFrame`/`RecAppSync` (probe W16, banked in `ShapeLogRel.lean`);
+  do not attempt to widen `RectFrame.mono` in place.
+- **The dominance ∀-`outTyP` producer hypothesis (pre-repair form):**
+  machine-proved undischargeable — every inhabitant forced
+  `out.T ≤ bot` while every call site assumed the negation (probe X16,
+  `producerHyp_forces_bot`/`producerHyp_unusable`); repaired 2026-08-20
+  with an `out.HasType outTyP` premise. Level adequacy
+  (`capturePaths.length ≤ head.1`) is a necessary premise of any
+  producer (`forces_headLevel`), not bookkeeping.
 
 ### Checker closure (L4L-19A–L4L-19C)
 
