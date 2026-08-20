@@ -233,6 +233,29 @@ Audit baseline after the complete L4L-12B literal-readiness checkpoint
   (`TrEnv'.ignore`/`mutualDef`/`thm`); dead `cheapRec` removal; the new do
   elaborator; and `isZero → isAlwaysZero` in inductive universe checks.
 
+- upstream v4.33-drift reconciliation checkpoint (L4L-16R, 2026-08-20): the
+  working-copy merge on `jcb/formalization3` whose second parent is digama
+  `upstream/master` `e0e3f6bc` (five commits past `b292275c`). Absorbed:
+  stage-2 fresh-replay environments (`Environment.empty (stage₁ := false)`),
+  the level-algorithm enable (`isEquivList := all2 isEquiv'` converged;
+  `geq → geq'` in constructor universe checks, propagated through
+  `ValidationTrace` and the fixture replays), the `lazyDeltaProjReduction`
+  restructure (`ReductionStatus.true`/`.false tn sn`, `reduceProjCore`
+  split — the fork's proof now discharges upstream's `reduceProjCore.WF`
+  sorry, see D022), the `isKTarget`-before-`mkRecInfos` phase alignment,
+  upstream's three new `divergences.md` entries, and the self-contained
+  `Theory/LevelSat.lean` coNP-hardness reduction. Kept fork-side: toolchain
+  v4.33.0 (D018), `Tests` in `defaultTargets` plus the fork's CI structure
+  (D021), the D012 sort-routing residue, and the 16C′w Experimental
+  deletions (upstream's `def → theorem` hunks in files the fork removed
+  resolve as deletions; the five remaining zero-token parked stubs —
+  `StepIndexed`, `CoinductiveLogRel`, `Stratified`, `StratifiedUntyped`,
+  `Stronger` — were deleted as import-leaves per the 16R plan). The sorry
+  frontier is unchanged at exactly 22 entries; V6
+  (`aliasFormerAlignmentRun`) was attempted and remains the allowlisted
+  sorry, with the v4.33 kabstract-transparency findings recorded at the
+  declaration.
+
 Status vocabulary: `worktree`, `local-committed`, `published-fork`, `submitted`,
 `upstreamed`, or `intentional-fork`. `published-fork` means pushed to an
 Argument Computer fork branch but not yet submitted upstream. An entry is
@@ -919,6 +942,23 @@ to the replacement.
   `Level.isExplicitSubsumedAux_eq`, `TreeMap.any_eq_any_toList`) joined
   `Verify/Axioms.lean`, and `TreeMap.all_eq_all_toList` is live again in
   upstream's proofs (no longer a deletable dead axiom).
+- **L4L-16R note (narrowed further, 2026-08-20):** upstream `3f6e8f92`
+  ("enable the new level algorithm") flipped its own
+  `isEquivList := List.all2 isEquiv'` and switched `checkConstructors` to
+  `geq'` — both halves converged with the fork, so the constant-level-list
+  routing and the constructor universe check are no longer divergences at
+  all (the fork absorbed the `geq → geq'` flip into
+  `checkConstructorType.loop`, `ValidationTrace`'s
+  `ConstructorUniverseTrace`, and the semantic-gate replay). The residue of
+  this row is now exactly: the `quickIsDefEq` sort comparison routed through
+  `isEquiv'` (upstream still compares sorts with core `isEquiv`), plus the
+  fork-only `isStructEq` family and the `levelStructGe` structural fast path
+  in `checkConstructorType` (accepts a subset of `geq'`, so kernel-facing
+  behavior matches upstream exactly). The Verify-side
+  `constructorUniverseSemanticGe` audit still requires `geq && geq'` in its
+  fallback; since the executable check now accepts via `geq'` alone, the
+  audit is strictly narrower than the checker — a proof-surface choice, not
+  a checker divergence.
 
 ## D013 — complete inductive replay and consumer certificates
 
@@ -1179,6 +1219,58 @@ to the replacement.
   explicit registered-equation join split, or an equivalent interface that
   represents beta-collapsed tower rules without a trusted shape or soundness
   oracle, and the fork migrates.
+
+## D021 — Tests stay in the default build surface
+
+- **Status:** intentional-fork, created by the L4L-16R reconciliation
+  (2026-08-20)
+- **Delta:** upstream `3f6e8f92` moved `Lean4Lean.Tests` out of
+  `defaultTargets` and compensated with an explicit "Build Lean4Lean.Tests"
+  CI step; the fork keeps `Lean4Lean.Tests` in `defaultTargets`
+  (`lakefile.toml`) because the §6 release gate and the Nix `proofs` check
+  build the default surface with `--wfail` and rely on Tests riding along.
+  Upstream's CI intent (Tests must compile) is therefore satisfied by the
+  fork's default `lake build` step, and the fork's `ci.yml` keeps its own
+  structure (frontier check, `--wfail`, Experimental job) without the extra
+  step. The fork also retains its batteries pin `v4.33.0` (upstream:
+  `v4.33.0-rc2`; see D018).
+- **Ix impact:** none; build-surface only.
+- **Tests:** `lake build` (default targets) is the §6 gate's first line.
+- **Removal condition:** the gate stops depending on default-target Tests
+  coverage (e.g. it names `Lean4Lean.Tests` explicitly), after which the
+  lakefile can converge with upstream's.
+
+## D022 — `reduceProjCore.WF` proved (upstream carries it as a sorry)
+
+- **Status:** local-committed; upstream-contribution candidate — submit
+  while `62441418` is fresh
+- **Delta:** upstream `62441418` ("perf: add lazyDeltaProjReduction") split
+  `reduceProj` into `reduceProjCore` + a `>>=` wrapper and moved
+  `reduceProj.WF` to `Verify/TypeChecker/Reduce.lean`, proved atop a *new
+  sorry* `reduceProjCore.WF`. The fork had already proved the unsplit
+  `reduceProj.WF` sorry-free via its TrProj semantics
+  (`registeredStructureHeadInversion`, projector/constructor alignment); the
+  L4L-16R merge reshaped that proof onto the split, so
+  `Verify/TypeChecker/Reduce.lean` now proves `reduceProjCore.WF` outright
+  (the string-literal branch and the `withApp` constructor-field selection)
+  and keeps upstream's wrapper derivation for `reduceProj.WF` verbatim. Both
+  measure `[propext, sorryAx, Classical.choice, Quot.sound]` plus only the
+  three persistent-collection contracts — a subset of the file's
+  pre-existing `reduceNat.WF` closure; the `sorryAx` is inherited from the
+  unchanged 22-entry frontier (whnf/whnfCore method chains and the TrProj
+  transport lemmas), not from any new admission.
+- **Ix impact:** none directly; keeps the fork's proj-reduction closure
+  intact across upstream's defeq-path change (`isDefEqCore'` proj case now
+  runs `lazyDeltaProjReduction`, fully verified upstream given
+  `reduceProjCore.WF`).
+- **Tests:** `lake build Lean4Lean.Verify`; the frontier audit stays at
+  exactly 22 known sorries.
+- **Upstream issue/PR:** TBD — the discharge depends on the fork's TrProj
+  machinery, so it travels with the projection-semantics series (D015), but
+  the statement-level fact that the sorry is dischargeable is worth
+  signalling upstream immediately.
+- **Removal condition:** upstream proves `reduceProjCore.WF` (theirs or a
+  ported version of this proof) and the fork rebases onto it.
 
 ## Review checklist
 

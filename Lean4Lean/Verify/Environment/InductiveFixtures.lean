@@ -5085,7 +5085,7 @@ private theorem annotatedPiLazyDeltaStepDomain
           (TypeChecker.Methods.withFuel (fuel + 3))
           annotatedPiCtorCandidateContext.toTypeChecker
           (annotatedPiSortOneInferOnlyState m) =
-        .ok (.bool true,
+        .ok (.true,
           annotatedPiWithEqvManager
             (annotatedPiOutParamUnfoldState
               (annotatedPiSortOneInferOnlyState m)) m') := by
@@ -5138,7 +5138,7 @@ private theorem annotatedPiLazyDeltaLoopDomain
           (TypeChecker.Methods.withFuel (fuel + 3))
           annotatedPiCtorCandidateContext.toTypeChecker
           (annotatedPiSortOneInferOnlyState m) =
-        .ok (.bool true,
+        .ok (.true,
           annotatedPiWithEqvManager
             (annotatedPiOutParamUnfoldState
               (annotatedPiSortOneInferOnlyState m)) m') := by
@@ -5189,7 +5189,7 @@ private theorem annotatedPiLazyDeltaDomain
           (TypeChecker.Methods.withFuel (fuel + 3))
           annotatedPiCtorCandidateContext.toTypeChecker
           (annotatedPiSortOneInferOnlyState m) =
-        .ok (.bool true,
+        .ok (.true,
           annotatedPiWithEqvManager
             (annotatedPiOutParamUnfoldState
               (annotatedPiSortOneInferOnlyState m)) m') := by
@@ -7669,8 +7669,22 @@ theorem aliasFormerAlignmentRun :
   -- Tier V (L4L-19B, v4.33 reconciliation repair debt): the premerge proof
   -- stepped `ConstructorCandidateAlignmentTrace.build` with `rw [build.eq_def]`,
   -- which the v4.33 elaborator no longer matches (and eq_def-in-simp loops).
-  -- The statement is an exact closed checker run and remains true; the
-  -- stepping proof needs a rework against the new equation-lemma shapes.
+  -- The statement is an exact closed checker run and remains true.
+  -- L4L-16R repair findings (2026-08-20): the entry `rw [build.eq_def]` works
+  -- again once `simp only [aliasFormerKernelType]` runs FIRST (v4.33 kabstract
+  -- no longer bridges the `aliasFormerKernelType.ctors`-vs-literal gap), and
+  -- `simp only [aliasFormerConstructorValidationContext_eq] at closed rootCheck`
+  -- (after `rename_i closed rootCheck fresh terminal valid`) aligns the
+  -- record-update trace-hypothesis types. The residual blocker is firing the
+  -- resulting dependent match: `split`/simp-iota refuse it, and
+  -- `rw [build.match_1.eq_2]` fails because the metavar assignments for the
+  -- trace slots type-check at reducible transparency against
+  -- `context.fuel.inductiveFuel`/`head.name`-indexed binder types while the
+  -- goal carries `999`/`ConstantInfo.name`-projection forms — every fixture
+  -- def (`aliasFormerKernelCtor`, fuel projections, `ConstantInfo.name`
+  -- chains) must be pre-normalized into one syntactic form across goal AND
+  -- hypothesis types before `.eq_2` can fire, then the same treatment repeats
+  -- for `ConstructorViewAlignmentTrace.build` and the recursive nil case.
   sorry
 
 private def aliasFormerStagedPostFamilyInput :

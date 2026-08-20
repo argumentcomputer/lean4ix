@@ -38,7 +38,7 @@ inductive ConstructorUniverseTrace (resultLevel fieldLevel : Level) : Type where
       ConstructorUniverseTrace resultLevel fieldLevel
   | fallback
       (structuralFailed : levelStructGe resultLevel fieldLevel = false)
-      (valid : (resultLevel.isAlwaysZero || resultLevel.geq fieldLevel) = true) :
+      (valid : (resultLevel.isAlwaysZero || resultLevel.geq' fieldLevel) = true) :
       ConstructorUniverseTrace resultLevel fieldLevel
 
 namespace ConstructorUniverseTrace
@@ -48,7 +48,7 @@ successful universe trace. -/
 theorem not_nonempty_of_rejected
     (structuralRejected : levelStructGe resultLevel fieldLevel = false)
     (fallbackRejected :
-      (resultLevel.isAlwaysZero || resultLevel.geq fieldLevel) = false) :
+      (resultLevel.isAlwaysZero || resultLevel.geq' fieldLevel) = false) :
     ¬ Nonempty (ConstructorUniverseTrace resultLevel fieldLevel) := by
   rintro ⟨trace⟩
   cases trace with
@@ -679,7 +679,7 @@ theorem exists_of_run
                     simp only [Bool.false_eq_true, if_false] at success
                     cases hfallback :
                         (stats.resultLevel.isAlwaysZero ||
-                          stats.resultLevel.geq sortResult.sortLevel!) with
+                          stats.resultLevel.geq' sortResult.sortLevel!) with
                     | false =>
                         rw [hfallback] at success
                         change Except.error _ = Except.ok () at success
@@ -767,7 +767,7 @@ def buildExecution (stats : InductiveStats) (isUnsafe : Bool)
                       | true => finish (.structural hstruct)
                       | false =>
                           match hfallback : stats.resultLevel.isAlwaysZero ||
-                              stats.resultLevel.geq sortResult.sortLevel! with
+                              stats.resultLevel.geq' sortResult.sortLevel! with
                           | false => .error <| .other
                               s!"universe level of type_of(arg #{argIdx + 1}) of '{ctor}' is too big for the corresponding inductive datatype"
                           | true => finish (.fallback hstruct hfallback)

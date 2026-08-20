@@ -1890,7 +1890,7 @@ theorem ConstructorUniverseTrace.nonempty_of_semanticGe
     Nonempty (ConstructorUniverseTrace resultLevel fieldLevel) := by
   unfold constructorUniverseSemanticGe at valid
   simp only [Bool.or_eq_true, Bool.and_eq_true] at valid
-  rcases valid with structural | prop | ⟨core, _verified⟩
+  rcases valid with structural | prop | ⟨_core, verified⟩
   · exact ⟨.structural structural⟩
   · cases hstruct : levelStructGe resultLevel fieldLevel with
     | true => exact ⟨.structural hstruct⟩
@@ -1900,7 +1900,7 @@ theorem ConstructorUniverseTrace.nonempty_of_semanticGe
   · cases hstruct : levelStructGe resultLevel fieldLevel with
     | true => exact ⟨.structural hstruct⟩
     | false =>
-        exact ⟨.fallback hstruct (by simp [core])⟩
+        exact ⟨.fallback hstruct (by simp [verified])⟩
 
 /-- The executable semantic subset implies exactly the disjunct required for
 a non-recursive field in `VInductDecl.fieldsWF`: either the family is Prop or
