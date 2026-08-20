@@ -210,12 +210,21 @@ recommended: it is a rule-packaging change, not a proof search.
 
 ## 6. Staged obligations (Lean statements in `plans/probes/probeE-weakn.lean`)
 
+> **2026-08-20 correction (machine-checked; folded from the completion
+> plan):** this table's original W2→W3 dependency arrow was INVERTED —
+> **W3 uses W2**, not the reverse — and W2's only non-elementary input is
+> `InferType.exists`.  W2 and W3 are both now **PROVED**, and strengthened:
+> probe E's `hA`/`hF` hypotheses are shown redundant.  Evidence:
+> `plans/probes/probeE2-weakn-w2w3.lean`.  The W2/W3 rows below are
+> updated accordingly; the SST route, the obstruction records, and the
+> W5+W6 residual-risk assessment are unchanged.
+
 | # | Statement (probe name) | Difficulty | Discharged by | Probe status |
 |---|---|---|---|---|
 | W0 | `probe_wall_witness` | short proof | `IsDefEq.beta` + `inst_lift` | **proved, clean** |
 | W1 | `IsDefEqU.strengthen_of_witness` (forward under inhabited insertion) | short proof | `IsDefEq.instN` + `inst_lift` | **proved, clean** |
-| W2 | `HasType.weakN_inv_ex` (S1: typing strengthening, existential type) | real work (inside SST; blocked standalone) | per-depth CR core + W3; app case = Pi-obs, lam/forallE cases = S2 one depth down | type-checked, sorry |
-| W3 | `IsDefEqU.weakN_inv_sort` / `weakN_inv_forallE` (S2-obs at heads) | real work | re-founded `reduce_sort`/`reduce_forallE` + `WHRedS.weakU_inv` + soundness; Injectivity endpoints | type-checked, sorry |
+| W2 | `HasType.weakN_inv_ex` (S1: typing strengthening, existential type) | **PROVED** (2026-08-20) | `InferType.exists` — its only non-elementary input (arrow corrected: W2 does **not** use W3) | proved + strengthened (`probeE2-weakn-w2w3.lean`) |
+| W3 | `IsDefEqU.weakN_inv_sort` / `weakN_inv_forallE` (S2-obs at heads) | **PROVED** (2026-08-20) | W2 (dependency arrow corrected — W3 uses W2, not the reverse) | proved + strengthened (`probeE2-weakn-w2w3.lean`) |
 | W4 | `ParRedS.weakN_inv` (S-PR) | real work → research-grade pending the `.extra` decision (§5) | existing `ParRed.weakN_inv` structural cases + certificate re-packaging | tainted-proved (iteration); `.extra` residual open |
 | W5 | `NormalEq.weakN_inv` (S-NE) | **research-grade core** | new mutual induction (§5.1) | tainted-proved via `weakN_inv_DFC` (stand-in); clean re-proof owed |
 | W6 | CR-core re-founding per depth (`NormalEq.trans`, `church_rosser`, `ParRedS.standard`; no new statements) | **research-grade core** | existing scripts + depth scaffolding + §5.2 | n/a (refactor) |

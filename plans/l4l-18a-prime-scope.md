@@ -1,5 +1,13 @@
 # L4L-18A′ scope — Church–Rosser, standardization, and the normalization question
 
+> **2026-08-20:** the ladder (§5/§6) as a *route to the 16C′ leaf* is
+> closed: `plans/probes/probeR13-loop.lean` proved `LRS.ParRedSDefeq` ⟺
+> `LRS.PiPathInv` — interderivable, so the CR ladder cannot discharge the
+> leaf; it is a downstream **consumer** of it. The rungs remain the plan of
+> record for L4L-18A′'s own deliverables (the CR `.extra` cases,
+> standardization transport), and the sort-restriction narrowing
+> (R12′/`PiPathInv.of_crLadder_R12`) provably does not dodge the hard case.
+
 Date: 2026-08-15
 
 Commissioned by the 2026-08-15 16C′ verdict, `plans/roadmap.md:735-741`:
@@ -412,39 +420,6 @@ and reproduces §7.1.
 
 ## 8. Sequencing recommendation
 
-### 8.1 18A′ *with* 16C′, not before it
-
-They share no files — 18A′ is `Theory/`, 16C′ is `Experimental/` — and the
-dependency between them is one-way *at the interface level only*. Run them
-concurrently. But note the real shape of the dependency, which is not what
-the roadmap currently records:
-
-* 16C′ needs `PiPathInv`, which 18A′ supplies (R12);
-* 18A′ needs the four shape facts (§4.4), which **only the semantics can
-  supply** (§4.2);
-* those facts currently come out of adequacy
-  (`TypeDefEqPath.sort_inv_of_adequacy`, ADQ:109; the `sortInv` fields at
-  ADQ:451/471/493 and `sort_inv_of_adequacyAtDepth`, ADQ:522), and adequacy
-  is what needs `PiPathInv`.
-
-**The decisive open question, and it belongs to the ADQ owner, not to
-18A′:** *can adequacy deliver the §4.4 shape facts at a rung strictly below
-the one that consumes `PiPathInv`?* If yes, the ladder is acyclic and 18A′
-closes the leaf. If no, there is a genuine cycle and the project needs a
-third input. Note the encouraging asymmetry: `sortInv` already has a
-**depth-indexed** producer (ADQ:471, :493, :522) whereas probeS closed the
-depth-indexed route for `PiPathInv` — so the two may well separate. That is
-the next thing to check, and it is cheap to check.
-
-### 8.2 Cut 16C″ — "shape disjointness"
-
-A new micro-milestone whose sole deliverable is the four §4.4 facts as one
-named class, proved from the shape logical relation independently of
-`PiPathInv`. It is far smaller than full adequacy: it needs only the
-*soundness* direction (read a shape off a derivation), not the reflection
-direction that makes adequacy hard. It is the true blocker for both 16C′
-and 18A′, and today it is nobody's milestone.
-
 ### 8.3 Re-cut 16C′ to close conditionally — **yes, do it**
 
 The commission asks honestly whether closing 16C′ with the leaf conditional
@@ -471,6 +446,13 @@ class of §4.4**, not `PiPathInv` itself. `PiPathInv` is 18A′'s *output*;
 the disjointness class is the genuine leaf, it is what 16C″ owes, and
 conditioning on it keeps the two milestones' interfaces honest.
 
+> **2026-08-20:** §8.3 was adopted as roadmap Decision (A) on 2026-08-15 —
+> but with the conditional Prop named `LRS.PiPathInv`, not the
+> shape-disjointness class this section insists on. Recorded deviation,
+> defensible: the disjointness facts landed independently (three from
+> `LE_Interp.sound`, `sortInv` at rung 0) before the cut, leaving
+> `PiPathInv` the genuine leaf.
+
 ### 8.4 What 16C′ banks meanwhile
 
 Everything already landed stays banked and is unaffected by this pass: the
@@ -483,6 +465,9 @@ and `MajorChainAnchorStep`. Still bankable without any 18A′ input:
 `∀ depth, FixedHeadTypeValidStep`, and `FixedHeadTerminalRetarget`.
 
 ### 8.5 Roadmap edits this implies
+
+> **2026-08-20:** the roadmap-edit bullets below were executed — the
+> roadmap rewrite of this date handles them.
 
 * Retitle the ladder entry `L4L-18A` → `L4L-18A′` and rewrite `:824-836`
   per §0 and §2 (strike normalization; add standardization as *already
