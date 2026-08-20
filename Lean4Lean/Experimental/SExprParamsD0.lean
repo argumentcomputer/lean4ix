@@ -7080,6 +7080,36 @@ def d0DeltaRank (univs : Nat) :
     obtain rfl := List.length_eq_zero_iff.mp hlen
     exact ⟨2, 0, by decide, d0ZeroCertR univs Gamma⟩
 
+/-- The generated Nat environment inhabits the classified normalization
+fragment.  Its only iota rules carry `NatGeneration` origins; the non-Prop
+argument law is the generic consequence of its semantic constructor
+bundles. -/
+theorem natClassified (univs : Nat)
+    [semantic : @Params.Semantic (natParams univs)] :
+    letI : Params := natParams univs
+    letI : Params.DeltaRank := natDeltaRank univs
+    Params.Classified := by
+  letI : Params := natParams univs
+  letI : Params.Semantic := semantic
+  letI : Params.DeltaRank := natDeltaRank univs
+  exact {
+    iotaDescent := natIotaStructuralDescent univs
+    argumentNonProp := Params.patternArgumentNonProp }
+
+/-- The zero-arity definition extension preserves the classified boundary;
+`d0DeltaRank` supplies its one strict delta edge. -/
+theorem d0Classified (univs : Nat)
+    [semantic : @Params.Semantic (d0Params univs)] :
+    letI : Params := d0Params univs
+    letI : Params.DeltaRank := d0DeltaRank univs
+    Params.Classified := by
+  letI : Params := d0Params univs
+  letI : Params.Semantic := semantic
+  letI : Params.DeltaRank := d0DeltaRank univs
+  exact {
+    iotaDescent := d0IotaStructuralDescent univs
+    argumentNonProp := Params.patternArgumentNonProp }
+
 /-- End-to-end D0a smoke theorem: the generated Nat fixture supplies every
 semantic certificate required by the experimental sort-injectivity bridge.
 Conditional on the two L4L-16C′w leaf inputs at the fixture instance. -/

@@ -2819,6 +2819,21 @@ def d1DeltaRank (univs : Nat) :
     obtain rfl := List.length_eq_zero_iff.mp hlen
     exact ⟨4, 1, by decide, d1MutBValueCertR univs Gamma⟩
 
+/-- Mutual zero-arity definitions preserve the classified fragment.  Their
+strict delta chain is certified by `d1DeltaRank`; all iota provenance is
+transported from D0. -/
+theorem d1Classified (univs : Nat)
+    [semantic : @Params.Semantic (d1Params univs)] :
+    letI : Params := d1Params univs
+    letI : Params.DeltaRank := d1DeltaRank univs
+    Params.Classified := by
+  letI : Params := d1Params univs
+  letI : Params.Semantic := semantic
+  letI : Params.DeltaRank := d1DeltaRank univs
+  exact {
+    iotaDescent := d1IotaStructuralDescent univs
+    argumentNonProp := Params.patternArgumentNonProp }
+
 /-- End-to-end D1 endpoint: the mutual-definition-extended environment
 supplies every semantic certificate required by the experimental
 sort-injectivity bridge.  Conditional on the two L4L-16C′w leaf inputs at
