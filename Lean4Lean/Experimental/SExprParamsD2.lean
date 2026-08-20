@@ -735,6 +735,26 @@ theorem treeRule_registered {i : Nat} {constructor : NormalizedBlockCtor}
   simpa only [VInductDecl.BlockGenerationChecked.generatedRules,
     List.mem_map] using ⟨_, this, rfl⟩
 
+/-- Each recursive call in a Tree/TreeList rule is attached to a strict
+constructor-field position.  Unlike the concrete Nat proof, this is derived
+uniformly from the block generation certificate: constructor semantics gives
+the retained field lookup and generation shape aligns the normalized and raw
+field telescope lengths. -/
+theorem treeRule_recursive_lt {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : TreeGen.flatCtors[i]? = some constructor) :
+    ∀ recursive ∈ constructor.ctor.view.recursive,
+      recursive.fieldIndex <
+        (constructor.ctor.rawFields treeDecl.nparams).length := by
+  intro recursive hrecursive
+  have hmem : constructor ∈ TreeGen.flatCtors := List.mem_of_getElem? hentry
+  obtain ⟨_, _, _, ⟨_, hfield, _⟩, _⟩ :=
+    (d2BlockGenerationWF.constructors constructor hmem).recursive
+      recursive hrecursive
+  have hlt : recursive.fieldIndex < constructor.ctor.view.fields.length :=
+    (List.getElem?_eq_some_iff.mp hfield).1
+  rw [TreeGen.flatCtor_fields_length hmem]
+  exact hlt
+
 /-- The RHS template of a block rule is the registered right tower applied
 to the ordered capture list. -/
 theorem treeRuleRHS_tower {i : Nat} {constructor : NormalizedBlockCtor}
@@ -2914,6 +2934,77 @@ theorem d2IotaRule_entry_elim (univs : Nat)
         exact absurd hpattern
           (by simp [RecursorIotaPattern, d0DefExt, d1MutAExt, d1MutBExt])
 
+/-- A concrete inherited Nat entry retains the generated declaration and its
+strict recursive-field certificate after transport into D2. -/
+theorem d2NatEntryIotaStructuralDescent (univs : Nat) {i : Nat}
+    {constructor : NormalizedBlockCtor}
+    (hentry : NatGeneration.flatCtors[i]? = some constructor) :
+    @Pattern.IotaRule.StructuralDescent (d2Params univs)
+      (NatGeneration.ruleRecName constructor)
+      (NatGeneration.ruleMajorArity constructor) constructor.ctor.raw.name
+      (NatGeneration.ruleArgArity constructor)
+      (NatGeneration.ruleRHS natRuleClosure hentry,
+        NatGeneration.ruleCheck natRuleClosure
+          (List.mem_of_getElem? hentry))
+      (d2NatEntryIotaRule univs hentry) := by
+  letI : Params := d2Params univs
+  exact ⟨{
+    source := InductiveFixtures.natDecl
+    generation := NatGeneration
+    ruleIndex := i
+    constructor := constructor
+    entry := hentry
+    rule_eq := rfl
+    recursive_lt := natRule_recursive_lt hentry }⟩
+
+/-- A concrete Tree/TreeList entry is certified directly by the block
+generation proof used to register its equation. -/
+theorem d2TreeIotaStructuralDescent (univs : Nat) {i : Nat}
+    {constructor : NormalizedBlockCtor}
+    (hentry : TreeGen.flatCtors[i]? = some constructor) :
+    @Pattern.IotaRule.StructuralDescent (d2Params univs)
+      (TreeGen.ruleRecName constructor)
+      (TreeGen.ruleMajorArity constructor) constructor.ctor.raw.name
+      (TreeGen.ruleArgArity constructor)
+      (TreeGen.ruleRHS treeRuleClosure hentry,
+        TreeGen.ruleCheck treeRuleClosure (List.mem_of_getElem? hentry))
+      (d2TreeIotaRule univs hentry) := by
+  letI : Params := d2Params univs
+  exact ⟨{
+    source := treeDecl
+    generation := TreeGen
+    ruleIndex := i
+    constructor := constructor
+    entry := hentry
+    rule_eq := rfl
+    recursive_lt := treeRule_recursive_lt hentry }⟩
+
+/-- Every D2 iota rule can be selected with a generated origin whose recursive
+calls point to strict constructor-field positions.  The concrete-entry
+eliminator covers both inherited Nat rules and the live mutual block. -/
+theorem d2IotaStructuralDescent (univs : Nat)
+    {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (H : (d2Params univs).Pat
+      (RecursorIotaPattern rec major ctor arity) r) :
+    ∃ rule : @Pattern.IotaRule (d2Params univs) rec major ctor arity r,
+      @Pattern.IotaRule.StructuralDescent (d2Params univs)
+        rec major ctor arity r rule := by
+  let rule := d2IotaRule univs H
+  let P : ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check},
+      @Pattern.IotaRule (d2Params univs) rec major ctor arity r → Prop :=
+    fun {rec} {major} {ctor} {arity} {r} selected =>
+      @Pattern.IotaRule.StructuralDescent (d2Params univs)
+        rec major ctor arity r selected
+  refine ⟨rule, d2IotaRule_entry_elim univs P ?_ ?_ rule⟩
+  · intro i constructor hentry
+    exact d2NatEntryIotaStructuralDescent univs hentry
+  · intro i constructor hentry
+    exact d2TreeIotaStructuralDescent univs hentry
+
 /-- The recursor levels at every D2 iota site have the arity stored by the
 selected generated equation.  This field is not per-rule replay volume: it
 comes from the typed recursor head and the generated rule's `rule_uvars`
@@ -3571,6 +3662,40 @@ info: 'Lean4Lean.SExpr.ParamsD2.d2IotaRule_levelsLength' depends on axioms: [pro
 -/
 #guard_msgs in
 #print axioms d2IotaRule_levelsLength
+
+/--
+info: 'Lean4Lean.SExpr.ParamsD2.d2IotaStructuralDescent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ d0Def_fresh._native.native_decide.ax_1_1,
+ d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ d1MutA_fresh._native.native_decide.ax_1_1,
+ d1MutA_name_ne_d0Def._native.native_decide.ax_1_1,
+ d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natRec._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natSucc._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natZero._native.native_decide.ax_1_1,
+ d1MutB_fresh._native.native_decide.ax_1_1,
+ d1MutB_name_ne_d0Def._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natRec._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natSucc._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natZero._native.native_decide.ax_1_1,
+ d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ d2Env_isSome._native.native_decide.ax_1_1,
+ treeList_fresh._native.native_decide.ax_1_1,
+ tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2IotaStructuralDescent
 
 /--
 info: 'Lean4Lean.SExpr.ParamsD2.d2SortInvSExact' depends on axioms: [propext,

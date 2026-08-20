@@ -1,4 +1,5 @@
 import Lean4Lean.Experimental.ShapeLogRelAdequacy
+import Lean4Lean.Experimental.SExprClassified
 import Lean4Lean.Theory.Typing.InductivePatternEnv
 import Lean4Lean.Verify.Environment.InductiveFixtures
 
@@ -1714,6 +1715,29 @@ theorem probeNatFlatCtorSucc_lookup :
       some NatGeneration.flatCtors[1] :=
   List.getElem?_eq_getElem (by decide)
 
+/-- Every recursive descriptor retained by either generated Nat rule points
+strictly inside that constructor's emitted field telescope.  This is the
+concrete N0 structural-decrease fact; `Nat.succ` contributes the sole
+recursive field and `Nat.zero` contributes none. -/
+theorem natRule_recursive_lt {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : NatGeneration.flatCtors[i]? = some constructor) :
+    ∀ recursive ∈ constructor.ctor.view.recursive,
+      recursive.fieldIndex <
+        (constructor.ctor.rawFields InductiveFixtures.natDecl.nparams).length := by
+  have hi : i = 0 ∨ i = 1 := by
+    obtain ⟨hlt, _⟩ := List.getElem?_eq_some_iff.mp hentry
+    have : NatGeneration.flatCtors.length = 2 := rfl
+    omega
+  rcases hi with rfl | rfl
+  · have hc := Option.some.inj
+      (probeNatFlatCtorZero_lookup.symm.trans hentry)
+    subst constructor
+    decide
+  · have hc := Option.some.inj
+      (probeNatFlatCtorSucc_lookup.symm.trans hentry)
+    subst constructor
+    decide
+
 theorem probeNatGeneratedRuleZero_lookup :
     NatGeneration.generatedRules[0]? =
       some (NatGeneration.rule 0 NatGeneration.flatCtors[0]) := by
@@ -1948,6 +1972,65 @@ noncomputable def natIotaRule (univs : Nat)
       (RecursorIotaPattern rec major ctor arity) r) :
     @Pattern.IotaRule (natParams univs) rec major ctor arity r :=
   Classical.choice (natIotaRule_nonempty univs H)
+
+/-- Every iota pattern in the base Nat fixture has a semantic descriptor
+whose registered equation carries certified structural descent.  The witness
+is selected from the generation entry itself rather than from the weaker
+`Params.Semantic.iotaRule` result, whose public type intentionally remembers
+only registration. -/
+theorem natIotaStructuralDescent (univs : Nat)
+    {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (H : (natParams univs).Pat
+      (RecursorIotaPattern rec major ctor arity) r) :
+    ∃ rule : @Pattern.IotaRule (natParams univs) rec major ctor arity r,
+      @Pattern.IotaRule.StructuralDescent (natParams univs)
+        rec major ctor arity r rule := by
+  letI : Params := natParams univs
+  change NatPat (RecursorIotaPattern rec major ctor arity) r at H
+  obtain ⟨i, constructor, hentry, hpattern, -⟩ :=
+    VInductDecl.BlockGenerationChecked.IotaPat.recover NatGeneration H
+  change RecursorIotaPattern rec major ctor arity =
+    RecursorIotaPattern (NatGeneration.ruleRecName constructor)
+      (NatGeneration.ruleMajorArity constructor) constructor.ctor.raw.name
+      (NatGeneration.ruleArgArity constructor) at hpattern
+  obtain ⟨rfl, rfl, rfl, rfl⟩ := RecursorIotaPattern.inj hpattern
+  let rgen :=
+    (NatGeneration.ruleRHS natRuleClosure hentry,
+      NatGeneration.ruleCheck natRuleClosure (List.mem_of_getElem? hentry))
+  have Hgen : NatPat
+      (RecursorIotaPattern (NatGeneration.ruleRecName constructor)
+        (NatGeneration.ruleMajorArity constructor) constructor.ctor.raw.name
+        (NatGeneration.ruleArgArity constructor)) rgen :=
+    .mk hentry
+  have hr : r ≍ rgen :=
+    (VInductDecl.BlockGenerationChecked.IotaPat.pat_uniq NatGeneration
+      H Hgen .refl (Pattern.inter_self _)).2.2
+  have hr' : r = rgen := eq_of_heq hr
+  subst r
+  let rule : @Pattern.IotaRule (natParams univs)
+      (NatGeneration.ruleRecName constructor)
+      (NatGeneration.ruleMajorArity constructor) constructor.ctor.raw.name
+      (NatGeneration.ruleArgArity constructor) rgen := {
+    pat := Hgen
+    df := NatGeneration.rule i constructor
+    registered := natRule_registered hentry
+    rhsClosed := natRuleClosure.rhs_closed hentry
+    capturePaths := natCapturePaths constructor
+    rhsTower := by
+      simpa only [rgen, VInductDecl.BlockGenerationChecked.rulePattern,
+        SimplePattern.toPattern, RecursorIotaPattern] using
+        natRuleRHS_tower hentry }
+  refine ⟨rule, ⟨?_⟩⟩
+  exact {
+    source := InductiveFixtures.natDecl
+    generation := NatGeneration
+    ruleIndex := i
+    constructor := constructor
+    entry := hentry
+    rule_eq := rfl
+    recursive_lt := natRule_recursive_lt hentry }
 
 /-- Every concrete Nat pattern match selects its canonical registered rule
 and carries a checked, conversion-aware capture spine and beta collapse. -/
@@ -5937,6 +6020,38 @@ noncomputable def d0IotaRule (univs : Nat)
       (RecursorIotaPattern rec major ctor arity) r) :
     @Pattern.IotaRule (d0Params univs) rec major ctor arity r :=
   Classical.choice (d0IotaRule_nonempty univs H)
+
+/-- Structural descent survives the D0 environment extension.  Definition
+patterns cannot inhabit an iota-pattern index, so the only case is the Nat
+rule already certified above; registration is weakened to `d0Env` while the
+generated origin is rebased unchanged. -/
+theorem d0IotaStructuralDescent (univs : Nat)
+    {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (H : (d0Params univs).Pat
+      (RecursorIotaPattern rec major ctor arity) r) :
+    ∃ rule : @Pattern.IotaRule (d0Params univs) rec major ctor arity r,
+      @Pattern.IotaRule.StructuralDescent (d0Params univs)
+        rec major ctor arity r rule := by
+  letI : Params := d0Params univs
+  change D0Pat _ _ at H
+  cases H with
+  | iota H =>
+    obtain ⟨oldRule, hdescent⟩ := natIotaStructuralDescent univs H
+    rcases oldRule with
+      ⟨oldPat, df, registered, rhsClosed, capturePaths, rhsTower⟩
+    let rule : @Pattern.IotaRule (d0Params univs)
+        rec major ctor arity r := {
+      pat := D0Pat.iota oldPat
+      df := df
+      registered := natFinalEnv_le_d0Env.defeqs registered
+      rhsClosed := rhsClosed
+      capturePaths := capturePaths
+      rhsTower := rhsTower }
+    refine ⟨rule, Pattern.IotaRule.StructuralDescent.rebase
+      hdescent rule ?_⟩
+    rfl
 
 theorem d0NatRecEnvLookup :
     d0Env.constants ``Nat.rec =
