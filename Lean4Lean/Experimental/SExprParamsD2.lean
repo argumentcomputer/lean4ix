@@ -3005,6 +3005,22 @@ theorem d2IotaStructuralDescent (univs : Nat)
   · intro i constructor hentry
     exact d2TreeIotaStructuralDescent univs hentry
 
+/-- The full Nat + mutual Tree/TreeList fixture inhabits the classified
+normalization fragment.  `d2IotaStructuralDescent` covers all seven generated
+entries, including recursion under a Pi, while `d2DeltaRank` covers the
+inherited zero-arity definitions. -/
+theorem d2Classified (univs : Nat)
+    [semantic : @Params.Semantic (d2Params univs)] :
+    letI : Params := d2Params univs
+    letI : Params.DeltaRank := d2DeltaRank univs
+    Params.Classified := by
+  letI : Params := d2Params univs
+  letI : Params.Semantic := semantic
+  letI : Params.DeltaRank := d2DeltaRank univs
+  exact {
+    iotaDescent := d2IotaStructuralDescent univs
+    argumentNonProp := Params.patternArgumentNonProp }
+
 /-- The recursor levels at every D2 iota site have the arity stored by the
 selected generated equation.  This field is not per-rule replay volume: it
 comes from the typed recursor head and the generated rule's `rule_uvars`
@@ -3696,6 +3712,40 @@ info: 'Lean4Lean.SExpr.ParamsD2.d2IotaStructuralDescent' depends on axioms: [pro
 -/
 #guard_msgs in
 #print axioms d2IotaStructuralDescent
+
+/--
+info: 'Lean4Lean.SExpr.ParamsD2.d2Classified' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ d0Def_fresh._native.native_decide.ax_1_1,
+ d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ d1MutA_fresh._native.native_decide.ax_1_1,
+ d1MutA_name_ne_d0Def._native.native_decide.ax_1_1,
+ d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natRec._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natSucc._native.native_decide.ax_1_1,
+ d1MutA_name_ne_natZero._native.native_decide.ax_1_1,
+ d1MutB_fresh._native.native_decide.ax_1_1,
+ d1MutB_name_ne_d0Def._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natRec._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natSucc._native.native_decide.ax_1_1,
+ d1MutB_name_ne_natZero._native.native_decide.ax_1_1,
+ d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ d2Env_isSome._native.native_decide.ax_1_1,
+ treeList_fresh._native.native_decide.ax_1_1,
+ tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2Classified
 
 /--
 info: 'Lean4Lean.SExpr.ParamsD2.d2SortInvSExact' depends on axioms: [propext,
