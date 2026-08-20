@@ -1472,6 +1472,36 @@ noncomputable def d1IotaRule (univs : Nat)
     @Pattern.IotaRule (d1Params univs) rec major ctor arity r :=
   Classical.choice (d1IotaRule_nonempty univs H)
 
+/-- The mutual-definition extension adds no iota rules, so generated
+structural descent is transported verbatim from D0. -/
+theorem d1IotaStructuralDescent (univs : Nat)
+    {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (H : (d1Params univs).Pat
+      (RecursorIotaPattern rec major ctor arity) r) :
+    ∃ rule : @Pattern.IotaRule (d1Params univs) rec major ctor arity r,
+      @Pattern.IotaRule.StructuralDescent (d1Params univs)
+        rec major ctor arity r rule := by
+  letI : Params := d1Params univs
+  change D1Pat _ _ at H
+  cases H with
+  | old H =>
+    obtain ⟨oldRule, hdescent⟩ := d0IotaStructuralDescent univs H
+    rcases oldRule with
+      ⟨oldPat, df, registered, rhsClosed, capturePaths, rhsTower⟩
+    let rule : @Pattern.IotaRule (d1Params univs)
+        rec major ctor arity r := {
+      pat := D1Pat.old oldPat
+      df := df
+      registered := d0Env_le_d1Env.defeqs registered
+      rhsClosed := rhsClosed
+      capturePaths := capturePaths
+      rhsTower := rhsTower }
+    refine ⟨rule, Pattern.IotaRule.StructuralDescent.rebase
+      hdescent rule ?_⟩
+    rfl
+
 theorem d1NatRecEnvLookup :
     d1Env.constants ``Nat.rec =
       some (VInductDecl.recConst 0 ``Nat 0 InductiveFixtures.natType) :=
