@@ -15038,8 +15038,9 @@ theorem InterpTyped.piBot_out {Γ : List SExpr} {M N A : SExpr}
 /-! ### Three of the four facts, from soundness alone
 
 None of the three theorems below takes an adequacy hypothesis, and none of
-them can consume `LR.adequacy` without exposing `sorryAx` in its axiom
-closure (ADQ's single `sorry` sits in `LR.iotaWitnessStep`). -/
+them consumes `LR.adequacy` (which, since the 16C′w wrap, is conditional on
+the named leaf inputs `LRS.PiPathInv`/`LR.MajorLinkRect` rather than
+sorried). -/
 
 /-- **§4.4 fact 2** (`IsDefEqU.sort_forallE_inv`) and **fact 3**
 (`Params.structEta_sort_disjoint`).  Soundness transports the Pi shape of the
@@ -15792,8 +15793,9 @@ producer here.  `IndTyHeadNorm` factors as
 and only the middle factor is soundness-shaped — it is this theorem.  The
 left flank — moving `IndTyHead Γ X`'s `WHRedS Γ X spine` into a defeq that
 `LE_Interp.sound` can consume — is exactly `LRS.SubjectRedS` (equivalently a
-direct whr-invariance of `LE_Interp`, which does not exist; the Theory
-mirror `SExpr.WHRedS.defeq` is a `sorry`).  The right flank — recovering
+direct whr-invariance of `LE_Interp`, which does not exist; the former
+mirror `SExpr.WHRedS.defeq` was deleted at the 16C′w wrap in favour of the
+conditional `WHRedS.defeq_of_piPathInv`).  The right flank — recovering
 `WHRedS Γ Y spine'` from `Y` carrying the `indTy` shape — is the adequacy
 fixpoint's `indTy` observation (`LR.adequacy`, ADQ).  Both flanks are
 leaf-equivalent and neither is soundness-derivable, because the conclusion

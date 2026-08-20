@@ -2791,13 +2791,16 @@ def d1DeltaRank (univs : Nat) :
 
 /-- End-to-end D1 endpoint: the mutual-definition-extended environment
 supplies every semantic certificate required by the experimental
-sort-injectivity bridge. -/
+sort-injectivity bridge.  Conditional on the two L4L-16C′w leaf inputs at
+the fixture instance. -/
 theorem d1SortInvS (univs : Nat) {Gamma : List VExpr} {u v : VLevel}
+    (piInv : @LRS.PiPathInv (d1Params univs))
+    (linkRect : ∀ Γ, @LR.MajorLinkRect (d1Params univs) Γ)
     (hGamma : OnCtx Gamma (d1Env.IsType univs))
     (h : d1Env.IsDefEqU univs Gamma (.sort u) (.sort v)) : u ≈ v := by
   letI : Params := d1Params univs
   letI : Params.Semantic := d1Semantic univs
-  exact VEnv.IsDefEqU.sort_invS hGamma h
+  exact VEnv.IsDefEqU.sort_invS piInv linkRect hGamma h
 
 /--
 info: 'Lean4Lean.SExpr.ParamsD1.d1SortInvS' depends on axioms: [propext,

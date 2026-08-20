@@ -2651,16 +2651,19 @@ noncomputable def d2Semantic (univs : Nat) (h : D2BlockStep univs) :
     intro df ls Gamma hreg hlen hLhs hRhs
     exact d2Registered univs h hreg hlen hLhs hRhs }
 
-/-- End-to-end D2 endpoint, conditional on the block step: the
-block-inductive environment supplies every semantic certificate required by
-the experimental sort-injectivity bridge. -/
+/-- End-to-end D2 endpoint, conditional on the block step and the two
+L4L-16C′w leaf inputs: the block-inductive environment supplies every
+semantic certificate required by the experimental sort-injectivity
+bridge. -/
 theorem d2SortInvS (univs : Nat) (h : D2BlockStep univs)
+    (piInv : @LRS.PiPathInv (d2Params univs))
+    (linkRect : ∀ Γ, @LR.MajorLinkRect (d2Params univs) Γ)
     {Gamma : List VExpr} {u v : VLevel}
     (hGamma : OnCtx Gamma (d2Env.IsType univs))
     (hde : d2Env.IsDefEqU univs Gamma (.sort u) (.sort v)) : u ≈ v := by
   letI : Params := d2Params univs
   letI : Params.Semantic := d2Semantic univs h
-  exact VEnv.IsDefEqU.sort_invS hGamma hde
+  exact VEnv.IsDefEqU.sort_invS piInv linkRect hGamma hde
 
 /-! ## The complete rule registry, disambiguated by right towers
 
@@ -3060,12 +3063,15 @@ noncomputable def d2SemanticExact (univs : Nat) (h : D2BlockStepExact univs) :
   d2Semantic univs h.toBlockStep
 
 /-- Preferred D2 endpoint with inherited Nat checks and all level-arity
-bookkeeping discharged internally. -/
+bookkeeping discharged internally.  Conditional on the exact residual
+contract and the two L4L-16C′w leaf inputs. -/
 theorem d2SortInvSExact (univs : Nat) (h : D2BlockStepExact univs)
+    (piInv : @LRS.PiPathInv (d2Params univs))
+    (linkRect : ∀ Γ, @LR.MajorLinkRect (d2Params univs) Γ)
     {Gamma : List VExpr} {u v : VLevel}
     (hGamma : OnCtx Gamma (d2Env.IsType univs))
     (hde : d2Env.IsDefEqU univs Gamma (.sort u) (.sort v)) : u ≈ v :=
-  d2SortInvS univs h.toBlockStep hGamma hde
+  d2SortInvS univs h.toBlockStep piInv linkRect hGamma hde
 
 /-! ## Endpoints and pins -/
 

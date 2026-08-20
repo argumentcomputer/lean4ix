@@ -4182,29 +4182,6 @@ theorem WHRed.weak' (W : Ctx.Lift' ρ Γ Γ') :
     rw [Pattern.RHS.lift'_applyS]
     exact .extra (action.weak' W)
 
-/-- Inverse weakening for one weak-head step. The `.extra` case is
-deferred (off the L4L-16 gate path; consumed only through the
-`WHRedS.weakU_inv` mirror, whose live consumers are `InferType.weakU_inv`
-below and `LRIsType.weak'` in `Experimental/LogRel.lean`): it needs to
-lower the two `IsDefEq` fields of the matched `Pattern.Action`, which
-requires either a context-WF-conditioned `IsDefEq` inverse weakening or
-restating `Action.checked`/`sound` at `:↑`. See
-plans/l4l-16-completion-plan.md §16B′. -/
-theorem WHRed.weakU_inv (W : Ctx.Lift' ρ Γ Γ') (H : Γ' ⊢ e1.lift' ρ ⤳ e2') :
-    ∃ e2, e2' = e2.lift' ρ ∧ Γ ⊢ e1 ⤳ e2 := by
-  generalize he : e1.lift' ρ = e1' at H
-  induction H generalizing e1 with
-  | app h1 ih => let .app .. := e1; cases he; obtain ⟨_, rfl, a1⟩ := ih rfl; exact ⟨_, rfl, .app a1⟩
-  | major h1 h2 ih =>
-    let .app .. := e1
-    cases he
-    obtain ⟨_, rfl, a1⟩ := ih rfl
-    exact ⟨_, rfl, .major (IsMajorPremise.lift'.1 h1) a1⟩
-  | beta =>
-    let .app e1 _ := e1; let .lam .. := e1; cases he
-    simp [← SExpr.lift'_inst_hi, SExpr.lift'_inj]; exact .beta
-  | extra => sorry
-
 def WHNF (Γ : List SExpr) (e : SExpr) := ∀ e', ¬Γ ⊢ e ⤳ e'
 
 theorem WHNF.lam : WHNF Γ (.lam A e) := by
@@ -4417,17 +4394,6 @@ theorem WHRedS.subst
   | rfl => exact .rfl
   | tail _ h2 ih => exact .tail ih (h2.subst W)
 
-/-- Weak-head reduction is definitional equality. OPEN, and the one
-`SExpr.lean` admission on the L4L-16 gate path. Native exact iota leaves no
-longer use it: their reductions are reflexive and their typings come from
-`CtorExact`/`PatternLeafSpine`.  The remaining uses are the two root-to-view
-anchors of a normalized constructor chain (and generic compatibility
-wrappers).  Proving those anchors is part of the merged weak-inversion/type-
-uniqueness development; it cannot be replaced by an intermediate-link
-certificate because arbitrary weak-head expansion erased that typing. See
-plans/l4l-16-completion-plan.md §16C′. -/
-theorem WHRedS.defeq (H : Γ ⊢ e1 ⤳* e2) (he : Γ ⊢ e1 : A) : Γ ⊢ e1 ≡ e2 : A := sorry
-
 theorem WHRedS.weak' (W : Ctx.Lift' ρ Γ Δ) (H : Γ ⊢ e1 ⤳* e2) :
     Δ ⊢ e1.lift' ρ ⤳* e2.lift' ρ := by
   induction H with
@@ -4444,15 +4410,6 @@ theorem WHRedS.major (H1 : IsMajorPremise f) (H : Γ ⊢ a ⤳* a') :
   induction H with
   | rfl => exact .rfl
   | tail _ h2 ih => exact .tail ih (h2.major H1)
-
-theorem WHRedS.weakU_inv (W : Ctx.Lift' ρ Γ Δ) (H : Δ ⊢ e1.lift' ρ ⤳* e2') :
-    ∃ e2, e2' = e2.lift' ρ ∧ Γ ⊢ e1 ⤳* e2 := by
-  induction H with
-  | rfl => exact ⟨_, rfl, .rfl⟩
-  | tail _ h2 ih =>
-    obtain ⟨_, rfl, a1⟩ := ih
-    obtain ⟨_, rfl, a2⟩ := h2.weakU_inv W
-    exact ⟨_, rfl, .tail a1 a2⟩
 
 theorem WHRedS.determ_l (H1 : Γ ⊢ e ⤳* e₁) (H2 : Γ ⊢ e ⤳* e₂) (W2 : WHNF Γ e₂) : Γ ⊢ e₁ ⤳* e₂ := by
   induction H1 using ReflTransGen.headIndOn generalizing e₂ with
@@ -4544,36 +4501,6 @@ theorem InferType.weak' (W : Ctx.Lift' ρ Γ Δ) : Γ ⊢ e ▷ A → Δ ⊢ e.l
   | .app h1 h2 h3 => SExpr.lift'_inst_hi .. ▸ .app (h1.weak' W) (h2.weak' W) (h3.weak' W)
   | .lam h1 h2 => .lam (h1.weak' W) (h2.weak' W.cons)
   | .forallE h1 h2 h3 h4 => .forallE (h1.weak' W) (h2.weak' W) (h3.weak' W.cons) (h4.weak' W.cons)
-
-theorem InferType.weakU_inv (W : Ctx.Lift' ρ Γ Δ) (H : Δ ⊢ e.lift' ρ ▷ A') :
-    ∃ A, A' = A.lift' ρ ∧ Γ ⊢ e ▷ A := by
-  generalize he : e.lift' ρ = e' at H
-  induction H generalizing Γ ρ e with
-  | bvar h => let .bvar _ := e; cases he; let ⟨_, h1, h2⟩ := h.weakU_inv W; exact ⟨_, h1, .bvar h2⟩
-  | sort => let .sort _ := e; cases he; exact ⟨_, rfl, .sort⟩
-  | const h1 h2 =>
-    let .const .. := e; cases he
-    exact ⟨_, ((henv.closedC h1).mkInstS.lift'_eq .zero).symm, .const h1 h2⟩
-  | app h1 h2 h3 ih =>
-    let .app .. := e; cases he
-    obtain ⟨_, rfl, a1⟩ := ih W rfl
-    obtain ⟨F, a2, a3⟩ := h2.weakU_inv W; cases F <;> cases a2
-    refine ⟨_, by rw [SExpr.lift'_inst_hi], .app a1 a3 (h3.weak'_inv W)⟩
-  | lam h1 h2 ih =>
-    let .lam .. := e; cases he
-    obtain ⟨_, rfl, a2⟩ := ih W.cons rfl
-    exact ⟨_, rfl, .lam (h1.weak'_inv W) a2⟩
-  | forallE h1 h2 h3 h4 ih1 ih2 =>
-    let .forallE .. := e; cases he
-    obtain ⟨_, rfl, a1⟩ := ih1 W rfl
-    obtain ⟨U, a2, a3⟩ := h2.weakU_inv W; cases U <;> cases a2
-    obtain ⟨_, rfl, b1⟩ := ih2 W.cons rfl
-    obtain ⟨V, b2, b3⟩ := h4.weakU_inv W.cons; cases V <;> cases b2
-    exact ⟨_, rfl, .forallE a1 a3 b1 b3⟩
-
-theorem InferType.weak'_inv (W : Ctx.Lift' ρ Γ Δ) (H : Δ ⊢ e.lift' ρ ▷ A.lift' ρ) : Γ ⊢ e ▷ A := by
-  obtain ⟨_, h1, h2⟩ := H.weakU_inv W
-  exact SExpr.lift'_inj.1 h1 ▸ h2
 
 /- `InferType.subst`/`InferType.inst` were deleted together with the
 unsound `IsDefEqLift.subst`: their `app`/`lam` cases consumed it at the
@@ -4760,9 +4687,6 @@ theorem CRDefEq.defeqDF : Γ ⊢ e₁ ≫≪ e₂ : A → Γ ⊢ A ≡ B : .sort
 theorem CRDefEq.weak' (W : Ctx.Lift' ρ Γ Γ') :
     Γ ⊢ e1 ≫≪ e2 : A → Γ' ⊢ e1.lift' ρ ≫≪ e2.lift' ρ : A.lift' ρ
   | ⟨h1, _, _, h3, h4, h5⟩ => ⟨h1.weak' W, _, _, h3.weak' W, h4.weak' W, h5.weak' W⟩
-
-theorem WHRedS.crDefEq (H1 : Γ ⊢ e1 : A) (H2 : Γ ⊢ e1 ⤳* e2) : Γ ⊢ e1 ≫≪ e2 : A :=
-  ⟨H2.defeq H1, _, _, H2.parRedS, .rfl, .refl (H2.defeq H1).hasType.2⟩
 
 nonrec theorem CRDefEqLift.symm : Γ ⊢ e1 ≫≪ e2 :↑ A → Γ ⊢ e2 ≫≪ e1 :↑ A := .symm .symm
 

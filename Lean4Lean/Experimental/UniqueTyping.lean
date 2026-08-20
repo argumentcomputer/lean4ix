@@ -21,11 +21,13 @@ variable [Params] [Params.Semantic]
 
 /-- Compatibility spelling for semantic sort injectivity on the strong
 judgment.  Unlike the retired weak theorem, its premise retains every typing
-and local-extension certificate required by adequacy. -/
+and local-extension certificate required by adequacy.  Conditional on the
+two L4L-16C′w leaf inputs, like everything downstream of `LR.adequacy`. -/
 theorem IsDefEqStrong.uniq_sort
     (hΓ : Ctx.WF Γ)
+    (piInv : LRS.PiPathInv) (linkRect : LR.MajorLinkRect Γ)
     (h : IsDefEqStrong Γ (.sort u) (.sort v) V) : u = v :=
-  SExpr.sort_inv hΓ h
+  SExpr.sort_inv hΓ piInv linkRect h
 
 end SExpr
 end Lean4Lean
