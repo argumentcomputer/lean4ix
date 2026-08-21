@@ -5,7 +5,11 @@ import Lean4Lean.Experimental.SExprParamsD2
 # L4L-16N′0: mutual-inductive reducibility candidates
 
 The candidate architecture of the L4L-16N′ route, landed from probe Z16
-(`plans/probes/probeZ16-indcand.lean`).  The candidate at an inductive type
+(`plans/probes/probeZ16-indcand.lean`).  | succ n hn ih =>
+    exact ⟨_, .rfl, WHNF.ctorSpine hs [n],
+      foldr_app_ne_forallE [n] _ _, foldr_app_ne_sort [n] _ _⟩| zero =>
+    exact ⟨_, .rfl, WHNF.ctorSpine hz [],
+      foldr_app_ne_forallE [] _ _, foldr_app_ne_sort [] _ _⟩The candidate at an inductive type
 stops degenerating to `Base` (edge + assumed `KripkeNormalizes`) and becomes
 constructor-generated membership: a term is in the candidate of a family iff
 it is neutral, or is a classified constructor spine whose recursive fields
@@ -2191,3 +2195,3220 @@ info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2IotaWHRed_ofBlockStep' depends on 
 -/
 #guard_msgs in
 #print axioms d2IotaWHRed_ofBlockStep
+
+/-! # L4L-16N′2 — tower collapse, `ConstFundamental` content, depth-0 heads
+
+Rung N′2 of L4L-16N′ (roadmap §5).  Three deliverables, all additive over
+the landed N′0/N′1 substrate:
+
+1. **The inherited N′1 volume — the tower-body instantiation.**  The N′1
+   finding recorded that a production step out of a live redex lands on the
+   applied right tower, not on the collapsed contractum, and that the
+   collapse is a pure-syntax multi-beta run.  This rung executes that run:
+   `whRedS_lamTower` drives `whRedS_foldl_beta` through an arbitrary lambda
+   tower (σ-generalized so the induction closes), the `lamBodyN` pins
+   compute each registered tower body by kernel `decide` (no new
+   `native_decide` observations), and the nine per-rule instance theorems
+   (`d0ZeroIotaRun` … `d2ConsIotaRun`) compose site step + collapse into
+   `WHRedS` runs from redex to the *landed contractum shapes* — the
+   `TreeRules`/`NatRules` step-field targets.  Multi-step (`WHRedS`-valued)
+   twins `TreeRulesS`/`NatRulesS` of the landed engines, with the same
+   assemblers and the same membership-induction `fundamental_iota`, make
+   those runs directly consumable: the operational side of `ofSteps` is
+   complete at the production step shape.  Conditional exactly as N′1
+   conditioned: D0 outright from the `Params.Semantic.iotaSite` premise
+   bundle; the five D2 Tree steps on `D2TreeCheckedStep` plus the per-rule
+   capture-spine/collapse data; the two inherited D2 Nat steps without a
+   check premise.
+
+2. **`ConstFundamental` content — constants via δ-descent.**  The rank
+   recursion is landed as `constsReducibleBelow_all`: plain induction on
+   the rank bound consuming the named per-step obligation
+   `DeltaStepObligation` — an explicit hypothesis interface (its
+   nonvacuity: `constsReducibleBelow_zero` outright, and
+   `DeltaStepObligation.of_fundamental` exhibits the obligation as a
+   consequence of the fundamental theorem it feeds), NOT a new axiom.
+   `Candidate.ofDeltaValue` is the pointed consumer: one δ-step plus its
+   certificate transfers the value's reducibility to the constant.
+   `ConstFundamental.of_deltaStep` closes the seam shape.  Rank-zero
+   (irreducible) heads get their depth-0 content outright:
+   `Base.const_irreducible` (no registered constant pattern ⇒ the bare
+   constant is Kripke-WHNF), `Base.ctorSpine` (partial and full classified
+   constructor applications), and `Base.stuckMajor` (recursor spines at
+   neutral majors).  Instance discharges: the literal rank certificates
+   and strict δ-drops at d0/d1/d2 (`d0DeltaDescent`, `d1DeltaChain`,
+   `d2DeltaChain`), head irreducibility at d0/d2, and the operational
+   δ-step at both d0 (`d0DefWHRed`, landed) and d2 (`d2DefWHRed`, new).
+   *Deferred and recorded:* membership of constant-headed stuck spines in
+   the `InCand*` candidates (their neutral clause is bvar-only) and the
+   depth-`succ` action content of partial constructor applications — both
+   are N′3 membership-induction content; this rung supplies their
+   `Base`/head-observation halves.
+
+3. **`HeadFundamental 0` content — head observations from membership.**
+   The depth-0 head lemma family: `KripkePiData.headLayer`/`.headLayerRev`
+   (both orientations of `HeadLayer Base` from Kripke Pi-targets with
+   `Base`-related components, via `WHRedS` determinism and
+   `RelatedPath.single`, the reverse via the landed `defeqDF_l` transport),
+   `KripkeSortData.headLayer` (sort targets, any `R`), and
+   `KripkeNonTypeHead.headLayer` (a normal form that is neither Pi nor
+   sort refutes both observations, any `R`, any partner).  Membership
+   supplies the third source: `inCand_whnfShape` shows every candidate
+   member reaches a neutral or classified-constructor normal form, so
+   members' head obligations hold vacuously (`InCandTree.headLayer`, …).
+   `headFundamental_zero_of_data` assembles exactly the
+   `Fundamental.succ` slot from the per-edge classification
+   `HeadObservationData` — the named interface N′3's induction discharges
+   case by case.  Every named `Prop` here has a nonvacuity witness before
+   any consumption; NO case demanded adequacy-strength input, so the
+   rung's kill criterion was not triggered and no isolated conditional
+   `Prop` was needed.
+
+The betaFire boundary is respected throughout: every exposed trace is
+`WHRed`/`WHRedS`-valued; typed data (`IsDefEqStrong` edges, `Base`
+components) rides only on clause arguments. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-! ## N′2.1 — the multi-step engine
+
+The production interface established by the N′1 finding is
+`IotaReductionSite.whRed` (one `.extra` step onto the applied tower) plus
+the untyped multi-beta collapse, i.e. a `WHRedS` run per rule.  The landed
+one-step `TreeRules`/`NatRules` fields cannot receive such runs, so the
+multi-step twins below carry `WHRedS`-valued step fields; their stuck
+halves, assemblers, membership-induction `fundamental_iota`, and seam
+corollary are word-for-word the landed proofs with the run-valued
+expansion `ResultCand.expandS` at the six step-consumption sites. -/
+
+/-- Result candidates absorb multi-step untyped expansion. -/
+theorem ResultCand.expandS {S : CtxPred} (SC : ResultCand S)
+    {Δ : List SExpr} {s s' : SExpr} (run : WHRedS Δ s s') (h : S Δ s') :
+    S Δ s := by
+  induction run using ReflTransGen.headIndOn with
+  | rfl => exact h
+  | head step _ ih => exact SC.expand step ih
+
+/-- The five block rules at the production step shape: `WHRedS`-valued step
+families from redex to the landed contractum shapes, exactly as the
+per-rule collapse theorems below produce them. -/
+structure TreeRulesS (H : TreeHeads) (Γ : List SExpr) (α : SExpr) :
+    Type where
+  recT : SExpr
+  recL : SExpr
+  minorLf : SExpr
+  minorNd : SExpr
+  minorBr : SExpr
+  minorNl : SExpr
+  minorCs : SExpr
+  recT_major : IsMajorPremise recT
+  recL_major : IsMajorPremise recL
+  stuckT : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∀ {t : SExpr}, Neutral t → WHNF Δ ((recT.lift' ρ).app t)
+  stuckL : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∀ {ts : SExpr}, Neutral ts → WHNF Δ ((recL.lift' ρ).app ts)
+  leafStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ x,
+    WHRedS Δ ((recT.lift' ρ).app (leafApp H (α.lift' ρ) x))
+      ((minorLf.lift' ρ).app x)
+  nodeStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts,
+    WHRedS Δ ((recT.lift' ρ).app (nodeApp H (α.lift' ρ) ts))
+      (((minorNd.lift' ρ).app ts).app ((recL.lift' ρ).app ts))
+  branchStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ f,
+    WHRedS Δ ((recT.lift' ρ).app (branchApp H (α.lift' ρ) f))
+      (((minorBr.lift' ρ).app f).app
+        (.lam (α.lift' ρ)
+          (((recL.lift' ρ).lift).app ((f.lift).app (.bvar 0)))))
+  nilStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    WHRedS Δ ((recL.lift' ρ).app (nilApp H (α.lift' ρ))) (minorNl.lift' ρ)
+  consStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t ts,
+    WHRedS Δ ((recL.lift' ρ).app (consApp H (α.lift' ρ) t ts))
+      (((((minorCs.lift' ρ).app t).app ts).app ((recT.lift' ρ).app t)).app
+        ((recL.lift' ρ).app ts))
+
+/-- Assemble a multi-step rule pack from its five run families alone; the
+stuck half is discharged by `stuck_major_kripke` exactly as in the landed
+one-step assembler. -/
+def TreeRulesS.ofSteps {H : TreeHeads} {Γ : List SExpr} {α : SExpr}
+    {recT recL minorLf minorNd minorBr minorNl minorCs : SExpr}
+    (recT_major : IsMajorPremise recT) (recL_major : IsMajorPremise recL)
+    (leafStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ x,
+      WHRedS Δ ((recT.lift' ρ).app (leafApp H (α.lift' ρ) x))
+        ((minorLf.lift' ρ).app x))
+    (nodeStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts,
+      WHRedS Δ ((recT.lift' ρ).app (nodeApp H (α.lift' ρ) ts))
+        (((minorNd.lift' ρ).app ts).app ((recL.lift' ρ).app ts)))
+    (branchStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ f,
+      WHRedS Δ ((recT.lift' ρ).app (branchApp H (α.lift' ρ) f))
+        (((minorBr.lift' ρ).app f).app
+          (.lam (α.lift' ρ)
+            (((recL.lift' ρ).lift).app ((f.lift).app (.bvar 0))))))
+    (nilStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      WHRedS Δ ((recL.lift' ρ).app (nilApp H (α.lift' ρ)))
+        (minorNl.lift' ρ))
+    (consStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t ts,
+      WHRedS Δ ((recL.lift' ρ).app (consApp H (α.lift' ρ) t ts))
+        (((((minorCs.lift' ρ).app t).app ts).app
+          ((recT.lift' ρ).app t)).app ((recL.lift' ρ).app ts))) :
+    TreeRulesS H Γ α where
+  recT := recT
+  recL := recL
+  minorLf := minorLf
+  minorNd := minorNd
+  minorBr := minorBr
+  minorNl := minorNl
+  minorCs := minorCs
+  recT_major := recT_major
+  recL_major := recL_major
+  stuckT := stuck_major_kripke recT_major
+  stuckL := stuck_major_kripke recL_major
+  leafStep := leafStep
+  nodeStep := nodeStep
+  branchStep := branchStep
+  nilStep := nilStep
+  consStep := consStep
+
+/-- The fundamental iota case against the multi-step rules: the landed
+membership induction verbatim, with `ResultCand.expandS` absorbing the
+per-rule runs.  No measure, no rank — the discriminating `branch` case is
+unchanged. -/
+theorem TreeRulesS.fundamental_iota {H : TreeHeads} {Γ : List SExpr}
+    {α : SExpr} {P S : CtxPred}
+    (R : TreeRulesS H Γ α) (SC : ResultCand S)
+    (mLf : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ x, P Δ x →
+      S Δ ((R.minorLf.lift' ρ).app x))
+    (mNd : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts,
+      InCandTreeList H P Δ (α.lift' ρ) ts → S Δ ((R.recL.lift' ρ).app ts) →
+      S Δ (((R.minorNd.lift' ρ).app ts).app ((R.recL.lift' ρ).app ts)))
+    (mBr : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ f,
+      (∀ {Δ' : List SExpr} {ρ' : Lift}, Ctx.Lift' ρ' Δ Δ' → ∀ a, P Δ' a →
+        InCandTreeList H P Δ' ((α.lift' ρ).lift' ρ') ((f.lift' ρ').app a)) →
+      ∀ g, (∀ a, P Δ a → S Δ (g.app a)) →
+        S Δ (((R.minorBr.lift' ρ).app f).app g))
+    (mNl : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      S Δ (R.minorNl.lift' ρ))
+    (mCs : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t ts,
+      InCandTree H P Δ (α.lift' ρ) t → InCandTreeList H P Δ (α.lift' ρ) ts →
+      S Δ ((R.recT.lift' ρ).app t) → S Δ ((R.recL.lift' ρ).app ts) →
+      S Δ (((((R.minorCs.lift' ρ).app t).app ts).app
+        ((R.recT.lift' ρ).app t)).app ((R.recL.lift' ρ).app ts))) :
+    (∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t : SExpr,
+        InCandTree H P Δ (α.lift' ρ) t → S Δ ((R.recT.lift' ρ).app t)) ∧
+      (∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts : SExpr,
+        InCandTreeList H P Δ (α.lift' ρ) ts →
+          S Δ ((R.recL.lift' ρ).app ts)) := by
+  have caseLeaf : ∀ {Δ : List SExpr} {β : SExpr} (x : SExpr), P Δ x →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app (leafApp H β x)) := by
+    intro Δ β x hx ρ W hβ
+    subst hβ
+    exact SC.expandS (R.leafStep W x) (mLf W x hx)
+  have caseNode : ∀ {Δ : List SExpr} {β : SExpr} (ts : SExpr),
+      InCandTreeList H P Δ β ts →
+      (∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app ts)) →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app (nodeApp H β ts)) := by
+    intro Δ β ts hts ih ρ W hβ
+    subst hβ
+    exact SC.expandS (R.nodeStep W ts) (mNd W ts hts (ih ρ W rfl))
+  have caseBranch : ∀ {Δ : List SExpr} {β : SExpr} (f : SExpr),
+      (∀ {Δ' : List SExpr} {ρ' : Lift}, Ctx.Lift' ρ' Δ Δ' → ∀ a : SExpr,
+        P Δ' a → InCandTreeList H P Δ' (β.lift' ρ') ((f.lift' ρ').app a)) →
+      (∀ {Δ' : List SExpr} {ρ' : Lift} (_ : Ctx.Lift' ρ' Δ Δ') (a : SExpr)
+        (_ : P Δ' a), ∀ ρ'' : Lift, Ctx.Lift' ρ'' Γ Δ' →
+          β.lift' ρ' = α.lift' ρ'' →
+          S Δ' ((R.recL.lift' ρ'').app ((f.lift' ρ').app a))) →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app (branchApp H β f)) := by
+    intro Δ β f hf ih ρ W hβ
+    subst hβ
+    refine SC.expandS (R.branchStep W f) (mBr W f hf _ fun a ha => ?_)
+    refine SC.expand (underPi_beta (α.lift' ρ) (R.recL.lift' ρ) f a) ?_
+    have := ih Ctx.Lift'.refl a ha ρ W SExpr.lift'_refl
+    simpa only [SExpr.lift'_refl] using this
+  have caseNeuT : ∀ {Δ : List SExpr} {β : SExpr} (t : SExpr), Neutral t →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app t) := by
+    intro Δ β t hn ρ W _
+    exact SC.whnf (R.stuckT W hn)
+  have caseExpT : ∀ {Δ : List SExpr} {β : SExpr} (t t' : SExpr),
+      WHRed Δ t t' → InCandTree H P Δ β t' →
+      (∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app t')) →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app t) := by
+    intro Δ β t t' step _ ih ρ W hβ
+    exact SC.expand
+      (WHRed.major (IsMajorPremise.lift'.2 R.recT_major) step) (ih ρ W hβ)
+  have caseNil : ∀ {Δ : List SExpr} {β : SExpr},
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app (nilApp H β)) := by
+    intro Δ β ρ W hβ
+    subst hβ
+    exact SC.expandS (R.nilStep W) (mNl W)
+  have caseCons : ∀ {Δ : List SExpr} {β : SExpr} (t ts : SExpr),
+      InCandTree H P Δ β t → InCandTreeList H P Δ β ts →
+      (∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recT.lift' ρ).app t)) →
+      (∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app ts)) →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app (consApp H β t ts)) := by
+    intro Δ β t ts ht hts ih₁ ih₂ ρ W hβ
+    subst hβ
+    exact SC.expandS (R.consStep W t ts)
+      (mCs W t ts ht hts (ih₁ ρ W rfl) (ih₂ ρ W rfl))
+  have caseNeuL : ∀ {Δ : List SExpr} {β : SExpr} (ts : SExpr), Neutral ts →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app ts) := by
+    intro Δ β ts hn ρ W _
+    exact SC.whnf (R.stuckL W hn)
+  have caseExpL : ∀ {Δ : List SExpr} {β : SExpr} (ts ts' : SExpr),
+      WHRed Δ ts ts' → InCandTreeList H P Δ β ts' →
+      (∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app ts')) →
+      ∀ ρ : Lift, Ctx.Lift' ρ Γ Δ → β = α.lift' ρ →
+        S Δ ((R.recL.lift' ρ).app ts) := by
+    intro Δ β ts ts' step _ ih ρ W hβ
+    exact SC.expand
+      (WHRed.major (IsMajorPremise.lift'.2 R.recL_major) step) (ih ρ W hβ)
+  refine ⟨fun {Δ ρ} W t h => ?_, fun {Δ ρ} W ts h => ?_⟩
+  · exact InCandTree.rec
+      (motive_1 := fun Δ' β t _ => ∀ ρ' : Lift, Ctx.Lift' ρ' Γ Δ' →
+        β = α.lift' ρ' → S Δ' ((R.recT.lift' ρ').app t))
+      (motive_2 := fun Δ' β ts _ => ∀ ρ' : Lift, Ctx.Lift' ρ' Γ Δ' →
+        β = α.lift' ρ' → S Δ' ((R.recL.lift' ρ').app ts))
+      caseLeaf caseNode caseBranch caseNeuT caseExpT
+      caseNil caseCons caseNeuL caseExpL h ρ W rfl
+  · exact InCandTreeList.rec
+      (motive_1 := fun Δ' β t _ => ∀ ρ' : Lift, Ctx.Lift' ρ' Γ Δ' →
+        β = α.lift' ρ' → S Δ' ((R.recT.lift' ρ').app t))
+      (motive_2 := fun Δ' β ts _ => ∀ ρ' : Lift, Ctx.Lift' ρ' Γ Δ' →
+        β = α.lift' ρ' → S Δ' ((R.recL.lift' ρ').app ts))
+      caseLeaf caseNode caseBranch caseNeuT caseExpT
+      caseNil caseCons caseNeuL caseExpL h ρ W rfl
+
+/-- Seam composition for the multi-step engine: recursor applications at
+candidate majors emit `WHResult`, exactly as the landed one-step corollary. -/
+theorem TreeRulesS.recT_whResult {H : TreeHeads} {Γ : List SExpr}
+    {α A : SExpr} {P : CtxPred} (R : TreeRulesS H Γ α)
+    (mLf : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ x, P Δ x →
+      WHReaches Δ ((R.minorLf.lift' ρ).app x))
+    (mNd : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ ts,
+      InCandTreeList H P Δ (α.lift' ρ) ts →
+      WHReaches Δ ((R.recL.lift' ρ).app ts) →
+      WHReaches Δ
+        (((R.minorNd.lift' ρ).app ts).app ((R.recL.lift' ρ).app ts)))
+    (mBr : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ f,
+      (∀ {Δ' : List SExpr} {ρ' : Lift}, Ctx.Lift' ρ' Δ Δ' → ∀ a, P Δ' a →
+        InCandTreeList H P Δ' ((α.lift' ρ).lift' ρ') ((f.lift' ρ').app a)) →
+      ∀ g, (∀ a, P Δ a → WHReaches Δ (g.app a)) →
+        WHReaches Δ (((R.minorBr.lift' ρ).app f).app g))
+    (mNl : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      WHReaches Δ (R.minorNl.lift' ρ))
+    (mCs : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ t ts,
+      InCandTree H P Δ (α.lift' ρ) t → InCandTreeList H P Δ (α.lift' ρ) ts →
+      WHReaches Δ ((R.recT.lift' ρ).app t) →
+      WHReaches Δ ((R.recL.lift' ρ).app ts) →
+      WHReaches Δ (((((R.minorCs.lift' ρ).app t).app ts).app
+        ((R.recT.lift' ρ).app t)).app ((R.recL.lift' ρ).app ts)))
+    {t : SExpr} (h : InCandTree H P Γ α t) :
+    WHResult Γ (R.recT.app t) A := by
+  have out := (R.fundamental_iota WHReaches.resultCand
+      mLf mNd mBr mNl mCs).1 Ctx.Lift'.refl t
+    (by simpa only [SExpr.lift'_refl] using h)
+  have out' : WHReaches Γ (R.recT.app t) := by
+    simpa only [SExpr.lift'_refl] using out
+  exact out'
+
+/-- The two Nat rules at the production step shape. -/
+structure NatRulesS (zeroC succC : Name) (ls : List SLevel)
+    (Γ : List SExpr) : Type where
+  recN : SExpr
+  minorZ : SExpr
+  minorS : SExpr
+  recN_major : IsMajorPremise recN
+  stuckN : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∀ {n : SExpr}, Neutral n → WHNF Δ ((recN.lift' ρ).app n)
+  zeroStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    WHRedS Δ ((recN.lift' ρ).app (.const zeroC ls)) (minorZ.lift' ρ)
+  succStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ n,
+    WHRedS Δ ((recN.lift' ρ).app ((SExpr.const succC ls).app n))
+      (((minorS.lift' ρ).app n).app ((recN.lift' ρ).app n))
+
+/-- `Nat` side of the multi-step assembler. -/
+def NatRulesS.ofSteps {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {recN minorZ minorS : SExpr}
+    (recN_major : IsMajorPremise recN)
+    (zeroStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      WHRedS Δ ((recN.lift' ρ).app (.const zeroC ls)) (minorZ.lift' ρ))
+    (succStep : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ n,
+      WHRedS Δ ((recN.lift' ρ).app ((SExpr.const succC ls).app n))
+        (((minorS.lift' ρ).app n).app ((recN.lift' ρ).app n))) :
+    NatRulesS zeroC succC ls Γ where
+  recN := recN
+  minorZ := minorZ
+  minorS := minorS
+  recN_major := recN_major
+  stuckN := stuck_major_kripke recN_major
+  zeroStep := zeroStep
+  succStep := succStep
+
+/-- The `Nat` fundamental iota case against the multi-step rules. -/
+theorem NatRulesS.fundamental_iota {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {S : CtxPred}
+    (R : NatRulesS zeroC succC ls Γ) (SC : ResultCand S)
+    (mZ : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+      S Δ (R.minorZ.lift' ρ))
+    (mS : ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → ∀ n,
+      InCandNat zeroC succC ls Δ n → S Δ ((R.recN.lift' ρ).app n) →
+      S Δ (((R.minorS.lift' ρ).app n).app ((R.recN.lift' ρ).app n)))
+    {Δ : List SExpr} {ρ : Lift} (W : Ctx.Lift' ρ Γ Δ)
+    {n : SExpr} (h : InCandNat zeroC succC ls Δ n) :
+    S Δ ((R.recN.lift' ρ).app n) := by
+  induction h with
+  | zero => exact SC.expandS (R.zeroStep W) (mZ W)
+  | succ n hn ih => exact SC.expandS (R.succStep W n) (mS W n hn ih)
+  | neutral n hn => exact SC.whnf (R.stuckN W hn)
+  | expand n n' step _ ih =>
+    exact SC.expand
+      (WHRed.major (IsMajorPremise.lift'.2 R.recN_major) step) ih
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2.2 — the tower-collapse engine
+
+Generic machinery for the applied-tower multi-beta collapse.  `lamBodyN`
+decides the lambda-tower decomposition of a registered right-hand side, and
+`whRedS_lamTower` drives `whRedS_foldl_beta` once per binder; the
+substitution is σ-generalized so the induction closes, with
+`SExpr.inst_lift_cons` folding each contraction into one accumulated
+parallel substitution.  `iotaSpineCaptureValues` reads the ordered capture
+values of a matched iota redex back as the spine arguments, in exactly the
+`take`/`drop` shape of the fixture capture-path inventories. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+/-- Strip exactly `n` lambda binders from a registered tower, returning the
+body.  Kernel-decidable, so the per-rule shape pins below need no new
+`native_decide` observations. -/
+def lamBodyN : Nat → VExpr → Option VExpr
+  | 0, e => some e
+  | n + 1, .lam _ e => lamBodyN n e
+  | _ + 1, _ => none
+
+/-- Soundness of the strip: a successful `lamBodyN` exhibits the
+lambda-tower decomposition. -/
+theorem lamBodyN_eq_some :
+    ∀ {n : Nat} {e body : VExpr}, lamBodyN n e = some body →
+      ∃ Ts : List VExpr, Ts.length = n ∧ e = VExpr.lamN Ts body := by
+  intro n
+  induction n with
+  | zero =>
+    intro e body h
+    cases h
+    exact ⟨[], rfl, rfl⟩
+  | succ n ih =>
+    intro e body h
+    cases e with
+    | lam ty inner =>
+      obtain ⟨Ts, hlen, rfl⟩ := ih h
+      exact ⟨ty :: Ts, by simp [hlen], rfl⟩
+    | bvar i => cases h
+    | sort u => cases h
+    | const c us => cases h
+    | app f a => cases h
+    | forallE A B => cases h
+
+variable [Params]
+
+/-- `mkInst` maps a `VExpr` lambda tower to the `SExpr` lambda tower. -/
+theorem mkInst_lamN (ls : List SLevel) :
+    ∀ (Ts : List VExpr) (body : VExpr),
+      SExpr.mkInst ls (VExpr.lamN Ts body) =
+        (Ts.map (SExpr.mkInst ls)).foldr .lam (SExpr.mkInst ls body) := by
+  intro Ts
+  induction Ts with
+  | nil => intro body; rfl
+  | cons T Ts ih =>
+    intro body
+    simp only [VExpr.lamN, SExpr.mkInst, List.map_cons, List.foldr_cons, ih]
+
+/-- σ-generalized multi-beta collapse of a fully applied lambda tower: one
+`whRedS_foldl_beta` per binder, each contraction folded into the
+accumulated substitution by `SExpr.inst_lift_cons`. -/
+theorem whRedS_lamTower_subst {Γ : List SExpr} :
+    ∀ (Ts : List SExpr) (body : SExpr) (args : List SExpr) (σ : Subst),
+      args.length = Ts.length →
+      WHRedS Γ
+        (args.foldl (fun (f a : SExpr) => f.app a)
+          ((Ts.foldr .lam body).subst σ))
+        (body.subst (args.foldl Subst.cons σ)) := by
+  intro Ts
+  induction Ts with
+  | nil =>
+    intro body args σ h
+    obtain rfl := List.length_eq_zero_iff.mp h
+    exact .rfl
+  | cons T Ts ih =>
+    intro body args σ h
+    cases args with
+    | nil => cases h
+    | cons a args =>
+      have h' : args.length = Ts.length := Nat.succ.inj h
+      have step := whRedS_foldl_beta (Γ := Γ) (T.subst σ)
+        ((Ts.foldr .lam body).subst σ.lift) a args
+      rw [SExpr.inst_lift_cons] at step
+      exact ReflTransGen.trans step (ih body args (σ.cons a) h')
+
+/-- The identity-substitution form: a lambda tower applied to exactly its
+binder count multi-beta-collapses onto its instantiated body. -/
+theorem whRedS_lamTower {Γ : List SExpr} (Ts : List SExpr) (body : SExpr)
+    (args : List SExpr) (h : args.length = Ts.length) :
+    WHRedS Γ
+      (args.foldl (fun (f a : SExpr) => f.app a) (Ts.foldr .lam body))
+      (body.subst (args.foldl Subst.cons Subst.id)) := by
+  have := whRedS_lamTower_subst (Γ := Γ) Ts body args Subst.id h
+  rwa [SExpr.subst_id] at this
+
+/-- Applying a fixed-body capture tower is the left fold of the capture
+values over the level-instantiated body. -/
+theorem appN_var_applyS_eq {p : Pattern} (body : VExpr)
+    (closed : body.Closed) (paths : List p.Path) (m1 : List SLevel)
+    (m2 : p.Path → SExpr) :
+    (Pattern.RHS.appN (.fixed body closed)
+        (paths.map fun path => .var path)).applyS m1 m2 =
+      (paths.map m2).foldl (fun (f a : SExpr) => f.app a)
+        (SExpr.mkInst m1 body) := by
+  rw [Pattern.RHS.appN_applyS]
+  simp only [List.foldl_map, Pattern.RHS.applyS]
+
+/-- The ordered capture values of a matched iota redex are its spine
+arguments, in the fixture inventories' `take`/`drop` shape. -/
+theorem iotaSpineCaptureValues {rec ctor : Name} {major arity : Nat}
+    (common np : Nat)
+    {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+    {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    (H : (RecursorIotaPattern rec major ctor arity).MatchesS
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a) (.const rec recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (.const ctor ctorLs)))
+      recLs mcap) :
+    recArgs.length = major ∧ ctorArgs.length = arity ∧
+      ((((Pattern.varNPaths (.const rec) major).take common).map
+          Sum.inl ++
+        ((Pattern.varNPaths (.const ctor) arity).drop np).map
+          Sum.inr).map mcap) =
+        recArgs.reverse.take common ++ ctorArgs.reverse.drop np := by
+  cases H with
+  | app hrec hctor =>
+    obtain ⟨-, hrecLen, hrecVals⟩ := ParamsD0.matchesS_varN_foldr hrec
+    obtain ⟨-, hctorLen, hctorVals⟩ := ParamsD0.matchesS_varN_foldr hctor
+    rename_i g1 g2
+    refine ⟨hrecLen, hctorLen, ?_⟩
+    have h₁ : (((Pattern.varNPaths (.const rec) major).take common).map
+          Sum.inl).map (Sum.elim g1 g2) =
+        recArgs.reverse.take common := by
+      rw [List.map_map,
+        show Sum.elim g1 g2 ∘ Sum.inl = g1 from rfl,
+        List.map_take, hrecVals]
+    have h₂ : (((Pattern.varNPaths (.const ctor) arity).drop np).map
+          Sum.inr).map (Sum.elim g1 g2) =
+        ctorArgs.reverse.drop np := by
+      rw [List.map_map,
+        show Sum.elim g1 g2 ∘ Sum.inr = g2 from rfl,
+        List.map_drop, hctorVals]
+    exact (List.map_append ..).trans (h₁ ▸ h₂ ▸ rfl)
+
+/-- The D0/D2 `Nat` capture inventory reads back as the spine arguments. -/
+theorem natCaptureValues {constructor : VInductDecl.NormalizedBlockCtor}
+    {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+    {mcap : ((ParamsD0.NatGeneration.rulePattern constructor).toPattern).Path →
+      SExpr}
+    (H : ((ParamsD0.NatGeneration.rulePattern constructor).toPattern).MatchesS
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+          (.const (ParamsD0.NatGeneration.ruleRecName constructor) recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (.const constructor.ctor.raw.name ctorLs)))
+      recLs mcap) :
+    (ParamsD0.natCapturePaths constructor).map mcap =
+      recArgs.reverse.take (InductiveFixtures.natDecl.nparams +
+        ParamsD0.NatGeneration.familyCount +
+        ParamsD0.NatGeneration.minorCount) ++
+      ctorArgs.reverse.drop InductiveFixtures.natDecl.nparams :=
+  (iotaSpineCaptureValues _ _ H).2.2
+
+/-- The D2 `Tree`/`TreeList` capture inventory reads back as the spine
+arguments. -/
+theorem treeCaptureValues {constructor : VInductDecl.NormalizedBlockCtor}
+    {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+    {mcap : ((ParamsD2.TreeGen.rulePattern constructor).toPattern).Path →
+      SExpr}
+    (H : ((ParamsD2.TreeGen.rulePattern constructor).toPattern).MatchesS
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+          (.const (ParamsD2.TreeGen.ruleRecName constructor) recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (.const constructor.ctor.raw.name ctorLs)))
+      recLs mcap) :
+    (ParamsD2.treeCapturePaths constructor).map mcap =
+      recArgs.reverse.take (MutualInductiveFixtures.treeDecl.nparams +
+        ParamsD2.TreeGen.familyCount + ParamsD2.TreeGen.minorCount) ++
+      ctorArgs.reverse.drop MutualInductiveFixtures.treeDecl.nparams :=
+  (iotaSpineCaptureValues _ _ H).2.2
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2.3 — the registered tower bodies, pinned
+
+The per-rule tower-body instantiation recorded by N′1 as this rung's
+inherited volume.  Each registered right-hand side is a lambda tower whose
+binder count and body are pure `VExpr` data (`Params`-free), decided by the
+kernel (`decide`, not `native_decide`): the seven pins below are the exact
+generated bodies — the captured minor premise applied to the fields and
+the lambda-packaged recursive calls.  The count pins fix the fixture spine
+arithmetic consumed by the capture-value reading. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+/-- `Nat.zero` rule body: the zero minor. -/
+theorem natZeroBody :
+    lamBodyN 3 (ParamsD0.NatGeneration.rule 0
+      ParamsD0.NatGeneration.flatCtors[0]).rhs = some (.bvar 1) := by
+  decide
+
+/-- `Nat.succ` rule body: the successor minor at the field and the
+recursive call. -/
+theorem natSuccBody :
+    lamBodyN 4 (ParamsD0.NatGeneration.rule 1
+      ParamsD0.NatGeneration.flatCtors[1]).rhs =
+      some (VExpr.bvar 1 |>.app (.bvar 0) |>.app
+        (VExpr.const ``Nat.rec [.param 0] |>.app (.bvar 3) |>.app (.bvar 2)
+          |>.app (.bvar 1) |>.app (.bvar 0))) := by
+  decide
+
+/-- `Tree.leaf` rule body: the leaf minor at the field. -/
+theorem treeLeafBody :
+    lamBodyN 9 (ParamsD2.TreeGen.rule 0 ParamsD2.TreeGen.flatCtors[0]).rhs =
+      some (VExpr.bvar 5 |>.app (.bvar 0)) := by
+  decide
+
+/-- `Tree.node` rule body: the node minor at the field and the sibling
+recursive call. -/
+theorem treeNodeBody :
+    lamBodyN 9 (ParamsD2.TreeGen.rule 1 ParamsD2.TreeGen.flatCtors[1]).rhs =
+      some (VExpr.bvar 4 |>.app (.bvar 0) |>.app
+        (VExpr.const ``TreeList.rec [.param 0, .param 1]
+          |>.app (.bvar 8) |>.app (.bvar 7) |>.app (.bvar 6)
+          |>.app (.bvar 5) |>.app (.bvar 4) |>.app (.bvar 3)
+          |>.app (.bvar 2) |>.app (.bvar 1) |>.app (.bvar 0))) := by
+  decide
+
+/-- `Tree.branch` rule body: the branch minor at the functional field and
+the lambda-packaged under-Pi recursive call — the killed transition's
+contractum, generated. -/
+theorem treeBranchBody :
+    lamBodyN 9 (ParamsD2.TreeGen.rule 2 ParamsD2.TreeGen.flatCtors[2]).rhs =
+      some (VExpr.bvar 3 |>.app (.bvar 0) |>.app
+        (VExpr.lam (.bvar 8)
+          (VExpr.const ``TreeList.rec [.param 0, .param 1]
+            |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+            |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+            |>.app (.bvar 3) |>.app (.bvar 2)
+            |>.app (VExpr.bvar 1 |>.app (.bvar 0))))) := by
+  decide
+
+/-- `TreeList.nil` rule body: the nil minor. -/
+theorem treeNilBody :
+    lamBodyN 8 (ParamsD2.TreeGen.rule 3 ParamsD2.TreeGen.flatCtors[3]).rhs =
+      some (.bvar 1) := by
+  decide
+
+/-- `TreeList.cons` rule body: the cons minor at both fields and both
+mutual recursive calls — including the reverse `TreeList → Tree` edge. -/
+theorem treeConsBody :
+    lamBodyN 10 (ParamsD2.TreeGen.rule 4 ParamsD2.TreeGen.flatCtors[4]).rhs =
+      some (VExpr.bvar 2 |>.app (.bvar 1) |>.app (.bvar 0)
+        |>.app (VExpr.const ``Tree.rec [.param 0, .param 1]
+          |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+          |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+          |>.app (.bvar 3) |>.app (.bvar 2) |>.app (.bvar 1))
+        |>.app (VExpr.const ``TreeList.rec [.param 0, .param 1]
+          |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+          |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+          |>.app (.bvar 3) |>.app (.bvar 2) |>.app (.bvar 0))) := by
+  decide
+
+/-- The Nat spine arithmetic: no parameters, one family, two minors. -/
+theorem natSpineCounts :
+    InductiveFixtures.natDecl.nparams + ParamsD0.NatGeneration.familyCount +
+      ParamsD0.NatGeneration.minorCount = 3 := by
+  decide
+
+/-- The Tree spine arithmetic: one parameter, two families, five minors. -/
+theorem treeSpineCounts :
+    MutualInductiveFixtures.treeDecl.nparams + ParamsD2.TreeGen.familyCount +
+      ParamsD2.TreeGen.minorCount = 8 := by
+  decide
+
+/-- The five literal block-entry lookups (the `Nat` pair is landed at D0 as
+`probeNatFlatCtorZero_lookup`/`probeNatFlatCtorSucc_lookup`). -/
+theorem treeFlatCtor0_lookup :
+    ParamsD2.TreeGen.flatCtors[0]? = some ParamsD2.TreeGen.flatCtors[0] :=
+  List.getElem?_eq_getElem (by decide)
+
+theorem treeFlatCtor1_lookup :
+    ParamsD2.TreeGen.flatCtors[1]? = some ParamsD2.TreeGen.flatCtors[1] :=
+  List.getElem?_eq_getElem (by decide)
+
+theorem treeFlatCtor2_lookup :
+    ParamsD2.TreeGen.flatCtors[2]? = some ParamsD2.TreeGen.flatCtors[2] :=
+  List.getElem?_eq_getElem (by decide)
+
+theorem treeFlatCtor3_lookup :
+    ParamsD2.TreeGen.flatCtors[3]? = some ParamsD2.TreeGen.flatCtors[3] :=
+  List.getElem?_eq_getElem (by decide)
+
+theorem treeFlatCtor4_lookup :
+    ParamsD2.TreeGen.flatCtors[4]? = some ParamsD2.TreeGen.flatCtors[4] :=
+  List.getElem?_eq_getElem (by decide)
+
+variable [Params]
+
+/-- The `Nat.rec` common spine of the collapse targets. -/
+def natRecSpine (recLs : List SLevel) (M mz ms : SExpr) : SExpr :=
+  SExpr.const ``Nat.rec [.instV recLs (.param 0)]
+    |>.app M |>.app mz |>.app ms
+
+/-- The `Tree.rec` eight-common spine of the D2 collapse targets. -/
+def treeRecSpine (recLs : List SLevel)
+    (α M₁ M₂ m₁ m₂ m₃ m₄ m₅ : SExpr) : SExpr :=
+  SExpr.const ``Tree.rec [.instV recLs (.param 0), .instV recLs (.param 1)]
+    |>.app α |>.app M₁ |>.app M₂ |>.app m₁ |>.app m₂ |>.app m₃
+    |>.app m₄ |>.app m₅
+
+/-- The `TreeList.rec` eight-common spine of the D2 collapse targets. -/
+def treeListRecSpine (recLs : List SLevel)
+    (α M₁ M₂ m₁ m₂ m₃ m₄ m₅ : SExpr) : SExpr :=
+  SExpr.const ``TreeList.rec
+      [.instV recLs (.param 0), .instV recLs (.param 1)]
+    |>.app α |>.app M₁ |>.app M₂ |>.app m₁ |>.app m₂ |>.app m₃
+    |>.app m₄ |>.app m₅
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2.4 — the per-rule redex-to-contractum runs at the instances
+
+The nine production runs: site step (`WHRed.extra` onto the applied tower,
+via the landed N′1 step theorems) followed by the tower collapse.  Each
+lands on the landed `TreeRules`/`NatRules` step-field contractum shape at
+the literal spine arguments, i.e. exactly what the multi-step
+`TreeRulesS`/`NatRulesS` fields consume.  Conditionality is inherited
+verbatim: the D0 runs take the landed `Params.Semantic.iotaSite` premise
+bundle and nothing else; the five D2 Tree runs are conditional on
+`D2TreeCheckedStep` plus the per-rule capture-spine/collapse data; the two
+inherited D2 Nat runs need no check premise. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+set_option linter.unusedVariables false
+
+/-- **`Nat.zero` at D0, redex to contractum.**  One `.extra` step onto the
+applied tower, three betas down to the captured zero minor. -/
+theorem d0ZeroIotaRun (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {M mz ms : SExpr}
+      {mcap : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[0]).toPattern).Path → SExpr}
+      (rule : Pattern.IotaRule
+        (ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+            ParamsD0.probeNatFlatCtorZero_lookup,
+          ParamsD0.NatGeneration.ruleCheck ParamsD0.natRuleClosure
+            (List.mem_of_getElem? ParamsD0.probeNatFlatCtorZero_lookup)))
+      (captureType : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[0]).toPattern).Path → SExpr)
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD0.D0ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD0.NatGeneration.ruleRecName
+          ParamsD0.NatGeneration.flatCtors[0])
+        (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name recLs ctorLs
+        [ms, mz, M] [] majorTerm A)
+      (matched : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[0]).toPattern).MatchesS
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (redexSelf : IsDefEq Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        A)
+      (AType : ∃ u, IsDefEq Gamma A A (.sort u)),
+      WHRedS Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        mz := by
+  letI : Params := ParamsD0.d0Params univs
+  intro Gamma A majorTerm recLs ctorLs M mz ms mcap rule captureType
+    captureTyping hGamma typing matched redexSelf AType
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d0IotaWHRed univs rule captureType captureTyping hGamma typing matched
+      redexSelf AType)) ?_
+  show WHRedS Gamma
+    ((ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+      ParamsD0.probeNatFlatCtorZero_lookup).applyS recLs mcap) mz
+  rw [ParamsD0.natRuleRHS_tower ParamsD0.probeNatFlatCtorZero_lookup,
+    appN_var_applyS_eq, natCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some natZeroBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (.bvar 1)) [M, mz, ms] (by simp [hTs])
+
+/-- **`Nat.succ` at D0, redex to contractum.**  One `.extra` step, four
+betas down to the successor minor at the field and the recursive call. -/
+theorem d0SuccIotaRun (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {M mz ms n : SExpr}
+      {mcap : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[1]).toPattern).Path → SExpr}
+      (rule : Pattern.IotaRule
+        (ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+            ParamsD0.probeNatFlatCtorSucc_lookup,
+          ParamsD0.NatGeneration.ruleCheck ParamsD0.natRuleClosure
+            (List.mem_of_getElem? ParamsD0.probeNatFlatCtorSucc_lookup)))
+      (captureType : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[1]).toPattern).Path → SExpr)
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD0.D0ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD0.NatGeneration.ruleRecName
+          ParamsD0.NatGeneration.flatCtors[1])
+        (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name recLs ctorLs
+        [ms, mz, M] [n] majorTerm A)
+      (matched : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[1]).toPattern).MatchesS
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (redexSelf : IsDefEq Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        A)
+      (AType : ∃ u, IsDefEq Gamma A A (.sort u)),
+      WHRedS Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        ((ms.app n).app ((natRecSpine recLs M mz ms).app n)) := by
+  letI : Params := ParamsD0.d0Params univs
+  intro Gamma A majorTerm recLs ctorLs M mz ms n mcap rule captureType
+    captureTyping hGamma typing matched redexSelf AType
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d0IotaWHRed univs rule captureType captureTyping hGamma typing matched
+      redexSelf AType)) ?_
+  show WHRedS Gamma
+    ((ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+      ParamsD0.probeNatFlatCtorSucc_lookup).applyS recLs mcap)
+    ((ms.app n).app ((natRecSpine recLs M mz ms).app n))
+  rw [ParamsD0.natRuleRHS_tower ParamsD0.probeNatFlatCtorSucc_lookup,
+    appN_var_applyS_eq, natCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some natSuccBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 1 |>.app (.bvar 0) |>.app
+      (VExpr.const ``Nat.rec [.param 0] |>.app (.bvar 3) |>.app (.bvar 2)
+        |>.app (.bvar 1) |>.app (.bvar 0))))
+    [M, mz, ms, n] (by simp [hTs])
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+set_option linter.unusedVariables false
+
+/-- **`Tree.leaf` at D2, redex to contractum** (conditional on
+`D2TreeCheckedStep` and the rule's capture-spine/collapse data, exactly as
+`d2TreeIotaWHRed`): one `.extra` step, nine betas down to the leaf minor at
+the field. -/
+theorem d2LeafIotaRun (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' x : SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[0]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName ParamsD2.TreeGen.flatCtors[0])
+        (ParamsD2.TreeGen.flatCtors[0]).ctor.raw.name recLs ctorLs
+        [m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] [x, α'] majorTerm A)
+      (matched : ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[0]).toPattern).MatchesS
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[0]) recLs)).app
+          (([x, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[0]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs treeFlatCtor0_lookup).df.type)
+        ((ParamsD2.d2TreeIotaRule univs
+          treeFlatCtor0_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[0]) recLs)).app
+          (([x, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[0]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs
+            treeFlatCtor0_lookup).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs treeFlatCtor0_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[0]) recLs)).app
+          (([x, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[0]).ctor.raw.name ctorLs)))
+        (m₁.app x) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' x mcap
+    captureType captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2TreeIotaWHRed univs checked treeFlatCtor0_lookup captureTyping
+      hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure
+      treeFlatCtor0_lookup).applyS recLs mcap) (m₁.app x)
+  rw [ParamsD2.treeRuleRHS_capture_tower treeFlatCtor0_lookup,
+    appN_var_applyS_eq, treeCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some treeLeafBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 5 |>.app (.bvar 0)))
+    [α, M₁, M₂, m₁, m₂, m₃, m₄, m₅, x] (by simp [hTs])
+
+/-- **`Tree.node` at D2, redex to contractum**: the node minor at the field
+and the sibling `TreeList.rec` recursive call. -/
+theorem d2NodeIotaRun (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' ts : SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[1]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName ParamsD2.TreeGen.flatCtors[1])
+        (ParamsD2.TreeGen.flatCtors[1]).ctor.raw.name recLs ctorLs
+        [m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] [ts, α'] majorTerm A)
+      (matched : ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[1]).toPattern).MatchesS
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[1]) recLs)).app
+          (([ts, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[1]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs treeFlatCtor1_lookup).df.type)
+        ((ParamsD2.d2TreeIotaRule univs
+          treeFlatCtor1_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[1]) recLs)).app
+          (([ts, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[1]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs
+            treeFlatCtor1_lookup).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs treeFlatCtor1_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[1]) recLs)).app
+          (([ts, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[1]).ctor.raw.name ctorLs)))
+        ((m₂.app ts).app
+          ((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app ts)) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' ts mcap
+    captureType captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2TreeIotaWHRed univs checked treeFlatCtor1_lookup captureTyping
+      hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure
+      treeFlatCtor1_lookup).applyS recLs mcap)
+    ((m₂.app ts).app
+      ((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app ts))
+  rw [ParamsD2.treeRuleRHS_capture_tower treeFlatCtor1_lookup,
+    appN_var_applyS_eq, treeCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some treeNodeBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 4 |>.app (.bvar 0) |>.app
+      (VExpr.const ``TreeList.rec [.param 0, .param 1]
+        |>.app (.bvar 8) |>.app (.bvar 7) |>.app (.bvar 6)
+        |>.app (.bvar 5) |>.app (.bvar 4) |>.app (.bvar 3)
+        |>.app (.bvar 2) |>.app (.bvar 1) |>.app (.bvar 0))))
+    [α, M₁, M₂, m₁, m₂, m₃, m₄, m₅, ts] (by simp [hTs])
+
+/-- **`Tree.branch` at D2, redex to contractum** — the transition that
+killed the L4L-16N measures, executed operationally: one `.extra` step and
+nine betas land on the branch minor at the functional field together with
+the lambda-packaged under-Pi recursive call. -/
+theorem d2BranchIotaRun (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' f : SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[2]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName ParamsD2.TreeGen.flatCtors[2])
+        (ParamsD2.TreeGen.flatCtors[2]).ctor.raw.name recLs ctorLs
+        [m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] [f, α'] majorTerm A)
+      (matched : ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[2]).toPattern).MatchesS
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[2]) recLs)).app
+          (([f, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[2]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs treeFlatCtor2_lookup).df.type)
+        ((ParamsD2.d2TreeIotaRule univs
+          treeFlatCtor2_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[2]) recLs)).app
+          (([f, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[2]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs
+            treeFlatCtor2_lookup).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs treeFlatCtor2_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[2]) recLs)).app
+          (([f, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[2]).ctor.raw.name ctorLs)))
+        ((m₃.app f).app
+          (.lam α
+            (((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).lift).app
+              ((f.lift).app (.bvar 0))))) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' f mcap
+    captureType captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2TreeIotaWHRed univs checked treeFlatCtor2_lookup captureTyping
+      hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure
+      treeFlatCtor2_lookup).applyS recLs mcap)
+    ((m₃.app f).app
+      (.lam α
+        (((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).lift).app
+          ((f.lift).app (.bvar 0)))))
+  rw [ParamsD2.treeRuleRHS_capture_tower treeFlatCtor2_lookup,
+    appN_var_applyS_eq, treeCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some treeBranchBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 3 |>.app (.bvar 0) |>.app
+      (VExpr.lam (.bvar 8)
+        (VExpr.const ``TreeList.rec [.param 0, .param 1]
+          |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+          |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+          |>.app (.bvar 3) |>.app (.bvar 2)
+          |>.app (VExpr.bvar 1 |>.app (.bvar 0))))))
+    [α, M₁, M₂, m₁, m₂, m₃, m₄, m₅, f] (by simp [hTs])
+
+/-- **`TreeList.nil` at D2, redex to contractum**: eight betas down to the
+bare nil minor. -/
+theorem d2NilIotaRun (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' : SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[3]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName ParamsD2.TreeGen.flatCtors[3])
+        (ParamsD2.TreeGen.flatCtors[3]).ctor.raw.name recLs ctorLs
+        [m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] [α'] majorTerm A)
+      (matched : ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[3]).toPattern).MatchesS
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[3]) recLs)).app
+          (([α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[3]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs treeFlatCtor3_lookup).df.type)
+        ((ParamsD2.d2TreeIotaRule univs
+          treeFlatCtor3_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[3]) recLs)).app
+          (([α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[3]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs
+            treeFlatCtor3_lookup).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs treeFlatCtor3_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[3]) recLs)).app
+          (([α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[3]).ctor.raw.name ctorLs)))
+        m₄ := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' mcap
+    captureType captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2TreeIotaWHRed univs checked treeFlatCtor3_lookup captureTyping
+      hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure
+      treeFlatCtor3_lookup).applyS recLs mcap) m₄
+  rw [ParamsD2.treeRuleRHS_capture_tower treeFlatCtor3_lookup,
+    appN_var_applyS_eq, treeCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some treeNilBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (.bvar 1))
+    [α, M₁, M₂, m₁, m₂, m₃, m₄, m₅] (by simp [hTs])
+
+/-- **`TreeList.cons` at D2, redex to contractum**: the cons minor at both
+fields and both mutual recursive calls — the reverse `TreeList → Tree` edge
+that refuted every family rank, as an ordinary run. -/
+theorem d2ConsIotaRun (univs : Nat)
+    (checked : ParamsD2.D2TreeCheckedStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' t ts : SExpr}
+      {mcap captureType :
+        ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[4]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD2.TreeGen.ruleRecName ParamsD2.TreeGen.flatCtors[4])
+        (ParamsD2.TreeGen.flatCtors[4]).ctor.raw.name recLs ctorLs
+        [m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] [ts, t, α'] majorTerm A)
+      (matched : ((ParamsD2.TreeGen.rulePattern
+          ParamsD2.TreeGen.flatCtors[4]).toPattern).MatchesS
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[4]) recLs)).app
+          (([ts, t, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[4]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2TreeIotaRule univs treeFlatCtor4_lookup).df.type)
+        ((ParamsD2.d2TreeIotaRule univs
+          treeFlatCtor4_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[4]) recLs)).app
+          (([ts, t, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[4]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2TreeIotaRule univs
+            treeFlatCtor4_lookup).capturePaths.map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2TreeIotaRule univs treeFlatCtor4_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([m₅, m₄, m₃, m₂, m₁, M₂, M₁, α] : List SExpr).foldr
+            (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD2.TreeGen.ruleRecName
+              ParamsD2.TreeGen.flatCtors[4]) recLs)).app
+          (([ts, t, α'] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD2.TreeGen.flatCtors[4]).ctor.raw.name ctorLs)))
+        ((((m₅.app t).app ts).app
+            ((treeRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app t)).app
+          ((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app ts)) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅ α' t ts mcap
+    captureType captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2TreeIotaWHRed univs checked treeFlatCtor4_lookup captureTyping
+      hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD2.TreeGen.ruleRHS ParamsD2.treeRuleClosure
+      treeFlatCtor4_lookup).applyS recLs mcap)
+    ((((m₅.app t).app ts).app
+        ((treeRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app t)).app
+      ((treeListRecSpine recLs α M₁ M₂ m₁ m₂ m₃ m₄ m₅).app ts))
+  rw [ParamsD2.treeRuleRHS_capture_tower treeFlatCtor4_lookup,
+    appN_var_applyS_eq, treeCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some treeConsBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 2 |>.app (.bvar 1) |>.app (.bvar 0)
+      |>.app (VExpr.const ``Tree.rec [.param 0, .param 1]
+        |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+        |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+        |>.app (.bvar 3) |>.app (.bvar 2) |>.app (.bvar 1))
+      |>.app (VExpr.const ``TreeList.rec [.param 0, .param 1]
+        |>.app (.bvar 9) |>.app (.bvar 8) |>.app (.bvar 7)
+        |>.app (.bvar 6) |>.app (.bvar 5) |>.app (.bvar 4)
+        |>.app (.bvar 3) |>.app (.bvar 2) |>.app (.bvar 0))))
+    [α, M₁, M₂, m₁, m₂, m₃, m₄, m₅, t, ts] (by simp [hTs])
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+set_option linter.unusedVariables false
+
+/-- **The inherited `Nat.zero` rule at D2, redex to contractum** — no check
+premise (`d2NatChecked` discharges internally); conditional only on the
+rule's capture-spine/collapse data, exactly as `d2NatEntryIotaWHRed`. -/
+theorem d2NatZeroIotaRun (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {M mz ms : SExpr}
+      {mcap captureType :
+        ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[0]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD0.NatGeneration.ruleRecName
+          ParamsD0.NatGeneration.flatCtors[0])
+        (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name recLs ctorLs
+        [ms, mz, M] [] majorTerm A)
+      (matched : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[0]).toPattern).MatchesS
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2NatEntryIotaRule univs
+            ParamsD0.probeNatFlatCtorZero_lookup).df.type)
+        ((ParamsD2.d2NatEntryIotaRule univs
+          ParamsD0.probeNatFlatCtorZero_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2NatEntryIotaRule univs
+            ParamsD0.probeNatFlatCtorZero_lookup).capturePaths.map
+              mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2NatEntryIotaRule univs
+              ParamsD0.probeNatFlatCtorZero_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[0]) recLs)).app
+          (([] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[0]).ctor.raw.name ctorLs)))
+        mz := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs M mz ms mcap captureType
+    captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2NatEntryIotaWHRed univs ParamsD0.probeNatFlatCtorZero_lookup
+      captureTyping hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+      ParamsD0.probeNatFlatCtorZero_lookup).applyS recLs mcap) mz
+  rw [ParamsD0.natRuleRHS_tower ParamsD0.probeNatFlatCtorZero_lookup,
+    appN_var_applyS_eq, natCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some natZeroBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (.bvar 1)) [M, mz, ms] (by simp [hTs])
+
+/-- **The inherited `Nat.succ` rule at D2, redex to contractum** — no check
+premise. -/
+theorem d2NatSuccIotaRun (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {M mz ms n : SExpr}
+      {mcap captureType :
+        ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[1]).toPattern).Path → SExpr}
+      (captureTyping : Pattern.CaptureTyping Gamma mcap captureType)
+      (hGamma : ParamsD2.D2ContextValid univs Gamma)
+      (typing : Pattern.IotaTyping Gamma
+        (ParamsD0.NatGeneration.ruleRecName
+          ParamsD0.NatGeneration.flatCtors[1])
+        (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name recLs ctorLs
+        [ms, mz, M] [n] majorTerm A)
+      (matched : ((ParamsD0.NatGeneration.rulePattern
+          ParamsD0.NatGeneration.flatCtors[1]).toPattern).MatchesS
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        recLs mcap)
+      (hspine : SpineWF Gamma
+        (SExpr.mkInst recLs
+          (ParamsD2.d2NatEntryIotaRule univs
+            ParamsD0.probeNatFlatCtorSucc_lookup).df.type)
+        ((ParamsD2.d2NatEntryIotaRule univs
+          ParamsD0.probeNatFlatCtorSucc_lookup).capturePaths.map mcap) A)
+      (hcollapse : IsDefEq Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        (((ParamsD2.d2NatEntryIotaRule univs
+            ParamsD0.probeNatFlatCtorSucc_lookup).capturePaths.map
+              mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs
+            (ParamsD2.d2NatEntryIotaRule univs
+              ParamsD0.probeNatFlatCtorSucc_lookup).df.lhs)) A),
+      WHRedS Gamma
+        ((([ms, mz, M] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const (ParamsD0.NatGeneration.ruleRecName
+              ParamsD0.NatGeneration.flatCtors[1]) recLs)).app
+          (([n] : List SExpr).foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const
+              (ParamsD0.NatGeneration.flatCtors[1]).ctor.raw.name ctorLs)))
+        ((ms.app n).app ((natRecSpine recLs M mz ms).app n)) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A majorTerm recLs ctorLs M mz ms n mcap captureType
+    captureTyping hGamma typing matched hspine hcollapse
+  refine ReflTransGen.trans (ReflTransGen.tail .rfl
+    (d2NatEntryIotaWHRed univs ParamsD0.probeNatFlatCtorSucc_lookup
+      captureTyping hGamma typing matched hspine hcollapse)) ?_
+  show WHRedS Gamma
+    ((ParamsD0.NatGeneration.ruleRHS ParamsD0.natRuleClosure
+      ParamsD0.probeNatFlatCtorSucc_lookup).applyS recLs mcap)
+    ((ms.app n).app ((natRecSpine recLs M mz ms).app n))
+  rw [ParamsD0.natRuleRHS_tower ParamsD0.probeNatFlatCtorSucc_lookup,
+    appN_var_applyS_eq, natCaptureValues matched]
+  obtain ⟨Ts, hTs, hrhs⟩ := lamBodyN_eq_some natSuccBody
+  rw [hrhs, mkInst_lamN]
+  exact whRedS_lamTower (Γ := Gamma) (Ts.map (SExpr.mkInst recLs))
+    (SExpr.mkInst recLs (VExpr.bvar 1 |>.app (.bvar 0) |>.app
+      (VExpr.const ``Nat.rec [.param 0] |>.app (.bvar 3) |>.app (.bvar 2)
+        |>.app (.bvar 1) |>.app (.bvar 0))))
+    [M, mz, ms, n] (by simp [hTs])
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2.5 — `ConstFundamental` content: constants via δ-descent
+
+The rank-recursion skeleton and the rank-zero head content.  The per-step
+obligation (`DeltaStepObligation`) is an explicit hypothesis interface: at
+a ranked definition N′3 discharges it by running the fundamental theorem
+over the value's `HasTypeStratifiedR` certificate (whose constants sit at
+rank strictly below `rank c`, i.e. inside `ConstsReducibleBelow (rank c)`)
+and transferring along the δ-step with `Candidate.ofDeltaValue`; at a
+rank-zero head it discharges by the irreducible-head content below plus the
+action/head layers of the membership induction. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-- A bare constant with no registered constant-headed pattern takes no
+step: the only rule that could fire is `extra`, and a constant target is
+matched only by the constant pattern itself. -/
+theorem _root_.Lean4Lean.SExpr.WHNF.constNoPat {Γ : List SExpr} {c : Name}
+    {ls : List SLevel}
+    (h : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r) :
+    WHNF Γ (.const c ls) := by
+  intro e' hred
+  cases hred with
+  | extra action =>
+    cases action.matched with
+    | const => exact h action.pat
+
+/-- Weak-head normal after every future lift: the operational half of the
+rank-zero constant content. -/
+def KripkeWHNF (Γ : List SExpr) (M : SExpr) : Prop :=
+  ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ → WHNF Δ (M.lift' ρ)
+
+/-- Irreducible constants are Kripke-WHNF (constants are lift-invariant). -/
+theorem KripkeWHNF.constNoPat {Γ : List SExpr} {c : Name} {ls : List SLevel}
+    (h : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r) :
+    KripkeWHNF Γ (.const c ls) :=
+  fun _ => WHNF.constNoPat h
+
+/-- Lifting a constant-headed application spine lifts its arguments. -/
+theorem foldr_app_lift' (args : List SExpr) (c : Name) (ls : List SLevel)
+    (ρ : Lift) :
+    (args.foldr (fun (a f : SExpr) => f.app a) (.const c ls)).lift' ρ =
+      (args.map (·.lift' ρ)).foldr (fun (a f : SExpr) => f.app a)
+        (.const c ls) := by
+  induction args with
+  | nil => rfl
+  | cons a args ih => simp [ih]
+
+/-- Classified constructor spines — total or partial — are Kripke-WHNF. -/
+theorem KripkeWHNF.ctorSpine {Γ : List SExpr} {c : Name} {k : Nat}
+    {ls : List SLevel} (hcl : Params.classify c = some (.ctor k))
+    (args : List SExpr) :
+    KripkeWHNF Γ (args.foldr (fun (a f : SExpr) => f.app a)
+      (.const c ls)) := by
+  intro Δ ρ W
+  rw [foldr_app_lift']
+  exact WHNF.ctorSpine hcl _
+
+/-- Recursor spines stuck at a neutral major are Kripke-WHNF. -/
+theorem KripkeWHNF.stuckMajor {Γ : List SExpr} {f t : SExpr}
+    (hmaj : IsMajorPremise f) (hn : Neutral t) :
+    KripkeWHNF Γ (f.app t) := by
+  intro Δ ρ W
+  show WHNF Δ ((f.lift' ρ).app (t.lift' ρ))
+  exact (IsMajorPremise.lift'.2 hmaj).stuckApp hn.lift'
+
+/-- Kripke-WHNF endpoints Kripke-normalize at every displayed type. -/
+theorem KripkeNormalizes.ofKripkeWHNF {Γ : List SExpr} {M N A : SExpr}
+    (hM : KripkeWHNF Γ M) (hN : KripkeWHNF Γ N) :
+    KripkeNormalizes Γ M N A :=
+  fun W => ⟨⟨_, .rfl, hM W⟩, ⟨_, .rfl, hN W⟩⟩
+
+/-- `Base` from Kripke-WHNF endpoints; the judgmental edge is a hypothesis
+(betaFire boundary — no typed trace is produced). -/
+theorem Base.ofKripkeWHNF {Γ : List SExpr} {M N A : SExpr}
+    (edge : IsDefEqStrong Γ M N A) (hM : KripkeWHNF Γ M)
+    (hN : KripkeWHNF Γ N) : Base Γ M N A :=
+  ⟨edge, KripkeNormalizes.ofKripkeWHNF hM hN⟩
+
+/-- **Rank-zero constants, depth 0**: an irreducible constant is
+`Base`-reducible at any self-edge. -/
+theorem Base.const_irreducible {Γ : List SExpr} {c : Name}
+    {ls : List SLevel} {A : SExpr}
+    (h : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r)
+    (edge : IsDefEqStrong Γ (.const c ls) (.const c ls) A) :
+    Base Γ (.const c ls) (.const c ls) A :=
+  Base.ofKripkeWHNF edge (KripkeWHNF.constNoPat h) (KripkeWHNF.constNoPat h)
+
+/-- **Partial and total constructor applications, depth 0**: classified
+constructor spines of any length are `Base`-reducible at any edge between
+them.  (Their depth-`succ` action content — applying a partial constructor
+lands in the `InCand*` constructor clause — is N′3 membership content;
+recorded as deferred.) -/
+theorem Base.ctorSpines {Γ : List SExpr} {c c' : Name} {k k' : Nat}
+    {ls ls' : List SLevel} {args args' : List SExpr} {A : SExpr}
+    (hc : Params.classify c = some (.ctor k))
+    (hc' : Params.classify c' = some (.ctor k'))
+    (edge : IsDefEqStrong Γ
+      (args.foldr (fun (a f : SExpr) => f.app a) (.const c ls))
+      (args'.foldr (fun (a f : SExpr) => f.app a) (.const c' ls')) A) :
+    Base Γ
+      (args.foldr (fun (a f : SExpr) => f.app a) (.const c ls))
+      (args'.foldr (fun (a f : SExpr) => f.app a) (.const c' ls')) A :=
+  Base.ofKripkeWHNF edge (KripkeWHNF.ctorSpine hc args) (KripkeWHNF.ctorSpine hc' args')
+
+/-- **Stuck recursor applications, depth 0**: a registered spine at a
+neutral major is `Base`-reducible at any edge between two such.  (Their
+`InCand*` membership under the landed bvar-only neutral clause is the
+recorded N′3 deferral.) -/
+theorem Base.stuckMajors {Γ : List SExpr} {f f' t t' : SExpr} {A : SExpr}
+    (hmaj : IsMajorPremise f) (hmaj' : IsMajorPremise f')
+    (hn : Neutral t) (hn' : Neutral t')
+    (edge : IsDefEqStrong Γ (f.app t) (f'.app t') A) :
+    Base Γ (f.app t) (f'.app t') A :=
+  Base.ofKripkeWHNF edge (KripkeWHNF.stuckMajor hmaj hn) (KripkeWHNF.stuckMajor hmaj' hn')
+
+/-- **The pointed δ-step consumer**: one untyped unfolding step plus its
+certificate transfer the value's reducibility to the constant, at every
+depth.  This is the lemma the per-step obligation fires after the
+fundamental theorem has interpreted the value. -/
+theorem Candidate.ofDeltaValue [Params.Semantic] {Γ : List SExpr}
+    {c : Name} {ls : List SLevel} {V A : SExpr} {depth : Nat}
+    (red : WHRed Γ (.const c ls) V)
+    (sound : IsDefEqStrong Γ (.const c ls) V A)
+    (hV : Candidate depth Γ V V A) :
+    Candidate depth Γ (.const c ls) (.const c ls) A :=
+  Candidate.expand (WHStep.toSteps ⟨red, sound⟩)
+    (WHStep.toSteps ⟨red, sound⟩) hV
+
+section DeltaDescent
+
+variable [Params.DeltaRank]
+
+/-- The δ-descent recursion invariant: reducibility of every constant of
+rank strictly below `n`, at every depth. -/
+def ConstsReducibleBelow (n : Nat) : Prop :=
+  ∀ {Γ : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr},
+    Params.DeltaRank.rank c < n →
+    IsDefEqStrong Γ (.const c ls) (.const c ls) A →
+    ∀ depth, Candidate depth Γ (.const c ls) (.const c ls) A
+
+/-- Nonvacuity of the invariant: below rank zero there is nothing to
+interpret. -/
+theorem constsReducibleBelow_zero : ConstsReducibleBelow 0 := by
+  intro Γ c ls A hlt
+  exact absurd hlt (Nat.not_lt_zero _)
+
+/-- **The per-step obligation of the δ-descent** — an explicit hypothesis
+interface, not an axiom: every typed constant is reducible once everything
+of strictly smaller rank is.  N′3 discharges it per constant class: ranked
+definitions via `DeltaRank.defnCert` + the fundamental theorem over the
+value's certificate + `Candidate.ofDeltaValue`; rank-zero heads via the
+irreducible-head content above plus membership. -/
+def DeltaStepObligation : Prop :=
+  ∀ {Γ : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr},
+    IsDefEqStrong Γ (.const c ls) (.const c ls) A →
+    ConstsReducibleBelow (Params.DeltaRank.rank c) →
+    ∀ depth, Candidate depth Γ (.const c ls) (.const c ls) A
+
+/-- Shape nonvacuity of the obligation: it is a consequence of the
+fundamental theorem it feeds (so the interface asks for strictly less than
+the theorem it produces). -/
+theorem DeltaStepObligation.of_fundamental
+    (fund : ∀ depth, Fundamental depth) : DeltaStepObligation :=
+  fun edge _ depth => fund depth edge
+
+/-- **The well-founded recursion on the rank**: plain induction on the rank
+bound turns the per-step obligation into the full invariant.  δ-steps
+strictly decrease the rank (`DeltaRank.defnCert`), so this is the entire
+termination content of constant unfolding — no term measure. -/
+theorem constsReducibleBelow_all (obl : DeltaStepObligation) :
+    ∀ n, ConstsReducibleBelow n := by
+  intro n
+  induction n with
+  | zero => exact constsReducibleBelow_zero
+  | succ n ih =>
+    intro Γ c ls A hlt edge depth
+    rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hlt) with h | h
+    · exact ih h edge depth
+    · exact obl edge (h ▸ ih) depth
+
+/-- Every typed constant is reducible at every depth, from the per-step
+obligation alone. -/
+theorem candidate_const_of_deltaStep (obl : DeltaStepObligation)
+    {Γ : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr}
+    (edge : IsDefEqStrong Γ (.const c ls) (.const c ls) A) (depth : Nat) :
+    Candidate depth Γ (.const c ls) (.const c ls) A :=
+  obl edge (constsReducibleBelow_all obl _) depth
+
+/-- **The seam shape**: the δ-descent skeleton closes `ConstFundamental`
+from the per-step obligation.  Constants are substitution-invariant, so all
+three interpretation components coincide. -/
+theorem ConstFundamental.of_deltaStep [Params.Semantic]
+    (obl : DeltaStepObligation) : ConstFundamental := by
+  intro Gamma c ls A H Delta sigma sigma' hDelta env depth
+  have edge : IsDefEqStrong Delta (.const c ls) (.const c ls)
+      (A.subst sigma) :=
+    (env.substStrong hDelta H).hasType.1
+  have cand := candidate_const_of_deltaStep obl edge depth
+  exact ⟨cand, cand, cand⟩
+
+end DeltaDescent
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ### N′2.5 instance discharges — literal ranks, irreducible heads, δ-steps
+
+The D-ladder rank certificates are consumed at their literal values: the
+strict δ-drop at d0 with its live operational step, the full three-link d1
+chain, and the d2 chain with every block head at rank zero.  Constant
+patterns at each instance are exactly the registered definitions, so every
+block head, constructor, and recursor is irreducible and its `Base` content
+fires outright at any strong self-edge. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+/-- A D0 constant pattern is the registered definition. -/
+theorem d0ConstPat_name (univs : Nat) {c : Name}
+    {r : (Pattern.const c).RHS × (Pattern.const c).Check}
+    (H : (ParamsD0.d0Params univs).Pat (.const c) r) :
+    c = ParamsD0.d0DefVal.name := by
+  change ParamsD0.D0Pat _ _ at H
+  cases H with
+  | iota h => exact (ParamsD0.natPat_no_const univs h).elim
+  | defn => rfl
+
+/-- A D2 constant pattern is one of the three registered definitions. -/
+theorem d2ConstPat_names (univs : Nat) {c : Name}
+    {r : (Pattern.const c).RHS × (Pattern.const c).Check}
+    (H : (ParamsD2.d2Params univs).Pat (.const c) r) :
+    c = ParamsD0.d0DefVal.name ∨ c = ParamsD1.d1MutAVal.name ∨
+      c = ParamsD1.d1MutBVal.name := by
+  change ParamsD2.D2Pat _ _ at H
+  have H1 := ParamsD2.d2Pat_at_const H
+  cases H1 with
+  | old h0 =>
+    cases h0 with
+    | iota h => exact (ParamsD0.natPat_no_const univs h).elim
+    | defn => exact .inl rfl
+  | defnA => exact .inr (.inl rfl)
+  | defnB => exact .inr (.inr rfl)
+
+/-- Irreducibility at D0 for any constant other than the definition. -/
+theorem d0ConstIrreducible (univs : Nat) {c : Name}
+    (hne : c ≠ ParamsD0.d0DefVal.name) :
+    ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬(ParamsD0.d0Params univs).Pat (.const c) r :=
+  fun H => hne (d0ConstPat_name univs H)
+
+/-- Irreducibility at D2 for any constant other than the three
+definitions — in particular for every block head, constructor, and
+recursor. -/
+theorem d2ConstIrreducible (univs : Nat) {c : Name}
+    (h1 : c ≠ ParamsD0.d0DefVal.name) (h2 : c ≠ ParamsD1.d1MutAVal.name)
+    (h3 : c ≠ ParamsD1.d1MutBVal.name) :
+    ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬(ParamsD2.d2Params univs).Pat (.const c) r := by
+  intro r H
+  rcases d2ConstPat_names univs H with h | h | h
+  · exact h1 h
+  · exact h2 h
+  · exact h3 h
+
+/-- **The literal δ-descent at d0**: the registered definition steps
+operationally to its value in every context, and its rank strictly drops
+at the literal certificate (`1 → 0`). -/
+theorem d0DeltaDescent (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    letI : Params.DeltaRank := ParamsD0.d0DeltaRank univs
+    (∀ Gamma : List SExpr,
+      WHRed Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ``Nat.zero [])) ∧
+      Params.DeltaRank.rank ``Nat.zero <
+        Params.DeltaRank.rank ParamsD0.d0DefVal.name := by
+  letI : Params := ParamsD0.d0Params univs
+  letI : Params.DeltaRank := ParamsD0.d0DeltaRank univs
+  refine ⟨d0DefWHRed univs, ?_⟩
+  show ParamsD0.d0DeltaRankFn ``Nat.zero <
+    ParamsD0.d0DeltaRankFn ParamsD0.d0DefVal.name
+  decide
+
+/-- **The literal d1 rank chain**: the live definition chain
+`d1mutA ▸ d1mutB ▸ d0def ▸ Nat.zero` strictly descends at the certified
+literal ranks `3 > 2 > 1 > 0`. -/
+theorem d1DeltaChain (univs : Nat) :
+    letI : Params := ParamsD1.d1Params univs
+    letI : Params.DeltaRank := ParamsD1.d1DeltaRank univs
+    Params.DeltaRank.rank ``Nat.zero <
+        Params.DeltaRank.rank ParamsD0.d0DefVal.name ∧
+      Params.DeltaRank.rank ParamsD0.d0DefVal.name <
+        Params.DeltaRank.rank ParamsD1.d1MutBVal.name ∧
+      Params.DeltaRank.rank ParamsD1.d1MutBVal.name <
+        Params.DeltaRank.rank ParamsD1.d1MutAVal.name := by
+  letI : Params := ParamsD1.d1Params univs
+  letI : Params.DeltaRank := ParamsD1.d1DeltaRank univs
+  refine ⟨?_, ?_, ?_⟩ <;>
+    · show ParamsD1.d1DeltaRankFn _ < ParamsD1.d1DeltaRankFn _
+      decide
+
+/-- **The literal d2 rank chain**: the inherited definition chain keeps its
+strict descent, and every block head sits at rank zero. -/
+theorem d2DeltaChain (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    letI : Params.DeltaRank := ParamsD2.d2DeltaRank univs
+    (Params.DeltaRank.rank ``Nat.zero <
+        Params.DeltaRank.rank ParamsD0.d0DefVal.name ∧
+      Params.DeltaRank.rank ParamsD0.d0DefVal.name <
+        Params.DeltaRank.rank ParamsD1.d1MutBVal.name ∧
+      Params.DeltaRank.rank ParamsD1.d1MutBVal.name <
+        Params.DeltaRank.rank ParamsD1.d1MutAVal.name) ∧
+      Params.DeltaRank.rank ``Tree = 0 ∧
+      Params.DeltaRank.rank ``TreeList = 0 ∧
+      Params.DeltaRank.rank ``Tree.rec = 0 ∧
+      Params.DeltaRank.rank ``TreeList.rec = 0 ∧
+      Params.DeltaRank.rank ``Tree.leaf = 0 ∧
+      Params.DeltaRank.rank ``Tree.node = 0 ∧
+      Params.DeltaRank.rank ``Tree.branch = 0 ∧
+      Params.DeltaRank.rank ``TreeList.nil = 0 ∧
+      Params.DeltaRank.rank ``TreeList.cons = 0 := by
+  letI : Params := ParamsD2.d2Params univs
+  letI : Params.DeltaRank := ParamsD2.d2DeltaRank univs
+  refine ⟨⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+    first
+      | (show ParamsD2.d2DeltaRankFn _ < ParamsD2.d2DeltaRankFn _
+         decide)
+      | (show ParamsD2.d2DeltaRankFn _ = 0
+         decide)
+
+/-- **The operational δ-step at the D2 instance**: the inherited definition
+`d0def ≡ Nat.zero` fires as an untyped `WHRed.extra` step over the block
+environment, premise-free — the d2 twin of the landed `d0DefWHRed`. -/
+theorem d2DefWHRed (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ Gamma : List SExpr,
+      WHRed Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ``Nat.zero []) := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma
+  let r : (Pattern.const ParamsD0.d0DefVal.name).RHS ×
+      (Pattern.const ParamsD0.d0DefVal.name).Check :=
+    (.fixed ParamsD0.d0DefVal.value ParamsD0.d0DefClosed, .true)
+  let action : Pattern.Action Gamma r
+      (.const ParamsD0.d0DefVal.name []) [] Empty.elim
+      (.const ``Nat []) := {
+    pat := ParamsD2.d1Pat_to_d2 (.old .defn)
+    matched := by
+      refine cast ?_ (@Pattern.MatchesS.const (ParamsD2.d2Params univs)
+        ParamsD0.d0DefVal.name [])
+      congr 1
+      funext path
+      exact Empty.elim path
+    dfs := []
+    defeqs := rfl
+    checked := by simp
+    sound := by
+      have H := @IsDefEq.extra (ParamsD2.d2Params univs)
+        ParamsD0.d0DefVal.toDefEq Gamma []
+        (ParamsD2.d1Env_le_d2Env.defeqs
+          (ParamsD1.d0Env_le_d1Env.defeqs VEnv.addDefEq_self)) rfl
+      change IsDefEq Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ``Nat.zero []) (.const ``Nat []) at H
+      exact H }
+  have step := WHRed.extra action
+  change WHRed Gamma (.const ParamsD0.d0DefVal.name [])
+    (.const ``Nat.zero []) at step
+  exact step
+
+/-- **The ranked definition's `Base` content at d0**: the constant's
+Kripke normalization is its one δ-step to the irreducible `Nat.zero`; only
+the judgmental edge is a hypothesis. -/
+theorem d0DefBase (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {Gamma : List SExpr} {A : SExpr},
+      IsDefEqStrong Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ParamsD0.d0DefVal.name []) A →
+      Base Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ParamsD0.d0DefVal.name []) A := by
+  letI : Params := ParamsD0.d0Params univs
+  intro Gamma A edge
+  refine ⟨edge, ?_⟩
+  intro Δ ρ W
+  have result : WHResult Δ (.const ParamsD0.d0DefVal.name [])
+      (A.lift' ρ) :=
+    ⟨.const ``Nat.zero [], .tail .rfl (d0DefWHRed univs Δ),
+      WHNF.constNoPat (d0ConstIrreducible univs (by decide))⟩
+  exact ⟨result, result⟩
+
+/-- The d2 twin of the ranked definition's `Base` content. -/
+theorem d2DefBase (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {A : SExpr},
+      IsDefEqStrong Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ParamsD0.d0DefVal.name []) A →
+      Base Gamma (.const ParamsD0.d0DefVal.name [])
+        (.const ParamsD0.d0DefVal.name []) A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma A edge
+  refine ⟨edge, ?_⟩
+  intro Δ ρ W
+  have result : WHResult Δ (.const ParamsD0.d0DefVal.name [])
+      (A.lift' ρ) :=
+    ⟨.const ``Nat.zero [], .tail .rfl (d2DefWHRed univs Δ),
+      WHNF.constNoPat (d2ConstIrreducible univs
+        (by decide) (by decide) (by decide))⟩
+  exact ⟨result, result⟩
+
+/-- **Rank-zero heads at d0**: the `Nat` family head, both constructors,
+and the recursor are irreducible, so their `Base` content fires at any
+strong self-edge. -/
+theorem d0HeadsBase (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {Gamma : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr},
+      (c = ``Nat ∨ c = ``Nat.zero ∨ c = ``Nat.succ ∨ c = ``Nat.rec) →
+      IsDefEqStrong Gamma (.const c ls) (.const c ls) A →
+      Base Gamma (.const c ls) (.const c ls) A := by
+  letI : Params := ParamsD0.d0Params univs
+  intro Gamma c ls A hc edge
+  refine Base.const_irreducible (fun {r} => d0ConstIrreducible univs ?_) edge
+  rcases hc with rfl | rfl | rfl | rfl <;> decide
+
+/-- **Rank-zero heads at d2**: every block head, constructor, and recursor
+of the full inventory — `Nat` and the `Tree`/`TreeList` block — is
+irreducible, so its `Base` content fires at any strong self-edge. -/
+theorem d2HeadsBase (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ {Gamma : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr},
+      (c = ``Nat ∨ c = ``Nat.zero ∨ c = ``Nat.succ ∨ c = ``Nat.rec ∨
+        c = ``Tree ∨ c = ``TreeList ∨ c = ``Tree.rec ∨
+        c = ``TreeList.rec ∨ c = ``Tree.leaf ∨ c = ``Tree.node ∨
+        c = ``Tree.branch ∨ c = ``TreeList.nil ∨ c = ``TreeList.cons) →
+      IsDefEqStrong Gamma (.const c ls) (.const c ls) A →
+      Base Gamma (.const c ls) (.const c ls) A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro Gamma c ls A hc edge
+  refine Base.const_irreducible
+    (fun {r} => d2ConstIrreducible univs ?_ ?_ ?_) edge <;>
+    (rcases hc with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
+      rfl | rfl | rfl | rfl <;> decide)
+
+/-- **Partial constructor applications at d2**: the one-argument `Tree`
+constructor spines (`Tree.leaf α`, …) and two-argument `TreeList.cons`
+spines are `Base`-reducible at any strong self-edge — the recorded
+instance content of the partial-application statement. -/
+theorem d2PartialCtorBase (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ (l : SLevel) {Gamma : List SExpr} {args : List SExpr} {A : SExpr}
+      {c : Name},
+      (c = ``Tree.leaf ∨ c = ``Tree.node ∨ c = ``Tree.branch ∨
+        c = ``TreeList.nil ∨ c = ``TreeList.cons) →
+      IsDefEqStrong Gamma
+        (args.foldr (fun (a f : SExpr) => f.app a) (.const c [l]))
+        (args.foldr (fun (a f : SExpr) => f.app a) (.const c [l])) A →
+      Base Gamma
+        (args.foldr (fun (a f : SExpr) => f.app a) (.const c [l]))
+        (args.foldr (fun (a f : SExpr) => f.app a) (.const c [l])) A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro l Gamma args A c hc edge
+  rcases hc with rfl | rfl | rfl | rfl | rfl <;>
+    exact Base.ctorSpines rfl rfl edge
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2.6 — `HeadFundamental 0` content: head observations at depth zero
+
+The lemma family filling `Fundamental.succ`'s `HeadFundamental 0` slot from
+`Base`-level data.  Three Kripke observation sources — matching Pi targets
+with `Base`-related components, matching sort targets, and a normal form
+that is neither Pi nor sort — produce both orientations of
+`HeadLayer Base`, all by `WHRedS` determinism against the landed
+`RelatedPath.single`/`defeqDF_l` shapes.  Membership supplies the third
+source: every `InCand*` member reaches a neutral or classified-constructor
+normal form, so members' head obligations hold vacuously.  The per-edge
+classification `HeadObservationData` is the named interface N′3's
+induction discharges case by case; no case needed adequacy-strength input,
+so the rung's kill criterion was not triggered. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-- Kripke Pi-observation data: after every future lift both endpoints
+reach syntactic Pis with `Base`-related domain and codomain (the codomain
+pair in the left-domain context, as `Candidate.forallERel` records it). -/
+def KripkePiData (Γ : List SExpr) (M N : SExpr) : Prop :=
+  ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∃ D C D' C' u v,
+      WHRedS Δ (M.lift' ρ) (.forallE D C) ∧
+      WHRedS Δ (N.lift' ρ) (.forallE D' C') ∧
+      Base Δ D D' (.sort u) ∧ Base (D :: Δ) C C' (.sort v)
+
+/-- Kripke sort-observation data: both endpoints reach the same sort after
+every future lift. -/
+def KripkeSortData (Γ : List SExpr) (M N : SExpr) : Prop :=
+  ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∃ u, WHRedS Δ (M.lift' ρ) (.sort u) ∧ WHRedS Δ (N.lift' ρ) (.sort u)
+
+theorem KripkeSortData.symm {Γ : List SExpr} {M N : SExpr}
+    (h : KripkeSortData Γ M N) : KripkeSortData Γ N M := by
+  intro Δ ρ W
+  obtain ⟨u, h1, h2⟩ := h W
+  exact ⟨u, h2, h1⟩
+
+/-- A Kripke non-type head: after every future lift the normal form reached
+is neither a Pi nor a sort.  Such a term refutes both head observations
+against any partner, at any relation. -/
+def KripkeNonTypeHead (Γ : List SExpr) (M : SExpr) : Prop :=
+  ∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ Δ →
+    ∃ r, WHRedS Δ (M.lift' ρ) r ∧ WHNF Δ r ∧
+      (∀ D C, r ≠ .forallE D C) ∧ (∀ u, r ≠ .sort u)
+
+/-- **Pi targets give the forward head layer at depth 0**: determinism
+identifies the observed Pi with the recorded one, and the recorded `Base`
+components enter as `RelatedPath.single` edges. -/
+theorem KripkePiData.headLayer {Γ : List SExpr} {M N A : SExpr}
+    (h : KripkePiData Γ M N) : HeadLayer Base Γ M N A where
+  piHead := by
+    intro Δ ρ D C s t W typeRun observed
+    obtain ⟨D₀, C₀, D', C', u, v, runM, runN, dom, cod⟩ := h W
+    have heq : (.forallE D C : SExpr) = .forallE D₀ C₀ :=
+      WHRedS.determ observed WHNF.forallE runM WHNF.forallE
+    injection heq with hD hC
+    subst hD
+    subst hC
+    exact ⟨D', C', runN, u, v, .single dom.edge dom, .single cod.edge cod⟩
+  sortHead := by
+    intro Δ ρ s t u W typeRun observed
+    obtain ⟨D₀, C₀, D', C', u', v', runM, runN, dom, cod⟩ := h W
+    have bad : (.sort u : SExpr) = .forallE D₀ C₀ :=
+      WHRedS.determ observed WHNF.sort runM WHNF.forallE
+    cases bad
+
+/-- **Pi targets give the reverse head layer at depth 0**: the symmetric
+component edges, with the codomain pair transported to the right-domain
+context by the landed `defeqDF_l` constructor. -/
+theorem KripkePiData.headLayerRev {Γ : List SExpr} {M N A : SExpr}
+    (h : KripkePiData Γ M N) : HeadLayer Base Γ N M A where
+  piHead := by
+    intro Δ ρ D C s t W typeRun observed
+    obtain ⟨D₀, C₀, D', C', u, v, runM, runN, dom, cod⟩ := h W
+    have heq : (.forallE D C : SExpr) = .forallE D' C' :=
+      WHRedS.determ observed WHNF.forallE runN WHNF.forallE
+    injection heq with hD hC
+    subst hD
+    subst hC
+    refine ⟨D₀, C₀, runM, u, v, .single dom.edge.symm dom.symm, ?_⟩
+    exact .defeqDF_l (.single dom.edge.defeq)
+      (.single cod.edge.symm cod.symm)
+  sortHead := by
+    intro Δ ρ s t u W typeRun observed
+    obtain ⟨D₀, C₀, D', C', u', v', runM, runN, dom, cod⟩ := h W
+    have bad : (.sort u : SExpr) = .forallE D' C' :=
+      WHRedS.determ observed WHNF.sort runN WHNF.forallE
+    cases bad
+
+/-- **Sort targets give the head layer at every relation**: the Pi
+observation is refuted by determinism, and the sort observation returns the
+recorded twin run at the same level. -/
+theorem KripkeSortData.headLayer {R : Rel} {Γ : List SExpr} {M N A : SExpr}
+    (h : KripkeSortData Γ M N) : HeadLayer R Γ M N A where
+  piHead := by
+    intro Δ ρ D C s t W typeRun observed
+    obtain ⟨u, runM, runN⟩ := h W
+    have bad : (.forallE D C : SExpr) = .sort u :=
+      WHRedS.determ observed WHNF.forallE runM WHNF.sort
+    cases bad
+  sortHead := by
+    intro Δ ρ s t u W typeRun observed
+    obtain ⟨u₀, runM, runN⟩ := h W
+    have heq : (.sort u : SExpr) = .sort u₀ :=
+      WHRedS.determ observed WHNF.sort runM WHNF.sort
+    injection heq with hu
+    subst hu
+    exact runN
+
+/-- **A non-type head refutes both observations** — against any partner, at
+any relation. -/
+theorem KripkeNonTypeHead.headLayer {R : Rel} {Γ : List SExpr}
+    {M N A : SExpr} (h : KripkeNonTypeHead Γ M) : HeadLayer R Γ M N A where
+  piHead := by
+    intro Δ ρ D C s t W typeRun observed
+    obtain ⟨r, run, nf, hpi, hsort⟩ := h W
+    exact absurd (WHRedS.determ observed WHNF.forallE run nf).symm
+      (hpi _ _)
+  sortHead := by
+    intro Δ ρ s t u W typeRun observed
+    obtain ⟨r, run, nf, hpi, hsort⟩ := h W
+    exact absurd (WHRedS.determ observed WHNF.sort run nf).symm (hsort _)
+
+/-! ### Non-type-head sources -/
+
+/-- Neutral terms have non-type heads. -/
+theorem KripkeNonTypeHead.ofNeutral {Γ : List SExpr} {M : SExpr}
+    (hn : Neutral M) : KripkeNonTypeHead Γ M :=
+  fun _ => ⟨_, .rfl, hn.lift'.whnf,
+    fun _ _ => hn.lift'.notForallE, fun _ => hn.lift'.notSort⟩
+
+/-- A constant-headed application spine is never a Pi. -/
+theorem foldr_app_ne_forallE (args : List SExpr) (c : Name)
+    (ls : List SLevel) :
+    ∀ D C, args.foldr (fun (a f : SExpr) => f.app a) (.const c ls) ≠
+      .forallE D C := by
+  cases args <;> intro D C h <;> cases h
+
+/-- A constant-headed application spine is never a sort. -/
+theorem foldr_app_ne_sort (args : List SExpr) (c : Name)
+    (ls : List SLevel) :
+    ∀ u, args.foldr (fun (a f : SExpr) => f.app a) (.const c ls) ≠
+      .sort u := by
+  cases args <;> intro u h <;> cases h
+
+/-- Classified constructor spines — total or partial — have non-type
+heads. -/
+theorem KripkeNonTypeHead.ofCtorSpine {Γ : List SExpr} {c : Name} {k : Nat}
+    {ls : List SLevel} (hcl : Params.classify c = some (.ctor k))
+    (args : List SExpr) :
+    KripkeNonTypeHead Γ
+      (args.foldr (fun (a f : SExpr) => f.app a) (.const c ls)) := by
+  intro Δ ρ W
+  rw [foldr_app_lift']
+  exact ⟨_, .rfl, WHNF.ctorSpine hcl _, foldr_app_ne_forallE _ _ _,
+    foldr_app_ne_sort _ _ _⟩
+
+/-- Irreducible constants have non-type heads. -/
+theorem KripkeNonTypeHead.ofConstNoPat {Γ : List SExpr} {c : Name}
+    {ls : List SLevel}
+    (h : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r) :
+    KripkeNonTypeHead Γ (.const c ls) := by
+  intro Δ ρ W
+  refine ⟨_, .rfl, WHNF.constNoPat h, ?_, ?_⟩
+  · intro D C h'
+    cases h'
+  · intro u h'
+    cases h'
+
+/-- Lambdas have non-type heads. -/
+theorem KripkeNonTypeHead.ofLam {Γ : List SExpr} {A e : SExpr} :
+    KripkeNonTypeHead Γ (.lam A e) := by
+  intro Δ ρ W
+  refine ⟨_, .rfl, WHNF.lam, ?_, ?_⟩
+  · intro D C h'
+    cases h'
+  · intro u h'
+    cases h'
+
+/-- Recursor spines stuck at a neutral major have non-type heads. -/
+theorem KripkeNonTypeHead.ofStuckMajor {Γ : List SExpr} {f t : SExpr}
+    (hmaj : IsMajorPremise f) (hn : Neutral t) :
+    KripkeNonTypeHead Γ (f.app t) := by
+  intro Δ ρ W
+  refine ⟨_, .rfl, KripkeWHNF.stuckMajor hmaj hn W, ?_, ?_⟩
+  · intro D C h'
+    cases h'
+  · intro u h'
+    cases h'
+
+/-- Non-type heads absorb backward multi-step untyped expansion. -/
+theorem KripkeNonTypeHead.expandS {Γ : List SExpr} {M M' : SExpr}
+    (run : WHRedS Γ M M') (h : KripkeNonTypeHead Γ M') :
+    KripkeNonTypeHead Γ M := by
+  intro Δ ρ W
+  obtain ⟨r, run', nf, h1, h2⟩ := h W
+  exact ⟨r, (run.weak' W).trans run', nf, h1, h2⟩
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ### Head observations from membership
+
+Candidate members reach only neutral or classified-constructor normal
+forms, so their head obligations hold vacuously — this is the membership
+half of the rung's `HeadFundamental 0` deliverable. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-- Every candidate member reaches a normal form that is neither a Pi nor a
+sort, by the same membership induction as `inCand_whReaches` with the
+normal form's shape retained. -/
+theorem inCand_nonTypeHead_step {H : TreeHeads} {P : CtxPred}
+    (C : TreeClassified H) :
+    (∀ {Γ : List SExpr} {α t : SExpr}, InCandTree H P Γ α t →
+        ∃ r, WHRedS Γ t r ∧ WHNF Γ r ∧
+          (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) ∧
+      (∀ {Γ : List SExpr} {α ts : SExpr}, InCandTreeList H P Γ α ts →
+        ∃ r, WHRedS Γ ts r ∧ WHNF Γ r ∧
+          (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) := by
+  have caseLeaf : ∀ {Γ' : List SExpr} {β : SExpr} (x : SExpr), P Γ' x →
+      ∃ r, WHRedS Γ' (leafApp H β x) r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    fun x _ => ⟨_, .rfl, WHNF.ctorSpine C.leaf_cl [x, _],
+      foldr_app_ne_forallE [x, _] _ _, foldr_app_ne_sort [x, _] _ _⟩
+  have caseNode : ∀ {Γ' : List SExpr} {β : SExpr} (ts : SExpr),
+      InCandTreeList H P Γ' β ts →
+      (∃ r, WHRedS Γ' ts r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) →
+      ∃ r, WHRedS Γ' (nodeApp H β ts) r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    fun ts _ _ => ⟨_, .rfl, WHNF.ctorSpine C.node_cl [ts, _],
+      foldr_app_ne_forallE [ts, _] _ _, foldr_app_ne_sort [ts, _] _ _⟩
+  have caseBranch : ∀ {Γ' : List SExpr} {β : SExpr} (f : SExpr),
+      (∀ {Δ : List SExpr} {ρ : Lift}, Ctx.Lift' ρ Γ' Δ → ∀ a, P Δ a →
+        InCandTreeList H P Δ (β.lift' ρ) ((f.lift' ρ).app a)) →
+      (∀ {Δ : List SExpr} {ρ : Lift} (_ : Ctx.Lift' ρ Γ' Δ) (a : SExpr)
+        (_ : P Δ a),
+        ∃ r, WHRedS Δ ((f.lift' ρ).app a) r ∧ WHNF Δ r ∧
+          (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) →
+      ∃ r, WHRedS Γ' (branchApp H β f) r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    fun f _ _ => ⟨_, .rfl, WHNF.ctorSpine C.branch_cl [f, _],
+      foldr_app_ne_forallE [f, _] _ _, foldr_app_ne_sort [f, _] _ _⟩
+  have caseNeu : ∀ {Γ' : List SExpr} (t : SExpr), Neutral t →
+      ∃ r, WHRedS Γ' t r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    fun t hn => ⟨t, .rfl, hn.whnf,
+      fun _ _ => hn.notForallE, fun _ => hn.notSort⟩
+  have caseExp : ∀ {Γ' : List SExpr} (t t' : SExpr), WHRed Γ' t t' →
+      (∃ r, WHRedS Γ' t' r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) →
+      ∃ r, WHRedS Γ' t r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) := by
+    intro Γ' t t' step ih
+    obtain ⟨r, run, nf, h1, h2⟩ := ih
+    exact ⟨r, ReflTransGen.trans (.tail .rfl step) run, nf, h1, h2⟩
+  have caseNil : ∀ {Γ' : List SExpr} {β : SExpr},
+      ∃ r, WHRedS Γ' (nilApp H β) r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    ⟨_, .rfl, WHNF.ctorSpine C.nil_cl [_],
+      foldr_app_ne_forallE [_] _ _, foldr_app_ne_sort [_] _ _⟩
+  have caseCons : ∀ {Γ' : List SExpr} {β : SExpr} (t ts : SExpr),
+      InCandTree H P Γ' β t → InCandTreeList H P Γ' β ts →
+      (∃ r, WHRedS Γ' t r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) →
+      (∃ r, WHRedS Γ' ts r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u)) →
+      ∃ r, WHRedS Γ' (consApp H β t ts) r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) :=
+    fun t ts _ _ _ _ => ⟨_, .rfl, WHNF.ctorSpine C.cons_cl [ts, t, _],
+      foldr_app_ne_forallE [ts, t, _] _ _, foldr_app_ne_sort [ts, t, _] _ _⟩
+  refine ⟨fun h => ?_, fun h => ?_⟩
+  · exact InCandTree.rec
+      (motive_1 := fun Γ' β t _ => ∃ r, WHRedS Γ' t r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u))
+      (motive_2 := fun Γ' β ts _ => ∃ r, WHRedS Γ' ts r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u))
+      caseLeaf caseNode caseBranch (fun t hn => caseNeu t hn)
+      (fun t t' step _ ih => caseExp t t' step ih)
+      caseNil caseCons (fun ts hn => caseNeu ts hn)
+      (fun ts ts' step _ ih => caseExp ts ts' step ih) h
+  · exact InCandTreeList.rec
+      (motive_1 := fun Γ' β t _ => ∃ r, WHRedS Γ' t r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u))
+      (motive_2 := fun Γ' β ts _ => ∃ r, WHRedS Γ' ts r ∧ WHNF Γ' r ∧
+        (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u))
+      caseLeaf caseNode caseBranch (fun t hn => caseNeu t hn)
+      (fun t t' step _ ih => caseExp t t' step ih)
+      caseNil caseCons (fun ts hn => caseNeu ts hn)
+      (fun ts ts' step _ ih => caseExp ts ts' step ih) h
+
+/-- `Tree`-candidate members have non-type heads: lift stability carries
+membership into every future context, and the shape induction reads the
+normal form there. -/
+theorem InCandTree.kripkeNonTypeHead {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (h : InCandTree H P Γ α M) :
+    KripkeNonTypeHead Γ M :=
+  fun W => (inCand_nonTypeHead_step C).1 (h.lift' hP W)
+
+/-- `TreeList` side of the member non-type-head observation. -/
+theorem InCandTreeList.kripkeNonTypeHead {H : TreeHeads} {P : CtxPred}
+    {Γ : List SExpr} {α M : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (h : InCandTreeList H P Γ α M) :
+    KripkeNonTypeHead Γ M :=
+  fun W => (inCand_nonTypeHead_step C).2 (h.lift' hP W)
+
+/-- The `Nat` member shape step: every member reaches a normal form that
+is neither Pi nor sort. -/
+theorem inCandNat_nonTypeHead_step {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {n : SExpr}
+    (hz : Params.classify zeroC = some (.ctor 0))
+    (hs : Params.classify succC = some (.ctor 1))
+    (h : InCandNat zeroC succC ls Γ n) :
+    ∃ r, WHRedS Γ n r ∧ WHNF Γ r ∧
+      (∀ D C', r ≠ .forallE D C') ∧ (∀ u, r ≠ .sort u) := by
+  induction h with
+  | zero =>
+    exact ⟨_, .rfl, WHNF.ctorSpine hz [],
+      foldr_app_ne_forallE [] _ _, foldr_app_ne_sort [] _ _⟩
+  | succ n hn ih =>
+    exact ⟨_, .rfl, WHNF.ctorSpine hs [n],
+      foldr_app_ne_forallE [n] _ _, foldr_app_ne_sort [n] _ _⟩
+  | neutral n hn =>
+    exact ⟨n, .rfl, hn.whnf, fun _ _ => hn.notForallE, fun _ => hn.notSort⟩
+  | expand n n' step _ ih =>
+    obtain ⟨r, run, nf, h1, h2⟩ := ih
+    exact ⟨r, ReflTransGen.trans (.tail .rfl step) run, nf, h1, h2⟩
+
+/-- `Nat` calibration of the member non-type-head observation. -/
+theorem InCandNat.kripkeNonTypeHead {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} {M : SExpr}
+    (hz : Params.classify zeroC = some (.ctor 0))
+    (hs : Params.classify succC = some (.ctor 1))
+    (h : InCandNat zeroC succC ls Γ M) : KripkeNonTypeHead Γ M :=
+  fun W => inCandNat_nonTypeHead_step hz hs (h.lift' W)
+
+/-- **Members' head obligations hold vacuously**, against any partner, at
+any relation and displayed type — the membership half of the
+`HeadFundamental 0` slot. -/
+theorem InCandTree.headLayer {H : TreeHeads} {P : CtxPred} {R : Rel}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (h : InCandTree H P Γ α M) :
+    HeadLayer R Γ M N A :=
+  KripkeNonTypeHead.headLayer (h.kripkeNonTypeHead hP C)
+
+/-- `TreeList` side of the member head layer. -/
+theorem InCandTreeList.headLayer {H : TreeHeads} {P : CtxPred} {R : Rel}
+    {Γ : List SExpr} {α M N A : SExpr} (hP : KripkeDomain P)
+    (C : TreeClassified H) (h : InCandTreeList H P Γ α M) :
+    HeadLayer R Γ M N A :=
+  KripkeNonTypeHead.headLayer (h.kripkeNonTypeHead hP C)
+
+/-- `Nat` calibration of the member head layer. -/
+theorem InCandNat.headLayer {zeroC succC : Name} {ls : List SLevel}
+    {R : Rel} {Γ : List SExpr} {M N A : SExpr}
+    (hz : Params.classify zeroC = some (.ctor 0))
+    (hs : Params.classify succC = some (.ctor 1))
+    (h : InCandNat zeroC succC ls Γ M) : HeadLayer R Γ M N A :=
+  KripkeNonTypeHead.headLayer (h.kripkeNonTypeHead hz hs)
+
+/-! ### The `Fundamental.succ` slot assembly -/
+
+/-- The per-edge head-observation classification: exactly the data from
+which both orientations of the depth-0 head layer assemble.  This is the
+named interface N′3's induction on strong equality discharges case by
+case (`sort`/`forallEDF` via the first two sources; neutrals, constants,
+lambdas, constructor spines, stuck recursors, and inductive-type members
+via the third; proof-valued types via the first disjunct). -/
+def HeadObservationData (Γ : List SExpr) (M N A : SExpr) : Prop :=
+  IsProofType Γ A ∨ KripkePiData Γ M N ∨ KripkeSortData Γ M N ∨
+    (KripkeNonTypeHead Γ M ∧ KripkeNonTypeHead Γ N)
+
+/-- The classification produces both orientations of the depth-0 head
+layer. -/
+theorem HeadObservationData.headLayers {Γ : List SExpr} {M N A : SExpr}
+    (h : HeadObservationData Γ M N A) :
+    IsProofType Γ A ∨
+      (HeadLayer Base Γ M N A ∧ HeadLayer Base Γ N M A) := by
+  rcases h with h | h | h | ⟨h₁, h₂⟩
+  · exact .inl h
+  · exact .inr ⟨KripkePiData.headLayer h, KripkePiData.headLayerRev h⟩
+  · exact .inr ⟨KripkeSortData.headLayer h,
+      KripkeSortData.headLayer (KripkeSortData.symm h)⟩
+  · exact .inr ⟨KripkeNonTypeHead.headLayer h₁,
+      KripkeNonTypeHead.headLayer h₂⟩
+
+/-- **The `HeadFundamental 0` slot, from the classification**: supplying
+`HeadObservationData` for every strong edge fills exactly the slot
+`Fundamental.succ` consumes at depth zero (`Candidate 0` is `Base`). -/
+theorem headFundamental_zero_of_data
+    (h : ∀ {Γ : List SExpr} {M N A : SExpr},
+      IsDefEqStrong Γ M N A → HeadObservationData Γ M N A) :
+    HeadFundamental 0 :=
+  fun edge => (h edge).headLayers
+
+/-! ### Nonvacuity witnesses -/
+
+/-- Sorts inhabit the sort-observation source. -/
+theorem kripkeSortData_sort {Γ : List SExpr} (u : SLevel) :
+    KripkeSortData Γ (.sort u) (.sort u) :=
+  fun _ => ⟨u, .rfl, .rfl⟩
+
+/-- Sort-formed Pis inhabit the Pi-observation source, with `Base.sort`
+components. -/
+theorem kripkePiData_sorts {Γ : List SExpr} (u v : SLevel) :
+    KripkePiData Γ (.forallE (.sort u) (.sort v))
+      (.forallE (.sort u) (.sort v)) :=
+  fun _ => ⟨.sort u, .sort v, .sort u, .sort v, u.succ, v.succ,
+    .rfl, .rfl, Base.sort, Base.sort⟩
+
+/-- The classification is inhabited at the sort edge. -/
+theorem headObservationData_sort {Γ : List SExpr} (u : SLevel) :
+    HeadObservationData Γ (.sort u) (.sort u) (.sort u.succ) :=
+  .inr (.inr (.inl (kripkeSortData_sort u)))
+
+/-- The classification is inhabited at a Pi edge. -/
+theorem headObservationData_pi {Γ : List SExpr} (u v : SLevel) :
+    HeadObservationData Γ (.forallE (.sort u) (.sort v))
+      (.forallE (.sort u) (.sort v)) (.sort (.imax u.succ v.succ)) :=
+  .inr (.inl (kripkePiData_sorts u v))
+
+/-- The classification is inhabited at a neutral edge. -/
+theorem headObservationData_neutral {Γ : List SExpr} {M N A : SExpr}
+    (hn : Neutral M) (hn' : Neutral N) :
+    HeadObservationData Γ M N A :=
+  .inr (.inr (.inr ⟨KripkeNonTypeHead.ofNeutral hn,
+    KripkeNonTypeHead.ofNeutral hn'⟩))
+
+/-! ### The production membership instances -/
+
+omit [Params] in
+/-- Member head observations at the production D2 instance: for members of
+the block candidates over the real environment, the `HeadFundamental 0`
+slot's head-layer content holds vacuously against any partner. -/
+theorem d2InCandTree_headLayer (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ (l : SLevel) {R : Rel} {P : CtxPred} {Γ : List SExpr}
+      {α M N A : SExpr},
+      KripkeDomain P →
+      InCandTree (d2TreeHeads univs l) P Γ α M →
+      HeadLayer R Γ M N A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro l R P Γ α M N A hP hM
+  exact hM.headLayer hP (d2TreeHeads_classified univs l)
+
+omit [Params] in
+/-- `TreeList` side of the production D2 member head observations. -/
+theorem d2InCandTreeList_headLayer (univs : Nat) :
+    letI : Params := ParamsD2.d2Params univs
+    ∀ (l : SLevel) {R : Rel} {P : CtxPred} {Γ : List SExpr}
+      {α M N A : SExpr},
+      KripkeDomain P →
+      InCandTreeList (d2TreeHeads univs l) P Γ α M →
+      HeadLayer R Γ M N A := by
+  letI : Params := ParamsD2.d2Params univs
+  intro l R P Γ α M N A hP hM
+  exact hM.headLayer hP (d2TreeHeads_classified univs l)
+
+omit [Params] in
+/-- Member head observations at the production D0 instance. -/
+theorem d0InCandNat_headLayer (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    ∀ {ls : List SLevel} {R : Rel} {Γ : List SExpr} {M N A : SExpr},
+      InCandNat ``Nat.zero ``Nat.succ ls Γ M →
+      HeadLayer R Γ M N A := by
+  letI : Params := ParamsD0.d0Params univs
+  intro ls R Γ M N A hM
+  exact hM.headLayer rfl rfl
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-- Every landed one-step rule pack is a multi-step rule pack: the
+multi-step interface strictly subsumes the N′0 mock shape (its nonvacuity
+transfer — probe Z16's mock registry inhabits `TreeRules`). -/
+def TreeRulesS.ofRules {H : TreeHeads} {Γ : List SExpr} {α : SExpr}
+    (R : TreeRules H Γ α) : TreeRulesS H Γ α where
+  recT := R.recT
+  recL := R.recL
+  minorLf := R.minorLf
+  minorNd := R.minorNd
+  minorBr := R.minorBr
+  minorNl := R.minorNl
+  minorCs := R.minorCs
+  recT_major := R.recT_major
+  recL_major := R.recL_major
+  stuckT := R.stuckT
+  stuckL := R.stuckL
+  leafStep := fun W x => .tail .rfl (R.leafStep W x)
+  nodeStep := fun W ts => .tail .rfl (R.nodeStep W ts)
+  branchStep := fun W f => .tail .rfl (R.branchStep W f)
+  nilStep := fun W => .tail .rfl (R.nilStep W)
+  consStep := fun W t ts => .tail .rfl (R.consStep W t ts)
+
+/-- `Nat` side of the one-step-to-multi-step subsumption. -/
+def NatRulesS.ofRules {zeroC succC : Name} {ls : List SLevel}
+    {Γ : List SExpr} (R : NatRules zeroC succC ls Γ) :
+    NatRulesS zeroC succC ls Γ where
+  recN := R.recN
+  minorZ := R.minorZ
+  minorS := R.minorS
+  recN_major := R.recN_major
+  stuckN := R.stuckN
+  zeroStep := fun W => .tail .rfl (R.zeroStep W)
+  succStep := fun W n => .tail .rfl (R.succStep W n)
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′2 axiom pins
+
+The generic N′2 layer (multi-step engine, tower collapse, δ-descent
+skeleton, depth-0 head lemma family, membership head observations) stays
+inside the accepted Experimental baseline: subsets of
+`[propext, Classical.choice, Quot.sound]`.  The seven registered
+tower-body pins are kernel `decide` computations — they contribute **no**
+new `native_decide` observations.  The nine per-rule runs and the
+instance discharges inherit, verbatim, the closures of the landed
+machinery they fire: the N′1 step theorems' recorded `sorryAx` (through
+`SExpr.typeUniq` → `VEnv.IsDefEq.uniq`, the 16C′ leaf) and the D-ladder
+fixtures' documented `native_decide` observations — contributed by those
+modules, not by this rung's reasoning. -/
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.ResultCand.expandS' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms ResultCand.expandS
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.TreeRulesS.ofSteps' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms TreeRulesS.ofSteps
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.TreeRulesS.fundamental_iota' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TreeRulesS.fundamental_iota
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.TreeRulesS.recT_whResult' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TreeRulesS.recT_whResult
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.NatRulesS.fundamental_iota' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms NatRulesS.fundamental_iota
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.lamBodyN_eq_some' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms lamBodyN_eq_some
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.whRedS_lamTower' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms whRedS_lamTower
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.iotaSpineCaptureValues' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms iotaSpineCaptureValues
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.natZeroBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms natZeroBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.natSuccBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms natSuccBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.treeLeafBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms treeLeafBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.treeNodeBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms treeNodeBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.treeBranchBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms treeBranchBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.treeNilBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms treeNilBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.treeConsBody' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms treeConsBody
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0ZeroIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0ZeroIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0SuccIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0SuccIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2LeafIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2LeafIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2NodeIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2NodeIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2BranchIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2BranchIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2NilIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2NilIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2ConsIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2ConsIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2NatZeroIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2NatZeroIotaRun
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2NatSuccIotaRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2AllRules_rhs_nodup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2NatSuccIotaRun
+
+/-- info: 'Lean4Lean.SExpr.WHNF.constNoPat' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.SExpr.WHNF.constNoPat
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.Base.const_irreducible' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Base.const_irreducible
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.Base.ctorSpines' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Base.ctorSpines
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.Base.stuckMajors' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Base.stuckMajors
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.Candidate.ofDeltaValue' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Candidate.ofDeltaValue
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.constsReducibleBelow_all' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms constsReducibleBelow_all
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.candidate_const_of_deltaStep' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms candidate_const_of_deltaStep
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.ConstFundamental.of_deltaStep' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms ConstFundamental.of_deltaStep
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.DeltaStepObligation.of_fundamental' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms DeltaStepObligation.of_fundamental
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0ConstPat_name' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0ConstPat_name
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2ConstPat_names' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2ConstPat_names
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0DeltaDescent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0DeltaDescent
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d1DeltaChain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d1DeltaChain
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2DeltaChain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2DeltaChain
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2DefWHRed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2DefWHRed
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0DefBase' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0DefBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2DefBase' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2DefBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0HeadsBase' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0HeadsBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2HeadsBase' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2HeadsBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2PartialCtorBase' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2PartialCtorBase
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.KripkePiData.headLayer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms KripkePiData.headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.KripkePiData.headLayerRev' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms KripkePiData.headLayerRev
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.KripkeSortData.headLayer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms KripkeSortData.headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.KripkeNonTypeHead.headLayer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms KripkeNonTypeHead.headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.inCand_nonTypeHead_step' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms inCand_nonTypeHead_step
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandTree.headLayer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandTree.headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.InCandNat.headLayer' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms InCandNat.headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.HeadObservationData.headLayers' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms HeadObservationData.headLayers
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.headFundamental_zero_of_data' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms headFundamental_zero_of_data
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.headObservationData_sort' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms headObservationData_sort
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.headObservationData_pi' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms headObservationData_pi
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.headObservationData_neutral' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms headObservationData_neutral
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2InCandTree_headLayer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2InCandTree_headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0InCandNat_headLayer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0InCandNat_headLayer
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.TreeRulesS.ofRules' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TreeRulesS.ofRules
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.NatRulesS.ofRules' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms NatRulesS.ofRules
