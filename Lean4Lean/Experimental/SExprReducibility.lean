@@ -1575,6 +1575,541 @@ theorem LRS.PiPathInv.of_candidateFundamental
   subst C
   exact ⟨u, v, domain, codomain⟩
 
+/-! ## N′3 session 1 — the remaining `SubstFundamental` cases
+
+The four dependency-ordered cases of the substitutional fundamental
+theorem: type transport (`defeqDF`), lambda congruence (`lamDF`), beta,
+and constants.  Beta is unconditional — the argument arrives at the
+abstraction's own domain by the derivation's hypotheses, so the entire
+case is the landed `Env.cons` substitution machinery plus certified
+backward expansion; no inversion on the type is used anywhere.
+
+Two cases expose genuinely missing semantic inputs, each isolated as a
+named `Prop` with nonvacuity witnesses in the N′2 style rather than
+forced:
+
+* `CandidateTypeTransport` — transport of a full candidate along one
+  evidence-rich type equality.  The depth-0 restriction is a theorem
+  (`Base.defeqDF`; the normalization component is type-phantom), but a
+  successor observation layer is gated on *typed* weak-head runs of the
+  displayed type, and a typed run out of `B` induces no typed run out of
+  a defeq `A`: manufacturing one is exactly type-level subject reduction,
+  which `SubjectPreservingWHNormalization.betaFire` shows is
+  Pi-inversion-strength.  The composite edge `.defeqDF typeEq base.edge`
+  reduces the obligation to the fundamental theorem itself
+  (`CandidateTypeTransport.of_fundamental`), which is how the assembled
+  theorem discharges it.
+* `CandidateUniformity` — re-indexing a candidate at every semantic
+  index.  The downward half is the theorem `Candidate.ofLe`; the upward
+  half is what `Env.cons` demands of an action argument that arrives at
+  one index, and is again a consequence of the fundamental theorem
+  (`CandidateUniformity.of_fundamental`).
+* `IrreducibleConstCandidates` — the successor content of registered
+  constants without a constant-headed pattern (inductive heads,
+  constructors, recursor heads).  Depth 0 is N′2's
+  `Base.const_irreducible`; the successor action layers are the
+  membership layer's per-instance content and remain the named input
+  here.
+
+`SubstFundamental.const` consumes the `.const` node's own value premise:
+the definition edge `hdefn` is a *sub-derivation*, so ranked definitions
+descend structurally — the inner leg of the (rank, derivation)
+lexicographic recursion whose outer leg is the landed
+`constsReducibleBelow_all`. -/
+
+/-- Downward closure of the candidate index. -/
+theorem Candidate.ofLe (h : depth' ≤ depth)
+    (H : Candidate depth Γ M N A) : Candidate depth' Γ M N A := by
+  induction depth with
+  | zero =>
+    cases Nat.le_zero.mp h
+    exact H
+  | succ k ih =>
+    rcases Nat.lt_or_eq_of_le h with h' | rfl
+    · exact ih (Nat.lt_succ_iff.mp h') H.lower
+    · exact H
+
+/-- Base transport along an evidence-rich type equality.  The
+normalization component never inspects its displayed type, so only the
+judgmental edge moves. -/
+theorem Base.defeqDF (typeEq : IsDefEqStrong Γ A B (.sort u))
+    (H : Base Γ M N A) : Base Γ M N B where
+  edge := .defeqDF typeEq H.edge
+  normalizes := H.normalizes
+
+/-- **Named input (defeqDF case)**: full candidate transport along one
+evidence-rich type equality.  Not derivable from the candidate structure
+alone: a successor layer's gates receive typed weak-head runs of the new
+displayed type, and converting them to runs of the old type is type-level
+subject reduction (Pi-inversion strength, per
+`SubjectPreservingWHNormalization.betaFire`).  It is strictly weaker than
+the fundamental theorem it feeds. -/
+def CandidateTypeTransport : Prop :=
+  ∀ {Γ : List SExpr} {M N A B : SExpr} {u : SLevel} {depth : Nat},
+    IsDefEqStrong Γ A B (.sort u) →
+    Candidate depth Γ M N A → Candidate depth Γ M N B
+
+/-- Nonvacuity: the depth-0 restriction of the transport is a theorem. -/
+theorem candidateTypeTransport_zero
+    (typeEq : IsDefEqStrong Γ A B (.sort u))
+    (H : Candidate 0 Γ M N A) : Candidate 0 Γ M N B :=
+  Base.defeqDF typeEq H
+
+/-- Shape nonvacuity: the transport follows from the fundamental theorem
+through the composite edge, so the interface asks for strictly less than
+the theorem it produces. -/
+theorem CandidateTypeTransport.of_fundamental
+    (fund : ∀ depth, Fundamental depth) : CandidateTypeTransport :=
+  fun typeEq H => fund _ (.defeqDF typeEq H.base.edge)
+
+/-- **Named input (lamDF case)**: candidates at every semantic index from
+a candidate at one index.  The downward half is `Candidate.ofLe`; the
+upward half is what extending a logical substitution (`Env.cons`) demands
+of a function-action argument, which arrives at a single index. -/
+def CandidateUniformity : Prop :=
+  ∀ {Γ : List SExpr} {M N A : SExpr} {depth : Nat},
+    Candidate depth Γ M N A → ∀ depth', Candidate depth' Γ M N A
+
+/-- Shape nonvacuity: uniformity follows from the fundamental theorem
+through the base edge. -/
+theorem CandidateUniformity.of_fundamental
+    (fund : ∀ depth, Fundamental depth) : CandidateUniformity :=
+  fun H depth' => fund depth' H.base.edge
+
+/-- **Named input (const case)**: candidates at every index for a typed
+registered constant with no constant-headed pattern (inductive heads,
+constructors, recursor heads).  Depth 0 is N′2's
+`Base.const_irreducible`; the successor action content — normalization of
+the constant's application spines, including iota firing at recursor
+heads — is the membership layer's territory. -/
+def IrreducibleConstCandidates : Prop :=
+  ∀ {Γ : List SExpr} {c : Name} {ls : List SLevel} {A : SExpr},
+    (∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r) →
+    IsDefEqStrong Γ (.const c ls) (.const c ls) A →
+    ∀ depth, Candidate depth Γ (.const c ls) (.const c ls) A
+
+/-- Shape nonvacuity: irreducible-constant candidates follow from the
+fundamental theorem outright. -/
+theorem IrreducibleConstCandidates.of_fundamental
+    (fund : ∀ depth, Fundamental depth) : IrreducibleConstCandidates :=
+  fun _ edge depth => fund depth edge
+
+/-- The reverse orientation of a Kripke function action, from the forward
+orientation: swap the argument pair, take candidate symmetry, and move
+the displayed instantiated codomain back along the supplied dependent
+result equality.  The final move is a type transport, so the lemma is
+conditional on the named transport input. -/
+theorem ActionLayer.reverseOfForward [Params.Semantic]
+    (transport : CandidateTypeTransport)
+    (forward : ActionLayer (Candidate depth) Γ M N A) :
+    ActionLayer (Candidate depth) Γ N M A where
+  apply := by
+    intro Δ ρ D C s W hΔ typeRun a b u v hab hD hC hResult
+    have out := forward.apply W hΔ typeRun hab.symm hD hC hResult.symm
+    exact transport hResult.symm out.symm
+
+/-- The substitutional fundamental type-conversion case, conditional on
+the named transport input: every component of the interpretation moves
+along the left-substituted type edge. -/
+theorem SubstFundamental.defeqDF [Params.Semantic]
+    (transport : CandidateTypeTransport)
+    (hAB : IsDefEqStrong Gamma A B (.sort u))
+    (h : IsDefEqStrong Gamma e1 e2 A)
+    (fund : SubstFundamental h) :
+    SubstFundamental (.defeqDF hAB h) := by
+  intro Delta sigma sigma' hDelta env depth
+  have typeEdge : IsDefEqStrong Delta (A.subst sigma) (B.subst sigma)
+      (.sort u) := by
+    simpa only [SExpr.subst] using env.left.substStrong hDelta hAB
+  have out := fund hDelta env depth
+  exact {
+    same := transport typeEdge out.same
+    cross := transport typeEdge out.cross
+    left := transport typeEdge out.left }
+
+/-- The substitutional fundamental constant case.  A constant with a
+registered pattern descends through the `.const` node's own definition
+premise: the value edge is a sub-derivation, so its interpretation is an
+induction hypothesis and PER composition returns the constant's own
+candidate — the inner, structural leg of the (rank, derivation)
+lexicographic descent whose outer leg is `constsReducibleBelow_all`.  A
+constant without a pattern consumes the named irreducible-head input. -/
+theorem SubstFundamental.const [Params.Semantic]
+    (irr : IrreducibleConstCandidates)
+    {Gamma : List SExpr} {c : Name} {ci : VConstant} {ls : List SLevel}
+    {u : SLevel}
+    (henv : Params.env.constants c = some ci)
+    (hls : ls.length = ci.uvars)
+    (hty : IsDefEqStrong Gamma (SExpr.mkInst ls ci.type)
+      (SExpr.mkInst ls ci.type) (.sort u))
+    (F : ∀ cl, CtorBundle c cl)
+    (hF : ∀ cl, IsDefEqStrong Gamma (SExpr.mkInst ls ci.type)
+      ((F cl).rhs ls) (.sort (F cl).u))
+    (hdefn : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      Params.Pat (.const c) r →
+      IsDefEqStrong Gamma (r.1.applyS ls Empty.elim) (.const c ls)
+        (SExpr.mkInst ls ci.type))
+    (fundDefn : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check}
+      (h : Params.Pat (.const c) r), SubstFundamental (hdefn h)) :
+    SubstFundamental (.const henv hls hty F hF hdefn) := by
+  intro Delta sigma sigma' hDelta env depth
+  by_cases hpat : ∃ r : (Pattern.const c).RHS × (Pattern.const c).Check,
+      Params.Pat (.const c) r
+  · obtain ⟨r, pat⟩ := hpat
+    have out := fundDefn pat hDelta env depth
+    have same : Candidate depth Delta ((SExpr.const c ls).subst sigma)
+        ((SExpr.const c ls).subst sigma)
+        ((SExpr.mkInst ls ci.type).subst sigma) :=
+      out.same.symm.trans out.same
+    have cross : Candidate depth Delta ((SExpr.const c ls).subst sigma)
+        ((SExpr.const c ls).subst sigma')
+        ((SExpr.mkInst ls ci.type).subst sigma) :=
+      out.same.symm.trans out.cross
+    exact ⟨same, cross, cross⟩
+  · have noPat : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+        ¬Params.Pat (.const c) r :=
+      fun {r} hr => hpat ⟨r, hr⟩
+    have edge : IsDefEqStrong Delta (.const c ls) (.const c ls)
+        ((SExpr.mkInst ls ci.type).subst sigma) := by
+      simpa only [SExpr.subst] using
+        (env.substStrong hDelta
+          (IsDefEqStrong.const henv hls hty F hF hdefn)).hasType.1
+    have cand := irr noPat edge depth
+    exact {
+      same := by simpa only [SExpr.subst] using cand
+      cross := by simpa only [SExpr.subst] using cand
+      left := by simpa only [SExpr.subst] using cand }
+
+/-- The substitutional fundamental beta case, unconditionally.  The redex
+expands backward along its own certified contraction — the derivation's
+premises type the argument at the abstraction's exact domain, so the
+extended logical substitution interprets the instantiated body directly
+and no inversion on the type is used.  The argument's interpretation
+supplies the environment head at every semantic index because the
+argument is a fixed term of the derivation, not a quantified action
+argument. -/
+theorem SubstFundamental.beta [Params.Semantic]
+    {Gamma : List SExpr} {A B e e' : SExpr}
+    (hBody : IsDefEqStrong (A :: Gamma) e e B)
+    (hArg : IsDefEqStrong Gamma e' e' A)
+    (hApp : IsDefEqStrong Gamma (.app (.lam A e) e') (.app (.lam A e) e')
+      (B.inst e'))
+    (hInst : IsDefEqStrong Gamma (e.inst e') (e.inst e') (B.inst e'))
+    (fundBody : SubstFundamental hBody)
+    (fundArg : SubstFundamental hArg)
+    (fundApp : SubstFundamental hApp) :
+    SubstFundamental (.beta hBody hArg hApp hInst) := by
+  intro Delta sigma sigma' hDelta env depth
+  obtain ⟨w, hAty⟩ := hArg.isType
+  have soundSame : IsDefEqStrong Delta
+      ((SExpr.app (.lam A e) e').subst sigma) ((e.inst e').subst sigma)
+      ((B.inst e').subst sigma) :=
+    env.left.substStrong hDelta (.beta hBody hArg hApp hInst)
+  have redSame : WHRed Delta ((SExpr.app (.lam A e) e').subst sigma)
+      ((e.inst e').subst sigma) :=
+    SExpr.subst_inst ▸ WHRed.beta
+  have stepSame : WHSteps Delta ((SExpr.app (.lam A e) e').subst sigma)
+      ((e.inst e').subst sigma) ((B.inst e').subst sigma) :=
+    WHStep.toSteps ⟨redSame, soundSame⟩
+  have typeEqSame : IsDefEqStrong Delta (A.subst sigma) (A.subst sigma)
+      (.sort w) := by
+    simpa only [SExpr.subst] using env.left.substStrong hDelta hAty
+  have typeEqCross : IsDefEqStrong Delta (A.subst sigma) (A.subst sigma')
+      (.sort w) := by
+    simpa only [SExpr.subst] using env.substStrong hDelta hAty
+  let envSame := env.left.cons (fun j => (fundArg hDelta env j).same)
+    hAty typeEqSame
+  let envCross := env.cons (fun j => (fundArg hDelta env j).left)
+    hAty typeEqCross
+  have bodySame : Candidate depth Delta ((e.inst e').subst sigma)
+      ((e.inst e').subst sigma) ((B.inst e').subst sigma) := by
+    simpa only [SExpr.subst_inst, SExpr.inst_lift_cons] using
+      (fundBody hDelta envSame depth).same
+  have bodyCross : Candidate depth Delta ((e.inst e').subst sigma)
+      ((e.inst e').subst sigma') ((B.inst e').subst sigma) := by
+    simpa only [SExpr.subst_inst, SExpr.inst_lift_cons] using
+      (fundBody hDelta envCross depth).cross
+  exact {
+    same := Candidate.expand stepSame (.refl bodySame.base.edge) bodySame
+    cross := Candidate.expand stepSame
+      (.refl bodyCross.base.edge.hasType.2) bodyCross
+    left := (fundApp hDelta env depth).left }
+
+/-- Candidates for one lambda pair under one substitution pair.  The
+common type is the left lambda's syntactic Pi, so every action gate is
+forced by determinism onto the syntactic domain and codomain; the action
+then contracts both certified beta redexes onto the instantiated bodies,
+whose candidate comes from the supplied interpreted-body producer at the
+extended logical substitution.  The right redex is certified against its
+own binder through the environment's weak right diagonal and retyped
+along the cross-substituted codomain equality; nothing is inverted. -/
+private theorem Candidate.lamOf [Params.Semantic]
+    (uniform : CandidateUniformity) (transport : CandidateTypeTransport)
+    {Gamma Delta : List SExpr} {A A2 B bodyL bodyR : SExpr}
+    {u v : SLevel} {tau tau2 : Subst}
+    (envX : Env Delta tau tau2 Gamma)
+    (hAA2 : IsDefEqStrong Gamma A A2 (.sort u))
+    (hBsortL : IsDefEqStrong (A :: Gamma) B B (.sort v))
+    (hBsortR : IsDefEqStrong (A2 :: Gamma) B B (.sort v))
+    (hBLsrc : IsDefEqStrong (A :: Gamma) bodyL bodyL B)
+    (hBRsrc : IsDefEqStrong (A2 :: Gamma) bodyR bodyR B)
+    (hLamR : IsDefEqStrong Gamma (.lam A2 bodyR) (.lam A2 bodyR)
+      (.forallE A2 B))
+    (edge : IsDefEqStrong Delta
+      (.lam (A.subst tau) (bodyL.subst tau.lift))
+      (.lam (A2.subst tau2) (bodyR.subst tau2.lift))
+      (.forallE (A.subst tau) (B.subst tau.lift)))
+    (bodies : ∀ {Theta : List SExpr} {sa sb : Subst}, Ctx.WF Theta →
+      Env Theta sa sb (A :: Gamma) → ∀ d,
+      Candidate d Theta (bodyL.subst sa) (bodyR.subst sb) (B.subst sa)) :
+    ∀ d, Candidate d Delta
+      (.lam (A.subst tau) (bodyL.subst tau.lift))
+      (.lam (A2.subst tau2) (bodyR.subst tau2.lift))
+      (.forallE (A.subst tau) (B.subst tau.lift)) := by
+  have forwardFam : ∀ k, ActionLayer (Candidate k) Delta
+      (.lam (A.subst tau) (bodyL.subst tau.lift))
+      (.lam (A2.subst tau2) (bodyR.subst tau2.lift))
+      (.forallE (A.subst tau) (B.subst tau.lift)) := by
+    intro k
+    refine { apply := ?_ }
+    intro Theta rho D C s W hTheta typeRun a b u' v' hab hD hC hResult
+    have piEq : (SExpr.forallE (A.subst tau) (B.subst tau.lift)).lift' rho =
+        .forallE D C :=
+      WHSteps.eq_of_normal
+        (by simp only [SExpr.lift']; exact WHNF.forallE) typeRun
+    have piEq' : SExpr.forallE (A.subst (tau.lift_r rho))
+        (B.subst (tau.lift_r rho).lift) = .forallE D C := by
+      simpa only [SExpr.lift', SExpr.lift'_subst, ← Subst.lift_r_lift]
+        using piEq
+    injection piEq' with hDeq hCeq
+    subst hDeq
+    subst hCeq
+    have envW := envX.weak' W
+    have head : ∀ j, Candidate j Theta a b (A.subst (tau.lift_r rho)) :=
+      fun j => uniform hab j
+    have typeEqTheta : IsDefEqStrong Theta (A.subst (tau.lift_r rho))
+        (A.subst (tau2.lift_r rho)) (.sort u) := by
+      simpa only [SExpr.subst] using
+        envW.substStrong hTheta hAA2.hasType.1
+    have hACross : IsDefEqStrong Theta (A.subst (tau.lift_r rho))
+        (A2.subst (tau2.lift_r rho)) (.sort u) := by
+      simpa only [SExpr.subst] using envW.substStrong hTheta hAA2
+    let envCons := envW.cons head hAA2.hasType.1 typeEqTheta
+    have bodyCand := bodies hTheta envCons k
+    have codomEq : IsDefEqStrong Theta
+        (B.subst ((tau.lift_r rho).cons a))
+        (B.subst ((tau2.lift_r rho).cons b)) (.sort v) := by
+      simpa only [SExpr.subst] using envCons.substStrong hTheta hBsortL
+    -- the left redex, certified at the left binder
+    have wfL : Ctx.WF (A.subst (tau.lift_r rho) :: Theta) :=
+      ⟨hTheta, ⟨u, typeEqTheta.hasType.1.defeq⟩⟩
+    have bodyTypedL : IsDefEqStrong (A.subst (tau.lift_r rho) :: Theta)
+        (bodyL.subst (tau.lift_r rho).lift)
+        (bodyL.subst (tau.lift_r rho).lift)
+        (B.subst (tau.lift_r rho).lift) :=
+      ((hBLsrc.defeq).subst
+        (envW.toSubst.lift (A := A) IsDefEq.weakCore IsDefEq.bvar)).strong wfL
+    have argTypedL : IsDefEqStrong Theta a a (A.subst (tau.lift_r rho)) :=
+      hab.base.edge.hasType.1
+    have lamLSelf : IsDefEqStrong Theta
+        (.lam (A.subst (tau.lift_r rho)) (bodyL.subst (tau.lift_r rho).lift))
+        (.lam (A.subst (tau.lift_r rho)) (bodyL.subst (tau.lift_r rho).lift))
+        (.forallE (A.subst (tau.lift_r rho))
+          (B.subst (tau.lift_r rho).lift)) := by
+      simpa only [SExpr.lift', SExpr.lift'_subst, ← Subst.lift_r_lift] using
+        (edge.weak' W).hasType.1
+    have appTypedL : IsDefEqStrong Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (bodyL.subst (tau.lift_r rho).lift)) a)
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (bodyL.subst (tau.lift_r rho).lift)) a)
+        ((B.subst (tau.lift_r rho).lift).inst a) :=
+      .appDF hD hC lamLSelf argTypedL hResult.hasType.1
+    have instTypedL : IsDefEqStrong Theta
+        ((bodyL.subst (tau.lift_r rho).lift).inst a)
+        ((bodyL.subst (tau.lift_r rho).lift).inst a)
+        ((B.subst (tau.lift_r rho).lift).inst a) := by
+      simpa only [SExpr.inst_lift_cons] using bodyCand.base.edge.hasType.1
+    have soundL :=
+      IsDefEqStrong.beta bodyTypedL argTypedL appTypedL instTypedL
+    have runL : WHSteps Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (bodyL.subst (tau.lift_r rho).lift)) a)
+        (bodyL.subst ((tau.lift_r rho).cons a))
+        (B.subst ((tau.lift_r rho).cons a)) := by
+      simpa only [SExpr.inst_lift_cons] using
+        WHStep.toSteps ⟨WHRed.beta, soundL⟩
+    -- the right redex, certified at its own binder and retyped
+    have wfR : Ctx.WF (A2.subst (tau2.lift_r rho) :: Theta) :=
+      ⟨hTheta, ⟨u, hACross.hasType.2.defeq⟩⟩
+    have liftedR := envW.rightTyped.lift (A := A2)
+      IsDefEq.weakCore IsDefEq.bvar
+    have bodyTypedR : IsDefEqStrong (A2.subst (tau2.lift_r rho) :: Theta)
+        (bodyR.subst (tau2.lift_r rho).lift)
+        (bodyR.subst (tau2.lift_r rho).lift)
+        (B.subst (tau2.lift_r rho).lift) :=
+      ((hBRsrc.defeq).subst liftedR).strong wfR
+    have argTypedR : IsDefEqStrong Theta b b (A2.subst (tau2.lift_r rho)) :=
+      .defeqDF hACross hab.base.edge.hasType.2
+    have lamRSelf : IsDefEqStrong Theta
+        (.lam (A2.subst (tau2.lift_r rho))
+          (bodyR.subst (tau2.lift_r rho).lift))
+        (.lam (A2.subst (tau2.lift_r rho))
+          (bodyR.subst (tau2.lift_r rho).lift))
+        (.forallE (A2.subst (tau2.lift_r rho))
+          (B.subst (tau2.lift_r rho).lift)) := by
+      simpa only [SExpr.subst] using
+        ((hLamR.defeq).subst envW.rightTyped).strong hTheta
+    have hC2 : IsDefEqStrong (A2.subst (tau2.lift_r rho) :: Theta)
+        (B.subst (tau2.lift_r rho).lift) (B.subst (tau2.lift_r rho).lift)
+        (.sort v) := by
+      simpa only [SExpr.subst] using
+        ((hBsortR.defeq).subst liftedR).strong wfR
+    have instSelfR : IsDefEqStrong Theta
+        ((B.subst (tau2.lift_r rho).lift).inst b)
+        ((B.subst (tau2.lift_r rho).lift).inst b) (.sort v) :=
+      IsDefEqStrong.instCongr hTheta hACross.hasType.2 hC2 argTypedR
+    have appTypedR : IsDefEqStrong Theta
+        (.app (.lam (A2.subst (tau2.lift_r rho))
+          (bodyR.subst (tau2.lift_r rho).lift)) b)
+        (.app (.lam (A2.subst (tau2.lift_r rho))
+          (bodyR.subst (tau2.lift_r rho).lift)) b)
+        ((B.subst (tau2.lift_r rho).lift).inst b) :=
+      .appDF hACross.hasType.2 hC2 lamRSelf argTypedR instSelfR
+    have instTypedR : IsDefEqStrong Theta
+        ((bodyR.subst (tau2.lift_r rho).lift).inst b)
+        ((bodyR.subst (tau2.lift_r rho).lift).inst b)
+        ((B.subst (tau2.lift_r rho).lift).inst b) := by
+      simpa only [SExpr.inst_lift_cons] using
+        IsDefEqStrong.defeqDF codomEq bodyCand.base.edge.hasType.2
+    have soundR :=
+      IsDefEqStrong.beta bodyTypedR argTypedR appTypedR instTypedR
+    have runR : WHSteps Theta
+        (.app (.lam (A2.subst (tau2.lift_r rho))
+          (bodyR.subst (tau2.lift_r rho).lift)) b)
+        (bodyR.subst ((tau2.lift_r rho).cons b))
+        (B.subst ((tau.lift_r rho).cons a)) := by
+      have run0 : WHSteps Theta
+          (.app (.lam (A2.subst (tau2.lift_r rho))
+            (bodyR.subst (tau2.lift_r rho).lift)) b)
+          (bodyR.subst ((tau2.lift_r rho).cons b))
+          (B.subst ((tau2.lift_r rho).cons b)) := by
+        simpa only [SExpr.inst_lift_cons] using
+          WHStep.toSteps ⟨WHRed.beta, soundR⟩
+      exact run0.defeqDF codomEq.symm
+    have expandOut := Candidate.expand runL runR bodyCand
+    simpa only [SExpr.lift', SExpr.lift'_subst, ← Subst.lift_r_lift,
+      SExpr.inst_lift_cons] using expandOut
+  exact Candidate.lamRel edge forwardFam
+    (fun k => ActionLayer.reverseOfForward transport (forwardFam k))
+
+/-- The substitutional fundamental lambda case, conditional on the two
+named inputs: uniformity feeds the action's argument pair to the extended
+logical substitution at every index, and transport orients the reverse
+action.  Each interpretation component is one instance of the lambda-pair
+builder with the matching interpreted-body selector. -/
+theorem SubstFundamental.lamDF [Params.Semantic]
+    (uniform : CandidateUniformity) (transport : CandidateTypeTransport)
+    {Gamma : List SExpr} {A A' B body body' : SExpr} {u v : SLevel}
+    (hA : IsDefEqStrong Gamma A A' (.sort u))
+    (hB : IsDefEqStrong (A :: Gamma) B B (.sort v))
+    (hB' : IsDefEqStrong (A' :: Gamma) B B (.sort v))
+    (hbody : IsDefEqStrong (A :: Gamma) body body' B)
+    (hbody' : IsDefEqStrong (A' :: Gamma) body body' B)
+    (fundBody : SubstFundamental hbody) :
+    SubstFundamental (.lamDF hA hB hB' hbody hbody') := by
+  intro Delta sigma sigma' hDelta env depth
+  have whole : IsDefEqStrong Gamma (.lam A body) (.lam A' body')
+      (.forallE A B) := .lamDF hA hB hB' hbody hbody'
+  have hLamR : IsDefEqStrong Gamma (.lam A' body') (.lam A' body')
+      (.forallE A' B) :=
+    .lamDF hA.hasType.2 hB' hB' hbody'.hasType.2 hbody'.hasType.2
+  have hLamL : IsDefEqStrong Gamma (.lam A body) (.lam A body)
+      (.forallE A B) :=
+    .lamDF hA.hasType.1 hB hB hbody.hasType.1 hbody.hasType.1
+  have edgeSame : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (body.subst sigma.lift))
+      (.lam (A'.subst sigma) (body'.subst sigma.lift))
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    simpa only [SExpr.subst] using env.left.substStrong hDelta whole
+  have edgeCross : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (body.subst sigma.lift))
+      (.lam (A'.subst sigma') (body'.subst sigma'.lift))
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    simpa only [SExpr.subst] using env.substStrong hDelta whole
+  have edgeLeft : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (body.subst sigma.lift))
+      (.lam (A.subst sigma') (body.subst sigma'.lift))
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    simpa only [SExpr.subst] using env.substStrong hDelta hLamL
+  have same := Candidate.lamOf uniform transport env.left hA hB hB'
+    hbody.hasType.1 hbody'.hasType.2 hLamR edgeSame
+    (fun hT envE d => (fundBody hT envE d).cross) depth
+  have cross := Candidate.lamOf uniform transport env hA hB hB'
+    hbody.hasType.1 hbody'.hasType.2 hLamR edgeCross
+    (fun hT envE d => (fundBody hT envE d).cross) depth
+  have left := Candidate.lamOf uniform transport env hA.hasType.1
+    hB hB hbody.hasType.1 hbody.hasType.1 hLamL edgeLeft
+    (fun hT envE d => (fundBody hT envE d).left) depth
+  exact {
+    same := by simpa only [SExpr.subst] using same
+    cross := by simpa only [SExpr.subst] using cross
+    left := by simpa only [SExpr.subst] using left }
+
+/-- The substitutional fundamental zero-arity definition case,
+unconditionally: the δ-analogue of beta.  The node's local action
+substitutes along the environment's typed left diagonal
+(`Pattern.Action.subst`), giving the operational step whose certificate
+is the substituted node itself; the value premise is a sub-derivation, so
+its interpretation is an induction hypothesis and backward expansion
+lands both components. -/
+theorem SubstFundamental.defn [Params.Semantic]
+    {Gamma : List SExpr} {c : Name} {ci : VConstant} {ls : List SLevel}
+    {u : SLevel}
+    {r : (Pattern.const c).RHS × (Pattern.const c).Check}
+    (henv : Params.env.constants c = some ci)
+    (hls : ls.length = ci.uvars)
+    (hty : IsDefEqStrong Gamma (SExpr.mkInst ls ci.type)
+      (SExpr.mkInst ls ci.type) (.sort u))
+    (F : ∀ cl, CtorBundle c cl)
+    (hF : ∀ cl, IsDefEqStrong Gamma (SExpr.mkInst ls ci.type)
+      ((F cl).rhs ls) (.sort (F cl).u))
+    (action : Pattern.Action Gamma r (.const c ls) ls Empty.elim
+      (SExpr.mkInst ls ci.type))
+    (hval : IsDefEqStrong Gamma (r.1.applyS ls Empty.elim)
+      (r.1.applyS ls Empty.elim) (SExpr.mkInst ls ci.type))
+    (fundVal : SubstFundamental hval) :
+    SubstFundamental (.defn henv hls hty F hF action hval) := by
+  intro Delta sigma sigma' hDelta env depth
+  have whole : IsDefEqStrong Gamma (.const c ls)
+      (r.1.applyS ls Empty.elim) (SExpr.mkInst ls ci.type) :=
+    .defn henv hls hty F hF action hval
+  have soundSame : IsDefEqStrong Delta ((SExpr.const c ls).subst sigma)
+      ((r.1.applyS ls Empty.elim).subst sigma)
+      ((SExpr.mkInst ls ci.type).subst sigma) :=
+    env.left.substStrong hDelta whole
+  have red : WHRed Delta ((SExpr.const c ls).subst sigma)
+      ((r.1.applyS ls Empty.elim).subst sigma) :=
+    WHRed.subst env.toSubst (.extra action)
+  have stepSame : WHSteps Delta ((SExpr.const c ls).subst sigma)
+      ((r.1.applyS ls Empty.elim).subst sigma)
+      ((SExpr.mkInst ls ci.type).subst sigma) :=
+    WHStep.toSteps ⟨red, soundSame⟩
+  have outV := fundVal hDelta env depth
+  have same : Candidate depth Delta ((SExpr.const c ls).subst sigma)
+      ((r.1.applyS ls Empty.elim).subst sigma)
+      ((SExpr.mkInst ls ci.type).subst sigma) :=
+    Candidate.expand stepSame (.refl outV.same.base.edge.hasType.1)
+      outV.same
+  have cross : Candidate depth Delta ((SExpr.const c ls).subst sigma)
+      ((r.1.applyS ls Empty.elim).subst sigma')
+      ((SExpr.mkInst ls ci.type).subst sigma) :=
+    Candidate.expand stepSame (.refl outV.cross.base.edge.hasType.2)
+      outV.cross
+  refine { same := same, cross := cross, left := ?_ }
+  simpa only [SExpr.subst] using same.left
+
 /-! Axiom pins: N1's relation kernel uses only the accepted logical baseline. -/
 
 /-- info: 'Lean4Lean.SExpr.Reducibility.WHSteps.sound' depends on axioms: [propext, Quot.sound] -/
@@ -1596,6 +2131,49 @@ info: 'Lean4Lean.SExpr.Reducibility.LRS.PiPathInv.of_candidateFundamental' depen
 -/
 #guard_msgs in
 #print axioms LRS.PiPathInv.of_candidateFundamental
+
+/-! N′3 session-1 pins: the four case closures and the named-input
+nonvacuity witnesses. -/
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.candidateTypeTransport_zero' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms candidateTypeTransport_zero
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.CandidateTypeTransport.of_fundamental' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms CandidateTypeTransport.of_fundamental
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.CandidateUniformity.of_fundamental' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms CandidateUniformity.of_fundamental
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.IrreducibleConstCandidates.of_fundamental' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms IrreducibleConstCandidates.of_fundamental
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.ActionLayer.reverseOfForward' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms ActionLayer.reverseOfForward
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.defeqDF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.defeqDF
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.beta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.beta
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.lamDF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.lamDF
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.const' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.const
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.defn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.defn
 
 end Reducibility
 end SExpr
