@@ -5448,3 +5448,213 @@ open Lean4Lean.SExpr.Reducibility.IndCand in
 /-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.irreducibleConstCandidates_zero' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms irreducibleConstCandidates_zero
+
+/-! ## N′3 session 2 — the instance staging chains
+
+The master file's assembly (`SubstFundamental.total`) is generically
+conditional on exactly four named inputs, and its staging ladder
+(`Fundamental.all`) discharges all four from two instance-shaped
+obligations: typed weak-head normalization (`TypedWHNormalization`, N2's
+seam) and the per-depth head-observation slot (`HeadFundamental`).  The
+chains below pin that discharge at the two production environments over
+their real semantic bridges (`d0Semantic` unconditionally, `d2Semantic`
+on the recorded block step).  Neither obligation is closed this session —
+the membership layer covers candidate members
+(`InCand*.kripkeNormalizes`, `*_headLayer`) but not yet arbitrary typed
+terms — so the chains record exactly what N′4 must supply per instance,
+and the depth-0 route additionally factors the head slot through the
+landed `HeadObservationData` classification. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+/-- The Pi-inversion leaf from the two depth-0 obligations alone, with the
+head slot factored through the landed per-edge classification. -/
+theorem LRS.PiPathInv.of_normalization_data [Params] [Params.Semantic]
+    (normalization : TypedWHNormalization)
+    (data : ∀ {Γ : List SExpr} {M N A : SExpr},
+      IsDefEqStrong Γ M N A → HeadObservationData Γ M N A) :
+    LRS.PiPathInv :=
+  LRS.PiPathInv.of_zero_data normalization
+    (headFundamental_zero_of_data data)
+
+/-- **The d0 staging chain**: at the smallest production environment, over
+its unconditional semantic bridge, the two recorded N′4 obligations close
+the full ladder, all four named inputs of the generic assembly, the total
+substitutional interpretation, and the Pi-inversion leaf. -/
+theorem d0StagingChain (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    letI : Params.Semantic := ParamsD0.d0Semantic univs
+    TypedWHNormalization →
+    (∀ depth, HeadFundamental depth) →
+    (∀ depth, Fundamental depth) ∧
+      CandidateUniformity ∧ CandidateTypeTransport ∧
+      IrreducibleConstCandidates ∧ ProofCandidateMerge ∧
+      (∀ {Gamma : List SExpr} {M N A : SExpr}
+        (H : IsDefEqStrong Gamma M N A), SubstFundamental H) ∧
+      LRS.PiPathInv := by
+  letI : Params := ParamsD0.d0Params univs
+  letI : Params.Semantic := ParamsD0.d0Semantic univs
+  intro normalization heads
+  have fund := Fundamental.all normalization heads
+  exact ⟨fund, CandidateUniformity.of_fundamental fund,
+    CandidateTypeTransport.of_fundamental fund,
+    IrreducibleConstCandidates.of_fundamental fund,
+    ProofCandidateMerge.of_fundamental fund,
+    fun H => SubstFundamental.of_ladder normalization heads H,
+    LRS.PiPathInv.of_candidateFundamental (fund 1)⟩
+
+/-- **The d2 staging chain**: the full-inventory twin over the conditional
+D2 bridge, inheriting exactly the recorded block-step premise. -/
+theorem d2StagingChain (univs : Nat) (h : ParamsD2.D2BlockStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    letI : Params.Semantic := ParamsD2.d2Semantic univs h
+    TypedWHNormalization →
+    (∀ depth, HeadFundamental depth) →
+    (∀ depth, Fundamental depth) ∧
+      CandidateUniformity ∧ CandidateTypeTransport ∧
+      IrreducibleConstCandidates ∧ ProofCandidateMerge ∧
+      (∀ {Gamma : List SExpr} {M N A : SExpr}
+        (H : IsDefEqStrong Gamma M N A), SubstFundamental H) ∧
+      LRS.PiPathInv := by
+  letI : Params := ParamsD2.d2Params univs
+  letI : Params.Semantic := ParamsD2.d2Semantic univs h
+  intro normalization heads
+  have fund := Fundamental.all normalization heads
+  exact ⟨fund, CandidateUniformity.of_fundamental fund,
+    CandidateTypeTransport.of_fundamental fund,
+    IrreducibleConstCandidates.of_fundamental fund,
+    ProofCandidateMerge.of_fundamental fund,
+    fun H => SubstFundamental.of_ladder normalization heads H,
+    LRS.PiPathInv.of_candidateFundamental (fund 1)⟩
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′3 session-2 instance pins
+
+The generic seam content stays inside the accepted baseline (see the
+master file's pins).  The two production chains additionally inherit,
+verbatim, their semantic bridges' documented fixture baselines: the
+D-ladder `native_decide` observations and the recorded `sorryAx`
+through `SExpr.typeUniq` → `VEnv.IsDefEq.uniq` (the 16C′ leaf) carried
+by `d0Semantic`/`d2Semantic` — no new axioms and no new `sorry` from
+this rung. -/
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.LRS.PiPathInv.of_normalization_data' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.PiPathInv.of_normalization_data
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0StagingChain' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natClassify_d0Def_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0StagingChain
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2StagingChain' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natClassify_d0Def_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutA._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutA._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutB._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutB._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_tree._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeBranch._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeLeaf._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeList._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListCons._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListNil._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeNode._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeBranch_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeLeaf_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListCons_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListNil_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListRec_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeNode_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeRec_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2StagingChain
+

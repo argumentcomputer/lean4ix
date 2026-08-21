@@ -2175,6 +2175,829 @@ nonvacuity witnesses. -/
 #guard_msgs in
 #print axioms SubstFundamental.defn
 
+/-! ## N′3 session 2 — the remaining cases and the assembly
+
+The three constructors not covered by session 1 — `.extra`, `.proofIrrel`,
+`.eta` — and the derivation induction that assembles the total
+substitutional interpretation.
+
+* `SubstFundamental.extra` is **unconditional** and is the `.defn` proof at
+  an arbitrary matched redex: the node's own `Pattern.Action` substitutes
+  along the environment's typed left diagonal (`WHRed.subst`), the
+  substituted node itself is the step certificate, and both endpoint
+  typings are sub-derivations, so the contractum's interpretation is an
+  induction hypothesis and backward expansion lands every component.
+
+* `SubstFundamental.eta` is **unconditional**.  An eta expansion does not
+  weak-head reduce, so its candidate is built layerwise: the common type is
+  a syntactic Pi (head observations vacuous), and every action first
+  contracts the applied expansion by one certified beta step — the step
+  certificate is `appDF` of the substituted eta node itself, never a
+  lambda inversion — and then consumes the function's own action at the
+  next index.  The heterogeneous-binder redex on the `left` component is
+  certified against its own binder through the environment's weak right
+  diagonal and retyped along the cross-substituted codomain equality,
+  exactly as `Candidate.lamOf` treats its right redex.  The binder
+  typings `hA`/`hB` are recovered structurally by
+  `IsDefEqStrong.forallE_inv'` from the node's own function typing.
+
+* `SubstFundamental.proofIrrel` is conditional on **one new named input**,
+  `ProofCandidateMerge`: the induction hypotheses supply both *diagonal*
+  candidates (in particular Kripke normalization of both proof terms — no
+  separate proof-term-normalization input is needed), and the substituted
+  judgment supplies the crossing edge, but crossing the gap between two
+  distinct diagonals at a successor index requires the two action layers
+  of the merged pair, and their gate type `C.inst a` cannot be shown
+  proof-valued without identifying the displayed sort of the reduced Pi
+  with `Prop` — weak type uniqueness, the 16C′ leaf.  The depth-0
+  restriction is a theorem with *no* proof-typing hypothesis at all
+  (`proofCandidateMerge_zero`): normalization is type-blind, so the merge
+  is exactly a successor-action interface, discharged at the instances via
+  `.of_fundamental` like the other three named inputs.
+
+The assembly `SubstFundamental.total` closes the induction over all
+fourteen constructors, conditional on exactly the four named inputs
+(`CandidateUniformity`, `CandidateTypeTransport`,
+`IrreducibleConstCandidates`, `ProofCandidateMerge`).  Instantiating at the
+identity environment (`Fundamental.of_total`) yields the context-validated
+fundamental theorem at every semantic index.  The staging ladder
+(`Fundamental.all`) shows all four inputs discharge from N2-shaped
+normalization plus per-depth head observations, and
+`LRS.PiPathInv.of_zero_data` records that the Pi-inversion leaf already
+follows from the depth-0 fragment of those inputs. -/
+
+/-- Substitution under the eta binder is lifting of the substituted
+function: the tail of a lifted substitution is its shift. -/
+theorem eta_lift_subst (X : SExpr) (tau : Subst) :
+    X.lift.subst tau.lift = (X.subst tau).lift := by
+  have htail : tau.lift.tail = tau.lift_r (.skip .refl) := by
+    funext i
+    rfl
+  rw [SExpr.lift_subst, htail, ← SExpr.lift'_subst]
+
+/-- Lifting under the eta binder commutes with the outer lift. -/
+theorem eta_lift_lift' (X : SExpr) (rho : Lift) :
+    X.lift.lift' rho.cons = (X.lift' rho).lift := by
+  simp [SExpr.lift, ← SExpr.lift'_comp]
+
+/-- One beta step collapses an applied eta body onto the application. -/
+theorem eta_body_inst (f x : SExpr) :
+    (SExpr.app f.lift (.bvar 0)).inst x = .app f x := by
+  have unfold : (SExpr.app f.lift (.bvar 0)).inst x =
+      .app (f.lift.inst x) x := rfl
+  rw [unfold, SExpr.lift_inst]
+
+/-- The lift of a syntactic eta expansion is the eta expansion of the
+lift. -/
+theorem eta_expand_lift' (At et : SExpr) (rho : Lift) :
+    (SExpr.lam At (.app et.lift (.bvar 0))).lift' rho =
+      .lam (At.lift' rho) (.app (et.lift' rho).lift (.bvar 0)) := by
+  simp [SExpr.lift, ← SExpr.lift'_comp]
+
+/-- The substitutional fundamental local-contraction case,
+unconditionally: the registered analogue of beta and the `.defn` proof at
+an arbitrary matched redex.  The node's own action substitutes along the
+environment's typed left diagonal, giving the operational step whose
+certificate is the substituted node itself; both endpoint typings are
+sub-derivations, so the contractum's interpretation is an induction
+hypothesis and backward expansion lands both crossing components. -/
+theorem SubstFundamental.extra [Params.Semantic]
+    {Gamma : List SExpr} {p : Pattern} {r : p.RHS × p.Check} {e : SExpr}
+    {m1 : List SLevel} {m2 : p.Path → SExpr} {A : SExpr}
+    (action : Pattern.Action Gamma r e m1 m2 A)
+    (hLeft : IsDefEqStrong Gamma e e A)
+    (hRight : IsDefEqStrong Gamma (r.1.applyS m1 m2)
+      (r.1.applyS m1 m2) A)
+    (fundLeft : SubstFundamental hLeft)
+    (fundRight : SubstFundamental hRight) :
+    SubstFundamental (.extra action hLeft hRight) := by
+  intro Delta sigma sigma' hDelta env depth
+  have whole : IsDefEqStrong Gamma e (r.1.applyS m1 m2) A :=
+    .extra action hLeft hRight
+  have soundSame : IsDefEqStrong Delta (e.subst sigma)
+      ((r.1.applyS m1 m2).subst sigma) (A.subst sigma) :=
+    env.left.substStrong hDelta whole
+  have red : WHRed Delta (e.subst sigma)
+      ((r.1.applyS m1 m2).subst sigma) :=
+    WHRed.subst env.toSubst (.extra action)
+  have stepSame : WHSteps Delta (e.subst sigma)
+      ((r.1.applyS m1 m2).subst sigma) (A.subst sigma) :=
+    WHStep.toSteps ⟨red, soundSame⟩
+  have outR := fundRight hDelta env depth
+  have same : Candidate depth Delta (e.subst sigma)
+      ((r.1.applyS m1 m2).subst sigma) (A.subst sigma) :=
+    Candidate.expand stepSame (.refl outR.same.base.edge.hasType.1)
+      outR.same
+  have cross : Candidate depth Delta (e.subst sigma)
+      ((r.1.applyS m1 m2).subst sigma') (A.subst sigma) :=
+    Candidate.expand stepSame (.refl outR.cross.base.edge.hasType.2)
+      outR.cross
+  exact {
+    same := same
+    cross := cross
+    left := (fundLeft hDelta env depth).left }
+
+/-- **Named input (proofIrrel case)**: merge two diagonal candidates at a
+proof-valued type into their crossing candidate along the judgmental
+crossing edge.  Not derivable from the candidate structure alone: the
+merged pair's action layers must relate applications of the two distinct
+proofs at the gate type `C.inst a` of any Pi the proof-valued type reduces
+to, and showing *that* type proof-valued would identify the reduced Pi's
+displayed sort with `Prop` — weak type uniqueness, the 16C′ leaf.  The
+interface is strictly weaker than the fundamental theorem it feeds. -/
+def ProofCandidateMerge : Prop :=
+  ∀ {Γ : List SExpr} {M N A : SExpr} {depth : Nat},
+    IsProofType Γ A → IsDefEqStrong Γ M N A →
+    Candidate depth Γ M M A → Candidate depth Γ N N A →
+    Candidate depth Γ M N A
+
+/-- Nonvacuity: the depth-0 restriction of the merge is a theorem, with no
+proof-typing hypothesis at all — the normalization component is type-blind
+and each half comes from the matching diagonal.  In particular no separate
+proof-term-normalization input exists: the successor action layers are the
+entire content of the named interface. -/
+theorem proofCandidateMerge_zero
+    (edge : IsDefEqStrong Γ M N A)
+    (HM : Candidate 0 Γ M M A) (HN : Candidate 0 Γ N N A) :
+    Candidate 0 Γ M N A :=
+  { edge := edge
+    normalizes := by
+      intro Δ ρ W
+      exact ⟨(HM.base.normalizes W).1, (HN.base.normalizes W).2⟩ }
+
+/-- Shape nonvacuity: the merge follows from the fundamental theorem
+through the crossing edge alone. -/
+theorem ProofCandidateMerge.of_fundamental
+    (fund : ∀ depth, Fundamental depth) : ProofCandidateMerge :=
+  fun _ edge _ _ => fund _ edge
+
+/-- The substitutional fundamental proof-irrelevance case, conditional on
+the named merge input.  The substituted type is proof-valued outright, the
+crossing edges are the substituted node, and both diagonals — including
+Kripke normalization of both proof terms — are induction hypotheses; the
+`left` component is the first proof's own interpretation. -/
+theorem SubstFundamental.proofIrrel [Params.Semantic]
+    (merge : ProofCandidateMerge)
+    {Gamma : List SExpr} {p h h' : SExpr}
+    (hp : IsDefEqStrong Gamma p p (.sort .zero))
+    (hh : IsDefEqStrong Gamma h h p)
+    (hh' : IsDefEqStrong Gamma h' h' p)
+    (fundH : SubstFundamental hh)
+    (fundH' : SubstFundamental hh') :
+    SubstFundamental (.proofIrrel hp hh hh') := by
+  intro Delta sigma sigma' hDelta env depth
+  have proofType : IsProofType Delta (p.subst sigma) := by
+    show IsDefEqStrong Delta (p.subst sigma) (p.subst sigma) (.sort .zero)
+    simpa only [SExpr.subst] using env.left.substStrong hDelta hp
+  have whole : IsDefEqStrong Gamma h h' p := .proofIrrel hp hh hh'
+  have edgeSame : IsDefEqStrong Delta (h.subst sigma) (h'.subst sigma)
+      (p.subst sigma) := env.left.substStrong hDelta whole
+  have edgeCross : IsDefEqStrong Delta (h.subst sigma) (h'.subst sigma')
+      (p.subst sigma) := env.substStrong hDelta whole
+  have outH := fundH hDelta env depth
+  have outH' := fundH' hDelta env depth
+  exact {
+    same := merge proofType edgeSame outH.same outH'.same
+    cross := merge proofType edgeCross outH.same outH'.right.right
+    left := outH.left }
+
+/-- Candidates for one eta expansion against an arbitrary partner term.
+The expansion is a lambda, so its normalization is immediate and all head
+observations at the syntactic Pi type are vacuous; each action contracts
+the applied expansion by one certified beta step — soundness is `appDF` of
+the supplied eta edge, no inversion — and consumes the function pair's own
+action at the next index. -/
+private theorem Candidate.etaTermOf [Params.Semantic]
+    {Delta : List SExpr} {At Bt et R : SExpr}
+    (edge : IsDefEqStrong Delta (.lam At (.app et.lift (.bvar 0))) R
+      (.forallE At Bt))
+    (etaEdge : IsDefEqStrong Delta (.lam At (.app et.lift (.bvar 0))) et
+      (.forallE At Bt))
+    (eCand : ∀ d, Candidate d Delta et R (.forallE At Bt)) :
+    ∀ d, Candidate d Delta (.lam At (.app et.lift (.bvar 0))) R
+      (.forallE At Bt)
+  | 0 => {
+      edge := edge
+      normalizes := by
+        intro Theta rho W
+        exact ⟨⟨_, .rfl, WHNF.lam⟩, ((eCand 0).base.normalizes W).2⟩ }
+  | d + 1 => by
+      have forward : ActionLayer (Candidate d) Delta
+          (.lam At (.app et.lift (.bvar 0))) R (.forallE At Bt) := by
+        refine { apply := ?_ }
+        intro Theta rho D C s W hTheta typeRun a b u' v' hab hD hC hResult
+        have piEq : (SExpr.forallE At Bt).lift' rho = .forallE D C :=
+          WHSteps.eq_of_normal
+            (by simp only [SExpr.lift']; exact WHNF.forallE) typeRun
+        have piEq' : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+            .forallE D C := by
+          simpa only [SExpr.lift'] using piEq
+        injection piEq' with hDeq hCeq
+        subst hDeq
+        subst hCeq
+        have out := (eCand (d + 1)).action.apply W hTheta typeRun hab hD hC
+          hResult
+        have etaW : IsDefEqStrong Theta
+            (.lam (At.lift' rho) (.app (et.lift' rho).lift (.bvar 0)))
+            (et.lift' rho)
+            (.forallE (At.lift' rho) (Bt.lift' rho.cons)) := by
+          have h0 := etaEdge.weak' W
+          rw [eta_expand_lift'] at h0
+          exact h0
+        have soundL : IsDefEqStrong Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) a)
+            (.app (et.lift' rho) a) ((Bt.lift' rho.cons).inst a) :=
+          .appDF hD hC etaW hab.base.edge.hasType.1 hResult.hasType.1
+        have redL : WHRed Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) a)
+            (.app (et.lift' rho) a) := by
+          have step : WHRed Theta
+              (.app (.lam (At.lift' rho)
+                (.app (et.lift' rho).lift (.bvar 0))) a)
+              ((SExpr.app (et.lift' rho).lift (.bvar 0)).inst a) := .beta
+          rwa [eta_body_inst] at step
+        have runL : WHSteps Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) a)
+            (.app (et.lift' rho) a) ((Bt.lift' rho.cons).inst a) :=
+          WHStep.toSteps ⟨redL, soundL⟩
+        have expandOut :=
+          Candidate.expand runL (.refl out.base.edge.hasType.2) out
+        simpa only [eta_expand_lift'] using expandOut
+      have reverse : ActionLayer (Candidate d) Delta R
+          (.lam At (.app et.lift (.bvar 0))) (.forallE At Bt) := by
+        refine { apply := ?_ }
+        intro Theta rho D C s W hTheta typeRun a b u' v' hab hD hC hResult
+        have piEq : (SExpr.forallE At Bt).lift' rho = .forallE D C :=
+          WHSteps.eq_of_normal
+            (by simp only [SExpr.lift']; exact WHNF.forallE) typeRun
+        have piEq' : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+            .forallE D C := by
+          simpa only [SExpr.lift'] using piEq
+        injection piEq' with hDeq hCeq
+        subst hDeq
+        subst hCeq
+        have out := (eCand (d + 1)).reverseAction.apply W hTheta typeRun
+          hab hD hC hResult
+        have etaW : IsDefEqStrong Theta
+            (.lam (At.lift' rho) (.app (et.lift' rho).lift (.bvar 0)))
+            (et.lift' rho)
+            (.forallE (At.lift' rho) (Bt.lift' rho.cons)) := by
+          have h0 := etaEdge.weak' W
+          rw [eta_expand_lift'] at h0
+          exact h0
+        have soundR : IsDefEqStrong Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) b)
+            (.app (et.lift' rho) b) ((Bt.lift' rho.cons).inst b) :=
+          .appDF hD hC etaW hab.base.edge.hasType.2 hResult.hasType.2
+        have redR : WHRed Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) b)
+            (.app (et.lift' rho) b) := by
+          have step : WHRed Theta
+              (.app (.lam (At.lift' rho)
+                (.app (et.lift' rho).lift (.bvar 0))) b)
+              ((SExpr.app (et.lift' rho).lift (.bvar 0)).inst b) := .beta
+          rwa [eta_body_inst] at step
+        have runR : WHSteps Theta
+            (.app (.lam (At.lift' rho)
+              (.app (et.lift' rho).lift (.bvar 0))) b)
+            (.app (et.lift' rho) b) ((Bt.lift' rho.cons).inst a) :=
+          (WHStep.toSteps ⟨redR, soundR⟩).defeqDF hResult.symm
+        have expandOut :=
+          Candidate.expand (.refl out.base.edge.hasType.1) runR out
+        simpa only [eta_expand_lift'] using expandOut
+      have headsL : HeadLayer (Candidate d) Delta
+          (.lam At (.app et.lift (.bvar 0))) R (.forallE At Bt) := {
+        piHead := by
+          intro Theta rho X Y s t W hType observed
+          have bad : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+              .sort s := by
+            simpa only [SExpr.lift'] using hType.eq_of_normal WHNF.forallE
+          cases bad
+        sortHead := by
+          intro Theta rho s t w W hType observed
+          have bad : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+              .sort s := by
+            simpa only [SExpr.lift'] using hType.eq_of_normal WHNF.forallE
+          cases bad }
+      have headsR : HeadLayer (Candidate d) Delta R
+          (.lam At (.app et.lift (.bvar 0))) (.forallE At Bt) := {
+        piHead := by
+          intro Theta rho X Y s t W hType observed
+          have bad : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+              .sort s := by
+            simpa only [SExpr.lift'] using hType.eq_of_normal WHNF.forallE
+          cases bad
+        sortHead := by
+          intro Theta rho s t w W hType observed
+          have bad : SExpr.forallE (At.lift' rho) (Bt.lift' rho.cons) =
+              .sort s := by
+            simpa only [SExpr.lift'] using hType.eq_of_normal WHNF.forallE
+          cases bad }
+      exact ⟨Candidate.etaTermOf edge etaEdge eCand d,
+        ⟨forward, reverse, .inr ⟨headsL, headsR⟩⟩⟩
+
+/-- Candidates for one eta-expansion pair under two substitutions.  Both
+endpoints are syntactic lambdas, so the pair enters through
+`Candidate.lamRel`; each action contracts both certified beta redexes onto
+the applied function pair, whose candidate is the supplied function-pair
+family's own action at the next index.  The heterogeneous-binder redex is
+certified against its own binder through the environment's weak right
+diagonal and retyped along the cross-substituted codomain equality;
+nothing is inverted. -/
+private theorem Candidate.etaLamOf [Params.Semantic]
+    {Gamma Delta : List SExpr} {A B e : SExpr} {u v : SLevel}
+    {tau tau2 : Subst}
+    (envX : Env Delta tau tau2 Gamma)
+    (hA : IsDefEqStrong Gamma A A (.sort u))
+    (hB : IsDefEqStrong (A :: Gamma) B B (.sort v))
+    (he : IsDefEqStrong Gamma e e (.forallE A B))
+    (hlam : IsDefEqStrong Gamma (.lam A (.app e.lift (.bvar 0)))
+      (.lam A (.app e.lift (.bvar 0))) (.forallE A B))
+    (edge : IsDefEqStrong Delta
+      (.lam (A.subst tau) (.app (e.subst tau).lift (.bvar 0)))
+      (.lam (A.subst tau2) (.app (e.subst tau2).lift (.bvar 0)))
+      (.forallE (A.subst tau) (B.subst tau.lift)))
+    (eFam : ∀ d, Candidate d Delta (e.subst tau) (e.subst tau2)
+      (.forallE (A.subst tau) (B.subst tau.lift))) :
+    ∀ d, Candidate d Delta
+      (.lam (A.subst tau) (.app (e.subst tau).lift (.bvar 0)))
+      (.lam (A.subst tau2) (.app (e.subst tau2).lift (.bvar 0)))
+      (.forallE (A.subst tau) (B.subst tau.lift)) := by
+  have nodeEta : IsDefEqStrong Gamma (.lam A (.app e.lift (.bvar 0))) e
+      (.forallE A B) := .eta he hlam
+  -- shared per-action context: the four σ/σ′-side certificates
+  have sides : ∀ {Theta : List SExpr} {rho : Lift},
+      Ctx.Lift' rho Delta Theta → Ctx.WF Theta →
+      IsDefEqStrong Theta
+          (.lam (A.subst (tau.lift_r rho))
+            (.app (e.subst (tau.lift_r rho)).lift (.bvar 0)))
+          (e.subst (tau.lift_r rho))
+          (.forallE (A.subst (tau.lift_r rho))
+            (B.subst (tau.lift_r rho).lift)) ∧
+        IsDefEqStrong Theta (A.subst (tau.lift_r rho))
+          (A.subst (tau2.lift_r rho)) (.sort u) ∧
+        IsDefEqStrong Theta
+          (.lam (A.subst (tau2.lift_r rho))
+            (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0)))
+          (e.subst (tau2.lift_r rho))
+          (.forallE (A.subst (tau2.lift_r rho))
+            (B.subst (tau2.lift_r rho).lift)) := by
+    intro Theta rho W hTheta
+    have envW := envX.weak' W
+    refine ⟨?_, ?_, ?_⟩
+    · have h0 := ((nodeEta.defeq).subst envW.toSubst).strong hTheta
+      simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using h0
+    · simpa only [SExpr.subst] using envW.substStrong hTheta hA
+    · have h0 := ((nodeEta.defeq).subst envW.rightTyped).strong hTheta
+      simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using h0
+  have hC2of : ∀ {Theta : List SExpr} {rho : Lift},
+      Ctx.Lift' rho Delta Theta → Ctx.WF Theta →
+      Ctx.WF (A.subst (tau2.lift_r rho) :: Theta) →
+      IsDefEqStrong (A.subst (tau2.lift_r rho) :: Theta)
+        (B.subst (tau2.lift_r rho).lift) (B.subst (tau2.lift_r rho).lift)
+        (.sort v) := by
+    intro Theta rho W hTheta wfR
+    have envW := envX.weak' W
+    have h0 := ((hB.defeq).subst
+      (envW.rightTyped.lift (A := A) IsDefEq.weakCore IsDefEq.bvar)).strong
+      wfR
+    simpa only [SExpr.subst] using h0
+  have codomEqOf : ∀ {Theta : List SExpr} {rho : Lift} {x y : SExpr},
+      Ctx.Lift' rho Delta Theta → Ctx.WF Theta →
+      IsDefEq Theta x y (A.subst (tau.lift_r rho)) →
+      IsDefEqStrong Theta (B.subst ((tau.lift_r rho).cons x))
+        (B.subst ((tau2.lift_r rho).cons y)) (.sort v) := by
+    intro Theta rho x y W hTheta hxy
+    have envW := envX.weak' W
+    have substEqCons : Ctx.SubstEq Theta ((tau.lift_r rho).cons x)
+        ((tau2.lift_r rho).cons y) (A :: Gamma) := by
+      refine .cons (u := u) ?_ hA.defeq ?_
+      · simpa only [Subst.tail_cons] using envW.substEq
+      · simpa only [Subst.head_cons, Subst.tail_cons] using hxy
+    have h0 := (hB.subst substEqCons).strong hTheta
+    simpa only [SExpr.subst] using h0
+  have forwardFam : ∀ k, ActionLayer (Candidate k) Delta
+      (.lam (A.subst tau) (.app (e.subst tau).lift (.bvar 0)))
+      (.lam (A.subst tau2) (.app (e.subst tau2).lift (.bvar 0)))
+      (.forallE (A.subst tau) (B.subst tau.lift)) := by
+    intro k
+    refine { apply := ?_ }
+    intro Theta rho D C s W hTheta typeRun a b u' v' hab hD hC hResult
+    have piEq : (SExpr.forallE (A.subst tau) (B.subst tau.lift)).lift' rho =
+        .forallE D C :=
+      WHSteps.eq_of_normal
+        (by simp only [SExpr.lift']; exact WHNF.forallE) typeRun
+    have piEq' : SExpr.forallE (A.subst (tau.lift_r rho))
+        (B.subst (tau.lift_r rho).lift) = .forallE D C := by
+      simpa only [SExpr.lift', SExpr.lift'_subst, ← Subst.lift_r_lift]
+        using piEq
+    injection piEq' with hDeq hCeq
+    subst hDeq
+    subst hCeq
+    obtain ⟨etaEdgeL, hACross, etaEdgeR⟩ := sides W hTheta
+    have hD2 : IsDefEqStrong Theta (A.subst (tau2.lift_r rho))
+        (A.subst (tau2.lift_r rho)) (.sort u) := hACross.hasType.2
+    have wfR : Ctx.WF (A.subst (tau2.lift_r rho) :: Theta) :=
+      ⟨hTheta, ⟨u, hD2.defeq⟩⟩
+    have hC2 := hC2of W hTheta wfR
+    have outNative := (eFam (k + 1)).action.apply W hTheta typeRun hab hD
+      hC hResult
+    have out : Candidate k Theta
+        ((e.subst (tau.lift_r rho)).app a)
+        ((e.subst (tau2.lift_r rho)).app b)
+        ((B.subst (tau.lift_r rho).lift).inst a) := by
+      simpa only [SExpr.lift'_subst] using outNative
+    -- the left redex, certified at the display type
+    have soundL : IsDefEqStrong Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau.lift_r rho)) a)
+        ((B.subst (tau.lift_r rho).lift).inst a) :=
+      .appDF hD hC etaEdgeL hab.base.edge.hasType.1 hResult.hasType.1
+    have redL : WHRed Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau.lift_r rho)) a) := by
+      have step : WHRed Theta
+          (.app (.lam (A.subst (tau.lift_r rho))
+            (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) a)
+          ((SExpr.app (e.subst (tau.lift_r rho)).lift (.bvar 0)).inst a) :=
+        .beta
+      rwa [eta_body_inst] at step
+    have runL : WHSteps Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau.lift_r rho)) a)
+        ((B.subst (tau.lift_r rho).lift).inst a) :=
+      WHStep.toSteps ⟨redL, soundL⟩
+    -- the right redex, certified at its own binder and retyped
+    have bR : IsDefEqStrong Theta b b (A.subst (tau2.lift_r rho)) :=
+      .defeqDF hACross hab.base.edge.hasType.2
+    have instR : IsDefEqStrong Theta
+        ((B.subst (tau2.lift_r rho).lift).inst b)
+        ((B.subst (tau2.lift_r rho).lift).inst b) (.sort v) :=
+      IsDefEqStrong.instCongr hTheta hD2 hC2 bR
+    have soundR : IsDefEqStrong Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau2.lift_r rho)) b)
+        ((B.subst (tau2.lift_r rho).lift).inst b) :=
+      .appDF hD2 hC2 etaEdgeR bR instR
+    have redR : WHRed Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau2.lift_r rho)) b) := by
+      have step : WHRed Theta
+          (.app (.lam (A.subst (tau2.lift_r rho))
+            (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) b)
+          ((SExpr.app (e.subst (tau2.lift_r rho)).lift (.bvar 0)).inst b) :=
+        .beta
+      rwa [eta_body_inst] at step
+    have codomEq := codomEqOf W hTheta hab.base.edge.defeq
+    have runR : WHSteps Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau2.lift_r rho)) b)
+        ((B.subst (tau.lift_r rho).lift).inst a) := by
+      have run0 : WHSteps Theta
+          (.app (.lam (A.subst (tau2.lift_r rho))
+            (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) b)
+          (.app (e.subst (tau2.lift_r rho)) b)
+          (B.subst ((tau2.lift_r rho).cons b)) := by
+        simpa only [SExpr.inst_lift_cons] using
+          WHStep.toSteps ⟨redR, soundR⟩
+      have run1 := run0.defeqDF codomEq.symm
+      simpa only [SExpr.inst_lift_cons] using run1
+    have expandOut := Candidate.expand runL runR out
+    rw [eta_expand_lift', eta_expand_lift']
+    simpa only [SExpr.lift'_subst] using expandOut
+  have reverseFam : ∀ k, ActionLayer (Candidate k) Delta
+      (.lam (A.subst tau2) (.app (e.subst tau2).lift (.bvar 0)))
+      (.lam (A.subst tau) (.app (e.subst tau).lift (.bvar 0)))
+      (.forallE (A.subst tau) (B.subst tau.lift)) := by
+    intro k
+    refine { apply := ?_ }
+    intro Theta rho D C s W hTheta typeRun a b u' v' hab hD hC hResult
+    have piEq : (SExpr.forallE (A.subst tau) (B.subst tau.lift)).lift' rho =
+        .forallE D C :=
+      WHSteps.eq_of_normal
+        (by simp only [SExpr.lift']; exact WHNF.forallE) typeRun
+    have piEq' : SExpr.forallE (A.subst (tau.lift_r rho))
+        (B.subst (tau.lift_r rho).lift) = .forallE D C := by
+      simpa only [SExpr.lift', SExpr.lift'_subst, ← Subst.lift_r_lift]
+        using piEq
+    injection piEq' with hDeq hCeq
+    subst hDeq
+    subst hCeq
+    obtain ⟨etaEdgeL, hACross, etaEdgeR⟩ := sides W hTheta
+    have hD2 : IsDefEqStrong Theta (A.subst (tau2.lift_r rho))
+        (A.subst (tau2.lift_r rho)) (.sort u) := hACross.hasType.2
+    have wfR : Ctx.WF (A.subst (tau2.lift_r rho) :: Theta) :=
+      ⟨hTheta, ⟨u, hD2.defeq⟩⟩
+    have hC2 := hC2of W hTheta wfR
+    have outNative := (eFam (k + 1)).reverseAction.apply W hTheta typeRun
+      hab hD hC hResult
+    have out : Candidate k Theta
+        ((e.subst (tau2.lift_r rho)).app a)
+        ((e.subst (tau.lift_r rho)).app b)
+        ((B.subst (tau.lift_r rho).lift).inst a) := by
+      simpa only [SExpr.lift'_subst] using outNative
+    -- the left redex, certified at its own binder and retyped at (a, a)
+    have aR : IsDefEqStrong Theta a a (A.subst (tau2.lift_r rho)) :=
+      .defeqDF hACross hab.base.edge.hasType.1
+    have instRa : IsDefEqStrong Theta
+        ((B.subst (tau2.lift_r rho).lift).inst a)
+        ((B.subst (tau2.lift_r rho).lift).inst a) (.sort v) :=
+      IsDefEqStrong.instCongr hTheta hD2 hC2 aR
+    have soundLa : IsDefEqStrong Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau2.lift_r rho)) a)
+        ((B.subst (tau2.lift_r rho).lift).inst a) :=
+      .appDF hD2 hC2 etaEdgeR aR instRa
+    have redLa : WHRed Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau2.lift_r rho)) a) := by
+      have step : WHRed Theta
+          (.app (.lam (A.subst (tau2.lift_r rho))
+            (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) a)
+          ((SExpr.app (e.subst (tau2.lift_r rho)).lift (.bvar 0)).inst a) :=
+        .beta
+      rwa [eta_body_inst] at step
+    have codomEqA := codomEqOf W hTheta hab.base.edge.defeq.hasType.1
+    have runLa : WHSteps Theta
+        (.app (.lam (A.subst (tau2.lift_r rho))
+          (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) a)
+        (.app (e.subst (tau2.lift_r rho)) a)
+        ((B.subst (tau.lift_r rho).lift).inst a) := by
+      have run0 : WHSteps Theta
+          (.app (.lam (A.subst (tau2.lift_r rho))
+            (.app (e.subst (tau2.lift_r rho)).lift (.bvar 0))) a)
+          (.app (e.subst (tau2.lift_r rho)) a)
+          (B.subst ((tau2.lift_r rho).cons a)) := by
+        simpa only [SExpr.inst_lift_cons] using
+          WHStep.toSteps ⟨redLa, soundLa⟩
+      have run1 := run0.defeqDF codomEqA.symm
+      simpa only [SExpr.inst_lift_cons] using run1
+    -- the right redex, certified at the display type and retyped
+    have soundRb : IsDefEqStrong Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau.lift_r rho)) b)
+        ((B.subst (tau.lift_r rho).lift).inst b) :=
+      .appDF hD hC etaEdgeL hab.base.edge.hasType.2 hResult.hasType.2
+    have redRb : WHRed Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau.lift_r rho)) b) := by
+      have step : WHRed Theta
+          (.app (.lam (A.subst (tau.lift_r rho))
+            (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) b)
+          ((SExpr.app (e.subst (tau.lift_r rho)).lift (.bvar 0)).inst b) :=
+        .beta
+      rwa [eta_body_inst] at step
+    have runRb : WHSteps Theta
+        (.app (.lam (A.subst (tau.lift_r rho))
+          (.app (e.subst (tau.lift_r rho)).lift (.bvar 0))) b)
+        (.app (e.subst (tau.lift_r rho)) b)
+        ((B.subst (tau.lift_r rho).lift).inst a) :=
+      (WHStep.toSteps ⟨redRb, soundRb⟩).defeqDF hResult.symm
+    have expandOut := Candidate.expand runLa runRb out
+    rw [eta_expand_lift', eta_expand_lift']
+    simpa only [SExpr.lift'_subst] using expandOut
+  exact Candidate.lamRel edge forwardFam reverseFam
+
+/-- The substitutional fundamental eta case, unconditionally.  The binder
+typings are recovered structurally from the node's own function typing
+(`IsDefEqStrong.forallE_inv'` — no weak uniqueness), the `same`/`cross`
+components are eta-against-term candidates whose actions contract the
+left redex only, and the `left` component is the eta-expansion pair under
+the two substitutions. -/
+theorem SubstFundamental.eta [Params.Semantic]
+    {Gamma : List SExpr} {A B e : SExpr}
+    (he : IsDefEqStrong Gamma e e (.forallE A B))
+    (hlam : IsDefEqStrong Gamma (.lam A (.app e.lift (.bvar 0)))
+      (.lam A (.app e.lift (.bvar 0))) (.forallE A B))
+    (fundE : SubstFundamental he) :
+    SubstFundamental (.eta he hlam) := by
+  intro Delta sigma sigma' hDelta env depth
+  obtain ⟨w0, hPi⟩ := he.isType
+  obtain ⟨⟨u, hA⟩, v, hB⟩ := hPi.forallE_inv' (.inl rfl)
+  have nodeEta : IsDefEqStrong Gamma (.lam A (.app e.lift (.bvar 0))) e
+      (.forallE A B) := .eta he hlam
+  have outE := fundE hDelta env
+  have etaEdgeSame : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (.app (e.subst sigma).lift (.bvar 0)))
+      (e.subst sigma)
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    have h0 := env.left.substStrong hDelta nodeEta
+    simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using h0
+  have same := Candidate.etaTermOf etaEdgeSame etaEdgeSame
+    (fun d => by simpa only [SExpr.subst] using (outE d).same) depth
+  have edgeCross : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (.app (e.subst sigma).lift (.bvar 0)))
+      (e.subst sigma')
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    have h0 := env.substStrong hDelta nodeEta
+    simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using h0
+  have cross := Candidate.etaTermOf edgeCross etaEdgeSame
+    (fun d => by simpa only [SExpr.subst] using (outE d).cross) depth
+  have edgeLeft : IsDefEqStrong Delta
+      (.lam (A.subst sigma) (.app (e.subst sigma).lift (.bvar 0)))
+      (.lam (A.subst sigma') (.app (e.subst sigma').lift (.bvar 0)))
+      (.forallE (A.subst sigma) (B.subst sigma.lift)) := by
+    have h0 := env.substStrong hDelta hlam
+    simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using h0
+  have left := Candidate.etaLamOf env hA hB he hlam edgeLeft
+    (fun d => by simpa only [SExpr.subst] using (outE d).left) depth
+  refine { same := ?_, cross := ?_, left := ?_ }
+  · simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using same
+  · simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using cross
+  · simpa only [SExpr.subst, Subst.lift, eta_lift_subst] using left
+
+/-! ### The assembly -/
+
+/-- **The assembled substitutional fundamental theorem**: one derivation
+induction over all fourteen `IsDefEqStrong` constructors, generically
+conditional on exactly the four named inputs.  Unconditional cases:
+`bvar`, `symm`, `trans`, `sort`, `appDF`, `forallEDF`, `beta`, `eta`,
+`defn`, `extra`.  Conditional cases: `lamDF` (uniformity + transport),
+`defeqDF` (transport), `const` (irreducible heads; the with-pattern branch
+descends through the node's own value premise), `proofIrrel` (the proof
+merge). -/
+theorem SubstFundamental.total [Params.Semantic]
+    (uniform : CandidateUniformity) (transport : CandidateTypeTransport)
+    (irr : IrreducibleConstCandidates) (merge : ProofCandidateMerge)
+    {Gamma : List SExpr} {M N A : SExpr}
+    (H : IsDefEqStrong Gamma M N A) : SubstFundamental H := by
+  induction H with
+  | bvar lookup hA _ => exact SubstFundamental.bvar lookup hA
+  | symm h ih => exact SubstFundamental.symm (H := h) ih
+  | trans h₁ h₂ ih₁ ih₂ =>
+    exact SubstFundamental.trans (H₁ := h₁) (H₂ := h₂) ih₁ ih₂
+  | sort => exact SubstFundamental.sort
+  | const henv hls hty F hF hdefn _ _ ihdefn =>
+    exact SubstFundamental.const irr henv hls hty F hF hdefn ihdefn
+  | appDF hA hB hf ha hResult ihA ihB ihf iha _ =>
+    exact SubstFundamental.appDF hA hB hf ha hResult ihA ihB ihf iha
+  | lamDF hA hB hB' hbody hbody' _ _ _ ihbody _ =>
+    exact SubstFundamental.lamDF uniform transport hA hB hB' hbody hbody'
+      ihbody
+  | forallEDF hA hbody hbody' ihA ihbody _ =>
+    exact SubstFundamental.forallEDF hA hbody hbody' ihA ihbody
+  | defeqDF hAB he _ ihe =>
+    exact SubstFundamental.defeqDF transport hAB he ihe
+  | beta hBody hArg hApp hInst ihBody ihArg ihApp _ =>
+    exact SubstFundamental.beta hBody hArg hApp hInst ihBody ihArg ihApp
+  | eta he hlam ihe _ => exact SubstFundamental.eta he hlam ihe
+  | proofIrrel hp hh hh' _ ihh ihh' =>
+    exact SubstFundamental.proofIrrel merge hp hh hh' ihh ihh'
+  | defn henv hls hty F hF action hval _ _ ihval =>
+    exact SubstFundamental.defn henv hls hty F hF action hval ihval
+  | extra action hLeft hRight ihLeft ihRight =>
+    exact SubstFundamental.extra action hLeft hRight ihLeft ihRight
+
+/-- The context-validated fundamental theorem from the assembly: the total
+interpretation instantiated at the identity logical substitution of a
+well-formed context.  Context validity enters exactly here, matching
+`TypeDefEqPath.piForward`'s signature, which supplies it. -/
+theorem Fundamental.of_total [Params.Semantic]
+    (uniform : CandidateUniformity) (transport : CandidateTypeTransport)
+    (irr : IrreducibleConstCandidates) (merge : ProofCandidateMerge)
+    {Gamma : List SExpr} {M N A : SExpr} (hGamma : Ctx.WF Gamma)
+    (H : IsDefEqStrong Gamma M N A) (depth : Nat) :
+    Candidate depth Gamma M N A := by
+  have out := SubstFundamental.total uniform transport irr merge H hGamma
+    (Env.id hGamma) depth
+  simpa only [SExpr.subst_id] using out.cross
+
+/-! ### The staging ladder
+
+The four named inputs are Fundamental-strength: the generic assembly stays
+conditional on them, and they discharge at the *instances* through the
+landed ladder — instance normalization gives `Fundamental 0`
+(`Fundamental.zero`), per-depth head observations iterate it
+(`Fundamental.succ`), and the resulting `∀ depth, Fundamental depth`
+closes all four named inputs via their `.of_fundamental` witnesses.  The
+named `Prop`s are exactly the generic/instance seam. -/
+
+/-- A successor fundamental theorem returns its own head slot: the heads
+stored at `depth + 1` are literally `HeadFundamental depth`.  This is the
+shape witness that the ladder's per-depth hypothesis asks for nothing
+beyond the theorem chain it builds. -/
+theorem HeadFundamental.of_fundamental_succ [Params.Semantic]
+    (fund : Fundamental (depth + 1)) : HeadFundamental depth :=
+  fun edge => (fund edge).2.heads
+
+/-- **The instance staging chain**: typed weak-head normalization plus the
+head-observation slot at every depth yield the fundamental theorem at
+every semantic index. -/
+theorem Fundamental.all [Params.Semantic]
+    (normalization : TypedWHNormalization)
+    (heads : ∀ depth, HeadFundamental depth) :
+    ∀ depth, Fundamental depth
+  | 0 => Fundamental.zero normalization
+  | depth + 1 =>
+      Fundamental.succ (Fundamental.all normalization heads depth)
+        (heads depth)
+
+/-- The closed seam: from the two instance-shaped inputs, every named
+`Prop` discharges and the total substitutional interpretation follows for
+every strong derivation. -/
+theorem SubstFundamental.of_ladder [Params.Semantic]
+    (normalization : TypedWHNormalization)
+    (heads : ∀ depth, HeadFundamental depth)
+    {Gamma : List SExpr} {M N A : SExpr}
+    (H : IsDefEqStrong Gamma M N A) : SubstFundamental H :=
+  have fund := Fundamental.all normalization heads
+  SubstFundamental.total (CandidateUniformity.of_fundamental fund)
+    (CandidateTypeTransport.of_fundamental fund)
+    (IrreducibleConstCandidates.of_fundamental fund)
+    (ProofCandidateMerge.of_fundamental fund) H
+
+/-- The Pi-inversion leaf needs only the depth-0 fragment of the ladder:
+normalization plus the depth-0 head slot give `Fundamental 1`, which is
+already `LRS.PiPathInv`-strength. -/
+theorem LRS.PiPathInv.of_zero_data [Params.Semantic]
+    (normalization : TypedWHNormalization)
+    (heads : HeadFundamental 0) : LRS.PiPathInv :=
+  LRS.PiPathInv.of_candidateFundamental
+    (Fundamental.succ (Fundamental.zero normalization) heads)
+
+/-! N′3 session-2 pins: the three remaining case closures, the new named
+input's witnesses, the assembled induction, and the staging ladder — all
+inside the accepted logical baseline. -/
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.eta_lift_subst' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms eta_lift_subst
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.eta_lift_lift'' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms eta_lift_lift'
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.eta_body_inst' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms eta_body_inst
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.eta_expand_lift'' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms eta_expand_lift'
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.extra' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.extra
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.proofCandidateMerge_zero' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms proofCandidateMerge_zero
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.ProofCandidateMerge.of_fundamental' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms ProofCandidateMerge.of_fundamental
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.proofIrrel' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.proofIrrel
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.eta' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.eta
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.total
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.Fundamental.of_total' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Fundamental.of_total
+
+/--
+info: 'Lean4Lean.SExpr.Reducibility.HeadFundamental.of_fundamental_succ' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms HeadFundamental.of_fundamental_succ
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.Fundamental.all' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Fundamental.all
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SubstFundamental.of_ladder' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SubstFundamental.of_ladder
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.LRS.PiPathInv.of_zero_data' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LRS.PiPathInv.of_zero_data
+
 end Reducibility
 end SExpr
 end Lean4Lean
