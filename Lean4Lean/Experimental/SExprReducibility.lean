@@ -2998,6 +2998,175 @@ info: 'Lean4Lean.SExpr.Reducibility.HeadFundamental.of_fundamental_succ' depends
 #guard_msgs in
 #print axioms LRS.PiPathInv.of_zero_data
 
+/-! ## N′4 — the leaf's minimized input
+
+Probe N4 (`plans/probes/probeN4-knot.lean`) measured what
+`LRS.PiPathInv.of_zero_data` actually consumes.  Its packaging dodges the
+∀-depth `Env.related` hazard — `Fundamental 1` is assembled from the two
+depth-0 obligations without touching `SubstFundamental`, `Env`, or any
+named `Prop` — but it still over-demands: `TypeDefEqPath.piForward`
+projects only the *forward* head layer at each *sort-typed* single edge
+of the path and discards every normalization component of the
+`Candidate 1` package.  The declarations below bank that narrowing: the
+Pi-inversion leaf follows from `SortEdgeHeads` alone, so
+`TypedWHNormalization` is not a leaf input at all — it remains an
+obligation only of the full `∀ depth, Fundamental depth` ladder.
+
+The knot is not dissolved, only relocated and sharpened.  Producing
+`SortEdgeHeads` at an instance is the sort-edge restriction of the
+per-edge head classification (`IndCand.HeadObservationData`), whose
+induction on strong equality still cannot cross `.appDF`/dynamic β: the
+contractum of a type-level β-redex has no premise.
+`IndCand.SortEdgeData.typeWHResult` records the strength honestly — the
+restricted classification already implies a Kripke weak-head normal form
+for every well-typed type.
+
+Probe N4 also closed the other cut, stratified-typing induction, against
+the same knot: the substitution shape `HasTypeStratifiedS d` of a β-redex
+⇒ `HasTypeStratifiedS ≤ d` of its contractum is *false*
+(`stratifiedBetaBound_false` — the duplication family
+`(fun x : Sort (l+1) => Iᵐ x) (Iᵐ (Sort l))` stratifies at `m + 4` while
+its contractum `I²ᵐ (Sort l)` has minimal depth `2m`); the additive bound
+that is true does not descend; and the untyped-trace β hand-off needs
+subject reduction along the emerged chain, whose typed form is
+`SubjectPreservingWHNormalization` — `LRS.BetaFire` strength by the pin
+above — and whose depth-uniform form is the banked-false
+`LRS.ChainAnchorAt` shape. -/
+
+/-- **The leaf's minimized input**: the forward depth-0 head observation
+at every sort-typed strong edge.  Strictly weaker than
+`HeadFundamental 0` — which covers every displayed type and both
+orientations — and incomparable to `TypedWHNormalization`, which it does
+not mention. -/
+def SortEdgeHeads : Prop :=
+  ∀ {Γ : List SExpr} {A B : SExpr} {u : SLevel},
+    IsDefEqStrong Γ A B (.sort u) → HeadLayer Base Γ A B (.sort u)
+
+/-- The landed depth-0 head slot over-supplies the leaf: restrict to sort
+edges, resolve the proof-type disjunct by `IsProofType.sort_false`, and
+keep the forward orientation. -/
+theorem SortEdgeHeads.of_headFundamental_zero
+    (heads : HeadFundamental 0) : SortEdgeHeads :=
+  fun edge => ((heads edge).resolve_left (IsProofType.sort_false _)).1
+
+/-- Shape nonvacuity in the N′2 style: the interface follows from the
+fundamental ladder, so it asks for strictly less than the chain that
+feeds it. -/
+theorem SortEdgeHeads.of_fundamental [Params.Semantic]
+    (fund : ∀ depth, Fundamental depth) : SortEdgeHeads :=
+  SortEdgeHeads.of_headFundamental_zero
+    (HeadFundamental.of_fundamental_succ (fund 1))
+
+/-- Component nonvacuity: at the canonical sort edge the head layer is a
+theorem — the Pi observation is refuted by determinism against
+`WHNF.sort` and the sort observation returns the observed run itself. -/
+theorem sortEdgeHeads_sort {Γ : List SExpr} (u : SLevel) :
+    HeadLayer Base Γ (.sort u) (.sort u) (.sort u.succ) where
+  piHead := by
+    intro Δ ρ D C s t W typeRun observed
+    have eq : (SExpr.sort u).lift' ρ = .forallE D C :=
+      WHNF.sort.whRedS (by simpa using observed)
+    simp at eq
+  sortHead := by
+    intro Δ ρ s t v W typeRun observed
+    exact observed
+
+/-- `TypeDefEqPath.piForward` from the minimized input: the landed
+induction verbatim, with `fundamental (edge.strong hΓ)` + `.heads`
+replaced by the per-edge datum.  Nothing else changes — the `trans` case
+never touched the fundamental theorem. -/
+theorem TypeDefEqPath.piForwardOfHeads
+    [Params.Semantic]
+    (heads : SortEdgeHeads) (hΓ : Ctx.WF Γ)
+    (H : TypeDefEqPath Γ X Y s)
+    (head : WHRedS Γ X (.forallE D C)) :
+    ∃ D' C', WHRedS Γ Y (.forallE D' C') ∧
+      ∃ u v, TypeDefEqPath Γ D D' u ∧
+        TypeDefEqPath (D :: Γ) C C' v := by
+  induction H generalizing D C with
+  | @single A B u edge =>
+    have layer := heads (edge.strong hΓ)
+    have observed : WHRedS Γ A (.forallE D C) := by
+      simpa using head
+    have observed' : WHRedS Γ (A.lift' Lift.refl) (.forallE D C) := by
+      simpa using observed
+    let typeRun : WHSteps Γ (.sort u) (.sort u) (.sort u.succ) :=
+      .refl .sort
+    obtain ⟨D', C', run, du, cu, domain, codomain⟩ :=
+      layer.piHead Ctx.Lift'.refl typeRun observed'
+    have runRed : WHRedS Γ B (.forallE D' C') := by
+      simpa using run
+    refine ⟨D', C', runRed, du, cu, ?_, ?_⟩
+    · exact domain.toTypeDefEqPath
+    · exact codomain.toTypeDefEqPath
+  | @trans A B Z u v left right ihLeft ihRight =>
+    obtain ⟨D₁, C₁, red₁, du₁, cu₁, domain₁, codomain₁⟩ :=
+      ihLeft head
+    obtain ⟨D₂, C₂, red₂, du₂, cu₂, domain₂, codomain₂⟩ :=
+      ihRight red₁
+    obtain ⟨_, domain₁Symm⟩ := domain₁.symm
+    have codomain₂' := domain₁Symm.defeqDF_l_path codomain₂
+    exact ⟨D₂, C₂, red₂, du₁, cu₁,
+      domain₁.trans domain₂, codomain₁.trans codomain₂'⟩
+
+/-- **The leaf from the minimized input.** -/
+theorem LRS.PiPathInv.of_sort_edge_heads
+    [Params.Semantic]
+    (heads : SortEdgeHeads) : LRS.PiPathInv := by
+  intro Γ A B A' B' s hΓ path
+  obtain ⟨D, C, red, u, v, domain, codomain⟩ :=
+    TypeDefEqPath.piForwardOfHeads heads hΓ path
+      (.rfl : WHRedS Γ (.forallE A B) (.forallE A B))
+  have headEq : (.forallE A' B' : SExpr) = .forallE D C :=
+    WHNF.forallE.whRedS red
+  injection headEq with hD hC
+  subst D
+  subst C
+  exact ⟨u, v, domain, codomain⟩
+
+/-- The landed claim with the normalization argument discarded: the
+depth-0 route to the leaf needs no bounded normalization statement at
+all. -/
+theorem LRS.PiPathInv.of_zero_heads [Params.Semantic]
+    (heads : HeadFundamental 0) : LRS.PiPathInv :=
+  LRS.PiPathInv.of_sort_edge_heads
+    (SortEdgeHeads.of_headFundamental_zero heads)
+
+/-! N′4 pins: the minimized-input suite stays inside the accepted logical
+baseline. -/
+
+/--
+info: 'Lean4Lean.SExpr.Reducibility.SortEdgeHeads.of_headFundamental_zero' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms SortEdgeHeads.of_headFundamental_zero
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.SortEdgeHeads.of_fundamental' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms SortEdgeHeads.of_fundamental
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.sortEdgeHeads_sort' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms sortEdgeHeads_sort
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.TypeDefEqPath.piForwardOfHeads' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms TypeDefEqPath.piForwardOfHeads
+
+/--
+info: 'Lean4Lean.SExpr.Reducibility.LRS.PiPathInv.of_sort_edge_heads' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.PiPathInv.of_sort_edge_heads
+
+/-- info: 'Lean4Lean.SExpr.Reducibility.LRS.PiPathInv.of_zero_heads' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms LRS.PiPathInv.of_zero_heads
+
 end Reducibility
 end SExpr
 end Lean4Lean
