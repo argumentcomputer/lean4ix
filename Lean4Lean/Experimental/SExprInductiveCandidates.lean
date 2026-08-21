@@ -5658,3 +5658,261 @@ info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2StagingChain' depends on axioms: [
 #guard_msgs in
 #print axioms d2StagingChain
 
+
+/-! ## N′4 — the leaf's residual, per instance
+
+Probe N4 (`plans/probes/probeN4-knot.lean`) narrowed the master file's
+leaf claim: `LRS.PiPathInv` consumes neither `TypedWHNormalization` nor
+the full `HeadFundamental 0` slot — only the forward depth-0 head
+observation at sort-typed edges (`SortEdgeHeads`).  At the classification
+interface this is the sort-edge restriction of `HeadObservationData`,
+recorded below as `SortEdgeData`, and the two production chains now carry
+the leaf conditional on that single datum.
+
+The residual is honest, not free: `SortEdgeData.typeWHResult` shows the
+restricted classification already implies a Kripke weak-head normal form
+for every well-typed type, i.e. type-level weak-head normalization
+strength.  The membership layer's sources (members, neutrals, constants,
+lambdas, constructor spines, stuck recursors) cover every classification
+case except `.appDF`/dynamic β at type level, where the contractum of a
+type-level β-redex has no premise in the induction — the same knot,
+confined to sort-typed edges.  Probe N4's Cut-2 refutation
+(`stratifiedBetaBound_false`) closes the stratified-typing route to that
+case. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+open Lean4Lean.MutualInductiveFixtures
+
+variable [Params]
+
+/-- **The leaf's per-instance residual**: the head classification at
+sort-typed strong edges.  Nonvacuity at concrete edges is the landed
+witness suite (`headObservationData_sort`, `headObservationData_pi`,
+`headObservationData_neutral`). -/
+def SortEdgeData : Prop :=
+  ∀ {Γ : List SExpr} {A B : SExpr} {u : SLevel},
+    IsDefEqStrong Γ A B (.sort u) → HeadObservationData Γ A B (.sort u)
+
+/-- The residual asks strictly less than the full classification recorded
+by `LRS.PiPathInv.of_normalization_data`. -/
+theorem SortEdgeData.of_full
+    (data : ∀ {Γ : List SExpr} {M N A : SExpr},
+      IsDefEqStrong Γ M N A → HeadObservationData Γ M N A) :
+    SortEdgeData :=
+  fun edge => data edge
+
+/-- The classification restricted to sort edges produces the minimized
+leaf input. -/
+theorem SortEdgeData.sortEdgeHeads (data : SortEdgeData) :
+    SortEdgeHeads :=
+  fun edge =>
+    ((data edge).headLayers.resolve_left (IsProofType.sort_false _)).1
+
+/-- The leaf from the residual alone — no normalization obligation. -/
+theorem LRS.PiPathInv.of_sort_edge_data [Params.Semantic]
+    (data : SortEdgeData) : LRS.PiPathInv :=
+  LRS.PiPathInv.of_sort_edge_heads data.sortEdgeHeads
+
+/-- **Strength characterization**: the sort-edge classification already
+implies Kripke weak-head normalization of every well-typed type — each
+disjunct hands over a normal form, and the proof-type disjunct is refuted
+at a sort.  This is why the residual is not dischargeable from the
+depth-0 theorems plus the membership machinery, which normalize members,
+not arbitrary typed types. -/
+theorem SortEdgeData.typeWHResult (data : SortEdgeData)
+    {Γ : List SExpr} {A : SExpr} {u : SLevel}
+    (h : IsDefEqStrong Γ A A (.sort u)) : WHResult Γ A (.sort u) := by
+  rcases data h with hproof | hpi | hsort | ⟨hM, _⟩
+  · exact absurd hproof (IsProofType.sort_false u)
+  · obtain ⟨D, C, D', C', u', v', runM, _, _, _⟩ := hpi Ctx.Lift'.refl
+    exact ⟨.forallE D C, by simpa using runM, WHNF.forallE⟩
+  · obtain ⟨w, runM, _⟩ := hsort Ctx.Lift'.refl
+    exact ⟨.sort w, by simpa using runM, WHNF.sort⟩
+  · obtain ⟨r, run, nf, _, _⟩ := hM Ctx.Lift'.refl
+    exact ⟨r, by simpa using run, nf⟩
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ### The production instances -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+/-- The d0 leaf from the sort-edge residual alone. -/
+theorem d0SortEdgeLeaf (univs : Nat) :
+    letI : Params := ParamsD0.d0Params univs
+    letI : Params.Semantic := ParamsD0.d0Semantic univs
+    SortEdgeData → LRS.PiPathInv := by
+  letI : Params := ParamsD0.d0Params univs
+  letI : Params.Semantic := ParamsD0.d0Semantic univs
+  intro data
+  exact LRS.PiPathInv.of_sort_edge_data data
+
+/-- The d2 twin over the conditional bridge, inheriting exactly the
+recorded block-step premise. -/
+theorem d2SortEdgeLeaf (univs : Nat) (h : ParamsD2.D2BlockStep univs) :
+    letI : Params := ParamsD2.d2Params univs
+    letI : Params.Semantic := ParamsD2.d2Semantic univs h
+    SortEdgeData → LRS.PiPathInv := by
+  letI : Params := ParamsD2.d2Params univs
+  letI : Params.Semantic := ParamsD2.d2Semantic univs h
+  intro data
+  exact LRS.PiPathInv.of_sort_edge_data data
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+/-! ## N′4 pins
+
+The generic residual suite stays inside the accepted baseline; the two
+instance leaves inherit, verbatim, their semantic bridges' documented
+fixture baselines (D-ladder `native_decide` observations and the recorded
+`sorryAx` through `SExpr.typeUniq` carried by `d0Semantic`/`d2Semantic`)
+— no new axioms and no new `sorry` from this rung. -/
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.SortEdgeData.of_full' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms SortEdgeData.of_full
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.SortEdgeData.sortEdgeHeads' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms SortEdgeData.sortEdgeHeads
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.LRS.PiPathInv.of_sort_edge_data' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.PiPathInv.of_sort_edge_data
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.SortEdgeData.typeWHResult' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms SortEdgeData.typeWHResult
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d0SortEdgeLeaf' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natClassify_d0Def_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d0SortEdgeLeaf
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/--
+info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2SortEdgeLeaf' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert,
+ Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.d0Def_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natClassify_d0Def_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD0.natRule_rhs_ne_d0Def._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleSucc_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatGeneratedRuleZero_lookup._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRuleRhs_ne._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroCtorName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleRecName._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_mutB._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutA_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_d0Def._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natSucc._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.d1MutB_name_ne_natZero._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutA._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutA._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutB._native.native_decide.ax_1_2,
+ Lean4Lean.SExpr.ParamsD1.natRule_rhs_ne_d1MutB._native.native_decide.ax_1_3,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_tree._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeBranch._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeLeaf._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeList._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListCons._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListNil._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeListRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeNode._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d1Classify_treeRec._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.d2Env_isSome._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeBranch_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeLeaf_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListCons_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListNil_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeListRec_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeList_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeNode_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.treeRec_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD2.tree_fresh._native.native_decide.ax_1_1]
+-/
+#guard_msgs in
+#print axioms d2SortEdgeLeaf
