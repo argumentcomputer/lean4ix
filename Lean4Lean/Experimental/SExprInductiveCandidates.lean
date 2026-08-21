@@ -5412,3 +5412,39 @@ open Lean4Lean.SExpr.Reducibility.IndCand in
 /-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.NatRulesS.ofRules' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms NatRulesS.ofRules
+
+/-! ## N′3 session 1 — nonvacuity of the irreducible-constant input
+
+The depth-0 restriction of the master file's `IrreducibleConstCandidates`
+is exactly this rung's `Base.const_irreducible`: a pattern-less constant
+is Kripke-WHNF, so its base content fires at any strong self-edge.  The
+successor observation layers — application-spine normalization at
+pattern-less heads, including iota firing under recursor heads — remain
+the named input, discharged per instance by the membership layer. -/
+
+namespace Lean4Lean
+namespace SExpr
+namespace Reducibility
+namespace IndCand
+
+variable [Params]
+
+/-- The depth-0 restriction of `IrreducibleConstCandidates` holds
+outright. -/
+theorem irreducibleConstCandidates_zero {Γ : List SExpr} {c : Name}
+    {ls : List SLevel} {A : SExpr}
+    (h : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      ¬Params.Pat (.const c) r)
+    (edge : IsDefEqStrong Γ (.const c ls) (.const c ls) A) :
+    Candidate 0 Γ (.const c ls) (.const c ls) A :=
+  Base.const_irreducible h edge
+
+end IndCand
+end Reducibility
+end SExpr
+end Lean4Lean
+
+open Lean4Lean.SExpr.Reducibility.IndCand in
+/-- info: 'Lean4Lean.SExpr.Reducibility.IndCand.irreducibleConstCandidates_zero' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms irreducibleConstCandidates_zero
