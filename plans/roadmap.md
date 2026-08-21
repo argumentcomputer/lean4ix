@@ -84,7 +84,7 @@ required for the final release; they can be reached in separate milestones.
 
 | Fact | Value |
 |---|---|
-| Ladder position | **Lane R halted at L4L-16N/N2 on 2026-08-20** (§5): both authorized termination measures fail on the checked Tree/TreeList block (`L4L16NFailure.treeBranch_primaryMeasure_fails`, `tree_familyOrdinalFallback_false`), activating the recorded "halt and report; no third fallback" rule. N0/N1 are banked; N3–N5 did not run. The L4L-16C′w conditional regime therefore persists: `LRS.PiPathInv` and `LR.MajorLinkRect` remain explicit inputs. **The successor is approved and probe-validated (2026-08-20, same day): L4L-16N′** — normalization by mutual-inductive membership candidates, whose rung-0 evidence `plans/probes/probeZ16-indcand.lean` proves the exact killed `Tree.branch` transition by membership-derivation induction (no measure, no rank) with positivity settled on the kernel-accepted class; Lane R re-opens there, and L4L-16X queues behind N′4. Full halt record: `plans/l4l-16n-failure-report.md`. **L4L-16C′w completed 2026-08-20** (checkpoint `e73d29fd` pre-rebase; full §6 gate + Experimental green), and **L4L-16R completed 2026-08-20** (merge `29d67a7c`). L4L-18B (D020) stands; 16D0/D1 complete and D2 remains conditional |
+| Ladder position | **L4L-16N′ rungs N′0–N′4 executed 2026-08-20** (six sessions; §5 outcome block): the fundamental theorem stands at full 14/14 `IsDefEqStrong` coverage with `beta`/`defn`/`extra`/`eta` unconditional, the assembly ladder and both instance staging chains are landed, and the leaf residual is narrowed to the single per-instance Prop **`SortEdgeData`** (`d0SortEdgeLeaf`/`d2SortEdgeLeaf`; type-level-WHN strength floor pinned; failing case = type-level β) — a sanctioned conditional close, exit not yet met. The 16C′w conditional regime persists with `LRS.PiPathInv` ⟸ `SortEdgeData` per instance and `LR.MajorLinkRect` untouched. The 16N halt record and the 16N′ probe evidence stand (`plans/l4l-16n-failure-report.md`, probes Z16/N4). **Open call:** fund the `SortEdgeData` successor slice (type-level WHN, probe-first on the type-level β knot) vs. run Lanes V/D while it waits. **L4L-16C′w completed 2026-08-20** (checkpoint `e73d29fd` pre-rebase), **L4L-16R completed 2026-08-20** (merge `29d67a7c`). L4L-18B (D020) stands; 16D0/D1 complete and D2 remains conditional |
 | Current formalization source | **`jcb/formalization3`** — the former `jcb/formalization2` line was squash-merged into `dev` as PR #4 (`3d1390a`, tree-equal to `06f13e02` modulo repo housekeeping), PR #5 ("chore: Fix warnings", 34 Theory/Verify files + `warn.sorry` frontier annotations + flake churn) landed on top (`4844eda4`), and the branch was deleted on origin (2026-08-18). The five 16C′w-era commits were segment-rebased onto `origin/dev` `4844eda4` on 2026-08-20 (one trivial `result-1` conflict; Lake gates + 22-entry frontier re-verified green on the rebased line); pre-squash history remains recoverable locally |
 | Parent lineage | the squash flattened git ancestry: all content through digama `upstream/master` `b292275c` (the v4.33 reconciliation `99a7f8ae`) is absorbed in the squash, but the published line no longer carries the merge commits, so the L4L-16R merge will see an old git merge-base — the same situation the post-PR#3 line was in when `99a7f8ae` landed green, so precedent stands. Lean on v4.33.0 final, lean4-nix on `argumentcomputer/lean4-nix` (upstream still pins v4.33.0-rc2 — ledger D018, re-verified 2026-08-20) |
 | Fixed `master` baseline | historical baseline `1a16b72d2e35932a82aa501beb29ef2c3d072580`; the tracked local `master` bookmark auto-advanced to `origin/master` `715bfaff` at the 2026-08-20 fetch (content already absorbed in-tree) |
@@ -762,9 +762,10 @@ itself constructs from currently supported declaration forms produces the
 certificate as a transaction invariant. The premise-vs-funding decision
 is 16X's named exit decision.
 
-**L4L-16N′ — normalization by inductive candidates (Lane R re-opened;
-next).** The approved third route, superseding 16N's refuted measure
-architecture. Rung-0 truth-status evidence:
+**L4L-16N′ — normalization by inductive candidates (rungs N′0–N′4
+executed 2026-08-20; sanctioned conditional close — see the outcome
+block below the rung table).** The approved third route, superseding
+16N's refuted measure architecture. Rung-0 truth-status evidence:
 `plans/probes/probeZ16-indcand.lean` (2026-08-20; compiled, zero sorries,
 nine pinned closures at `[propext, (Classical.choice,) Quot.sound]`)
 machine-validates the replacement **at the exact transition that killed
@@ -821,10 +822,44 @@ concentration: N′3's `proofIrrel`/`.extra` cases and N′4's
 fallback that leaves the conditional regime intact. The stretch tiers
 (P1–P3) and their pre-approved statement-premise fallback carry over from
 16N unchanged.
-*Exit:* both named leaf inputs discharged at the D-ladder instances; the
-16C′w conditional endpoints fire unconditionally; the escape's measured
-closure stays `[propext, Classical.choice, Quot.sound]`; L4L-16X
-unblocks.
+
+**Outcome (2026-08-20, six sessions, all rungs executed).** N′0–N′2
+landed in full with every kill criterion surviving (positivity first
+try; the killed `Tree.branch` transition proved by membership induction
+in Kripke form; all seven towers collapsed by kernel `decide`; the N′2
+head-observation kill never fired). N′3 landed the complete 14/14
+`IsDefEqStrong` case suite — `beta`, `defn`, `extra`, and `eta` all
+UNCONDITIONAL (the β case closes with no inversion anywhere: the
+argument arrives at the abstraction's own domain by the derivation's
+hypotheses — the semantic route's thesis, machine-realized) — with
+`SubstFundamental.total` conditional on exactly four named,
+depth-0-witnessed Props, the assembly ladder, and both instance staging
+chains ending in `LRS.PiPathInv`. N′4's probe then narrowed the leaf's
+premise a further step and refuted the last shortcut: the leaf never
+consumed `TypedWHNormalization` (the packaging over-demanded — the
+exact consumption is the forward head layer at sort-typed edges only),
+so **the leaf residual at each instance is now the single Prop
+`SortEdgeData`** (`d0SortEdgeLeaf`/`d2SortEdgeLeaf`; strength floor
+pinned by `typeWHResult`: it implies type-level weak-head
+normalization; failing induction case: `.appDF`/dynamic β at type
+level), while the stratified-substitution route is refuted outright
+(`stratifiedBetaBound_false`, probeN4 — see banked refutations). The
+full ladder (`∀ d, Fundamental d` → the four Props → unconditional
+`SubstFundamental`) still takes `TypedWHNormalization` +
+`∀ d, HeadFundamental d` per instance. The 16C′w consumer wiring was
+deliberately not fired. **Residual, exactly:** (leaf) `SortEdgeData`
+per instance — type-level WHN strength, the honest heir of the old
+`TypeWHNFEx` now sitting at the right place with the full candidate
+scaffolding around it; (full ladder) the two original obligations;
+(consumers) `LR.MajorLinkRect` untouched. The successor slice — the
+`SortEdgeData` discharge, i.e. type-level weak-head normalization at
+the classified instances, probe-first on the type-level β knot — is
+scoped but UNFUNDED; the lane decision (fund it next vs. run Lanes V/D
+while it waits) is the open call.
+*Exit (unchanged, not yet met):* both named leaf inputs discharged at
+the D-ladder instances; the 16C′w conditional endpoints fire
+unconditionally; the escape's measured closure stays
+`[propext, Classical.choice, Quot.sound]`; L4L-16X unblocks.
 
 **L4L-16E — promotion mechanics (slack lane).** Execute
 `plans/l4l-16e-promotion-map.md`: module moves out of `Experimental/`
@@ -955,6 +990,14 @@ named design docs and probe files.
   positivity checker (pinned in probe Z16) — and never needed: checked
   non-nested blocks cannot put a sibling family in a recursive field's Pi
   domain, so the domain-candidate-as-parameter form covers the class.
+- **The stratified β-substitution bound:** false in its weakest form —
+  a β-contractum can exceed every stratified bound of its redex
+  (`stratifiedBetaBound_false`, probeN4: the duplication family
+  `(fun x : Sort (l+1) => I^m x) (I^m (Sort l))`, redex at `m+4`,
+  contractum minimal depth `2m`). The surviving additive form does not
+  descend; recovering a lambda's typing from an untyped trace is
+  subject-reduction/leaf strength (`betaFire`). Do not route
+  normalization through stratified typing bounds.
 - **Literal `RectFrame` at the rec-app observation:** refuted 2026-08-20
   (`RectFrame.tyShape_rigid` + the `RecAppMoving` witness — the rec-app
   observation moves its type shape along `mono`, which the frame's rigid
