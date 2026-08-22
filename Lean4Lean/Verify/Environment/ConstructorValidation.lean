@@ -522,7 +522,7 @@ theorem CandidateIsDefEqObservation.observe_eq
   rw [observeCandidateIsDefEq_of_run context lhs rhs observation.valid]
 
 /-- The verified implementation equality checker accepts a syntactically
-identical pair without inspecting or mutating its equivalence manager. -/
+identical pair without inspecting or extending its success cache. -/
 theorem candidateIsDefEqRefl
     (context : Context) (source : Expr) :
     CandidateIsDefEqStep.Valid ⟨context, source, source⟩ := by
@@ -8724,7 +8724,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8760,7 +8759,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8796,7 +8794,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8832,7 +8829,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8868,7 +8864,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8904,7 +8899,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8940,7 +8934,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -8976,7 +8969,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
@@ -9031,7 +9023,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,

@@ -223,7 +223,8 @@ Audit baseline after the complete L4L-12B literal-readiness checkpoint
   `upstream/master` `b292275c` ("perf: skip the NormLevel for levels with no
   essential imax"; upstream advanced past the planned `1a16b72d` before the
   merge executed, so the reconciliation took the actual head). Toolchain
-  v4.33.0 final (upstream pins v4.33.0-rc2 — see D018); lean4-nix input
+  v4.33.1 (upstream pins v4.33.0-rc2 — see D018; the v4.33.1 kernel changes
+  are mirrored per D021); lean4-nix input
   repointed to `argumentcomputer/lean4-nix` (`fromToolchainFile` API).
   Upstream absorbed since `ef849dfb`: verified standard-library level
   operations (`Verify/LevelStd.lean`) plus sound-and-complete primed
@@ -1091,14 +1092,18 @@ to the replacement.
   structure artifact, and proves constructive quotient initialization,
   emptying the six entries.
 
-## D018 — v4.33.0 final toolchain (upstream pins v4.33.0-rc2)
+## D018 — v4.33.1 toolchain (upstream pins v4.33.0-rc2)
 
 - **Status:** intentional-fork (temporary)
-- **Delta:** `lean-toolchain` pins `leanprover/lean4:v4.33.0` and batteries
-  `v4.33.0` because `argumentcomputer/lean4-nix` vendors released toolchains
-  only; upstream pins `v4.33.0-rc2`.
-- **Removal condition:** upstream bumps to the final release (expected
-  imminently); no code delta is attached to this row.
+- **Delta:** `lean-toolchain` pins `leanprover/lean4:v4.33.1` because
+  `argumentcomputer/lean4-nix` vendors released toolchains only; upstream pins
+  `v4.33.0-rc2`. Batteries stays pinned at its `v4.33.0` tag: the project cut
+  no patch release for v4.33.1, and its v4.33.0 sources build unchanged under
+  the v4.33.1 toolchain.
+- **Note:** v4.33.1 is a kernel release. The six kernel changes it carries are
+  accounted for in this fork — see D021.
+- **Removal condition:** upstream bumps to a released toolchain of v4.33.1 or
+  later; no code delta is attached to this row.
 
 ## D019 — registered structure eta in Theory
 
@@ -1179,6 +1184,55 @@ to the replacement.
   explicit registered-equation join split, or an equivalent interface that
   represents beta-collapsed tower rules without a trusted shape or soundness
   oracle, and the fork migrates.
+
+## D021 — v4.33.1 kernel changes mirrored ahead of upstream
+
+- **Status:** implemented intentional fork divergence (2026-08-22); upstream
+  lean4lean still targets v4.33.0-rc2 and carries none of these.
+- **Delta:** v4.33.1 is a kernel release. Each of its six kernel changes is
+  accounted for here — five mirrored, one already satisfied:
+  - lean4#14582 — `Environment.addInductive` runs `checkUniformIndOccs` before
+    nested-inductive elimination, rejecting any occurrence of a datatype being
+    declared that is not applied to the declaration's parameters and universe
+    levels. Occurrences erased by a later `whnf`, and permuted universe levels,
+    are now rejected where they were previously accepted.
+  - lean4#14806 — the union-find `EquivManager` positive cache is replaced by a
+    hash-ordered pair set (`succeededBefore`/`cacheSuccess`), so results no
+    longer depend on the order pairs were checked in. `Lean4Lean/EquivManager.lean`
+    and `Lean4Lean/Verify/EquivManager.lean` are deleted; the cache invariant is
+    now `DefEqCache.WF` in `Verify/TypeChecker/Basic.lean`.
+  - lean4#14807 — no delta: `isProp` already routed through `ensureSortCore`,
+    so lean4lean never had the bug. Upstream has converged on this fork's
+    behavior.
+  - lean4#14808 — `AddInductive.checkRecursors` type-checks each generated
+    recursor and verifies that each computation rule is type-preserving.
+  - lean4#14843 — `toCtorWhenStruct` takes a sort-ensuring `isNeverProp`
+    callback instead of matching on `whnf (inferType eType)` with an
+    `unreachable!` fallback, so a non-sort type raises a kernel error. The
+    `isNeverZero`/`!isAlwaysZero` divergence recorded in `divergences.md` is
+    preserved.
+  - lean4#14849 — `natMaxSize` (a new `FuelConfig` field, default 128 MB, the
+    same bound `LEAN_NAT_MAX_SIZE` sets natively) bounds literals entering the
+    kernel and the numerals `reduceNat` computes. `reducePow` and the new
+    `reduceShiftLeft` bound their results before forming them.
+- **Downstream impact:** `TypeChecker.State.eqvManager` is now
+  `TypeChecker.State.success : Std.HashSet (Expr × Expr)`; `quickIsDefEq` lost
+  its `useHash` parameter and no longer mutates state. `inductiveReduceRec` and
+  `toCtorWhenStruct` take an extra `isNeverProp` callback. `FuelConfig` gained
+  `natMaxSize` — write its default as a literal, not `128 * 1024 * 1024`, since
+  `simp` renormalizes the arithmetic and desynchronizes fixture contexts.
+- **Tests:** `Lean4Lean/Tests/UniformIndOccs.lean` ports upstream's
+  `tests/elab/issue_14576_nonuniform.lean` (five rejection cases, three
+  acceptance cases) plus the mutual defeq-parameter case from
+  `tests/elab/inductiveDefeqParams.lean`. `Tests/NestedInductive.lean` gained
+  `badUniformDecl`, whose ill-typed dropped parameter sits beside a uniform
+  occurrence so the uniformity check cannot preempt the nested-parameter check.
+- **Axiom note:** no new axiom or `sorry`; the frontier is unchanged at 22.
+  Dropping the union-find cache removes `ptrEqExpr_eq` from the axiom
+  dependencies of every `#print axioms` guard that reached it through
+  `quickIsDefEq`.
+- **Removal condition:** upstream lean4lean adopts v4.33.1 and mirrors these
+  kernel changes; the fork then rebases onto its versions.
 
 ## Review checklist
 

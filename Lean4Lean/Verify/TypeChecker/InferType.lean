@@ -1,5 +1,4 @@
 import Lean4Lean.Verify.TypeChecker.Reduce
-import Lean4Lean.Verify.EquivManager
 
 open Lean4Lean
 
@@ -992,7 +991,9 @@ theorem inferType'.WF
     · exact { wf with inferTypeC_wf := hic wf.inferTypeC_wf }
     · exact { wf with inferTypeI_wf := hic wf.inferTypeI_wf }
   split
-  · extract_lets G1; split <;> [split; skip]
+  · extract_lets G1
+    refine (checkLitSize.WF (Q := fun _ s' => s' = _) rfl).bind fun _ _ _ h => ?_
+    subst h; split <;> [split; skip]
     · refine .getEnv <| (M.WF.liftExcept envGet.WF).lift.bind fun _ _ _ h => ?_
       have ⟨_, h, _⟩ := c.trenv.find? h <|
         (c.safePrimitives h (literal_is_primitive (.inl rfl))).1 ▸ DefinitionSafety.le_safe

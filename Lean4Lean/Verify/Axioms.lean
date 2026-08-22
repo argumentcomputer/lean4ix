@@ -122,7 +122,7 @@ namespace Level
 
 `Lean.Level.normalize` and four of its helpers are `partial def`s, so they are opaque and nothing
 can be proved about them. The `Total` namespace below is a clause-by-clause copy of
-[Lean's `Lean/Level.lean`](https://github.com/leanprover/lean4/blob/v4.33.0-rc2/src/Lean/Level.lean#L319-L404),
+[Lean's `Lean/Level.lean`](https://github.com/leanprover/lean4/blob/v4.33.1/src/Lean/Level.lean#L319-L404),
 under the same names, with the termination proofs supplied. That makes `normalize_eq` below a
 purely syntactic trust assumption, checkable by reading the two definitions side by side;
 `Lean4Lean.Tests.LevelStd` also checks it on a finite corpus of levels.

@@ -1,0 +1,55 @@
+name: Update Lean toolchain and pinned deps
+
+on:
+  schedule:
+    # Daily at 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      # create-pull-request takes its base from the checked-out branch, and the
+      # action passes no `base` of its own, so this is what points the update PR
+      # at `dev`. `dev` is already the default branch; naming it keeps the PR
+      # off `master`, which only mirrors digama0/lean4lean (see repo-sync.yml)
+      # and would discard the commit on its next force-sync.
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+
+      # Mint a token from the GitHub App so the opened PR triggers CI; pushes
+      # made with GITHUB_TOKEN do not. Same App as repo-sync.yml.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ secrets.TOKEN_APP_ID }}
+          private-key: ${{ secrets.TOKEN_APP_PRIVATE_KEY }}
+
+      # `dev` carries the fork's bump_mode/release_channel support; `main` only
+      # mirrors upstream, which silently ignores these inputs. `pinned-tags`
+      # suits this package: batteries is pinned to a Lean version tag rather
+      # than tracking a branch, so its `rev` moves with the toolchain; a
+      # dependency pinned to a commit hash is reported and left alone. A PR is
+      # opened on an update/lean-{release} branch whether or not the build
+      # passes, so an incompatible release shows up as a failing PR to review --
+      # expected here, where a toolchain bump can break the kernel internals
+      # this package mirrors.
+      #
+      # Only the Lean half is automated. flake.nix resolves the toolchain from
+      # `lean-toolchain` through lean4-nix's vendored release table, so nix.yml
+      # fails at evaluation on a release that table has not recorded yet. Those
+      # hashes arrive through lean4-nix's own lean-update PR, which will not
+      # have merged by the time this job runs, so bumping the `lean4-nix` flake
+      # input here would only add unrelated churn. It stays a manual follow-up
+      # on the update PR once lean4-nix has landed the release.
+      - uses: argumentcomputer/lean-update@dev
+        with:
+          bump_mode: pinned-tags
+          on_update_fails: pr
+          token: ${{ steps.app-token.outputs.token }}

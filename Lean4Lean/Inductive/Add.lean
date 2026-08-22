@@ -107,6 +107,11 @@ instance : MonadLCtx M where
 @[inline] def withEnv (env : Environment) (x : M α) : M α :=
   withReader (fun c => { c with env }) x
 
+/-- Run an action under a different universe parameter list. The recursors are checked under
+their own parameters, which carry the extra eliminator level the declaration itself lacks. -/
+@[inline] def withLParams (lparams : List Name) (x : M α) : M α :=
+  withReader (fun c => { c with lparams }) x
+
 /-- Run a closed-metadata action without inheriting validation-local
 declarations.  All other reader fields, including the staged environment and
 fuel, are preserved exactly. -/
@@ -2652,6 +2657,39 @@ def mkRecRules (indTypes : Array InductiveType) (elimLevel : Level) (stats : Ind
     rules := rules.push rule
   return rules.toList
 
+/-- Defensively type-checks the generated recursors.
+
+`run` installs a recursor and its computation rules without re-checking them. This verifies that
+(1) each recursor's type is well typed, and (2) each computation rule is type-preserving: reducing
+the recursor applied to a constructor yields a term whose type is the recursor's declared result
+type. This catches a recursor whose minor-premise type and reduction rule disagree; checking only
+that a rule's right-hand side has *some* type is insufficient, because an under-applied minor
+premise is still a well-typed (function) term. -/
+def checkRecursors (indTypes : Array InductiveType) (elimLevel : Level)
+    (stats : InductiveStats) (motives minors : Array Expr) : M Unit := do
+  let {lparams, ..} ← read
+  let lvls := getRecLevels elimLevel stats.levels
+  withLParams (getRecLevelParams elimLevel lparams) do
+  for h : dIdx in [:indTypes.size] do
+    let indType := indTypes[dIdx]
+    let recName := mkRecName indType.name
+    let recCi ← (← read).env.get recName
+    -- (1) The recursor type must be well typed.
+    _ ← (TypeChecker.checkType recCi.type : TypeChecker.M Expr)
+    let recPre := mkAppN (mkAppN (mkAppN (.const recName lvls) stats.params) motives) minors
+    -- (2) Each computation rule must preserve types.
+    for ctor in indType.ctors do
+      mkRecInfos.loopCtorArgs stats ctor.type fun t bu _ => do
+        let (_, itIndices) := getIIndices stats t
+        let introApp := mkAppN (mkAppN (.const ctor.name stats.levels) stats.params) bu
+        let lhs := (mkAppN recPre itIndices).app introApp
+        let expected ← inferType lhs
+        let reduct ← whnf lhs
+        let actual ← inferType reduct
+        unless ← isDefEq actual expected do
+          throw <| .other s!"generated recursor computation rule for '{ctor.name
+            }' is not type-preserving"
+
 def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Environment := do
   let isUnsafe := (← read).safety != .safe
   let indTypes := types.toArray
@@ -2694,6 +2732,7 @@ def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Envir
       numIndices := stats.nindices[dIdx]!
       name, all, numMotives, numMinors, rules, k, isUnsafe
     }
+  withEnv env <| checkRecursors indTypes elimLevel stats motives minors
   pure env
 
 end AddInductive
@@ -2939,6 +2978,61 @@ def checkNoNestedAux (n : Name) (e : Expr) : Except Exception Unit := do
       | _ => false).isSome then
     throw <| .other s!"invalid declaration '{n}', it uses the reserved prefix '_nested'"
 
+/-- Checks the occurrence of a datatype being declared at the head of `e`, if there is one.
+Returns `true` when the occurrence was checked and `e`'s subterms need not be revisited. -/
+def checkUniformIndOcc (lvls : List Level) (indNames : List Name) (nparams : Nat)
+    (e : Expr) (offset : Nat) : Except Exception Bool := do
+  let .const c ls := e.getAppFn | return false
+  unless indNames.contains c do return false
+  let args := e.getAppArgs
+  -- Over-applied: descend, so that occurrences in the indices are checked too. The parameter
+  -- application itself is visited as a subterm of `e` and checked then.
+  if args.size > nparams then return false
+  let ok := args.size == nparams && offset ≥ nparams && ls == lvls
+    && (List.range nparams).all fun i => args[i]! == .bvar (offset - 1 - i)
+  unless ok do
+    throw <| .other s!"invalid occurrence of datatype '{c}' being declared: it must be applied \
+      to the parameters and universe levels of the mutual declaration"
+  return true
+
+/-- Checks that every occurrence of a datatype being declared in `e` is applied to the
+declaration's universe levels and to its parameters, which at binder depth `offset` are the bound
+variables `#(offset-1) … #(offset-nparams)`. That those binders really are the parameters is
+established later, by the parameter check in `checkConstructors`. -/
+def checkUniformIndOccsIn (lvls : List Level) (indNames : List Name) (nparams : Nat) :
+    Expr → Nat → Except Exception Unit
+  | e, offset => do
+    if ← checkUniformIndOcc lvls indNames nparams e offset then return
+    match e with
+    | .forallE _ d b _ | .lam _ d b _ =>
+      checkUniformIndOccsIn lvls indNames nparams d offset
+      checkUniformIndOccsIn lvls indNames nparams b (offset + 1)
+    | .letE _ t v b _ =>
+      checkUniformIndOccsIn lvls indNames nparams t offset
+      checkUniformIndOccsIn lvls indNames nparams v offset
+      checkUniformIndOccsIn lvls indNames nparams b (offset + 1)
+    | .app f a =>
+      checkUniformIndOccsIn lvls indNames nparams f offset
+      checkUniformIndOccsIn lvls indNames nparams a offset
+    | .mdata _ b => checkUniformIndOccsIn lvls indNames nparams b offset
+    | .proj _ _ b => checkUniformIndOccsIn lvls indNames nparams b offset
+    | _ => pure ()
+
+/-- Runs `checkUniformIndOccsIn` over every constructor type of the declaration.
+
+Later phases inspect the constructor types modulo `whnf`, which can erase an occurrence (as in
+`(fun _ => Unit) (T Nat)`), and the parametric arguments of a nested occurrence are dropped from
+the auxiliary declaration altogether, so a non-uniform occurrence could escape checking there.
+Reduction never creates an occurrence of a datatype being declared, since those are not yet in the
+environment, so checking the syntactic occurrences here covers all of them. -/
+def checkUniformIndOccs (lparams : List Name) (nparams : Nat) (types : List InductiveType) :
+    Except Exception Unit := do
+  let lvls := lparams.map Level.param
+  let indNames := types.map (·.name)
+  for indType in types do
+    for ctor in indType.ctors do
+      checkUniformIndOccsIn lvls indNames nparams ctor.type 0
+
 def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (fuel : FuelConfig := {}) :
     Except Exception Environment := do
@@ -2947,6 +3041,7 @@ def Environment.addInductive (env : Environment) (lparams : List Name) (nparams 
     for ctor in indType.ctors do
       env.checkNoMVarNoFVar ctor.name ctor.type
       checkNoNestedAux ctor.name ctor.type
+  checkUniformIndOccs lparams nparams types
   let res ← ElimNestedInductive.run fuel.inductiveFuel nparams types env
     |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
   let numNested := res.aux2nested.size

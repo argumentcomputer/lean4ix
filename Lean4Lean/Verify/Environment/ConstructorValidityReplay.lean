@@ -11366,7 +11366,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.cvmStagedPreFamilyInput' depends on axi
  sorryAx,
  Classical.choice,
  ptrEqConstantInfo_eq,
- ptrEqExpr_eq,
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,

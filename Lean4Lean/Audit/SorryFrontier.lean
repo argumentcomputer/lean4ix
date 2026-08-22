@@ -58,7 +58,6 @@ import Lean4Lean.Verify.Environment.Normalization
 import Lean4Lean.Verify.Environment.NormalizationMatrix
 import Lean4Lean.Verify.Environment.SingletonParityMatrix
 import Lean4Lean.Verify.Environment.SingletonParityReplay
-import Lean4Lean.Verify.EquivManager
 import Lean4Lean.Verify.Expr
 import Lean4Lean.Verify.Level
 import Lean4Lean.Verify.LocalContext

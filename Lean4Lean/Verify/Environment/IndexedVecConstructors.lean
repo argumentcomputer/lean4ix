@@ -887,6 +887,7 @@ theorem nilCandidateInductiveReduceRec
         (fun e => TypeChecker.Inner.whnf e)
         (fun e => TypeChecker.Inner.inferType e)
         TypeChecker.Inner.isDefEq
+        TypeChecker.Inner.isNeverProp
         methods (tcContext nilCandidateAlphaLctx) state =
       .ok (none, state) := by
   unfold inductiveReduceRec
@@ -1656,9 +1657,9 @@ def ctorIndexedVecApp (alpha index : Expr) : Expr :=
 theorem ctorIndexedVecInductiveReduceRec
     {m : Type → Type} [Monad m]
     (alpha index : Expr) (whnf inferType : Expr → m Expr)
-    (isDefEq : Expr → Expr → m Bool) :
+    (isDefEq : Expr → Expr → m Bool) (isNeverProp : Expr → m Bool) :
     inductiveReduceRec ctorEnv (ctorIndexedVecApp alpha index)
-      whnf inferType isDefEq = pure none := by
+      whnf inferType isDefEq isNeverProp = pure none := by
   unfold inductiveReduceRec
   rw [ctorIndexedVecAppGetAppFn]
   simp only

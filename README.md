@@ -118,8 +118,8 @@ If you run this as is (with no additional arguments), it will check every olean 
       * `Basic.lean`: translating environments
       * `Lemmas.lean`: properties of `TrEnv`
     * `TypeChecker`
-      * `Basic.lean`: typechecker invariants
-      * `EquivManager.lean`: invariants for the union-find defeq cache
+      * `Basic.lean`: typechecker invariants, including the defeq cache
+      * `Reduce.lean`: correctness of the `Nat` literal reductions
       * `InferType.lean`: correctness of `inferType`
       * `WHNF.lean`: correctness of `whnf`
       * `IsDefEq.lean`: correctness of `isDefEq`

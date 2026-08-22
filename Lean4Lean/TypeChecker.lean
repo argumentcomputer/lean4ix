@@ -1,10 +1,10 @@
 import Lean4Lean.Declaration
+import Lean4Lean.PtrEq
 import Lean4Lean.Level
 import Lean4Lean.Quot
 import Lean4Lean.Inductive.Reduce
 import Lean4Lean.Instantiate
 import Lean4Lean.ForEachExprV
-import Lean4Lean.EquivManager
 import Lean4Lean.FuelConfig
 
 namespace Lean4Lean
@@ -19,7 +19,7 @@ structure TypeChecker.State where
   inferTypeC : InferCache := {}
   whnfCoreCache : ExprMap Expr := {}
   whnfCache : ExprMap Expr := {}
-  eqvManager : EquivManager := {}
+  success : Std.HashSet (Expr × Expr) := {}
   failure : Std.HashSet (Expr × Expr) := {}
   unfold : ExprMap Expr := {}
 
@@ -98,6 +98,55 @@ def ensureForallCore (e s : Expr) : RecM Expr := do
   if e.isForall then return e
   throw <| .funExpected (← getEnv) (← getLCtx) s
 
+/-- Upper bound on the size in bytes of `n`'s runtime representation, mirroring the kernel's
+`lean_nat_size_in_bytes`: a scalar occupies one machine word, and a bignum occupies its GMP limb
+count times the limb size. -/
+def natSizeInBytes (n : Nat) : Nat :=
+  let bits := n.log2 + 1
+  -- `n` is boxed once it no longer fits in a machine word minus its tag bit.
+  if bits ≤ 63 then 8 else 8 * ((bits + 63) / 64)
+
+/-- Rejects a `Nat` numeral whose size exceeds `natMaxSize`. `numBytes` is an upper bound on the
+numeral's size, so this may be called before computing it. -/
+def checkNatSize (numBytes : Nat) : RecM Unit := do
+  if numBytes > (← readThe Context).fuel.natMaxSize then
+    throw <| .other "the kernel refused a `Nat` numeral because its size exceeds the maximum; \
+      raise the `natMaxSize` bound to allow it"
+
+/-- `Nat.pow` and `Nat.shiftLeft` take their second argument (the exponent, resp. the shift
+amount) as a machine `UInt32` in the kernel, so reject one that does not fit rather than
+overflowing. -/
+def checkCountArg (count : Nat) (op : String) : RecM Unit := do
+  if count ≥ UInt32.size then
+    throw <| .other s!"the kernel refused to evaluate `{op}` because its second argument does \
+      not fit in a 32-bit unsigned integer"
+
+/-- Bounds the numerals entering the kernel (e.g. source literals) by the same limit `reduceNat`
+enforces on the ones it computes. -/
+def checkLitSize (l : Literal) : RecM Unit := do
+  if let .natVal n := l then checkNatSize (natSizeInBytes n)
+
+/-- `checkNatSize`, conditionally: the size check the binary `Nat` operations that can grow a
+numeral without bound run on their result. -/
+def checkNatSizeIf (checkSize : Bool) (numBytes : Nat) : RecM Unit := do
+  if checkSize then checkNatSize numBytes
+
+/-- Rejects `base ^ exp` when it would exceed `natMaxSize`, without forming it: the result
+occupies at most `natSizeInBytes base * exp` bytes (a `base` of `0` or `1` yields `0`/`1`), and
+the bound is compared by division so the product is never formed either. -/
+def checkPowSize (base exp : Nat) : RecM Unit := do
+  checkCountArg exp "Nat.pow"
+  if base > 1 && exp != 0 && natSizeInBytes base > (← readThe Context).fuel.natMaxSize / exp then
+    throw <| .other "the kernel refused to evaluate `Nat.pow` because the result would exceed \
+      the maximum numeral size; raise the `natMaxSize` bound to allow it"
+
+/-- Rejects `v <<< shift` when it would exceed `natMaxSize`, without forming it: the result is
+`v * 2 ^ shift`, which occupies about `natSizeInBytes v + shift / 8` bytes. `0 <<< _` is `0`. -/
+def checkShiftLeftSize (v shift : Nat) : RecM Unit := do
+  if v != 0 then
+    checkCountArg shift "Nat.shiftLeft"
+    checkNatSize (natSizeInBytes v + shift / 8 + 1)
+
 /-- Checks that `l` does not contain any level parameters not found in the context `tc`. -/
 def checkLevel (tc : Context) (l : Level) : Except Exception Unit := do
   if let some n2 := l.getUndefParam tc.lparams then
@@ -164,6 +213,26 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
     let s ← ensureSortCore r e
     return .sort <| us.foldr mkLevelIMax' s.sortLevel!
 
+/-- Whether `t` and `s` have already been found definitionally equal.
+
+The pair is keyed on the order of the two hashes, so a later query finds the entry whichever way
+round it presents the pair. This is a plain set of pairs rather than an equivalence-closure
+structure on purpose: `isDefEq` is a sound but incomplete semi-decision procedure and so is not
+transitive, and taking the transitive closure of its successes would make its result depend on the
+order in which pairs were checked (lean4#14806). -/
+def succeededBefore (success : Std.HashSet (Expr × Expr)) (t s : Expr) : Bool :=
+  if t.hash < s.hash then
+    success.contains (t, s)
+  else if t.hash > s.hash then
+    success.contains (s, t)
+  else
+    success.contains (t, s) || success.contains (s, t)
+
+@[inherit_doc succeededBefore]
+def cacheSuccess (t s : Expr) : M Unit := do
+  let k := if t.hash ≤ s.hash then (t, s) else (s, t)
+  modify fun st => { st with success := st.success.insert k }
+
 /-- Returns whether `t` and `s` are definitionally equal according to Lean's algorithmic
 definitional equality judgment.
 
@@ -176,14 +245,14 @@ def isDefEqCore (t s : Expr) : RecM Bool := fun m => m.isDefEqCore t s
 
 @[inherit_doc isDefEqCore]
 def isDefEq (t s : Expr) : RecM Bool := do
-  -- Syntactically equivalent expressions are definitionally equal without
-  -- consulting or mutating the equivalence manager.  Besides avoiding
-  -- needless work, this keeps exact checker executions compositional when an
-  -- application argument has precisely the declared domain type.
+  -- Syntactically equivalent expressions are definitionally equal without consulting or
+  -- extending the success cache.  Besides avoiding needless work, this keeps exact checker
+  -- executions compositional when an application argument has precisely the declared domain
+  -- type.
   if t == s then return true
   let r ← isDefEqCore t s
   if r then
-    modify fun st => { st with eqvManager := st.eqvManager.addEquiv t s }
+    cacheSuccess t s
   pure r
 
 /-- Infers the type of application `e`, assuming that `e` is already well-typed. -/
@@ -228,6 +297,11 @@ def getSortLevel (e : Expr) : RecM Level := do
 /-- Checks if `e` is a proposition, that is, if its type is a sort whose level normalizes to
 zero. -/
 def isProp (e : Expr) : RecM Bool := return (← getSortLevel e).isAlwaysZero
+
+/-- Checks if `e` is definitely not a proposition, that is, if its type is a sort whose level
+cannot normalize to zero under any instantiation. This is strictly stronger than `!(← isProp e)`,
+which also holds for the levels that could go either way. -/
+def isNeverProp (e : Expr) : RecM Bool := return (← getSortLevel e).isNeverZero
 
 def invalidProj (e : Expr) : RecM α := do
   throw <| .invalidProj (← getEnv) (← getLCtx) e
@@ -284,6 +358,7 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     return r
   let r ← match e with
     | .lit l =>
+      checkLitSize l
       if !inferOnly then
         match l with
         | .natVal _ => _ ← (← getEnv).get ``Nat
@@ -342,7 +417,7 @@ def reduceRecursor (e : Expr) : RecM (Option Expr) := do
   if env.quotInit then
     if let some r ← quotReduceRec e whnf then
       return r
-  if let some r ← inductiveReduceRec env e whnf inferType isDefEq then
+  if let some r ← inductiveReduceRec env e whnf inferType isDefEq isNeverProp then
     return r
   return none
 
@@ -470,19 +545,31 @@ def rawNatLitExt? (e : Expr) : Option Nat := if e == .natZero then some 0 else e
 
 /-- Reduces the application `f a b` to a Nat literal if `a` and `b` can be reduced to Nat literals.
 
+`checkSize` bounds the size of the result, for the operations that can grow a numeral without
+bound when iterated. Their operands are already bounded, so computing the result before checking
+it is cheap.
+
 Note: `f` should have an (efficient) external implementation. -/
-def reduceBinNatOp (f : Nat → Nat → Nat) (a b : Expr) : RecM (Option Expr) := do
+def reduceBinNatOp (f : Nat → Nat → Nat) (a b : Expr) (checkSize := false) : RecM (Option Expr) := do
   let some v1 := rawNatLitExt? (← whnf a) | return none
   let some v2 := rawNatLitExt? (← whnf b) | return none
+  checkNatSizeIf checkSize (natSizeInBytes (f v1 v2))
   return some <| .lit <| .natVal <| f v1 v2
 
-def reducePowMaxExp : Nat := 1 <<< 24
-
+/-- Reduces `Nat.pow a b`. Unlike the other binary operations this bounds the result *before*
+computing it, since a small exponent already denotes an unrepresentable numeral. -/
 def reducePow (a b : Expr) : RecM (Option Expr) := do
-  let some v1 := rawNatLitExt? (← whnf a) | return none
-  let some v2 := rawNatLitExt? (← whnf b) | return none
-  if v2 > reducePowMaxExp then return none
-  return some <| .lit <| .natVal <| Nat.pow v1 v2
+  let some base := rawNatLitExt? (← whnf a) | return none
+  let some exp := rawNatLitExt? (← whnf b) | return none
+  checkPowSize base exp
+  return some <| .lit <| .natVal <| Nat.pow base exp
+
+/-- Reduces `Nat.shiftLeft a b`, bounding the result before computing it. -/
+def reduceShiftLeft (a b : Expr) : RecM (Option Expr) := do
+  let some v := rawNatLitExt? (← whnf a) | return none
+  let some shift := rawNatLitExt? (← whnf b) | return none
+  checkShiftLeftSize v shift
+  return some <| .lit <| .natVal <| v <<< shift
 
 /-- Reduces the application `f a b` to a boolean expression if `a` and `b` can be reduced to Nat
 literals.
@@ -504,12 +591,13 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     let f := e.appFn!
     if Expr.structuralEq f (.const ``Nat.succ []) then
       let some v := rawNatLitExt? (← whnf e.appArg!) | return none
+      checkNatSize (natSizeInBytes (v + 1))
       return some <| .lit <| .natVal <| v + 1
   else if nargs == 2 then
     let .app (.app (.const f _) a) b := e | return none
-    if f == ``Nat.add then return ← reduceBinNatOp Nat.add a b
-    if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b
-    if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b
+    if f == ``Nat.add then return ← reduceBinNatOp Nat.add a b (checkSize := true)
+    if f == ``Nat.sub then return ← reduceBinNatOp Nat.sub a b (checkSize := true)
+    if f == ``Nat.mul then return ← reduceBinNatOp Nat.mul a b (checkSize := true)
     if f == ``Nat.pow then return ← reducePow a b
     if f == ``Nat.gcd then return ← reduceBinNatOp Nat.gcd a b
     if f == ``Nat.mod then return ← reduceBinNatOp Nat.mod a b
@@ -519,7 +607,7 @@ def reduceNat (e : Expr) : RecM (Option Expr) := do
     if f == ``Nat.land then return ← reduceBinNatOp Nat.land a b
     if f == ``Nat.lor then return ← reduceBinNatOp Nat.lor a b
     if f == ``Nat.xor then return ← reduceBinNatOp Nat.xor a b
-    if f == ``Nat.shiftLeft then return ← reduceBinNatOp Nat.shiftLeft a b
+    if f == ``Nat.shiftLeft then return ← reduceShiftLeft a b
     if f == ``Nat.shiftRight then return ← reduceBinNatOp Nat.shiftRight a b
   return none
 
@@ -596,12 +684,9 @@ equality, and otherwise decides two sorts by level equivalence and two literals 
 returning `.false` where these disagree. Two lambdas or two for-alls are handed to
 `isDefEqLambda`/`isDefEqForall`, which may return either. All remaining cases — including two
 constants, two free variables, two applications and two projections — are deferred. -/
-def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
-  -- optimization for terms that are already α-equivalent or were previously checked
-  if ← modifyGet fun (.mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m)) =>
-    let (b, m) := m.isEquiv useHash t s
-    (b, .mk a1 a2 a3 a4 a5 a6 a7 (eqvManager := m))
-  then return .true
+def quickIsDefEq (t s : Expr) : RecM LBool := do
+  -- cheap structural check, plus the positive `isDefEq` cache
+  if t == s || succeededBefore (← get).success t s then return .true
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
@@ -844,7 +929,7 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
 
 @[inherit_doc isDefEqCore]
 def isDefEqCore' (t s : Expr) : RecM Bool := do
-  let r ← quickIsDefEq t s (useHash := true)
+  let r ← quickIsDefEq t s
   if r != .undef then return r == .true
 
   if (!t.hasFVar || (← readThe Context).eagerReduce) && s.isConstOf ``true then

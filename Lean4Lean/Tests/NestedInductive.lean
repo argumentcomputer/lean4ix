@@ -29,6 +29,22 @@ def treeDecl : Declaration :=
              (tree (.bvar 1)) .default) .default }] }]
     false
 
+/-- As above, but the dropped parametric argument is ill typed while every occurrence of the
+datatype being declared stays uniform, so the uniformity check of lean4#14582 does not preempt
+the nested-parameter check this test is about. -/
+def badUniformDecl : Declaration :=
+  .inductDecl [] 1
+    [{ name := `Bad1
+       type := .forallE `α (.sort 1) (.sort 1) .default
+       ctors := [{
+         name := `Bad1.node
+         type := .forallE `α (.sort 1)
+           (.forallE `es
+             (mkApp2 (mkConst ``Prod [.zero, .zero])
+               (mkApp (mkConst `Bad1 []) (.bvar 0)) (mkConst ``Bool.true))
+             (mkApp (mkConst `Bad1 []) (.bvar 1)) .default) .default }] }]
+    false
+
 /-- As above, but the dropped parametric argument `Tree0 Bool.true` is ill typed. -/
 def badDecl : Declaration :=
   .inductDecl [] 1
@@ -57,6 +73,15 @@ run_meta do
   -- ... and an ill-typed dropped parameter must still be caught.
   match Lean4Lean.addDecl kenv badDecl with
   | .ok _ => throwError "nested inductive with an ill-typed parameter was accepted"
+  | .error _ => pure ()
+
+  -- The same, with the ill-typed parameter beside a uniform occurrence, so the rejection has to
+  -- come from the nested-parameter check rather than the uniformity check.
+  match Lean4Lean.addDecl kenv badUniformDecl with
+  | .ok _ => throwError "nested inductive with an ill-typed parameter was accepted"
+  | .error (.other msg) =>
+    if "invalid occurrence of datatype".isPrefixOf msg then
+      throwError "the uniformity check preempted the nested-parameter check"
   | .error _ => pure ()
 
 end Lean4Lean.Tests.NestedInductive

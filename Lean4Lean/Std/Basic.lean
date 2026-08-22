@@ -1,7 +1,6 @@
 import Batteries.CodeAction
 import Batteries.Data.Array.Lemmas
 import Batteries.Data.HashMap.Basic
-import Batteries.Data.UnionFind.Basic
 import Batteries.Tactic.SeqFocus
 
 open Std
@@ -217,6 +216,12 @@ instance [BEq α] [PartialEquivBEq α] [BEq β] [PartialEquivBEq β] : PartialEq
 instance [BEq α] [EquivBEq α] [BEq β] [EquivBEq β] : EquivBEq (α × β) where
   rfl := by simp [(· == ·)]
 
+instance [BEq α] [Hashable α] [LawfulHashable α] [BEq β] [Hashable β] [LawfulHashable β] :
+    LawfulHashable (α × β) where
+  hash_eq a b h := by
+    simp [(· == ·)] at h
+    simp [hash, LawfulHashable.hash_eq _ _ h.1, LawfulHashable.hash_eq _ _ h.2]
+
 instance [BEq α] [PartialEquivBEq α] : PartialEquivBEq (List α) where
   symm := by
     simp [(· == ·)]; intro a b
@@ -257,27 +262,3 @@ instance : LawfulEqOrd UInt64 where
 
 end UInt64
 
-namespace Batteries.UnionFind
-
-@[simp] theorem size_empty : (∅ : UnionFind).size = 0 := rfl
-
-@[simp] theorem size_push (uf : UnionFind) : uf.push.size = uf.size + 1 := by
-  simp [push, size]
-
-@[simp] theorem size_link (uf : UnionFind) (i j hi) : (uf.link i j hi).size = uf.size := by
-  simp [link, size]
-
-@[simp] theorem size_union (uf : UnionFind) (i j) : (uf.union i j).size = uf.size := by
-  simp [union, size]
-
-theorem Equiv.eq_of_ge_size (h : Equiv uf a b) (h2 : uf.size ≤ a) : a = b := by
-  simp [Equiv, rootD, Nat.not_lt.2 h2] at h; split at h
-  · have := (uf.root ⟨b, ‹_›⟩).2; omega
-  · exact h
-
-theorem Equiv.lt_size (h : Equiv uf a b) : a < uf.size ↔ b < uf.size :=
-  suffices ∀ {a b}, Equiv uf a b → b < uf.size → a < uf.size from ⟨this h.symm, this h⟩
-  fun h h1 => Nat.not_le.1 fun h2 => Nat.not_le.2 h1 <| h.eq_of_ge_size h2 ▸ h2
-
-
-end Batteries.UnionFind

@@ -28,4 +28,8 @@ structure FuelConfig where
   recDepth    : Nat := 10000
   /-- Shared fuel for the structural loops in `Inductive/Add.lean`. -/
   inductiveFuel : Nat := 1000
+  /-- Upper bound, in bytes, on the `Nat` numerals the kernel will accept or compute while
+  reducing `Nat` literals. Bounds the memory and time a single reduction can consume. The
+  native kernel spells this bound `LEAN_NAT_MAX_SIZE` and defaults it to the same 128 MB. -/
+  natMaxSize : Nat := 134217728 -- 128 MB; a literal so `simp` cannot renormalize it
   deriving Repr, Inhabited, Lean.FromJson, Lean.ToJson

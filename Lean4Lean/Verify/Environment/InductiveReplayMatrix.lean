@@ -718,7 +718,6 @@ info: 'Lean4Lean.CompleteInductiveReplay.completeReplayMatrix_metadataComplete' 
  sorryAx,
  Classical.choice,
  Lean4Lean.ptrEqConstantInfo_eq,
- Lean4Lean.ptrEqExpr_eq,
  Quot.sound,
  Lean.Expr.abstractRange_eq,
  Lean.Expr.abstract_eq,

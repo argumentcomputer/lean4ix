@@ -9,6 +9,7 @@ open Kernel
 section
 variable [Monad m] (env : Environment)
     (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool)
+    (isNeverProp : Expr → m Bool)
 
 def getFirstCtor (dName : Name) : Option Name := do
   let some (.inductInfo info) := env.find? dName | none
@@ -60,8 +61,11 @@ def toCtorWhenStruct (inductName : Name) (e : Expr) : m Expr := do
     return e
   let eType ← whnf (← inferType e)
   if !eType.getAppFn.isConstOf inductName then return e
-  let .sort u ← whnf (← inferType eType) | unreachable!
-  unless u.isNeverZero do return e
+  -- Lean tests `is_prop eType` and declines to expand when it holds; lean4lean instead requires
+  -- the level to be *never* zero, so an uncertain level declines too (see `divergences.md`).
+  -- Either way the level comes from a sort-ensuring check, so a non-sort type raises a kernel
+  -- error rather than reaching an unreachable branch.
+  unless ← isNeverProp eType do return e
   return expandEtaStruct env eType e
 
 def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := do
@@ -78,7 +82,8 @@ constructor to everything before the indices in the recursor application (its pa
 and minor premises) and then to the fields of the constructor application; any arguments after the
 major premise are re-applied to the result. -/
 def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
-    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool) :
+    (whnf : Expr → m Expr) (inferType : Expr → m Expr) (isDefEq : Expr → Expr → m Bool)
+    (isNeverProp : Expr → m Bool) :
     m (Option Expr) := do
   let .const recFn ls := e.getAppFn | return none
   let some (.recInfo info) := env.find? recFn | return none
@@ -91,7 +96,7 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
   match ← whnf major with
   | .lit (.natVal n) => major := .natLitToConstructor n
   | .lit (.strVal s) => major ← whnf (.strLitToConstructor s)
-  | e => major ← toCtorWhenStruct env whnf inferType info.getMajorInduct e
+  | e => major ← toCtorWhenStruct env whnf inferType isNeverProp info.getMajorInduct e
   let some rule := getRecRuleFor info major | return none
   let majorArgs := major.getAppArgs
   if rule.nfields > majorArgs.size then return none
