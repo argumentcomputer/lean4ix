@@ -1196,8 +1196,12 @@ to the replacement.
   into three explicit layers. `Params` retains only pattern combinatorics;
   every `ParRed`/`CParRed`/`WHRed.extra` contraction carries an exact
   `IsDefEqU` certificate for its concrete redex and instantiated payload;
-  and `Params.Extension.join` is a separate consumer-supplied `CRDefEq`
-  obligation for every raw registered equation in every well-formed context.
+  `PatternArgumentNonFunction` excludes eta-sensitive under-saturated
+  constructor majors; `StructurePatternCompatibility` names only the local
+  registered-iota/structure-eta critical pair; and `Params.Extension.join`
+  adds a consumer-supplied `CRDefEq` obligation for every raw registered
+  equation in every well-formed context while inheriting both admissibility
+  contracts.
   `CertifiedExtension.covers` records only a match after `VExpr.stripLams`,
   where generated iota and quotient tower bodies actually expose a
   first-order pattern. The durable rationale, trust boundary, and removal
@@ -1206,12 +1210,15 @@ to the replacement.
 - **Downstream impact:** Church--Rosser and head standardization transport the
   local equality certificate through weakening, substitution, context
   conversion, match inversion, and triangle proofs. Only results that invoke
-  raw registered-equation Church--Rosser require `[Params.Extension]`.
+  the repaired `NormalEq.parRed` require the two explicit admissibility
+  classes; raw registered-equation Church--Rosser requires
+  `[Params.Extension]`, which supplies both.
   `VEnv.LE.extra`, `extra_appN`, and `extra_appN_symm` publish the environment
   growth boundary. L4L-16 must construct the whole-live-environment join
   instance through the semantic bridge; the block assembler intentionally
   does not synthesize one.
-- **Tests:** exact guards cover universe-instantiation of matches, the
+- **Tests:** exact guards cover the two public admissibility interfaces,
+  universe-instantiation of matches, the
   generated-iota and `quotDefEq` beta-collapsed certificates, and all three
   `VEnv.LE` transport helpers. Concrete mutual-block and quotient fixtures
   compile the tower obligations. Focused Church--Rosser, head-reduction, and

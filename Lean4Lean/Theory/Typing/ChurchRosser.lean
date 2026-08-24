@@ -1886,8 +1886,69 @@ theorem NormalEq.parRed_extra_propArg
   exact ⟨_, .rfl, .proofIrrel (hB.instN henv .zero l3) (l1.app l3)
     (.defeqU_l henv hΓ hdefeq (l1.app l3))⟩
 
+/-- Saturation boundary for arguments of registered application patterns.
+
+Bare `Params` admits the false schematic rule `drop ctor ↦ zero`, where the
+matched `ctor` can have a function type and its eta expansion no longer
+matches.  Real generated iota patterns instead match a saturated constructor
+major.  An accepted pattern environment must retain that fact explicitly. -/
+class Params.PatternArgumentNonFunction [Params] : Prop where
+  not_forallE :
+    OnCtx Γ (env.IsType univs) →
+    Pat (Pattern.app p₁ p₂) r →
+    (Pattern.app p₁ p₂).Matches (VExpr.app f b) m1 m2 →
+    HasType env univs Γ f (VExpr.forallE A B) →
+    HasType env univs Γ b A →
+    ¬ HasType env univs Γ b (VExpr.forallE C D)
+
+/-- Local compatibility of registered iota contraction with structure eta.
+
+This certificate covers only the `NormalEq.appDF`/`ParRed.extra` critical
+pair whose immediate matched argument is related by a retained `StructEq`
+seed.  It neither joins arbitrary registered equations nor assumes global
+confluence; concrete structure registration must construct it together with
+the corresponding iota rules. -/
+class Params.StructurePatternCompatibility [Params] : Prop where
+  structureArgument :
+    OnCtx Γ (env.IsType univs) →
+    HasType env univs Γ f (VExpr.forallE A B) →
+    HasType env univs Γ f₂ (VExpr.forallE A B) →
+    HasType env univs Γ a A →
+    HasType env univs Γ b A →
+    NormalEq Γ f f₂ →
+    StructEq Γ a b →
+    Pat (Pattern.app p₁ p₂) rr →
+    (Pattern.app p₁ p₂).Matches (VExpr.app f₂ b) m1 m2 →
+    rr.2.OK (IsDefEqU env univs Γ) m1 m2 →
+    IsDefEqU env univs Γ (VExpr.app f₂ b) (rr.1.apply m1 m2) →
+    (∀ x, ParRed Γ (m2 x) (m2' x)) →
+    ∃ e₁', ParRedS Γ (VExpr.app f a) e₁' ∧
+      NormalEq Γ e₁' (rr.1.apply m1 m2')
+
+/-- Consume exactly the registered-iota/structure-eta compatibility
+certificate needed by the remaining `appDF`/`.extra` proof branch. -/
+theorem NormalEq.parRed_extra_structuralArg
+    [Params.StructurePatternCompatibility]
+    {p₁ p₂ : Pattern}
+    {rr : (Pattern.app p₁ p₂).RHS × (Pattern.app p₁ p₂).Check}
+    {f f₂ a b A B m1 m2 m2'}
+    (hΓ : OnCtx Γ (env.IsType univs))
+    (l1 : Γ ⊢ f : .forallE A B) (l2 : Γ ⊢ f₂ : .forallE A B)
+    (l3 : Γ ⊢ a : A) (l4 : Γ ⊢ b : A)
+    (l5 : Γ ⊢ f ≡ₚ f₂) (l6 : StructEq Γ a b)
+    (r1 : Pat (Pattern.app p₁ p₂) rr)
+    (r2 : (Pattern.app p₁ p₂).Matches (VExpr.app f₂ b) m1 m2)
+    (r3 : rr.2.OK (IsDefEqU env univs Γ) m1 m2)
+    (r4 : IsDefEqU env univs Γ (VExpr.app f₂ b) (rr.1.apply m1 m2))
+    (r5 : ∀ x, Γ ⊢ m2 x ≫ m2' x) :
+    ∃ e₁', Γ ⊢ .app f a ≫* e₁' ∧ Γ ⊢ e₁' ≡ₚ rr.1.apply m1 m2' :=
+  Params.StructurePatternCompatibility.structureArgument hΓ l1 l2 l3 l4 l5 l6
+    r1 r2 r3 r4 r5
+
 set_option warn.sorry false in
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.PatternArgumentNonFunction]
+    [Params.StructurePatternCompatibility]
+    (hΓ : OnCtx Γ (IsType env univs)) in
 theorem NormalEq.parRed (H1 : Γ ⊢ e₁ ≡ₚ e₂) (H2 : Γ ⊢ e₂ ≫ e₂') :
     ∃ e₁', Γ ⊢ e₁ ≫* e₁' ∧ Γ ⊢ e₁' ≡ₚ e₂' := by
   induction H1 generalizing e₂' with
@@ -2007,7 +2068,9 @@ theorem NormalEq.parRed (H1 : Γ ⊢ e₁ ≡ₚ e₂) (H2 : Γ ⊢ e₂ ≫ e�
     exact ⟨_, .rfl, .structural (hs.parRed_right hΓ H2)⟩
   | proofIrrel l1 l2 l3 => exact ⟨_, .rfl, .proofIrrel l1 l2 (H2.hasType hΓ l3)⟩
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.PatternArgumentNonFunction]
+    [Params.StructurePatternCompatibility]
+    (hΓ : OnCtx Γ (IsType env univs)) in
 theorem NormalEq.parRedS (H1 : Γ ⊢ e₁ ≡ₚ e₂) (H2 : Γ ⊢ e₂ ≫* e₂') :
     ∃ e₁', Γ ⊢ e₁ ≫* e₁' ∧ Γ ⊢ e₁' ≡ₚ e₂' := by
   induction H2 with
@@ -2023,7 +2086,9 @@ def CRDefEq (Γ : List VExpr) (e₁ e₂ : VExpr) : Prop :=
   (∃ A, Γ ⊢ e₁ : A) ∧ (∃ A, Γ ⊢ e₂ : A) ∧
   ∃ e₁' e₂', Γ ⊢ e₁ ≫* e₁' ∧ Γ ⊢ e₂ ≫* e₂' ∧ Γ ⊢ e₁' ≡ₚ e₂'
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.PatternArgumentNonFunction]
+    [Params.StructurePatternCompatibility]
+    (hΓ : OnCtx Γ (IsType env univs)) in
 theorem ParRedS.church_rosser  (H : Γ ⊢ e : A)
     (H1 : Γ ⊢ e ≫* e₁) (H2 : Γ ⊢ e ≫* e₂) : Γ ⊢ e₁ ≫≪ e₂ := by
   refine ⟨⟨_, H1.hasType hΓ H⟩, ⟨_, H2.hasType hΓ H⟩, ?_⟩
@@ -2060,7 +2125,9 @@ variable! (hΓ : OnCtx Γ (IsType env univs)) in
 theorem CRDefEq.symm : Γ ⊢ e₁ ≫≪ e₂ → Γ ⊢ e₂ ≫≪ e₁
   | ⟨h1, h2, _, _, h3, h4, h5⟩ => ⟨h2, h1, _, _, h4, h3, h5.symm hΓ⟩
 
-variable! (hΓ : OnCtx Γ (IsType env univs)) in
+variable! [Params.PatternArgumentNonFunction]
+    [Params.StructurePatternCompatibility]
+    (hΓ : OnCtx Γ (IsType env univs)) in
 theorem CRDefEq.trans : Γ ⊢ e₁ ≫≪ e₂ → Γ ⊢ e₂ ≫≪ e₃ → Γ ⊢ e₁ ≫≪ e₃
   | ⟨l1, ⟨_, l2⟩, _, _, l3, l4, l5⟩, ⟨_, r2, _, _, r3, r4, r5⟩ => by
     let ⟨_, _, _, _, m1, m2, m3⟩ := l4.church_rosser hΓ l2 r3
@@ -2084,7 +2151,9 @@ or pattern membership into an automatically trusted rewrite. Lambda-tower
 registrations expose their useful pattern only underneath the tower, after
 beta collapse, without pretending that the closed tower itself matches a
 first-order pattern. -/
-class Params.Extension [Params] where
+class Params.Extension [Params] extends
+    Params.PatternArgumentNonFunction,
+    Params.StructurePatternCompatibility where
   join : OnCtx Γ (env.IsType univs) →
     env.defeqs df → (∀ l ∈ ls, l.WF univs) → ls.length = df.uvars →
     CRDefEq Γ (df.lhs.instL ls) (df.rhs.instL ls)

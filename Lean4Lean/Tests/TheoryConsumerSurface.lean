@@ -1,5 +1,6 @@
 import Lean4Lean.Theory.Literals
 import Lean4Lean.Theory.Projection
+import Lean4Lean.Theory.Typing.ChurchRosser
 import Lean4Lean.Theory.Typing.InductiveLemmas
 import Lean4Lean.Theory.Typing.UniqueTyping
 
@@ -26,6 +27,12 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.SpineWF.weak'_inv
 #check VEnv.ConstructorHead
 #check VEnv.ConstructorHead.mono
+#check VEnv.Params.PatternArgumentNonFunction
+#check VEnv.Params.PatternArgumentNonFunction.not_forallE
+#check VEnv.Params.StructurePatternCompatibility
+#check VEnv.Params.StructurePatternCompatibility.structureArgument
+#check VEnv.NormalEq.parRed_extra_structuralArg
+#check VEnv.NormalEq.parRed
 #check VInductDecl.ElimMode.ofBool
 #check VStructureView.etaRebuild
 #check VStructureView.MinorsWF
