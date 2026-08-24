@@ -1511,11 +1511,12 @@ theorem d2IotaWHRed (univs : Nat)
     (ParamsD2.d2IotaRule_levelsLength univs rule typing) hspine hcollapse
     hck.choose hck.choose_spec.1 hck.choose_spec.2).action
 
-/-- The bundle-conditioned form: with the full `D2BlockStepExact` premise —
-exactly `d2SortInvSExact`'s conditioning — the per-rule capture-spine and
-collapse hypotheses discharge internally, and the D2 statement becomes the
-precise conditional analogue of the discharged `d0IotaWHRed` (modulo the
-`redexSelf`/`AType` inputs D2's engine route does not consume). -/
+/-- The bundle-conditioned form: with the smaller `D2BlockStepExact` premise
+— exactly `d2SortInvSExact`'s conditioning — the paired five-rule Tree replay
+and internally proved Nat replays discharge the per-rule capture-spine and
+collapse hypotheses.  The D2 statement becomes the precise conditional
+analogue of the discharged `d0IotaWHRed` (modulo the `redexSelf`/`AType`
+inputs D2's engine route does not consume). -/
 theorem d2IotaWHRed_ofBlockStep (univs : Nat)
     (h : ParamsD2.D2BlockStepExact univs) :
     letI : Params := ParamsD2.d2Params univs
@@ -2181,8 +2182,13 @@ info: 'Lean4Lean.SExpr.Reducibility.IndCand.d2IotaWHRed_ofBlockStep' depends on 
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert,
  Lean4Lean.SExpr.ParamsD0.d0Def_fresh._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatRecTypeV_eq._native.native_decide.ax_1_1,
  Lean4Lean.SExpr.ParamsD0.probeNatSuccCtorTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatSuccRuleTypeV_eq._native.native_decide.ax_1_1,
  Lean4Lean.SExpr.ParamsD0.probeNatTypeTypeV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleLhsV_eq._native.native_decide.ax_1_1,
+ Lean4Lean.SExpr.ParamsD0.probeNatZeroRuleTypeV_eq._native.native_decide.ax_1_1,
  Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutA_none._native.native_decide.ax_1_1,
  Lean4Lean.SExpr.ParamsD1.d0Classify_d1MutB_none._native.native_decide.ax_1_1,
  Lean4Lean.SExpr.ParamsD1.d1MutA_fresh._native.native_decide.ax_1_1,

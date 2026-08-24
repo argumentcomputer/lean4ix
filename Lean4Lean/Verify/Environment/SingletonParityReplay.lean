@@ -2782,7 +2782,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonNormalizationReplays' depends 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -2818,7 +2817,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonReplayMatrix' depends on axiom
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

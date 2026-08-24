@@ -110,12 +110,14 @@ theorem getUndefParam_none {l : Level} (hmv : l.hasMVar' = false) :
       s = none ∧ ∃ u', VLevel.ofLevel Us l = some u' := by
     simp; split <;> rename_i h
     · simp; revert h
-      simp [getUndefParam.F]; split <;> [simp; split <;> [split <;> simp; simp]]
+      simp [getUndefParam.F, hasParam_eq]
+      split <;> [simp; split <;> [split <;> simp; simp]]
       rintro rfl; simp at *
       exact ofLevel_of_not_hasParam Us ‹_› hmv
     · refine fun h' => let ⟨h1, h2⟩ := H h'; have := ?_; ⟨this, h2 ?_⟩
       · revert h h1
-        simp [getUndefParam.F]; split <;> [simp; split <;> [split <;> simp; simp]]
+        simp [getUndefParam.F, hasParam_eq]
+        split <;> [simp; split <;> [split <;> simp; simp]]
       · revert h h1; subst s
         cases (getUndefParam.F Us l).run none; simp; rintro rfl rfl; rfl
   have lt {n a} : n + 1 < a → n < a := by omega
@@ -130,7 +132,7 @@ theorem getUndefParam_none {l : Level} (hmv : l.hasMVar' = false) :
     have ⟨h, _, h1⟩ := ih1 hmv.1 _ h
     exact ⟨h, fun _ => ⟨_, _, h1, _, h2, rfl⟩⟩
   | param =>
-    simp [getUndefParam.F, hasParam', List.idxOf_lt_length_iff, *]
+    simp [getUndefParam.F, hasParam_eq, hasParam', List.idxOf_lt_length_iff, *]
     split <;> simp [*]
   | _ => simp [*]
 
@@ -149,13 +151,14 @@ def substParams' (red : Bool) : Level → Level
 
 theorem substParams_eq_self {u : Level} (h : u.hasParam' = false) :
     substParams' s red u = u := by
-  induction u generalizing red <;> simp_all [substParams', hasParam']
+  induction u generalizing red <;> simp_all [substParams', hasParam_eq, hasParam']
 
 open private substParams.go from Lean.Level in
 @[simp] theorem substParams_eq (u : Level) (s : Name → Option Level) :
     substParams u s = substParams' (fun x => (s x).getD (.param x)) true u := by
   unfold substParams
-  induction u <;> simp [substParams.go, substParams', hasParam', ← Bool.or_eq_true] <;>
+  induction u <;>
+    simp [substParams.go, substParams', hasParam_eq, hasParam', ← Bool.or_eq_true] <;>
     split <;> simp [*, substParams_eq_self] <;> simp_all [substParams_eq_self]
 
 theorem substParams_id {u : Level} :

@@ -15,7 +15,9 @@ theorem isDefEqLambda.WF {c : VContext} {s : VState}
     RecM.WF (c.withMLC m) s (isDefEqLambda e₁ e₂ subst) fun b _ =>
       b → (c.withMLC m).IsDefEqU ei₁' ei₂' := by
   unfold isDefEqLambda; let c' := c.withMLC m
-  split <;> [rename_i n₁ d₁ b₁ bi₁ n₂ d₂ b₂ bi₂; (simp [hsubst]; exact isDefEq.WF he₁ he₂)]
+  split <;>
+    [rename_i n₁ d₁ b₁ bi₁ n₂ d₂ b₂ bi₂;
+      (simp [hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]; exact isDefEq.WF he₁ he₂)]
   extract_lets F di₁ di₂; unfold di₁ di₂
   simp at he₁ he₂
   let .lam (ty' := t₁') (body' := b₁') ⟨_, a1⟩ a2 a3 := he₁
@@ -29,7 +31,7 @@ theorem isDefEqLambda.WF {c : VContext} {s : VState}
     split <;> rename_i h
     · refine .pureBind <| this ‹_› ?_
       exact a2.eqv (Expr.instantiateList_eqv h) |>.uniq c'.Ewf (.refl c'.Ewf c'.Δwf) b2
-    simp [hsubst]
+    simp [hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]
     refine (isDefEq.WF a2 b2).bind fun b _ _ h1 => ?_
     split <;> [exact .pure nofun; rename_i h]
     simp at h; exact this rfl (h1 h)
@@ -38,7 +40,9 @@ theorem isDefEqLambda.WF {c : VContext} {s : VState}
   have ⟨b₁'', a3', eq⟩ := a3.defeqDFC' c'.Ewf <| .cons (.refl c'.Ewf c'.Δwf) (by nofun) (.vlam tt')
   unfold F; split <;> rename_i h
   · extract_lets d₂'
-    have : d₂' = d₂.instantiateList fvs := by split at hx <;> [simp [d₂', hsubst]; exact hx]
+    have : d₂' = d₂.instantiateList fvs := by
+      split at hx <;>
+        [simp [d₂', hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]; exact hx]
     clear_value d₂'; subst this
     refine .withLocalDecl b2 b1 .rfl fun v mwf' _ _ _ => ?_
     have b3' := b3.inst_fvar c.Ewf mwf'.1.tr.wf
@@ -48,7 +52,7 @@ theorem isDefEqLambda.WF {c : VContext} {s : VState}
       |>.mono fun _ _ _ h hb => ?_
     have ⟨_, bb⟩ := eq.symm.trans c'.Ewf mwf'.1.tr.wf.toCtx (h hb)
     exact ⟨_, .symm <| .lamDF tt'.symm <| bb.symm⟩
-  · simp [Expr.hasLooseBVars] at h
+  · simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq] at h
     refine .stateWF fun wf => ?_
     have {bᵢ : Expr} {bᵢ'} (h : bᵢ.looseBVarRange' = 0)
         (a3 : TrExprS c'.venv c'.lparams ((none, .vlam t₂') :: c'.vlctx)
@@ -85,7 +89,9 @@ theorem isDefEqForall.WF {c : VContext} {s : VState}
     RecM.WF (c.withMLC m) s (isDefEqForall e₁ e₂ subst) fun b _ =>
       b → (c.withMLC m).IsDefEqU ei₁' ei₂' := by
   unfold isDefEqForall; let c' := c.withMLC m
-  split <;> [rename_i n₁ d₁ b₁ bi₁ n₂ d₂ b₂ bi₂; (simp [hsubst]; exact isDefEq.WF he₁ he₂)]
+  split <;>
+    [rename_i n₁ d₁ b₁ bi₁ n₂ d₂ b₂ bi₂;
+      (simp [hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]; exact isDefEq.WF he₁ he₂)]
   extract_lets F di₁ di₂; unfold di₁ di₂
   simp at he₁ he₂
   let .forallE (ty' := t₁') (body' := b₁') ⟨_, a1⟩ _ a2 a3 := he₁
@@ -99,7 +105,7 @@ theorem isDefEqForall.WF {c : VContext} {s : VState}
     split <;> rename_i h
     · refine .pureBind <| this ‹_› ?_
       exact a2.eqv (Expr.instantiateList_eqv h) |>.uniq c'.Ewf (.refl c'.Ewf c'.Δwf) b2
-    simp [hsubst]
+    simp [hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]
     refine (isDefEq.WF a2 b2).bind fun b _ _ h1 => ?_
     split <;> [exact .pure nofun; rename_i h]
     simp at h; exact this rfl (h1 h)
@@ -108,7 +114,9 @@ theorem isDefEqForall.WF {c : VContext} {s : VState}
   have ⟨b₁'', a3', eq⟩ := a3.defeqDFC' c'.Ewf <| .cons (.refl c'.Ewf c'.Δwf) (by nofun) (.vlam tt')
   unfold F; split <;> rename_i h
   · extract_lets d₂'
-    have : d₂' = d₂.instantiateList fvs := by split at hx <;> [simp [d₂', hsubst]; exact hx]
+    have : d₂' = d₂.instantiateList fvs := by
+      split at hx <;>
+        [simp [d₂', hsubst, Expr.instantiateRev_eq, Expr.instantiate_eq]; exact hx]
     clear_value d₂'; subst this
     refine .withLocalDecl b2 b1 .rfl fun v mwf' _ _ _ => ?_
     have b3' := b3.inst_fvar c.Ewf mwf'.1.tr.wf
@@ -118,7 +126,7 @@ theorem isDefEqForall.WF {c : VContext} {s : VState}
       |>.mono fun _ _ _ h hb => ?_
     have bb := eq.symm.trans c'.Ewf mwf'.1.tr.wf.toCtx (h hb) |>.of_r c'.Ewf mwf'.1.tr.wf.toCtx bT
     exact ⟨_, .symm <| .forallEDF tt'.symm <| bb.symm⟩
-  · simp [Expr.hasLooseBVars] at h
+  · simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq] at h
     refine .stateWF fun wf => ?_
     have {bᵢ : Expr} {bᵢ'} (h : bᵢ.looseBVarRange' = 0)
         (a3 : TrExprS c'.venv c'.lparams ((none, .vlam t₂') :: c'.vlctx)

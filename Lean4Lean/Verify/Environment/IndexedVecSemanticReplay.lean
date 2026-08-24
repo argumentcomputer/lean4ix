@@ -631,7 +631,8 @@ private theorem indexedVecValidationSortCheckTypeM (lctx : LocalContext) :
       (TypeChecker.Methods.withFuel 9999) (tcContext lctx)
       ({} : TypeChecker.State)) = _
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     checkLevelSuccParam, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
   rfl
@@ -688,7 +689,7 @@ private theorem indexedVecValidationZeroCheckTypeM
         (indexedVecValidationZeroState alphaId) (.fvar alphaId)
         (.const ``Nat.zero [])
         (by simp [ctorIndexedVecApp, Expr.hasLooseBVars,
-          Expr.looseBVarRange'])
+          Expr.looseBVarRange_eq, Expr.looseBVarRange'])
         (by simp [ctorIndexedVecApp])
         hfirst hzero (by rfl))
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -778,7 +779,8 @@ private theorem indexedVecValidationSuccCheckTypeM
         (indexedVecValidationSuccState alphaId nId) (.fvar alphaId)
         (replaySuccApp (.fvar nId))
         (by simp [ctorIndexedVecApp, replaySuccApp,
-          Expr.hasLooseBVars, Expr.looseBVarRange'])
+          Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+          Expr.looseBVarRange'])
         (by simp [ctorIndexedVecApp, replaySuccApp])
         hfirst hsucc (by rfl))
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -1909,7 +1911,8 @@ private theorem indexedVecPreFamilyFVarInferOnly
     ({} : TypeChecker.State) = _
   unfold TypeChecker.Inner.inferType'
   simp [indexedVecPreFamilyFVarInferOnlyState,
-    Expr.hasLooseBVars, Expr.looseBVarRange',
+    Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     TypeChecker.Inner.inferFVar, indexedVecTypeCheckerContext,
     find, LocalDecl.type, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
@@ -1984,7 +1987,8 @@ private theorem indexedVecPreFamilySuccFVarCheckTypeM
     ({} : TypeChecker.State) succState argumentState
     (.const ``Nat.succ []) (.fvar id) (.const ``Nat [])
     (.const ``Nat []) `n .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+      Expr.looseBVarRange'])
     (by simp) succRun argumentRun (by rfl)
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType' (replaySuccApp (.fvar id)) false
@@ -3353,7 +3357,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3389,7 +3392,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPostFamilySemantic_ex
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3425,7 +3427,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPreFamilySemantic_exi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3461,7 +3462,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3559,7 +3559,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticExactProducedGenerati
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3595,7 +3594,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3631,7 +3629,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3667,7 +3664,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

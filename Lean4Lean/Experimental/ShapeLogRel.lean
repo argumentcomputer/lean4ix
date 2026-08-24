@@ -7229,6 +7229,79 @@ noncomputable def LE_Interp.Witness.forallE_inv'
     |>.mono (WShape.LE.T hd.app_le)
     |>.mono hout
 
+/-- Restrict an exact Pi witness to the singleton semantic branch selected
+by one typed argument.  Off that branch the new codomain is bottom; on it,
+monotonicity of the original shape function lowers the retained body witness
+to the selected result. -/
+noncomputable def LE_Interp.Witness.forallE_single
+    {b p : WShape n} {f : WShapeFun n} {B F : SExpr}
+    (H : LE_Interp.Witness ρ
+      (WShape.T (n := n + 1) (.forallE b f)) (.forallE B F))
+    (hp : p.HasType b) :
+    LE_Interp.Witness ρ
+      (WShape.forallE b (.single p (f.app p))).T (.forallE B F) := by
+  let hB := H.forallE_inv'.1
+  refine .forallE hB hB (WShape.HasDom.single.2 (.inl hp))
+    (fun x hx => ?_) TShape.LE.rfl
+  rw [WShapeFun.single_app]
+  split
+  · rename_i hpx
+    exact (H.forallE_inv'.2 x).mono (WShapeFun.app_mono_r hpx).T
+  · exact .bot
+
+/-- Lift a Pi observation to a chosen argument level and replace its body
+shape by one caller-built singleton branch.  The callback is required only
+above the selected argument; every other semantic input is interpreted at
+bottom.  This is the compositional form used to build a multi-layer sparse
+telescope from exact registered Pi observations. -/
+noncomputable def LE_Interp.Witness.forallE_singleMap
+    {domainLevel targetLevel : Nat}
+    {b : WShape domainLevel} {f : WShapeFun domainLevel}
+    {B F G : SExpr} (levelLE : domainLevel ≤ targetLevel)
+    (H : LE_Interp.Witness ρ
+      (WShape.T (n := domainLevel + 1) (.forallE b f))
+      (.forallE B F))
+    (p result : WShape targetLevel) (hp : p.HasType (b.lift targetLevel))
+    (body : ∀ x : WShape targetLevel, p ≤ x →
+      LE_Interp.Witness (ρ.push x.T) result.T G) :
+    LE_Interp.Witness ρ
+      (WShape.forallE (b.lift targetLevel) (.single p result)).T
+      (.forallE B G) := by
+  have Hlift : LE_Interp.Witness ρ
+      (WShape.forallE (b.lift targetLevel) (f.lift targetLevel)).T
+      (.forallE B F) := by
+    simpa only [WShape.lift_forallE levelLE] using
+      H.mono (TShape.lift_eqv (Nat.succ_le_succ levelLE)).1
+  let hB := Hlift.forallE_inv'.1
+  refine .forallE hB hB (WShape.HasDom.single.2 (.inl hp))
+    (fun x hx => ?_) TShape.LE.rfl
+  rw [WShapeFun.single_app]
+  split
+  · rename_i hpx
+    exact body x hpx
+  · exact .bot
+
+/-- Replace the body of a Pi observation by a caller-built singleton branch
+without changing the observation level.  This exact-level form packages the
+`lift_self` transports required by `forallE_singleMap`. -/
+noncomputable def LE_Interp.Witness.forallE_singleMapSelf
+    {b p result : WShape n} {f : WShapeFun n}
+    {B F G : SExpr}
+    (H : LE_Interp.Witness ρ
+      (WShape.T (n := n + 1) (.forallE b f))
+      (.forallE B F))
+    (hp : p.HasType b)
+    (body : ∀ x : WShape n, p ≤ x →
+      LE_Interp.Witness (ρ.push x.T) result.T G) :
+    LE_Interp.Witness ρ
+      (WShape.forallE b (.single p result)).T
+      (.forallE B G) := by
+  have hp' : p.HasType (b.lift n) := by
+    simpa only [WShape.lift_self] using hp
+  simpa only [WShape.lift_self] using
+    (LE_Interp.Witness.forallE_singleMap (Nat.le_refl n) H
+      p result hp' body)
+
 /-- Proof-relevant lambda inversion at one semantic argument. -/
 noncomputable def LE_Interp.Witness.lam_inv'
     {f : WShapeFun n} {hl : f.NonZero} {B F : SExpr}
@@ -9798,6 +9871,30 @@ theorem LE_Interp.Witness.FitsRDeep.push
   obtain ⟨a', hA, hle, ha', cA⟩ := hA
   exact .cons W ⟨a', hA, ha'.mono_r hle hx, cA⟩
 
+/-- Retain an arbitrary rebuilt recursion tree at every binding of an
+already-valid valuation.
+
+The public `Valuation.Fits` proof owns the exact binding interpretation and
+typing.  Only its proof-relevant representative is selected here; `children`
+then attaches the caller's chosen retained-tree invariant to that same
+witness. -/
+theorem Valuation.Fits.toFitsRDeep
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    (W : Valuation.Fits Γ₀ Γ ρ)
+    (children : ∀ {ρ m M} (hM : LE_Interp.Witness ρ m M),
+      hM.RDeepChildren P) :
+    LE_Interp.Witness.FitsRDeep P Γ₀ Γ ρ := by
+  induction W with
+  | nil => exact .nil
+  | cons _ _ hA hx ih =>
+    exact .cons ih ⟨_, hA.witness, hx, children hA.witness⟩
+
+/--
+info: 'Lean4Lean.SExpr.Valuation.Fits.toFitsRDeep' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Valuation.Fits.toFitsRDeep
+
 /-- Choose exact binding witnesses from an ordinary valid valuation.  The
 retained predicate is trivial, so this changes no public semantic content. -/
 theorem Valuation.Fits.toFitsRDeepTrue
@@ -10243,12 +10340,14 @@ def LR0 : LogRel Γ 0 where
 
 /-! `TypeDefEqPath` and its conversion API (`single`, `trans`, `leftType`,
 `rightType`, `left`, `right`, `symm`, `defeqDF`, `defeqDF_l`,
-`defeqDF_l_path`, `subst`) moved to `Lean4Lean/Experimental/SExpr.lean` on
-2026-08-15, beside `IsDefEq.defeqDF_l` and `IsDefEq.subst`, which are its only
-inputs.  Nothing about it was logical-relation-flavoured, and the relocation
-is what lets `IsDefEqStrong.app_inv'` / `.lam_inv'` / `.forallE_inv_path`
-state their conclusions there.  `TypeDefEqPath.collapse` (below) stays here:
-its extra input `LogRel.RawTypeUniq` is declared here. -/
+`defeqDF_l_path`, `subst`, `weak'`) moved to
+`Lean4Lean/Experimental/SExpr.lean` on 2026-08-15, beside
+`IsDefEq.defeqDF_l` and `IsDefEq.subst`, which are its only inputs.  The
+syntax-only `TypedWHRedS` and `TypeWHRedPath` bundles now live there too.
+Nothing about these APIs is logical-relation-flavoured, and the relocation is
+what lets `IsDefEqStrong.app_inv'` / `.lam_inv'` / `.forallE_inv_path` state
+their conclusions there.  `TypeDefEqPath.collapse` (below) stays here: its
+extra input `LogRel.RawTypeUniq` is declared here. -/
 
 /-- The four synchronized facts retained after applying a Pi codomain to
 related arguments.  The raw equalities are the evidence needed by dependent
@@ -10285,6 +10384,134 @@ def LRS.ValTyPi2 (IH : LogRel Γ n) (M₁ M₂ : SExpr) (b : WShape n) (f : WSha
     TypeDefEqPath Γ B₁ B₂ u ∧ TypeDefEqPath (B₁ :: Γ) F₁ F₂ v ∧
     IH.TyDefEq B₁ B₂ b ∧
     LRS.PiDefEq IH B₁ F₁ F₂ b f
+
+/-- Additive direct-route Pi observation.  It retains exactly the component
+data of `LRS.ValTyPi2`, but each root reduction is paired with the
+heterogeneous type path that authorizes conversion from that root to the
+observed Pi.  This is intentionally a sidecar rather than a change to the
+legacy `LogRel`: the direct adequacy construction can be developed without
+silently feeding its conclusion back into the conditional relation. -/
+def LRS.ValTyPi2Direct (IH : LogRel Γ n) (M₁ M₂ : SExpr)
+    (b : WShape n) (f : WShapeFun n) : Prop :=
+  ∃ B₁ F₁ B₂ F₂ u v,
+    TypeWHRedPath Γ M₁ (.forallE B₁ F₁) ∧
+    TypeWHRedPath Γ M₂ (.forallE B₂ F₂) ∧
+    TypeDefEqPath Γ B₁ B₂ u ∧ TypeDefEqPath (B₁ :: Γ) F₁ F₂ v ∧
+    IH.TyDefEq B₁ B₂ b ∧
+    LRS.PiDefEq IH B₁ F₁ F₂ b f
+
+/-- Erase only the typed root-path sidecar.  Every semantic component and
+both raw weak-head reductions are preserved literally. -/
+theorem LRS.ValTyPi2Direct.toValTyPi2
+    (H : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f) :
+    LRS.ValTyPi2 (Γ := Γ) IH M₁ M₂ b f := by
+  obtain ⟨B₁, F₁, B₂, F₂, u, v,
+    ⟨_, _, red₁⟩, ⟨_, _, red₂⟩, hB, hF, hValB, hPi⟩ := H
+  exact ⟨B₁, F₁, B₂, F₂, u, v, red₁, red₂, hB, hF, hValB, hPi⟩
+
+/-- The direct Pi sidecar is closed under keeping its left endpoint. -/
+theorem LRS.ValTyPi2Direct.left
+    (H : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f) :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₁ b f := by
+  obtain ⟨B₁, F₁, _, _, u, v, root₁, _, hB, hF, hValB, hPi⟩ := H
+  exact ⟨B₁, F₁, B₁, F₁, u, v, root₁, root₁,
+    hB.left, hF.left, IH.left_ty hValB, hPi.left⟩
+
+/-- The direct Pi sidecar is symmetric.  Each endpoint keeps its own
+directional root reduction; only the component paths are reversed. -/
+theorem LRS.ValTyPi2Direct.symm
+    (H : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f) :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M₂ M₁ b f := by
+  obtain ⟨B₁, F₁, B₂, F₂, _, _, root₁, root₂,
+    hB, hF, hValB, hPi⟩ := H
+  have hValB' := IH.symm_ty hValB
+  obtain ⟨u', hB'⟩ := hB.symm
+  obtain ⟨v', hF'⟩ := hF.symm
+  have hF'' := hB.defeqDF_l_path hF'
+  refine ⟨B₂, F₂, B₁, F₁, u', v', root₂, root₁, hB', hF'',
+    hValB', fun _ _ _ hp ha a1 => ?_, fun _ _ hp ha a1 => ?_⟩
+  · let h := hPi.1 hp (hB'.defeqDF ha) (IH.conv hValB' a1)
+    exact ⟨h.rightTy, h.leftTy, h.rightDefEq, h.leftDefEq⟩
+  · exact IH.symm_ty (hPi.2 hp (hB'.defeqDF ha) (IH.conv hValB' a1))
+
+/-- The direct Pi sidecar composes.  Determinism identifies the two Pi
+observations of the shared syntactic endpoint, while the outer endpoints
+retain their original path-typed reductions. -/
+theorem LRS.ValTyPi2Direct.trans
+    (H₁ : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f)
+    (H₂ : LRS.ValTyPi2Direct (Γ := Γ) IH M₂ M₃ b f) :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₃ b f := by
+  obtain ⟨B₁, F₁, B₂, F₂, u, v, root₁, root₂,
+    hB₁₂, hF₁₂, hValB₁₂, hPi₁⟩ := H₁
+  obtain ⟨B₂', F₂', B₃, F₃, _, _, root₂', root₃,
+    hB₂₃, hF₂₃, hValB₂₃, hPi₂⟩ := H₂
+  obtain ⟨_, _, red₂⟩ := root₂
+  obtain ⟨_, _, red₂'⟩ := root₂'
+  cases red₂.determ WHNF.forallE red₂' WHNF.forallE
+  obtain ⟨_, hB₂₁⟩ := hB₁₂.symm
+  have hF₂₃' := hB₂₁.defeqDF_l_path hF₂₃
+  refine ⟨B₁, F₁, B₃, F₃, u, v, root₁, root₃,
+    hB₁₂.trans hB₂₃, hF₁₂.trans hF₂₃',
+    IH.trans_ty hValB₁₂ hValB₂₃,
+    fun _ _ _ hp ha a1 => ?_, fun _ _ hp ha a1 => ?_⟩
+  · let h₁ := hPi₁.1 hp ha a1
+    let h₂ := hPi₂.1 hp (hB₁₂.defeqDF ha) (IH.conv hValB₁₂ a1)
+    exact ⟨h₁.leftTy, h₂.rightTy, h₁.leftDefEq, h₂.rightDefEq⟩
+  · exact IH.trans_ty (hPi₁.2 hp ha a1)
+      (hPi₂.2 hp (hB₁₂.defeqDF ha) (IH.conv hValB₁₂ a1))
+
+/-- Path-typed weak-head closure for the direct Pi sidecar.  Unlike
+`LogRel.whr_ty`, this theorem does not accept raw reductions: the prefixes
+must carry their own conversion paths. -/
+theorem LRS.ValTyPi2Direct.whr
+    (hM : TypeWHRedPath Γ M M') (hN : TypeWHRedPath Γ N N') :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M N b f ↔
+      LRS.ValTyPi2Direct (Γ := Γ) IH M' N' b f := by
+  constructor
+  · intro H
+    obtain ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN,
+      hB, hF, hValB, hPi⟩ := H
+    exact ⟨B₁, F₁, B₂, F₂, u, v,
+      hM.retargetLeft rootM WHNF.forallE,
+      hN.retargetLeft rootN WHNF.forallE,
+      hB, hF, hValB, hPi⟩
+  · intro H
+    obtain ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN,
+      hB, hF, hValB, hPi⟩ := H
+    exact ⟨B₁, F₁, B₂, F₂, u, v,
+      hM.trans rootM, hN.trans rootN,
+      hB, hF, hValB, hPi⟩
+
+/-- The first direct root converts a term equality at `M₁` to the observed
+Pi one path edge at a time.  This is the exact replacement for the legacy
+call to weak-head subject reduction in the constant evaluator. -/
+theorem LRS.ValTyPi2Direct.defeqDF_left
+    (H : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f)
+    (h : IsDefEq Γ e₁ e₂ M₁) :
+    ∃ B₁ F₁, IsDefEq Γ e₁ e₂ (.forallE B₁ F₁) := by
+  obtain ⟨B₁, F₁, _, _, _, _, ⟨_, path, -⟩, _⟩ := H
+  exact ⟨B₁, F₁, path.defeqDF h⟩
+
+/-- Symmetric endpoint form of `defeqDF_left`, using the second root's own
+path rather than reversing the first root reduction. -/
+theorem LRS.ValTyPi2Direct.defeqDF_right
+    (H : LRS.ValTyPi2Direct (Γ := Γ) IH M₁ M₂ b f)
+    (h : IsDefEq Γ e₁ e₂ M₂) :
+    ∃ B₂ F₂, IsDefEq Γ e₁ e₂ (.forallE B₂ F₂) := by
+  obtain ⟨_, _, B₂, F₂, _, _, _, ⟨_, path, -⟩, _⟩ := H
+  exact ⟨B₂, F₂, path.defeqDF h⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRS.ValTyPi2Direct.toValTyPi2' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.ValTyPi2Direct.toValTyPi2
+
+/--
+info: 'Lean4Lean.SExpr.LRS.ValTyPi2Direct.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.ValTyPi2Direct.trans
 
 def LRS.LamDefEq (IH : LogRel Γ n)
     (M N A₁ A₂ : SExpr) (m : WShapeFun n) (a₁ : WShape n) (a₂ : WShapeFun n) : Prop :=
@@ -10559,6 +10786,39 @@ theorem LRS.CtorSpineDefEq.args
   | nil => exact .nil
   | cons _ _ hp hty hxy hv _ ih => exact .cons hp hty hxy hv ih
   | ret _ _ ih => exact ih
+
+/-- Transport the result of an aligned constructor spine along a
+heterogeneous type path.  Each edge becomes one existing `ret` constructor,
+so adjacent universe indices never have to be identified. -/
+theorem LRS.CtorSpineDefEq.ret_path
+    (P : TypeDefEqPath Γ A A' u)
+    (H : CtorSpineDefEq (Γ := Γ) IH Head xs ys ps A) :
+    CtorSpineDefEq (Γ := Γ) IH Head xs ys ps A' := by
+  induction P with
+  | single h => exact .ret H h
+  | trans _ _ ih₁ ih₂ => exact ih₂ (ih₁ H)
+
+/-- Add one related constructor argument after a path exposes the prefix as
+a Pi.  This is the constructor-spine counterpart of `SpineWF.snoc_path` and
+is the direct evaluator's replacement for a homogeneous root equality. -/
+theorem LRS.CtorSpineDefEq.cons_path
+    (H : CtorSpineDefEq (Γ := Γ) IH Head xs ys ps A)
+    (P : TypeDefEqPath Γ A (.forallE D C) u)
+    (hp : p.HasType a)
+    (hty : IH.TyDefEq D D a)
+    (hxy : IsDefEq Γ x y D)
+    (hv : IH.DefEq x y D p a)
+    (hresult : IsDefEq Γ (C.inst y) (C.inst x) (.sort v)) :
+    CtorSpineDefEq (Γ := Γ) IH Head
+      (x :: xs) (y :: ys) (p :: ps) (C.inst x) := by
+  obtain ⟨_, hPi⟩ := P.rightType
+  exact .cons (H.ret_path P) hPi hp hty hxy hv hresult
+
+/--
+info: 'Lean4Lean.SExpr.LRS.CtorSpineDefEq.cons_path' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.CtorSpineDefEq.cons_path
 
 /-- Forget semantic fields while retaining the exact dependent pointwise
 application spine. -/
@@ -11158,8 +11418,9 @@ the term.  What it reconciles is the link's *own* result type — the `A` of
 `CtorExact`'s retained `SpineWF` certificate — against the anchor inherited
 from the root.  The definitions below retain that reconciliation as a transport
 attached to the native leaf, so that the fold performs no type identification
-of its own.  See the 2026-08-15 chain-wall entry in
-`plans/l4l-16c-buildp-premortem.md`. -/
+of its own.  The surviving chain-wall constraint is consolidated in the NORM
+work package of `plans/roadmap.md`; the full 2026-08-15 audit remains in git
+history. -/
 
 /-- The retyping action a normalized chain performs at one native link:
 transport the link's typed equality to any domain that types one of its
@@ -11298,6 +11559,22 @@ theorem SpineWF.ret_path {Γ : List SExpr} {B B' : SExpr} {u : SLevel}
   induction P with
   | single h => exact fun H => H.ret h
   | trans _ _ ih₁ ih₂ => exact fun H => ih₂ (ih₁ H)
+
+/-- Extend a spine through a path-exposed Pi.  The prefix result is first
+transported to the literal Pi endpoint; its endpoint self-typing then fills
+the ordinary `SpineWF.snoc` field.  No heterogeneous path is collapsed. -/
+theorem SpineWF.snoc_path {Γ : List SExpr} {A B D C e : SExpr}
+    {es : List SExpr} {u : SLevel}
+    (H : SExpr.SpineWF Γ A es B)
+    (P : TypeDefEqPath Γ B (.forallE D C) u)
+    (he : IsDefEq Γ e e D) :
+    SExpr.SpineWF Γ A (es ++ [e]) (C.inst e) := by
+  obtain ⟨_, hPi⟩ := P.rightType
+  exact (SpineWF.ret_path P H).snoc hPi he
+
+/-- info: 'Lean4Lean.SExpr.SpineWF.snoc_path' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms SpineWF.snoc_path
 
 /-- Path-threading inversion of an empty spine.  The incoming path is carried
 through the `conv`/`ret` edges rather than being re-created, so no typing of
@@ -12331,6 +12608,23 @@ theorem LRS.PiDefEq.mono_r_2 {IH : LogRel Γ n}
         h.leftDefEq, h.rightDefEq⟩
     · exact IH.mono_r_2_ty (WShapeFun.app_mono_l le₂ x) hm_tgt hm_src (h2 hp' ha a2)
 
+/-- Lower a direct Pi observation along the Pi type-shape order.  The
+path-typed syntactic roots are invariant; only the lower semantic domain and
+codomain observations are transported. -/
+theorem LRS.ValTyPi2Direct.mono_r_2 {IH : LogRel Γ n}
+    (le₁ : b ≤ b') (le₂ : f ≤ f')
+    (htpi : WShape.HasTypePi f b r)
+    (htpi' : WShape.HasTypePi f' b' r') :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M N b' f' →
+      LRS.ValTyPi2Direct (Γ := Γ) IH M N b f := by
+  intro ⟨B₁, F₁, B₂, F₂, u, v, root₁, root₂,
+    hB, hF, hValB, hPi⟩
+  have hb := (WShape.HasTypePi.iff.1 htpi).1.isType
+  have hb' := (WShape.HasTypePi.iff.1 htpi').1.isType
+  exact ⟨B₁, F₁, B₂, F₂, u, v, root₁, root₂, hB, hF,
+    IH.mono_r_2_ty le₁ hb hb' hValB,
+    hPi.mono_r_2 le₁ le₂ htpi htpi' (IH.left_ty hValB)⟩
+
 theorem LRS.LamDefEq.mono_r_2 {IH : LogRel Γ n}
     (le₁ : a₁ ≤ a₁') (le₂ : a₂ ≤ a₂') (hm : WShape.HasTypeLam m a₁ a₂)
     (hValA₁ : IH.TyDefEq A₁ A₁ a₁') (htpi' : WShape.HasTypePi a₂' a₁' r') :
@@ -12416,6 +12710,32 @@ theorem LRS.PiDefEq.join {IH : LogRel Γ n}
       hd.leftDefEq, hd.rightDefEq⟩
   · exact IH.mono_r_2_ty hC_fJ ht_fJ ht_fJ' <| IH.join_ty hC_fp ht_f1 ht_f2
       (cvt_d (hE₁.2 d_ht ha c2)) (cvt_e (hE₂.2 e_ht ha c3))
+
+/-- Join two direct Pi observations at the same syntactic endpoints.  Raw
+weak-head determinism identifies the independently selected Pi components;
+the chosen root paths are then retained while the semantic domain and edge
+observations use the ordinary join laws. -/
+theorem LRS.ValTyPi2Direct.join {IH : LogRel Γ n}
+    (htB₁ : b₁.HasType .type) (htB₂ : b₂.HasType .type)
+    (hC_b : b₁.Compat b₂)
+    (ht₁ : WShape.HasTypePi f₁ b₁ r₁)
+    (ht₂ : WShape.HasTypePi f₂ b₂ r₂)
+    (hC_f : WShapeFun.Compat f₁ f₂)
+    (H₁ : LRS.ValTyPi2Direct (Γ := Γ) IH M N b₁ f₁)
+    (H₂ : LRS.ValTyPi2Direct (Γ := Γ) IH M N b₂ f₂) :
+    LRS.ValTyPi2Direct (Γ := Γ) IH M N
+      (b₁.join b₂) (f₁.join f₂) := by
+  obtain ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN,
+    hB, hF, hValB₁, hPi₁⟩ := H₁
+  obtain ⟨C₁, G₁, C₂, G₂, _, _, rootM', rootN',
+    _, _, hValB₂, hPi₂⟩ := H₂
+  cases rootM.toWHRedS.determ WHNF.forallE
+    rootM'.toWHRedS WHNF.forallE
+  cases rootN.toWHRedS.determ WHNF.forallE
+    rootN'.toWHRedS WHNF.forallE
+  exact ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN, hB, hF,
+    IH.join_ty hC_b htB₁ htB₂ hValB₁ hValB₂,
+    LRS.PiDefEq.join htB₁ htB₂ hC_b ht₁ ht₂ hC_f hPi₁ hPi₂⟩
 
 /-- Head reduction on M, N preserves `LamDefEq`. Uses `IH.whr` (with `WHRed.app`)
 to transport the inner `IH.DefEq` terms. HasType is preserved trivially (doesn't mention M, N). -/
@@ -12768,6 +13088,1832 @@ def LR (Γ : List SExpr) : LogRel Γ n :=
 
 @[simp] theorem LR_zero : LR (n := 0) Γ = LR0 := rfl
 @[simp] theorem LR_succ : LR (n := n+1) Γ = LRS (LR Γ) := rfl
+
+/-! #### Level-guarded path-typed logical relation
+
+The first additive direct sidecar below is useful for the constant evaluator,
+but its recursively retained Pi codomain is deliberately positive: the
+codomain callback may consume only a legacy argument relation.  That is not
+enough to run the fundamental theorem through a polymorphic context variable
+(for example, a Nat recursor motive), because the variable's function action
+must itself preserve the path-typed relation.
+
+`LRD` is the guarded replacement.  It follows the semantic shape grading of
+`LR`: a successor Pi/lambda clause consumes the complete direct relation from
+the preceding shape level.  Consequently direct substitution entries can
+retain motives and their applications without an impredicative or
+non-positive fixed point.  Every clause keeps its legacy `LR` proof as the
+first projection, so this tower is additive while its algebra and adequacy
+proof are brought online. -/
+
+/-- Data of the path-typed relation at one semantic shape level. -/
+structure LR.DirectRelBase (Γ : List SExpr) (n : Nat) where
+  TyDefEq (A B : SExpr) (a : WShape n) : Prop
+  DefEq (M N A : SExpr) (m a : WShape n) : Prop
+  tyLegacy : TyDefEq A B a → (LR Γ).TyDefEq A B a
+  defLegacy : DefEq M N A m a → (LR Γ).DefEq M N A m a
+
+/-- Direct codomain data after applying a Pi edge to related arguments. -/
+structure LR.DirectPiInstDefEq (IH : LR.DirectRelBase Γ n)
+    (F₁ F₂ a b : SExpr) (p : WShape n) : Prop where
+  leftTy : IH.TyDefEq (F₁.inst a) (F₁.inst b) p
+  rightTy : IH.TyDefEq (F₂.inst a) (F₂.inst b) p
+  leftDefEq : ∃ u, IsDefEq Γ (F₁.inst a) (F₁.inst b) (.sort u)
+  rightDefEq : ∃ u, IsDefEq Γ (F₂.inst a) (F₂.inst b) (.sort u)
+
+/-- Pi validity whose argument and codomain premises live in the lower
+path-typed relation, rather than falling back to `LR`. -/
+def LR.DirectPiDefEq (IH : LR.DirectRelBase Γ n)
+    (B F₁ F₂ : SExpr) (b : WShape n) (f : WShapeFun n) : Prop :=
+  (∀ {{a b' p}}, p.HasType b → IsDefEq Γ a b' B →
+    IH.DefEq a b' B p b →
+    LR.DirectPiInstDefEq IH F₁ F₂ a b' (f.app p)) ∧
+  ∀ {{a p}}, p.HasType b → IsDefEq Γ a a B →
+    IH.DefEq a a B p b →
+    IH.TyDefEq (F₁.inst a) (F₂.inst a) (f.app p)
+
+/-- Extensional lambda equality in the lower direct relation. -/
+def LR.DirectLamDefEq (IH : LR.DirectRelBase Γ n)
+    (M N A₁ A₂ : SExpr) (m : WShapeFun n)
+    (a₁ : WShape n) (a₂ : WShapeFun n) : Prop :=
+  (∀ {{a b p}}, p.HasType a₁ → IsDefEq Γ a b A₁ →
+    IH.DefEq a b A₁ p a₁ →
+    IH.DefEq (M.app a) (M.app b) (A₂.inst a)
+        (m.app p) (a₂.app p) ∧
+    IH.DefEq (N.app a) (N.app b) (A₂.inst a)
+        (m.app p) (a₂.app p)) ∧
+  ∀ {{a p}}, p.HasType a₁ → IsDefEq Γ a a A₁ →
+    IH.DefEq a a A₁ p a₁ →
+    IH.DefEq (M.app a) (N.app a) (A₂.inst a)
+      (m.app p) (a₂.app p)
+
+/-- Path-typed Pi observation at a successor shape level. -/
+def LR.DirectValTyPi2 (IH : LR.DirectRelBase Γ n)
+    (M N : SExpr) (b : WShape n) (f : WShapeFun n) : Prop :=
+  ∃ B₁ F₁ B₂ F₂ u v,
+    TypeWHRedPath Γ M (.forallE B₁ F₁) ∧
+    TypeWHRedPath Γ N (.forallE B₂ F₂) ∧
+    TypeDefEqPath Γ B₁ B₂ u ∧
+    TypeDefEqPath (B₁ :: Γ) F₁ F₂ v ∧
+    IH.TyDefEq B₁ B₂ b ∧
+    LR.DirectPiDefEq IH B₁ F₁ F₂ b f
+
+/-- Direct lambda view at a successor shape level. -/
+def LR.DirectLamView (IH : LR.DirectRelBase Γ n)
+    (M N A : SExpr) (g : WShapeFun n)
+    (a₁ : WShape n) (a₂ : WShapeFun n) : Prop :=
+  ∃ A₁ A₂ u v,
+    TypeWHRedPath Γ A (.forallE A₁ A₂) ∧
+    IsDefEq Γ A₁ A₁ (.sort u) ∧
+    IH.TyDefEq A₁ A₁ a₁ ∧
+    IsDefEq (A₁ :: Γ) A₂ A₂ (.sort v) ∧
+    LR.DirectPiDefEq IH A₁ A₂ A₂ a₁ a₂ ∧
+    LR.DirectLamDefEq IH M N A₁ A₂ g a₁ a₂
+
+/-- Level-zero direct type validity. -/
+def LR.DirectTyDefEq0 (Γ : List SExpr) (A B : SExpr)
+    (a : WShape 0) : Prop :=
+  (LR Γ).TyDefEq A B a ∧
+  ∀ r, a = (.sort r : WShape 0) →
+    ∃ u, TypeWHRedPath Γ A (.sort u) ∧
+      TypeWHRedPath Γ B (.sort u)
+
+/-- Level-zero direct term validity. -/
+def LR.DirectDefEq0 (Γ : List SExpr) (M N A : SExpr)
+    (m a : WShape 0) : Prop :=
+  (LR Γ).DefEq M N A m a ∧
+  ∀ r, a = (.sort r : WShape 0) →
+    LR.DirectTyDefEq0 Γ M N m
+
+def LR.DirectRel0 (Γ : List SExpr) : LR.DirectRelBase Γ 0 where
+  TyDefEq := LR.DirectTyDefEq0 Γ
+  DefEq := LR.DirectDefEq0 Γ
+  tyLegacy := And.left
+  defLegacy := And.left
+
+/-- Successor direct type validity.  The legacy relation remains the first
+projection; sort and Pi shapes add typed roots, and Pi components recurse
+through the preceding direct level. -/
+def LR.DirectTyDefEqS (IH : LR.DirectRelBase Γ n)
+    (A B : SExpr) (a : WShape (n + 1)) : Prop :=
+  (LR Γ).TyDefEq A B a ∧
+  (∀ r, a = (.sort r : WShape (n + 1)) →
+    ∃ u, TypeWHRedPath Γ A (.sort u) ∧
+      TypeWHRedPath Γ B (.sort u)) ∧
+  ∀ b f, a = (.forallE b f : WShape (n + 1)) →
+    LR.DirectValTyPi2 IH A B b f
+
+/-- Successor direct term validity.  At a sort it retains direct type
+validity of the term.  At a Pi, only a non-bottom lambda observation adds
+the direct extensional action.  In particular, bottom remains the
+uninformative approximation at every displayed type, just as it is in the
+underlying logical relation. -/
+def LR.DirectDefEqS (IH : LR.DirectRelBase Γ n)
+    (M N A : SExpr) (m a : WShape (n + 1)) : Prop :=
+  (LR Γ).DefEq M N A m a ∧
+  (∀ r, a = (.sort r : WShape (n + 1)) →
+    LR.DirectTyDefEqS IH M N m) ∧
+  ∀ b f g (hg : g.NonZero),
+    a = (.forallE b f : WShape (n + 1)) →
+    m = (.lam g hg : WShape (n + 1)) →
+    LR.DirectLamView IH M N A g b f
+
+def LR.DirectRelS (IH : LR.DirectRelBase Γ n) :
+    LR.DirectRelBase Γ (n + 1) where
+  TyDefEq := LR.DirectTyDefEqS IH
+  DefEq := LR.DirectDefEqS IH
+  tyLegacy := And.left
+  defLegacy := And.left
+
+/-- The path-typed logical relation, guarded by semantic shape level. -/
+def LRD (Γ : List SExpr) : LR.DirectRelBase Γ n :=
+  match n with
+  | 0 => LR.DirectRel0 Γ
+  | n + 1 => LR.DirectRelS (LRD (n := n) Γ)
+
+/-- Erase direct type validity to the established logical relation. -/
+theorem LRD.tyLegacy (H : (LRD Γ).TyDefEq A B a) :
+    (LR Γ).TyDefEq A B a :=
+  (LRD Γ).tyLegacy H
+
+/-- Erase direct term validity to the established logical relation. -/
+theorem LRD.defLegacy (H : (LRD Γ).DefEq M N A m a) :
+    (LR Γ).DefEq M N A m a :=
+  (LRD Γ).defLegacy H
+
+@[simp] theorem LRD_zero : LRD (n := 0) Γ = LR.DirectRel0 Γ := rfl
+
+@[simp] theorem LRD_succ :
+    LRD (n := n + 1) Γ = LR.DirectRelS (LRD (n := n) Γ) := rfl
+
+/-- Erase one already-direct Pi result rectangle.  There is intentionally no
+converse: manufacturing a direct argument from a legacy one is precisely the
+cycle which the level-guarded relation avoids. -/
+theorem LR.DirectPiInstDefEq.toPiInstDefEq
+    {IH : LR.DirectRelBase Γ n}
+    (H : LR.DirectPiInstDefEq IH F₁ F₂ a b p) :
+    LRS.PiInstDefEq (LR Γ) F₁ F₂ a b p :=
+  ⟨IH.tyLegacy H.leftTy, IH.tyLegacy H.rightTy,
+    H.leftDefEq, H.rightDefEq⟩
+
+/-- Bottom is a direct type observation at every semantic level. -/
+theorem LRD.TyDefEq.bot {n : Nat} {A B : SExpr} :
+    (LRD Γ).TyDefEq A B (.bot : WShape n) := by
+  induction n with
+  | zero =>
+    refine ⟨(show (LR Γ).TyDefEq A B (.bot : WShape 0) by trivial), ?_⟩
+    intro r h
+    cases congrArg (fun x : WShape 0 => x.1) h
+  | succ n ih =>
+    refine ⟨(show (LR Γ).TyDefEq A B (.bot : WShape (n + 1)) by
+      rw [LR_succ]
+      trivial), ?_, ?_⟩
+    · intro r h
+      cases congrArg (fun x : WShape (n + 1) => x.1) h
+    · intro b f h
+      cases congrArg (fun x : WShape (n + 1) => x.1) h
+
+/-- Expose the two path-typed roots retained by a direct sort observation. -/
+theorem LRD.TyDefEq.sortView
+    (H : (LRD Γ).TyDefEq A B (.sort r : WShape n)) :
+    ∃ u, TypeWHRedPath Γ A (.sort u) ∧
+      TypeWHRedPath Γ B (.sort u) := by
+  cases n with
+  | zero => exact H.2 r rfl
+  | succ n => exact H.2.1 r rfl
+
+/-- At a sort, direct term validity exposes the guarded direct type
+observation of its endpoints. -/
+theorem LRD.DefEq.toTyDefEq
+    {m : WShape n}
+    (H : (LRD (n := n) Γ).DefEq M N A m
+      (.sort r : WShape n)) :
+    (LRD (n := n) Γ).TyDefEq M N m := by
+  cases n with
+  | zero => exact H.2 r rfl
+  | succ n => exact H.2.1 r rfl
+
+/-- A bottom term is directly related at every well-shaped displayed type.
+Bottom carries no head information, so it creates no path-typed root
+obligation. -/
+theorem LRD.DefEq.bot
+    {a : WShape n}
+    (ha : a.HasType .type) :
+    (LRD (n := n) Γ).DefEq M N A (.bot : WShape n) a := by
+  cases n with
+  | zero =>
+    refine ⟨(LR Γ).bot ha, fun _ _ => ?_⟩
+    change (LRD (n := 0) Γ).TyDefEq M N (.bot : WShape 0)
+    exact LRD.TyDefEq.bot
+  | succ n =>
+    refine ⟨(LR Γ).bot ha, fun _ _ => ?_, ?_⟩
+    · change (LRD (n := n + 1) Γ).TyDefEq M N
+        (.bot : WShape (n + 1))
+      exact LRD.TyDefEq.bot
+    · intro b f g hg hforall hlam
+      cases congrArg (fun x : WShape (n + 1) => x.1) hlam
+
+/-- Sorts are directly valid types at every sort observation. -/
+theorem LRD.TyDefEq.sort {n : Nat} :
+    (LRD Γ).TyDefEq (.sort u) (.sort u) (.sort r : WShape n) := by
+  have root : TypeWHRedPath Γ (.sort u) (.sort u) :=
+    .refl (IsDefEq.sort (l := u))
+  cases n with
+  | zero =>
+    exact ⟨LogRelBase.TyDefEq.sort, fun _ _ => ⟨u, root, root⟩⟩
+  | succ n =>
+    refine ⟨LogRelBase.TyDefEq.sort, fun _ _ => ⟨u, root, root⟩, ?_⟩
+    intro b f h
+    cases congrArg (fun x : WShape (n + 1) => x.1) h
+
+/-- A sort term is directly related to itself at its canonical sort
+observation. -/
+theorem LRD.DefEq.sort {n : Nat} :
+    (LRD Γ).DefEq (.sort u) (.sort u) (.sort u.succ)
+      (.sort r : WShape n) (.sort s : WShape n) := by
+  cases n with
+  | zero =>
+    exact ⟨(LR Γ).sort_iff.2 ⟨u, .rfl, .rfl⟩,
+      fun _ _ => by
+        change (LRD (n := 0) Γ).TyDefEq (.sort u) (.sort u)
+          (.sort r : WShape 0)
+        exact LRD.TyDefEq.sort⟩
+  | succ n =>
+    refine ⟨(LR Γ).sort_iff.2 ⟨u, .rfl, .rfl⟩,
+      fun _ _ => ?_, ?_⟩
+    · change (LRD (n := n + 1) Γ).TyDefEq (.sort u) (.sort u)
+        (.sort r : WShape (n + 1))
+      exact LRD.TyDefEq.sort
+    · intro b f g hg hsort hforall
+      cases congrArg (fun x : WShape (n + 1) => x.1) hsort
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.sort' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.sort
+
+
+/-- Package a legacy term observation at a sort with its guarded direct type
+sidecar. -/
+theorem LRD.DefEq.of_sort
+    {n : Nat} {m : WShape n}
+    (legacy : (LR Γ).DefEq M N A m (.sort r))
+    (direct : (LRD (n := n) Γ).TyDefEq M N m) :
+    (LRD (n := n) Γ).DefEq M N A m (.sort r) := by
+  cases n with
+  | zero => exact ⟨legacy, fun _ _ => direct⟩
+  | succ n =>
+    refine ⟨legacy, (fun _ _ => direct), ?_⟩
+    intro b f g hg hsort hlam
+    cases congrArg (·.1) hsort
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.of_sort' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.of_sort
+
+
+/-- At an inductive displayed type the guarded term relation has no extra
+sidecar, so an established observation packages directly. -/
+theorem LRD.DefEq.of_legacy_indTy
+    {n : Nat} {m : WShape (n + 1)}
+    (legacy : (LR Γ).DefEq M N A m (.indTy : WShape (n + 1))) :
+    (LRD Γ).DefEq M N A m (.indTy : WShape (n + 1)) := by
+  refine ⟨legacy, ?_, ?_⟩
+  · intro r h
+    cases congrArg (·.1) h
+  · intro b f g hg hty
+    cases congrArg (·.1) hty
+
+/-- An inductive-head type observation likewise has no guarded root or Pi
+obligation beyond its established projection. -/
+theorem LRD.TyDefEq.of_legacy_indTy
+    {n : Nat}
+    (legacy : (LR Γ).TyDefEq A B (.indTy : WShape (n + 1))) :
+    (LRD Γ).TyDefEq A B (.indTy : WShape (n + 1)) := by
+  refine ⟨legacy, ?_, ?_⟩
+  · intro r h
+    cases congrArg (·.1) h
+  · intro b f h
+    cases congrArg (·.1) h
+
+/-- Package an inductive head observed as a type. -/
+theorem LRD.DefEq.of_legacy_indTy_type
+    {n : Nat}
+    (legacy : (LR Γ).DefEq M N A (.indTy : WShape (n + 1)) .type) :
+    (LRD Γ).DefEq M N A (.indTy : WShape (n + 1)) .type :=
+  LRD.DefEq.of_sort legacy <|
+    LRD.TyDefEq.of_legacy_indTy ((LR Γ).toType legacy)
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.of_legacy_indTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.of_legacy_indTy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.of_legacy_indTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.of_legacy_indTy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.of_legacy_indTy_type' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.of_legacy_indTy_type
+
+
+/-- Left projection is proved jointly for guarded direct types and terms.
+The joint induction is essential at successor levels: Pi validity consumes
+lower direct term edges, while lambda validity returns them. -/
+private theorem LRD.left_aux (n : Nat) :
+    (∀ {Γ : List SExpr} {A B : SExpr} {a : WShape n},
+      (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq A A a) ∧
+    (∀ {Γ : List SExpr} {M N A : SExpr} {m a : WShape n},
+      (LRD Γ).DefEq M N A m a → (LRD Γ).DefEq M M A m a) := by
+  induction n with
+  | zero =>
+    let tyLeft : ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape 0},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq A A a := by
+      intro Γ A B a H
+      exact ⟨(LR Γ).left_ty H.1, fun r hsort =>
+        let ⟨u, rootA, _⟩ := H.2 r hsort
+        ⟨u, rootA, rootA⟩⟩
+    refine ⟨tyLeft, ?_⟩
+    intro Γ M N A m a H
+    exact ⟨(LR Γ).left H.1, fun r hsort =>
+      tyLeft (H.2 r hsort)⟩
+  | succ n ih =>
+    let tyLeft : ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape (n + 1)},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq A A a := by
+      intro Γ A B a H
+      refine ⟨(LR Γ).left_ty H.1, ?_, ?_⟩
+      · intro r hsort
+        let ⟨u, rootA, _⟩ := H.2.1 r hsort
+        exact ⟨u, rootA, rootA⟩
+      · intro b f hforall
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath, codomainPath, domain, pi⟩ := H.2.2 b f hforall
+        refine ⟨B₁, F₁, B₁, F₁, u, v, rootA, rootA,
+          domainPath.left, codomainPath.left, ih.1 domain, ?_⟩
+        constructor
+        · intro x y p hp hxy hrel
+          have out := pi.1 hp hxy hrel
+          exact ⟨out.leftTy, out.leftTy,
+            out.leftDefEq, out.leftDefEq⟩
+        · intro x p hp hxx hrel
+          exact ih.1 (pi.2 hp hxx hrel)
+    refine ⟨tyLeft, ?_⟩
+    intro Γ M N A m a H
+    refine ⟨(LR Γ).left H.1,
+      (fun r hsort => tyLeft (H.2.1 r hsort)), ?_⟩
+    intro b f g hg hforall hlam
+    obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, action⟩ :=
+      H.2.2 b f g hg hforall hlam
+    refine ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, ?_⟩
+    constructor
+    · intro x y p hp hxy hrel
+      have out := action.1 hp hxy hrel
+      exact ⟨out.1, out.1⟩
+    · intro x p hp hxx hrel
+      exact ih.2 (action.2 hp hxx hrel)
+
+/-- Keep the left endpoint of a guarded direct type observation. -/
+theorem LRD.TyDefEq.left
+    (H : (LRD Γ).TyDefEq A B a) :
+    (LRD Γ).TyDefEq A A a :=
+  (LRD.left_aux _).1 H
+
+/-- Keep the left endpoint of a guarded direct term observation. -/
+theorem LRD.DefEq.left
+    (H : (LRD Γ).DefEq M N A m a) :
+    (LRD Γ).DefEq M M A m a :=
+  (LRD.left_aux _).2 H
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.left' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.left
+
+/-- The mutually dependent algebra needed at one guarded shape level.
+Keeping these operations in one induction makes the dependency explicit:
+Pi symmetry/transitivity convert lower arguments, and lambda conversion
+uses the corresponding lower term operation. -/
+structure LRD.AlgebraAt (n : Nat) : Prop where
+  tySymm : ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape n},
+    (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B A a
+  tyTrans : ∀ {Γ : List SExpr} {A B C : SExpr} {a : WShape n},
+    (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B C a →
+      (LRD Γ).TyDefEq A C a
+  defSymm : ∀ {Γ : List SExpr} {M N A : SExpr} {m a : WShape n},
+    (LRD Γ).DefEq M N A m a → (LRD Γ).DefEq N M A m a
+  defTrans : ∀ {Γ : List SExpr} {M₁ M₂ M₃ A : SExpr}
+      {m a : WShape n},
+    (LRD Γ).DefEq M₁ M₂ A m a →
+    (LRD Γ).DefEq M₂ M₃ A m a →
+      (LRD Γ).DefEq M₁ M₃ A m a
+  conv : ∀ {Γ : List SExpr} {M N A B : SExpr} {m a : WShape n},
+    (LRD Γ).TyDefEq A B a → (LRD Γ).DefEq M N A m a →
+      (LRD Γ).DefEq M N B m a
+
+private theorem LRD.algebra (n : Nat) : LRD.AlgebraAt n := by
+  induction n with
+  | zero =>
+    let tySymm : ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape 0},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B A a := by
+      intro Γ A B a H
+      exact ⟨(LR Γ).symm_ty H.1, fun r hsort =>
+        let ⟨u, rootA, rootB⟩ := H.2 r hsort
+        ⟨u, rootB, rootA⟩⟩
+    let tyTrans : ∀ {Γ : List SExpr} {A B C : SExpr} {a : WShape 0},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B C a →
+          (LRD Γ).TyDefEq A C a := by
+      intro Γ A B C a H₁ H₂
+      refine ⟨(LR Γ).trans_ty H₁.1 H₂.1, fun r hsort => ?_⟩
+      obtain ⟨u, rootA, rootB⟩ := H₁.2 r hsort
+      obtain ⟨_, rootB', rootC⟩ := H₂.2 r hsort
+      cases rootB.toWHRedS.determ WHNF.sort rootB'.toWHRedS WHNF.sort
+      exact ⟨u, rootA, rootC⟩
+    refine ⟨tySymm, tyTrans, ?_, ?_, ?_⟩
+    · intro Γ M N A m a H
+      exact ⟨(LR Γ).symm H.1, fun r hsort =>
+        tySymm (H.2 r hsort)⟩
+    · intro Γ M₁ M₂ M₃ A m a H₁ H₂
+      exact ⟨(LR Γ).trans H₁.1 H₂.1, fun r hsort =>
+        tyTrans (H₁.2 r hsort) (H₂.2 r hsort)⟩
+    · intro Γ M N A B m a hTy H
+      exact ⟨(LR Γ).conv hTy.1 H.1, H.2⟩
+  | succ n ih =>
+    let tySymm : ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape (n + 1)},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B A a := by
+      intro Γ A B a H
+      refine ⟨(LR Γ).symm_ty H.1, ?_, ?_⟩
+      · intro r hsort
+        let ⟨u, rootA, rootB⟩ := H.2.1 r hsort
+        exact ⟨u, rootB, rootA⟩
+      · intro b f hforall
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath, codomainPath, domain, pi⟩ := H.2.2 b f hforall
+        obtain ⟨u', domainPath'⟩ := domainPath.symm
+        obtain ⟨v', codomainPath'⟩ := codomainPath.symm
+        have codomainPath'' := domainPath.defeqDF_l_path codomainPath'
+        have domain' := ih.tySymm domain
+        refine ⟨B₂, F₂, B₁, F₁, u', v', rootB, rootA,
+          domainPath', codomainPath'', domain', ?_⟩
+        constructor
+        · intro x y p hp hxy hrel
+          have out := pi.1 hp (domainPath'.defeqDF hxy)
+            (ih.conv domain' hrel)
+          exact ⟨out.rightTy, out.leftTy,
+            out.rightDefEq, out.leftDefEq⟩
+        · intro x p hp hxx hrel
+          exact ih.tySymm <| pi.2 hp (domainPath'.defeqDF hxx)
+            (ih.conv domain' hrel)
+    let tyTrans : ∀ {Γ : List SExpr} {A B C : SExpr}
+        {a : WShape (n + 1)},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).TyDefEq B C a →
+          (LRD Γ).TyDefEq A C a := by
+      intro Γ A B C a H₁ H₂
+      refine ⟨(LR Γ).trans_ty H₁.1 H₂.1, ?_, ?_⟩
+      · intro r hsort
+        obtain ⟨u, rootA, rootB⟩ := H₁.2.1 r hsort
+        obtain ⟨_, rootB', rootC⟩ := H₂.2.1 r hsort
+        cases rootB.toWHRedS.determ WHNF.sort rootB'.toWHRedS WHNF.sort
+        exact ⟨u, rootA, rootC⟩
+      · intro b f hforall
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath₁₂, codomainPath₁₂, domain₁₂, pi₁⟩ :=
+          H₁.2.2 b f hforall
+        obtain ⟨B₂', F₂', B₃, F₃, _, _, rootB', rootC,
+          domainPath₂₃, codomainPath₂₃, domain₂₃, pi₂⟩ :=
+          H₂.2.2 b f hforall
+        cases rootB.toWHRedS.determ WHNF.forallE
+          rootB'.toWHRedS WHNF.forallE
+        obtain ⟨_, domainPath₂₁⟩ := domainPath₁₂.symm
+        have codomainPath₂₃' :=
+          domainPath₂₁.defeqDF_l_path codomainPath₂₃
+        have domain₁₃ := ih.tyTrans domain₁₂ domain₂₃
+        refine ⟨B₁, F₁, B₃, F₃, u, v, rootA, rootC,
+          domainPath₁₂.trans domainPath₂₃,
+          codomainPath₁₂.trans codomainPath₂₃', domain₁₃, ?_⟩
+        constructor
+        · intro x y p hp hxy hrel
+          have out₁ := pi₁.1 hp hxy hrel
+          have out₂ := pi₂.1 hp (domainPath₁₂.defeqDF hxy)
+            (ih.conv domain₁₂ hrel)
+          exact ⟨out₁.leftTy, out₂.rightTy,
+            out₁.leftDefEq, out₂.rightDefEq⟩
+        · intro x p hp hxx hrel
+          exact ih.tyTrans (pi₁.2 hp hxx hrel)
+            (pi₂.2 hp (domainPath₁₂.defeqDF hxx)
+              (ih.conv domain₁₂ hrel))
+    let defSymm : ∀ {Γ : List SExpr} {M N A : SExpr}
+        {m a : WShape (n + 1)},
+        (LRD Γ).DefEq M N A m a → (LRD Γ).DefEq N M A m a := by
+      intro Γ M N A m a H
+      refine ⟨(LR Γ).symm H.1,
+        (fun r hsort => tySymm (H.2.1 r hsort)), ?_⟩
+      intro b f g hg hforall hlam
+      obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, action⟩ :=
+        H.2.2 b f g hg hforall hlam
+      refine ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, ?_⟩
+      constructor
+      · intro x y p hp hxy hrel
+        have out := action.1 hp hxy hrel
+        exact ⟨out.2, out.1⟩
+      · intro x p hp hxx hrel
+        exact ih.defSymm (action.2 hp hxx hrel)
+    let defTrans : ∀ {Γ : List SExpr} {M₁ M₂ M₃ A : SExpr}
+        {m a : WShape (n + 1)},
+        (LRD Γ).DefEq M₁ M₂ A m a →
+        (LRD Γ).DefEq M₂ M₃ A m a →
+          (LRD Γ).DefEq M₁ M₃ A m a := by
+      intro Γ M₁ M₂ M₃ A m a H₁ H₂
+      refine ⟨(LR Γ).trans H₁.1 H₂.1,
+        (fun r hsort => tyTrans (H₁.2.1 r hsort) (H₂.2.1 r hsort)), ?_⟩
+      intro b f g hg hforall hlam
+      obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, action₁⟩ :=
+        H₁.2.2 b f g hg hforall hlam
+      obtain ⟨A₁', A₂', _, _, rootA', _, _, _, _, action₂⟩ :=
+        H₂.2.2 b f g hg hforall hlam
+      cases rootA.toWHRedS.determ WHNF.forallE
+        rootA'.toWHRedS WHNF.forallE
+      refine ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi, ?_⟩
+      constructor
+      · intro x y p hp hxy hrel
+        have out₁ := action₁.1 hp hxy hrel
+        have out₂ := action₂.1 hp hxy hrel
+        exact ⟨out₁.1, out₂.2⟩
+      · intro x p hp hxx hrel
+        exact ih.defTrans (action₁.2 hp hxx hrel)
+          (action₂.2 hp hxx hrel)
+    let conv : ∀ {Γ : List SExpr} {M N A B : SExpr}
+        {m a : WShape (n + 1)},
+        (LRD Γ).TyDefEq A B a → (LRD Γ).DefEq M N A m a →
+          (LRD Γ).DefEq M N B m a := by
+      intro Γ M N A B m a hTy H
+      refine ⟨(LR Γ).conv hTy.1 H.1, H.2.1, ?_⟩
+      intro b f g hg hforall hlam
+      obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+        domainPath, codomainPath, domain, typePi⟩ :=
+        hTy.2.2 b f hforall
+      obtain ⟨A₁, A₂, _, v', rootA', hA₁, domainA, hA₂,
+        piA, action⟩ := H.2.2 b f g hg hforall hlam
+      cases rootA.toWHRedS.determ WHNF.forallE
+        rootA'.toWHRedS WHNF.forallE
+      obtain ⟨u', hB₂⟩ := domainPath.rightType
+      obtain ⟨v'', hF₂⟩ := codomainPath.rightType
+      obtain ⟨_, domainSymmPath⟩ := domainPath.symm
+      have domainSymm := ih.tySymm domain
+      have domainRight := LRD.TyDefEq.left domainSymm
+      refine ⟨B₂, F₂, u', v'', rootB, hB₂, domainRight,
+        domainPath.defeqDF_l hF₂, ?_, ?_⟩
+      · constructor
+        · intro x y p hp hxy hrel
+          have out := typePi.1 hp (domainSymmPath.defeqDF hxy)
+            (ih.conv domainSymm hrel)
+          exact ⟨out.rightTy, out.rightTy,
+            out.rightDefEq, out.rightDefEq⟩
+        · intro x p hp hxx hrel
+          exact (typePi.1 hp (domainSymmPath.defeqDF hxx)
+            (ih.conv domainSymm hrel)).rightTy
+      · constructor
+        · intro x y p hp hxy hrel
+          have hrelA := ih.conv domainSymm hrel
+          have hxyA := domainSymmPath.defeqDF hxy
+          have codomain := typePi.2 hp hxyA.hasType.1
+            (LRD.DefEq.left hrelA)
+          have out := action.1 hp hxyA hrelA
+          exact ⟨ih.conv codomain out.1, ih.conv codomain out.2⟩
+        · intro x p hp hxx hrel
+          have hrelA := ih.conv domainSymm hrel
+          have hxxA := domainSymmPath.defeqDF hxx
+          have codomain := typePi.2 hp hxxA.hasType.1
+            (LRD.DefEq.left hrelA)
+          exact ih.conv codomain (action.2 hp hxxA hrelA)
+    exact ⟨tySymm, tyTrans, defSymm, defTrans, conv⟩
+
+/-- Symmetry of guarded direct type validity. -/
+theorem LRD.TyDefEq.symm
+    (H : (LRD Γ).TyDefEq A B a) : (LRD Γ).TyDefEq B A a :=
+  (LRD.algebra _).tySymm H
+
+/-- Transitivity of guarded direct type validity. -/
+theorem LRD.TyDefEq.trans
+    (H₁ : (LRD Γ).TyDefEq A B a) (H₂ : (LRD Γ).TyDefEq B C a) :
+    (LRD Γ).TyDefEq A C a :=
+  (LRD.algebra _).tyTrans H₁ H₂
+
+/-- Symmetry of guarded direct term validity. -/
+theorem LRD.DefEq.symm
+    (H : (LRD Γ).DefEq M N A m a) : (LRD Γ).DefEq N M A m a :=
+  (LRD.algebra _).defSymm H
+
+/-- Transitivity of guarded direct term validity. -/
+theorem LRD.DefEq.trans
+    (H₁ : (LRD Γ).DefEq M₁ M₂ A m a)
+    (H₂ : (LRD Γ).DefEq M₂ M₃ A m a) :
+    (LRD Γ).DefEq M₁ M₃ A m a :=
+  (LRD.algebra _).defTrans H₁ H₂
+
+/-- Convert the displayed type of a guarded direct term edge. -/
+theorem LRD.DefEq.conv
+    (hTy : (LRD Γ).TyDefEq A B a)
+    (H : (LRD Γ).DefEq M N A m a) :
+    (LRD Γ).DefEq M N B m a :=
+  (LRD.algebra _).conv hTy H
+
+/-- Complete a legacy cross-type observation with guarded self-observations
+at its two endpoints.  At Pi shapes the legacy edge fixes the heterogeneous
+domain/codomain paths, while the endpoint observations supply the guarded
+actions; weak-head determinism synchronizes their exposed Pi roots. -/
+private theorem LRD.tyCompleteAux (n : Nat) :
+    ∀ {Γ : List SExpr} {A B : SExpr} {a : WShape n},
+      (LR Γ).TyDefEq A B a →
+      (LRD Γ).TyDefEq A A a →
+      (LRD Γ).TyDefEq B B a →
+      (LRD Γ).TyDefEq A B a := by
+  induction n with
+  | zero =>
+    intro Γ A B a hAB hAA hBB
+    refine ⟨hAB, ?_⟩
+    intro r hsort
+    have hAB' := hAB
+    cases hsort
+    rw [LR_zero] at hAB'
+    change LR0.TyDefEq Γ A B (.sort r) at hAB'
+    obtain ⟨_, legacyA, legacyB⟩ := hAB'
+    obtain ⟨_, rootA, _⟩ := hAA.2 r rfl
+    obtain ⟨_, rootB, _⟩ := hBB.2 r rfl
+    cases rootA.toWHRedS.determ WHNF.sort legacyA WHNF.sort
+    cases rootB.toWHRedS.determ WHNF.sort legacyB WHNF.sort
+    exact ⟨_, rootA, rootB⟩
+  | succ n ih =>
+    intro Γ A B a hAB hAA hBB
+    refine ⟨hAB, ?_, ?_⟩
+    · intro r hsort
+      have hAB' := hAB
+      cases hsort
+      rw [LR_succ] at hAB'
+      change LRS.TyDefEq (n := n) (LR Γ) A B
+        (.sort r : WShape (n + 1)) at hAB'
+      obtain ⟨_, legacyA, legacyB⟩ := hAB'
+      obtain ⟨_, rootA, _⟩ := hAA.2.1 r rfl
+      obtain ⟨_, rootB, _⟩ := hBB.2.1 r rfl
+      cases rootA.toWHRedS.determ WHNF.sort legacyA WHNF.sort
+      cases rootB.toWHRedS.determ WHNF.sort legacyB WHNF.sort
+      exact ⟨_, rootA, rootB⟩
+    · intro b f hforall
+      have hAA' := LRD.TyDefEq.left hAA
+      have hBB' := LRD.TyDefEq.left hBB
+      obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath, codomainPath, domainLegacy, piLegacy⟩ := by
+        rw [LR_succ] at hAB
+        simpa only [hforall, LRS.TyDefEq.forallE_iff] using hAB
+      obtain ⟨_, _, _, _, _, _, rootAA, rootAA', _, _,
+          domainAA, piAA⟩ := hAA'.2.2 b f hforall
+      cases rootAA.toWHRedS.determ WHNF.forallE
+        rootA WHNF.forallE
+      cases rootAA'.toWHRedS.determ WHNF.forallE
+        rootA WHNF.forallE
+      obtain ⟨_, _, _, _, _, _, rootBB, rootBB', _, _,
+          domainBB, piBB⟩ := hBB'.2.2 b f hforall
+      cases rootBB.toWHRedS.determ WHNF.forallE
+        rootB WHNF.forallE
+      cases rootBB'.toWHRedS.determ WHNF.forallE
+        rootB WHNF.forallE
+      have domain : (LRD Γ).TyDefEq B₁ B₂ b :=
+        ih domainLegacy domainAA domainBB
+      refine ⟨B₁, F₁, B₂, F₂, u, v, rootAA, rootBB,
+        domainPath, codomainPath, domain, ?_⟩
+      constructor
+      · intro x y p hp hxy hrel
+        have legacyOut := piLegacy.1 hp hxy (LRD.defLegacy hrel)
+        have leftOut := piAA.1 hp hxy hrel
+        have hxyRight := domainPath.defeqDF hxy
+        have hrelRight := LRD.DefEq.conv domain hrel
+        have rightOut := piBB.1 hp hxyRight hrelRight
+        exact ⟨leftOut.leftTy, rightOut.leftTy,
+          legacyOut.leftDefEq, legacyOut.rightDefEq⟩
+      · intro x p hp hxx hrel
+        have legacyOut := piLegacy.2 hp hxx (LRD.defLegacy hrel)
+        have leftOut := piAA.2 hp hxx hrel
+        have hxxRight := domainPath.defeqDF hxx
+        have hrelRight := LRD.DefEq.conv domain hrel
+        have rightOut := piBB.2 hp hxxRight hrelRight
+        exact ih legacyOut leftOut rightOut
+
+/-- Public completion rule for the guarded type relation.  No raw equality
+is promoted: the cross endpoint must already be related in `LR`, and both
+guarded endpoint observations are retained at the same semantic shape. -/
+theorem LRD.TyDefEq.complete
+    (legacy : (LR Γ).TyDefEq A B a)
+    (left : (LRD Γ).TyDefEq A A a)
+    (right : (LRD Γ).TyDefEq B B a) :
+    (LRD Γ).TyDefEq A B a :=
+  LRD.tyCompleteAux _ legacy left right
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.symm' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.symm
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.trans
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.symm' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.symm
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.trans
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.complete' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.complete
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.conv' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.conv
+
+/-- Path-typed weak-head closure of guarded direct type validity.  Raw
+reductions are insufficient here: each prefix must retain the heterogeneous
+type path that authorizes retargeting the selected root. -/
+theorem LRD.TyDefEq.whr
+    {n : Nat} {a : WShape n}
+    (hA : TypeWHRedPath Γ A A') (hB : TypeWHRedPath Γ B B') :
+    (LRD Γ).TyDefEq A B a ↔ (LRD Γ).TyDefEq A' B' a := by
+  cases n with
+  | zero =>
+    constructor
+    · intro H
+      refine ⟨((LR Γ).whr_ty hA.toWHRedS hB.toWHRedS).1 H.1, ?_⟩
+      intro r hsort
+      obtain ⟨u, rootA, rootB⟩ := H.2 r hsort
+      exact ⟨u, hA.retargetLeft rootA WHNF.sort,
+        hB.retargetLeft rootB WHNF.sort⟩
+    · intro H
+      refine ⟨((LR Γ).whr_ty hA.toWHRedS hB.toWHRedS).2 H.1, ?_⟩
+      intro r hsort
+      obtain ⟨u, rootA, rootB⟩ := H.2 r hsort
+      exact ⟨u, hA.trans rootA, hB.trans rootB⟩
+  | succ n =>
+    constructor
+    · intro H
+      refine ⟨((LR Γ).whr_ty hA.toWHRedS hB.toWHRedS).1 H.1, ?_, ?_⟩
+      · intro r hsort
+        obtain ⟨u, rootA, rootB⟩ := H.2.1 r hsort
+        exact ⟨u, hA.retargetLeft rootA WHNF.sort,
+          hB.retargetLeft rootB WHNF.sort⟩
+      · intro b f hforall
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB, rest⟩ :=
+          H.2.2 b f hforall
+        exact ⟨B₁, F₁, B₂, F₂, u, v,
+          hA.retargetLeft rootA WHNF.forallE,
+          hB.retargetLeft rootB WHNF.forallE, rest⟩
+    · intro H
+      refine ⟨((LR Γ).whr_ty hA.toWHRedS hB.toWHRedS).2 H.1, ?_, ?_⟩
+      · intro r hsort
+        obtain ⟨u, rootA, rootB⟩ := H.2.1 r hsort
+        exact ⟨u, hA.trans rootA, hB.trans rootB⟩
+      · intro b f hforall
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB, rest⟩ :=
+          H.2.2 b f hforall
+        exact ⟨B₁, F₁, B₂, F₂, u, v,
+          hA.trans rootA, hB.trans rootB, rest⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.whr' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.whr
+
+/-- Typed weak-head closure of guarded direct term validity.  The ordinary
+relation follows the raw reductions.  Direct sort observations use the
+displayed type's retained universe root, while direct lambda actions recurse
+after applying the typed reductions to their arguments. -/
+theorem LRD.DefEq.whr
+    {n : Nat} {m a : WShape n}
+    (hTy : (LRD Γ).TyDefEq A A a)
+    (hM : TypedWHRedS Γ M M' A)
+    (hN : TypedWHRedS Γ N N' A) :
+    (LRD Γ).DefEq M N A m a ↔
+      (LRD Γ).DefEq M' N' A m a := by
+  induction n generalizing Γ M M' N N' A with
+  | zero =>
+    constructor
+    · intro H
+      refine ⟨((LR Γ).whr hM.reduction hN.reduction).1 H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      obtain ⟨u, rootA, _⟩ := LRD.TyDefEq.sortView hTy
+      exact (LRD.TyDefEq.whr (n := 0)
+        (hM.toTypeWHRedPathAt rootA)
+        (hN.toTypeWHRedPathAt rootA)).1 (H.2 r rfl)
+    · intro H
+      refine ⟨((LR Γ).whr hM.reduction hN.reduction).2 H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      obtain ⟨u, rootA, _⟩ := LRD.TyDefEq.sortView hTy
+      exact (LRD.TyDefEq.whr (n := 0)
+        (hM.toTypeWHRedPathAt rootA)
+        (hN.toTypeWHRedPathAt rootA)).2 (H.2 r rfl)
+  | succ n ih =>
+    have mapAction : ∀
+        {M M' N N' A₁ A₂ : SExpr}
+        {g : WShapeFun n} {b : WShape n} {f : WShapeFun n},
+        LR.DirectPiDefEq (LRD Γ) A₁ A₂ A₂ b f →
+        LR.DirectLamDefEq (LRD Γ) M N A₁ A₂ g b f →
+        TypedWHRedS Γ M M' (.forallE A₁ A₂) →
+        TypedWHRedS Γ N N' (.forallE A₁ A₂) →
+        LR.DirectLamDefEq (LRD Γ) M' N' A₁ A₂ g b f := by
+      intro M M' N N' A₁ A₂ g b f pi action hM hN
+      constructor
+      · intro x y p hp hxy hrel
+        have typed := pi.1 hp hxy hrel
+        obtain ⟨_, hcod⟩ := typed.leftDefEq
+        have hMx : TypedWHRedS Γ (M.app x) (M'.app x) (A₂.inst x) :=
+          ⟨.appDF hM.defeq hxy.hasType.1, .app hM.reduction⟩
+        have hMy : TypedWHRedS Γ (M.app y) (M'.app y) (A₂.inst x) :=
+          ⟨hcod.symm.defeqDF (.appDF hM.defeq hxy.hasType.2),
+            .app hM.reduction⟩
+        have hNx : TypedWHRedS Γ (N.app x) (N'.app x) (A₂.inst x) :=
+          ⟨.appDF hN.defeq hxy.hasType.1, .app hN.reduction⟩
+        have hNy : TypedWHRedS Γ (N.app y) (N'.app y) (A₂.inst x) :=
+          ⟨hcod.symm.defeqDF (.appDF hN.defeq hxy.hasType.2),
+            .app hN.reduction⟩
+        have out := action.1 hp hxy hrel
+        have leftTy := LRD.TyDefEq.left typed.leftTy
+        exact ⟨(ih leftTy hMx hMy).1 out.1,
+          (ih leftTy hNx hNy).1 out.2⟩
+      · intro x p hp hxx hrel
+        have typed := pi.1 hp hxx hrel
+        have hMx : TypedWHRedS Γ (M.app x) (M'.app x) (A₂.inst x) :=
+          ⟨.appDF hM.defeq hxx.hasType.1, .app hM.reduction⟩
+        have hNx : TypedWHRedS Γ (N.app x) (N'.app x) (A₂.inst x) :=
+          ⟨.appDF hN.defeq hxx.hasType.1, .app hN.reduction⟩
+        exact (ih (LRD.TyDefEq.left typed.leftTy) hMx hNx).1
+          (action.2 hp hxx hrel)
+    have unmapAction : ∀
+        {M M' N N' A₁ A₂ : SExpr}
+        {g : WShapeFun n} {b : WShape n} {f : WShapeFun n},
+        LR.DirectPiDefEq (LRD Γ) A₁ A₂ A₂ b f →
+        LR.DirectLamDefEq (LRD Γ) M' N' A₁ A₂ g b f →
+        TypedWHRedS Γ M M' (.forallE A₁ A₂) →
+        TypedWHRedS Γ N N' (.forallE A₁ A₂) →
+        LR.DirectLamDefEq (LRD Γ) M N A₁ A₂ g b f := by
+      intro M M' N N' A₁ A₂ g b f pi action hM hN
+      constructor
+      · intro x y p hp hxy hrel
+        have typed := pi.1 hp hxy hrel
+        obtain ⟨_, hcod⟩ := typed.leftDefEq
+        have hMx : TypedWHRedS Γ (M.app x) (M'.app x) (A₂.inst x) :=
+          ⟨.appDF hM.defeq hxy.hasType.1, .app hM.reduction⟩
+        have hMy : TypedWHRedS Γ (M.app y) (M'.app y) (A₂.inst x) :=
+          ⟨hcod.symm.defeqDF (.appDF hM.defeq hxy.hasType.2),
+            .app hM.reduction⟩
+        have hNx : TypedWHRedS Γ (N.app x) (N'.app x) (A₂.inst x) :=
+          ⟨.appDF hN.defeq hxy.hasType.1, .app hN.reduction⟩
+        have hNy : TypedWHRedS Γ (N.app y) (N'.app y) (A₂.inst x) :=
+          ⟨hcod.symm.defeqDF (.appDF hN.defeq hxy.hasType.2),
+            .app hN.reduction⟩
+        have out := action.1 hp hxy hrel
+        have leftTy := LRD.TyDefEq.left typed.leftTy
+        exact ⟨(ih leftTy hMx hMy).2 out.1,
+          (ih leftTy hNx hNy).2 out.2⟩
+      · intro x p hp hxx hrel
+        have typed := pi.1 hp hxx hrel
+        have hMx : TypedWHRedS Γ (M.app x) (M'.app x) (A₂.inst x) :=
+          ⟨.appDF hM.defeq hxx.hasType.1, .app hM.reduction⟩
+        have hNx : TypedWHRedS Γ (N.app x) (N'.app x) (A₂.inst x) :=
+          ⟨.appDF hN.defeq hxx.hasType.1, .app hN.reduction⟩
+        exact (ih (LRD.TyDefEq.left typed.leftTy) hMx hNx).2
+          (action.2 hp hxx hrel)
+    constructor
+    · intro H
+      refine ⟨((LR Γ).whr hM.reduction hN.reduction).1 H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        obtain ⟨u, rootA, _⟩ := LRD.TyDefEq.sortView hTy
+        exact (LRD.TyDefEq.whr (n := n + 1)
+          (hM.toTypeWHRedPathAt rootA)
+          (hN.toTypeWHRedPathAt rootA)).1 (H.2.1 r rfl)
+      · intro b f g hg hforall hlam
+        obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi,
+          action⟩ := H.2.2 b f g hg hforall hlam
+        have hM' : TypedWHRedS Γ M M' (.forallE A₁ A₂) :=
+          ⟨rootA.defeqDF hM.defeq, hM.reduction⟩
+        have hN' : TypedWHRedS Γ N N' (.forallE A₁ A₂) :=
+          ⟨rootA.defeqDF hN.defeq, hN.reduction⟩
+        exact ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi,
+          mapAction pi action hM' hN'⟩
+    · intro H
+      refine ⟨((LR Γ).whr hM.reduction hN.reduction).2 H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        obtain ⟨u, rootA, _⟩ := LRD.TyDefEq.sortView hTy
+        exact (LRD.TyDefEq.whr (n := n + 1)
+          (hM.toTypeWHRedPathAt rootA)
+          (hN.toTypeWHRedPathAt rootA)).2 (H.2.1 r rfl)
+      · intro b f g hg hforall hlam
+        obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi,
+          action⟩ := H.2.2 b f g hg hforall hlam
+        have hM' : TypedWHRedS Γ M M' (.forallE A₁ A₂) :=
+          ⟨rootA.defeqDF hM.defeq, hM.reduction⟩
+        have hN' : TypedWHRedS Γ N N' (.forallE A₁ A₂) :=
+          ⟨rootA.defeqDF hN.defeq, hN.reduction⟩
+        exact ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi,
+          unmapAction pi action hM' hN'⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.whr' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.whr
+
+/-! #### Guarded direct Pi, lambda, and application constructors -/
+
+
+/-- Package the legacy Pi observation and its guarded direct sidecar. -/
+theorem LRD.TyDefEq.forallE
+    {n : Nat} {b : WShape n} {f : WShapeFun n}
+    (legacy : (LR Γ).TyDefEq A B (.forallE b f))
+    (direct : LR.DirectValTyPi2 (LRD (n := n) Γ) A B b f) :
+    (LRD (n := n + 1) Γ).TyDefEq A B (.forallE b f) := by
+  refine ⟨legacy, ?_, ?_⟩
+  · intro r hsort
+    cases congrArg (·.1) hsort
+  · intro b' f' hforall
+    obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+    exact direct
+
+/-- Package the legacy lambda observation and its guarded direct action. -/
+theorem LRD.DefEq.lam
+    {n : Nat} {g : WShapeFun n} {hg : g.NonZero}
+    {b : WShape n} {f : WShapeFun n}
+    (legacy : (LR Γ).DefEq M N A (.lam g hg) (.forallE b f))
+    (direct : LR.DirectLamView (LRD (n := n) Γ) M N A g b f) :
+    (LRD (n := n + 1) Γ).DefEq M N A
+      (.lam g hg) (.forallE b f) := by
+  refine ⟨legacy, ?_, ?_⟩
+  · intro r hsort
+    cases congrArg (·.1) hsort
+  · intro b' f' g' hg' hforall hlam
+    obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+    have hgg' := WShape.lam.inj.1 hlam
+    subst g'
+    exact direct
+
+/-- An informative guarded lambda observation validates its own displayed
+Pi type at the identical semantic type shape.
+
+The legacy projection supplies the unrestricted Pi certificate required by
+`LR`, while the guarded lambda view supplies the path-typed root and the
+recursive direct Pi action.  No type observation is reselected and no raw
+weak-head reduction is promoted to a conversion. -/
+theorem LRD.DefEq.piDisplayedTy
+    {n : Nat} {Γ : List SExpr} {M N A : SExpr}
+    {g : WShapeFun n} {hg : g.NonZero}
+    {b : WShape n} {f : WShapeFun n}
+    (H : (LRD (n := n + 1) Γ).DefEq M N A
+      (.lam g hg) (.forallE b f)) :
+    (LRD (n := n + 1) Γ).TyDefEq A A (.forallE b f) := by
+  have hlegacy := H.1
+  rw [LR_succ] at hlegacy
+  obtain ⟨A₁, A₂, u, v, root, hA₁, hDomain,
+    hA₂, hPi, _hLam⟩ :=
+      (LRS.DefEq.lam_forallE (M := M) (N := N) (A := A)
+        (f := g) (hf := hg) (a₁ := b) (a₂ := f) (LR Γ)).1 hlegacy
+  have legacy : (LR Γ).TyDefEq A A (.forallE b f) := by
+    rw [LR_succ]
+    exact ⟨A₁, A₂, A₁, A₂, u, v, root, root,
+      .single hA₁, .single hA₂, hDomain, hPi⟩
+  rw [LRD_succ] at H
+  obtain ⟨B, F, u', v', root', hB, domain,
+    hF, pi, _action⟩ := H.2.2 b f g hg rfl rfl
+  exact LRD.TyDefEq.forallE legacy
+    ⟨B, F, B, F, u', v', root', root',
+      .single hB, .single hF, domain, pi⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.piDisplayedTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.piDisplayedTy
+
+/-- Expose and apply the exact Pi telescope retained by a guarded direct
+function observation. -/
+theorem LRD.DefEq.app_exposed
+    {n : Nat} {M N T x y : SExpr}
+    {mf : WShapeFun n} {hmf : mf.NonZero}
+    {b p : WShape n} {tf : WShapeFun n}
+    (hfun : (LRD (n := n + 1) Γ).DefEq M N T
+      (.lam mf hmf) (.forallE b tf))
+    (hp : p.HasType b) :
+    ∃ B F u v, TypeWHRedPath Γ T (.forallE B F) ∧
+      IsDefEq Γ B B (.sort u) ∧
+      (LRD (n := n) Γ).TyDefEq B B b ∧
+      IsDefEq (B :: Γ) F F (.sort v) ∧
+      LR.DirectPiDefEq (LRD (n := n) Γ) B F F b tf ∧
+      ∀ (_hxy : IsDefEq Γ x y B),
+        (LRD (n := n) Γ).DefEq x y B p b →
+        (LRD (n := n) Γ).DefEq
+          (M.app x) (N.app y) (F.inst x)
+          (mf.app p) (tf.app p) := by
+  obtain ⟨B, F, u, v, root, hB, domain, hF, pi, action⟩ :=
+    hfun.2.2 b tf mf hmf rfl rfl
+  refine ⟨B, F, u, v, root, hB, domain, hF, pi, ?_⟩
+  intro hxy harg
+  exact LRD.DefEq.trans
+    (action.2 hp hxy.hasType.1 (LRD.DefEq.left harg))
+    (action.1 hp hxy harg).2
+
+/-- Apply guarded-direct functions to guarded-direct arguments. -/
+theorem LRD.DefEq.app
+    {n : Nat} {M N A₁ A₂ x y : SExpr}
+    {mf : WShapeFun n} {hmf : mf.NonZero}
+    {b p : WShape n} {tf : WShapeFun n}
+    (hfun : (LRD (n := n + 1) Γ).DefEq M N (.forallE A₁ A₂)
+      (.lam mf hmf) (.forallE b tf))
+    (hp : p.HasType b) (hxy : IsDefEq Γ x y A₁)
+    (harg : (LRD (n := n) Γ).DefEq x y A₁ p b) :
+    (LRD (n := n) Γ).DefEq
+      (M.app x) (N.app y) (A₂.inst x)
+      (mf.app p) (tf.app p) := by
+  obtain ⟨B, F, u, v, root, hB, domain, hF, pi, apply⟩ :=
+    LRD.DefEq.app_exposed hfun hp
+  have hhead : SExpr.forallE A₁ A₂ = .forallE B F :=
+    WHNF.forallE.whRedS root.toWHRedS
+  cases hhead
+  exact apply hxy harg
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.forallE' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.forallE
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.lam' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.lam
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.app_exposed' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.app_exposed
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.app' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.app
+
+
+/-! #### Guarded direct shape algebra
+
+Pi and lambda transport require all four monotonicity directions together:
+type-shape lowering, displayed-type lowering and raising, and element-shape
+lowering.  The lower direct relation supplies those operations recursively.
+The same package carries compatible type joins, whose Pi case joins each
+direct codomain observation rather than erasing it to the legacy relation. -/
+
+structure LRD.ShapeAt (n : Nat) : Prop where
+  tyMono : ∀ { Γ : List SExpr } {A B : SExpr} {a a' : WShape n},
+    a ≤ a' → a.HasType .type → a'.HasType .type →
+      (LRD (n := n) Γ).TyDefEq A B a' →
+        (LRD (n := n) Γ).TyDefEq A B a
+  defMonoR2 : ∀ { Γ : List SExpr } {M N A : SExpr} {m a a' : WShape n},
+    a ≤ a' → m.HasType a → a'.HasType .type →
+      (LRD (n := n) Γ).DefEq M N A m a' →
+        (LRD (n := n) Γ).DefEq M N A m a
+  defMonoR1 : ∀ { Γ : List SExpr } {M N A : SExpr} {m a a' : WShape n},
+    a ≤ a' → m.HasType a → m.HasType a' →
+      (LRD (n := n) Γ).TyDefEq A A a' →
+      (LRD (n := n) Γ).DefEq M N A m a →
+        (LRD (n := n) Γ).DefEq M N A m a'
+  defMonoL : ∀ { Γ : List SExpr} {M N A : SExpr} {m m' a : WShape n},
+    m ≤ m' → m.HasType a → m'.HasType a →
+      (LRD (n := n) Γ).DefEq M N A m' a →
+        (LRD (n := n) Γ).DefEq M N A m a
+  tyJoin : ∀ { Γ : List SExpr } {A B : SExpr} {a₁ a₂ : WShape n},
+    a₁.Compat a₂ → a₁.HasType .type → a₂.HasType .type →
+      (LRD (n := n) Γ).TyDefEq A B a₁ →
+      (LRD (n := n) Γ).TyDefEq A B a₂ →
+        (LRD (n := n) Γ).TyDefEq A B (a₁.join a₂)
+
+private theorem LR.DirectPiDefEq.mono_r_2_direct
+    (L : LRD.ShapeAt n)
+    (le₁ : b ≤ b') (le₂ : f ≤ f')
+    (htpi : WShape.HasTypePi f b r)
+    (htpi' : WShape.HasTypePi f' b' r')
+    (hValA₁ : (LRD (n := n) Γ).TyDefEq A₁ A₁ b') :
+    LR.DirectPiDefEq (LRD (n := n) Γ) A₁ A₂ B₂ b' f' →
+      LR.DirectPiDefEq (LRD (n := n) Γ) A₁ A₂ B₂ b f
+  | ⟨h₁, h₂⟩ => by
+    have htpi_w := WShape.HasTypePi.iff.1 htpi
+    have htpi'_w := WShape.HasTypePi.iff.1 htpi'
+    refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+    all_goals
+      have hp' := WShape.HasType.mono_r le₁
+        (WShape.HasDom.isType htpi'.1) hp
+      have a₂ := L.defMonoR1 (A := A₁) (m := p) (a := b) (a' := b')
+        le₁ hp hp' hValA₁ hrel
+      have hm_tgt := (htpi_w.2 _ hp).toType
+      have hm_src := (htpi'_w.2 _ hp').toType
+    · let h := h₁ hp' ha a₂
+      exact ⟨L.tyMono (WShapeFun.app_mono_l le₂ p)
+          hm_tgt hm_src h.leftTy,
+        L.tyMono (WShapeFun.app_mono_l le₂ p)
+          hm_tgt hm_src h.rightTy,
+        h.leftDefEq, h.rightDefEq⟩
+    · exact L.tyMono (WShapeFun.app_mono_l le₂ p)
+        hm_tgt hm_src (h₂ hp' ha a₂)
+
+private theorem LR.DirectLamDefEq.mono_r_2_direct
+    (L : LRD.ShapeAt n)
+    (le₁ : a₁ ≤ a₁') (le₂ : a₂ ≤ a₂')
+    (hm : WShape.HasTypeLam m a₁ a₂)
+    (hValA₁ : (LRD (n := n) Γ).TyDefEq A₁ A₁ a₁')
+    (htpi' : WShape.HasTypePi a₂' a₁' r') :
+    LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m a₁' a₂' →
+      LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m a₁ a₂ := by
+  have hm_w := WShape.HasTypeLam.iff.1 hm
+  have htpi'_w := WShape.HasTypePi.iff.1 htpi'
+  intro ⟨h₁, h₂⟩
+  refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+  all_goals
+    have hp' := WShape.HasType.mono_r le₁
+      (WShape.HasDom.isType htpi'.1) hp
+    have hrel' := L.defMonoR1 (A := A₁) (m := p)
+      (a := a₁) (a' := a₁')
+      le₁ hp hp' hValA₁ hrel
+    have hm_tgt := hm_w.2.2 _ hp
+    have ht_src := (htpi'_w.2 _ hp').toType
+  · have ⟨d₁, d₂⟩ := h₁ hp' ha hrel'
+    exact ⟨L.defMonoR2 (WShapeFun.app_mono_l le₂ p)
+        hm_tgt ht_src d₁,
+      L.defMonoR2 (WShapeFun.app_mono_l le₂ p)
+        hm_tgt ht_src d₂⟩
+  · exact L.defMonoR2 (WShapeFun.app_mono_l le₂ _)
+      hm_tgt ht_src (h₂ hp' ha hrel')
+
+private theorem LR.DirectLamDefEq.mono_r_1_direct
+    (L : LRD.ShapeAt n)
+    (le₁ : a₁ ≤ a₁') (le₂ : a₂ ≤ a₂')
+    (hm : WShape.HasTypeLam m a₁ a₂)
+    (hm' : WShape.HasTypeLam m a₁' a₂')
+    (piEV : LR.DirectPiDefEq (LRD (n := n) Γ)
+      A₁ A₂ A₂ a₁' a₂') :
+    LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m a₁ a₂ →
+      LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m a₁' a₂' := by
+  have hm_d := WShape.HasDom.iff.1 hm.2.1
+  have hm_f := WShape.HasTypeLam.iff.1 hm |>.2.2
+  intro ⟨pav, pae⟩
+  refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+  all_goals
+    have ⟨p', le', hpp, h₁⟩ := hm_d p
+    have hpp' := hp.isType.mono_r le₁ hpp
+    have hrelP := L.defMonoL le' hpp' hp hrel
+    have hrelDown := L.defMonoR2 le₁ hpp hp.isType hrelP
+    have hgP := hm_f p' hpp
+    have hgP' := hgP.mono_l (WShapeFun.app_mono_r le') h₁
+    have leCod := (WShapeFun.app_mono_r le').trans
+      (WShapeFun.app_mono_l le₂ _)
+    have htCod := (WShape.HasTypePi.iff.1 hm'.1).2 p hp
+    have hmTarget := htCod.mono_r leCod hgP'
+  · have ⟨d₁, d₂⟩ := pav hpp ha hrelDown
+    have tyA₂ := (piEV.1 hp ha.hasType.1
+      (LRD.DefEq.left hrel)).leftTy
+    exact ⟨L.defMonoR1 leCod hgP' hmTarget tyA₂
+        (L.defMonoL h₁ hgP' hgP d₁),
+      L.defMonoR1 leCod hgP' hmTarget tyA₂
+        (L.defMonoL h₁ hgP' hgP d₂)⟩
+  · have d := pae hpp ha hrelDown
+    have tyA₂ := piEV.2 hp ha hrel
+    exact L.defMonoR1 leCod hgP' hmTarget tyA₂
+      (L.defMonoL h₁ hgP' hgP d)
+
+private theorem LR.DirectLamDefEq.mono_l_direct
+    (L : LRD.ShapeAt n)
+    (le : m ≤ m') (hm : WShape.HasTypeLam m a₁ a₂)
+    (hm' : WShape.HasTypeLam m' a₁ a₂) :
+    LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m' a₁ a₂ →
+      LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ m a₁ a₂ := by
+  have hm_w := WShape.HasTypeLam.iff.1 hm
+  have hm'_w := WShape.HasTypeLam.iff.1 hm'
+  intro ⟨pav, pae⟩
+  refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+  all_goals
+    have hm_tgt := hm_w.2.2 _ hp
+    have hm_src := hm'_w.2.2 _ hp
+  · have ⟨d₁, d₂⟩ := pav hp ha hrel
+    exact ⟨L.defMonoL (M := M.app x) (N := M.app y)
+        (A := A₂.inst x) (WShapeFun.app_mono_l le p)
+        hm_tgt hm_src d₁,
+      L.defMonoL (M := N.app x) (N := N.app y)
+        (A := A₂.inst x) (WShapeFun.app_mono_l le p)
+        hm_tgt hm_src d₂⟩
+  · exact L.defMonoL (WShapeFun.app_mono_l le _)
+      hm_tgt hm_src (pae hp ha hrel)
+
+private theorem LR.DirectPiDefEq.join_direct
+    (L : LRD.ShapeAt n)
+    (htB₁ : b₁.HasType .type) (htB₂ : b₂.HasType .type)
+    (hC_b : b₁.Compat b₂)
+    (ht₁ : WShape.HasTypePi f₁ b₁ r₁)
+    (ht₂ : WShape.HasTypePi f₂ b₂ r₂)
+    (hC_f : WShapeFun.Compat f₁ f₂)
+    (hE₁ : LR.DirectPiDefEq (LRD (n := n) Γ) B₁ F₁ F₂ b₁ f₁)
+    (hE₂ : LR.DirectPiDefEq (LRD (n := n) Γ) B₁ F₁ F₂ b₂ f₂) :
+    LR.DirectPiDefEq (LRD (n := n) Γ) B₁ F₁ F₂
+      (b₁.join b₂) (f₁.join f₂) := by
+  have hJ_b := WShape.Join.mk hC_b
+  have htB_join := htB₁.join hC_b htB₂
+  have hJ_f := WShapeFun.Join.mk hC_f
+  have ht₁_w := WShape.HasTypePi.iff.1 ht₁
+  have ht₂_w := WShape.HasTypePi.iff.1 ht₂
+  have hd₁ := WShape.HasDom.iff.1 ht₁.1
+  have hd₂ := WShape.HasDom.iff.1 ht₂.1
+  refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+  all_goals
+    obtain ⟨d, d_le, d_ht, d_app⟩ := hd₁ p
+    have relD := L.defMonoR2 hJ_b.le.1 d_ht htB_join
+      (L.defMonoL d_le
+        (WShape.HasType.mono_r hJ_b.le.1 htB_join d_ht) hp hrel)
+    obtain ⟨e, e_le, e_ht, e_app⟩ := hd₂ p
+    have relE := L.defMonoR2 hJ_b.le.2 e_ht htB_join
+      (L.defMonoL e_le
+        (WShape.HasType.mono_r hJ_b.le.2 htB_join e_ht) hp hrel)
+    have ht_f₁ : (f₁.app p).HasType .type :=
+      have ⟨_, _, hm⟩ := f₁.app_eq p
+      (ht₁.2 _ _ hm).toType
+    have ht_f₂ : (f₂.app p).HasType .type :=
+      have ⟨_, _, hm⟩ := f₂.app_eq p
+      (ht₂.2 _ _ hm).toType
+    have hJ_fp := hJ_f.app_l p
+    have ⟨hC_fp, _, hC_fJ⟩ := WShape.Join.iff.1 hJ_fp
+    have ht_fJ := ht_f₁.join' hJ_fp ht_f₂
+    have ht_fJ' := ht_f₁.join hC_fp ht_f₂
+    have cvtD {A B} (h : (LRD (n := n) Γ).TyDefEq A B (f₁.app d)) :
+        (LRD (n := n) Γ).TyDefEq A B (f₁.app p) :=
+      L.tyMono d_app ht_f₁ (ht₁_w.2 d d_ht).toType h
+    have cvtE {A B} (h : (LRD (n := n) Γ).TyDefEq A B (f₂.app e)) :
+        (LRD (n := n) Γ).TyDefEq A B (f₂.app p) :=
+      L.tyMono e_app ht_f₂ (ht₂_w.2 e e_ht).toType h
+  · let hd := hE₁.1 d_ht ha relD
+    let he := hE₂.1 e_ht ha relE
+    exact ⟨
+      L.tyMono hC_fJ ht_fJ ht_fJ' <|
+        L.tyJoin hC_fp ht_f₁ ht_f₂ (cvtD hd.leftTy) (cvtE he.leftTy),
+      L.tyMono hC_fJ ht_fJ ht_fJ' <|
+        L.tyJoin hC_fp ht_f₁ ht_f₂ (cvtD hd.rightTy) (cvtE he.rightTy),
+      hd.leftDefEq, hd.rightDefEq⟩
+  · exact L.tyMono hC_fJ ht_fJ ht_fJ' <|
+      L.tyJoin hC_fp ht_f₁ ht_f₂
+        (cvtD (hE₁.2 d_ht ha relD))
+        (cvtE (hE₂.2 e_ht ha relE))
+
+private theorem LRD.shape (n : Nat) : LRD.ShapeAt n := by
+  induction n with
+  | zero =>
+    let tyMono : ∀ { Γ : List SExpr } {A B : SExpr}
+        {a a' : WShape 0},
+        a ≤ a' → a.HasType .type → a'.HasType .type →
+          (LRD (n := 0) Γ).TyDefEq A B a' →
+          (LRD (n := 0) Γ).TyDefEq A B a := by
+      intro Γ A B a a' le ha ha' H
+      refine ⟨(LR Γ).mono_r_2_ty le ha ha' H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      obtain rfl := WShape.sort_le.1 le
+      exact H.2 r rfl
+    refine ⟨tyMono, ?_, ?_, ?_, ?_⟩
+    · intro Γ M N A m a a' le hm ha' H
+      refine ⟨(LR Γ).mono_r_2 le hm ha' H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      obtain rfl := WShape.sort_le.1 le
+      exact H.2 r rfl
+    · intro Γ M N A m a a' le hm hm' hTy H
+      refine ⟨(LR Γ).mono_r_1 le hm hm' hTy.1 H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      obtain rfl | rfl := WShape.le_sort.1 le
+      · have hm0 := hm.bot_r
+        subst m
+        change (LRD (n := 0) Γ).TyDefEq M N (.bot : WShape 0)
+        exact LRD.TyDefEq.bot
+      · exact H.2 r rfl
+    · intro Γ M N A m m' a le hm hm' H
+      refine ⟨(LR Γ).mono_l le hm hm' H.1, ?_⟩
+      intro r hsort
+      cases hsort
+      exact tyMono le hm.toType hm'.toType (H.2 r rfl)
+    · intro Γ A B a₁ a₂ hC ha₁ ha₂ H₁ H₂
+      refine ⟨(LR Γ).join_ty hC ha₁ ha₂ H₁.1 H₂.1, ?_⟩
+      cases ha₁.unfold with
+      | bot => simpa only [WShape.bot_join] using H₂.2
+      | sort =>
+        cases ha₂.unfold with
+        | bot => simpa only [WShape.join_bot] using H₁.2
+        | sort =>
+          intro r hsort
+          obtain ⟨u, rootA, rootB⟩ := H₁.2 _ rfl
+          exact ⟨u, rootA, rootB⟩
+  | succ n ih =>
+    let tyMono : ∀ { Γ : List SExpr } {A B : SExpr}
+        {a a' : WShape (n + 1)},
+        a ≤ a' → a.HasType .type → a'.HasType .type →
+          (LRD (n := n + 1) Γ).TyDefEq A B a' →
+          (LRD (n := n + 1) Γ).TyDefEq A B a := by
+      intro Γ A B a a' le ha ha' H
+      refine ⟨(LR Γ).mono_r_2_ty le ha ha' H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        obtain rfl := WShape.sort_le.1 le
+        exact H.2.1 r rfl
+      · intro b f hforall
+        cases hforall
+        obtain ⟨b', f', le₁, le₂, rfl⟩ := WShape.forallE_le.1 le
+        have ⟨_, htpi, _⟩ := WShape.HasType.forallE_l.1 ha
+        have ⟨_, htpi', _⟩ := WShape.HasType.forallE_l.1 ha'
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath, codomainPath, domain, pi⟩ := H.2.2 b' f' rfl
+        have hb := (WShape.HasTypePi.iff.1 htpi).1.isType
+        have hb' := (WShape.HasTypePi.iff.1 htpi').1.isType
+        exact ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+          domainPath, codomainPath, ih.tyMono le₁ hb hb' domain,
+          pi.mono_r_2_direct ih le₁ le₂ htpi htpi'
+            (LRD.TyDefEq.left domain)⟩
+    let defMonoR2 : ∀ { Γ : List SExpr } {M N A : SExpr}
+        {m a a' : WShape (n + 1)},
+        a ≤ a' → m.HasType a → a'.HasType .type →
+          (LRD (n := n + 1) Γ).DefEq M N A m a' →
+          (LRD (n := n + 1) Γ).DefEq M N A m a := by
+      intro Γ M N A m a a' le hm ha' H
+      refine ⟨(LR Γ).mono_r_2 le hm ha' H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        obtain rfl := WShape.sort_le.1 le
+        exact H.2.1 r rfl
+      · intro b f g hg hforall hlam
+        cases hforall
+        obtain ⟨b', f', le₁, le₂, rfl⟩ := WShape.forallE_le.1 le
+        have ⟨_, htpi, _⟩ := WShape.HasType.forallE_l.1 hm.isType
+        have ⟨_, htpi', _⟩ := WShape.HasType.forallE_l.1 ha'
+        obtain ⟨g', hmEq, hmLam⟩ := WShape.HasType.forallE_inv hm
+        have hgg' : g = g' := by
+          have eqv := congrArg (·.1) (hlam.symm.trans hmEq)
+          simp only [WShape.lam, WShape.lam'] at eqv
+          split at eqv
+          · injection eqv with eqv
+            exact WShapeFun.ext eqv
+          · cases eqv
+        subst g'
+        obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂,
+          pi, action⟩ := H.2.2 b' f' g hg rfl hlam
+        have hb := (WShape.HasTypePi.iff.1 htpi).1.isType
+        have hb' := (WShape.HasTypePi.iff.1 htpi').1.isType
+        exact ⟨A₁, A₂, u, v, rootA, hA₁,
+          ih.tyMono le₁ hb hb' domain, hA₂,
+          pi.mono_r_2_direct ih le₁ le₂ htpi htpi'
+            (LRD.TyDefEq.left domain),
+          action.mono_r_2_direct ih le₁ le₂ hmLam
+            (LRD.TyDefEq.left domain) htpi'⟩
+    let defMonoR1 : ∀ { Γ : List SExpr } {M N A : SExpr}
+        {m a a' : WShape (n + 1)},
+        a ≤ a' → m.HasType a → m.HasType a' →
+          (LRD (n := n + 1) Γ).TyDefEq A A a' →
+          (LRD (n := n + 1) Γ).DefEq M N A m a →
+          (LRD (n := n + 1) Γ).DefEq M N A m a' := by
+      intro Γ M N A m a a' le hm hm' hTy H
+      refine ⟨(LR Γ).mono_r_1 le hm hm' hTy.1 H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        obtain rfl | rfl := WShape.le_sort.1 le
+        · have hm0 := hm.bot_r
+          subst m
+          change (LRD (n := n + 1) Γ).TyDefEq M N
+            (.bot : WShape (n + 1))
+          exact LRD.TyDefEq.bot
+        · exact H.2.1 r rfl
+      · intro b' f' g hg hforall hlam
+        cases hforall
+        obtain rfl | ⟨b, f, rfl, le₁, le₂⟩ :=
+          WShape.le_forallE_iff.1 le
+        · have hm0 := hm.bot_r
+          cases congrArg (·.1) (hm0.symm.trans hlam)
+        · obtain ⟨g₁, hmEq₁, hmLam₁⟩ :=
+            WShape.HasType.forallE_inv hm
+          have hgg₁ : g = g₁ := by
+            have eqv := congrArg (·.1) (hlam.symm.trans hmEq₁)
+            simp only [WShape.lam, WShape.lam'] at eqv
+            split at eqv
+            · injection eqv with eqv
+              exact WShapeFun.ext eqv
+            · cases eqv
+          subst g₁
+          obtain ⟨g₂, hmEq₂, hmLam₂⟩ :=
+            WShape.HasType.forallE_inv hm'
+          have hgg₂ : g = g₂ := by
+            have eqv := congrArg (·.1) (hlam.symm.trans hmEq₂)
+            simp only [WShape.lam, WShape.lam'] at eqv
+            split at eqv
+            · injection eqv with eqv
+              exact WShapeFun.ext eqv
+            · cases eqv
+          subst g₂
+          obtain ⟨A₁, A₂, u, v, rootA, hA₁, domainA, hA₂,
+            piA, action⟩ := H.2.2 b f g hg rfl hlam
+          obtain ⟨B₁, F₁, B₂, F₂, _, _, rootL, rootR,
+            _, _, domainT, piT⟩ := hTy.2.2 b' f' rfl
+          cases rootA.toWHRedS.determ WHNF.forallE
+            rootL.toWHRedS WHNF.forallE
+          cases rootA.toWHRedS.determ WHNF.forallE
+            rootR.toWHRedS WHNF.forallE
+          exact ⟨_, _, u, v, rootA, hA₁, domainT, hA₂, piT,
+            action.mono_r_1_direct ih le₁ le₂ hmLam₁ hmLam₂ piT⟩
+    let defMonoL : ∀ { Γ : List SExpr } {M N A : SExpr}
+        {m m' a : WShape (n + 1)},
+        m ≤ m' → m.HasType a → m'.HasType a →
+          (LRD (n := n + 1) Γ).DefEq M N A m' a →
+          (LRD (n := n + 1) Γ).DefEq M N A m a := by
+      intro Γ M N A m m' a le hm hm' H
+      refine ⟨(LR Γ).mono_l le hm hm' H.1, ?_, ?_⟩
+      · intro r hsort
+        cases hsort
+        exact tyMono le hm.toType hm'.toType (H.2.1 r rfl)
+      · intro b f g hg hforall hlam
+        cases hforall
+        obtain ⟨g₁, hmEq₁, hmLam₁⟩ :=
+          WShape.HasType.forallE_inv hm
+        have hgg₁ : g = g₁ := by
+          have eqv := congrArg (·.1) (hlam.symm.trans hmEq₁)
+          simp only [WShape.lam, WShape.lam'] at eqv
+          split at eqv
+          · injection eqv with eqv
+            exact WShapeFun.ext eqv
+          · cases eqv
+        subst g₁
+        obtain ⟨g₂, hmEq₂, hmLam₂⟩ :=
+          WShape.HasType.forallE_inv hm'
+        by_cases hg₂ : g₂.NonZero
+        · have hmEqLam₂ : m' = .lam g₂ hg₂ :=
+            hmEq₂.trans WShape.lam_eq_lam'.symm
+          have leLam : (.lam g hg : WShape (n + 1)) ≤ .lam g₂ hg₂ := by
+            simpa only [hlam, hmEqLam₂] using le
+          have leG : g ≤ g₂ := by
+            rw [WShape.lam_eq_lam', WShape.lam_eq_lam'] at leLam
+            exact WShape.lam'_le_lam'.1 leLam
+          obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂,
+            pi, action⟩ := H.2.2 b f g₂ hg₂ rfl hmEqLam₂
+          exact ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂, pi,
+            action.mono_l_direct ih leG hmLam₁ hmLam₂⟩
+        · have leBot : m ≤ (.bot : WShape (n + 1)) := by
+            simpa only [hmEq₂, WShape.lam', dif_neg hg₂] using le
+          have hmBot := WShape.le_bot.1 leBot
+          cases congrArg (·.1) (hmBot.symm.trans hlam)
+    let tyJoin : ∀ { Γ : List SExpr } {A B : SExpr}
+        {a₁ a₂ : WShape (n + 1)},
+        a₁.Compat a₂ → a₁.HasType .type → a₂.HasType .type →
+          (LRD (n := n + 1) Γ).TyDefEq A B a₁ →
+          (LRD (n := n + 1) Γ).TyDefEq A B a₂ →
+          (LRD (n := n + 1) Γ).TyDefEq A B (a₁.join a₂) := by
+      intro Γ A B a₁ a₂ hC ha₁ ha₂ H₁ H₂
+      refine ⟨(LR Γ).join_ty hC ha₁ ha₂ H₁.1 H₂.1, ?_, ?_⟩
+      · cases ha₁.unfold with
+        | bot => simpa only [WShape.bot_join] using H₂.2.1
+        | sort =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.1
+          | sort =>
+            intro r hsort
+            obtain ⟨u, rootA, rootB⟩ := H₁.2.1 _ rfl
+            exact ⟨u, rootA, rootB⟩
+          | _ => cases hC
+        | forallE =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.1
+          | sort => cases hC
+          | forallE =>
+            simp [WShape.Compat, WShape.forallE, Shape.Compat] at hC
+            intro r hsort
+            rw [WShape.forallE_join_forallE hC.1 hC.2] at hsort
+            cases congrArg (·.1) hsort
+          | indTy => cases hC
+        | indTy =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.1
+          | sort => cases hC
+          | forallE => cases hC
+          | indTy =>
+            intro r hsort
+            have hv := congrArg (·.1) hsort
+            rw [WShape.join_val hC] at hv
+            cases hv
+      · cases ha₁.unfold with
+        | bot => simpa only [WShape.bot_join] using H₂.2.2
+        | sort =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.2
+          | sort =>
+            simp [WShape.Compat, WShape.sort, Shape.Compat] at hC
+            subst hC
+            intro b f hforall
+            rw [WShape.sort_join_sort] at hforall
+            simp at hforall
+            cases congrArg (·.1) hforall
+          | forallE => cases hC
+          | indTy => cases hC
+        | forallE hp₁ =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.2
+          | forallE hp₂ =>
+            simp [WShape.Compat, WShape.forallE, Shape.Compat] at hC
+            intro b f hforall
+            rw [WShape.forallE_join_forallE hC.1 hC.2] at hforall
+            obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+            obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+              domainPath, codomainPath, domain₁, pi₁⟩ :=
+              H₁.2.2 _ _ rfl
+            obtain ⟨C₁, G₁, C₂, G₂, _, _, rootA', rootB',
+              _, _, domain₂, pi₂⟩ := H₂.2.2 _ _ rfl
+            cases rootA.toWHRedS.determ WHNF.forallE
+              rootA'.toWHRedS WHNF.forallE
+            cases rootB.toWHRedS.determ WHNF.forallE
+              rootB'.toWHRedS WHNF.forallE
+            have hb₁ := (WShape.HasTypePi.iff.1 hp₁).1.isType
+            have hb₂ := (WShape.HasTypePi.iff.1 hp₂).1.isType
+            exact ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+              domainPath, codomainPath,
+              ih.tyJoin hC.1 hb₁ hb₂ domain₁ domain₂,
+              pi₁.join_direct ih hb₁ hb₂ hC.1 hp₁ hp₂ hC.2 pi₂⟩
+          | _ => cases hC
+        | indTy =>
+          cases ha₂.unfold with
+          | bot => simpa only [WShape.join_bot] using H₁.2.2
+          | sort => cases hC
+          | forallE => cases hC
+          | indTy =>
+            intro b f hforall
+            have hv := congrArg (·.1) hforall
+            rw [WShape.join_val hC] at hv
+            cases hv
+    exact ⟨tyMono, defMonoR2, defMonoR1, defMonoL, tyJoin⟩
+
+/-- Lower a guarded direct type observation along the type-shape order. -/
+theorem LRD.TyDefEq.mono_r_2
+    (le : a ≤ a') (ha : a.HasType .type) (ha' : a'.HasType .type)
+    (H : (LRD Γ).TyDefEq A B a') :
+    (LRD Γ).TyDefEq A B a :=
+  (LRD.shape _).tyMono le ha ha' H
+
+/-- Lower the displayed type shape of a guarded direct term observation. -/
+theorem LRD.DefEq.mono_r_2
+    (le : a ≤ a') (hm : m.HasType a) (ha' : a'.HasType .type)
+    (H : (LRD Γ).DefEq M N A m a') :
+    (LRD Γ).DefEq M N A m a :=
+  (LRD.shape _).defMonoR2 le hm ha' H
+
+/-- Raise the displayed type shape using direct validity at the target. -/
+theorem LRD.DefEq.mono_r_1
+    (le : a ≤ a') (hm : m.HasType a) (hm' : m.HasType a')
+    (hTy : (LRD Γ).TyDefEq A A a')
+    (H : (LRD Γ).DefEq M N A m a) :
+    (LRD Γ).DefEq M N A m a' :=
+  (LRD.shape _).defMonoR1 le hm hm' hTy H
+
+/-- Lower the element shape of a guarded direct term observation. -/
+theorem LRD.DefEq.mono_l
+    (le : m ≤ m') (hm : m.HasType a) (hm' : m'.HasType a)
+    (H : (LRD Γ).DefEq M N A m' a) :
+    (LRD Γ).DefEq M N A m a :=
+  (LRD.shape _).defMonoL le hm hm' H
+
+/-- Join two compatible guarded direct type observations. -/
+theorem LRD.TyDefEq.join
+    (hC : a₁.Compat a₂) (ha₁ : a₁.HasType .type)
+    (ha₂ : a₂.HasType .type)
+    (H₁ : (LRD Γ).TyDefEq A B a₁)
+    (H₂ : (LRD Γ).TyDefEq A B a₂) :
+    (LRD Γ).TyDefEq A B (a₁.join a₂) :=
+  (LRD.shape _).tyJoin hC ha₁ ha₂ H₁ H₂
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.mono_r_2' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.mono_r_2
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.mono_r_2' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.mono_r_2
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.mono_r_1' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.mono_r_1
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.mono_l' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.mono_l
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.join' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.join
+
+/-! #### Recursively retained direct type observations -/
+
+/-- Additive direct-route type validity.  The ordinary logical relation is
+still used for term arguments and all non-Pi semantic components.  A Pi node
+adds two pieces of information which the legacy relation forgets:
+
+* each weak-head root is authorized by its own heterogeneous type path; and
+* every instantiated codomain carries another direct observation.
+
+The codomain field is Kripke in the shape level.  Constant evaluation may
+therefore enlarge an argument observation without projecting it back down or
+asking a global subject-reduction callback to recreate the root path.  This
+is a least fixed point: callers can only construct a codomain observation
+from an actual recursively available proof. -/
+inductive LR.DirectTyDefEq (Γ : List SExpr) :
+    {n : Nat} → SExpr → SExpr → WShape n → Prop where
+  | bot {n A B} : DirectTyDefEq Γ A B (.bot : WShape n)
+  | sort {n A B r u}
+      (rootA : TypeWHRedPath Γ A (.sort u))
+      (rootB : TypeWHRedPath Γ B (.sort u)) :
+      DirectTyDefEq Γ A B (.sort r : WShape n)
+  | forallE {n : Nat} {A B B₁ F₁ B₂ F₂ : SExpr}
+      {b : WShape n} {f : WShapeFun n} {u v : SLevel}
+      (rootA : TypeWHRedPath Γ A (.forallE B₁ F₁))
+      (rootB : TypeWHRedPath Γ B (.forallE B₂ F₂))
+      (domainPath : TypeDefEqPath Γ B₁ B₂ u)
+      (codomainPath : TypeDefEqPath (B₁ :: Γ) F₁ F₂ v)
+      (domain : DirectTyDefEq Γ B₁ B₂ b)
+      (pi : LRS.PiDefEq (LR Γ) B₁ F₁ F₂ b f)
+      (result : ∀ {k : Nat} (_le : n ≤ k) {x : SExpr} {p : WShape k},
+        p.HasType (b.lift k) → IsDefEq Γ x x B₁ →
+        (LR Γ).DefEq x x B₁ p (b.lift k) →
+        DirectTyDefEq Γ (F₁.inst x) (F₂.inst x) ((f.lift k).app p)) :
+      DirectTyDefEq Γ A B (.forallE b f)
+  | lam {n : Nat} {A B : SExpr} {f : WShapeFun n} (hf : f.NonZero) :
+      DirectTyDefEq Γ A B (.lam f hf : WShape (n + 1))
+  | ctor {n : Nat} {A B : SExpr} {c : Name} {fields : List (WShape n)}
+      (hwf : IsStruct c → WShape.ListNonZero fields) :
+      DirectTyDefEq Γ A B (.ctor c fields hwf : WShape (n + 1))
+  | indTy {n A B}
+      (left : LRS.IndTyHead Γ A) (right : LRS.IndTyHead Γ B) :
+      DirectTyDefEq Γ A B (.indTy : WShape (n + 1))
+
+/-- The Pi view of the recursive direct relation.  It is defined separately
+from the inductive family so that the recursive occurrence remains visibly
+strictly positive.  The syntax data is existential because a `Prop`-valued
+record cannot expose data projections. -/
+def LRS.ValTyPi2DirectRec (Γ : List SExpr) (M N : SExpr)
+    (b : WShape n) (f : WShapeFun n) : Prop :=
+  ∃ B₁ F₁ B₂ F₂ u v,
+    TypeWHRedPath Γ M (.forallE B₁ F₁) ∧
+    TypeWHRedPath Γ N (.forallE B₂ F₂) ∧
+    TypeDefEqPath Γ B₁ B₂ u ∧
+    TypeDefEqPath (B₁ :: Γ) F₁ F₂ v ∧
+    LR.DirectTyDefEq Γ B₁ B₂ b ∧
+    LRS.PiDefEq (LR Γ) B₁ F₁ F₂ b f ∧
+    ∀ {k : Nat} (_le : n ≤ k) {x : SExpr} {p : WShape k},
+      p.HasType (b.lift k) → IsDefEq Γ x x B₁ →
+      (LR Γ).DefEq x x B₁ p (b.lift k) →
+      LR.DirectTyDefEq Γ (F₁.inst x) (F₂.inst x) ((f.lift k).app p)
+
+/-- Expose the recursive Pi view selected by a direct Pi-shaped type
+observation. -/
+theorem LR.DirectTyDefEq.toValTyPi2DirectRec
+    (H : LR.DirectTyDefEq Γ M N (.forallE b f)) :
+    LRS.ValTyPi2DirectRec Γ M N b f := by
+  generalize eq : WShape.forallE b f = t at H
+  cases H with
+  | bot => cases congrArg (·.1) eq
+  | sort => cases congrArg (·.1) eq
+  | forallE rootM rootN domainPath codomainPath domain pi result =>
+    obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 eq
+    exact ⟨_, _, _, _, _, _, rootM, rootN, domainPath, codomainPath,
+      domain, pi, result⟩
+  | lam => cases congrArg (·.1) eq
+  | ctor => cases congrArg (·.1) eq
+  | indTy => cases congrArg (·.1) eq
+
+/-- Forget the direct root/codomain sidecar.  This is the compatibility map
+back to the existing logical relation and does not use the recursive
+codomain field. -/
+theorem LR.DirectTyDefEq.toTyDefEq
+    (H : LR.DirectTyDefEq Γ A B a) :
+    (LR Γ).TyDefEq A B a := by
+  cases H with
+  | bot =>
+    rename_i n
+    cases n with
+    | zero => trivial
+    | succ n => trivial
+  | sort rootA rootB =>
+    exact (LR Γ).sort_iff_ty.2
+      ⟨_, rootA.toWHRedS, rootB.toWHRedS⟩
+  | forallE rootA rootB domainPath codomainPath domain pi result =>
+    rw [LR_succ]
+    exact ⟨_, _, _, _, _, _, rootA.toWHRedS, rootB.toWHRedS,
+      domainPath, codomainPath, domain.toTyDefEq, pi⟩
+  | lam => rw [LR_succ]; trivial
+  | ctor => rw [LR_succ]; trivial
+  | indTy left right => rw [LR_succ]; exact ⟨left, right⟩
+
+/-- Erase the recursive codomain layer of a direct Pi view while retaining
+its path-typed roots. -/
+theorem LRS.ValTyPi2DirectRec.toValTyPi2Direct
+    (H : LRS.ValTyPi2DirectRec Γ M N b f) :
+    LRS.ValTyPi2Direct (Γ := Γ) (LR Γ) M N b f := by
+  obtain ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN,
+    domainPath, codomainPath, domain, pi, _⟩ := H
+  exact ⟨B₁, F₁, B₂, F₂, u, v, rootM, rootN,
+    domainPath, codomainPath, domain.toTyDefEq, pi⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRS.ValTyPi2DirectRec.toValTyPi2Direct' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.ValTyPi2DirectRec.toValTyPi2Direct
+
+/-- Keep the left endpoint of a direct type observation.  Recursive
+codomains remain direct rather than being re-created from their legacy
+projection. -/
+theorem LR.DirectTyDefEq.left
+    (H : LR.DirectTyDefEq Γ A B a) :
+    LR.DirectTyDefEq Γ A A a := by
+  induction H with
+  | bot => exact .bot
+  | sort rootA rootB => exact .sort rootA rootA
+  | forallE rootA rootB domainPath codomainPath domain pi result ihDomain ihResult =>
+    exact .forallE rootA rootA domainPath.left codomainPath.left
+      ihDomain pi.left (fun {k} le {x p} hp hx hrel =>
+        ihResult (k := k) le (x := x) (p := p) hp hx hrel)
+  | lam hf => exact .lam hf
+  | ctor hwf => exact .ctor hwf
+  | indTy left right => exact .indTy left left
+
+/-- Direct term validity is the legacy term relation plus a direct type
+observation exactly when the ambient shape says the term itself is a type.
+This deliberately leaves ordinary term semantics unchanged while giving a
+direct adequacy proof a place to retain typed roots. -/
+def LR.DirectDefEq (Γ : List SExpr) (M N A : SExpr)
+    (m a : WShape n) : Prop :=
+  (LR Γ).DefEq M N A m a ∧
+  ∀ r, a = (.sort r : WShape n) → LR.DirectTyDefEq Γ M N m
+
+/-- Erase a direct term observation. -/
+theorem LR.DirectDefEq.toDefEq
+    (H : LR.DirectDefEq Γ M N A m a) :
+    (LR Γ).DefEq M N A m a := H.1
+
+/-- At a sort, direct term validity exposes its recursively retained type
+observation. -/
+theorem LR.DirectDefEq.toTyDefEq
+    (H : LR.DirectDefEq Γ M N A m (.sort r)) :
+    LR.DirectTyDefEq Γ M N m := H.2 r rfl
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.toTyDefEq' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.toTyDefEq
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.left' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.left
 
 /-- The only non-structural case in successor-level semantic retyping.
 
@@ -13149,6 +15295,33 @@ theorem LRS.PiDefEq.liftEquiv
       LRS.PiDefEq IH B F₁ F₂ b f :=
   LRS.PiDefEq.lift_aux le htpi E.ty E.term
 
+/-- Rebase a direct Pi observation through the same lower-relation lift
+equivalence as its legacy semantic components.  Root terms and their
+path-typed reductions do not depend on the shape depth and are retained
+literally. -/
+theorem LRS.ValTyPi2Direct.liftEquiv
+    {IH : LogRel Γ n} {IH' : LogRel Γ n'}
+    {b : WShape n} {f : WShapeFun n} (le : n ≤ n')
+    (htpi : WShape.HasTypePi f b true)
+    (E : LogRel.LiftEquiv IH IH' le) :
+    LRS.ValTyPi2Direct (Γ := Γ) IH' M N (b.lift n') (f.lift n') ↔
+      LRS.ValTyPi2Direct (Γ := Γ) IH M N b f := by
+  have hbType := (WShape.HasTypePi.iff.1 htpi).1.isType
+  constructor <;>
+    intro ⟨B₁, F₁, B₂, F₂, u, v, root₁, root₂,
+      hB, hF, hValB, hPi⟩ <;>
+    refine ⟨B₁, F₁, B₂, F₂, u, v, root₁, root₂, hB, hF, ?_, ?_⟩
+  · exact (E.ty hbType).1 hValB
+  · exact (LRS.PiDefEq.liftEquiv le htpi E).1 hPi
+  · exact (E.ty hbType).2 hValB
+  · exact (LRS.PiDefEq.liftEquiv le htpi E).2 hPi
+
+/--
+info: 'Lean4Lean.SExpr.LRS.ValTyPi2Direct.liftEquiv' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRS.ValTyPi2Direct.liftEquiv
+
 private theorem LRS.LamDefEq.lift_aux
     {IH : LogRel Γ n} {IH' : LogRel Γ n'}
     {g : WShapeFun n} {a₁ a₂} (le : n ≤ n') (htm : WShape.HasTypeLam g a₁ a₂)
@@ -13362,6 +15535,765 @@ theorem LR.TyDefEq.lift {m : WShape n} (le : n ≤ n') (hmt : WShape.HasType m .
   have := (WShape.HasType.lift le).2 hmt
   simp [WShape.type] at this
   exact (LR.lift_succ_aux.1 this).trans ih
+
+/-! #### Canonical cross-level transport for guarded direct validity -/
+
+
+structure LRD.LiftEquiv (Γ : List SExpr) {n n' : Nat}
+    (le : n ≤ n') : Prop where
+  ty : ∀ {A B : SExpr} {a : WShape n}, a.HasType .type →
+    ((LRD (n := n') Γ).TyDefEq A B (a.lift n') ↔
+      (LRD (n := n) Γ).TyDefEq A B a)
+  term : ∀ {M N A : SExpr} {m a : WShape n}, m.HasType a →
+    ((LRD (n := n') Γ).DefEq M N A (m.lift n') (a.lift n') ↔
+      (LRD (n := n) Γ).DefEq M N A m a)
+
+private theorem LR.DirectPiDefEq.lift_direct
+    {b : WShape n} {f : WShapeFun n}
+    (le : n ≤ n') (htpi : WShape.HasTypePi f b true)
+    (E : LRD.LiftEquiv Γ le) :
+    LR.DirectPiDefEq (LRD (n := n') Γ) B F₁ F₂
+        (b.lift n') (f.lift n') ↔
+      LR.DirectPiDefEq (LRD (n := n) Γ) B F₁ F₂ b f := by
+  have htpi_w := WShape.HasTypePi.iff.1 htpi
+  constructor <;> intro hEdge
+  · refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩ <;> (
+      have hp' := (WShape.HasType.lift le).2 hp
+      have hrel' := (E.term hp).2 hrel)
+    · have h := hEdge.1 hp' ha hrel'
+      exact ⟨(E.ty (htpi_w.2 _ hp).toType).1
+          (WShapeFun.lift_app le ▸ h.leftTy),
+        (E.ty (htpi_w.2 _ hp).toType).1
+          (WShapeFun.lift_app le ▸ h.rightTy),
+        h.leftDefEq, h.rightDefEq⟩
+    · exact (E.ty (htpi_w.2 _ hp).toType).1
+        (WShapeFun.lift_app le ▸ hEdge.2 hp' ha hrel')
+  · refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+    all_goals
+      obtain ⟨q, d₁, d₂⟩ := WShapeFun.app_eq (f.lift n') p
+      obtain ⟨q₀, y₀, d₂₀, rfl, d₃⟩ := (WShapeFun.mem_lift le).1 d₂
+      obtain ⟨qx', qy', d₂₀', qxle, qyle, hq⟩ :=
+        WShape.HasDom.def.1 htpi.1 _ _ d₂₀
+      have hrel' := (E.term hq).1 <| LRD.DefEq.mono_l
+        (((WShape.lift_le_lift le).2 qxle).trans d₁)
+        ((WShape.HasType.lift le).2 hq) hp hrel
+    · have h := hEdge.1 hq ha hrel'
+      have ht_q := (htpi_w.2 _ hq).toType
+      have ht_y₀ : (y₀ : WShape n).HasType WShape.type :=
+        (htpi.2 _ _ d₂₀).toType
+      have y₀_le_fqx : y₀ ≤ f.app qx' :=
+        qyle.trans (f.app_of_mem d₂₀').2
+      have ht_q_l : ((f.app qx').lift n').HasType WShape.type := by
+        have := (WShape.HasType.lift le).2 ht_q
+        rwa [WShape.lift_sort] at this
+      have ht_y₀_l : (y₀.lift n').HasType WShape.type := by
+        have := (WShape.HasType.lift le).2 ht_y₀
+        rwa [WShape.lift_sort] at this
+      exact d₃ ▸ ⟨
+        LRD.TyDefEq.mono_r_2 (WShape.lift_mono le y₀_le_fqx)
+          ht_y₀_l ht_q_l ((E.ty ht_q).2 h.leftTy),
+        LRD.TyDefEq.mono_r_2 (WShape.lift_mono le y₀_le_fqx)
+          ht_y₀_l ht_q_l ((E.ty ht_q).2 h.rightTy),
+        h.leftDefEq, h.rightDefEq⟩
+    · have body := hEdge.2 hq ha hrel'
+      have ht_q := (htpi_w.2 _ hq).toType
+      have ht_y₀ : (y₀ : WShape n).HasType WShape.type :=
+        (htpi.2 _ _ d₂₀).toType
+      have y₀_le_fqx : y₀ ≤ f.app qx' :=
+        qyle.trans (f.app_of_mem d₂₀').2
+      have ht_q_l : ((f.app qx').lift n').HasType WShape.type := by
+        have := (WShape.HasType.lift le).2 ht_q
+        rwa [WShape.lift_sort] at this
+      have ht_y₀_l : (y₀.lift n').HasType WShape.type := by
+        have := (WShape.HasType.lift le).2 ht_y₀
+        rwa [WShape.lift_sort] at this
+      exact d₃ ▸ LRD.TyDefEq.mono_r_2
+        (WShape.lift_mono le y₀_le_fqx) ht_y₀_l ht_q_l
+        ((E.ty ht_q).2 body)
+
+private theorem LR.DirectLamDefEq.lift_direct
+    {g : WShapeFun n} {a₁ : WShape n} {a₂ : WShapeFun n}
+    (le : n ≤ n') (htm : WShape.HasTypeLam g a₁ a₂)
+    (E : LRD.LiftEquiv Γ le)
+    (hEdge : LR.DirectPiDefEq (LRD (n := n) Γ)
+      A₁ A₂ A₂ a₁ a₂) :
+    LR.DirectLamDefEq (LRD (n := n') Γ) M N A₁ A₂
+        (g.lift n') (a₁.lift n') (a₂.lift n') ↔
+      LR.DirectLamDefEq (LRD (n := n) Γ) M N A₁ A₂ g a₁ a₂ := by
+  have htm_w := WShape.HasTypeLam.iff.1 htm
+  constructor <;> intro H
+  · refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩ <;> (
+      have hp' := (WShape.HasType.lift le).2 hp
+      have hrel' := (E.term hp).2 hrel)
+    · have ⟨r₁, r₂⟩ := H.1 hp' ha hrel'
+      refine ⟨(E.term (htm_w.2.2 _ hp)).1 ?_,
+        (E.term (htm_w.2.2 _ hp)).1 ?_⟩ <;>
+        rw [WShapeFun.lift_app le, WShapeFun.lift_app le]
+      · exact r₁
+      · exact r₂
+    · apply (E.term (htm_w.2.2 _ hp)).1
+      rw [WShapeFun.lift_app le, WShapeFun.lift_app le]
+      exact H.2 hp' ha hrel'
+  · refine ⟨fun x y p hp ha hrel => ?_, fun x p hp ha hrel => ?_⟩
+    all_goals
+      obtain ⟨_, dg₁, dg₂⟩ := WShapeFun.app_eq (g.lift n') p
+      obtain ⟨_, da₁, da₂⟩ := WShapeFun.app_eq (a₂.lift n') p
+      obtain ⟨qg, yg, dg₂₀, rfl, dg₃⟩ := (WShapeFun.mem_lift le).1 dg₂
+      obtain ⟨qa, ya, da₂₀, rfl, da₃⟩ := (WShapeFun.mem_lift le).1 da₂
+      have ⟨yg₁, yg₂⟩ := WShapeFun.app_of_mem dg₂₀
+      have ⟨ya₁, ya₂⟩ := WShapeFun.app_of_mem da₂₀
+      have ⟨qg', qg'le, hqg, qg'app⟩ := WShape.HasDom.iff.1 htm.2.1 qg
+      have ⟨qa', qa'le, hqa, qa'app⟩ := WShape.HasDom.iff.1 htm.1.1 qa
+      rw [dg₃, da₃]
+      have relG := (E.term hqg).1 <| LRD.DefEq.mono_l
+        (((WShape.lift_le_lift le).2 qg'le).trans dg₁)
+        ((WShape.HasType.lift le).2 hqg) hp hrel
+      have relA := (E.term hqa).1 <| LRD.DefEq.mono_l
+        (((WShape.lift_le_lift le).2 qa'le).trans da₁)
+        ((WShape.HasType.lift le).2 hqa) hp hrel
+      have ht_lo := htm_w.2.2 _ hqg
+      have htm_p := WShape.HasTypePi.iff'.1 htm_w.1
+      have vt_qa := hEdge.2 hqa ha.hasType.1 (LRD.DefEq.left relA)
+      have vt_qa' := LRD.TyDefEq.mono_r_2 qa'app
+        (htm_p.2 qa) (htm_p.2 qa') vt_qa
+      have ya_sort := (htm_p.2 qa).mono_l ya₁ ya₂
+      have ht_yg_qg' : yg.HasType (a₂.app qg') :=
+        ht_lo.mono_l (WShapeFun.app_mono_r qg'le |>.trans yg₁)
+          (yg₂.trans qg'app)
+      have le_a₂_ya := by
+        refine (a₂.app_mono_r qg'le).trans (.trans ?_ ya₁)
+        rw [← WShape.lift_le_lift le, WShapeFun.lift_app le]
+        exact (WShapeFun.app_mono_r dg₁ (f := a₂.lift n')).trans <|
+          da₃ ▸ WShape.lift_mono le ya₂
+      have ht_yg := ya_sort.mono_r le_a₂_ya ht_yg_qg'
+      have vt_ya := LRD.TyDefEq.mono_r_2 ya₂ ya_sort
+        (htm_p.2 qa) vt_qa'
+      have go {P Q} (r : (LRD (n := n) Γ).DefEq P Q (A₂.inst x)
+          (g.app qg') (a₂.app qg')) :
+          (LRD (n := n') Γ).DefEq P Q (A₂.inst x)
+            (yg.lift n') (ya.lift n') :=
+        (E.term ht_yg).2 <| LRD.DefEq.mono_r_1 le_a₂_ya
+          ht_yg_qg' ht_yg vt_ya <| LRD.DefEq.mono_l
+            (yg₂.trans qg'app) ht_yg_qg' ht_lo r
+    · have ⟨r₁, r₂⟩ := H.1 hqg ha relG
+      exact ⟨go r₁, go r₂⟩
+    · exact go (H.2 hqg ha relG)
+
+private theorem WShape.lam_inj_direct
+    {f f' : WShapeFun n} {hf : f.NonZero} {hf' : f'.NonZero}
+    (H : (WShape.lam f hf : WShape (n + 1)) = .lam f' hf') :
+    f = f' := by
+  have eqv := congrArg (·.1) H
+  simp only [WShape.lam] at eqv
+  injection eqv with eqv
+  exact WShapeFun.ext eqv
+
+private theorem LRD.TyDefEq.lift_succ
+    {le : n ≤ n'} (E : LRD.LiftEquiv Γ le)
+    {A B : SExpr} {a : WShape (n + 1)} (ha : a.HasType .type) :
+    (LRD (n := n' + 1) Γ).TyDefEq A B (a.lift (n' + 1)) ↔
+      (LRD (n := n + 1) Γ).TyDefEq A B a := by
+  cases a using WShape.casesOn' with
+    | bot =>
+      rw [WShape.lift_bot]
+      constructor <;> intro H
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).1 H.1,
+          ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f hforall; cases congrArg (·.1) hforall
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).2 H.1,
+          ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f hforall; cases congrArg (·.1) hforall
+    | sort r =>
+      rw [WShape.lift_sort]
+      constructor <;> intro H
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).1 H.1,
+          ?_, ?_⟩
+        · intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact H.2.1 r rfl
+        intro b f hforall
+        cases congrArg (·.1) hforall
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).2 H.1,
+          ?_, ?_⟩
+        · intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact H.2.1 r rfl
+        intro b f hforall
+        cases congrArg (·.1) hforall
+    | forallE b f =>
+      rw [WShape.lift_forallE le]
+      obtain ⟨r, htpi, hr⟩ := WShape.HasType.forallE_l.1 ha
+      have hr' := congrArg (·.1) hr
+      simp only [WShape.type, WShape.sort] at hr'
+      injection hr' with hr'
+      subst r
+      have hb := (WShape.HasTypePi.iff.1 htpi).1.isType
+      constructor <;> intro H
+      · have legacy := LR.TyDefEq.lift (Γ := Γ) (M := A) (N := B)
+          (Nat.succ_le_succ le) ha
+        rw [WShape.lift_forallE le] at legacy
+        refine ⟨legacy.1 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b₀ f₀ hforall
+          obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+          obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+            domainPath, codomainPath, domain, pi⟩ :=
+            H.2.2 (b.lift n') (f.lift n') rfl
+          exact ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+            domainPath, codomainPath, (E.ty hb).1 domain,
+            (LR.DirectPiDefEq.lift_direct le htpi E).1 pi⟩
+      · have legacy := LR.TyDefEq.lift (Γ := Γ) (M := A) (N := B)
+          (Nat.succ_le_succ le) ha
+        rw [WShape.lift_forallE le] at legacy
+        refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b₀ f₀ hforall
+          obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+          obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+            domainPath, codomainPath, domain, pi⟩ := H.2.2 b f rfl
+          exact ⟨B₁, F₁, B₂, F₂, u, v, rootA, rootB,
+            domainPath, codomainPath, (E.ty hb).2 domain,
+            (LR.DirectPiDefEq.lift_direct le htpi E).2 pi⟩
+    | indTy =>
+      rw [WShape.lift_indTy]
+      constructor <;> intro H
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).1 H.1,
+          ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f hforall; cases congrArg (·.1) hforall
+      · refine ⟨(LR.TyDefEq.lift (Nat.succ_le_succ le) ha).2 H.1,
+          ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f hforall; cases congrArg (·.1) hforall
+    | lam f hf => exact (WShape.HasType.lam_isType ha).elim
+    | ctor c fields hwf => exact (WShape.HasType.ctor_isType ha).elim
+
+private theorem LRD.LiftEquiv.succ
+    {le : n ≤ n'} (E : LRD.LiftEquiv Γ le) :
+    LRD.LiftEquiv Γ (Nat.succ_le_succ le) where
+  ty := LRD.TyDefEq.lift_succ E
+  term := by
+    intro M N A m a hma
+    cases a using WShape.casesOn' with
+    | bot =>
+      rw [WShape.lift_bot]
+      have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+        (Nat.succ_le_succ le) hma
+      rw [WShape.lift_bot] at legacy
+      constructor <;> intro H
+      · refine ⟨legacy.1 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+      · refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+    | sort r =>
+      rw [WShape.lift_sort]
+      have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+        (Nat.succ_le_succ le) hma
+      rw [WShape.lift_sort] at legacy
+      constructor <;> intro H
+      · refine ⟨legacy.1 H.1, ?_, ?_⟩
+        · intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact (LRD.TyDefEq.lift_succ (A := M) (B := N)
+            E hma.toType).1 (H.2.1 r rfl)
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+      · refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact (LRD.TyDefEq.lift_succ (A := M) (B := N)
+            E hma.toType).2 (H.2.1 r rfl)
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+    | forallE b f =>
+      cases m using WShape.casesOn' with
+      | bot =>
+        rw [WShape.lift_bot, WShape.lift_forallE le]
+        have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+          (Nat.succ_le_succ le) hma
+        rw [WShape.lift_bot, WShape.lift_forallE le] at legacy
+        constructor <;> intro H
+        · refine ⟨legacy.1 H.1, ?_, ?_⟩
+          · intro r hsort; cases congrArg (·.1) hsort
+          · intro b₀ f₀ g hg hforall hlam
+            cases congrArg (·.1) hlam
+        · refine ⟨legacy.2 H.1, ?_, ?_⟩
+          · intro r hsort; cases congrArg (·.1) hsort
+          · intro b₀ f₀ g hg hforall hlam
+            cases congrArg (·.1) hlam
+      | lam g hg =>
+        obtain ⟨g', hmEq, hmLam⟩ := WShape.HasType.forallE_inv hma
+        have hgg' : g = g' := by
+          have eqv := congrArg (·.1) hmEq
+          simp only [WShape.lam, WShape.lam'] at eqv
+          split at eqv
+          · injection eqv with eqv
+            exact WShapeFun.ext eqv
+          · cases eqv
+        subst g'
+        let hgLift := (WShapeFun.NonZero.lift_iff le).2 hg
+        rw [WShape.lift_lam le, WShape.lift_forallE le]
+        have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+          (Nat.succ_le_succ le) hma
+        rw [WShape.lift_lam le, WShape.lift_forallE le] at legacy
+        have hb := (WShape.HasTypePi.iff.1 hmLam.1).1.isType
+        constructor <;> intro H
+        · refine ⟨legacy.1 H.1, ?_, ?_⟩
+          · intro r hsort; cases congrArg (·.1) hsort
+          · intro b₀ f₀ g₀ hg₀ hforall hlam
+            obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+            have hgg₀ := WShape.lam_inj_direct hlam
+            subst g₀
+            obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂,
+              pi, action⟩ := H.2.2 (b.lift n') (f.lift n')
+              (g.lift n') hgLift rfl rfl
+            have piLow :=
+              (LR.DirectPiDefEq.lift_direct le hmLam.1 E).1 pi
+            exact ⟨A₁, A₂, u, v, rootA, hA₁, (E.ty hb).1 domain,
+              hA₂, piLow,
+              (LR.DirectLamDefEq.lift_direct le hmLam E piLow).1 action⟩
+        · refine ⟨legacy.2 H.1, ?_, ?_⟩
+          · intro r hsort; cases congrArg (·.1) hsort
+          · intro b₀ f₀ g₀ hg₀ hforall hlam
+            obtain ⟨rfl, rfl⟩ := WShape.forallE.inj.1 hforall
+            have hgg₀ := WShape.lam_inj_direct hlam
+            subst g₀
+            obtain ⟨A₁, A₂, u, v, rootA, hA₁, domain, hA₂,
+              pi, action⟩ := H.2.2 b f g hg rfl rfl
+            have piHigh :=
+              (LR.DirectPiDefEq.lift_direct le hmLam.1 E).2 pi
+            exact ⟨A₁, A₂, u, v, rootA, hA₁, (E.ty hb).2 domain,
+              hA₂, piHigh,
+              (LR.DirectLamDefEq.lift_direct le hmLam E pi).2 action⟩
+      | _ => cases hma
+    | indTy =>
+      rw [WShape.lift_indTy]
+      have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+        (Nat.succ_le_succ le) hma
+      rw [WShape.lift_indTy] at legacy
+      constructor <;> intro H
+      · refine ⟨legacy.1 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+      · refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+    | lam f hf => exact (WShape.HasType.lam_isType hma.isType).elim
+    | ctor c fields hwf => exact (WShape.HasType.ctor_isType hma.isType).elim
+
+private theorem LRD.LiftEquiv.zero (k : Nat) :
+    LRD.LiftEquiv Γ (Nat.zero_le k) := by
+  cases k with
+  | zero =>
+    refine ⟨?_, ?_⟩
+    · intro A B a ha
+      simp only [WShape.lift_self]
+    · intro M N A m a hma
+      simp only [WShape.lift_self]
+  | succ k =>
+    let tyEq : ∀ {A B : SExpr} {a : WShape 0}, a.HasType .type →
+        ((LRD (n := k + 1) Γ).TyDefEq A B (a.lift (k + 1)) ↔
+          (LRD (n := 0) Γ).TyDefEq A B a) := by
+      intro A B a ha
+      cases a using WShape.casesOn with
+      | bot =>
+        rw [WShape.lift_bot]
+        constructor <;> intro H
+        · refine ⟨(LR.TyDefEq.lift (Nat.zero_le _) ha).1 H.1, ?_⟩
+          intro r hsort
+          cases congrArg (·.1) hsort
+        · refine ⟨(LR.TyDefEq.lift (Nat.zero_le _) ha).2 H.1,
+            ?_, ?_⟩
+          · intro r hsort; cases congrArg (·.1) hsort
+          · intro b f hforall; cases congrArg (·.1) hforall
+      | sort r =>
+        rw [WShape.lift_sort]
+        constructor <;> intro H
+        · refine ⟨(LR.TyDefEq.lift (Nat.zero_le _) ha).1 H.1, ?_⟩
+          intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact H.2.1 r rfl
+        · refine ⟨(LR.TyDefEq.lift (Nat.zero_le _) ha).2 H.1,
+            ?_, ?_⟩
+          · intro r' hsort
+            have eqv := congrArg (·.1) hsort
+            simp only [WShape.sort] at eqv
+            injection eqv with eqv
+            subst r'
+            exact H.2 r rfl
+          · intro b f hforall; cases congrArg (·.1) hforall
+    refine ⟨tyEq, ?_⟩
+    intro M N A m a hma
+    cases a using WShape.casesOn with
+    | bot =>
+      rw [WShape.lift_bot]
+      have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+        (n := 0) (n' := k + 1) (Nat.zero_le _) hma
+      rw [WShape.lift_bot] at legacy
+      constructor <;> intro H
+      · refine ⟨legacy.1 H.1, ?_⟩
+        intro r hsort
+        cases congrArg (·.1) hsort
+      · refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r hsort; cases congrArg (·.1) hsort
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+    | sort r =>
+      rw [WShape.lift_sort]
+      have legacy := LR.DefEq.lift (Γ := Γ) (M := M) (N := N) (A := A)
+        (n := 0) (n' := k + 1) (Nat.zero_le _) hma
+      rw [WShape.lift_sort] at legacy
+      constructor <;> intro H
+      · refine ⟨legacy.1 H.1, ?_⟩
+        intro r' hsort
+        have eqv := congrArg (·.1) hsort
+        simp only [WShape.sort] at eqv
+        injection eqv with eqv
+        subst r'
+        exact (tyEq hma.toType).1 (H.2.1 r rfl)
+      · refine ⟨legacy.2 H.1, ?_, ?_⟩
+        · intro r' hsort
+          have eqv := congrArg (·.1) hsort
+          simp only [WShape.sort] at eqv
+          injection eqv with eqv
+          subst r'
+          exact (tyEq hma.toType).2 (H.2 r rfl)
+        · intro b f g hg hforall hlam
+          cases congrArg (·.1) hforall
+
+private theorem LRD.LiftEquiv.canonical
+    {n n' : Nat} (le : n ≤ n') : LRD.LiftEquiv Γ le := by
+  induction n generalizing n' with
+  | zero => exact LRD.LiftEquiv.zero n'
+  | succ n ih =>
+    cases n' with
+    | zero => exact (Nat.not_succ_le_zero n le).elim
+    | succ n' =>
+      exact (LRD.LiftEquiv.succ
+        (ih (Nat.le_of_succ_le_succ le)))
+
+theorem LRD.TyDefEq.lift
+    (le : n ≤ n') (ha : a.HasType .type) :
+    ((LRD (n := n') Γ).TyDefEq A B (a.lift n') ↔
+      (LRD (n := n) Γ).TyDefEq A B a) :=
+  (LRD.LiftEquiv.canonical le).ty ha
+
+theorem LRD.DefEq.lift
+    (le : n ≤ n') (hma : m.HasType a) :
+    ((LRD (n := n') Γ).DefEq M N A (m.lift n') (a.lift n') ↔
+      (LRD (n := n) Γ).DefEq M N A m a) :=
+  (LRD.LiftEquiv.canonical le).term hma
+
+/-- Canonical cross-level equivalence for a retained direct Pi action. -/
+theorem LR.DirectPiDefEq.lift
+    {b : WShape n} {f : WShapeFun n}
+    (le : n ≤ n') (htpi : WShape.HasTypePi f b true) :
+    LR.DirectPiDefEq (LRD (n := n') Γ) B F₁ F₂
+        (b.lift n') (f.lift n') ↔
+      LR.DirectPiDefEq (LRD (n := n) Γ) B F₁ F₂ b f :=
+  LR.DirectPiDefEq.lift_direct le htpi
+    (LRD.LiftEquiv.canonical le)
+
+/--
+info: 'Lean4Lean.SExpr.LRD.TyDefEq.lift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.TyDefEq.lift
+
+/--
+info: 'Lean4Lean.SExpr.LRD.DefEq.lift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.DefEq.lift
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectPiDefEq.lift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectPiDefEq.lift
+
+
+
+/-- Symmetry of recursively retained direct type observations.  At a Pi
+node, the argument is converted through the lifted direct domain relation
+before the recursive codomain witness is used. -/
+theorem LR.DirectTyDefEq.symm
+    (H : LR.DirectTyDefEq Γ A B a) :
+    LR.DirectTyDefEq Γ B A a := by
+  induction H with
+  | bot => exact .bot
+  | sort rootA rootB => exact .sort rootB rootA
+  | @forallE n A B B₁ F₁ B₂ F₂ b f u v rootA rootB
+      domainPath codomainPath domain pi result ihDomain ihResult =>
+    obtain ⟨u', domainPath'⟩ := domainPath.symm
+    obtain ⟨v', codomainPath'⟩ := codomainPath.symm
+    have codomainPath'' := domainPath.defeqDF_l_path codomainPath'
+    have hDomain := ihDomain.toTyDefEq
+    have pi' : LRS.PiDefEq (LR Γ) B₂ F₂ F₁ b f := by
+      refine ⟨fun _ _ _ hp hx hrel => ?_, fun _ _ hp hx hrel => ?_⟩
+      · let h := pi.1 hp (domainPath'.defeqDF hx)
+          ((LR Γ).conv hDomain hrel)
+        exact ⟨h.rightTy, h.leftTy, h.rightDefEq, h.leftDefEq⟩
+      · exact (LR Γ).symm_ty <| pi.2 hp (domainPath'.defeqDF hx)
+          ((LR Γ).conv hDomain hrel)
+    refine .forallE rootB rootA domainPath' codomainPath''
+      ihDomain pi' ?_
+    intro k le x p hp hx hrel
+    have hb : b.HasType .type := by
+      have hbLift : (b.lift k).HasType ((WShape.type : WShape n).lift k) := by
+        simpa only [WShape.lift_type] using hp.isType
+      exact (WShape.HasType.lift le).1 hbLift
+    have hDomainK : (LR Γ).TyDefEq B₂ B₁ (b.lift k) :=
+      (LR.TyDefEq.lift le hb).2 hDomain
+    exact ihResult (k := k) le (x := x) (p := p) hp
+      (domainPath'.defeqDF hx) ((LR Γ).conv hDomainK hrel)
+  | lam hf => exact .lam hf
+  | ctor hwf => exact .ctor hwf
+  | indTy left right => exact .indTy right left
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.symm' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.symm
+
+/-- The root data selected by a sort-shaped direct type observation. -/
+def LR.DirectTyDefEq.SortView (Γ : List SExpr) (A B : SExpr) : Prop :=
+  ∃ u, TypeWHRedPath Γ A (.sort u) ∧ TypeWHRedPath Γ B (.sort u)
+
+private theorem WShape.bot_ne_sort_direct {n r} :
+    (WShape.bot : WShape n) ≠ .sort r := by
+  intro h
+  have h' := congrArg Subtype.val h
+  cases n <;> cases h'
+
+/-- Invert a sort-shaped direct observation without depending on equality
+of the proof fields in `WShape`. -/
+theorem LR.DirectTyDefEq.sortView
+    (H : LR.DirectTyDefEq Γ A B (.sort r : WShape n)) :
+    LR.DirectTyDefEq.SortView Γ A B := by
+  generalize eq : (WShape.sort r : WShape n) = t at H
+  cases H with
+  | bot => exact False.elim (WShape.bot_ne_sort_direct eq.symm)
+  | sort rootA rootB => exact ⟨_, rootA, rootB⟩
+  | forallE => cases congrArg (·.1) eq
+  | lam => cases congrArg (·.1) eq
+  | ctor => cases congrArg (·.1) eq
+  | indTy => cases congrArg (·.1) eq
+
+/-- Transitivity of recursively retained direct type observations.  The
+shared Pi root aligns the two heterogeneous component paths; recursive
+codomain observations then compose at each Kripke level. -/
+theorem LR.DirectTyDefEq.trans
+    (H₁ : LR.DirectTyDefEq Γ A B a)
+    (H₂ : LR.DirectTyDefEq Γ B C a) :
+    LR.DirectTyDefEq Γ A C a := by
+  induction H₁ generalizing C with
+  | bot => exact .bot
+  | sort rootA rootB =>
+    obtain ⟨_, rootB', rootC⟩ := H₂.sortView
+    cases rootB.toWHRedS.determ WHNF.sort rootB'.toWHRedS WHNF.sort
+    exact .sort rootA rootC
+  | @forallE n A B B₁ F₁ B₂ F₂ b f u v rootA rootB
+      domainPath₁₂ codomainPath₁₂ domain₁₂ pi₁ result₁ ihDomain ihResult =>
+    obtain ⟨C₁, G₁, C₂, G₂, u₂₃, v₂₃, rootB', rootC,
+      domainPath₂₃, codomainPath₂₃, domain₂₃, pi₂, result₂⟩ :=
+      H₂.toValTyPi2DirectRec
+    cases rootB.toWHRedS.determ WHNF.forallE
+      rootB'.toWHRedS WHNF.forallE
+    obtain ⟨_, domainPath₂₁⟩ := domainPath₁₂.symm
+    have codomainPath₂₃' :=
+      domainPath₂₁.defeqDF_l_path codomainPath₂₃
+    have hDomain₁₂ := domain₁₂.toTyDefEq
+    have pi₁₃ : LRS.PiDefEq (LR Γ) B₁ F₁ G₂ b f := by
+      refine ⟨fun _ _ _ hp hx hrel => ?_, fun _ _ hp hx hrel => ?_⟩
+      · let h₁ := pi₁.1 hp hx hrel
+        let h₂ := pi₂.1 hp (domainPath₁₂.defeqDF hx)
+          ((LR Γ).conv hDomain₁₂ hrel)
+        exact ⟨h₁.leftTy, h₂.rightTy,
+          h₁.leftDefEq, h₂.rightDefEq⟩
+      · exact (LR Γ).trans_ty (pi₁.2 hp hx hrel)
+          (pi₂.2 hp (domainPath₁₂.defeqDF hx)
+            ((LR Γ).conv hDomain₁₂ hrel))
+    refine .forallE rootA rootC
+      (domainPath₁₂.trans domainPath₂₃)
+      (codomainPath₁₂.trans codomainPath₂₃')
+      (ihDomain domain₂₃) pi₁₃ ?_
+    intro k le x p hp hx hrel
+    have hb : b.HasType .type := by
+      have hbLift : (b.lift k).HasType ((WShape.type : WShape n).lift k) := by
+        simpa only [WShape.lift_type] using hp.isType
+      exact (WShape.HasType.lift le).1 hbLift
+    have hDomain₁₂K : (LR Γ).TyDefEq B₁ B₂ (b.lift k) :=
+      (LR.TyDefEq.lift le hb).2 hDomain₁₂
+    exact ihResult (k := k) le (x := x) (p := p) hp hx hrel <|
+      result₂ le hp (domainPath₁₂.defeqDF hx)
+        ((LR Γ).conv hDomain₁₂K hrel)
+  | lam hf => exact .lam hf
+  | ctor hwf => exact .ctor hwf
+  | @indTy n A B left right =>
+    have h₂ := H₂.toTyDefEq
+    rw [LR_succ] at h₂
+    exact .indTy left h₂.2
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.trans
+
+/-- Path-typed weak-head closure of recursively retained direct type
+observations.  The forward direction retargets each selected root by
+determinism; the reverse direction composes the supplied typed prefix. -/
+theorem LR.DirectTyDefEq.whr
+    (hA : TypeWHRedPath Γ A A') (hB : TypeWHRedPath Γ B B') :
+    LR.DirectTyDefEq Γ A B a ↔ LR.DirectTyDefEq Γ A' B' a := by
+  constructor
+  · intro H
+    cases H with
+    | bot => exact .bot
+    | sort rootA rootB =>
+      exact .sort (hA.retargetLeft rootA WHNF.sort)
+        (hB.retargetLeft rootB WHNF.sort)
+    | forallE rootA rootB domainPath codomainPath domain pi result =>
+      exact .forallE
+        (hA.retargetLeft rootA WHNF.forallE)
+        (hB.retargetLeft rootB WHNF.forallE)
+        domainPath codomainPath domain pi result
+    | lam hf => exact .lam hf
+    | ctor hwf => exact .ctor hwf
+    | indTy left right =>
+      exact .indTy ((LRS.IndTyHead.whr hA.toWHRedS).1 left)
+        ((LRS.IndTyHead.whr hB.toWHRedS).1 right)
+  · intro H
+    cases H with
+    | bot => exact .bot
+    | sort rootA rootB => exact .sort (hA.trans rootA) (hB.trans rootB)
+    | forallE rootA rootB domainPath codomainPath domain pi result =>
+      exact .forallE (hA.trans rootA) (hB.trans rootB)
+        domainPath codomainPath domain pi result
+    | lam hf => exact .lam hf
+    | ctor hwf => exact .ctor hwf
+    | indTy left right =>
+      exact .indTy ((LRS.IndTyHead.whr hA.toWHRedS).2 left)
+        ((LRS.IndTyHead.whr hB.toWHRedS).2 right)
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.whr' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.whr
+
+/-- Lower a recursively retained direct observation along the semantic
+type-shape order at one common stratification level.  A Pi child is lowered
+by the induction hypothesis after its argument relation is converted to the
+larger domain selected by the source observation. -/
+theorem LR.DirectTyDefEq.mono_r_2
+    {a a' : WShape n} (le : a ≤ a')
+    (ha : a.HasType .type) (ha' : a'.HasType .type)
+    (H : LR.DirectTyDefEq Γ A B a') :
+    LR.DirectTyDefEq Γ A B a := by
+  induction H with
+  | bot =>
+    cases WShape.le_bot.1 le
+    exact .bot
+  | sort rootA rootB =>
+    obtain rfl | rfl := WShape.le_sort.1 le
+    · exact .bot
+    · exact .sort rootA rootB
+  | @forallE n A B B₁ F₁ B₂ F₂ b' f' u v rootA rootB
+      domainPath codomainPath domain pi result ihDomain ihResult =>
+    obtain rfl | ⟨b, f, rfl, leB, leF⟩ := WShape.le_forallE_iff.1 le
+    · exact .bot
+    · have ⟨_, htpi, _⟩ := WShape.HasType.forallE_l.1 ha
+      have ⟨_, htpi', _⟩ := WShape.HasType.forallE_l.1 ha'
+      have hb := (WShape.HasTypePi.iff.1 htpi).1.isType
+      have hb' := (WShape.HasTypePi.iff.1 htpi').1.isType
+      have domain' := ihDomain leB hb hb'
+      have hDomain := domain.toTyDefEq
+      refine .forallE rootA rootB domainPath codomainPath domain'
+        (pi.mono_r_2 leB leF htpi htpi' ((LR Γ).left_ty hDomain)) ?_
+      intro k leK x p hp hx hrel
+      have leBK : b.lift k ≤ b'.lift k := WShape.lift_mono leK leB
+      have hp' : p.HasType (b'.lift k) :=
+        WShape.HasType.mono_r leBK
+          (WShape.HasDom.isType ((WShape.HasTypePi.lift leK).2 htpi').1) hp
+      have hDomainK : (LR Γ).TyDefEq B₁ B₁ (b'.lift k) :=
+        (LR.TyDefEq.lift leK hb').2 ((LR Γ).left_ty hDomain)
+      have hrel' : (LR Γ).DefEq x x B₁ p (b'.lift k) :=
+        (LR Γ).mono_r_1 leBK hp hp' hDomainK hrel
+      have child := result leK hp' hx hrel'
+      have leFK : f.lift k ≤ f'.lift k := WShapeFun.lift_mono leK leF
+      have leApp : (f.lift k).app p ≤ (f'.lift k).app p :=
+        WShapeFun.app_mono_l leFK p
+      have htChild : ((f.lift k).app p).HasType .type :=
+        ((WShape.HasTypePi.iff.1
+          ((WShape.HasTypePi.lift leK).2 htpi)).2 p hp).toType
+      have htChild' : ((f'.lift k).app p).HasType .type :=
+        ((WShape.HasTypePi.iff.1
+          ((WShape.HasTypePi.lift leK).2 htpi')).2 p hp').toType
+      exact ihResult leK hp' hx hrel' leApp htChild htChild'
+  | lam hf => exact (WShape.HasType.lam_isType ha').elim
+  | ctor hwf => exact (WShape.HasType.ctor_isType ha').elim
+  | indTy left right =>
+    obtain rfl | rfl := WShape.le_indTy.1 le
+    · exact .bot
+    · exact .indTy left right
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTyDefEq.mono_r_2' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTyDefEq.mono_r_2
+
+/-- Keep the left endpoint of a direct term observation. -/
+theorem LR.DirectDefEq.left
+    (H : LR.DirectDefEq Γ M N A m a) :
+    LR.DirectDefEq Γ M M A m a :=
+  ⟨(LR Γ).left H.1, fun r hsort => (H.2 r hsort).left⟩
+
+/-- Symmetry of direct term observations. -/
+theorem LR.DirectDefEq.symm
+    (H : LR.DirectDefEq Γ M N A m a) :
+    LR.DirectDefEq Γ N M A m a :=
+  ⟨(LR Γ).symm H.1, fun r hsort => (H.2 r hsort).symm⟩
+
+/-- Transitivity of direct term observations. -/
+theorem LR.DirectDefEq.trans
+    (H₁ : LR.DirectDefEq Γ M₁ M₂ A m a)
+    (H₂ : LR.DirectDefEq Γ M₂ M₃ A m a) :
+    LR.DirectDefEq Γ M₁ M₃ A m a :=
+  ⟨(LR Γ).trans H₁.1 H₂.1,
+    fun r hsort => (H₁.2 r hsort).trans (H₂.2 r hsort)⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectDefEq.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectDefEq.trans
 
 /-- The canonical stratified logical relation realizes itself at every
 higher level. -/

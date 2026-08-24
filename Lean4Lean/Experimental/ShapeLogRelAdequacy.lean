@@ -12,6 +12,1173 @@ def LR.Adequate (Γ₀ Γ : List SExpr) (ρ : Valuation) (M N A : SExpr) (m a : 
     (LR Γ₀).DefEq (N.subst σ) (N.subst σ') (A.subst σ) m a) ∧
   ∀ {{σ}}, LR.SubstWF Γ₀ σ σ Γ ρ → (LR Γ₀).DefEq (M.subst σ) (N.subst σ) (A.subst σ) m a
 
+/-- Additive direct adequacy.  Ordinary term semantics are unchanged; when
+the ambient type shape is a sort, each substituted term edge additionally
+retains a recursive direct type observation. -/
+def LR.DirectAdequate (Γ₀ Γ : List SExpr) (ρ : Valuation)
+    (M N A : SExpr) (m a : WShape n) :=
+  (∀ {{σ σ'}}, LR.SubstWF Γ₀ σ σ' Γ ρ →
+    LR.DirectDefEq Γ₀ (M.subst σ) (M.subst σ') (A.subst σ) m a ∧
+    LR.DirectDefEq Γ₀ (N.subst σ) (N.subst σ') (A.subst σ) m a) ∧
+  ∀ {{σ}}, LR.SubstWF Γ₀ σ σ Γ ρ →
+    LR.DirectDefEq Γ₀ (M.subst σ) (N.subst σ) (A.subst σ) m a
+
+/-- Forget the direct sidecar and recover the established adequacy
+interface. -/
+theorem LR.DirectAdequate.toAdequate
+    (H : LR.DirectAdequate Γ₀ Γ ρ M N A m a) :
+    LR.Adequate Γ₀ Γ ρ M N A m a :=
+  ⟨fun _ _ W => ⟨(H.1 W).1.toDefEq, (H.1 W).2.toDefEq⟩,
+    fun _ W => (H.2 W).toDefEq⟩
+
+/-- The left congruence edge of direct adequacy at a sort exposes the
+retained type observation. -/
+theorem LR.DirectAdequate.leftTy
+    (H : LR.DirectAdequate Γ₀ Γ ρ M N A m (.sort r))
+    (W : LR.SubstWF Γ₀ σ σ' Γ ρ) :
+    LR.DirectTyDefEq Γ₀ (M.subst σ) (M.subst σ') m :=
+  (H.1 W).1.toTyDefEq
+
+/-- The right congruence edge of direct adequacy at a sort. -/
+theorem LR.DirectAdequate.rightTy
+    (H : LR.DirectAdequate Γ₀ Γ ρ M N A m (.sort r))
+    (W : LR.SubstWF Γ₀ σ σ' Γ ρ) :
+    LR.DirectTyDefEq Γ₀ (N.subst σ) (N.subst σ') m :=
+  (H.1 W).2.toTyDefEq
+
+/-- The heterogeneous same-substitution edge of direct adequacy at a
+sort. -/
+theorem LR.DirectAdequate.edgeTy
+    (H : LR.DirectAdequate Γ₀ Γ ρ M N A m (.sort r))
+    (W : LR.SubstWF Γ₀ σ σ Γ ρ) :
+    LR.DirectTyDefEq Γ₀ (M.subst σ) (N.subst σ) m :=
+  (H.2 W).toTyDefEq
+
+/-! #### Level-guarded direct substitutions and adequacy
+
+The `LRD` tower cannot quantify over legacy substitutions: a context entry
+whose declared type is itself a function must retain the direct action of
+that function (the Nat eliminator motive is the first concrete example).
+These definitions mirror `LR.Subst1`, `LR.SubstWF`, and `LR.Adequate`, but
+use the relation at each entry's actual semantic shape level. -/
+
+/-- One context entry realized in the level-guarded direct relation. -/
+def LR.DirectSubst1 (Γ₀ : List SExpr)
+    (x x' A₀ A A' : SExpr) (ρ : Valuation) (i := 0) : Prop :=
+  IsDefEq Γ₀ x x' A ∧ ∀ {{n}} (a : WShape n), LE_Interp ρ a.T A₀ →
+    (a.HasType .type →
+      (∃ u, IsDefEq Γ₀ A A' (.sort u)) ∧
+        (LRD Γ₀).TyDefEq A A' a) ∧
+    ∀ {{m : WShape n}}, LE_Interp ρ m.T (.bvar i) → m.HasType a →
+      (LRD Γ₀).DefEq x x' A m a
+
+/-- Two-sided substitutions whose entries retain their direct semantic
+actions, including actions at Pi-shaped declared types. -/
+inductive LR.DirectSubstWF (Γ₀ : List SExpr) :
+    Subst → Subst → List SExpr → Valuation → Prop where
+  | id : LR.DirectSubstWF Γ₀ .id .id Γ₀ .nil
+  | cons : LR.DirectSubstWF Γ₀ σ.tail σ'.tail Γ ρ →
+    (∀ {a}, LE_Interp ρ a A →
+      ∃ a', a ≤ a' ∧ LE_Interp ρ a' A ∧ a'.HasType .type) →
+    LE_Interp ρ a A → x.HasType a → IsDefEq Γ A A (.sort u) →
+    LR.DirectSubst1 Γ₀ σ.head σ'.head A.lift
+      (A.subst σ.tail) (A.subst σ'.tail) (ρ.push x) →
+    LR.DirectSubstWF Γ₀ σ σ' (A :: Γ) (ρ.push x)
+
+/-- Forget one direct substitution entry. -/
+theorem LR.DirectSubst1.toSubst1
+    (H : LR.DirectSubst1 Γ₀ x x' A₀ A A' ρ i) :
+    LR.Subst1 Γ₀ x x' A₀ A A' ρ i := by
+  refine ⟨H.1, fun n a ha => ⟨fun ht => ?_, fun m hm hma => ?_⟩⟩
+  · exact ⟨(H.2 a ha).1 ht |>.1,
+      LRD.tyLegacy ((H.2 a ha).1 ht |>.2)⟩
+  · exact LRD.defLegacy ((H.2 a ha).2 hm hma)
+
+/-- Direct substitution well-formedness erases structurally to the existing
+substitution interface. -/
+theorem LR.DirectSubstWF.toSubstWF :
+    LR.DirectSubstWF Γ₀ σ σ' Γ ρ → LR.SubstWF Γ₀ σ σ' Γ ρ
+  | .id => .id
+  | .cons W hfit hA hx hty h0 =>
+    .cons W.toSubstWF hfit hA hx hty h0.toSubst1
+
+theorem LR.DirectSubstWF.fits
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ) : ρ.Fits Γ₀ Γ :=
+  W.toSubstWF.fits
+
+theorem LR.DirectSubstWF.toSubstEq
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ) :
+    Ctx.SubstEq Γ₀ σ σ' Γ :=
+  W.toSubstWF.toSubstEq
+
+/-- Retain the left endpoint of every entry in a direct substitution. -/
+theorem LR.DirectSubstWF.left
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ) :
+    LR.DirectSubstWF Γ₀ σ σ Γ ρ := by
+  induction W with
+  | id => exact .id
+  | cons _ hfit hA hx hty h₀ ih =>
+    refine .cons ih hfit hA hx hty
+      ⟨h₀.1.hasType.1, fun _ a ha =>
+        ⟨fun ht => ?_, fun _ hM hmem => ?_⟩⟩
+    · have ⟨⟨u, hraw⟩, hdirect⟩ := (h₀.2 a ha).1 ht
+      exact ⟨⟨u, hraw.hasType.1⟩, LRD.TyDefEq.left hdirect⟩
+    · exact LRD.DefEq.left ((h₀.2 a ha).2 hM hmem)
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectSubstWF.left' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectSubstWF.left
+
+/-- Reverse both endpoints of every direct substitution entry. -/
+theorem LR.DirectSubstWF.symm
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ) :
+    LR.DirectSubstWF Γ₀ σ' σ Γ ρ := by
+  induction W with
+  | id => exact .id
+  | cons _ hfit hA hx hty h₀ ih =>
+    refine .cons ih hfit hA hx hty ⟨?_, fun _ a ha =>
+      ⟨fun ht => ?_, fun _ hM hmem => ?_⟩⟩
+    · have ⟨⟨_, hraw⟩, _⟩ :=
+        (h₀.2 (n := 0) _ .bot).1 (.bot .sort)
+      exact hraw.defeqDF h₀.1.symm
+    · have ⟨⟨u, hraw⟩, hdirect⟩ := (h₀.2 a ha).1 ht
+      exact ⟨⟨u, hraw.symm⟩, LRD.TyDefEq.symm hdirect⟩
+    · let ⟨_, htype⟩ := (h₀.2 a ha).1 hmem.isType
+      exact LRD.DefEq.conv htype <|
+        LRD.DefEq.symm ((h₀.2 a ha).2 hM hmem)
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectSubstWF.symm' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectSubstWF.symm
+
+/-- Look up one variable through a direct substitution.  The head case is
+exactly the retained entry payload; the tail case strips one weakening.
+For the identity tail the semantic variable observation is bottom, which
+is deliberately uninformative in `LRD`. -/
+theorem LR.DirectSubstWF.bvar
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ)
+    (hlookup : Lookup Γ i A)
+    (hM : LE_Interp ρ m.T (.bvar i))
+    (hA : LE_Interp ρ a.T A)
+    (hmem : m.HasType a) :
+    (LRD Γ₀).DefEq
+      ((SExpr.bvar i).subst σ) ((SExpr.bvar i).subst σ')
+      (A.subst σ) m a := by
+  have hle := LE_Interp.bvar_iff.1 hM
+  clear hM
+  induction W generalizing i A with
+  | id =>
+    cases show m = .bot from TShape.le_bot.1 (hle.trans TShape.bot_le)
+    exact LRD.DefEq.bot hmem.isType
+  | cons W' _ _ _ _ h₀ ih =>
+    cases hlookup with
+    | zero => exact lift_subst ▸ (h₀.2 a hA).2 (.bvar hle) hmem
+    | succ h' =>
+      exact lift_subst ▸ ih h' (LE_Interp.weak_iff.1 hA) hle
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectSubstWF.bvar' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectSubstWF.bvar
+
+/-- Fundamental-theorem target for the level-guarded direct relation. -/
+def LRD.Adequate (Γ₀ Γ : List SExpr) (ρ : Valuation)
+    (M N A : SExpr) (m a : WShape n) : Prop :=
+  (∀ {{σ σ'}}, LR.DirectSubstWF Γ₀ σ σ' Γ ρ →
+    (LRD Γ₀).DefEq (M.subst σ) (M.subst σ') (A.subst σ) m a ∧
+    (LRD Γ₀).DefEq (N.subst σ) (N.subst σ') (A.subst σ) m a) ∧
+  ∀ {{σ}}, LR.DirectSubstWF Γ₀ σ σ Γ ρ →
+    (LRD Γ₀).DefEq (M.subst σ) (N.subst σ) (A.subst σ) m a
+
+/-- Reflexive direct adequacy from the relational-substitution edge. -/
+theorem LRD.Adequate.refl
+    (H : ∀ {{σ σ'}}, LR.DirectSubstWF Γ₀ σ σ' Γ ρ →
+      (LRD Γ₀).DefEq (M.subst σ) (M.subst σ')
+        (A.subst σ) m a) :
+    LRD.Adequate Γ₀ Γ ρ M M A m a :=
+  ⟨fun _ _ W => ⟨H W, H W⟩, fun _ W => H W⟩
+
+/-- A bottom term observation is adequate at every well-shaped displayed
+type.  As at the relation level, it deliberately carries no head evidence. -/
+theorem LRD.Adequate.bot
+    (ha : a.HasType .type) :
+    LRD.Adequate Γ₀ Γ ρ M N A (.bot : WShape n) a :=
+  ⟨fun _ _ _ => ⟨LRD.DefEq.bot ha, LRD.DefEq.bot ha⟩,
+    fun _ _ => LRD.DefEq.bot ha⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.bot' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.bot
+
+/-- Retain the left endpoint of direct adequacy. -/
+theorem LRD.Adequate.left
+    (H : LRD.Adequate Γ₀ Γ ρ M N A m a) :
+    LRD.Adequate Γ₀ Γ ρ M M A m a :=
+  .refl fun _ _ W => (H.1 W).1
+
+/-- Symmetry of direct adequacy. -/
+theorem LRD.Adequate.symm
+    (H : LRD.Adequate Γ₀ Γ ρ M N A m a) :
+    LRD.Adequate Γ₀ Γ ρ N M A m a :=
+  ⟨fun _ _ W => (H.1 W).symm,
+    fun _ W => LRD.DefEq.symm (H.2 W)⟩
+
+/-- Transitivity of direct adequacy. -/
+theorem LRD.Adequate.trans
+    (H₁ : LRD.Adequate Γ₀ Γ ρ M₁ M₂ A m a)
+    (H₂ : LRD.Adequate Γ₀ Γ ρ M₂ M₃ A m a) :
+    LRD.Adequate Γ₀ Γ ρ M₁ M₃ A m a :=
+  ⟨fun _ _ W => ⟨(H₁.1 W).1, (H₂.1 W).2⟩,
+    fun _ W => LRD.DefEq.trans (H₁.2 W) (H₂.2 W)⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.trans
+
+
+/-- Lower the displayed type shape pointwise across direct adequacy. -/
+theorem LRD.Adequate.mono_r_2
+    (le : a ≤ a') (hm : m.HasType a) (ha' : a'.HasType .type)
+    (H : LRD.Adequate Γ₀ Γ ρ M N A m a') :
+    LRD.Adequate Γ₀ Γ ρ M N A m a :=
+  ⟨fun _ _ W => ⟨
+      LRD.DefEq.mono_r_2 le hm ha' (H.1 W).1,
+      LRD.DefEq.mono_r_2 le hm ha' (H.1 W).2⟩,
+    fun _ W => LRD.DefEq.mono_r_2 le hm ha' (H.2 W)⟩
+
+/-- Raise the displayed type shape pointwise across direct adequacy when
+the target type is directly self-valid under every direct substitution. -/
+theorem LRD.Adequate.mono_r_1
+    (le : a ≤ a') (hm : m.HasType a) (hm' : m.HasType a')
+    (hTy : ∀ {{σ σ'}}, LR.DirectSubstWF Γ₀ σ σ' Γ ρ →
+      (LRD Γ₀).TyDefEq (A.subst σ) (A.subst σ) a')
+    (H : LRD.Adequate Γ₀ Γ ρ M N A m a) :
+    LRD.Adequate Γ₀ Γ ρ M N A m a' :=
+  ⟨fun _ _ W => ⟨
+      LRD.DefEq.mono_r_1 le hm hm' (hTy W) (H.1 W).1,
+      LRD.DefEq.mono_r_1 le hm hm' (hTy W) (H.1 W).2⟩,
+    fun _ W => LRD.DefEq.mono_r_1 le hm hm' (hTy W) (H.2 W)⟩
+
+/-- Lower the element shape pointwise across direct adequacy. -/
+theorem LRD.Adequate.mono_l
+    (le : m ≤ m') (hm : m.HasType a) (hm' : m'.HasType a)
+    (H : LRD.Adequate Γ₀ Γ ρ M N A m' a) :
+    LRD.Adequate Γ₀ Γ ρ M N A m a :=
+  ⟨fun _ _ W => ⟨
+      LRD.DefEq.mono_l le hm hm' (H.1 W).1,
+      LRD.DefEq.mono_l le hm hm' (H.1 W).2⟩,
+    fun _ W => LRD.DefEq.mono_l le hm hm' (H.2 W)⟩
+
+/-- Canonical cross-level equivalence for direct adequacy. -/
+theorem LRD.Adequate.lift
+    {n n' : Nat} {m a : WShape n}
+    (le : n ≤ n') (hma : m.HasType a) :
+    (LRD.Adequate Γ₀ Γ ρ M N A (m.lift n') (a.lift n') ↔
+      LRD.Adequate Γ₀ Γ ρ M N A m a) := by
+  constructor <;> intro H
+  · exact ⟨fun σ σ' W => ⟨
+        (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+          (M := M.subst σ) (N := M.subst σ') (A := A.subst σ)
+          (m := m) (a := a) le hma).1 (H.1 W).1,
+        (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+          (M := N.subst σ) (N := N.subst σ') (A := A.subst σ)
+          (m := m) (a := a) le hma).1 (H.1 W).2⟩,
+      fun σ W => (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+        (M := M.subst σ) (N := N.subst σ) (A := A.subst σ)
+        (m := m) (a := a) le hma).1 (H.2 W)⟩
+  · exact ⟨fun σ σ' W => ⟨
+        (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+          (M := M.subst σ) (N := M.subst σ') (A := A.subst σ)
+          (m := m) (a := a) le hma).2 (H.1 W).1,
+        (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+          (M := N.subst σ) (N := N.subst σ') (A := A.subst σ)
+          (m := m) (a := a) le hma).2 (H.1 W).2⟩,
+      fun σ W => (LRD.DefEq.lift (Γ := Γ₀) (n := n) (n' := n')
+        (M := M.subst σ) (N := N.subst σ) (A := A.subst σ)
+        (m := m) (a := a) le hma).2 (H.2 W)⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.mono_r_2' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.mono_r_2
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.mono_r_1' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.mono_r_1
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.mono_l' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.mono_l
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.lift' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.lift
+
+
+/-- Extract guarded direct type validity from a term observation whose
+semantic displayed type lies below a sort. -/
+theorem LRD.toValTy
+    {m : WShape n'} {b : WShape n}
+    (le_n : n ≤ n') (le_a : b.T ≤ m.T)
+    (ht : b.HasType .type)
+    (hSort : LE_Interp ρ a.T (.sort u))
+    (hmem' : m.HasType a)
+    (H : (LRD Γ₀).DefEq M N (.sort u) m a) :
+    (LRD Γ₀).TyDefEq M N b := by
+  have hle := hSort.le_sort'
+  refine (LRD.TyDefEq.lift le_n ht).1 ?_
+  refine LRD.TyDefEq.mono_r_2
+    ((TShape.LE.lift_l le_n).1 le_a)
+    (WShape.lift_type ▸ (WShape.HasType.lift le_n).2 ht)
+    (WShape.HasType.mono_r hle .sort hmem').toType ?_
+  exact LRD.DefEq.toTyDefEq <| LRD.DefEq.mono_r_1 hle hmem'
+    (.mono_r hle .sort hmem') LRD.TyDefEq.sort H
+
+/--
+info: 'Lean4Lean.SExpr.LRD.toValTy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.toValTy
+
+
+/-- Extend a guarded-direct substitution with one directly adequate
+argument. -/
+theorem LRD.Adequate.cons
+    (ihA : ∀ {ρ n} {m a : WShape n},
+      LE_Interp ρ m.T A → LE_Interp ρ a.T (.sort u) →
+      m.HasType a → LRD.Adequate Γ₀ Γ ρ A A' (.sort u) m a)
+    (HA : IsDefEqStrong Γ A A' (.sort u))
+    {{k : Nat}} {{a₁ p : WShape k}} {{x x' σ σ' ρ}}
+    (hp : p.HasType a₁) (hA₁ : LE_Interp ρ a₁.T A)
+    (hx : IsDefEq Γ₀ x x' (A.subst σ))
+    (hv : (LRD Γ₀).DefEq x x' (A.subst σ) p a₁)
+    (W : LR.DirectSubstWF Γ₀ σ σ' Γ ρ) :
+    LR.DirectSubstWF Γ₀ (σ.cons x) (σ'.cons x')
+      (A :: Γ) (ρ.push p.T) := by
+  refine W.cons (fun hA => ?_) hA₁ hp.T HA.defeq.hasType.1
+    ⟨hx, fun n a' ha' => ?_⟩
+  · have ⟨_, _, le_a, hA', hSort, hmem'⟩ :=
+      (LE_Interp.sound HA W.fits).2 hA
+    exact ⟨_, le_a, hA',
+      (TShape.HasType.mono_r hSort.le_sort .sort hmem').toType⟩
+  refine ⟨fun ht => ⟨⟨_, (HA.substCongr W.toSubstEq).1⟩, ?_⟩,
+    fun m' hm' ht => ?_⟩
+  · have ha' := LE_Interp.weak_iff.1 ha'
+    have ⟨_, _, _, le_n, le_a, hA', hSort, hmem'⟩ :=
+      (LE_Interp.sound HA W.fits).2 ha' |>.out
+    refine (LRD.TyDefEq.lift le_n ht).1 <|
+      LRD.TyDefEq.mono_r_2 ((TShape.LE.lift_l le_n).1 le_a)
+        (WShape.lift_type ▸ (WShape.HasType.lift le_n).2 ht)
+        (WShape.HasType.mono_r hSort.le_sort' .sort hmem').toType ?_
+    exact LRD.DefEq.toTyDefEq <| LRD.DefEq.mono_r_1 hSort.le_sort'
+      hmem' (.mono_r hSort.le_sort' .sort hmem') LRD.TyDefEq.sort
+      ((ihA hA' hSort hmem').1 W).1
+  · have ha' := LE_Interp.weak_iff.1 ha'
+    have le_k := Nat.le_max_left k n
+    have le_n := Nat.le_max_right k n
+    have ht' := (WShape.HasType.lift le_n).2 ht
+    have hp' := (WShape.HasType.lift le_k).2 hp
+    have hle' := (TShape.LE.def le_n le_k).1
+      (LE_Interp.bvar_iff.1 hm')
+    have hta₁ := WShape.lift_type ▸
+      (WShape.HasType.lift le_k).2 hp.isType
+    have hta' := WShape.lift_type ▸
+      (WShape.HasType.lift le_n).2 ht.isType
+    have hc := hA₁.compat ha'
+    have hj := (TShape.Join.def le_k le_n (Nat.le_refl _)).1 (.mk hc)
+    rw [TShape.lift_join le_k le_n] at hj
+    have ⟨hj1, hj2⟩ := hj.le
+    have hJ := hta₁.join' hj hta'
+    have hJ' := hJ.mono_r hj1 hp'
+    refine (LRD.DefEq.lift le_n ht).1 <|
+      LRD.DefEq.mono_r_2 hj2 ht' hJ <|
+      LRD.DefEq.mono_l hle' (hJ.mono_r hj2 ht') hJ' <|
+      LRD.DefEq.mono_r_1 hj1 hp' hJ' ?_ <|
+      (LRD.DefEq.lift le_k hp).2 hv
+    have valTyA {nd : Nat} {a : WShape nd}
+        (hA : LE_Interp ρ a.T A) (ha : a.HasType .type) :
+        (LRD Γ₀).TyDefEq (A.subst σ) (A.subst σ) a := by
+      have ⟨_, _, _, le_n, le_a, hA', hSort, hmem'⟩ :=
+        (LE_Interp.sound HA W.left.fits).2 hA |>.out
+      have v2 := (ihA hA' hSort hmem').2 W.left
+      have vt := LRD.TyDefEq.left <| LRD.DefEq.toTyDefEq <|
+        LRD.DefEq.mono_r_1 hSort.le_sort' hmem'
+          (.mono_r hSort.le_sort' .sort hmem') LRD.TyDefEq.sort v2
+      exact (LRD.TyDefEq.lift le_n ha).1 <|
+        LRD.TyDefEq.mono_r_2 ((TShape.LE.lift_l le_n).1 le_a)
+          (WShape.lift_type ▸ (WShape.HasType.lift le_n).2 ha)
+          (WShape.HasType.mono_r hSort.le_sort' .sort hmem').toType vt
+    exact LRD.TyDefEq.join ((TShape.Compat.def le_k le_n).2 hc)
+      hta₁ hta'
+      ((LRD.TyDefEq.lift le_k hp.isType).2 (valTyA hA₁ hp.isType))
+      ((LRD.TyDefEq.lift le_n ht.isType).2 (valTyA ha' ht.isType))
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.cons' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.cons
+
+
+/-- Exact informative Pi branch of guarded-direct self adequacy.  The
+ordinary adequacy premise supplies the additive legacy projection; the
+domain and codomain callbacks construct the retained direct sidecar. -/
+theorem LRD.Adequate.forallESelf_exact
+    {Γ₀ Γ : List SExpr} {ρ : Valuation}
+    {A body : SExpr} {u v : SLevel}
+    {k : Nat} {a₂ : WShape k} {a₁ : WShapeFun k} {r : Bool}
+    (HA : IsDefEqStrong Γ A A (.sort u))
+    (HBody : IsDefEqStrong (A :: Γ) body body (.sort v))
+    (hM : LE_Interp ρ (WShape.forallE a₂ a₁).T
+      (SExpr.forallE A body))
+    (aty : WShape.HasTypePi a₁ a₂ r)
+    (ihA : ∀ {ρ n} {ma aa : WShape n},
+      LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+      ma.HasType aa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa)
+    (ihBody : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T body → LE_Interp ρ ab.T (.sort v) →
+      mb.HasType ab →
+      LRD.Adequate Γ₀ (A :: Γ) ρ body body (.sort v) mb ab)
+    (legacy : LR.Adequate Γ₀ Γ ρ
+      (SExpr.forallE A body) (SExpr.forallE A body)
+      (.sort (.imax u v)) (WShape.forallE a₂ a₁) (.sort r)) :
+    LRD.Adequate Γ₀ Γ ρ
+      (SExpr.forallE A body) (SExpr.forallE A body)
+      (.sort (.imax u v)) (WShape.forallE a₂ a₁) (.sort r) := by
+  have atyW := WShape.HasTypePi.iff.1 aty
+  have hA1 := hM.forallE_inv.1
+  have cons := LRD.Adequate.cons ihA HA
+  have HPi : IsDefEqStrong Γ (SExpr.forallE A body)
+      (SExpr.forallE A body) (.sort (.imax u v)) :=
+    .forallEDF HA HBody HBody
+  refine .refl fun σ σ' W => ?_
+  have legacyEdge := (legacy.1 W.toSubstWF).1
+  have ⟨_, a', _, le_n, le_a, hA', hSort, hmem'⟩ :=
+    (LE_Interp.sound HA W.left.fits).2 hA1 |>.out
+  have HAσ := (HA.substCongr W.toSubstEq).1
+  have S' := W.toSubstEq.lift HA.defeq.hasType.1
+  have HBodyσ := (HBody.substCongr S').1
+  have hPiCongr := HPi.substCongr W.toSubstEq
+  have rootL : TypeWHRedPath Γ₀
+      ((SExpr.forallE A body).subst σ)
+      (SExpr.forallE (A.subst σ) (body.subst σ.lift)) := by
+    simpa only [SExpr.subst] using
+      TypeWHRedPath.refl hPiCongr.1.hasType.1
+  have rootR : TypeWHRedPath Γ₀
+      ((SExpr.forallE A body).subst σ')
+      (SExpr.forallE (A.subst σ') (body.subst σ'.lift)) := by
+    simpa only [SExpr.subst] using
+      TypeWHRedPath.refl hPiCongr.1.hasType.2
+  have domain : (LRD (n := k) Γ₀).TyDefEq
+      (A.subst σ) (A.subst σ') a₂ :=
+    LRD.toValTy le_n le_a atyW.1.isType hSort hmem'
+      ((ihA hA' hSort hmem').1 W).1
+  have pi : LR.DirectPiDefEq (LRD (n := k) Γ₀)
+      (A.subst σ) (body.subst σ.lift) (body.subst σ'.lift)
+      a₂ a₁ := by
+    constructor
+    · intro x x' p hp ha hv
+      have hB := hM.forallE_inv'.2 p
+      have WL := cons hp hA1 ha hv W.left
+      have ⟨_, _, _, leL, leL', iBL, ivL, hmbL⟩ :=
+        (LE_Interp.sound HBody WL.fits).2 hB |>.out
+      have semL : (LRD (n := k) Γ₀).TyDefEq
+          ((body.subst σ.lift).inst x)
+          ((body.subst σ.lift).inst x') (a₁.app p) := by
+        simpa [inst_lift_cons] using
+          LRD.toValTy leL leL' (atyW.2 _ hp).toType ivL hmbL
+            ((ihBody iBL ivL hmbL).1 WL).1
+      have valA := LRD.toValTy le_n le_a atyW.1.isType
+        hSort hmem' ((ihA hA' hSort hmem').1 W).1
+      have WR := cons hp hA1 (HAσ.defeqDF ha)
+        (LRD.DefEq.conv valA hv) W.symm.left
+      have ⟨_, _, _, leR, leR', iBR, ivR, hmbR⟩ :=
+        (LE_Interp.sound HBody WR.fits).2 hB |>.out
+      have semR : (LRD (n := k) Γ₀).TyDefEq
+          ((body.subst σ'.lift).inst x)
+          ((body.subst σ'.lift).inst x') (a₁.app p) := by
+        simpa [inst_lift_cons] using
+          LRD.toValTy leR leR' (atyW.2 _ hp).toType ivR hmbR
+            ((ihBody iBR ivR hmbR).1 WR).1
+      have rawL : IsDefEq Γ₀
+          ((body.subst σ.lift).inst x)
+          ((body.subst σ.lift).inst x') (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          (HBody.substCongr WL.toSubstEq).1
+      have rawR : IsDefEq Γ₀
+          ((body.subst σ'.lift).inst x)
+          ((body.subst σ'.lift).inst x') (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          (HBody.substCongr WR.toSubstEq).1
+      exact ⟨semL, semR, ⟨v, rawL⟩, ⟨v, rawR⟩⟩
+    · intro x p hp ha hv
+      have hB := hM.forallE_inv'.2 p
+      have WX := cons hp hA1 ha.hasType.1
+        (LRD.DefEq.left hv) W
+      have ⟨_, _, _, le, le', iB, iv, hmb⟩ :=
+        (LE_Interp.sound HBody WX.fits).2 hB |>.out
+      have hout : (LRD (n := k) Γ₀).TyDefEq
+          ((body.subst σ.lift).inst x)
+          ((body.subst σ'.lift).inst x) (a₁.app p) := by
+        simpa [inst_lift_cons] using
+          LRD.toValTy le le' (atyW.2 _ hp).toType iv hmb
+            ((ihBody iB iv hmb).1 WX).1
+      exact cast (by congr 1) hout
+  have sidecar : LR.DirectValTyPi2 (LRD (n := k) Γ₀)
+      ((SExpr.forallE A body).subst σ)
+      ((SExpr.forallE A body).subst σ') a₂ a₁ :=
+    ⟨A.subst σ, body.subst σ.lift,
+      A.subst σ', body.subst σ'.lift, u, v,
+      rootL, rootR, .single HAσ, .single HBodyσ, domain, pi⟩
+  exact LRD.DefEq.of_sort legacyEdge <|
+    LRD.TyDefEq.forallE ((LR Γ₀).toType legacyEdge) sidecar
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.forallESelf_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.forallESelf_exact
+
+
+/-- Guarded-direct self adequacy for dependent products across every
+semantic shape.  Noninformative and impossible cases are discharged by the
+shape analysis; the informative Pi case preserves its typed roots and direct
+domain/codomain action through `forallESelf_exact`. -/
+theorem LRD.Adequate.forallESelf
+    {Γ : List SExpr} {A body : SExpr} {u v : SLevel}
+    {ρ : Valuation} {n : Nat} {m a : WShape n}
+    (HA : IsDefEqStrong Γ A A (.sort u))
+    (HBody : IsDefEqStrong (A :: Γ) body body (.sort v))
+    (hM : LE_Interp ρ m.T (.forallE A body))
+    (hA : LE_Interp ρ a.T (.sort (.imax u v)))
+    (hmem : m.HasType a)
+    (ihA : ∀ {ρ n} {ma aa : WShape n},
+      LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+      ma.HasType aa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa)
+    (ihBody : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T body → LE_Interp ρ ab.T (.sort v) →
+      mb.HasType ab →
+      LRD.Adequate Γ₀ (A :: Γ) ρ body body (.sort v) mb ab)
+    (legacy : LR.Adequate Γ₀ Γ ρ
+      (.forallE A body) (.forallE A body)
+      (.sort (.imax u v)) m a) :
+    LRD.Adequate Γ₀ Γ ρ (.forallE A body) (.forallE A body)
+      (.sort (.imax u v)) m a := by
+  cases hmem.unfold with
+  | bot hm =>
+    cases hm.unfold with
+    | forallE =>
+      let .sort h := hA
+      cases (TShape.LE.lift_r (by simp [TShape.sort])).1 h
+    | _ => exact .bot hmem.isType
+  | sort =>
+    cases n <;>
+      have .forallE _ _ _ _ h := hM <;>
+      cases TShape.sort_not_le_forallE h
+  | @lam _ f₀ =>
+    revert hM
+    unfold WShape.lam'
+    split <;> [skip; exact fun _ => .bot hmem.isType]
+    intro | .forallE _ _ _ _ h => cases TShape.lam_not_le_forallE h
+  | ctor =>
+    have .forallE _ _ _ _ h := hM
+    cases TShape.ctor_not_le_forallE h
+  | indTy =>
+    have .forallE _ _ _ _ h := hM
+    cases TShape.indTy_not_le_forallE h
+  | @forallE k a₂ a₁ r aty =>
+    exact LRD.Adequate.forallESelf_exact
+      HA HBody hM aty ihA ihBody legacy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.forallESelf' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.forallESelf
+
+
+/-- Exact informative lambda branch of guarded-direct self adequacy.  The
+legacy premise supplies the additive first projection; typed beta paths and
+the direct body induction supply the retained extensional action. -/
+theorem LRD.Adequate.lamSelf_exact
+    {Γ₀ Γ : List SExpr} {ρ : Valuation}
+    {A B body : SExpr} {u v : SLevel}
+    {k : Nat} {g a₂ : WShapeFun k} {hg : g.NonZero}
+    {a₁ : WShape k}
+    (HA : IsDefEqStrong Γ A A (.sort u))
+    (HB : IsDefEqStrong (A :: Γ) B B (.sort v))
+    (HBody : IsDefEqStrong (A :: Γ) body body B)
+    (hTerm : LE_Interp ρ (WShape.lam g hg).T (SExpr.lam A body))
+    (hPi : LE_Interp ρ (WShape.forallE a₁ a₂).T
+      (SExpr.forallE A B))
+    (htm : WShape.HasTypeLam g a₁ a₂)
+    (ihA : ∀ {ρ n} {ma aa : WShape n},
+      LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+      ma.HasType aa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa)
+    (ihB : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T B → LE_Interp ρ ab.T (.sort v) →
+      mb.HasType ab →
+      LRD.Adequate Γ₀ (A :: Γ) ρ B B (.sort v) mb ab)
+    (ihBody : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T body → LE_Interp ρ ab.T B →
+      mb.HasType ab → LRD.Adequate Γ₀ (A :: Γ) ρ body body B mb ab)
+    (legacy : LR.Adequate Γ₀ Γ ρ
+      (SExpr.lam A body) (SExpr.lam A body) (SExpr.forallE A B)
+      (WShape.lam g hg) (WShape.forallE a₁ a₂)) :
+    LRD.Adequate Γ₀ Γ ρ
+      (SExpr.lam A body) (SExpr.lam A body) (SExpr.forallE A B)
+      (WShape.lam g hg) (WShape.forallE a₁ a₂) := by
+  have htmW := WShape.HasTypeLam.iff.1 htm
+  have atyW := WShape.HasTypePi.iff.1 htm.1
+  have hA1 := hPi.forallE_inv.1
+  have cons := LRD.Adequate.cons ihA HA
+  have HPi : IsDefEqStrong Γ (SExpr.forallE A B)
+      (SExpr.forallE A B) (.sort (.imax u v)) :=
+    .forallEDF HA HB HB
+  refine .refl fun σ σ' W => ?_
+  have legacyEdge := (legacy.1 W.toSubstWF).1
+  have ⟨_, a', _, le_n, le_a, hA', hSort, hmem'⟩ :=
+    (LE_Interp.sound HA W.left.fits).2 hA1 |>.out
+  have HAσ := (HA.substCongr W.toSubstEq).1
+  have SLeft := W.left.toSubstEq.lift HA.defeq.hasType.1
+  have SRight := W.symm.left.toSubstEq.lift HA.defeq.hasType.1
+  have hTypA : IsDefEq Γ₀ (A.subst σ) (A.subst σ) (.sort u) :=
+    HA.defeq.subst W.left.toSubstEq.left
+  have hTypB : IsDefEq (A.subst σ :: Γ₀)
+      (B.subst σ.lift) (B.subst σ.lift) (.sort v) :=
+    HB.defeq.subst SLeft.left
+  have root : TypeWHRedPath Γ₀ ((SExpr.forallE A B).subst σ)
+      (SExpr.forallE (A.subst σ) (B.subst σ.lift)) := by
+    simpa only [SExpr.subst] using
+      TypeWHRedPath.refl (HPi.substCongr W.toSubstEq).1.hasType.1
+  have domain : (LRD (n := k) Γ₀).TyDefEq
+      (A.subst σ) (A.subst σ) a₁ :=
+    LRD.TyDefEq.left <| LRD.toValTy le_n le_a atyW.1.isType
+      hSort hmem' ((ihA hA' hSort hmem').2 W.left)
+  have pi : LR.DirectPiDefEq (LRD (n := k) Γ₀)
+      (A.subst σ) (B.subst σ.lift) (B.subst σ.lift) a₁ a₂ := by
+    have edge : ∀ {{x x' p}}, p.HasType a₁ →
+        IsDefEq Γ₀ x x' (A.subst σ) →
+        (LRD (n := k) Γ₀).DefEq x x' (A.subst σ) p a₁ →
+        LR.DirectPiInstDefEq (LRD (n := k) Γ₀)
+          (B.subst σ.lift) (B.subst σ.lift) x x' (a₂.app p) := by
+      intro x x' p hp ha hv
+      have W' := cons hp hA1 ha hv W.left
+      have hBsem := hPi.forallE_inv'.2 p
+      have ⟨_, _, _, le, le', iB, iv, hmb⟩ :=
+        (LE_Interp.sound HB W'.fits).2 hBsem |>.out
+      have hsem : (LRD (n := k) Γ₀).TyDefEq
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ.lift).inst x') (a₂.app p) := by
+        simpa [inst_lift_cons] using
+          LRD.toValTy le le' (atyW.2 _ hp).toType iv hmb
+            ((ihB iB iv hmb).1 W').1
+      have hraw : IsDefEq Γ₀
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ.lift).inst x') (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          (HB.substCongr W'.toSubstEq).1
+      exact ⟨hsem, hsem, ⟨v, hraw⟩, ⟨v, hraw⟩⟩
+    exact ⟨edge, fun _ _ hp ha hv => (edge hp ha hv).leftTy⟩
+  have action : LR.DirectLamDefEq (LRD (n := k) Γ₀)
+      ((SExpr.lam A body).subst σ) ((SExpr.lam A body).subst σ')
+      (A.subst σ) (B.subst σ.lift) g a₁ a₂ := by
+    have betaL {t : SExpr} (ht : IsDefEq Γ₀ t t (A.subst σ)) :
+        TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ).app t)
+          ((body.subst σ.lift).inst t)
+          ((B.subst σ.lift).inst t) := by
+      simpa only [SExpr.subst] using
+        TypedWHRedS.beta (HBody.defeq.subst SLeft.left) ht
+    have betaR {t : SExpr} (ht : IsDefEq Γ₀ t t (A.subst σ')) :
+        TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ').app t)
+          ((body.subst σ'.lift).inst t)
+          ((B.subst σ'.lift).inst t) := by
+      simpa only [SExpr.subst] using
+        TypedWHRedS.beta (HBody.defeq.subst SRight.left) ht
+    constructor
+    · intro x x' p hp ha hv
+      have hBodySem := hTerm.lam_inv' p
+      have hBsem := hPi.forallE_inv'.2 p
+      have houtTy := htmW.2.2 p hp
+      have WL := cons hp hA1 ha hv W.left
+      have bodyL := ((ihBody hBodySem hBsem houtTy).1 WL).1
+      have bodyL' : (LRD (n := k) Γ₀).DefEq
+          ((body.subst σ.lift).inst x)
+          ((body.subst σ.lift).inst x')
+          ((B.subst σ.lift).inst x) (g.app p) (a₂.app p) := by
+        simpa only [inst_lift_cons] using bodyL
+      have piL := pi.1 hp ha hv
+      obtain ⟨_, rawL⟩ := piL.leftDefEq
+      have betaL' := betaL ha.hasType.2
+      have betaLAt : TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ).app x')
+          ((body.subst σ.lift).inst x')
+          ((B.subst σ.lift).inst x) :=
+        ⟨rawL.symm.defeqDF betaL'.defeq, betaL'.reduction⟩
+      have outL := (LRD.DefEq.whr (LRD.TyDefEq.left piL.leftTy)
+        (betaL ha.hasType.1) betaLAt).2 bodyL'
+
+      have ha' : IsDefEq Γ₀ x x' (A.subst σ') :=
+        HAσ.defeqDF ha
+      have hv' := LRD.DefEq.conv
+        (LRD.toValTy le_n le_a atyW.1.isType hSort hmem'
+          ((ihA hA' hSort hmem').1 W).1) hv
+      have WR := cons hp hA1 ha' hv' W.symm.left
+      have bodyR := ((ihBody hBodySem hBsem houtTy).1 WR).1
+      have bodyR0 : (LRD (n := k) Γ₀).DefEq
+          ((body.subst σ'.lift).inst x)
+          ((body.subst σ'.lift).inst x')
+          ((B.subst σ'.lift).inst x) (g.app p) (a₂.app p) := by
+        simpa only [inst_lift_cons] using bodyR
+      have W2 := cons hp hA1 ha.hasType.1 (LRD.DefEq.left hv) W
+      have ⟨_, _, _, le, le', iB, iv, hmb⟩ :=
+        (LE_Interp.sound HB W2.fits).2 hBsem |>.out
+      have vtBB : (LRD (n := k) Γ₀).TyDefEq
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ'.lift).inst x) (a₂.app p) := by
+        simpa [inst_lift_cons] using
+          LRD.toValTy le le' (atyW.2 _ hp).toType iv hmb
+            ((ihB iB iv hmb).1 W2).1
+      have rawRx : IsDefEq Γ₀
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ'.lift).inst x) (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          HB.subst W2.toSubstEq
+      have Wcross := cons hp hA1 ha hv W
+      have rawRx' : IsDefEq Γ₀
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ'.lift).inst x') (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          HB.subst Wcross.toSubstEq
+      have betaRx := betaR ha'.hasType.1
+      have betaRx' := betaR ha'.hasType.2
+      have betaRxAt : TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ').app x)
+          ((body.subst σ'.lift).inst x)
+          ((B.subst σ.lift).inst x) :=
+        ⟨rawRx.symm.defeqDF betaRx.defeq, betaRx.reduction⟩
+      have betaRx'At : TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ').app x')
+          ((body.subst σ'.lift).inst x')
+          ((B.subst σ.lift).inst x) :=
+        ⟨rawRx'.symm.defeqDF betaRx'.defeq, betaRx'.reduction⟩
+      have bodyR' := LRD.DefEq.conv (LRD.TyDefEq.symm vtBB) bodyR0
+      have outR := (LRD.DefEq.whr (LRD.TyDefEq.left vtBB)
+        betaRxAt betaRx'At).2 bodyR'
+      exact ⟨outL, outR⟩
+    · intro x p hp ha hv
+      have hBodySem := hTerm.lam_inv' p
+      have hBsem := hPi.forallE_inv'.2 p
+      have houtTy := htmW.2.2 p hp
+      have Wcross := cons hp hA1 ha.hasType.1 (LRD.DefEq.left hv) W
+      have bodyCross := ((ihBody hBodySem hBsem houtTy).1 Wcross).1
+      have bodyCross' : (LRD (n := k) Γ₀).DefEq
+          ((body.subst σ.lift).inst x)
+          ((body.subst σ'.lift).inst x)
+          ((B.subst σ.lift).inst x) (g.app p) (a₂.app p) := by
+        simpa only [inst_lift_cons] using bodyCross
+      have rawCross : IsDefEq Γ₀
+          ((B.subst σ.lift).inst x)
+          ((B.subst σ'.lift).inst x) (.sort v) := by
+        simpa only [inst_lift_cons, SExpr.subst] using
+          HB.subst Wcross.toSubstEq
+      have betaRx := betaR (HAσ.defeqDF ha).hasType.1
+      have betaRAt : TypedWHRedS Γ₀
+          (((SExpr.lam A body).subst σ').app x)
+          ((body.subst σ'.lift).inst x)
+          ((B.subst σ.lift).inst x) :=
+        ⟨rawCross.symm.defeqDF betaRx.defeq, betaRx.reduction⟩
+      exact (LRD.DefEq.whr (pi.2 hp ha (LRD.DefEq.left hv))
+        (betaL ha) betaRAt).2 bodyCross'
+  exact LRD.DefEq.lam legacyEdge
+    ⟨A.subst σ, B.subst σ.lift, u, v, root,
+      hTypA, domain, hTypB, pi, action⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.lamSelf_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.lamSelf_exact
+
+
+/-- Guarded-direct self adequacy for lambdas across every semantic shape.
+The only informative branch is a non-bottom lambda paired with its Pi type;
+all other branches are bottom or incompatible with the lambda interpreter. -/
+theorem LRD.Adequate.lamSelf
+    {Γ : List SExpr} {A B body : SExpr} {u v : SLevel}
+    {ρ : Valuation} {n : Nat} {m a : WShape n}
+    (HA : IsDefEqStrong Γ A A (.sort u))
+    (HB : IsDefEqStrong (A :: Γ) B B (.sort v))
+    (HBody : IsDefEqStrong (A :: Γ) body body B)
+    (hTerm : LE_Interp ρ m.T (.lam A body))
+    (hPi : LE_Interp ρ a.T (.forallE A B))
+    (hmem : m.HasType a)
+    (ihA : ∀ {ρ n} {ma aa : WShape n},
+      LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+      ma.HasType aa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa)
+    (ihB : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T B → LE_Interp ρ ab.T (.sort v) →
+      mb.HasType ab →
+      LRD.Adequate Γ₀ (A :: Γ) ρ B B (.sort v) mb ab)
+    (ihBody : ∀ {ρ n} {mb ab : WShape n},
+      LE_Interp ρ mb.T body → LE_Interp ρ ab.T B →
+      mb.HasType ab → LRD.Adequate Γ₀ (A :: Γ) ρ body body B mb ab)
+    (legacy : LR.Adequate Γ₀ Γ ρ
+      (.lam A body) (.lam A body) (.forallE A B) m a) :
+    LRD.Adequate Γ₀ Γ ρ
+      (.lam A body) (.lam A body) (.forallE A B) m a := by
+  cases hmem.unfold with
+  | bot hm => exact .bot hm
+  | sort =>
+    cases n <;>
+      let .lam _ _ _ h := hTerm <;>
+      cases TShape.sort_not_le_lam' h
+  | forallE =>
+    let .lam _ _ _ h := hTerm
+    cases TShape.forallE_not_le_lam' h
+  | @lam k g a₁ a₂ htm =>
+    unfold WShape.lam' at hTerm legacy ⊢
+    split at hTerm <;> rename_i hg
+    · simp only [dif_pos hg] at legacy ⊢
+      exact LRD.Adequate.lamSelf_exact HA HB HBody hTerm hPi htm
+        ihA ihB ihBody legacy
+    · simp only [dif_neg hg] at legacy ⊢
+      exact .bot hmem.isType
+  | ctor =>
+    let .lam _ _ _ h := hTerm
+    cases TShape.ctor_not_le_lam' h
+  | indTy =>
+    let .lam _ _ _ h := hTerm
+    cases TShape.indTy_not_le_lam' h
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.lamSelf' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.lamSelf
+
+
+
+
+
+
+/-- Exact-shape reflexive fundamental application for guarded direct
+adequacy. -/
+theorem LRD.Adequate.appSelf_exact
+    {n : Nat} {Γ₀ Γ : List SExpr} {ρ : Valuation}
+    {F X A B : SExpr}
+    {mf : WShapeFun n} {hmf : mf.NonZero}
+    {b p : WShape n} {tf : WShapeFun n}
+    (hX : IsDefEqStrong Γ X X A)
+    (hp : p.HasType b)
+    (Hf : LRD.Adequate Γ₀ Γ ρ F F (SExpr.forallE A B)
+      (WShape.lam mf hmf) (WShape.forallE b tf))
+    (Hx : LRD.Adequate Γ₀ Γ ρ X X A p b) :
+    LRD.Adequate Γ₀ Γ ρ (SExpr.app F X) (SExpr.app F X)
+      (B.inst X) (mf.app p) (tf.app p) :=
+  .refl fun σ σ' W => by
+    simpa only [SExpr.subst, SExpr.subst_inst] using
+      LRD.DefEq.app
+        (by simpa only [SExpr.subst] using (Hf.1 W).1)
+        hp (hX.substCongr W.toSubstEq).1 (Hx.1 W).1
+
+/-- Exact-shape heterogeneous fundamental application.  The instantiated
+result-type adequacy supplies the one conversion needed by the right
+congruence edge. -/
+theorem LRD.Adequate.app_exact
+    {n : Nat} {Γ₀ Γ : List SExpr} {ρ : Valuation}
+    {F F' X X' A B : SExpr} {v : SLevel} {r : Bool}
+    {mf : WShapeFun n} {hmf : mf.NonZero}
+    {b p : WShape n} {tf : WShapeFun n}
+    (hX : IsDefEqStrong Γ X X' A)
+    (hp : p.HasType b)
+    (Hf : LRD.Adequate Γ₀ Γ ρ F F' (SExpr.forallE A B)
+      (WShape.lam mf hmf) (WShape.forallE b tf))
+    (Hx : LRD.Adequate Γ₀ Γ ρ X X' A p b)
+    (HBa : LRD.Adequate Γ₀ Γ ρ (B.inst X) (B.inst X')
+      (.sort v) (tf.app p) (.sort r)) :
+    LRD.Adequate Γ₀ Γ ρ (SExpr.app F X) (SExpr.app F' X')
+      (B.inst X) (mf.app p) (tf.app p) := by
+  refine ⟨fun σ σ' W => ⟨?_, ?_⟩, fun σ W => ?_⟩
+  · simpa only [SExpr.subst, SExpr.subst_inst] using
+      LRD.DefEq.app
+        (by simpa only [SExpr.subst] using (Hf.1 W).1)
+        hp (hX.substCongr W.toSubstEq).1 (Hx.1 W).1
+  · have happ : (LRD (n := n) Γ₀).DefEq
+        ((SExpr.app F' X').subst σ) ((SExpr.app F' X').subst σ')
+        ((B.inst X').subst σ) (mf.app p) (tf.app p) := by
+      simpa only [SExpr.subst, SExpr.subst_inst] using
+        LRD.DefEq.app
+          (by simpa only [SExpr.subst] using (Hf.1 W).2)
+          hp (hX.substCongr W.toSubstEq).2 (Hx.1 W).2
+    have hTy : (LRD (n := n) Γ₀).TyDefEq
+        ((B.inst X').subst σ) ((B.inst X).subst σ) (tf.app p) :=
+      LRD.TyDefEq.symm (LRD.DefEq.toTyDefEq (HBa.2 W.left))
+    exact LRD.DefEq.conv hTy happ
+  · simpa only [SExpr.subst, SExpr.subst_inst] using
+      LRD.DefEq.app
+        (by simpa only [SExpr.subst] using Hf.2 W)
+        hp (hX.subst W.toSubstEq) (Hx.2 W)
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.appSelf_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.appSelf_exact
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.app_exact' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.app_exact
+/-- Guarded-direct adequacy is closed under dependent application.
+The proof aligns the independently interpreted function, argument, and result
+shapes at one common level, retains the joined result type directly, applies
+the exact guarded Pi action, and lowers back to the requested observation. -/
+theorem LRD.adequateApp
+    {Γ : List SExpr} {A B F F' X X' : SExpr} {v : SLevel}
+    {ρ : Valuation} {n : Nat} {m a : WShape n}
+    (Hf : IsDefEqStrong Γ F F' (A.forallE B))
+    (Ha : IsDefEqStrong Γ X X' A)
+    (HBa : IsDefEqStrong Γ (B.inst X) (B.inst X') (.sort v))
+    (hM : LE_Interp ρ m.T (.app F X))
+    (hA : LE_Interp ρ a.T (B.inst X))
+    (hmem : m.HasType a)
+    (ihf : ∀ {n'} {mf af : WShape n'},
+      LE_Interp ρ mf.T F → LE_Interp ρ af.T (.forallE A B) →
+      mf.HasType af →
+      LRD.Adequate Γ₀ Γ ρ F F' (.forallE A B) mf af)
+    (iha : ∀ {n'} {ma aa : WShape n'},
+      LE_Interp ρ ma.T X → LE_Interp ρ aa.T A → ma.HasType aa →
+      LRD.Adequate Γ₀ Γ ρ X X' A ma aa)
+    (ihBa : ∀ {n'} {mb av : WShape n'},
+      LE_Interp ρ mb.T (B.inst X) → LE_Interp ρ av.T (.sort v) →
+      mb.HasType av →
+      LRD.Adequate Γ₀ Γ ρ (B.inst X) (B.inst X') (.sort v) mb av) :
+    LRD.Adequate Γ₀ Γ ρ (.app F X) (.app F' X')
+      (B.inst X) m a := by
+  cases hM with
+  | bot =>
+    exact ⟨fun _ _ _ => ⟨LRD.DefEq.bot hmem.isType,
+        LRD.DefEq.bot hmem.isType⟩,
+      fun _ _ => LRD.DefEq.bot hmem.isType⟩
+  | @app _ nf_app f _ _ _ x hif hia le_m =>
+    suffices ∀ {F F' X X' σ σ'},
+        LR.DirectSubstWF Γ₀ σ σ' Γ ρ →
+        IsDefEqStrong Γ F F' (A.forallE B) →
+        IsDefEqStrong Γ X X' A →
+        IsDefEqStrong Γ (B.inst X) (B.inst X') (.sort v) →
+        LE_Interp ρ f.T F → LE_Interp ρ x.T X →
+        LE_Interp ρ a.T (B.inst X) →
+        (∀ {n'} {mf af : WShape n'}, LE_Interp ρ mf.T F →
+          LE_Interp ρ af.T (.forallE A B) → mf.HasType af →
+          LRD.Adequate Γ₀ Γ ρ F F' (.forallE A B) mf af) →
+        (∀ {n'} {ma aa : WShape n'}, LE_Interp ρ ma.T X →
+          LE_Interp ρ aa.T A → ma.HasType aa →
+          LRD.Adequate Γ₀ Γ ρ X X' A ma aa) →
+        (∀ {n'} {mb av : WShape n'}, LE_Interp ρ mb.T (B.inst X) →
+          LE_Interp ρ av.T (.sort v) → mb.HasType av →
+          LRD.Adequate Γ₀ Γ ρ (B.inst X) (B.inst X')
+            (.sort v) mb av) →
+        (LRD Γ₀).DefEq (.subst (.app F X) σ)
+          (.subst (.app F' X') σ')
+          (.subst (B.inst X) σ) m a by
+      refine ⟨fun σ σ' W => ⟨?_, ?_⟩,
+        fun σ W => this W Hf Ha HBa hif hia hA ihf iha ihBa⟩
+      · refine this W (Hf.trans Hf.symm) (Ha.trans Ha.symm)
+          (HBa.trans HBa.symm) hif hia hA ?_ ?_ ?_
+        · exact fun hf hPi hmf => (ihf hf hPi hmf).left
+        · exact fun ha hA hma => (iha ha hA hma).left
+        · exact fun hB hv hmb => (ihBa hB hv hmb).left
+      · refine LRD.DefEq.conv (LRD.TyDefEq.symm ?_) <| this W
+          (Hf.symm.trans Hf) (Ha.symm.trans Ha)
+          (HBa.symm.trans HBa)
+          ((LE_Interp.sound Hf W.fits).1.1 hif)
+          ((LE_Interp.sound Ha W.fits).1.1 hia)
+          ((LE_Interp.sound HBa W.fits).1.1 hA)
+          (fun hf hPi hmf => ?_) (fun ha hA hma => ?_)
+          (fun hB hv hmb => ?_)
+        · have ⟨_, _, _, le, le', iB, iv, hmb⟩ :=
+            (LE_Interp.sound HBa W.fits).2 hA |>.out
+          exact LRD.toValTy le le' hmem.isType iv hmb
+            ((ihBa iB iv hmb).2 W.left)
+        · exact (ihf ((LE_Interp.sound Hf W.left.fits).1.2 hf)
+            hPi hmf).symm.left
+        · exact (iha ((LE_Interp.sound Ha W.left.fits).1.2 ha)
+            hA hma).symm.left
+        · exact (ihBa ((LE_Interp.sound HBa W.left.fits).1.2 hB)
+            hv hmb).symm.left
+    intro F F' X X' σ σ' W hF hX hBa hif hia hA ihf iha ihBa
+    have ⟨_, mf, _, le_nf, le_mf, hf', hPi, hmf⟩ :=
+      (LE_Interp.sound hF W.left.fits).2 hif |>.out
+    have Af := ihf hf' hPi hmf
+    by_cases hm0 : mf = .bot
+    · simp only [hm0] at le_mf hmf
+      refine (?_ : m = .bot) ▸ LRD.DefEq.bot hmem.isType
+      cases show f = .bot from TShape.le_bot.1 (le_mf.trans TShape.bot_le')
+      exact TShape.le_bot.1
+        ((WShape.bot_app ▸ le_m).trans TShape.bot_eqv.1)
+    cases hPi with
+    | bot => cases hm0 hmf.bot_r
+    | forallE haA hbA hd hiB le =>
+      cases hmf.unfold with
+      | bot => cases hm0 rfl
+      | lam hg =>
+        rename_i n₁ b₁' b₂' f' n₂ b₁ b₂ f
+        simp at le_nf
+        let k := max n (max n₁ n₂)
+        have hk := Nat.max_le.1 (Nat.le_refl k)
+        rw [Nat.max_le] at hk
+        have le_nf_k : nf_app ≤ k := Nat.le_trans le_nf hk.2.2
+        have hA' := hA.lift hk.1
+        have ⟨_, le_x', hx'_a₁, hgx2⟩ :=
+          WShape.HasDom.iff.1 hg.2.1 (x.lift _)
+        have hia' := (hia.lift le_nf).mono le_x'.T
+        have hax' := LE_Interp.forallE' haA hbA hd hiB
+          |>.mono le |>.forallE_inv.2 hia'
+        have hJ := TShape.Join.mk (hA.compat hax')
+        have ⟨hJ1, hJ2⟩ := (hJ _).1 .rfl
+        have hk' := Nat.max_le.2 ⟨hk.1, hk.2.2⟩
+        have hJ1' := (TShape.LE.def hk.1 hk').1 hJ1
+        have hJ2' := (TShape.LE.def hk.2.2 hk').1 hJ2
+        have hgx' := (WShape.HasTypeLam.iff.1 hg).2.2 _ hx'_a₁
+        have hJ_t := TShape.HasType.sort_r.2 hmem.isType
+          |>.join' hJ <| TShape.HasType.sort_r.2 hgx'.isType
+        have hmem_k := (WShape.HasType.lift hk.1).2 hmem
+        rw [subst_inst]
+        have hJ_t' := TShape.HasType.sort_r.1 <|
+          hJ_t.mono_l (TShape.lift_eqv hk').2
+            (TShape.lift_eqv hk').1
+        refine (LRD.DefEq.lift hk.1 hmem).1 <|
+          LRD.DefEq.mono_r_2 hJ1' hmem_k hJ_t' ?_
+        have hgx'' := (WShape.HasType.lift hk.2.2).2 hgx'
+        refine LRD.DefEq.mono_l ?_
+          (.mono_r hJ1' hJ_t' hmem_k)
+          (.mono_r hJ2' hJ_t' hgx'') ?_
+        · exact (TShape.LE.def hk.1 hk.2.2).1 <| le_m.trans <|
+            (TShape.app_mono le_mf (TShape.lift_eqv le_nf).2).trans
+              (WShape.lam'_app ▸ hgx2.T)
+        refine LRD.DefEq.mono_r_1 hJ2' hgx''
+          (.mono_r hJ2' hJ_t' hgx'') ?_ ?_
+        · have ⟨_, _, _, le_j, le_j', hBj, hSj, hmj⟩ :=
+            (LE_Interp.sound hBa W.left.fits).2
+              (hA.join hJ hax') |>.out
+          exact LRD.TyDefEq.left <|
+            (LRD.TyDefEq.lift hk'
+              (TShape.HasType.sort_r.1 hJ_t)).2 <|
+              subst_inst ▸ LRD.toValTy le_j le_j'
+                (TShape.HasType.sort_r.1 hJ_t) hSj hmj
+                ((ihBa hBj hSj hmj).2 W.left)
+        · have hAf := LRD.DefEq.trans (Af.2 W.left) (Af.1 W).2
+          have le' := (TShape.LE.def
+            (Nat.succ_le_succ hk.2.2)
+            (Nat.succ_le_succ hk.2.1)).1 le
+          simp only [WShape.T, WShape.lift_forallE hk.2.2,
+            WShape.lift_forallE hk.2.1,
+            WShape.forallE_le_forallE] at le'
+          have Aa := iha hia'
+            (haA.mono ((TShape.LE.def hk.2.2 hk.2.1).2 le'.1))
+            hx'_a₁
+          have harg := LRD.DefEq.trans (Aa.2 W.left) (Aa.1 W).2
+          have hfun :=
+            (LRD.DefEq.lift (Nat.succ_le_succ hk.2.2) hmf).2 hAf
+          rw [WShape.lift_lam' hk.2.2,
+            WShape.lift_forallE hk.2.2] at hfun
+          unfold WShape.lam' at hfun
+          split at hfun
+          · simpa only [SExpr.subst, WShapeFun.lift_app hk.2.2] using
+              LRD.DefEq.app
+                (by simpa only [SExpr.subst] using hfun)
+                ((WShape.HasType.lift hk.2.2).2 hx'_a₁)
+                (hX.subst W.toSubstEq)
+                ((LRD.DefEq.lift hk.2.2 hx'_a₁).2 harg)
+          · refine (hm0 ?_).elim
+            unfold WShape.lam'
+            split
+            · rename_i hb
+              exact (‹¬(WShapeFun.lift k b₁).NonZero›
+                ((WShapeFun.NonZero.lift_iff hk.2.2).2 hb)).elim
+            · rfl
+      | _ =>
+        refine have le₂ := Nat.succ_le_succ (Nat.le_max_right ..)
+          have hbad := (TShape.LE.def
+            (Nat.le_succ_of_le (Nat.le_max_left ..)) le₂).1 le
+          ?_
+        simp only [WShape.lift_sort, WShape.LE.def,
+          WShape.lift_val le₂] at hbad
+        cases hbad
+
+/--
+info: 'Lean4Lean.SExpr.LRD.adequateApp' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.adequateApp
+
+
+
+/-- The direct fundamental-theorem variable constructor. -/
+theorem LRD.Adequate.bvar
+    (hlookup : Lookup Γ i A)
+    (hM : LE_Interp ρ m.T (.bvar i))
+    (hA : LE_Interp ρ a.T A)
+    (hmem : m.HasType a) :
+    LRD.Adequate Γ₀ Γ ρ (.bvar i) (.bvar i) A m a :=
+  .refl fun _ _ W => W.bvar hlookup hM hA hmem
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.bvar' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.bvar
+
+/-- The direct fundamental-theorem sort constructor.  The semantic shape
+analysis is unchanged from the legacy proof; its informative sort branch
+now constructs the path-typed observation explicitly. -/
+theorem LRD.Adequate.sort
+    (hM : LE_Interp ρ m.T (.sort l))
+    (hmem : m.HasType a) :
+    LRD.Adequate Γ₀ Γ ρ (.sort l) (.sort l) (.sort l.succ) m a := by
+  suffices (LRD Γ₀).DefEq (.sort l) (.sort l) (.sort l.succ) m a from
+    ⟨fun _ _ _ => ⟨this, this⟩, fun _ _ => this⟩
+  cases hmem.unfold with
+  | bot hm => exact LRD.DefEq.bot hm
+  | sort => exact LRD.DefEq.sort
+  | _ =>
+    obtain h | h := WShape.le_sort.1 hM.le_sort'
+    · dsimp only at h
+      rw [h]
+      exact LRD.DefEq.bot hmem.isType
+    · simp [WShape.ext_iff, WShape.forallE, WShape.sort, Shape.sort,
+        WShape.lam', WShape.lam, WShape.bot, WShape.ctor, WShape.indTy,
+        Shape.bot] at h <;>
+        first
+        | split at h <;> simp_all only [reduceCtorEq]
+        | simp_all
+
+/--
+info: 'Lean4Lean.SExpr.LRD.Adequate.sort' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.Adequate.sort
+
 /-- Adequacy specialized to one shape level.  Naming the indexed statement
 separately makes the dependency of the joint adequacy/uniqueness
 construction explicit: inversion at level `n + 1` can consume this package
@@ -39,6 +1206,24 @@ def LR.AdequacyAtDepth (Γ₀ : List SExpr) (depth : Nat) : Prop :=
 /-- Depth-bounded adequacy uniformly over well-formed target contexts. -/
 def LR.ContextualAdequacyAtDepth (depth : Nat) : Prop :=
   ∀ {Γ₀ : List SExpr}, Ctx.WF Γ₀ → LR.AdequacyAtDepth Γ₀ depth
+
+/-- Guarded heterogeneous adequacy observed at one explicit stratified depth
+of its left endpoint.  This is the direct counterpart of
+`LR.AdequacyAtDepth`; it is kept separate from the self-only coherent result
+because the conversion constructor genuinely consumes a heterogeneous type
+edge at a strict predecessor depth. -/
+def LRD.AdequacyAtDepth (Γ₀ : List SExpr) (depth : Nat) : Prop :=
+  ∀ {n : Nat} {Γ : List SExpr} {ρ : Valuation} {M N A B : SExpr}
+      {core : Bool} {m a : WShape n},
+    IsDefEqStrong Γ M N A →
+    HasTypeStratifiedS Γ M B core depth →
+    LE_Interp ρ m.T M → LE_Interp ρ a.T A → m.HasType a →
+    LRD.Adequate Γ₀ Γ ρ M N A m a
+
+/-- Depth-bounded guarded heterogeneous adequacy uniformly over well-formed
+target contexts. -/
+def LRD.ContextualAdequacyAtDepth (depth : Nat) : Prop :=
+  ∀ {Γ₀ : List SExpr}, Ctx.WF Γ₀ → LRD.AdequacyAtDepth Γ₀ depth
 
 /-- Adequacy at one shape level, uniformly over well-formed target contexts.
 The contextual quantifier is part of the induction unit: Pi uniqueness enters
@@ -1045,8 +2230,9 @@ inversion, uniqueness or subject-reduction fact at all.
 
 Neither field is reachable from a strict predecessor adequacy rung: an
 interior vertex is an arbitrary term whose stratified depth is bounded by
-no certificate available at the leaf.  See the 2026-08-15 rung audit in
-`plans/l4l-16c-buildp-premortem.md`. -/
+no certificate available at the leaf.  The surviving constraint is
+consolidated in the NORM work package of `plans/roadmap.md`; the full
+2026-08-15 rung audit remains in git history. -/
 structure LR.MajorChainFoldStep (Γ₀ : List SExpr) : Prop where
   /-- Retyping of the interior chain vertices at the externally chosen
   domain. -/
@@ -1402,6 +2588,47 @@ theorem LR.Adequate.trans' : Adequate Γ₀ Γ ρ A₁ A₂ (.sort u) a s →
     have h2 := (LR _).trans' (a1 W.symm.left).2 (b2 W.symm.left)
     exact (LR _).trans ((LR _).symm h1) <| (LR _).trans (a1 W).2 h2
 
+/-- Bottom term observations are directly adequate; a sort-shaped ambient
+obligation receives the direct bottom constructor. -/
+theorem LR.DirectAdequate.bot (ha : a.HasType .type) :
+    DirectAdequate Γ₀ Γ ρ M N A .bot a := by
+  have direct {X Y T : SExpr} : LR.DirectDefEq Γ₀ X Y T .bot a :=
+    ⟨(LR Γ₀).bot ha, fun _ _ => .bot⟩
+  exact ⟨fun _ _ _ => ⟨direct, direct⟩, fun _ _ => direct⟩
+
+/-- Reflexive direct adequacy from the relational-substitution congruence
+edge. -/
+theorem LR.DirectAdequate.refl
+    (H : ∀ {{σ σ'}}, LR.SubstWF Γ₀ σ σ' Γ ρ →
+      LR.DirectDefEq Γ₀ (M.subst σ) (M.subst σ') (A.subst σ) m a) :
+    DirectAdequate Γ₀ Γ ρ M M A m a :=
+  ⟨fun _ _ W => ⟨H W, H W⟩, fun _ W => H W⟩
+
+theorem LR.DirectAdequate.left :
+    DirectAdequate Γ₀ Γ ρ M N A m a →
+      DirectAdequate Γ₀ Γ ρ M M A m a
+  | ⟨h1, _⟩ => .refl fun _ _ W => (h1 W).1
+
+theorem LR.DirectAdequate.symm :
+    DirectAdequate Γ₀ Γ ρ M N A m a →
+      DirectAdequate Γ₀ Γ ρ N M A m a
+  | ⟨h1, h2⟩ =>
+    ⟨fun _ _ W => (h1 W).symm, fun _ W => (h2 W).symm⟩
+
+theorem LR.DirectAdequate.trans :
+    DirectAdequate Γ₀ Γ ρ M₁ M₂ A m a →
+    DirectAdequate Γ₀ Γ ρ M₂ M₃ A m a →
+      DirectAdequate Γ₀ Γ ρ M₁ M₃ A m a
+  | ⟨a1, a2⟩, ⟨b1, b2⟩ =>
+    ⟨fun _ _ W => ⟨(a1 W).1, (b1 W).2⟩,
+      fun _ W => (a2 W).trans (b2 W)⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectAdequate.trans' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectAdequate.trans
+
 /-- Lower adequacy from a saturated semantic witness to a compatible smaller
 witness.  Constant evaluation recursively builds finite approximants; this
 lemma reconciles the resulting type witnesses through their join. -/
@@ -1588,6 +2815,318 @@ theorem LR.constLamDefEq
   · have H := lower hp hxy hv
     exact ⟨H.left, H.right⟩
   · exact (lower hp hx hv).cross
+/-- The synchronized guarded rectangle produced by evaluating related
+heads at related arguments. -/
+structure LR.DirectDefEqRect (IH : LR.DirectRelBase Γ n)
+    (M₁ M₂ N₁ N₂ A : SExpr) (m a : WShape n) : Prop where
+  left : IH.DefEq M₁ M₂ A m a
+  right : IH.DefEq N₁ N₂ A m a
+  cross : IH.DefEq M₁ N₂ A m a
+
+/-- A single guarded edge supplies the synchronized diagonal rectangle. -/
+theorem LR.DirectDefEqRect.diagonal
+    (H : IH.DefEq M N A m a) :
+    LR.DirectDefEqRect IH M N M N A m a :=
+  ⟨H, H, H⟩
+
+/-- Compose synchronized guarded rectangles at their common middle pair. -/
+theorem LR.DirectDefEqRect.trans
+    (H₁ : LR.DirectDefEqRect IH M₁ M₂ N₁ N₂ A m a)
+    (H₂ : LR.DirectDefEqRect IH M₂ M₃ N₂ N₃ A m a)
+    (trans : ∀ {X Y Z},
+      IH.DefEq X Y A m a → IH.DefEq Y Z A m a →
+      IH.DefEq X Z A m a) :
+    LR.DirectDefEqRect IH M₁ M₃ N₁ N₃ A m a :=
+  ⟨trans H₁.left H₂.left, trans H₁.right H₂.right,
+    trans H₁.cross H₂.right⟩
+
+/-- Specialize rectangle composition to the guarded logical relation. -/
+theorem LR.DirectDefEqRect.transLRD
+    (H₁ : LR.DirectDefEqRect (LRD Γ) M₁ M₂ N₁ N₂ A m a)
+    (H₂ : LR.DirectDefEqRect (LRD Γ) M₂ M₃ N₂ N₃ A m a) :
+    LR.DirectDefEqRect (LRD Γ) M₁ M₃ N₁ N₃ A m a :=
+  H₁.trans H₂ LRD.DefEq.trans
+
+theorem LR.DirectDefEqRect.toLegacy
+    {Γ : List SExpr} {n : Nat} {IH : LR.DirectRelBase Γ n}
+    {m a : WShape n}
+    (H : LR.DirectDefEqRect IH M₁ M₂ N₁ N₂ A m a) :
+    LogRel.DefEqRect (LR Γ) M₁ M₂ N₁ N₂ A m a :=
+  ⟨IH.defLegacy H.left, IH.defLegacy H.right, IH.defLegacy H.cross⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectDefEqRect.transLRD' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectDefEqRect.transLRD
+
+/-- One guarded rectangle for every native link of a normalized constructor
+path, at one fixed root recursor site.  The root-major bridge is threaded
+explicitly so a concrete generated-rule producer can reuse the selected
+major rather than reselect semantic evidence at an interior vertex. -/
+def LR.DirectMajorLinkRectAt (Γ₀ : List SExpr)
+    {n : Nat} (rootShape : WShape (n + 1)) (D : SExpr)
+    (rec : Name) (ls : List SLevel) (recXs recYs : List SExpr)
+    (rootMajor A : SExpr) (out outTy : WShape (n + 1)) : Prop :=
+  ∀ {k : Nat} {J : LogRel Γ₀ k} {p : WShape (k + 1)} {X Y : SExpr},
+    LRS.CtorFrame Γ₀ (LR Γ₀) rootShape J p →
+    LRS.CtorExact Γ₀ J X Y p →
+    IsDefEq Γ₀ X Y D →
+    IsDefEq Γ₀ rootMajor X D →
+    LR.DirectDefEqRect (LRD Γ₀)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app X)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app Y)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app X)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app Y)
+      A out outTy
+
+/-- Reuse the left recursor prefix at any term equal to the recorded left
+major.  The instantiated codomain is connected back to the recorded result
+by a heterogeneous type path, so the two universe indices are never
+identified. -/
+theorem SpineWF.LastPair.fullXAt
+    (hΓ : Ctx.WF Γ)
+    (H : SExpr.SpineWF.LastPair Γ Head xs ys x y A)
+    (hxz : IsDefEq Γ x z H.domain) :
+    SExpr.SpineWF Γ Head (xs.reverse ++ [z]) A := by
+  obtain ⟨⟨u, hDomain⟩, v, hCodomain⟩ :=
+    (H.pi.strong hΓ).forallE_inv' (.inr rfl)
+  have W : Ctx.SubstEq Γ (.one z) (.one x) (H.domain :: Γ) := by
+    refine .cons .nil hDomain.defeq ?_
+    show IsDefEq Γ z x (H.domain.subst SExpr.Subst.id)
+    rw [SExpr.subst_id]
+    exact hxz.symm
+  have hinst : IsDefEq Γ (H.codomain.inst z) (H.codomain.inst x)
+      (.sort v) := by
+    simpa only [SExpr.inst, SExpr.subst] using
+      (hCodomain.substCongr W).1
+  exact SpineWF.ret_path
+    ((TypeDefEqPath.single hinst).trans
+      (TypeDefEqPath.single H.resultX))
+    (H.prefixX.snoc_path (.single H.pi) hxz.hasType.2)
+
+/-- Reuse the right recursor prefix at any term equal to the recorded right
+major, with the same path-valued result transport as `fullXAt`. -/
+theorem SpineWF.LastPair.fullYAt
+    (hΓ : Ctx.WF Γ)
+    (H : SExpr.SpineWF.LastPair Γ Head xs ys x y A)
+    (hyz : IsDefEq Γ y z H.domain) :
+    SExpr.SpineWF Γ Head (ys.reverse ++ [z]) A :=
+  H.symm.fullXAt hΓ hyz
+
+/--
+info: 'Lean4Lean.SExpr.SpineWF.LastPair.fullXAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SpineWF.LastPair.fullXAt
+
+/--
+info: 'Lean4Lean.SExpr.SpineWF.LastPair.fullYAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SpineWF.LastPair.fullYAt
+
+/-- Fold a free constructor-major observation into the guarded cross edge at
+one fixed recursor site.
+
+The constructor closure is first normalized to a root view and a native path.
+Only the path is folded by `DirectMajorLinkRectAt`; afterward the two literal
+root majors are transported to its endpoints using `TypedWHRedS` built from
+the retained `LastPair` Pi/result certificates.  Thus the final guarded
+weak-head step consumes typed reductions and never manufactures conversion
+evidence from a raw `WHRedS`. -/
+theorem LRD.iotaDefEq_of_ctorDefEqAt
+    {n : Nat} {rootShape out outTy : WShape (n + 1)}
+    {majorX majorY CHead A : SExpr}
+    {rec : Name} {ls : List SLevel} {recXs recYs : List SExpr}
+    (anchor : LR.MajorChainAnchorStep Γ₀)
+    (hmajor : LRS.CtorDefEq Γ₀ (LR Γ₀)
+      majorX majorY rootShape)
+    (hpair : SExpr.SpineWF.LastPair Γ₀ CHead
+      recXs recYs majorX majorY A)
+    (hhead : IsDefEq Γ₀ (.const rec ls) (.const rec ls) CHead)
+    (hmajorPremX : IsMajorPremise
+      (recXs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls)))
+    (hmajorPremY : IsMajorPremise
+      (recYs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls)))
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (link : LR.DirectMajorLinkRectAt Γ₀ rootShape hpair.domain
+      rec ls recXs recYs majorX A out outTy) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec ls)).app majorY)
+      A out outTy := by
+  cases hmajor.toChain with
+  | @intro X Y hleft hright path =>
+    have hMX : IsDefEq Γ₀ majorX X hpair.domain :=
+      anchor.rootRed hleft hpair.major.hasType.1
+    have hNY : IsDefEq Γ₀ majorY Y hpair.domain :=
+      anchor.rootRed hright hpair.major.hasType.2
+    have disc : LRS.CtorAnchorDisciplineAt Γ₀ (LR Γ₀) rootShape :=
+      fun frame leaf => anchor.ctorRetype frame leaf
+    have hfold := path.foldRaw_of_anchorDiscipline
+      (D := hpair.domain)
+      (Q := fun X Y =>
+        IsDefEq Γ₀ majorX X hpair.domain →
+          LR.DirectDefEqRect (LRD Γ₀)
+            ((recXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const rec ls)).app X)
+            ((recXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const rec ls)).app Y)
+            ((recYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const rec ls)).app X)
+            ((recYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const rec ls)).app Y)
+            A out outTy ∧
+          IsDefEq Γ₀ majorX Y hpair.domain)
+      disc
+      { exact := fun frame leaf hXY hbridge =>
+          ⟨link frame leaf hXY hbridge, hbridge.trans hXY⟩
+        trans := fun h₁ h₂ hbridge => by
+          obtain ⟨r₁, hY⟩ := h₁ hbridge
+          obtain ⟨r₂, hZ⟩ := h₂ hY
+          exact ⟨r₁.transLRD r₂, hZ⟩ }
+      hMX.hasType.2
+    obtain ⟨rect, _hY⟩ := hfold hMX
+    have hprefixX : IsDefEq Γ₀
+        (recXs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls))
+        (recXs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls))
+        hpair.prefixType := by
+      simpa only [List.foldl_reverse] using hpair.prefixX.hasType hhead
+    have hprefixY : IsDefEq Γ₀
+        (recYs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls))
+        (recYs.foldr (fun (a f : SExpr) => f.app a) (.const rec ls))
+        hpair.prefixType := by
+      simpa only [List.foldl_reverse] using hpair.prefixY.hasType hhead
+    have hredX : TypedWHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec ls)).app majorX)
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec ls)).app X)
+        A := by
+      refine ⟨hpair.resultX.defeqDF
+        (.appDF (hpair.pi.defeqDF hprefixX) hMX), ?_⟩
+      cases hleft with
+      | intro _ hred => exact .major hmajorPremX hred
+    have hredY : TypedWHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec ls)).app majorY)
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec ls)).app Y)
+        A := by
+      refine ⟨hpair.resultY.defeqDF
+        (.appDF (hpair.pi.defeqDF hprefixY) hNY), ?_⟩
+      cases hright with
+      | intro _ hred => exact .major hmajorPremY hred
+    exact (LRD.DefEq.whr hA hredX hredY).2 rect.cross
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectMajorLinkRectAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectMajorLinkRectAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_ctorDefEqAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_ctorDefEqAt
+
+theorem LRD.constLamDefEq
+    {n n' nArgs : Nat} {f : WShapeFun n} {f' : WShapeFun n'}
+    {hf : f.NonZero} {M N : SExpr}
+    {a₁ : WShape n} {a₂ : WShapeFun n} {A₁ A₂ : SExpr}
+    (htm : WShape.HasTypeLam f a₁ a₂)
+    (hlam : (WShape.lam' f).T ≤ (WShape.lam' f').T)
+    (eval : ∀ {x y : SExpr} {p : WShape (max n nArgs)}
+      {x₀ y₀ : WShape n'},
+      p.HasType (a₁.lift (max n nArgs)) →
+      IsDefEq Γ₀ x y A₁ →
+      (LRD Γ₀).DefEq x y A₁ p (a₁.lift (max n nArgs)) →
+      (x₀, y₀) ∈ f' → x₀.T ≤ p.T →
+      ((f.lift (max n nArgs)).app p).T ≤ y₀.T →
+      LR.DirectDefEqRect (LRD Γ₀)
+        (M.app x) (M.app y) (N.app x) (N.app y)
+        (A₂.inst x) ((f.lift (max n nArgs)).app p)
+          ((a₂.lift (max n nArgs)).app p)) :
+    LR.DirectLamDefEq (LRD Γ₀) M N A₁ A₂ f a₁ a₂ := by
+  let k := max n nArgs
+  have hn : n ≤ k := Nat.le_max_left ..
+  have childBounds (p : WShape n) :
+      ∃ x₀ y₀ : WShape n', (x₀, y₀) ∈ f' ∧
+        x₀.T ≤ p.T ∧ (f.app p).T ≤ y₀.T := by
+    let K := max n n'
+    have hnK : n ≤ K := Nat.le_max_left ..
+    have hn'K : n' ≤ K := Nat.le_max_right ..
+    have hffT : TShapeFun.LE f f' := TShape.LE.lam'_decomp hlam
+    have hff : f.lift K ≤ f'.lift K :=
+      (TShapeFun.LE.def hnK hn'K).1 hffT
+    obtain ⟨x, hx, hmem⟩ := (f.lift K).app_eq (p.lift K)
+    obtain ⟨x', y', hmem', hx', hy'⟩ :=
+      WShapeFun.LE.def'.1 hff _ _ hmem
+    obtain ⟨x₀, y₀, hmem₀, rfl, rfl⟩ :=
+      (WShapeFun.mem_lift hn'K).1 hmem'
+    have hxT : x₀.T ≤ p.T :=
+      (TShape.lift_eqv hn'K).2 |>.trans
+        ((hx'.trans hx).T) |>.trans (TShape.lift_eqv hnK).1
+    have hyLift : (f.app p).lift K ≤ y₀.lift K := by
+      simpa only [WShapeFun.lift_app hnK] using hy'
+    have hyT : (f.app p).T ≤ y₀.T :=
+      (TShape.lift_eqv hnK).2 |>.trans hyLift.T |>.trans
+        (TShape.lift_eqv hn'K).1
+    exact ⟨x₀, y₀, hmem₀, hxT, hyT⟩
+  have lower {x y : SExpr} {p : WShape n}
+      (hp : p.HasType a₁) (hxy : IsDefEq Γ₀ x y A₁)
+      (hv : (LRD Γ₀).DefEq x y A₁ p a₁) :
+      LR.DirectDefEqRect (LRD Γ₀)
+        (M.app x) (M.app y) (N.app x) (N.app y)
+        (A₂.inst x) (f.app p) (a₂.app p) := by
+    have hpₖ : (p.lift k).HasType (a₁.lift k) :=
+      (WShape.HasType.lift hn).2 hp
+    have hvₖ : (LRD Γ₀).DefEq x y A₁
+        (p.lift k) (a₁.lift k) :=
+      (LRD.DefEq.lift hn hp).2 hv
+    obtain ⟨x₀, y₀, hmem₀, hx₀, hy₀⟩ := childBounds p
+    have hy₀k : ((f.lift k).app (p.lift k)).T ≤ y₀.T := by
+      rw [← WShapeFun.lift_app hn]
+      exact (TShape.lift_eqv hn).1.trans hy₀
+    have hout := eval hpₖ hxy hvₖ hmem₀
+      (hx₀.trans (TShape.lift_eqv hn).2) hy₀k
+    have lowerEdge {P Q : SExpr}
+        (H : (LRD Γ₀).DefEq P Q (A₂.inst x)
+          ((f.lift k).app (p.lift k))
+          ((a₂.lift k).app (p.lift k))) :
+        (LRD Γ₀).DefEq P Q (A₂.inst x)
+          (f.app p) (a₂.app p) := by
+      have H' : (LRD Γ₀).DefEq P Q (A₂.inst x)
+          ((f.app p).lift k) ((a₂.app p).lift k) := by
+        simpa only [WShapeFun.lift_app hn] using H
+      exact (LRD.DefEq.lift hn
+        ((WShape.HasTypeLam.iff.1 htm).2.2 p hp)).1 H'
+    exact ⟨lowerEdge hout.left, lowerEdge hout.right,
+      lowerEdge hout.cross⟩
+  refine ⟨fun _ _ _ hp hxy hv => ?_, fun _ _ hp hx hv => ?_⟩
+  · have H := lower hp hxy hv
+    exact ⟨H.left, H.right⟩
+  · exact (lower hp hx hv).cross
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectDefEqRect.toLegacy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectDefEqRect.toLegacy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.constLamDefEq' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.constLamDefEq
 
 /-- The final semantic application carried by the constant evaluator.  This
 packages the raw final-Pi spine together with the *same* logical-relation
@@ -1619,6 +3158,3611 @@ structure LR.PatternLeafSpine (Γ : List SExpr) (IH : LogRel Γ n)
   aligned : LRS.CtorSpineDefEq IH Head args args' rargs A
   pi : LRS.PiDefEq IH pair.domain pair.codomain pair.codomain
     majorTypeShape resultTypeShape
+
+/-- Extend an aligned prefix to the next semantic application when its Pi
+type is exposed by a heterogeneous path.  The prefix spines and constructor
+alignment absorb the path via `SpineWF.snoc_path`/
+`CtorSpineDefEq.cons_path`; the `LastPair` record uses the literal Pi
+endpoint and its self-typing.  Thus no path collapse or `PiPathInv` premise
+is needed at this evaluator step. -/
+theorem LR.PatternLeafSpine.of_cons_path
+    {Γ : List SExpr} {n : Nat} {IH : LogRel Γ n}
+    {Head A B F x y : SExpr} {xs ys : List SExpr}
+    {p a : WShape n} {ps : List (WShape n)}
+    {g f : WShapeFun n} {u v : SLevel}
+    (prefixX : SExpr.SpineWF Γ Head xs.reverse A)
+    (prefixY : SExpr.SpineWF Γ Head ys.reverse A)
+    (aligned : LRS.CtorSpineDefEq IH Head xs ys ps A)
+    (path : TypeDefEqPath Γ A (.forallE B F) u)
+    (hp : p.HasType a)
+    (htpi : WShape.HasTypePi f a true)
+    (hB : IH.TyDefEq B B a)
+    (hxy : IsDefEq Γ x y B)
+    (hrel : IH.DefEq x y B p a)
+    (hresult : IsDefEq Γ (F.inst y) (F.inst x) (.sort v))
+    (hPi : LRS.PiDefEq IH B F F a f) :
+    Nonempty (LR.PatternLeafSpine Γ IH Head
+      (x :: xs) (y :: ys) (p :: ps) (F.inst x) (g.app p) (f.app p)) := by
+  obtain ⟨w, hPiTy⟩ := path.rightType
+  exact ⟨{
+    majorX := x
+    recXs := xs
+    majorY := y
+    recYs := ys
+    majorShape := p
+    recShapes := ps
+    majorTypeShape := a
+    resultShape := g
+    resultTypeShape := f
+    args_eq := rfl
+    args'_eq := rfl
+    rargs_eq := rfl
+    out_eq := rfl
+    outTy_eq := rfl
+    pair := {
+      prefixType := .forallE B F
+      domain := B
+      codomain := F
+      piSort := w
+      resultSortX := v
+      resultSortY := v
+      prefixX := SpineWF.ret_path path prefixX
+      prefixY := SpineWF.ret_path path prefixY
+      pi := hPiTy
+      major := hxy
+      resultX := hresult.hasType.2
+      resultY := hresult }
+    majorHasType := hp
+    resultType := htpi
+    majorType := hB
+    majorRel := hrel
+    aligned := aligned.cons_path path hp hB hxy hrel hresult
+    pi := hPi }⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.PatternLeafSpine.of_cons_path' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.PatternLeafSpine.of_cons_path
+/-- Guarded relational evidence for a complete newest-first argument list.
+Unlike `LRS.CtorArgsDefEq`, this finite payload needs no `LogRel` wrapper: it
+uses exactly the type and term fields of the lower direct relation. -/
+inductive LR.DirectCtorArgsDefEq (IH : LR.DirectRelBase Γ n) :
+    List SExpr → List SExpr → List (WShape n) → Prop where
+  | nil : DirectCtorArgsDefEq IH [] [] []
+  | cons (hp : p.HasType a)
+      (htyLegacy : (LR Γ).TyDefEq A A a)
+      (htyDirect : IH.TyDefEq A A a)
+      (hxy : IsDefEq Γ x y A)
+      (hvLegacy : (LR Γ).DefEq x y A p a)
+      (hvDirect : IH.DefEq x y A p a)
+      (hrest : DirectCtorArgsDefEq IH xs ys ps) :
+      DirectCtorArgsDefEq IH (x :: xs) (y :: ys) (p :: ps)
+
+/-- Guarded argument evidence with every formerly hidden capture datum made
+an explicit newest-first list index.
+
+`DirectCtorArgsDefEq` deliberately hides the raw type expression and type
+shape of each argument.  That is sufficient for ordinary iota congruence,
+but a registered fixed-head producer must reuse the exact Pi domains that
+generated its semantic type tower.  This refinement records those two lists
+alongside the already-indexed syntax and element-shape lists. -/
+inductive LR.DirectCtorArgsDefEqListed (IH : LR.DirectRelBase Γ n) :
+    List SExpr → List SExpr → List SExpr →
+      List (WShape n) → List (WShape n) → Prop where
+  | nil : DirectCtorArgsDefEqListed IH [] [] [] [] []
+  | cons (hp : p.HasType a)
+      (htyLegacy : (LR Γ).TyDefEq A A a)
+      (htyDirect : IH.TyDefEq A A a)
+      (hxy : IsDefEq Γ x y A)
+      (hvLegacy : (LR Γ).DefEq x y A p a)
+      (hvDirect : IH.DefEq x y A p a)
+      (hrest : DirectCtorArgsDefEqListed IH xs ys types ps typeShapes) :
+      DirectCtorArgsDefEqListed IH
+        (x :: xs) (y :: ys) (A :: types) (p :: ps) (a :: typeShapes)
+
+/-- Forget the explicit capture-type lists while retaining the paired direct
+argument relation. -/
+theorem LR.DirectCtorArgsDefEqListed.toDirectArgs
+    (H : LR.DirectCtorArgsDefEqListed IH xs ys types ps typeShapes) :
+    LR.DirectCtorArgsDefEq IH xs ys ps := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect _ ih =>
+    exact .cons hp htyLegacy htyDirect hxy hvLegacy hvDirect ih
+
+/-- All five lists in an explicitly listed direct argument payload have the
+same length. -/
+theorem LR.DirectCtorArgsDefEqListed.lengths
+    (H : LR.DirectCtorArgsDefEqListed IH xs ys types ps typeShapes) :
+    xs.length = ps.length ∧ ys.length = ps.length ∧
+      types.length = ps.length ∧ typeShapes.length = ps.length := by
+  induction H with
+  | nil => simp
+  | cons _ _ _ _ _ _ _ ih =>
+    simp only [List.length_cons, Nat.succ.injEq]
+    exact ⟨ih.1, ih.2.1, ih.2.2.1, ih.2.2.2⟩
+
+/-- Lift an explicitly listed direct constructor payload without reselecting
+any of its proof-relevant element or type shapes. -/
+theorem LR.DirectCtorArgsDefEqListed.lift
+    {n n' : Nat} {xs ys types : List SExpr}
+    {ps typeShapes : List (WShape n)} (le : n ≤ n')
+    (H : LR.DirectCtorArgsDefEqListed
+      (LRD Γ : LR.DirectRelBase Γ n)
+      xs ys types ps typeShapes) :
+    LR.DirectCtorArgsDefEqListed
+      (LRD Γ : LR.DirectRelBase Γ n')
+      xs ys types (ps.map (.lift n')) (typeShapes.map (.lift n')) := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect hrest ih =>
+    simp only [List.map_cons]
+    exact .cons
+      ((WShape.HasType.lift le).2 hp)
+      ((LR.TyDefEq.lift le hp.isType).2 htyLegacy)
+      ((LRD.TyDefEq.lift le hp.isType).2 htyDirect)
+      hxy
+      ((LR.DefEq.lift le hp).2 hvLegacy)
+      ((LRD.DefEq.lift le hp).2 hvDirect)
+      ih
+
+/-- Keep the left endpoint of every explicitly listed guarded argument
+edge.  The capture types and both shape lists remain literally unchanged. -/
+theorem LR.DirectCtorArgsDefEqListed.left
+    (H : LR.DirectCtorArgsDefEqListed (LRD Γ)
+      xs ys types ps typeShapes) :
+    LR.DirectCtorArgsDefEqListed (LRD Γ)
+      xs xs types ps typeShapes := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect _ ih =>
+    exact .cons hp htyLegacy htyDirect hxy.hasType.1
+      ((LR Γ).left hvLegacy) (LRD.DefEq.left hvDirect) ih
+
+/-- Keep the right endpoint of every explicitly listed guarded argument
+edge.  The capture types and both shape lists remain literally unchanged. -/
+theorem LR.DirectCtorArgsDefEqListed.right
+    (H : LR.DirectCtorArgsDefEqListed (LRD Γ)
+      xs ys types ps typeShapes) :
+    LR.DirectCtorArgsDefEqListed (LRD Γ)
+      ys ys types ps typeShapes := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect _ ih =>
+    exact .cons hp htyLegacy htyDirect hxy.hasType.2
+      ((LR Γ).left ((LR Γ).symm hvLegacy))
+      (LRD.DefEq.left (LRD.DefEq.symm hvDirect)) ih
+
+/-- The three newest-first lists retained by a direct argument bundle have
+the same length. -/
+theorem LR.DirectCtorArgsDefEq.lengths
+    (H : LR.DirectCtorArgsDefEq IH xs ys ps) :
+    xs.length = ps.length ∧ ys.length = ps.length := by
+  induction H with
+  | nil => exact ⟨rfl, rfl⟩
+  | cons _ _ _ _ _ _ _ ih =>
+    exact ⟨congrArg Nat.succ ih.1, congrArg Nat.succ ih.2⟩
+
+/-- Drop the newest paired direct argument. -/
+theorem LR.DirectCtorArgsDefEq.tail
+    (H : LR.DirectCtorArgsDefEq IH (x :: xs) (y :: ys) (p :: ps)) :
+    LR.DirectCtorArgsDefEq IH xs ys ps := by
+  cases H with
+  | cons _ _ _ _ _ _ hrest => exact hrest
+
+/-- Keep the left endpoint of every guarded argument edge. -/
+theorem LR.DirectCtorArgsDefEq.left
+    (H : LR.DirectCtorArgsDefEq (LRD Γ) xs ys ps) :
+    LR.DirectCtorArgsDefEq (LRD Γ) xs xs ps := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect _ ih =>
+    exact .cons hp htyLegacy htyDirect hxy.hasType.1
+      ((LR Γ).left hvLegacy) (LRD.DefEq.left hvDirect) ih
+
+/-- Keep the right endpoint of every guarded argument edge. -/
+theorem LR.DirectCtorArgsDefEq.right
+    (H : LR.DirectCtorArgsDefEq (LRD Γ) xs ys ps) :
+    LR.DirectCtorArgsDefEq (LRD Γ) ys ys ps := by
+  induction H with
+  | nil => exact .nil
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect _ ih =>
+    exact .cons hp htyLegacy htyDirect hxy.hasType.2
+      ((LR Γ).left ((LR Γ).symm hvLegacy))
+      (LRD.DefEq.left (LRD.DefEq.symm hvDirect)) ih
+
+/-- Keep the related newest argument while using the left tail at both
+endpoints.  This is the direct recursor-prefix projection used by the left
+row of a synchronized iota rectangle. -/
+theorem LR.DirectCtorArgsDefEq.leftPrefixes
+    (H : LR.DirectCtorArgsDefEq (LRD Γ)
+      (x :: xs) (y :: ys) (p :: ps)) :
+    LR.DirectCtorArgsDefEq (LRD Γ)
+      (x :: xs) (y :: xs) (p :: ps) := by
+  cases H with
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect hrest =>
+    exact .cons hp htyLegacy htyDirect hxy hvLegacy hvDirect hrest.left
+
+/-- Keep the related newest argument while using the right tail at both
+endpoints.  This is the direct recursor-prefix projection used by the right
+row of a synchronized iota rectangle. -/
+theorem LR.DirectCtorArgsDefEq.rightPrefixes
+    (H : LR.DirectCtorArgsDefEq (LRD Γ)
+      (x :: xs) (y :: ys) (p :: ps)) :
+    LR.DirectCtorArgsDefEq (LRD Γ)
+      (x :: ys) (y :: ys) (p :: ps) := by
+  cases H with
+  | cons hp htyLegacy htyDirect hxy hvLegacy hvDirect hrest =>
+    exact .cons hp htyLegacy htyDirect hxy hvLegacy hvDirect hrest.right
+
+/-- One captured argument with legacy and direct evidence sharing the exact
+same syntax, shape, and raw type. -/
+def LR.DirectCaptureDefEqAt (IH : LR.DirectRelBase Γ n)
+    (m : TShape) (x y : SExpr) : Prop :=
+  ∃ (elemShape typeShape : WShape n) (typeExpr : SExpr),
+    m ≤ elemShape.T ∧ elemShape.HasType typeShape ∧
+    (LR Γ).TyDefEq typeExpr typeExpr typeShape ∧
+    IH.TyDefEq typeExpr typeExpr typeShape ∧
+    IsDefEq Γ x y typeExpr ∧
+    (LR Γ).DefEq x y typeExpr elemShape typeShape ∧
+    IH.DefEq x y typeExpr elemShape typeShape
+
+/-- Data chosen once from a paired direct capture.  The legacy and guarded
+projections retain the same literal type expression and semantic shapes. -/
+structure LR.DirectCaptureDefEqAt.Witness
+    (IH : LR.DirectRelBase Γ n) (m : TShape) (x y : SExpr) where
+  elemShape : WShape n
+  typeShape : WShape n
+  typeExpr : SExpr
+  shape : m ≤ elemShape.T
+  hasType : elemShape.HasType typeShape
+  typeRelatedLegacy : (LR Γ).TyDefEq typeExpr typeExpr typeShape
+  typeRelatedDirect : IH.TyDefEq typeExpr typeExpr typeShape
+  defeq : IsDefEq Γ x y typeExpr
+  relatedLegacy : (LR Γ).DefEq x y typeExpr elemShape typeShape
+  relatedDirect : IH.DefEq x y typeExpr elemShape typeShape
+
+/-- Select the evidence-rich representative of one paired direct capture. -/
+noncomputable def LR.DirectCaptureDefEqAt.witness
+    (H : LR.DirectCaptureDefEqAt IH m x y) :
+    LR.DirectCaptureDefEqAt.Witness IH m x y :=
+  Classical.choice (by
+    rcases H with ⟨elemShape, typeShape, typeExpr, hshape, htype,
+      htyLegacy, htyDirect, hxy, hvLegacy, hvDirect⟩
+    exact ⟨⟨elemShape, typeShape, typeExpr, hshape, htype,
+      htyLegacy, htyDirect, hxy, hvLegacy, hvDirect⟩⟩)
+
+/-- Paired direct capture evidence aligned to the type chosen by the
+surrounding dependent application spine. -/
+def LR.DirectCaptureDefEqAligned (IH : LR.DirectRelBase Γ n)
+    (m : TShape) (x y typeExpr : SExpr) : Prop :=
+  ∃ (elemShape typeShape : WShape n),
+    m ≤ elemShape.T ∧ elemShape.HasType typeShape ∧
+    (LR Γ).TyDefEq typeExpr typeExpr typeShape ∧
+    IH.TyDefEq typeExpr typeExpr typeShape ∧
+    IsDefEq Γ x y typeExpr ∧
+    (LR Γ).DefEq x y typeExpr elemShape typeShape ∧
+    IH.DefEq x y typeExpr elemShape typeShape
+
+/-- Repackage a chosen direct capture at its exact selected type. -/
+theorem LR.DirectCaptureDefEqAt.Witness.aligned
+    (H : LR.DirectCaptureDefEqAt.Witness IH m x y) :
+    LR.DirectCaptureDefEqAligned IH m x y H.typeExpr :=
+  ⟨H.elemShape, H.typeShape, H.shape, H.hasType,
+    H.typeRelatedLegacy, H.typeRelatedDirect, H.defeq,
+    H.relatedLegacy, H.relatedDirect⟩
+
+/-- The fields of a paired guarded capture at one literal element/type
+shape pair.  Keeping both projections here lets legacy consumers erase the
+payload while guarded application reuses the very same semantic indices. -/
+def LR.DirectCaptureDefEqAligned.AtShapes
+    (IH : LR.DirectRelBase Γ n) (m : TShape)
+    (x y typeExpr : SExpr) (elemShape typeShape : WShape n) : Prop :=
+  m ≤ elemShape.T ∧ elemShape.HasType typeShape ∧
+    (LR Γ).TyDefEq typeExpr typeExpr typeShape ∧
+    IH.TyDefEq typeExpr typeExpr typeShape ∧
+    IsDefEq Γ x y typeExpr ∧
+    (LR Γ).DefEq x y typeExpr elemShape typeShape ∧
+    IH.DefEq x y typeExpr elemShape typeShape
+
+/-- Evidence-rich representative of a paired guarded capture aligned to the
+dependent spine's selected type expression. -/
+structure LR.DirectCaptureDefEqAligned.Witness
+    (IH : LR.DirectRelBase Γ n) (m : TShape)
+    (x y typeExpr : SExpr) where
+  elemShape : WShape n
+  typeShape : WShape n
+  shape : m ≤ elemShape.T
+  hasType : elemShape.HasType typeShape
+  typeRelatedLegacy : (LR Γ).TyDefEq typeExpr typeExpr typeShape
+  typeRelatedDirect : IH.TyDefEq typeExpr typeExpr typeShape
+  defeq : IsDefEq Γ x y typeExpr
+  relatedLegacy : (LR Γ).DefEq x y typeExpr elemShape typeShape
+  relatedDirect : IH.DefEq x y typeExpr elemShape typeShape
+
+/-- Choose the synchronized shape pair of one aligned guarded capture once. -/
+noncomputable def LR.DirectCaptureDefEqAligned.witness
+    (H : LR.DirectCaptureDefEqAligned IH m x y typeExpr) :
+    LR.DirectCaptureDefEqAligned.Witness IH m x y typeExpr :=
+  Classical.choice (by
+    rcases H with ⟨elemShape, typeShape, hshape, htype,
+      htyLegacy, htyDirect, hxy, hvLegacy, hvDirect⟩
+    exact ⟨⟨elemShape, typeShape, hshape, htype,
+      htyLegacy, htyDirect, hxy, hvLegacy, hvDirect⟩⟩)
+
+/-- Expose every paired field at the witness's literal shape indices. -/
+theorem LR.DirectCaptureDefEqAligned.Witness.atShapes
+    (H : LR.DirectCaptureDefEqAligned.Witness IH m x y typeExpr) :
+    LR.DirectCaptureDefEqAligned.AtShapes IH m x y typeExpr
+      H.elemShape H.typeShape :=
+  ⟨H.shape, H.hasType, H.typeRelatedLegacy, H.typeRelatedDirect,
+    H.defeq, H.relatedLegacy, H.relatedDirect⟩
+
+/-- Lift a literally chosen paired direct capture without reselecting either
+shape.  Both the legacy projection and the guarded relation are transported
+along their canonical lift equivalences. -/
+theorem LR.DirectCaptureDefEqAligned.AtShapes.lift
+    {m : TShape} {x y A : SExpr} {elemShape typeShape : WShape n}
+    (le : n ≤ n')
+    (H : LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A elemShape typeShape) :
+    LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A (elemShape.lift n') (typeShape.lift n') := by
+  exact ⟨H.1.trans (TShape.lift_eqv le).2,
+    (WShape.HasType.lift le).2 H.2.1,
+    (LR.TyDefEq.lift le H.2.1.isType).2 H.2.2.1,
+    (LRD.TyDefEq.lift le H.2.1.isType).2 H.2.2.2.1,
+    H.2.2.2.2.1,
+    (LR.DefEq.lift le H.2.1).2 H.2.2.2.2.2.1,
+    (LRD.DefEq.lift le H.2.1).2 H.2.2.2.2.2.2⟩
+
+/-- A paired direct capture at an existential canonical shape level. -/
+def LR.DirectCaptureDefEqAligned.AtSomeLevel (Γ : List SExpr)
+    (m : TShape) (x y typeExpr : SExpr) : Prop :=
+  ∃ (n : Nat) (elemShape typeShape : WShape n),
+    LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y typeExpr elemShape typeShape
+
+/-- Package an aligned guarded capture at its existing level. -/
+theorem LR.DirectCaptureDefEqAligned.atSomeLevel
+    (H : LR.DirectCaptureDefEqAligned (LRD Γ : LR.DirectRelBase Γ n)
+      m x y typeExpr) :
+    LR.DirectCaptureDefEqAligned.AtSomeLevel Γ m x y typeExpr := by
+  rcases H with ⟨elemShape, typeShape, hshape, htyped,
+    htypeLegacy, htypeDirect, hraw, hrelLegacy, hrelDirect⟩
+  exact ⟨n, elemShape, typeShape, hshape, htyped,
+    htypeLegacy, htypeDirect, hraw, hrelLegacy, hrelDirect⟩
+
+omit [Params.Semantic] in
+/-- The two guarded fields missing from one legacy aligned capture, at the
+exact shapes already selected by that proof-relevant capture witness. -/
+structure LR.DirectCaptureDefEqAligned.Upgrade
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    (H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A) : Prop where
+  typeRelatedDirect : (LRD Γ).TyDefEq A A H.witness.typeShape
+  relatedDirect : (LRD Γ).DefEq x y A
+    H.witness.elemShape H.witness.typeShape
+
+omit [Params.Semantic] in
+/-- Pair an exact guarded upgrade with its legacy witness and expose the
+combined capture at an existential canonical level. -/
+theorem LR.DirectCaptureDefEqAligned.Upgrade.atSomeLevel
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (U : LR.DirectCaptureDefEqAligned.Upgrade H) :
+    LR.DirectCaptureDefEqAligned.AtSomeLevel Γ m x y A := by
+  let W := H.witness
+  exact ⟨n, W.elemShape, W.typeShape, W.shape, W.hasType,
+    W.typeRelated, U.typeRelatedDirect, W.defeq,
+    W.related, U.relatedDirect⟩
+
+omit [Params.Semantic] in
+/-- A bottom displayed-type observation has no guarded sidecar.  Its element
+shape is forced to bottom by the retained typing witness. -/
+theorem LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_bot
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (hbot : H.witness.typeShape = (.bot : WShape n)) :
+    LR.DirectCaptureDefEqAligned.Upgrade H := by
+  let W := H.witness
+  have htyped : W.elemShape.HasType (.bot : WShape n) := by
+    rw [← hbot]
+    exact W.hasType
+  have helem : W.elemShape = (.bot : WShape n) := htyped.bot_r
+  refine ⟨?_, ?_⟩
+  · simpa only [W, hbot] using
+      (LRD.TyDefEq.bot (Γ := Γ) (A := A) (B := A) (n := n))
+  · simpa only [W, hbot, helem] using
+      (LRD.DefEq.bot (Γ := Γ) (M := x) (N := y) (A := A)
+        htyped.isType)
+
+omit [Params.Semantic] in
+/-- At an inductive displayed type both guarded fields are exactly their
+legacy projections, so the upgrade adds no semantic premise. -/
+theorem LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_indTy
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ (n + 1)) m x y A}
+    (hind : H.witness.typeShape = (.indTy : WShape (n + 1))) :
+    LR.DirectCaptureDefEqAligned.Upgrade H := by
+  let W := H.witness
+  have htype : (LR Γ).TyDefEq A A (.indTy : WShape (n + 1)) := by
+    simpa only [W, hind] using W.typeRelated
+  have hterm : (LR Γ).DefEq x y A W.elemShape
+      (.indTy : WShape (n + 1)) := by
+    simpa only [W, hind] using W.related
+  refine ⟨?_, ?_⟩
+  · simpa only [W, hind] using LRD.TyDefEq.of_legacy_indTy htype
+  · simpa only [W, hind] using LRD.DefEq.of_legacy_indTy hterm
+
+/-- A capture whose raw and legacy typing remain aligned, while only its
+term relation is required in the guarded tower.  The guarded domain type is
+reconstructed later from the actual Pi edge of `PathSpineWF`. -/
+def LR.DirectTermCaptureDefEqAligned.AtShapes
+    (IH : LR.DirectRelBase Γ n) (m : TShape)
+    (x y typeExpr : SExpr) (elemShape typeShape : WShape n) : Prop :=
+  m ≤ elemShape.T ∧ elemShape.HasType typeShape ∧
+    (LR Γ).TyDefEq typeExpr typeExpr typeShape ∧
+    IsDefEq Γ x y typeExpr ∧
+    (LR Γ).DefEq x y typeExpr elemShape typeShape ∧
+    IH.DefEq x y typeExpr elemShape typeShape
+
+/-- A term-guarded capture at an existential canonical shape level. -/
+def LR.DirectTermCaptureDefEqAligned.AtSomeLevel (Γ : List SExpr)
+    (m : TShape) (x y typeExpr : SExpr) : Prop :=
+  ∃ (n : Nat) (elemShape typeShape : WShape n),
+    LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y typeExpr elemShape typeShape
+
+/-- Forget only the precomputed direct type sidecar of a fully paired
+capture. -/
+theorem LR.DirectCaptureDefEqAligned.AtShapes.toTerm
+    (H : LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A elemShape typeShape) :
+    LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+  m x y A elemShape typeShape :=
+  ⟨H.1, H.2.1, H.2.2.1, H.2.2.2.2.1,
+    H.2.2.2.2.2.1, H.2.2.2.2.2.2⟩
+
+/-- Forget a fully paired existential capture to the term-guarded payload. -/
+theorem LR.DirectCaptureDefEqAligned.AtSomeLevel.toTerm
+    (H : LR.DirectCaptureDefEqAligned.AtSomeLevel Γ m x y A) :
+    LR.DirectTermCaptureDefEqAligned.AtSomeLevel Γ m x y A := by
+  rcases H with ⟨n, elemShape, typeShape, hcapture⟩
+  exact ⟨n, elemShape, typeShape, hcapture.toTerm⟩
+
+omit [Params.Semantic] in
+/-- The single guarded field missing from one legacy aligned capture, at
+the exact shapes already selected by its proof-relevant witness. -/
+structure LR.DirectTermCaptureDefEqAligned.Upgrade
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    (H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A) : Prop where
+  relatedDirect : (LRD Γ).DefEq x y A
+    H.witness.elemShape H.witness.typeShape
+
+omit [Params.Semantic] in
+/-- Combine the legacy witness with its exact guarded term relation. -/
+theorem LR.DirectTermCaptureDefEqAligned.Upgrade.atSomeLevel
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (U : LR.DirectTermCaptureDefEqAligned.Upgrade H) :
+    LR.DirectTermCaptureDefEqAligned.AtSomeLevel Γ m x y A := by
+  let W := H.witness
+  exact ⟨n, W.elemShape, W.typeShape, W.shape, W.hasType,
+    W.typeRelated, W.defeq, W.related, U.relatedDirect⟩
+
+omit [Params.Semantic] in
+/-- A full guarded upgrade contains the weaker term-only upgrade. -/
+theorem LR.DirectCaptureDefEqAligned.Upgrade.toTerm
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (U : LR.DirectCaptureDefEqAligned.Upgrade H) :
+    LR.DirectTermCaptureDefEqAligned.Upgrade H :=
+  ⟨U.relatedDirect⟩
+
+omit [Params.Semantic] in
+/-- Bottom displayed types also close the weaker term-only upgrade. -/
+theorem LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_bot
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (hbot : H.witness.typeShape = (.bot : WShape n)) :
+    LR.DirectTermCaptureDefEqAligned.Upgrade H :=
+  (LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_bot hbot).toTerm
+
+omit [Params.Semantic] in
+/-- A bottom element observation needs no information about its displayed
+type beyond the retained fact that the latter is itself a type. -/
+theorem LR.DirectTermCaptureDefEqAligned.Upgrade.of_elemShape_bot
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ n) m x y A}
+    (hbot : H.witness.elemShape = (.bot : WShape n)) :
+    LR.DirectTermCaptureDefEqAligned.Upgrade H := by
+  refine ⟨?_⟩
+  rw [hbot]
+  exact LRD.DefEq.bot H.witness.hasType.isType
+
+omit [Params.Semantic] in
+/-- Inductive displayed types also close the weaker term-only upgrade. -/
+theorem LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_indTy
+    {n : Nat} {Γ : List SExpr} {m : TShape} {x y A : SExpr}
+    {H : LRS.CaptureDefEqAligned (LR Γ : LogRel Γ (n + 1)) m x y A}
+    (hind : H.witness.typeShape = (.indTy : WShape (n + 1))) :
+    LR.DirectTermCaptureDefEqAligned.Upgrade H :=
+  (LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_indTy hind).toTerm
+
+/-- Lift a term-guarded capture while preserving its literal shape pair. -/
+theorem LR.DirectTermCaptureDefEqAligned.AtShapes.lift
+    {m : TShape} {x y A : SExpr} {elemShape typeShape : WShape n}
+    (le : n ≤ n')
+    (H : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A elemShape typeShape) :
+    LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A (elemShape.lift n') (typeShape.lift n') := by
+  exact ⟨H.1.trans (TShape.lift_eqv le).2,
+    (WShape.HasType.lift le).2 H.2.1,
+    (LR.TyDefEq.lift le H.2.1.isType).2 H.2.2.1,
+    H.2.2.2.1,
+    (LR.DefEq.lift le H.2.1).2 H.2.2.2.2.1,
+    (LRD.DefEq.lift le H.2.1).2 H.2.2.2.2.2⟩
+
+/-- The syntax-independent shape ladder for one guarded fixed-head
+application spine.
+
+Each application layer retains a paired legacy/direct capture at the exact
+element and type shapes used by the ladder.  `liftHead` raises only the
+current head observation, allowing semantic layers, recursive tails, and
+captures born at different finite levels to meet at a common maximum without
+projecting any guarded observation downward. -/
+inductive LR.DirectFixedHeadShapeChain (Γ : List SExpr)
+    {p : Pattern} (mcap : p.Path → TShape)
+    (mx my captureType : p.Path → SExpr) :
+    ∀ (paths : List p.Path)
+      {headLevel : Nat}, WShape headLevel → WShape headLevel →
+      ∀ {outLevel : Nat}, WShape outLevel → WShape outLevel → Prop where
+  | nil {n : Nat} {out outTy : WShape n} :
+      LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        [] out outTy out outTy
+  | cons
+      {n : Nat} {path : p.Path} {paths : List p.Path}
+      {termFun typeFun : WShapeFun n} {hterm : termFun.NonZero}
+      {argCap tyDom : WShape n}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      (capture : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom)
+      (tail : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths (termFun.app argCap) (typeFun.app argCap) out outTy) :
+      LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        (path :: paths) (.lam termFun hterm) (.forallE tyDom typeFun)
+        out outTy
+  | liftHead
+      {n n' : Nat} {head headTy : WShape n}
+      {paths : List p.Path} {outLevel : Nat}
+      {out outTy : WShape outLevel}
+      (le : n ≤ n') (htyped : head.HasType headTy)
+      (tail : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths head headTy out outTy) :
+      LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths (head.lift n') (headTy.lift n') out outTy
+
+/-- A monotone fixed-head telescope whose capture payload already contains
+the guarded term edge at the literal element/type shapes selected by each
+layer.  Unlike the existential shape-chain constructor below, this package
+also retains the registered head-type observation threaded by the ordered
+type peel. -/
+def LR.DirectFixedHeadTelescopeLE (Γ : List SExpr)
+    {p : Pattern} {mcap : p.Path → TShape}
+    (mx my captureType : p.Path → SExpr)
+    {head out headTy outTy : TShape} {paths : List p.Path}
+    (_spine : LE_Interp.RHS.ShapeSpine mcap head paths out) : Prop :=
+  LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE
+    (m2 := mcap)
+    (fun {n} path (elemShape typeShape : WShape n) =>
+      LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        elemShape typeShape)
+    head paths out headTy outTy
+
+omit [Params.Semantic] in
+/-- Empty guarded monotone telescope at the caller's terminal observation. -/
+theorem LR.DirectFixedHeadTelescopeLE.nil
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr} {head headTy outTy : TShape}
+    (htyped : head.HasType outTy) (hle : outTy ≤ headTy) :
+    LR.DirectFixedHeadTelescopeLE
+      (headTy := headTy) (outTy := outTy)
+      Γ mx my captureType
+      (LE_Interp.RHS.ShapeSpine.nil (m2 := mcap) (head := head)) :=
+  LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.nil htyped hle
+
+omit [Params.Semantic] in
+/-- Prepend one guarded capture layer to a monotone direct telescope.  The
+semantic argument bound, typed domain, legacy relation, and guarded term edge
+are all read from the same literal capture payload. -/
+theorem LR.DirectFixedHeadTelescopeLE.cons
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {n : Nat} {f : WShape (n + 1)} {a : WShape n}
+    {m out : TShape} {path : p.Path} {paths : List p.Path}
+    (harg : a.T ≤ mcap path) (happ : m ≤ (f.app a).T)
+    (rest : LE_Interp.RHS.ShapeSpine mcap m paths out)
+    {tyDom : WShape n} {tyFun : WShapeFun n} {argCap : WShape n}
+    {outTy : TShape}
+    (capture : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+      (mcap path) (mx path) (my path) (captureType path)
+      argCap tyDom)
+    (tail : LR.DirectFixedHeadTelescopeLE
+      (headTy := (tyFun.app argCap).T) (outTy := outTy)
+      Γ mx my captureType rest) :
+    LR.DirectFixedHeadTelescopeLE
+      (headTy := (WShape.forallE tyDom tyFun).T) (outTy := outTy)
+      Γ mx my captureType
+      (LE_Interp.RHS.ShapeSpine.cons harg happ rest) := by
+  have hargCap : a ≤ argCap :=
+    WShape.LE.T_iff.1 (harg.trans capture.1)
+  exact LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.cons
+    harg happ hargCap capture.2.1 capture tail
+
+/-- Fold a guarded monotone telescope into a direct fixed-head chain while
+preserving the comparison from the chain's selected head-type shape to the
+registered head-type observation.
+
+The proof is the guarded payload specialization of the ordinary monotone
+telescope fold.  In particular, the terminal comparison is threaded through
+the same recursive choices as every direct capture; no head or capture
+representative is selected a second time. -/
+theorem LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.directFixedHeadShapeChain
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head headTy : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {outShape outTyShape : TShape}
+    (H : LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE
+      (m2 := mcap)
+      (fun {n} path (elemShape typeShape : WShape n) =>
+        LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+          (mcap path) (mx path) (my path) (captureType path)
+          elemShape typeShape)
+      head paths outShape headTy outTyShape)
+    (houtShapeEq : out.T = outShape)
+    (houtTyShapeEq : outTy.T = outTyShape)
+    (houtNonbot : ¬out.T ≤ TShape.bot) :
+    ∃ (headLevel : Nat) (headElem headElemTy : WShape headLevel),
+      headElem.T ≤ head ∧ headElem.HasType headElemTy ∧
+        headElemTy.T ≤ headTy ∧ ¬headElem.T ≤ TShape.bot ∧
+        LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths headElem headElemTy out outTy := by
+  revert out outTy
+  revert outLevel
+  let Motive := fun (head : TShape) (paths : List p.Path)
+      (outShape headTy outTyShape : TShape)
+      (_ : LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE
+        (m2 := mcap)
+        (fun {n} path (elemShape typeShape : WShape n) =>
+          LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+            (mcap path) (mx path) (my path) (captureType path)
+            elemShape typeShape)
+        head paths outShape headTy outTyShape) =>
+      ∀ (outLevel : Nat) (out outTy : WShape outLevel),
+        out.T = outShape → outTy.T = outTyShape →
+        (¬out.T ≤ TShape.bot) →
+        ∃ (headLevel : Nat) (headElem headElemTy : WShape headLevel),
+          headElem.T ≤ head ∧ headElem.HasType headElemTy ∧
+            headElemTy.T ≤ headTy ∧ ¬headElem.T ≤ TShape.bot ∧
+            LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+              paths headElem headElemTy out outTy
+  change Motive head paths outShape headTy outTyShape H
+  refine LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.rec
+    (motive := Motive) ?_ ?_ H
+  · intro head headTy terminalTy htyped hle
+    intro outLevel out outTy houtShapeEq houtTyShapeEq houtNonbot
+    have houtLe : out.T ≤ head := by
+      rw [houtShapeEq]
+      exact TShape.LE.rfl
+    have houtTyLe : outTy.T ≤ headTy := by
+      rw [houtTyShapeEq]
+      exact hle
+    have houtTyped : out.HasType outTy := by
+      apply WShape.HasType.T_iff.1
+      rw [houtShapeEq, houtTyShapeEq]
+      exact htyped
+    exact ⟨outLevel, out, outTy, houtLe, houtTyped, houtTyLe,
+      houtNonbot, LR.DirectFixedHeadShapeChain.nil⟩
+  · intro n f a m outT path paths tyDom tyFun argCap outTyT
+      harg happ hargCap hcapDom capture tail ih
+    intro outLevel out outTy houtShapeEq houtTyShapeEq houtNonbot
+    obtain ⟨nextLevel, next, nextTy, hnext, hnextTy,
+      hnextTyLe, hnextNonbot, tailChain⟩ :=
+      ih outLevel out outTy houtShapeEq houtTyShapeEq houtNonbot
+    have hnextApp : next.T ≤ (f.app a).T := hnext.trans happ
+    cases f using WShape.casesOn' with
+    | bot => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | sort => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | forallE => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | ctor => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | indTy => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | @lam g hg =>
+      let k := max n nextLevel
+      have hk : n ≤ k ∧ nextLevel ≤ k := by
+        dsimp [k]
+        omega
+      let aK : WShape k := a.lift k
+      let argCapK : WShape k := argCap.lift k
+      let tyDomK : WShape k := tyDom.lift k
+      let nextK : WShape k := next.lift k
+      let nextTyK : WShape k := nextTy.lift k
+      let elemFun : WShapeFun k := .single argCapK nextK
+      let typeFun : WShapeFun k := .single argCapK nextTyK
+      have hargCapK : aK ≤ argCapK :=
+        WShape.lift_mono hk.1 hargCap
+      have hnextAppK : nextK ≤ (g.lift k).app argCapK := by
+        have hnextApp' : next.T ≤ ((WShape.lam g hg).app a).T := by
+          simpa using hnextApp
+        have hmono : ((WShape.lam g hg).app a).T ≤
+            ((WShape.lam (g.lift k)
+              (WShapeFun.NonZero.lift_iff hk.1 |>.2 hg)).app argCapK).T := by
+          apply TShape.app_mono
+          · have hLift := (TShape.lift_eqv
+              (a := (WShape.lam g hg).T)
+              (Nat.succ_le_succ hk.1)).2
+            rw [WShape.lift_lam hk.1] at hLift
+            exact hLift
+          · exact hargCap.T.trans (TShape.lift_eqv hk.1).2
+        have hT : next.T ≤ ((g.lift k).app argCapK).T := by
+          simpa [WShape.lam_eq_lam'] using hnextApp'.trans hmono
+        have hTK := (TShape.LE.def hk.2 (Nat.le_refl k)).1 hT
+        simpa only [nextK, WShape.lift_self] using hTK
+      have hnextTyKLe : nextTyK ≤ (tyFun.lift k).app argCapK := by
+        have hTK := (TShape.LE.def
+          (a := nextTy.T) (b := (tyFun.app argCap).T)
+          hk.2 hk.1).1 hnextTyLe
+        simpa only [nextTyK, argCapK, WShape.lift_self,
+          WShapeFun.lift_app hk.1] using hTK
+      have hnextKTy : nextK.HasType nextTyK :=
+        (WShape.HasType.lift hk.2).2 hnextTy
+      have hnextKNonbot : ¬nextK.T ≤ TShape.bot := by
+        intro hbot
+        exact hnextNonbot <|
+          (TShape.lift_eqv hk.2).2.trans
+            (hbot.trans TShape.bot_eqv.1)
+      have helemNonzero : elemFun.NonZero := by
+        rw [WShapeFun.NonZero.iff]
+        refine ⟨(argCapK, nextK),
+          WShapeFun.mem_single.2 (.inl rfl), ?_⟩
+        intro hbot
+        exact hnextKNonbot <|
+          (WShape.LE.T hbot).trans TShape.bot_eqv.1
+      let headElem : WShape (k + 1) := .lam elemFun helemNonzero
+      let headElemTy : WShape (k + 1) := .forallE tyDomK typeFun
+      have hcaptureK : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+          (mcap path) (mx path) (my path) (captureType path)
+          argCapK tyDomK := by
+        exact capture.lift hk.1
+      have hheadTyped : headElem.HasType headElemTy := by
+        change (WShape.lam elemFun helemNonzero).HasType
+          (WShape.forallE tyDomK typeFun)
+        rw [WShape.lam_eq_lam']
+        apply WShape.HasType.lam
+        refine WShape.HasTypeLam.iff'.2 ⟨?_, ?_, fun x => ?_⟩
+        · refine WShape.HasTypePi.def.2
+            ⟨WShape.HasDom.single.2 (.inl hcaptureK.2.1), ?_⟩
+          intro x y hxy
+          obtain ⟨rfl, rfl⟩ | ⟨_, rfl, rfl⟩ :=
+            WShapeFun.mem_single.1 hxy
+          · exact hnextKTy.isType
+          · exact .bot' .sort
+        · exact WShape.HasDom.single.2 (.inl hcaptureK.2.1)
+        · simp only [elemFun, typeFun, WShapeFun.single_app]
+          split <;> [exact hnextKTy; exact .bot' (.bot' .sort)]
+      have hheadLeK : headElem ≤ .lam' (g.lift k) := by
+        change WShape.lam elemFun helemNonzero ≤ .lam' (g.lift k)
+        rw [WShape.lam_eq_lam']
+        apply WShape.lam'_le_lam'.2
+        obtain ⟨x', hx', hmem⟩ := (g.lift k).app_eq argCapK
+        exact WShapeFun.single_le.2
+          ⟨x', _, hmem, hx', hnextAppK⟩
+      have hliftHead : (WShape.lam' (g.lift k)).T ≤
+          (WShape.lam g hg).T := by
+        have hLift := (TShape.lift_eqv
+          (a := (WShape.lam g hg).T)
+          (Nat.succ_le_succ hk.1)).1
+        rw [WShape.lift_lam hk.1, WShape.lam_eq_lam'] at hLift
+        exact hLift
+      have hheadLe : headElem.T ≤ (WShape.lam g hg).T :=
+        hheadLeK.T.trans hliftHead
+      have htypeFunLe : typeFun ≤ tyFun.lift k := by
+        obtain ⟨x', hx', hmem⟩ := (tyFun.lift k).app_eq argCapK
+        exact WShapeFun.single_le.2
+          ⟨x', _, hmem, hx', hnextTyKLe⟩
+      have hheadTyLeK : headElemTy ≤
+          .forallE tyDomK (tyFun.lift k) := by
+        exact WShape.forallE_le_forallE.2 ⟨.rfl, htypeFunLe⟩
+      have hliftHeadTy : (WShape.forallE tyDomK (tyFun.lift k)).T ≤
+          (WShape.forallE tyDom tyFun).T := by
+        have hLift := (TShape.lift_eqv
+          (a := (WShape.forallE tyDom tyFun).T)
+          (Nat.succ_le_succ hk.1)).1
+        rw [WShape.lift_forallE hk.1] at hLift
+        exact hLift
+      have hheadTyLe : headElemTy.T ≤
+          (WShape.forallE tyDom tyFun).T :=
+        hheadTyLeK.T.trans hliftHeadTy
+      have tailK : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths nextK nextTyK out outTy :=
+        LR.DirectFixedHeadShapeChain.liftHead hk.2 hnextTy tailChain
+      have tailApp : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths (elemFun.app argCapK) (typeFun.app argCapK)
+            out outTy := by
+        simpa only [elemFun, typeFun, WShapeFun.single_app,
+          WShape.LE.rfl, ↓reduceIte] using tailK
+      have chain : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          (path :: paths) headElem headElemTy out outTy := by
+        exact LR.DirectFixedHeadShapeChain.cons hcaptureK tailApp
+      exact ⟨k + 1, headElem, headElemTy, hheadLe,
+        hheadTyped, hheadTyLe, by
+          intro hbot
+          have happBotSame : (headElem.app argCapK).T ≤
+              ((WShape.bot (n := k + 1)).app argCapK).T :=
+            TShape.app_mono
+              (hbot.trans (TShape.bot_eqv (n := k + 1)).2)
+              TShape.LE.rfl
+          rw [WShape.bot_app] at happBotSame
+          have happBot : (headElem.app argCapK).T ≤ TShape.bot :=
+            happBotSame.trans TShape.bot_eqv.1
+          apply hnextKNonbot
+          simpa only [headElem, WShape.lam_eq_lam', WShape.lam'_app,
+            elemFun, WShapeFun.single_app, WShape.LE.rfl, ↓reduceIte]
+            using happBot,
+        chain⟩
+
+/-- Add the registered syntax witness to the guarded telescope's literal
+lower endpoint.  The witness is weakened only along the head-type comparison
+returned by the same fold that builds the direct application chain. -/
+theorem LR.DirectFixedHeadTelescopeLE.withWitnessAndChain
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head headTy : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {spine : LE_Interp.RHS.ShapeSpine mcap head paths out.T}
+    (H : LR.DirectFixedHeadTelescopeLE
+      (headTy := headTy) (outTy := outTy.T)
+      Γ mx my captureType spine)
+    (hTy : LE_Interp.Witness ρ headTy B)
+    (houtNonbot : ¬out.T ≤ TShape.bot) :
+    ∃ (headLevel : Nat) (headElem headElemTy : WShape headLevel),
+      headElem.T ≤ head ∧ headElem.HasType headElemTy ∧
+        Nonempty (LE_Interp.Witness ρ headElemTy.T B) ∧
+        LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths headElem headElemTy out outTy := by
+  obtain ⟨headLevel, headElem, headElemTy, hhead, htyped,
+    hheadTy, _hheadNonbot, chain⟩ :=
+    LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.directFixedHeadShapeChain
+      H rfl rfl houtNonbot
+  exact ⟨headLevel, headElem, headElemTy, hhead, htyped,
+    ⟨hTy.mono hheadTy⟩, chain⟩
+
+/-- Proof-relevant producer for a guarded fixed-head fold.
+
+Continuation passing keeps the registered type witness paired with the
+guarded telescope that selected its head observation.  The consumer can
+therefore lower that witness to the direct chain's exact type shape without
+inventing a witness at an arbitrary `HasType` observation. -/
+def LR.DirectFixedHeadProducer (Γ : List SExpr) (ρ : Valuation)
+    {p : Pattern} {mcap : p.Path → TShape}
+    (mx my captureType : p.Path → SExpr)
+    {paths : List p.Path} {head : TShape} {headType : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (hshape : LE_Interp.RHS.ShapeSpine mcap head paths out.T) : Prop :=
+  ∀ {C : Prop},
+    (∀ headTy : TShape,
+      LR.DirectFixedHeadTelescopeLE
+        (headTy := headTy) (outTy := outTy.T)
+        Γ mx my captureType hshape →
+      LE_Interp.Witness ρ headTy headType → C) → C
+
+omit [Params.Semantic] in
+/-- An explicitly synchronized guarded telescope and registered type witness
+form a direct fixed-head producer without any further choice. -/
+theorem LR.DirectFixedHeadProducer.of_telescope
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head headTy : TShape} {headType : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {spine : LE_Interp.RHS.ShapeSpine mcap head paths out.T}
+    (htel : LR.DirectFixedHeadTelescopeLE
+      (headTy := headTy) (outTy := outTy.T)
+      Γ mx my captureType spine)
+    (hTy : LE_Interp.Witness ρ headTy headType) :
+    LR.DirectFixedHeadProducer Γ ρ mx my captureType spine
+      (headType := headType) (outTy := outTy) := by
+  intro C K
+  exact K headTy htel hTy
+
+/-- Concrete layers for a guarded fixed-head producer.
+
+Each application node retains the semantic spine edge and the direct capture
+at the literal element/domain shapes used to build its singleton Pi tower.
+The terminal node is data at the observation actually reached: it records the
+caller's result typing and only the comparison from the caller's type
+observation to that reached observation.  Thus the package contains neither a
+type-functionality law nor an independently reselected capture witness. -/
+inductive LR.DirectFixedHeadDominanceSpine (Γ : List SExpr) {p : Pattern}
+    (mcap : p.Path → TShape) (mx my captureType : p.Path → SExpr)
+    (outTy : TShape) :
+    {n : Nat} → TShape → List p.Path → TShape → WShape n → Prop where
+  | nil {n : Nat} {out : TShape} {w : WShape n}
+      (hw : out.HasType outTy) (hle : outTy ≤ w.T) :
+      LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType outTy
+        out [] out w
+  | cons
+      {n : Nat} {f : WShape (n + 1)} {a argCap tyDom inner : WShape n}
+      {m out : TShape} {path : p.Path} {paths : List p.Path}
+      (harg : a.T ≤ mcap path) (happ : m ≤ (f.app a).T)
+      (capture : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom)
+      (tail : LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType
+        outTy m paths out inner) :
+      LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType outTy
+        f.T (path :: paths) out
+        (.forallE tyDom (.single argCap inner))
+
+omit [Params.Semantic] in
+/-- Recover the semantic application spine stored by the guarded layer
+package. -/
+theorem LR.DirectFixedHeadDominanceSpine.spine
+    {Γ : List SExpr} {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {outTy head out : TShape} {paths : List p.Path}
+    {n : Nat} {tower : WShape n}
+    (H : LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType outTy
+      head paths out tower) :
+    LE_Interp.RHS.ShapeSpine mcap head paths out := by
+  induction H with
+  | nil _ _ => exact .nil
+  | cons harg happ _ _ ih => exact .cons harg happ ih
+
+omit [Params.Semantic] in
+/-- Fold concrete guarded layers into the monotone telescope selected by
+their singleton Pi tower. -/
+theorem LR.DirectFixedHeadDominanceSpine.telescopeLE
+    {Γ : List SExpr} {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {outTy head out : TShape} {paths : List p.Path}
+    {n : Nat} {tower : WShape n}
+    (H : LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType outTy
+      head paths out tower) :
+    LR.DirectFixedHeadTelescopeLE
+      (headTy := tower.T) (outTy := outTy)
+      Γ mx my captureType H.spine := by
+  induction H with
+  | nil hw hle =>
+    exact LR.DirectFixedHeadTelescopeLE.nil hw hle
+  | @cons n f a argCap tyDom inner m out path paths harg happ capture tail ih =>
+    refine LR.DirectFixedHeadTelescopeLE.cons harg happ tail.spine capture ?_
+    have happEq : (WShapeFun.single argCap inner).app argCap = inner := by
+      rw [WShapeFun.single_app]
+      exact if_pos WShape.LE.rfl
+    rw [happEq]
+    exact ih
+
+omit [Params.Semantic] in
+/-- A concrete guarded dominance spine plus the registered type's witness at
+its singleton Pi tower is a complete direct fixed-head producer. -/
+theorem LR.DirectFixedHeadDominanceSpine.producer
+    {Γ : List SExpr} {ρ : Valuation}
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType : SExpr} {headShape : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {n : Nat} {tower : WShape n}
+    (H : LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType outTy.T
+      headShape paths out.T tower)
+    (hTy : LE_Interp.Witness ρ tower.T headType) :
+    LR.DirectFixedHeadProducer Γ ρ mx my captureType H.spine
+      (headType := headType) (outTy := outTy) :=
+  LR.DirectFixedHeadProducer.of_telescope H.telescopeLE hTy
+
+/-- Semantic typing aligned with the concrete guarded dominance spine.
+
+The package deliberately exposes the comparison that a fixed-head producer
+actually needs: the singleton Pi tower built from the literal captures lies
+below the registered type observation selected together with the semantic
+term witness.  Merely knowing that the semantic head and the constructed
+tower are both typings of a non-bottom term is insufficient; those type
+observations need not even be compatible.
+
+Keeping the term witness, type witness, retained child trees, dominance
+spine, and comparison in one existential prevents a later consumer from
+silently pairing the tower with a different semantic typing package. -/
+def LR.DirectFixedHeadAlignedTyping
+    (Γ : List SExpr) (ρ : Valuation)
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    {p : Pattern} {mcap : p.Path → TShape}
+    (mx my captureType : p.Path → SExpr)
+    {paths : List p.Path} {head : TShape} {body headType : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (_hshape : LE_Interp.RHS.ShapeSpine mcap head paths out.T) : Prop :=
+  ∃ (semanticHead registeredTy : TShape)
+      (hBody : LE_Interp.Witness ρ semanticHead body)
+      (hTy : LE_Interp.Witness ρ registeredTy headType),
+    head ≤ semanticHead ∧ semanticHead.HasType registeredTy ∧
+      hBody.RDeepChildren P ∧ hTy.RDeepChildren P ∧
+        ∃ (towerLevel : Nat) (tower : WShape towerLevel),
+          LR.DirectFixedHeadDominanceSpine Γ mcap mx my captureType
+              outTy.T head paths out.T tower ∧
+            tower.T ≤ registeredTy
+
+omit [Params.Semantic] in
+/-- Forget the explicit tower alignment while retaining the synchronized
+proof-relevant semantic typing. -/
+theorem LR.DirectFixedHeadAlignedTyping.toTypedRDeep
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head : TShape} {body headType : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {hshape : LE_Interp.RHS.ShapeSpine mcap head paths out.T}
+    (H : LR.DirectFixedHeadAlignedTyping Γ ρ mx my captureType
+      (P := P) (body := body) (headType := headType)
+      (outTy := outTy) hshape) :
+    LE_Interp.Witness.TypedRDeep P ρ head body headType := by
+  obtain ⟨semanticHead, registeredTy, hBody, hTy, hhead, htyped,
+    cBody, cTy, _⟩ := H
+  exact ⟨semanticHead, registeredTy, hBody, hTy, hhead, htyped,
+    cBody, cTy⟩
+
+omit [Params.Semantic] in
+/-- Consume the explicit tower-to-registered-type comparison to obtain the
+ordinary direct fixed-head producer. -/
+theorem LR.DirectFixedHeadAlignedTyping.producer
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head : TShape} {body headType : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {hshape : LE_Interp.RHS.ShapeSpine mcap head paths out.T}
+    (H : LR.DirectFixedHeadAlignedTyping Γ ρ mx my captureType
+      (P := P) (body := body) (headType := headType)
+      (outTy := outTy) hshape) :
+    LR.DirectFixedHeadProducer Γ ρ mx my captureType hshape
+      (headType := headType) (outTy := outTy) := by
+  obtain ⟨_semanticHead, registeredTy, _hBody, hTy, _hhead,
+    _htyped, _cBody, _cTy, towerLevel, tower, hdom, htower⟩ := H
+  exact hdom.producer (hTy.mono htower)
+
+/-- Per-layer input for the guarded ordered peel.  It is the ordinary
+`FixedHeadOrderedLink` with the capture strengthened at the same literal
+shapes by exactly the guarded term edge consumed by the direct zipper. -/
+def LR.DirectFixedHeadOrderedLink
+    (Γ : List SExpr) (ρ : Valuation) {p : Pattern}
+    (mcap : p.Path → TShape) (mx my captureType : p.Path → SExpr) : Prop :=
+  ∀ {C : Prop} {n : Nat} (path : p.Path) (a : WShape n)
+      (headTy : TShape) (B : SExpr),
+    a.T ≤ mcap path →
+    LE_Interp.Witness ρ headTy B →
+    (∀ (tyDom : WShape n) (tyFun : WShapeFun n) (argCap : WShape n)
+        (Bdom Bbody : SExpr),
+      headTy = (WShape.forallE tyDom tyFun).T →
+      B = .forallE Bdom Bbody →
+      a ≤ argCap →
+      LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom →
+      LE_Interp.Witness ρ argCap.T (mx path) → C) → C
+
+/-- Peel a registered type witness along a semantic shape spine while
+building the guarded telescope at the same captures.
+
+As in the ordinary repaired peel, the terminal observation is returned to
+the caller together with a factory.  The caller supplies its own result
+typing and the single comparison to that reached observation. -/
+theorem LR.DirectFixedHeadTelescopeLE.ofOrderedLink
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head out : TShape}
+    (spine : LE_Interp.RHS.ShapeSpine mcap head paths out)
+    (link : LR.DirectFixedHeadOrderedLink Γ ρ
+      mcap mx my captureType) :
+    ∀ {C : Prop} {headTy : TShape} {B : SExpr},
+      LE_Interp.Witness ρ headTy B →
+      (∀ (reachedTy : TShape) (Bend : SExpr),
+        LE_Interp.Witness ρ reachedTy Bend →
+        (∀ outTy : TShape, out.HasType outTy → outTy ≤ reachedTy →
+          LR.DirectFixedHeadTelescopeLE
+            (headTy := headTy) (outTy := outTy)
+            Γ mx my captureType spine) → C) → C := by
+  induction spine with
+  | @nil head0 =>
+    intro C headTy B hTy K
+    exact K headTy B hTy
+      (fun _ htyped hle => LR.DirectFixedHeadTelescopeLE.nil htyped hle)
+  | @cons n f a m out path paths harg happ rest ih =>
+    intro C headTy B hTy K
+    refine link path a headTy B harg hTy ?_
+    intro tyDom tyFun argCap Bdom Bbody hheadTy hB hargCap capture hArg
+    subst hheadTy
+    subst hB
+    refine ih (hTy.forallE_inst hArg) ?_
+    intro reachedTy Bend hEnd factory
+    exact K reachedTy Bend hEnd
+      (fun outTy htyped hle =>
+        LR.DirectFixedHeadTelescopeLE.cons harg happ rest capture
+          (factory outTy htyped hle))
+
+/-- Build the complete guarded shape ladder below one non-bottom semantic
+RHS spine.
+
+The construction proceeds backward from the result.  At every layer it
+raises the semantic function/argument, recursive head, and paired capture to
+one common maximum level, then records the exact singleton lambda/Pi
+observation consumed by the later path-semantics zipper. -/
+theorem LE_Interp.RHS.ShapeSpine.directFixedHeadShapeChain
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LE_Interp.RHS.ShapeSpine mcap head paths out.T)
+    (hcap : ∀ path, LR.DirectTermCaptureDefEqAligned.AtSomeLevel Γ
+      (mcap path) (mx path) (my path) (captureType path))
+    (hout : out.HasType outTy) (houtNonbot : ¬out.T ≤ TShape.bot) :
+    ∃ (headLevel : Nat) (headElem headElemTy : WShape headLevel),
+      headElem.T ≤ head ∧ headElem.HasType headElemTy ∧
+        ¬headElem.T ≤ TShape.bot ∧
+        LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths headElem headElemTy out outTy := by
+  generalize houtT : out.T = outT at H
+  induction H generalizing outLevel out outTy with
+  | @nil head0 =>
+    have houtLe : out.T ≤ head0 := by
+      rw [houtT]
+      exact TShape.LE.rfl
+    exact ⟨outLevel, out, outTy, houtLe, hout, houtNonbot,
+      LR.DirectFixedHeadShapeChain.nil⟩
+  | @cons n f a m outT path paths harg happ hrest ih =>
+    obtain ⟨nextLevel, next, nextTy, hnext, hnextTy,
+      hnextNonbot, tail⟩ := ih hout houtNonbot houtT
+    obtain ⟨capLevel, argCap, tyDom, capture⟩ := hcap path
+    have hnextApp : next.T ≤ (f.app a).T := hnext.trans happ
+    cases f using WShape.casesOn' with
+    | bot => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | sort => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | forallE => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | ctor => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | indTy => exact (hnextNonbot (hnextApp.trans TShape.bot_eqv.1)).elim
+    | @lam g hg =>
+      let k := max n (max nextLevel capLevel)
+      have hk : n ≤ k ∧ nextLevel ≤ k ∧ capLevel ≤ k := by
+        dsimp [k]
+        omega
+      let aK : WShape k := a.lift k
+      let argCapK : WShape k := argCap.lift k
+      let tyDomK : WShape k := tyDom.lift k
+      let nextK : WShape k := next.lift k
+      let nextTyK : WShape k := nextTy.lift k
+      let elemFun : WShapeFun k := .single argCapK nextK
+      let typeFun : WShapeFun k := .single argCapK nextTyK
+      have hargBound : a.T ≤ argCap.T := harg.trans capture.1
+      have hargK : aK ≤ argCapK := by
+        exact (TShape.LE.def hk.1 hk.2.2).1 hargBound
+      have hnextAppK : nextK ≤ (g.lift k).app argCapK := by
+        have hmono : ((WShape.lam g hg).app a).T ≤
+            ((WShape.lam (g.lift k)
+              (WShapeFun.NonZero.lift_iff hk.1 |>.2 hg)).app argCapK).T := by
+          apply TShape.app_mono
+          · have hLift := (TShape.lift_eqv
+              (a := (WShape.lam g hg).T)
+              (Nat.succ_le_succ hk.1)).2
+            rw [WShape.lift_lam hk.1] at hLift
+            exact hLift
+          · exact hargBound.trans (TShape.lift_eqv hk.2.2).2
+        have hT : next.T ≤ ((g.lift k).app argCapK).T := by
+          simpa [WShape.lam_eq_lam'] using hnextApp.trans hmono
+        have hTK := (TShape.LE.def hk.2.1 (Nat.le_refl k)).1 hT
+        simpa only [nextK, WShape.lift_self] using hTK
+      have hnextKTy : nextK.HasType nextTyK :=
+        (WShape.HasType.lift hk.2.1).2 hnextTy
+      have hnextKNonbot : ¬nextK.T ≤ TShape.bot := by
+        intro hbot
+        exact hnextNonbot <|
+          (TShape.lift_eqv hk.2.1).2.trans
+            (hbot.trans TShape.bot_eqv.1)
+      have helemNonzero : elemFun.NonZero := by
+        rw [WShapeFun.NonZero.iff]
+        refine ⟨(argCapK, nextK),
+          WShapeFun.mem_single.2 (.inl rfl), ?_⟩
+        intro hbot
+        exact hnextKNonbot <|
+          (WShape.LE.T hbot).trans TShape.bot_eqv.1
+      let headElem : WShape (k + 1) := .lam elemFun helemNonzero
+      let headElemTy : WShape (k + 1) := .forallE tyDomK typeFun
+      have hcaptureK : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+          (mcap path) (mx path) (my path) (captureType path)
+          argCapK tyDomK := by
+        exact capture.lift hk.2.2
+      have hheadTyped : headElem.HasType headElemTy := by
+        change (WShape.lam elemFun helemNonzero).HasType
+          (WShape.forallE tyDomK typeFun)
+        rw [WShape.lam_eq_lam']
+        apply WShape.HasType.lam
+        refine WShape.HasTypeLam.iff'.2 ⟨?_, ?_, fun x => ?_⟩
+        · refine WShape.HasTypePi.def.2
+            ⟨WShape.HasDom.single.2 (.inl hcaptureK.2.1), ?_⟩
+          intro x y hxy
+          obtain ⟨rfl, rfl⟩ | ⟨_, rfl, rfl⟩ :=
+            WShapeFun.mem_single.1 hxy
+          · exact hnextKTy.isType
+          · exact .bot' .sort
+        · exact WShape.HasDom.single.2 (.inl hcaptureK.2.1)
+        · simp only [elemFun, typeFun, WShapeFun.single_app]
+          split <;> [exact hnextKTy; exact .bot' (.bot' .sort)]
+      have hheadLeK : headElem ≤ .lam' (g.lift k) := by
+        change WShape.lam elemFun helemNonzero ≤ .lam' (g.lift k)
+        rw [WShape.lam_eq_lam']
+        apply WShape.lam'_le_lam'.2
+        obtain ⟨x', hx', hmem⟩ := (g.lift k).app_eq argCapK
+        exact WShapeFun.single_le.2
+          ⟨x', _, hmem, hx', hnextAppK⟩
+      have hliftHead : (WShape.lam' (g.lift k)).T ≤
+          (WShape.lam g hg).T := by
+        have hLift := (TShape.lift_eqv
+          (a := (WShape.lam g hg).T)
+          (Nat.succ_le_succ hk.1)).1
+        rw [WShape.lift_lam hk.1, WShape.lam_eq_lam'] at hLift
+        exact hLift
+      have hheadLe : headElem.T ≤ (WShape.lam g hg).T :=
+        hheadLeK.T.trans hliftHead
+      have tailK : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths nextK nextTyK out outTy :=
+        LR.DirectFixedHeadShapeChain.liftHead hk.2.1 hnextTy tail
+      have tailApp : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          paths (elemFun.app argCapK) (typeFun.app argCapK) out outTy := by
+        simpa only [elemFun, typeFun, WShapeFun.single_app,
+          WShape.LE.rfl, ↓reduceIte] using tailK
+      have chain : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+          (path :: paths) headElem headElemTy out outTy := by
+        exact LR.DirectFixedHeadShapeChain.cons hcaptureK tailApp
+      exact ⟨k + 1, headElem, headElemTy, hheadLe,
+        hheadTyped, by
+          intro hbot
+          have happBotSame : (headElem.app argCapK).T ≤
+              ((WShape.bot (n := k + 1)).app argCapK).T :=
+            TShape.app_mono
+              (hbot.trans (TShape.bot_eqv (n := k + 1)).2)
+              TShape.LE.rfl
+          rw [WShape.bot_app] at happBotSame
+          have happBot : (headElem.app argCapK).T ≤ TShape.bot :=
+            happBotSame.trans TShape.bot_eqv.1
+          apply hnextKNonbot
+          simpa only [headElem, WShape.lam_eq_lam', WShape.lam'_app,
+            elemFun, WShapeFun.single_app, WShape.LE.rfl, ↓reduceIte]
+            using happBot,
+        chain⟩
+
+/-- A guarded term relation at the head of a nonempty fixed-head shape chain
+already validates its displayed head type at the chain's exact type shape.
+
+The first application frame is necessarily an informative lambda/Pi.  Head
+lifts are erased to the recursive frame, the Pi type is extracted there, and
+the result is lifted back along the same canonical equivalence. -/
+theorem LR.DirectFixedHeadShapeChain.headTyOfNonempty
+    {Γ : List SExpr} {p : Pattern}
+    {mcap : p.Path → TShape} {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+      paths head headTy out outTy)
+    (hne : paths ≠ []) {X headType : SExpr}
+    (hterm : (LRD Γ).DefEq X X headType head headTy) :
+    (LRD Γ).TyDefEq headType headType headTy := by
+  induction H with
+  | nil => exact (hne rfl).elim
+  | cons capture tail =>
+    exact LRD.DefEq.piDisplayedTy hterm
+  | liftHead le htyped tail ih =>
+    exact (LRD.TyDefEq.lift le htyped.isType).2 <|
+      ih hne ((LRD.DefEq.lift le htyped).1 hterm)
+
+/-- Apply one guarded function edge to the exact guarded capture retained by
+the synchronized semantic telescope. -/
+theorem LR.DirectCaptureDefEqAligned.AtShapes.app
+    {m : TShape} {x y A B M N : SExpr}
+    {elemShape typeShape : WShape n}
+    {termFun typeFun : WShapeFun n} {hterm : termFun.NonZero}
+    (H : LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A elemShape typeShape)
+    (hfun : (LRD (n := n + 1) Γ).DefEq M N (.forallE A B)
+      (.lam termFun hterm) (.forallE typeShape typeFun)) :
+    (LRD (n := n) Γ).DefEq (M.app x) (N.app y) (B.inst x)
+      (termFun.app elemShape) (typeFun.app elemShape) := by
+  exact LRD.DefEq.app hfun H.2.1 H.2.2.2.2.1 H.2.2.2.2.2.2
+
+/-- Retarget a guarded capture to the domain exposed by a dependent
+application spine.  The raw path converts syntax typing, while the completed
+guarded type edge transports both logical projections at the unchanged
+semantic shapes. -/
+theorem LR.DirectCaptureDefEqAligned.AtShapes.conv
+    {m : TShape} {x y A B : SExpr}
+    {elemShape typeShape : WShape n}
+    (H : LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y A elemShape typeShape)
+    (raw : TypeDefEqPath Γ A B u)
+    (hTy : (LRD Γ).TyDefEq A B typeShape) :
+    LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+      m x y B elemShape typeShape := by
+  have hB : (LRD Γ).TyDefEq B B typeShape :=
+    LRD.TyDefEq.left (LRD.TyDefEq.symm hTy)
+  exact ⟨H.1, H.2.1, LRD.tyLegacy hB, hB,
+    raw.defeqDF H.2.2.2.2.1,
+    (LR Γ).conv (LRD.tyLegacy hTy) H.2.2.2.2.2.1,
+    LRD.DefEq.conv hTy H.2.2.2.2.2.2⟩
+
+/-- Canonical guarded fixed-head application chain.  Every layer lowers the
+guard index exactly once and reuses the paired capture's literal shapes. -/
+inductive LR.DirectFixedHeadChain (Γ : List SExpr)
+    {p : Pattern} (mcap : p.Path → TShape)
+    (mx my captureType : p.Path → SExpr) :
+    ∀ (paths : List p.Path) (headType resultType : SExpr)
+      {headLevel : Nat}, WShape headLevel → WShape headLevel →
+      ∀ {outLevel : Nat}, WShape outLevel → WShape outLevel → Prop where
+  | nil {A : SExpr} {n : Nat} {out outTy : WShape n} :
+      LR.DirectFixedHeadChain Γ mcap mx my captureType
+        [] A A out outTy out outTy
+  | cons
+      {n : Nat} {path : p.Path} {paths : List p.Path}
+      {body resultType : SExpr}
+      {termFun typeFun : WShapeFun n} {hterm : termFun.NonZero}
+      {argCap tyDom : WShape n}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      (capture : LR.DirectCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom)
+      (tail : LR.DirectFixedHeadChain Γ mcap mx my captureType
+        paths (body.inst (mx path)) resultType
+        (termFun.app argCap) (typeFun.app argCap) out outTy) :
+      LR.DirectFixedHeadChain Γ mcap mx my captureType
+        (path :: paths) (.forallE (captureType path) body) resultType
+        (.lam termFun hterm) (.forallE tyDom typeFun) out outTy
+
+/-- Fold a canonical guarded fixed-head chain by dependent application. -/
+theorem LR.DirectFixedHeadChain.apply
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType resultType : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LR.DirectFixedHeadChain Γ mcap mx my captureType
+      paths headType resultType head headTy out outTy)
+    {M N : SExpr}
+    (hhead : (LRD Γ).DefEq M N headType head headTy) :
+    (LRD Γ).DefEq
+      (paths.foldl (fun f path => f.app (mx path)) M)
+      (paths.foldl (fun f path => f.app (my path)) N)
+      resultType out outTy := by
+  induction H generalizing M N with
+  | nil => exact hhead
+  | cons capture tail ih =>
+    simp only [List.foldl_cons]
+    exact ih (capture.app hhead)
+
+/-- Conversion-safe guarded application chain over one generated capture
+spine.  Each application stores the actual weak-head Pi exposed at that
+layer and the completed guarded domain edge; raw `PathSpineWF` conversions
+are therefore never promoted by the consumer. -/
+inductive LR.DirectFixedHeadExposedChain (Γ : List SExpr)
+    {p : Pattern} (mcap : p.Path → TShape)
+    (mx my captureType : p.Path → SExpr) :
+    ∀ (paths : List p.Path) (headType resultType : SExpr)
+      {headLevel : Nat}, WShape headLevel → WShape headLevel →
+      ∀ {outLevel : Nat}, WShape outLevel → WShape outLevel → Prop where
+  | nil {A : SExpr} {n : Nat} {out outTy : WShape n} :
+      LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        [] A A out outTy out outTy
+  | cons
+      {n : Nat} {path : p.Path} {paths : List p.Path}
+      {headType A₁ A₂ resultType : SExpr} {u : SLevel}
+      {termFun typeFun : WShapeFun n} {hterm : termFun.NonZero}
+      {argCap tyDom : WShape n}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      (headRed : WHRedS Γ headType (.forallE A₁ A₂))
+      (capture : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom)
+      (domainRaw : TypeDefEqPath Γ (captureType path) A₁ u)
+      (domainRel : (LRD Γ).TyDefEq (captureType path) A₁ tyDom)
+      (tail : LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        paths (A₂.inst (mx path)) resultType
+        (termFun.app argCap) (typeFun.app argCap) out outTy) :
+      LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        (path :: paths) headType resultType
+        (.lam termFun hterm) (.forallE tyDom typeFun) out outTy
+  | liftHead
+      {n n' : Nat} {head headTy : WShape n}
+      {paths : List p.Path} {headType resultType : SExpr}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      (le : n ≤ n') (htyped : head.HasType headTy)
+      (tail : LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        paths headType resultType head headTy out outTy) :
+      LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        paths headType resultType
+        (head.lift n') (headTy.lift n') out outTy
+  | ret
+      {paths : List p.Path} {headType resultType resultType' : SExpr}
+      {u : SLevel}
+      {headLevel : Nat} {head headTy : WShape headLevel}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      (tail : LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        paths headType resultType head headTy out outTy)
+      (resultRaw : TypeDefEqPath Γ resultType resultType' u)
+      (resultRel : (LRD Γ).TyDefEq resultType resultType' outTy) :
+      LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+        paths headType resultType' head headTy out outTy
+
+/-- Consume a conversion-safe guarded fixed-head chain.  Every conversion
+uses a stored guarded type edge, and every function application uses the
+typed Pi root already retained by the current `LRD` observation. -/
+theorem LR.DirectFixedHeadExposedChain.apply
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType resultType : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+      paths headType resultType head headTy out outTy)
+    {M N : SExpr}
+    (hhead : (LRD Γ).DefEq M N headType head headTy) :
+    (LRD Γ).DefEq
+      (paths.foldl (fun f path => f.app (mx path)) M)
+      (paths.foldl (fun f path => f.app (my path)) N)
+      resultType out outTy := by
+  induction H generalizing M N with
+  | nil => exact hhead
+  | @cons n path paths headType A₁ A₂ resultType u termFun typeFun
+      hterm argCap tyDom outLevel out outTy headRed capture domainRaw
+      domainRel tail ih =>
+    simp only [List.foldl_cons]
+    obtain ⟨B, F, _u, _v, root, _hB, _domain, _hF, _pi, apply⟩ :=
+      LRD.DefEq.app_exposed hhead capture.2.1
+    have hPiEq : SExpr.forallE B F = .forallE A₁ A₂ :=
+      root.toWHRedS.determ WHNF.forallE headRed WHNF.forallE
+    cases hPiEq
+    apply ih
+    exact apply
+      (domainRaw.defeqDF capture.2.2.2.1)
+      (LRD.DefEq.conv domainRel capture.2.2.2.2.2)
+  | liftHead le htyped tail ih =>
+    exact ih ((LRD.DefEq.lift le htyped).1 hhead)
+  | ret tail _resultRaw resultRel ih =>
+    exact LRD.DefEq.conv resultRel (ih hhead)
+
+/-- Change the declared type at a guarded fixed head after its direct
+cross-type observation has already been constructed.  The retained right Pi
+root is synchronized with the existing chain; the reversed guarded domain
+edge then retargets the capture and propagates the dependent codomain edge to
+the tail. -/
+theorem LR.DirectFixedHeadExposedChain.rehead
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType headType' resultType : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+      paths headType' resultType head headTy out outTy)
+    {u : SLevel}
+    (hraw : TypeDefEqPath Γ headType headType' u)
+    (hrel : (LRD Γ).TyDefEq headType headType' headTy) :
+    LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+      paths headType resultType head headTy out outTy := by
+  induction H generalizing headType u with
+  | nil =>
+    exact LR.DirectFixedHeadExposedChain.ret
+      LR.DirectFixedHeadExposedChain.nil hraw hrel
+  | @cons n path paths headType' A₁ A₂ resultType v termFun typeFun
+      hterm argCap tyDom outLevel out outTy headRed capture domainRaw
+      domainRel tail ih =>
+    rw [LRD_succ] at hrel
+    obtain ⟨B₁, F₁, B₂, F₂, _u₁, u₂,
+      hred₁, hred₂, hdom, hcod, hvalDom, hpi⟩ :=
+      hrel.2.2 tyDom typeFun rfl
+    have hPiEq : SExpr.forallE B₂ F₂ = .forallE A₁ A₂ :=
+      hred₂.toWHRedS.determ WHNF.forallE headRed WHNF.forallE
+    cases hPiEq
+    obtain ⟨_, hdomSymm⟩ := hdom.symm
+    let domainRaw' : TypeDefEqPath Γ (captureType path) B₁ v :=
+      .trans domainRaw hdomSymm
+    let domainRel' : (LRD Γ).TyDefEq
+        (captureType path) B₁ tyDom :=
+      LRD.TyDefEq.trans domainRel (LRD.TyDefEq.symm hvalDom)
+    have hargRaw : IsDefEq Γ (mx path) (my path) B₁ :=
+      domainRaw'.defeqDF capture.2.2.2.1
+    have hargRel : (LRD Γ).DefEq
+        (mx path) (my path) B₁ argCap tyDom :=
+      LRD.DefEq.conv domainRel' capture.2.2.2.2.2
+    have hcodInst : TypeDefEqPath Γ
+        (F₁.inst (mx path)) (A₂.inst (mx path)) u₂ := by
+      simpa only [SExpr.inst] using hcod.subst
+        (Ctx.Subst.one IsDefEq.weakCore IsDefEq.bvar hargRaw.hasType.1)
+    have hcodRel : (LRD Γ).TyDefEq
+        (F₁.inst (mx path)) (A₂.inst (mx path))
+        (typeFun.app argCap) :=
+      hpi.2 capture.2.1 hargRaw.hasType.1 (LRD.DefEq.left hargRel)
+    exact LR.DirectFixedHeadExposedChain.cons hred₁.toWHRedS capture
+      domainRaw' domainRel' (ih hcodInst hcodRel)
+  | liftHead le htyped tail ih =>
+    exact LR.DirectFixedHeadExposedChain.liftHead le htyped <|
+      ih hraw ((LRD.TyDefEq.lift le htyped.isType).1 hrel)
+  | ret tail resultRaw resultRel ih =>
+    exact LR.DirectFixedHeadExposedChain.ret
+      (ih hraw hrel) resultRaw resultRel
+
+/-- Guarded conversion at one fixed-head path-spine edge. -/
+def LRD.FixedHeadConvertStep (Γ : List SExpr) : Prop :=
+  ∀ {n : Nat} {A B : SExpr} {u : SLevel} {a : WShape n},
+    IsDefEq Γ A B (.sort u) →
+    (LRD Γ).TyDefEq A A a →
+    (LRD Γ).TyDefEq A B a
+
+/-- Legacy cross-relation producer used by guarded completion. -/
+def LRD.FixedHeadLegacyConvertStep (Γ : List SExpr) : Prop :=
+  ∀ {n : Nat} {A B : SExpr} {u : SLevel} {a : WShape n},
+    IsDefEq Γ A B (.sort u) →
+    (LR Γ).TyDefEq A A a →
+    (LR Γ).TyDefEq A B a
+
+/-- Right endpoint validity at the exact observation threaded by a guarded
+path-spine conversion edge. -/
+def LRD.FixedHeadConvertRightValidStep (Γ : List SExpr) : Prop :=
+  ∀ {n : Nat} {A B : SExpr} {u : SLevel} {a : WShape n},
+    IsDefEq Γ A B (.sort u) →
+    (LRD Γ).TyDefEq A A a →
+    (LRD Γ).TyDefEq B B a
+
+/-- Complete a guarded fixed-head conversion from its legacy cross edge and
+an independently justified guarded right endpoint at the same shape. -/
+theorem LRD.FixedHeadConvertStep.of_parts
+    (legacy : LRD.FixedHeadLegacyConvertStep Γ)
+    (right : LRD.FixedHeadConvertRightValidStep Γ) :
+    LRD.FixedHeadConvertStep Γ := by
+  intro n A B u a raw left
+  exact LRD.TyDefEq.complete
+    (legacy raw (LRD.tyLegacy left)) left (right raw left)
+
+/-- Guarded semantic payloads for one concrete path-indexed typing spine.
+
+This certificate zips a syntax-independent `DirectFixedHeadShapeChain` with
+the actual `PathSpineWF` derivation used by a generated RHS.  Raw conversion
+edges remain syntax-only: each one carries a separately constructed guarded
+type edge at the exact shape threaded by the chain. -/
+inductive LR.DirectFixedHeadPathSemantics (Γ : List SExpr)
+    {p : Pattern} (mcap : p.Path → TShape)
+    (mx my captureType : p.Path → SExpr) :
+    ∀ {paths : List p.Path} {headType resultType : SExpr}
+      {headLevel : Nat} {head headTy : WShape headLevel}
+      {outLevel : Nat} {out outTy : WShape outLevel},
+      LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths head headTy out outTy →
+      SExpr.PathSpineWF Γ mx captureType
+        headType paths resultType → Prop where
+  | nil {A : SExpr} {n : Nat} {out outTy : WShape n} :
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        (LR.DirectFixedHeadShapeChain.nil (out := out) (outTy := outTy))
+        (SExpr.PathSpineWF.nil (A := A))
+  | cons
+      {n : Nat} {path : p.Path} {paths : List p.Path}
+      {A₁ A₂ resultType : SExpr} {u : SLevel}
+      {termFun typeFun : WShapeFun n} {hterm : termFun.NonZero}
+      {argCap tyDom : WShape n}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      {capture : LR.DirectTermCaptureDefEqAligned.AtShapes (LRD Γ)
+        (mcap path) (mx path) (my path) (captureType path)
+        argCap tyDom}
+      {tailShape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths (termFun.app argCap) (typeFun.app argCap) out outTy}
+      {domainRaw : IsDefEq Γ (captureType path) A₁ (.sort u)}
+      {tailRaw : SExpr.PathSpineWF Γ mx captureType
+        (A₂.inst (mx path)) paths resultType}
+      (domainRel : (LRD Γ).TyDefEq (captureType path) A₁ tyDom)
+      (tail : LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        tailShape tailRaw) :
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        (LR.DirectFixedHeadShapeChain.cons (hterm := hterm) capture tailShape)
+        (SExpr.PathSpineWF.cons domainRaw tailRaw)
+  | liftHead
+      {n n' : Nat} {head headTy : WShape n}
+      {paths : List p.Path} {headType resultType : SExpr}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      {le : n ≤ n'} {htyped : head.HasType headTy}
+      {tailShape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths head headTy out outTy}
+      {raw : SExpr.PathSpineWF Γ mx captureType
+        headType paths resultType}
+      (tail : LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        tailShape raw) :
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        (LR.DirectFixedHeadShapeChain.liftHead le htyped tailShape) raw
+  | conv
+      {paths : List p.Path} {headType headType' resultType : SExpr}
+      {u : SLevel}
+      {headLevel : Nat} {head headTy : WShape headLevel}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      {shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths head headTy out outTy}
+      {headRaw : IsDefEq Γ headType headType' (.sort u)}
+      {tailRaw : SExpr.PathSpineWF Γ mx captureType
+        headType' paths resultType}
+      (headRel : (LRD Γ).TyDefEq headType headType' headTy)
+      (tail : LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        shape tailRaw) :
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType shape
+        (SExpr.PathSpineWF.conv headRaw tailRaw)
+  | ret
+      {paths : List p.Path} {headType resultType resultType' : SExpr}
+      {u : SLevel}
+      {headLevel : Nat} {head headTy : WShape headLevel}
+      {outLevel : Nat} {out outTy : WShape outLevel}
+      {shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths head headTy out outTy}
+      {tailRaw : SExpr.PathSpineWF Γ mx captureType
+        headType paths resultType}
+      {resultRaw : IsDefEq Γ resultType resultType' (.sort u)}
+      (resultRel : (LRD Γ).TyDefEq resultType resultType' outTy)
+      (tail : LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        shape tailRaw) :
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType shape
+        (SExpr.PathSpineWF.ret tailRaw resultRaw)
+
+/-- Zip an empty concrete spine with a guarded shape chain containing only
+terminal and head-lift frames. -/
+theorem LR.DirectFixedHeadShapeChain.pathSemanticsNil
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {shapePaths : List p.Path} {A : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+      shapePaths head headTy out outTy)
+    (hpaths : shapePaths = []) :
+    LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+      (hpaths ▸ shape) (SExpr.PathSpineWF.nil (A := A)) := by
+  induction shape with
+  | nil =>
+    cases hpaths
+    exact LR.DirectFixedHeadPathSemantics.nil
+  | cons capture tail =>
+    cases hpaths
+  | liftHead le htyped tail ih =>
+    cases hpaths
+    exact LR.DirectFixedHeadPathSemantics.liftHead
+      (le := le) (htyped := htyped)
+      (raw := SExpr.PathSpineWF.nil (A := A))
+      (ih rfl)
+
+/-- Zip one concrete application edge after stripping leading head-lift
+frames from the guarded shape chain. -/
+theorem LR.DirectFixedHeadShapeChain.pathSemanticsCons
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {shapePaths : List p.Path}
+    {path : p.Path} {paths : List p.Path}
+    {A₁ A₂ resultType : SExpr} {u : SLevel}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+      shapePaths head headTy out outTy)
+    (hpaths : shapePaths = path :: paths)
+    (domainRaw : IsDefEq Γ (captureType path) A₁ (.sort u))
+    (tailRaw : SExpr.PathSpineWF Γ mx captureType
+      (A₂.inst (mx path)) paths resultType)
+    (headRel : (LRD Γ).TyDefEq
+      (.forallE A₁ A₂) (.forallE A₁ A₂) headTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (tailSemantics : ∀ {tailLevel : Nat}
+        {tailHead tailHeadTy : WShape tailLevel},
+      (tailShape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+        paths tailHead tailHeadTy out outTy) →
+      (LRD Γ).TyDefEq
+        (A₂.inst (mx path)) (A₂.inst (mx path)) tailHeadTy →
+      LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+        tailShape tailRaw) :
+    LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+      (hpaths ▸ shape) (SExpr.PathSpineWF.cons domainRaw tailRaw) := by
+  induction shape with
+  | nil =>
+    cases hpaths
+  | @cons n path₀ paths₀ termFun typeFun hterm argCap tyDom
+      outLevel out outTy capture tail =>
+    cases hpaths
+    rw [LRD_succ] at headRel
+    obtain ⟨B₁, F₁, B₂, F₂, _u₁, _u₂,
+      hred₁, hred₂, _hdom, _hcod, domainSelf, hpi⟩ :=
+      headRel.2.2 tyDom typeFun rfl
+    have hPi₁ : SExpr.forallE B₁ F₁ = .forallE A₁ A₂ :=
+      hred₁.toWHRedS.determ WHNF.forallE .rfl WHNF.forallE
+    have hPi₂ : SExpr.forallE B₂ F₂ = .forallE A₁ A₂ :=
+      hred₂.toWHRedS.determ WHNF.forallE .rfl WHNF.forallE
+    cases hPi₁
+    cases hPi₂
+    have domainRelRev : (LRD Γ).TyDefEq
+        A₁ (captureType path) tyDom :=
+      convert domainRaw.symm domainSelf
+    have domainRel : (LRD Γ).TyDefEq
+        (captureType path) A₁ tyDom :=
+      LRD.TyDefEq.symm domainRelRev
+    have argRaw : IsDefEq Γ (mx path) (my path) A₁ :=
+      domainRaw.defeqDF capture.2.2.2.1
+    have argRel : (LRD Γ).DefEq
+        (mx path) (my path) A₁ argCap tyDom :=
+      LRD.DefEq.conv domainRel capture.2.2.2.2.2
+    have tailHeadRel : (LRD Γ).TyDefEq
+        (A₂.inst (mx path)) (A₂.inst (mx path))
+        (typeFun.app argCap) :=
+      hpi.2 capture.2.1 argRaw.hasType.1 (LRD.DefEq.left argRel)
+    exact LR.DirectFixedHeadPathSemantics.cons
+      (u := u) (capture := capture)
+      (domainRaw := domainRaw) (tailRaw := tailRaw)
+      domainRel (tailSemantics tail tailHeadRel)
+  | liftHead le htyped tail ih =>
+    cases hpaths
+    exact LR.DirectFixedHeadPathSemantics.liftHead
+      (le := le) (htyped := htyped)
+      (raw := SExpr.PathSpineWF.cons domainRaw tailRaw) <|
+      ih rfl ((LRD.TyDefEq.lift le htyped.isType).1 headRel)
+        tailSemantics
+
+/-- Add guarded semantic payloads to one concrete path-indexed typing spine.
+
+The conversion callback is invoked only for an equality edge actually
+present in `raw`, and only after its source is already a guarded type at the
+exact shape threaded by the fixed-head chain. -/
+theorem LR.DirectFixedHeadShapeChain.pathSemantics
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType resultType : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+      paths head headTy out outTy)
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      headType paths resultType)
+    (headRel : (LRD Γ).TyDefEq headType headType headTy)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ) :
+    LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType shape raw := by
+  induction raw generalizing headLevel head headTy with
+  | @nil A =>
+    simpa only using shape.pathSemanticsNil (A := A) rfl
+  | @cons path A₁ u paths resultType A₂ domainRaw tailRaw ih =>
+    exact shape.pathSemanticsCons rfl domainRaw tailRaw headRel convert
+      (fun tail tailHeadRel => ih tail tailHeadRel resultRel)
+  | @conv headType headType' u paths resultType headRaw tailRaw ih =>
+    have headCross : (LRD Γ).TyDefEq headType headType' headTy :=
+      convert headRaw headRel
+    have tailHeadRel : (LRD Γ).TyDefEq headType' headType' headTy :=
+      LRD.TyDefEq.left (LRD.TyDefEq.symm headCross)
+    exact LR.DirectFixedHeadPathSemantics.conv
+      (u := u) (headRaw := headRaw) (tailRaw := tailRaw) headCross
+      (ih shape tailHeadRel resultRel)
+  | @ret headType paths resultType resultType' u tailRaw resultRaw ih =>
+    have resultCrossRev : (LRD Γ).TyDefEq
+        resultType' resultType outTy :=
+      convert resultRaw.symm resultRel
+    have tailResultRel : (LRD Γ).TyDefEq
+        resultType resultType outTy :=
+      LRD.TyDefEq.left (LRD.TyDefEq.symm resultCrossRev)
+    exact LR.DirectFixedHeadPathSemantics.ret
+      (u := u) (tailRaw := tailRaw) (resultRaw := resultRaw)
+      (LRD.TyDefEq.symm resultCrossRev)
+      (ih shape headRel tailResultRel)
+
+/-- Forget zipper provenance and expose the conversion-safe guarded
+fixed-head application certificate consumed by `apply`. -/
+theorem LR.DirectFixedHeadPathSemantics.exposed
+    {p : Pattern} {mcap : p.Path → TShape}
+    {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {headType resultType : SExpr}
+    {headLevel : Nat} {head headTy : WShape headLevel}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {shape : LR.DirectFixedHeadShapeChain Γ mcap mx my captureType
+      paths head headTy out outTy}
+    {raw : SExpr.PathSpineWF Γ mx captureType
+      headType paths resultType}
+    (H : LR.DirectFixedHeadPathSemantics Γ mcap mx my captureType
+      shape raw) :
+    LR.DirectFixedHeadExposedChain Γ mcap mx my captureType
+      paths headType resultType head headTy out outTy := by
+  induction H with
+  | nil => exact LR.DirectFixedHeadExposedChain.nil
+  | @cons n path paths A₁ A₂ resultType u termFun typeFun hterm
+      argCap tyDom outLevel out outTy capture tailShape domainRaw tailRaw
+      domainRel tail ih =>
+    exact LR.DirectFixedHeadExposedChain.cons .rfl capture
+      (.single domainRaw) domainRel ih
+  | @liftHead n n' head headTy paths headType resultType outLevel out outTy
+      le htyped tailShape raw tail ih =>
+    exact LR.DirectFixedHeadExposedChain.liftHead le htyped ih
+  | @conv paths headType headType' resultType u headLevel head headTy
+      outLevel out outTy shape headRaw tailRaw headRel tail ih =>
+    exact ih.rehead (.single headRaw) headRel
+  | @ret paths headType resultType resultType' u headLevel head headTy
+      outLevel out outTy shape tailRaw resultRaw resultRel tail ih =>
+    exact LR.DirectFixedHeadExposedChain.ret ih (.single resultRaw) resultRel
+
+/-- Complete a nonempty guarded fixed-head application spine from one exact
+self-relation for the selected lower head.
+
+Shape synthesis chooses the common finite levels, `headTyOfNonempty` recovers
+the head type relation from the informative term observation, and the path
+zipper stores only conversion edges explicitly authorized by `convert`.  The
+terminal term/type observation remains exactly the caller's `out`/`outTy`. -/
+theorem LE_Interp.RHS.ShapeSpine.directApplyWithHeadSelf
+    {Γ : List SExpr} {p : Pattern}
+    {mcap : p.Path → TShape} {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head : TShape}
+    {headType resultType X : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LE_Interp.RHS.ShapeSpine mcap head paths out.T)
+    (hcap : ∀ path, LR.DirectTermCaptureDefEqAligned.AtSomeLevel Γ
+      (mcap path) (mx path) (my path) (captureType path))
+    (hout : out.HasType outTy) (houtNonbot : ¬out.T ≤ TShape.bot)
+    (hne : paths ≠ [])
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      headType paths resultType)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (headSelf : ∀ {headLevel : Nat}
+        {headElem headElemTy : WShape headLevel},
+      headElem.T ≤ head → headElem.HasType headElemTy →
+      (LRD Γ).DefEq X X headType headElem headElemTy) :
+    (LRD Γ).DefEq
+      (paths.foldl (fun f path => f.app (mx path)) X)
+      (paths.foldl (fun f path => f.app (my path)) X)
+      resultType out outTy := by
+  obtain ⟨headLevel, headElem, headElemTy, helem, htyped,
+    _hnonbot, chain⟩ := H.directFixedHeadShapeChain hcap hout houtNonbot
+  have hterm : (LRD Γ).DefEq X X headType headElem headElemTy :=
+    headSelf helem htyped
+  have hheadTy : (LRD Γ).TyDefEq headType headType headElemTy :=
+    chain.headTyOfNonempty hne hterm
+  exact (chain.pathSemantics raw hheadTy resultRel convert).exposed.apply hterm
+
+/-- Rewrite the guarded fixed-head fold back to the exact generated RHS
+syntax stored by an iota descriptor.  The descriptor's `rhsTower` is the
+only syntactic rewrite; all semantic levels and the terminal observation are
+those selected by `directApplyWithHeadSelf`. -/
+theorem LE_Interp.RHS.ShapeSpine.directApplyRuleWithHeadSelf
+    {Γ : List SExpr} {rec ctor : Name} {major arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {recLs : List SLevel}
+    {mcap : (RecursorIotaPattern rec major ctor arity).Path → TShape}
+    {mx my captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {resultType : SExpr} {head : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LE_Interp.RHS.ShapeSpine mcap head rule.capturePaths out.T)
+    (hcap : ∀ path, LR.DirectTermCaptureDefEqAligned.AtSomeLevel Γ
+      (mcap path) (mx path) (my path) (captureType path))
+    (hout : out.HasType outTy) (houtNonbot : ¬out.T ≤ TShape.bot)
+    (hne : rule.capturePaths ≠ [])
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths resultType)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (headSelf : ∀ {headLevel : Nat}
+        {headElem headElemTy : WShape headLevel},
+      headElem.T ≤ head → headElem.HasType headElemTy →
+      (LRD Γ).DefEq
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) headElem headElemTy) :
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my)
+      resultType out outTy := by
+  rw [← rule.rhsApply recLs mx, ← rule.rhsApply recLs my]
+  simpa only [List.foldl_map] using
+    H.directApplyWithHeadSelf hcap hout houtNonbot hne raw resultRel
+      convert headSelf
+
+/-- Complete a nonempty guarded fixed-head application from a
+proof-relevant guarded telescope producer.
+
+Unlike `directApplyWithHeadSelf`, the callback receives the registered
+head-type witness at the exact lower type shape selected by the direct
+chain.  The telescope, lowered witness, and direct captures all arise from
+one producer elimination, so the callback never has to justify an arbitrary
+typed observation. -/
+theorem LE_Interp.RHS.ShapeSpine.directApplyWithProducerHeadSelf
+    {Γ : List SExpr} {ρ : Valuation} {p : Pattern}
+    {mcap : p.Path → TShape} {mx my captureType : p.Path → SExpr}
+    {paths : List p.Path} {head : TShape}
+    {headType resultType X : SExpr}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LE_Interp.RHS.ShapeSpine mcap head paths out.T)
+    (producer : LR.DirectFixedHeadProducer Γ ρ mx my captureType H
+      (headType := headType) (outTy := outTy))
+    (houtNonbot : ¬out.T ≤ TShape.bot)
+    (hne : paths ≠ [])
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      headType paths resultType)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (headSelf : ∀ {headLevel : Nat}
+        {headElem headElemTy : WShape headLevel},
+      headElem.T ≤ head → headElem.HasType headElemTy →
+      LE_Interp.Witness ρ headElemTy.T headType →
+      (LRD Γ).DefEq X X headType headElem headElemTy) :
+    (LRD Γ).DefEq
+      (paths.foldl (fun f path => f.app (mx path)) X)
+      (paths.foldl (fun f path => f.app (my path)) X)
+      resultType out outTy := by
+  refine producer ?_
+  intro headTy htel hTyReg
+  obtain ⟨headLevel, headElem, headElemTy, helem, htyped,
+    ⟨hTy⟩, chain⟩ := htel.withWitnessAndChain hTyReg houtNonbot
+  have hterm : (LRD Γ).DefEq X X headType headElem headElemTy :=
+    headSelf helem htyped hTy
+  have hheadTy : (LRD Γ).TyDefEq headType headType headElemTy :=
+    chain.headTyOfNonempty hne hterm
+  exact (chain.pathSemantics raw hheadTy resultRel convert).exposed.apply hterm
+
+/-- The producer-driven guarded fold, rewritten to the generated RHS syntax
+stored by an iota descriptor. -/
+theorem LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerHeadSelf
+    {Γ : List SExpr} {ρ : Valuation}
+    {rec ctor : Name} {major arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {recLs : List SLevel}
+    {mcap : (RecursorIotaPattern rec major ctor arity).Path → TShape}
+    {mx my captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {resultType : SExpr} {head : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    (H : LE_Interp.RHS.ShapeSpine mcap head rule.capturePaths out.T)
+    (producer : LR.DirectFixedHeadProducer Γ ρ mx my captureType H
+      (headType := SExpr.mkInst recLs rule.df.type) (outTy := outTy))
+    (houtNonbot : ¬out.T ≤ TShape.bot)
+    (hne : rule.capturePaths ≠ [])
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths resultType)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (headSelf : ∀ {headLevel : Nat}
+        {headElem headElemTy : WShape headLevel},
+      headElem.T ≤ head → headElem.HasType headElemTy →
+      LE_Interp.Witness ρ headElemTy.T
+        (SExpr.mkInst recLs rule.df.type) →
+      (LRD Γ).DefEq
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) headElem headElemTy) :
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my)
+      resultType out outTy := by
+  rw [← rule.rhsApply recLs mx, ← rule.rhsApply recLs my]
+  simpa only [List.foldl_map] using
+    H.directApplyWithProducerHeadSelf producer houtNonbot hne raw
+      resultRel convert headSelf
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directFixedHeadShapeChain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directFixedHeadShapeChain
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadShapeChain.headTyOfNonempty' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadShapeChain.headTyOfNonempty
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadShapeChain.pathSemantics' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadShapeChain.pathSemantics
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadPathSemantics.exposed' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadPathSemantics.exposed
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directApplyWithHeadSelf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directApplyWithHeadSelf
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directApplyRuleWithHeadSelf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directApplyRuleWithHeadSelf
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.directFixedHeadShapeChain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.TypedTelescope.WithCapturesLE.directFixedHeadShapeChain
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadTelescopeLE.withWitnessAndChain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadTelescopeLE.withWitnessAndChain
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadProducer.of_telescope' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadProducer.of_telescope
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadTelescopeLE.ofOrderedLink' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadTelescopeLE.ofOrderedLink
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadDominanceSpine.telescopeLE' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadDominanceSpine.telescopeLE
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadDominanceSpine.producer' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadDominanceSpine.producer
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directApplyWithProducerHeadSelf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directApplyWithProducerHeadSelf
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerHeadSelf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerHeadSelf
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.AtShapes.toTerm' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.AtShapes.toTerm
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.AtSomeLevel.toTerm' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.AtSomeLevel.toTerm
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTermCaptureDefEqAligned.Upgrade.atSomeLevel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTermCaptureDefEqAligned.Upgrade.atSomeLevel
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.Upgrade.toTerm' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.Upgrade.toTerm
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTermCaptureDefEqAligned.AtShapes.lift' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTermCaptureDefEqAligned.AtShapes.lift
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_bot' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_bot
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_indTy' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.Upgrade.of_typeShape_indTy
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_bot' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_bot
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTermCaptureDefEqAligned.Upgrade.of_elemShape_bot' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTermCaptureDefEqAligned.Upgrade.of_elemShape_bot
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_indTy' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectTermCaptureDefEqAligned.Upgrade.of_typeShape_indTy
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAligned.Upgrade.atSomeLevel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAligned.Upgrade.atSomeLevel
+
+/--
+info: 'Lean4Lean.SExpr.LRD.FixedHeadConvertStep.of_parts' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.FixedHeadConvertStep.of_parts
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadChain.apply' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadChain.apply
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectFixedHeadExposedChain.apply' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectFixedHeadExposedChain.apply
+
+/-- Materialize a semantic `varN` match from a complete paired direct
+argument list.  The induction is purely structural and, crucially, chooses
+the capture type only once for both projections. -/
+theorem LE_Interp.Matches.varN_materializeDirectAt
+    {IH : LR.DirectRelBase Γ n}
+    {c c' : Name} {arity : Nat} {rargs : List (WShape n)}
+    {mcap : (Pattern.varN (.const c) arity).Path → TShape}
+    {xs ys : List SExpr} {ls ls' : List SLevel}
+    (hm : LE_Interp.Matches (Pattern.varN (.const c) arity)
+      c' rargs mcap)
+    (hargs : LR.DirectCtorArgsDefEq IH xs ys rargs) :
+    c' = c ∧ ∃ mx my,
+      (Pattern.varN (.const c) arity).MatchesS
+        (xs.foldr (fun a f => f.app a) (.const c ls)) ls mx ∧
+      (Pattern.varN (.const c) arity).MatchesS
+        (ys.foldr (fun a f => f.app a) (.const c ls')) ls' my ∧
+      ∀ path, LR.DirectCaptureDefEqAt IH
+        (mcap path) (mx path) (my path) := by
+  induction arity generalizing c' n rargs xs ys with
+  | zero =>
+    simp only [Pattern.varN] at hm
+    cases hm
+    cases hargs
+    refine ⟨rfl, nofun, nofun, ?_, ?_, nofun⟩
+    · exact .const
+    · exact .const
+  | succ arity ih =>
+    simp only [Pattern.varN] at hm
+    cases hm with
+    | var hm =>
+      cases hargs with
+      | @cons A a x y p xs ys ps hp htyLegacy htyDirect hxy
+          hvLegacy hvDirect hrest =>
+        obtain ⟨rfl, mx, my, hmx, hmy, hcap⟩ := ih hm hrest
+        refine ⟨rfl, (fun path => Option.elim path x mx),
+          (fun path => Option.elim path y my), hmx.var, hmy.var, ?_⟩
+        intro path
+        cases path with
+        | none =>
+          exact ⟨_, _, _, TShape.LE.rfl, hp, htyLegacy, htyDirect,
+            hxy, hvLegacy, hvDirect⟩
+        | some path => exact hcap path
+
+/-- Materialize a semantic `varN` match while retaining the literal capture
+type and both literal shapes stored by the paired direct argument spine.
+
+Unlike `varN_materializeDirectAt`, this form does not existentially package
+each capture and then choose a representative.  The capture maps, type map,
+and shape maps are constructed together by the same structural recursion, so
+a registered-type trace can later identify them layer-for-layer without a
+type-functionality or shape-projection principle. -/
+theorem LE_Interp.Matches.varN_materializeDirectAlignedAt
+    {IH : LR.DirectRelBase Γ n}
+    {c c' : Name} {arity : Nat} {rargs : List (WShape n)}
+    {mcap : (Pattern.varN (.const c) arity).Path → TShape}
+    {xs ys : List SExpr} {ls ls' : List SLevel}
+    (hm : LE_Interp.Matches (Pattern.varN (.const c) arity)
+      c' rargs mcap)
+    (hargs : LR.DirectCtorArgsDefEq IH xs ys rargs) :
+    c' = c ∧
+      ∃ (mx my : (Pattern.varN (.const c) arity).Path → SExpr)
+        (captureType : (Pattern.varN (.const c) arity).Path → SExpr)
+        (elemShape typeShape :
+          (Pattern.varN (.const c) arity).Path → WShape n),
+        (Pattern.varN (.const c) arity).MatchesS
+          (xs.foldr (fun a f => f.app a) (.const c ls)) ls mx ∧
+        (Pattern.varN (.const c) arity).MatchesS
+          (ys.foldr (fun a f => f.app a) (.const c ls')) ls' my ∧
+        (Pattern.varNPaths (.const c) arity).map mx = xs.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map my = ys.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map elemShape = rargs.reverse ∧
+        ∀ path, LR.DirectCaptureDefEqAligned.AtShapes IH
+          (mcap path) (mx path) (my path) (captureType path)
+          (elemShape path) (typeShape path) := by
+  induction arity generalizing c' n rargs xs ys with
+  | zero =>
+    simp only [Pattern.varN] at hm
+    cases hm
+    cases hargs
+    refine ⟨rfl, nofun, nofun, nofun, nofun, nofun,
+      ?_, ?_, rfl, rfl, rfl, nofun⟩
+    · exact .const
+    · exact .const
+  | succ arity ih =>
+    simp only [Pattern.varN] at hm
+    cases hm with
+    | @var _ _ _ _ _ p hm =>
+      cases hargs with
+      | @cons A a x y p xs ys ps hp htyLegacy htyDirect hxy
+          hvLegacy hvDirect hrest =>
+        obtain ⟨rfl, mx, my, captureType, elemShape, typeShape,
+            hmx, hmy, hmxPaths, hmyPaths, helemPaths, hcap⟩ :=
+          ih hm hrest
+        refine ⟨rfl,
+          (fun path => Option.elim path x mx),
+          (fun path => Option.elim path y my),
+          (fun path => Option.elim path A captureType),
+          (fun path => Option.elim path p elemShape),
+          (fun path => Option.elim path a typeShape),
+          hmx.var, hmy.var, ?_, ?_, ?_, ?_⟩
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path x mx) ∘ some = mx := by
+            funext path
+            rfl
+          rw [hcomp, hmxPaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path y my) ∘ some = my := by
+            funext path
+            rfl
+          rw [hcomp, hmyPaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path p elemShape) ∘ some =
+                elemShape := by
+            funext path
+            rfl
+          rw [hcomp, helemPaths]
+          rfl
+        · intro path
+          cases path with
+          | none =>
+            exact ⟨TShape.LE.rfl, hp, htyLegacy, htyDirect,
+              hxy, hvLegacy, hvDirect⟩
+          | some path => exact hcap path
+
+/-- Fully listed form of direct `varN` materialization.  Besides the exact
+capture payload, the five canonical path traversals are proved equal to the
+reversed newest-first lists supplied by the evaluator. -/
+theorem LE_Interp.Matches.varN_materializeDirectListedAt
+    {IH : LR.DirectRelBase Γ n}
+    {c c' : Name} {arity : Nat} {rargs typeShapes : List (WShape n)}
+    {mcap : (Pattern.varN (.const c) arity).Path → TShape}
+    {xs ys types : List SExpr} {ls ls' : List SLevel}
+    (hm : LE_Interp.Matches (Pattern.varN (.const c) arity)
+      c' rargs mcap)
+    (hargs : LR.DirectCtorArgsDefEqListed IH
+      xs ys types rargs typeShapes) :
+    c' = c ∧
+      ∃ (mx my : (Pattern.varN (.const c) arity).Path → SExpr)
+        (captureType : (Pattern.varN (.const c) arity).Path → SExpr)
+        (elemShape typeShape :
+          (Pattern.varN (.const c) arity).Path → WShape n),
+        (Pattern.varN (.const c) arity).MatchesS
+          (xs.foldr (fun a f => f.app a) (.const c ls)) ls mx ∧
+        (Pattern.varN (.const c) arity).MatchesS
+          (ys.foldr (fun a f => f.app a) (.const c ls')) ls' my ∧
+        (Pattern.varNPaths (.const c) arity).map mx = xs.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map my = ys.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map captureType =
+          types.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map elemShape =
+          rargs.reverse ∧
+        (Pattern.varNPaths (.const c) arity).map typeShape =
+          typeShapes.reverse ∧
+        ∀ path, LR.DirectCaptureDefEqAligned.AtShapes IH
+          (mcap path) (mx path) (my path) (captureType path)
+          (elemShape path) (typeShape path) := by
+  induction arity generalizing c' n rargs typeShapes xs ys types with
+  | zero =>
+    simp only [Pattern.varN] at hm
+    cases hm
+    cases hargs
+    refine ⟨rfl, nofun, nofun, nofun, nofun, nofun,
+      ?_, ?_, rfl, rfl, rfl, rfl, rfl, nofun⟩
+    · exact .const
+    · exact .const
+  | succ arity ih =>
+    simp only [Pattern.varN] at hm
+    cases hm with
+    | @var _ _ _ _ _ p hm =>
+      cases hargs with
+      | @cons A a x y p xs ys types ps typeShapes hp htyLegacy
+          htyDirect hxy hvLegacy hvDirect hrest =>
+        obtain ⟨rfl, mx, my, captureType, elemShape, typeShape,
+            hmx, hmy, hmxPaths, hmyPaths, htypePaths,
+            helemPaths, htypeShapePaths, hcap⟩ := ih hm hrest
+        refine ⟨rfl,
+          (fun path => Option.elim path x mx),
+          (fun path => Option.elim path y my),
+          (fun path => Option.elim path A captureType),
+          (fun path => Option.elim path p elemShape),
+          (fun path => Option.elim path a typeShape),
+          hmx.var, hmy.var, ?_, ?_, ?_, ?_, ?_, ?_⟩
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path x mx) ∘ some = mx := by
+            funext path
+            rfl
+          rw [hcomp, hmxPaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path y my) ∘ some = my := by
+            funext path
+            rfl
+          rw [hcomp, hmyPaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path A captureType) ∘ some =
+                captureType := by
+            funext path
+            rfl
+          rw [hcomp, htypePaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path p elemShape) ∘ some =
+                elemShape := by
+            funext path
+            rfl
+          rw [hcomp, helemPaths]
+          rfl
+        · simp only [Pattern.varNPaths, List.map_append, List.map_map,
+            List.map_cons, List.map_nil, List.reverse_cons]
+          have hcomp :
+              (fun path => Option.elim path a typeShape) ∘ some =
+                typeShape := by
+            funext path
+            rfl
+          rw [hcomp, htypeShapePaths]
+          rfl
+        · intro path
+          cases path with
+          | none =>
+            exact ⟨TShape.LE.rfl, hp, htyLegacy, htyDirect,
+              hxy, hvLegacy, hvDirect⟩
+          | some path => exact hcap path
+
+/-- Materialize an iota match with paired direct evidence for every
+accumulated recursor argument and the established predecessor relation for
+constructor fields.  This is the exact mixed-level payload needed by the Nat
+successor branch: motives and recursive arguments stay guarded, while the
+constructor predecessor remains in the ordinary inductive relation. -/
+theorem LE_Interp.Matches.iota_materializeDirectRecAt
+    {rec ctor ctor' : Name} {major arity n : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor' ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEq (LRD Γ)
+      recXs recYs recShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ)
+      ctorXs ctorYs ctorShapes)
+    (hMajorX : WHRedS Γ majorX
+      (ctorXs.foldr (fun a f => f.app a) (.const ctor' ctorLs)))
+    (hMajorY : WHRedS Γ majorY
+      (ctorYs.foldr (fun a f => f.app a) (.const ctor' ctorLs'))) :
+    ∃ mx my,
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recXs.foldr (fun (a f : SExpr) => f.app a) (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs)))
+        recLs mx ∧
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recYs.foldr (fun (a f : SExpr) => f.app a) (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs')))
+        recLs my ∧
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAt (n := n + 1) (LRD Γ)
+            (mrec p) (mx path) (my path)
+        | Sum.inr p => LRS.CaptureDefEqAt (n := n) (LR Γ)
+            (mctor p) (mx path) (my path)) ∧
+      WHRedS Γ
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ∧
+      WHRedS Γ
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) := by
+  obtain ⟨_, mxf, myf, hmxf, hmyf, hcapf⟩ :=
+    hmf.varN_materializeDirectAt (ls := recLs) (ls' := recLs)
+      hrecargs
+  obtain ⟨hctor, mxa, mya, hmxa, hmya, hcapa⟩ :=
+    hma.varN_materializeAt (ls := ctorLs) (ls' := ctorLs') hctorargs
+  subst ctor'
+  refine ⟨Sum.elim mxf mxa, Sum.elim myf mya,
+    hmxf.app hmxa, hmyf.app hmya, ?_, ?_, ?_⟩
+  · intro path
+    cases path with
+    | inl path =>
+      change LR.DirectCaptureDefEqAt (n := n + 1) (LRD Γ)
+        (mrec path) (mxf path) (myf path)
+      exact hcapf path
+    | inr path =>
+      change LRS.CaptureDefEqAt (n := n) (LR Γ)
+        (mctor path) (mxa path) (mya path)
+      exact hcapa path
+  · exact hMajorX.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmxf⟩
+  · exact hMajorY.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmyf⟩
+
+/-- Materialize an iota match while preserving the literal aligned data of
+every recursor-prefix capture.
+
+The recursor side is built by `varN_materializeDirectAlignedAt`, so its
+capture type and both shapes are never reselected.  Constructor fields stay
+at predecessor level and use the established aligned witness selection.  In
+the nullary-constructor case (notably `Nat.zero`) the latter branch is empty,
+leaving the whole live capture inventory choice-free. -/
+theorem LE_Interp.Matches.iota_materializeDirectRecAlignedAt
+    {rec ctor ctor' : Name} {major arity n : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor' ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEq (LRD Γ)
+      recXs recYs recShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ)
+      ctorXs ctorYs ctorShapes)
+    (hMajorX : WHRedS Γ majorX
+      (ctorXs.foldr (fun a f => f.app a) (.const ctor' ctorLs)))
+    (hMajorY : WHRedS Γ majorY
+      (ctorYs.foldr (fun a f => f.app a) (.const ctor' ctorLs'))) :
+    ∃ (mx my captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)),
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs)))
+        recLs mx ∧
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs')))
+        recLs my ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes (n := n + 1) (LRD Γ)
+          (mrec path) (mx (.inl path)) (my (.inl path))
+          (captureType (.inl path)) (recElemShape path)
+          (recTypeShape path)) ∧
+      (∀ path : (Pattern.varN (.const ctor) arity).Path,
+        LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor path) (mx (.inr path)) (my (.inr path))
+          (captureType (.inr path))) ∧
+      WHRedS Γ
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ∧
+      WHRedS Γ
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) := by
+  obtain ⟨_, mxf, myf, recCaptureType, recElemShape, recTypeShape,
+      hmxf, hmyf, hmxfPaths, hmyfPaths, helemPaths, hcapf⟩ :=
+    hmf.varN_materializeDirectAlignedAt
+      (ls := recLs) (ls' := recLs) hrecargs
+  obtain ⟨hctor, mxa, mya, hmxa, hmya, hcapa⟩ :=
+    hma.varN_materializeAt (ls := ctorLs) (ls' := ctorLs') hctorargs
+  subst ctor'
+  classical
+  let captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr :=
+    fun path => match path with
+      | Sum.inl path => recCaptureType path
+      | Sum.inr path =>
+        (LRS.CaptureDefEqAt.witness (hcapa path)).typeExpr
+  refine ⟨Sum.elim mxf mxa, Sum.elim myf mya, captureType,
+    recElemShape, recTypeShape, hmxf.app hmxa, hmyf.app hmya,
+    ?_, ?_, helemPaths, ?_, ?_, ?_, ?_⟩
+  · simpa only [Sum.elim_inl] using hmxfPaths
+  · simpa only [Sum.elim_inl] using hmyfPaths
+  · intro path
+    change LR.DirectCaptureDefEqAligned.AtShapes (n := n + 1) (LRD Γ)
+      (mrec path) (mxf path) (myf path) (recCaptureType path)
+      (recElemShape path) (recTypeShape path)
+    exact hcapf path
+  · intro path
+    change LRS.CaptureDefEqAligned (n := n) (LR Γ)
+      (mctor path) (mxa path) (mya path)
+      (LRS.CaptureDefEqAt.witness (hcapa path)).typeExpr
+    exact (LRS.CaptureDefEqAt.witness (hcapa path)).aligned
+  · exact hMajorX.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmxf⟩
+  · exact hMajorY.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmyf⟩
+
+/-- Iota materialization from an explicitly listed recursor-prefix payload.
+All five recursor capture maps are returned with their canonical readback
+equations; constructor fields retain the established predecessor-level
+aligned witnesses. -/
+theorem LE_Interp.Matches.iota_materializeDirectRecListedAt
+    {rec ctor ctor' : Name} {major arity n : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor' ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ)
+      ctorXs ctorYs ctorShapes)
+    (hMajorX : WHRedS Γ majorX
+      (ctorXs.foldr (fun a f => f.app a) (.const ctor' ctorLs)))
+    (hMajorY : WHRedS Γ majorY
+      (ctorYs.foldr (fun a f => f.app a) (.const ctor' ctorLs'))) :
+    ∃ (mx my captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)),
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) recLs mx ∧
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) recLs my ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => captureType (.inl path)) = recTypes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recTypeShape =
+        recTypeShapes.reverse ∧
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes (n := n + 1) (LRD Γ)
+          (mrec path) (mx (.inl path)) (my (.inl path))
+          (captureType (.inl path)) (recElemShape path)
+          (recTypeShape path)) ∧
+      (∀ path : (Pattern.varN (.const ctor) arity).Path,
+        LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor path) (mx (.inr path)) (my (.inr path))
+          (captureType (.inr path))) ∧
+      WHRedS Γ
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ∧
+      WHRedS Γ
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) := by
+  obtain ⟨_, mxf, myf, recCaptureType, recElemShape, recTypeShape,
+      hmxf, hmyf, hmxfPaths, hmyfPaths, htypePaths,
+      helemPaths, htypeShapePaths, hcapf⟩ :=
+    hmf.varN_materializeDirectListedAt
+      (ls := recLs) (ls' := recLs) hrecargs
+  obtain ⟨hctor, mxa, mya, hmxa, hmya, hcapa⟩ :=
+    hma.varN_materializeAt (ls := ctorLs) (ls' := ctorLs') hctorargs
+  subst ctor'
+  classical
+  let captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr :=
+    fun path => match path with
+      | Sum.inl path => recCaptureType path
+      | Sum.inr path =>
+        (LRS.CaptureDefEqAt.witness (hcapa path)).typeExpr
+  refine ⟨Sum.elim mxf mxa, Sum.elim myf mya, captureType,
+    recElemShape, recTypeShape, hmxf.app hmxa, hmyf.app hmya,
+    ?_, ?_, ?_, helemPaths, htypeShapePaths, ?_, ?_, ?_, ?_⟩
+  · simpa only [Sum.elim_inl] using hmxfPaths
+  · simpa only [Sum.elim_inl] using hmyfPaths
+  · simpa only [captureType] using htypePaths
+  · intro path
+    change LR.DirectCaptureDefEqAligned.AtShapes (n := n + 1) (LRD Γ)
+      (mrec path) (mxf path) (myf path) (recCaptureType path)
+      (recElemShape path) (recTypeShape path)
+    exact hcapf path
+  · intro path
+    change LRS.CaptureDefEqAligned (n := n) (LR Γ)
+      (mctor path) (mxa path) (mya path)
+      (LRS.CaptureDefEqAt.witness (hcapa path)).typeExpr
+    exact (LRS.CaptureDefEqAt.witness (hcapa path)).aligned
+  · exact hMajorX.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmxf⟩
+  · exact hMajorY.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmyf⟩
+
+/-- Fully listed iota materialization when both the recursor prefix and the
+constructor fields already carry paired guarded evidence.
+
+The constructor half deliberately remains at level `n`, but unlike the
+legacy mixed materializer it exposes the exact field types and both semantic
+shape lists.  A framed unary constructor can therefore rebuild its root
+field relation once and let the generated RHS consume that same selected
+predecessor without an existential re-selection. -/
+theorem LE_Interp.Matches.iota_materializeDirectListedAt
+    {rec ctor ctor' : Name} {major arity n : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes ctorTypeShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs ctorTypes : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor' ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LR.DirectCtorArgsDefEqListed (LRD Γ)
+      ctorXs ctorYs ctorTypes ctorShapes ctorTypeShapes)
+    (hMajorX : WHRedS Γ majorX
+      (ctorXs.foldr (fun a f => f.app a) (.const ctor' ctorLs)))
+    (hMajorY : WHRedS Γ majorY
+      (ctorYs.foldr (fun a f => f.app a) (.const ctor' ctorLs'))) :
+    ∃ (mx my captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1))
+      (ctorElemShape ctorTypeShape :
+        (Pattern.varN (.const ctor) arity).Path → WShape n),
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) recLs mx ∧
+      (RecursorIotaPattern rec major ctor arity).MatchesS
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) recLs my ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => captureType (.inl path)) = recTypes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recTypeShape =
+        recTypeShapes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => mx (.inr path)) = ctorXs.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => my (.inr path)) = ctorYs.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => captureType (.inr path)) = ctorTypes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map ctorElemShape =
+        ctorShapes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map ctorTypeShape =
+        ctorTypeShapes.reverse ∧
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes (n := n + 1) (LRD Γ)
+          (mrec path) (mx (.inl path)) (my (.inl path))
+          (captureType (.inl path)) (recElemShape path)
+          (recTypeShape path)) ∧
+      (∀ path : (Pattern.varN (.const ctor) arity).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes (n := n) (LRD Γ)
+          (mctor path) (mx (.inr path)) (my (.inr path))
+          (captureType (.inr path)) (ctorElemShape path)
+          (ctorTypeShape path)) ∧
+      WHRedS Γ
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ∧
+      WHRedS Γ
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) := by
+  obtain ⟨_, mxf, myf, recCaptureType, recElemShape, recTypeShape,
+      hmxf, hmyf, hmxfPaths, hmyfPaths, hrecTypePaths,
+      hrecElemPaths, hrecTypeShapePaths, hcapf⟩ :=
+    hmf.varN_materializeDirectListedAt
+      (ls := recLs) (ls' := recLs) hrecargs
+  obtain ⟨hctor, mxa, mya, ctorCaptureType, ctorElemShape,
+      ctorTypeShape, hmxa, hmya, hmxaPaths, hmyaPaths, hctorTypePaths,
+      hctorElemPaths, hctorTypeShapePaths, hcapa⟩ :=
+    hma.varN_materializeDirectListedAt
+      (ls := ctorLs) (ls' := ctorLs') hctorargs
+  subst ctor'
+  let mx := Sum.elim mxf mxa
+  let my := Sum.elim myf mya
+  let captureType := Sum.elim recCaptureType ctorCaptureType
+  refine ⟨mx, my, captureType, recElemShape, recTypeShape,
+    ctorElemShape, ctorTypeShape, hmxf.app hmxa, hmyf.app hmya,
+    ?_, ?_, ?_, hrecElemPaths, hrecTypeShapePaths,
+    ?_, ?_, ?_, hctorElemPaths, hctorTypeShapePaths,
+    ?_, ?_, ?_, ?_⟩
+  · simpa only [mx, Sum.elim_inl] using hmxfPaths
+  · simpa only [my, Sum.elim_inl] using hmyfPaths
+  · simpa only [captureType, Sum.elim_inl] using hrecTypePaths
+  · simpa only [mx, Sum.elim_inr] using hmxaPaths
+  · simpa only [my, Sum.elim_inr] using hmyaPaths
+  · simpa only [captureType, Sum.elim_inr] using hctorTypePaths
+  · intro path
+    simpa only [mx, my, captureType, Sum.elim_inl] using hcapf path
+  · intro path
+    simpa only [mx, my, captureType, Sum.elim_inr] using hcapa path
+  · exact hMajorX.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmxf⟩
+  · exact hMajorY.major ⟨_, ⟨_, hpat⟩, _, _, .refl, _, _, hmyf⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCtorArgsDefEq.left' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCtorArgsDefEq.left
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCtorArgsDefEq.right' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCtorArgsDefEq.right
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCtorArgsDefEqListed.left' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCtorArgsDefEqListed.left
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCtorArgsDefEqListed.right' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCtorArgsDefEqListed.right
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.varN_materializeDirectAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.varN_materializeDirectAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.varN_materializeDirectAlignedAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.varN_materializeDirectAlignedAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.varN_materializeDirectListedAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.varN_materializeDirectListedAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.iota_materializeDirectRecAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.iota_materializeDirectRecAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.iota_materializeDirectRecAlignedAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.iota_materializeDirectRecAlignedAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.iota_materializeDirectRecListedAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.iota_materializeDirectRecListedAt
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Matches.iota_materializeDirectListedAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Matches.iota_materializeDirectListedAt
+
+/-- A pattern-leaf spine whose established projection and guarded action
+share the same syntactic and semantic endpoints.  The complete direct
+argument list is retained in addition to the final Pi edge, so a generated
+RHS can reuse any earlier recursor capture without reselecting evidence. -/
+structure LR.DirectPatternLeafSpine (Γ : List SExpr)
+    (IH : LR.DirectRelBase Γ n)
+    (Head : SExpr) (args args' : List SExpr)
+    (rargs : List (WShape n)) (A : SExpr)
+    (out outTy : WShape n) where
+  legacy : LR.PatternLeafSpine Γ (LR Γ)
+    Head args args' rargs A out outTy
+  directArgs : LR.DirectCtorArgsDefEq IH args args' rargs
+  majorType : IH.TyDefEq legacy.pair.domain legacy.pair.domain
+    legacy.majorTypeShape
+  majorRel : IH.DefEq legacy.majorX legacy.majorY legacy.pair.domain
+    legacy.majorShape legacy.majorTypeShape
+  pi : LR.DirectPiDefEq IH legacy.pair.domain legacy.pair.codomain
+    legacy.pair.codomain legacy.majorTypeShape legacy.resultTypeShape
+
+/-- The registered constant type at the exact guarded root shape used by
+the direct application spine.
+
+The semantic witness and guarded type relation are deliberately indexed by
+the same literal `WShape`.  A reached pattern leaf may therefore inspect the
+registered type telescope without pairing an independently selected semantic
+typing with the direct Pi decomposition that generated its captures. -/
+structure LR.DirectRegisteredTypeRoot (Γ : List SExpr) (ρ : Valuation)
+    (headType : SExpr) : Type where
+  level : Nat
+  domain : WShape level
+  codomain : WShapeFun level
+  witness : LE_Interp.Witness ρ
+    (WShape.forallE domain codomain).T headType
+  related : (LRD Γ).TyDefEq headType headType
+    (.forallE domain codomain)
+
+/-- The registered type decomposition followed by the direct constant
+evaluator, with every application layer retained at the exact shapes used by
+that evaluator.
+
+The argument level is fixed by the registered root.  The type observation
+has its own level: the root Pi lives one level above its domain, while later
+Pi observations may be exposed at the common argument level and therefore
+lift their domains before accepting the next argument.  The result syntax is
+kept as an explicit index because the right rectangle row is transported to
+the evaluator's left-oriented dependent result rather than being
+definitionally `F.inst y`. -/
+inductive LR.DirectRegisteredTypeTrace (Γ : List SExpr) (ρ : Valuation)
+    (headType : SExpr) :
+    {argLevel : Nat} →
+      List SExpr → List SExpr → List (WShape argLevel) → SExpr →
+      {typeLevel : Nat} → WShape typeLevel → Type where
+  | nil (registered : LR.DirectRegisteredTypeRoot Γ ρ headType) :
+      LR.DirectRegisteredTypeTrace Γ ρ headType
+        (argLevel := registered.level)
+        [] [] [] headType
+        (.forallE registered.domain registered.codomain)
+  | cons
+      {argLevel domainLevel : Nat}
+      {xs ys : List SExpr} {ps : List (WShape argLevel)}
+      {A B F result x y : SExpr}
+      {domain : WShape domainLevel} {codomain : WShapeFun domainLevel}
+      {p : WShape argLevel} {u vX vY : SLevel}
+      (levelLE : domainLevel ≤ argLevel)
+      (previous : LR.DirectRegisteredTypeTrace Γ ρ headType
+        xs ys ps A (.forallE domain codomain))
+      (path : TypeDefEqPath Γ A (.forallE B F) u)
+      (hasType : p.HasType (domain.lift argLevel))
+      (typeRelatedLegacy : (LR Γ).TyDefEq B B (domain.lift argLevel))
+      (typeRelatedDirect : (LRD Γ).TyDefEq B B (domain.lift argLevel))
+      (defeq : IsDefEq Γ x y B)
+      (relatedLegacy : (LR Γ).DefEq x y B p (domain.lift argLevel))
+      (relatedDirect : (LRD Γ).DefEq x y B p (domain.lift argLevel))
+      (resultX : IsDefEq Γ (F.inst x) result (.sort vX))
+      (resultY : IsDefEq Γ (F.inst y) result (.sort vY))
+      (resultRelated : (LRD Γ).TyDefEq result result
+        ((codomain.lift argLevel).app p)) :
+      LR.DirectRegisteredTypeTrace Γ ρ headType
+        (x :: xs) (y :: ys) (p :: ps) result
+        ((codomain.lift argLevel).app p)
+
+/-- Add an application whose Pi domain already lives at the trace's common
+argument level.  This is the registered root step; the general constructor
+above handles later Pi observations whose domains require a canonical
+lift. -/
+noncomputable def LR.DirectRegisteredTypeTrace.consSelf
+    {n : Nat} {xs ys : List SExpr} {ps : List (WShape n)}
+    {A B F result x y : SExpr} {domain : WShape n}
+    {codomain : WShapeFun n} {p : WShape n} {u vX vY : SLevel}
+    (previous : LR.DirectRegisteredTypeTrace Γ ρ headType
+      xs ys ps A (.forallE domain codomain))
+    (path : TypeDefEqPath Γ A (.forallE B F) u)
+    (hasType : p.HasType domain)
+    (typeRelatedLegacy : (LR Γ).TyDefEq B B domain)
+    (typeRelatedDirect : (LRD Γ).TyDefEq B B domain)
+    (defeq : IsDefEq Γ x y B)
+    (relatedLegacy : (LR Γ).DefEq x y B p domain)
+    (relatedDirect : (LRD Γ).DefEq x y B p domain)
+    (resultX : IsDefEq Γ (F.inst x) result (.sort vX))
+    (resultY : IsDefEq Γ (F.inst y) result (.sort vY))
+    (resultRelated : (LRD Γ).TyDefEq result result (codomain.app p)) :
+    LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result (codomain.app p) := by
+  have hasType' : p.HasType (domain.lift n) := by
+    simpa only [WShape.lift_self] using hasType
+  have typeRelatedLegacy' : (LR Γ).TyDefEq B B (domain.lift n) := by
+    simpa only [WShape.lift_self] using typeRelatedLegacy
+  have typeRelatedDirect' : (LRD Γ).TyDefEq B B (domain.lift n) := by
+    simpa only [WShape.lift_self] using typeRelatedDirect
+  have relatedLegacy' : (LR Γ).DefEq x y B p (domain.lift n) := by
+    simpa only [WShape.lift_self] using relatedLegacy
+  have relatedDirect' : (LRD Γ).DefEq x y B p (domain.lift n) := by
+    simpa only [WShape.lift_self] using relatedDirect
+  have resultRelated' : (LRD Γ).TyDefEq result result
+      ((codomain.lift n).app p) := by
+    simpa only [WShapeFun.lift_self] using resultRelated
+  simpa only [WShapeFun.lift_self] using
+    LR.DirectRegisteredTypeTrace.cons (Nat.le_refl n) previous path
+      hasType' typeRelatedLegacy' typeRelatedDirect' defeq relatedLegacy'
+      relatedDirect' resultX resultY resultRelated'
+
+/-- Recover the exact registered root retained by an application trace. -/
+noncomputable def LR.DirectRegisteredTypeTrace.registeredRoot
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType xs ys ps A outTy) :
+    LR.DirectRegisteredTypeRoot Γ ρ headType := by
+  induction H with
+  | nil registered => exact registered
+  | cons _ _ _ _ _ _ _ _ _ _ _ _ ih => exact ih
+
+/-- The exact semantic witness at an empty registered trace.  Unlike
+`registeredRoot`, this projection keeps the trace's terminal type-shape index
+in its result, which is essential when a consumer peels the registered Pi
+telescope without reselecting a root observation. -/
+def LR.DirectRegisteredTypeTrace.nilWitness
+    {argLevel typeLevel : Nat} {A : SExpr} {outTy : WShape typeLevel}
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (argLevel := argLevel)
+      [] [] [] A outTy) :
+    LE_Interp.Witness ρ outTy.T A := by
+  cases H with
+  | nil registered => exact registered.witness
+
+/-- An empty registered trace has not changed the registered type syntax. -/
+theorem LR.DirectRegisteredTypeTrace.nilResult_eq
+    {argLevel typeLevel : Nat} {A : SExpr} {outTy : WShape typeLevel}
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (argLevel := argLevel) [] [] [] A outTy) :
+    A = headType := by
+  cases H
+  rfl
+
+/-- Forget a registered-type trace to its synchronized direct argument
+payload. -/
+theorem LR.DirectRegisteredTypeTrace.directArgs
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType xs ys ps A outTy) :
+    LR.DirectCtorArgsDefEq (LRD Γ) xs ys ps := by
+  induction H with
+  | nil _ => exact .nil
+  | cons _ _ _ hp htyLegacy htyDirect hxy hvLegacy hvDirect _ _ _ ih =>
+      exact .cons hp htyLegacy htyDirect hxy hvLegacy hvDirect ih
+
+/-- Keep the left endpoint of every exact registered-type application
+layer.  Both dependent result transports reuse the left result edge, so the
+trace keeps its original left-oriented terminal type. -/
+noncomputable def LR.DirectRegisteredTypeTrace.left
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType xs ys ps A outTy) :
+    LR.DirectRegisteredTypeTrace Γ ρ headType xs xs ps A outTy := by
+  induction H with
+  | nil registered => exact .nil registered
+  | cons levelLE previous path hp htyLegacy htyDirect hxy hvLegacy hvDirect
+      resultX resultY resultRelated ih =>
+    exact .cons levelLE ih path hp htyLegacy htyDirect hxy.hasType.1
+      ((LR Γ).left hvLegacy) (LRD.DefEq.left hvDirect)
+      resultX resultX resultRelated
+
+/-- Keep the right endpoint of every exact registered-type application
+layer while retaining the evaluator's left-oriented terminal type through
+the stored right-to-result conversion. -/
+noncomputable def LR.DirectRegisteredTypeTrace.right
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType xs ys ps A outTy) :
+    LR.DirectRegisteredTypeTrace Γ ρ headType ys ys ps A outTy := by
+  induction H with
+  | nil registered => exact .nil registered
+  | cons levelLE previous path hp htyLegacy htyDirect hxy hvLegacy hvDirect
+      resultX resultY resultRelated ih =>
+    exact .cons levelLE ih path hp htyLegacy htyDirect hxy.hasType.2
+      ((LR Γ).left ((LR Γ).symm hvLegacy))
+      (LRD.DefEq.left (LRD.DefEq.symm hvDirect))
+      resultY resultY resultRelated
+
+/-- Data-valued inversion of one nonempty registered-type application
+trace.  Unlike inversion through the proposition-valued argument relation,
+this view preserves the literal Pi domain which accepted the head argument
+and the previous trace which produced that Pi observation. -/
+structure LR.DirectRegisteredTypeTrace.ConsView
+    (Γ : List SExpr) (ρ : Valuation) (headType : SExpr)
+    {n outLevel : Nat} (x y : SExpr) (xs ys : List SExpr)
+    (p : WShape n) (ps : List (WShape n)) (result : SExpr)
+    (outTy : WShape outLevel)
+    (_H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy) where
+  domainLevel : Nat
+  previousType : SExpr
+  domainExpr : SExpr
+  bodyExpr : SExpr
+  domain : WShape domainLevel
+  codomain : WShapeFun domainLevel
+  pathSort : SLevel
+  resultSortX : SLevel
+  resultSortY : SLevel
+  levelLE : domainLevel ≤ n
+  previous : LR.DirectRegisteredTypeTrace Γ ρ headType
+    xs ys ps previousType (.forallE domain codomain)
+  path : TypeDefEqPath Γ previousType
+    (.forallE domainExpr bodyExpr) pathSort
+  hasType : p.HasType (domain.lift n)
+  typeRelatedLegacy : (LR Γ).TyDefEq domainExpr domainExpr
+    (domain.lift n)
+  typeRelatedDirect : (LRD Γ).TyDefEq domainExpr domainExpr
+    (domain.lift n)
+  defeq : IsDefEq Γ x y domainExpr
+  relatedLegacy : (LR Γ).DefEq x y domainExpr p (domain.lift n)
+  relatedDirect : (LRD Γ).DefEq x y domainExpr p (domain.lift n)
+  resultX : IsDefEq Γ (bodyExpr.inst x) result (.sort resultSortX)
+  resultY : IsDefEq Γ (bodyExpr.inst y) result (.sort resultSortY)
+  resultRelated : (LRD Γ).TyDefEq result result
+    ((codomain.lift n).app p)
+  outLevel_eq : outLevel = n
+  outTy_eq : outTy.T = ((codomain.lift n).app p).T
+
+/-- A nonempty registered-type trace has a proof-relevant one-layer view.
+The proposition-valued existence proof is the safe elimination boundary for
+the indexed trace; `consView` below chooses its data-valued representative. -/
+theorem LR.DirectRegisteredTypeTrace.consView_nonempty
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy) :
+    Nonempty (LR.DirectRegisteredTypeTrace.ConsView
+      Γ ρ headType x y xs ys p ps result outTy H) := by
+  cases H with
+  | cons levelLE previous path hp htyLegacy htyDirect hxy hvLegacy
+      hvDirect resultX resultY resultRelated =>
+    exact ⟨{
+      domainLevel := _
+      previousType := _
+      domainExpr := _
+      bodyExpr := _
+      domain := _
+      codomain := _
+      pathSort := _
+      resultSortX := _
+      resultSortY := _
+      levelLE
+      previous
+      path
+      hasType := hp
+      typeRelatedLegacy := htyLegacy
+      typeRelatedDirect := htyDirect
+      defeq := hxy
+      relatedLegacy := hvLegacy
+      relatedDirect := hvDirect
+      resultX
+      resultY
+      resultRelated
+      outLevel_eq := rfl
+      outTy_eq := rfl }⟩
+
+/-- Peel one exact application layer from a nonempty registered-type trace. -/
+noncomputable def LR.DirectRegisteredTypeTrace.consView
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy) :
+    LR.DirectRegisteredTypeTrace.ConsView
+      Γ ρ headType x y xs ys p ps result outTy H :=
+  Classical.choice H.consView_nonempty
+
+/-- Reuse one exact registered application layer as a guarded capture at
+the literal argument/domain shapes retained by the trace.  Only the semantic
+pattern bound is supplied by the caller; every typing and relational field
+comes from the registered Pi application itself. -/
+theorem LR.DirectRegisteredTypeTrace.ConsView.captureAtShapes
+    {Γ : List SExpr} {ρ : Valuation} {headType : SExpr}
+    {n outLevel : Nat} {x y result : SExpr} {xs ys : List SExpr}
+    {p : WShape n} {ps : List (WShape n)} {outTy : WShape outLevel}
+    {trace : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy}
+    {m : TShape}
+    (H : LR.DirectRegisteredTypeTrace.ConsView
+      (n := n) (outLevel := outLevel)
+      Γ ρ headType x y xs ys p ps result outTy trace)
+    (hshape : m ≤ p.T) :
+    LR.DirectCaptureDefEqAligned.AtShapes (n := n) (LRD Γ)
+      m x y H.domainExpr p (H.domain.lift n) :=
+  ⟨hshape, H.hasType, H.typeRelatedLegacy, H.typeRelatedDirect,
+    H.defeq, H.relatedLegacy, H.relatedDirect⟩
+
+/-- Follow one registered Pi layer semantically after lifting it to a larger
+argument level.  The caller may supply any argument above the trace's
+selected one; monotonicity of the registered codomain then lowers the body
+witness to the lifted exact output retained by the trace. -/
+noncomputable def LR.DirectRegisteredTypeTrace.ConsView.bodyWitnessLift
+    {Γ : List SExpr} {traceρ ρ : Valuation} {headType : SExpr}
+    {n outLevel targetLevel : Nat}
+    {x y result : SExpr} {xs ys : List SExpr}
+    {p : WShape n} {ps : List (WShape n)} {outTy : WShape outLevel}
+    {trace : LR.DirectRegisteredTypeTrace Γ traceρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy}
+    (H : LR.DirectRegisteredTypeTrace.ConsView
+      (n := n) (outLevel := outLevel)
+      Γ traceρ headType x y xs ys p ps result outTy trace)
+    (levelLE : n ≤ targetLevel)
+    {B F : SExpr}
+    (root : LE_Interp.Witness ρ
+      (WShape.forallE (H.domain.lift targetLevel)
+        (H.codomain.lift targetLevel)).T
+      (.forallE B F))
+    (q : WShape targetLevel) (hpq : p.lift targetLevel ≤ q) :
+    LE_Interp.Witness (ρ.push q.T) (outTy.lift targetLevel).T F := by
+  have houtLevelLE : outLevel ≤ targetLevel := by
+    rw [H.outLevel_eq]
+    exact levelLE
+  have hdomainLevelLE : H.domainLevel ≤ targetLevel :=
+    Nat.le_trans H.levelLE levelLE
+  have hselected : (outTy.lift targetLevel).T ≤
+      ((H.codomain.lift targetLevel).app (p.lift targetLevel)).T := by
+    refine (TShape.lift_eqv (a := outTy.T) houtLevelLE).1 |>.trans ?_
+    have houtEq : outTy.T ≤ ((H.codomain.lift n).app p).T := by
+      rw [H.outTy_eq]
+      exact TShape.LE.rfl
+    refine houtEq.trans ?_
+    have happLevelLE : (((H.codomain.lift n).app p).T).1 ≤ targetLevel := by
+      exact levelLE
+    refine (TShape.lift_eqv
+      (a := ((H.codomain.lift n).app p).T) happLevelLE).2.trans ?_
+    rw [WShapeFun.lift_app levelLE,
+      WShapeFun.lift_lift (.inl H.levelLE)]
+    exact TShape.LE.rfl
+  exact (root.forallE_inv'.2 q).mono
+    (hselected.trans (WShapeFun.app_mono_r hpq).T)
+
+/-- Follow one registered Pi layer at the trace's existing argument level.
+This exact-level form packages the `lift_self` transports needed by
+`bodyWitnessLift`. -/
+noncomputable def LR.DirectRegisteredTypeTrace.ConsView.bodyWitnessSelf
+    {Γ : List SExpr} {traceρ ρ : Valuation} {headType : SExpr}
+    {n outLevel : Nat}
+    {x y result : SExpr} {xs ys : List SExpr}
+    {p : WShape n} {ps : List (WShape n)} {outTy : WShape outLevel}
+    {trace : LR.DirectRegisteredTypeTrace Γ traceρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy}
+    (H : LR.DirectRegisteredTypeTrace.ConsView
+      (n := n) (outLevel := outLevel)
+      Γ traceρ headType x y xs ys p ps result outTy trace)
+    {B F : SExpr}
+    (root : LE_Interp.Witness ρ
+      (WShape.forallE (H.domain.lift n)
+        (H.codomain.lift n)).T
+      (.forallE B F))
+    (q : WShape n) (hpq : p ≤ q) :
+    LE_Interp.Witness (ρ.push q.T) outTy.T F := by
+  have houtLevel_eq : outLevel = n := H.outLevel_eq
+  subst outLevel
+  have hpq' : p.lift n ≤ q := by
+    simpa only [WShape.lift_self] using hpq
+  simpa only [WShape.lift_self] using
+    H.bodyWitnessLift (Nat.le_refl n) root q hpq'
+
+/-- Short name for the exact one-layer view of a nonempty trace. -/
+abbrev LR.DirectRegisteredTypeTrace.HeadView
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x :: xs) (y :: ys) (p :: ps) result outTy) : Type :=
+  LR.DirectRegisteredTypeTrace.ConsView
+    Γ ρ headType x y xs ys p ps result outTy H
+
+/-- Four exact applications above a registered Pi root.  Nat recursor
+leaves have precisely this shape: the constructor major is the newest
+layer, followed by the successor minor, zero minor, and motive. -/
+structure LR.DirectRegisteredTypeTrace.FourView
+    {n outLevel : Nat}
+    {x₄ x₃ x₂ x₁ y₄ y₃ y₂ y₁ result : SExpr}
+    {p₄ p₃ p₂ p₁ : WShape n} {outTy : WShape outLevel}
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [p₄, p₃, p₂, p₁] result outTy) where
+  fourth : LR.DirectRegisteredTypeTrace.HeadView H
+  third : LR.DirectRegisteredTypeTrace.HeadView fourth.previous
+  second : LR.DirectRegisteredTypeTrace.HeadView third.previous
+  first : LR.DirectRegisteredTypeTrace.HeadView second.previous
+
+/-- The four registered application layers as one explicitly listed direct
+argument payload.  Every type expression and type shape is the literal Pi
+domain retained by the corresponding `ConsView`. -/
+def LR.DirectRegisteredTypeTrace.FourView.directArgsListed
+    {n outLevel : Nat}
+    {x₄ x₃ x₂ x₁ y₄ y₃ y₂ y₁ resultExpr : SExpr}
+    {p₄ p₃ p₂ p₁ : WShape n} {outTy : WShape outLevel}
+    {H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [p₄, p₃, p₂, p₁] resultExpr outTy}
+    (view : LR.DirectRegisteredTypeTrace.FourView H) :
+    LR.DirectCtorArgsDefEqListed (LRD Γ)
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [view.fourth.domainExpr, view.third.domainExpr,
+        view.second.domainExpr, view.first.domainExpr]
+      [p₄, p₃, p₂, p₁]
+      [view.fourth.domain.lift n, view.third.domain.lift n,
+        view.second.domain.lift n, view.first.domain.lift n] :=
+  .cons view.fourth.hasType view.fourth.typeRelatedLegacy
+    view.fourth.typeRelatedDirect view.fourth.defeq
+    view.fourth.relatedLegacy view.fourth.relatedDirect <|
+  .cons view.third.hasType view.third.typeRelatedLegacy
+    view.third.typeRelatedDirect view.third.defeq
+    view.third.relatedLegacy view.third.relatedDirect <|
+  .cons view.second.hasType view.second.typeRelatedLegacy
+    view.second.typeRelatedDirect view.second.defeq
+    view.second.relatedLegacy view.second.relatedDirect <|
+  .cons view.first.hasType view.first.typeRelatedLegacy
+    view.first.typeRelatedDirect view.first.defeq
+    view.first.relatedLegacy view.first.relatedDirect .nil
+
+/-- The three recursor-prefix layers of a registered four-application trace,
+dropping only the newest constructor major.  For Nat these are, newest first,
+the successor minor, zero minor, and motive. -/
+def LR.DirectRegisteredTypeTrace.FourView.recArgsListed
+    {n outLevel : Nat}
+    {x₄ x₃ x₂ x₁ y₄ y₃ y₂ y₁ resultExpr : SExpr}
+    {p₄ p₃ p₂ p₁ : WShape n} {outTy : WShape outLevel}
+    {H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [p₄, p₃, p₂, p₁] resultExpr outTy}
+    (view : LR.DirectRegisteredTypeTrace.FourView H) :
+    LR.DirectCtorArgsDefEqListed (LRD Γ)
+      [x₃, x₂, x₁] [y₃, y₂, y₁]
+      [view.third.domainExpr, view.second.domainExpr,
+        view.first.domainExpr]
+      [p₃, p₂, p₁]
+      [view.third.domain.lift n, view.second.domain.lift n,
+        view.first.domain.lift n] :=
+  .cons view.third.hasType view.third.typeRelatedLegacy
+    view.third.typeRelatedDirect view.third.defeq
+    view.third.relatedLegacy view.third.relatedDirect <|
+  .cons view.second.hasType view.second.typeRelatedLegacy
+    view.second.typeRelatedDirect view.second.defeq
+    view.second.relatedLegacy view.second.relatedDirect <|
+  .cons view.first.hasType view.first.typeRelatedLegacy
+    view.first.typeRelatedDirect view.first.defeq
+    view.first.relatedLegacy view.first.relatedDirect .nil
+
+/-- The sparse three-binder telescope selected by the oldest three layers
+of a four-application registered trace.  Each retained branch is lifted just
+far enough to contain the already-built inner telescope; the supplied result
+is the observation obtained after specializing the fourth (major) layer. -/
+def LR.DirectRegisteredTypeTrace.FourView.sparsePrefix
+    {n outLevel : Nat}
+    {x₄ x₃ x₂ x₁ y₄ y₃ y₂ y₁ resultExpr : SExpr}
+    {p₄ p₃ p₂ p₁ : WShape n} {outTy : WShape outLevel}
+    {H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [p₄, p₃, p₂, p₁] resultExpr outTy}
+    (view : LR.DirectRegisteredTypeTrace.FourView H)
+    (result : WShape n) : WShape (n + 3) :=
+  .forallE (view.first.domain.lift (n + 2))
+    (.single (p₁.lift (n + 2)) <|
+      .forallE (view.second.domain.lift (n + 1))
+        (.single (p₂.lift (n + 1)) <|
+          .forallE (view.third.domain.lift n)
+            (.single p₃ result)))
+
+/-- Peel all four layers of an exact four-argument registered-type trace. -/
+noncomputable def LR.DirectRegisteredTypeTrace.fourView
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+      [p₄, p₃, p₂, p₁] result outTy) :
+    LR.DirectRegisteredTypeTrace.FourView H := by
+  let fourth := H.consView
+  let third := fourth.previous.consView
+  let second := third.previous.consView
+  let first := second.previous.consView
+  exact { fourth, third, second, first }
+
+/-- Eliminate a trace whose tail lists all have length three into its four
+literal newest-first layers.  The continuation form performs the dependent
+list substitutions once, exposing both the transported trace and its exact
+four-layer view without storing equality casts in later native-site data. -/
+theorem LR.DirectRegisteredTypeTrace.fourViewElim_of_tail_lengths
+    {n outLevel : Nat} {x₄ y₄ result : SExpr}
+    {xs ys : List SExpr} {p₄ : WShape n} {ps : List (WShape n)}
+    {outTy : WShape outLevel}
+    (H : LR.DirectRegisteredTypeTrace Γ ρ headType
+      (x₄ :: xs) (y₄ :: ys) (p₄ :: ps) result outTy)
+    (hxs : xs.length = 3) (hys : ys.length = 3)
+    (hps : ps.length = 3) {C : Prop}
+    (K : ∀ (x₃ x₂ x₁ y₃ y₂ y₁ : SExpr)
+        (p₃ p₂ p₁ : WShape n),
+      ∀ H' : LR.DirectRegisteredTypeTrace Γ ρ headType
+        [x₄, x₃, x₂, x₁] [y₄, y₃, y₂, y₁]
+        [p₄, p₃, p₂, p₁] result outTy,
+        LR.DirectRegisteredTypeTrace.FourView H' → C) : C := by
+  obtain ⟨x₃, x₂, x₁, rfl⟩ : ∃ x₃ x₂ x₁, xs = [x₃, x₂, x₁] :=
+    ⟨xs[0], xs[1], xs[2], List.eq_getElem_of_length_eq_three xs hxs⟩
+  obtain ⟨y₃, y₂, y₁, rfl⟩ : ∃ y₃ y₂ y₁, ys = [y₃, y₂, y₁] :=
+    ⟨ys[0], ys[1], ys[2], List.eq_getElem_of_length_eq_three ys hys⟩
+  obtain ⟨p₃, p₂, p₁, rfl⟩ : ∃ p₃ p₂ p₁, ps = [p₃, p₂, p₁] :=
+    ⟨ps[0], ps[1], ps[2], List.eq_getElem_of_length_eq_three ps hps⟩
+  exact K x₃ x₂ x₁ y₃ y₂ y₁ p₃ p₂ p₁ H H.fourView
+
+/-- Keep the related final majors while using the left direct recursor prefix
+at both endpoints.  The proof rebuilds the dependent legacy package so the
+guarded major and Pi fields remain literally indexed by the same pair. -/
+def LR.DirectPatternLeafSpine.leftPrefixes
+    {majorX majorY : SExpr} {recXs recYs : List SExpr}
+    {majorShape : WShape n} {recShapes : List (WShape n)}
+    (H : LR.DirectPatternLeafSpine Γ (LRD Γ) Head
+      (majorX :: recXs) (majorY :: recYs)
+      (majorShape :: recShapes) A out outTy) :
+    LR.DirectPatternLeafSpine Γ (LRD Γ) Head
+      (majorX :: recXs) (majorY :: recXs)
+      (majorShape :: recShapes) A out outTy := by
+  rcases H with ⟨legacy, directArgs, hmajorTypeD, hmajorRelD, hpiD⟩
+  rcases legacy with
+    ⟨mx, rxs, my, rys, ms, rss, mts, rs, rts,
+      hargs, hargs', hrargs, hout, houtTy, pair,
+      hmsty, hrty, hmty, hmrel, haligned, hpi⟩
+  simp only [List.cons.injEq] at hargs hargs' hrargs
+  rcases hargs with ⟨rfl, rfl⟩
+  rcases hargs' with ⟨rfl, rfl⟩
+  rcases hrargs with ⟨rfl, rfl⟩
+  exact {
+    legacy := {
+      majorX := majorX
+      recXs := recXs
+      majorY := majorY
+      recYs := recXs
+      majorShape := majorShape
+      recShapes := recShapes
+      majorTypeShape := mts
+      resultShape := rs
+      resultTypeShape := rts
+      args_eq := rfl
+      args'_eq := rfl
+      rargs_eq := rfl
+      out_eq := hout
+      outTy_eq := houtTy
+      pair := pair.leftPrefixes
+      majorHasType := hmsty
+      resultType := hrty
+      majorType := hmty
+      majorRel := hmrel
+      aligned := haligned.leftPrefixes
+      pi := hpi }
+    directArgs := directArgs.leftPrefixes
+    majorType := hmajorTypeD
+    majorRel := hmajorRelD
+    pi := hpiD }
+
+/-- Keep the related final majors while using the right direct recursor
+prefix at both endpoints. -/
+def LR.DirectPatternLeafSpine.rightPrefixes
+    {majorX majorY : SExpr} {recXs recYs : List SExpr}
+    {majorShape : WShape n} {recShapes : List (WShape n)}
+    (H : LR.DirectPatternLeafSpine Γ (LRD Γ) Head
+      (majorX :: recXs) (majorY :: recYs)
+      (majorShape :: recShapes) A out outTy) :
+    LR.DirectPatternLeafSpine Γ (LRD Γ) Head
+      (majorX :: recYs) (majorY :: recYs)
+      (majorShape :: recShapes) A out outTy := by
+  rcases H with ⟨legacy, directArgs, hmajorTypeD, hmajorRelD, hpiD⟩
+  rcases legacy with
+    ⟨mx, rxs, my, rys, ms, rss, mts, rs, rts,
+      hargs, hargs', hrargs, hout, houtTy, pair,
+      hmsty, hrty, hmty, hmrel, haligned, hpi⟩
+  simp only [List.cons.injEq] at hargs hargs' hrargs
+  rcases hargs with ⟨rfl, rfl⟩
+  rcases hargs' with ⟨rfl, rfl⟩
+  rcases hrargs with ⟨rfl, rfl⟩
+  exact {
+    legacy := {
+      majorX := majorX
+      recXs := recYs
+      majorY := majorY
+      recYs := recYs
+      majorShape := majorShape
+      recShapes := recShapes
+      majorTypeShape := mts
+      resultShape := rs
+      resultTypeShape := rts
+      args_eq := rfl
+      args'_eq := rfl
+      rargs_eq := rfl
+      out_eq := hout
+      outTy_eq := houtTy
+      pair := pair.rightPrefixes
+      majorHasType := hmsty
+      resultType := hrty
+      majorType := hmty
+      majorRel := hmrel
+      aligned := haligned.rightPrefixes
+      pi := hpi }
+    directArgs := directArgs.rightPrefixes
+    majorType := hmajorTypeD
+    majorRel := hmajorRelD
+    pi := hpiD }
+
+theorem LR.DirectPatternLeafSpine.of_cons_path
+    {Γ : List SExpr} {n : Nat} {IH : LR.DirectRelBase Γ n}
+    {Head A B F x y : SExpr} {xs ys : List SExpr}
+    {p a : WShape n} {ps : List (WShape n)}
+    {g f : WShapeFun n} {u v : SLevel}
+    (prefixX : SExpr.SpineWF Γ Head xs.reverse A)
+    (prefixY : SExpr.SpineWF Γ Head ys.reverse A)
+    (aligned : LRS.CtorSpineDefEq (LR Γ) Head xs ys ps A)
+    (directArgs : LR.DirectCtorArgsDefEq IH xs ys ps)
+    (path : TypeDefEqPath Γ A (.forallE B F) u)
+    (hp : p.HasType a)
+    (htpi : WShape.HasTypePi f a true)
+    (hBLegacy : (LR Γ).TyDefEq B B a)
+    (hBDirect : IH.TyDefEq B B a)
+    (hxy : IsDefEq Γ x y B)
+    (hrelLegacy : (LR Γ).DefEq x y B p a)
+    (hrelDirect : IH.DefEq x y B p a)
+    (hresult : IsDefEq Γ (F.inst y) (F.inst x) (.sort v))
+    (hPiLegacy : LRS.PiDefEq (LR Γ) B F F a f)
+    (hPiDirect : LR.DirectPiDefEq IH B F F a f) :
+    Nonempty (LR.DirectPatternLeafSpine Γ IH Head
+      (x :: xs) (y :: ys) (p :: ps) (F.inst x)
+      (g.app p) (f.app p)) := by
+  obtain ⟨w, hPiTy⟩ := path.rightType
+  exact ⟨{
+    legacy := {
+      majorX := x
+      recXs := xs
+      majorY := y
+      recYs := ys
+      majorShape := p
+      recShapes := ps
+      majorTypeShape := a
+      resultShape := g
+      resultTypeShape := f
+      args_eq := rfl
+      args'_eq := rfl
+      rargs_eq := rfl
+      out_eq := rfl
+      outTy_eq := rfl
+      pair := {
+        prefixType := .forallE B F
+        domain := B
+        codomain := F
+        piSort := w
+        resultSortX := v
+        resultSortY := v
+        prefixX := SpineWF.ret_path path prefixX
+        prefixY := SpineWF.ret_path path prefixY
+        pi := hPiTy
+        major := hxy
+        resultX := hresult.hasType.2
+        resultY := hresult }
+      majorHasType := hp
+      resultType := htpi
+      majorType := hBLegacy
+      majorRel := hrelLegacy
+      aligned := aligned.cons_path path hp hBLegacy hxy hrelLegacy hresult
+      pi := hPiLegacy }
+    directArgs := .cons hp hBLegacy hBDirect hxy
+      hrelLegacy hrelDirect directArgs
+    majorType := hBDirect
+    majorRel := hrelDirect
+    pi := hPiDirect }⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectPatternLeafSpine.of_cons_path' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectPatternLeafSpine.of_cons_path
 
 /-- Forget the final-Pi alignment back to the ordinary related argument
 spine consumed by the structural constant cases. -/
@@ -1917,6 +7061,396 @@ def LR.PatternLeafDefEqAt (Γ₀ : List SExpr) (level : Nat)
         (xs.foldr (fun a f => f.app a) (.const c ls))
         (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy
 
+/-- Guarded counterpart of the structural pattern-leaf contract.  The
+ordinary and direct spine evidence share literal endpoints, while the
+ordinary result remains explicit because guarded argument quantification
+cannot manufacture its legacy projection. -/
+def LRD.PatternLeafDefEqAt (Γ₀ : List SExpr) (level : Nat)
+    (c : Name) (ls : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {rargs : List (WShape level)}
+      {p : Pattern} {r : p.RHS × p.Check} {mcap : p.Path → TShape}
+      {xs ys : List SExpr} {CHead A : SExpr}
+      {out outTy : WShape level},
+      Params.Pat p r →
+      LE_Interp.Matches (n := level) p c rargs mcap →
+      LE_Interp.RHS ls mcap R out.T r.1 →
+      LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀)
+        CHead xs ys rargs A out outTy →
+      IsDefEq Γ₀
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A →
+      (∃ u, IsDefEq Γ₀ A A (.sort u)) →
+      IsDefEq Γ₀ (.const c ls) (.const c ls) CHead →
+      SExpr.SpineWF Γ₀ CHead xs.reverse A →
+      SExpr.SpineWF Γ₀ CHead ys.reverse A →
+      out.HasType outTy →
+      (LR Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy →
+      (LRD Γ₀).TyDefEq A A outTy →
+      (LRD Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy
+
+/-- Guarded nonempty iota-leaf contract at one explicit application-spine
+level.  As in the structural guarded contract, the established result is an
+explicit input while the paired spine retains the direct major and Pi
+actions needed to rebuild the informative output. -/
+def LRD.IotaLeafDefEqAt (Γ₀ : List SExpr) (level : Nat)
+    (c : Name) (ls : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {rargs : List (WShape level)}
+      {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {mcap : (RecursorIotaPattern rec major ctor arity).Path → TShape}
+      {xs ys : List SExpr} {CHead A : SExpr}
+      {out outTy : WShape level},
+      Params.Pat (RecursorIotaPattern rec major ctor arity) r →
+      LE_Interp.Matches (n := level)
+        (RecursorIotaPattern rec major ctor arity) c rargs mcap →
+      LE_Interp.RHS ls mcap R out.T r.1 →
+      LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀)
+        CHead xs ys rargs A out outTy →
+      IsDefEq Γ₀
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A →
+      (∃ u, IsDefEq Γ₀ A A (.sort u)) →
+      IsDefEq Γ₀ (.const c ls) (.const c ls) CHead →
+      SExpr.SpineWF Γ₀ CHead xs.reverse A →
+      SExpr.SpineWF Γ₀ CHead ys.reverse A →
+      out.HasType outTy →
+      (LR Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy →
+      (LRD Γ₀).TyDefEq A A outTy →
+      (LRD Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy
+
+/-- A guarded structural leaf carrying the exact registered-type
+application trace which produced its direct argument spine.  This is the
+proof-relevant evaluator boundary used by the typed constant callback; the
+ordinary leaf contract remains available for consumers that do not inspect
+the registered telescope. -/
+def LRD.RegisteredPatternLeafDefEqAt (Γ₀ : List SExpr) (ρ : Valuation)
+    (headType : SExpr) (level : Nat) (c : Name) (ls : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {rargs : List (WShape level)}
+      {p : Pattern} {r : p.RHS × p.Check} {mcap : p.Path → TShape}
+      {xs ys : List SExpr} {A : SExpr}
+      {out outTy : WShape level},
+      Params.Pat p r →
+      LE_Interp.Matches (n := level) p c rargs mcap →
+      LE_Interp.RHS ls mcap R out.T r.1 →
+      LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀)
+        headType xs ys rargs A out outTy →
+      LR.DirectRegisteredTypeTrace Γ₀ ρ headType
+        xs ys rargs A outTy →
+      IsDefEq Γ₀
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A →
+      (∃ u, IsDefEq Γ₀ A A (.sort u)) →
+      IsDefEq Γ₀ (.const c ls) (.const c ls) headType →
+      SExpr.SpineWF Γ₀ headType xs.reverse A →
+      SExpr.SpineWF Γ₀ headType ys.reverse A →
+      out.HasType outTy →
+      (LR Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy →
+      (LRD Γ₀).TyDefEq A A outTy →
+      (LRD Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy
+
+/-- Iota-specialized registered leaf contract.  The selected pattern and
+the exact registered-type trace are retained in one implication chain, so a
+native leaf may eliminate both without choosing a second application
+telescope. -/
+def LRD.RegisteredIotaLeafDefEqAt (Γ₀ : List SExpr) (ρ : Valuation)
+    (headType : SExpr) (level : Nat) (c : Name) (ls : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {rargs : List (WShape level)}
+      {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {mcap : (RecursorIotaPattern rec major ctor arity).Path → TShape}
+      {xs ys : List SExpr} {A : SExpr}
+      {out outTy : WShape level},
+      Params.Pat (RecursorIotaPattern rec major ctor arity) r →
+      LE_Interp.Matches (n := level)
+        (RecursorIotaPattern rec major ctor arity) c rargs mcap →
+      LE_Interp.RHS ls mcap R out.T r.1 →
+      LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀)
+        headType xs ys rargs A out outTy →
+      LR.DirectRegisteredTypeTrace Γ₀ ρ headType
+        xs ys rargs A outTy →
+      IsDefEq Γ₀
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A →
+      (∃ u, IsDefEq Γ₀ A A (.sort u)) →
+      IsDefEq Γ₀ (.const c ls) (.const c ls) headType →
+      SExpr.SpineWF Γ₀ headType xs.reverse A →
+      SExpr.SpineWF Γ₀ headType ys.reverse A →
+      out.HasType outTy →
+      (LR Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy →
+      (LRD Γ₀).TyDefEq A A outTy →
+      (LRD Γ₀).DefEq
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy
+
+/-- Argument-count rigidity of a semantic `varN` match: the matched list
+has exactly the pattern's arity. -/
+theorem LE_Interp.Matches.varN_length
+    {c c' : Name} {k : Nat} : ∀ {n : Nat} {rargs : List (WShape n)}
+      {m : (Pattern.varN (.const c) k).Path → TShape},
+    LE_Interp.Matches (Pattern.varN (.const c) k) c' rargs m →
+    rargs.length = k := by
+  induction k with
+  | zero =>
+    intro n rargs m H
+    cases H
+    rfl
+  | succ k ih =>
+    intro n rargs m H
+    cases H with
+    | var H => simpa using ih H
+
+/-- The remaining guarded major-chain action at one reached iota site.
+
+The selected recursor and constructor matches, semantic RHS, paired direct
+leaf, and its normalized final-Pi record are all retained literally.  A
+producer must return one guarded rectangle for every framed native link of
+the constructor-major closure; `iotaLeafDefEqAt_of_majorLinkStep` performs
+the surrounding match inversion and chain fold. -/
+def LRD.IotaMajorLinkStepAt (Γ₀ : List SExpr) (level : Nat)
+    (c : Name) (recLs : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {n : Nat} {rec ctor : Name} {major arity : Nat}
+      {recShapes : List (WShape (n + 1))}
+      {ctorShapes : List (WShape n)}
+      {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+      {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {majorX majorY : SExpr} {recXs recYs : List SExpr}
+      {CHead A : SExpr} {out outTy : WShape (n + 1)},
+    level = n + 1 →
+    c = rec →
+    Ctx.WF Γ₀ →
+    Params.Pat (RecursorIotaPattern rec major ctor arity) r →
+    LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec →
+    LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor →
+    LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) CHead
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor' ctor ctorShapes.reverse) :: recShapes) A out outTy) →
+    (pair : SExpr.SpineWF.LastPair Γ₀ CHead
+      recXs recYs majorX majorY A) →
+    IsDefEq Γ₀ (.const rec recLs) (.const rec recLs) CHead →
+    out.HasType outTy →
+    (LRD Γ₀).TyDefEq A A outTy →
+    LR.DirectMajorLinkRectAt Γ₀
+      (.ctor' ctor ctorShapes.reverse) pair.domain
+      rec recLs recXs recYs majorX A out outTy
+
+/-- A fixed-site guarded major-link producer closes the complete reached
+iota leaf.  The executable match determines the recursor/constructor split;
+the direct leaf then supplies the constructor closure and the final typed Pi
+site.  Only `IotaMajorLinkStepAt` remains after the root constructor closure
+is folded by `iotaDefEq_of_ctorDefEqAt`. -/
+theorem LRD.iotaLeafDefEqAt_of_majorLinkStep
+    (hΓ : Ctx.WF Γ₀)
+    (anchor : LR.MajorChainAnchorStep Γ₀)
+    (site : LRD.IotaMajorLinkStepAt Γ₀ level c ls R) :
+    LRD.IotaLeafDefEqAt Γ₀ level c ls R := by
+  intro rargs rec major ctor arity r mcap xs ys CHead A out outTy
+    hpat hmatch hrhs hleaf hterm hAType hhead hspineX hspineY hout
+    hlegacy hA
+  cases hmatch with
+  | @app fPat nCtor head recShapes mrec aPat ctorHead
+      ctorShapes mctor hmf hma =>
+    have hleafRoot := hleaf
+    rcases hleaf.legacy with
+      ⟨majorX, recXs, majorY, recYs, majorShape, recShapes',
+        majorTypeShape, resultShape, resultTypeShape,
+        hxs, hys, hrargs, houtEq, houtTyEq, hpair,
+        hmajorHasType, hresultType, hmajorType, hmajorRel,
+        haligned, hpi⟩
+    subst xs
+    subst ys
+    simp only [List.cons.injEq] at hrargs
+    rcases hrargs with ⟨hmajorShape, hrecShapes⟩
+    subst recShapes'
+    subst out
+    subst outTy
+    have hctorHead : ctor = ctorHead := hma.varN_const_head
+    subst ctorHead
+    have hctorClass : Params.classify ctor =
+        some (.ctor ctorShapes.reverse.length) := by
+      simpa using hma.head_wf_eq (Params.pat_wf hpat).2
+    subst majorShape
+    have hrecHead : rec = c := hmf.varN_const_head
+    subst c
+    have hrecShapesLen : recShapes.length = major := hmf.varN_length
+    have hrecargs : LRS.CtorArgsDefEq (LR Γ₀)
+        recXs recYs recShapes := hleafRoot.legacy.aligned.args.tail
+    obtain ⟨hXlen, hYlen⟩ := hrecargs.lengths
+    have hmajorPremX : IsMajorPremise
+        (recXs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recXs.length = major := hXlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ :=
+        hlen ▸ Pattern.varN_const_matchesS rec ls recXs
+      exact ⟨_, ⟨r, hpat⟩, _, _, .refl, ls, m2, hm2⟩
+    have hmajorPremY : IsMajorPremise
+        (recYs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recYs.length = major := hYlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ :=
+        hlen ▸ Pattern.varN_const_matchesS rec ls recYs
+      exact ⟨_, ⟨r, hpat⟩, _, _, .refl, ls, m2, hm2⟩
+    have hmajorCtor := LR.DefEq.ctor'_inv hctorClass
+      hmajorHasType hmajorRel
+    have hlink : LR.DirectMajorLinkRectAt Γ₀
+        (.ctor' ctor ctorShapes.reverse) hpair.domain
+        rec ls recXs recYs majorX A
+        (resultShape.app (.ctor' ctor ctorShapes.reverse))
+        (resultTypeShape.app (.ctor' ctor ctorShapes.reverse)) :=
+      site rfl rfl hΓ hpat hmf hma hrhs
+        hleafRoot hpair hhead hout hA
+    exact LRD.iotaDefEq_of_ctorDefEqAt anchor hmajorCtor.2 hpair
+      hhead hmajorPremX hmajorPremY hA hlink
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaMajorLinkStepAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaMajorLinkStepAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaLeafDefEqAt_of_majorLinkStep' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaLeafDefEqAt_of_majorLinkStep
+
+/-- Registered counterpart of `LRD.IotaMajorLinkStepAt`.  The fixed-site
+producer receives the exact registered-type application trace in addition to
+the normalized direct leaf, so its native Nat branch can derive capture
+domains from the same Pi decomposition used by constant evaluation. -/
+def LRD.RegisteredIotaMajorLinkStepAt (Γ₀ : List SExpr)
+    (ρ : Valuation) (headType : SExpr) (level : Nat)
+    (c : Name) (recLs : List SLevel)
+    (R : TShape → SExpr → Prop) : Prop :=
+  ∀ {n : Nat} {rec ctor : Name} {major arity : Nat}
+      {recShapes : List (WShape (n + 1))}
+      {ctorShapes : List (WShape n)}
+      {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+      {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check}
+      {majorX majorY : SExpr} {recXs recYs : List SExpr}
+      {A : SExpr} {out outTy : WShape (n + 1)},
+    level = n + 1 →
+    c = rec →
+    Ctx.WF Γ₀ →
+    Params.Pat (RecursorIotaPattern rec major ctor arity) r →
+    LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec →
+    LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor →
+    LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) headType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor' ctor ctorShapes.reverse) :: recShapes) A out outTy) →
+    LR.DirectRegisteredTypeTrace Γ₀ ρ headType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor' ctor ctorShapes.reverse) :: recShapes) A outTy →
+    (pair : SExpr.SpineWF.LastPair Γ₀ headType
+      recXs recYs majorX majorY A) →
+    IsDefEq Γ₀ (.const rec recLs) (.const rec recLs) headType →
+    out.HasType outTy →
+    (LRD Γ₀).TyDefEq A A outTy →
+    LR.DirectMajorLinkRectAt Γ₀
+      (.ctor' ctor ctorShapes.reverse) pair.domain
+      rec recLs recXs recYs majorX A out outTy
+
+/-- Fold a registered fixed-site callback through the executable iota match
+while preserving the exact registered-type trace at the reached site. -/
+theorem LRD.registeredIotaLeafDefEqAt_of_majorLinkStep
+    (hΓ : Ctx.WF Γ₀)
+    (anchor : LR.MajorChainAnchorStep Γ₀)
+    (site : LRD.RegisteredIotaMajorLinkStepAt
+      Γ₀ ρ headType level c ls R) :
+    LRD.RegisteredIotaLeafDefEqAt
+      Γ₀ ρ headType level c ls R := by
+  intro rargs rec major ctor arity r mcap xs ys A out outTy
+    hpat hmatch hrhs hleaf trace hterm hAType hhead hspineX hspineY
+    hout hlegacy hA
+  cases hmatch with
+  | @app fPat nCtor head recShapes mrec aPat ctorHead
+      ctorShapes mctor hmf hma =>
+    have hleafRoot := hleaf
+    rcases hleaf.legacy with
+      ⟨majorX, recXs, majorY, recYs, majorShape, recShapes',
+        majorTypeShape, resultShape, resultTypeShape,
+        hxs, hys, hrargs, houtEq, houtTyEq, hpair,
+        hmajorHasType, hresultType, hmajorType, hmajorRel,
+        haligned, hpi⟩
+    subst xs
+    subst ys
+    simp only [List.cons.injEq] at hrargs
+    rcases hrargs with ⟨hmajorShape, hrecShapes⟩
+    subst recShapes'
+    subst out
+    subst outTy
+    have hctorHead : ctor = ctorHead := hma.varN_const_head
+    subst ctorHead
+    have hctorClass : Params.classify ctor =
+        some (.ctor ctorShapes.reverse.length) := by
+      simpa using hma.head_wf_eq (Params.pat_wf hpat).2
+    subst majorShape
+    have hrecHead : rec = c := hmf.varN_const_head
+    subst c
+    have hrecShapesLen : recShapes.length = major := hmf.varN_length
+    have hrecargs : LRS.CtorArgsDefEq (LR Γ₀)
+        recXs recYs recShapes := hleafRoot.legacy.aligned.args.tail
+    obtain ⟨hXlen, hYlen⟩ := hrecargs.lengths
+    have hmajorPremX : IsMajorPremise
+        (recXs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recXs.length = major := hXlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ :=
+        hlen ▸ Pattern.varN_const_matchesS rec ls recXs
+      exact ⟨_, ⟨r, hpat⟩, _, _, .refl, ls, m2, hm2⟩
+    have hmajorPremY : IsMajorPremise
+        (recYs.foldr (fun a f => f.app a) (.const rec ls)) := by
+      have hlen : recYs.length = major := hYlen.trans hrecShapesLen
+      obtain ⟨m2, hm2⟩ :=
+        hlen ▸ Pattern.varN_const_matchesS rec ls recYs
+      exact ⟨_, ⟨r, hpat⟩, _, _, .refl, ls, m2, hm2⟩
+    have hmajorCtor := LR.DefEq.ctor'_inv hctorClass
+      hmajorHasType hmajorRel
+    have hlink : LR.DirectMajorLinkRectAt Γ₀
+        (.ctor' ctor ctorShapes.reverse) hpair.domain
+        rec ls recXs recYs majorX A
+        (resultShape.app (.ctor' ctor ctorShapes.reverse))
+        (resultTypeShape.app (.ctor' ctor ctorShapes.reverse)) :=
+      site rfl rfl hΓ hpat hmf hma hrhs hleafRoot trace
+        hpair hhead hout hA
+    exact LRD.iotaDefEq_of_ctorDefEqAt anchor hmajorCtor.2 hpair
+      hhead hmajorPremX hmajorPremY hA hlink
+
+/--
+info: 'Lean4Lean.SExpr.LRD.registeredIotaLeafDefEqAt_of_majorLinkStep' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.registeredIotaLeafDefEqAt_of_majorLinkStep
+
 /-- A fixed-level iota handler discharges the corresponding structural
 nonempty pattern leaf. -/
 theorem LR.PatternLeafDefEqAt.of_iota
@@ -1928,6 +7462,61 @@ theorem LR.PatternLeafDefEqAt.of_iota
     hmatch.iota_of_pat_nonempty hpat hleaf.nonempty
   exact H hpat hmatch hrhs hleaf hterm hAType hhead
     hspineX hspineY hout hA
+
+/-- A guarded fixed-level iota handler discharges the corresponding
+structural leaf after executable matching proves that its nonempty argument
+spine cannot be a definitional pattern. -/
+theorem LRD.PatternLeafDefEqAt.of_iota
+    (H : LRD.IotaLeafDefEqAt Γ₀ level c ls R) :
+    LRD.PatternLeafDefEqAt Γ₀ level c ls R := by
+  intro rargs p r mcap xs ys CHead A out outTy
+    hpat hmatch hrhs hleaf hterm hAType hhead hspineX hspineY hout
+    hlegacy hA
+  obtain ⟨rec, major, ctor, arity, rfl⟩ :=
+    hmatch.iota_of_pat_nonempty hpat hleaf.legacy.nonempty
+  exact H hpat hmatch hrhs hleaf hterm hAType hhead
+    hspineX hspineY hout hlegacy hA
+
+/-- An ordinary guarded leaf remains a registered leaf consumer when it
+does not need to inspect the synchronized type trace. -/
+theorem LRD.PatternLeafDefEqAt.toRegistered
+    (H : LRD.PatternLeafDefEqAt Γ₀ level c ls R) :
+    LRD.RegisteredPatternLeafDefEqAt Γ₀ ρ headType level c ls R := by
+  intro rargs p r mcap xs ys A out outTy hpat hmatch hrhs hleaf _trace
+    hterm hAType hhead hspineX hspineY hout hlegacy hA
+  exact H hpat hmatch hrhs hleaf hterm hAType hhead
+    hspineX hspineY hout hlegacy hA
+
+/-- An ordinary guarded iota handler is likewise a registered handler which
+ignores the additional exact evaluator trace. -/
+theorem LRD.IotaLeafDefEqAt.toRegistered
+    (H : LRD.IotaLeafDefEqAt Γ₀ level c ls R) :
+    LRD.RegisteredIotaLeafDefEqAt Γ₀ ρ headType level c ls R := by
+  intro rargs rec major ctor arity r mcap xs ys A out outTy
+    hpat hmatch hrhs hleaf _trace hterm hAType hhead hspineX hspineY
+    hout hlegacy hA
+  exact H hpat hmatch hrhs hleaf hterm hAType hhead
+    hspineX hspineY hout hlegacy hA
+
+/-- A registered fixed-level iota handler discharges the corresponding
+registered structural leaf without forgetting its exact type trace. -/
+theorem LRD.RegisteredPatternLeafDefEqAt.of_iota
+    (H : LRD.RegisteredIotaLeafDefEqAt
+      Γ₀ ρ headType level c ls R) :
+    LRD.RegisteredPatternLeafDefEqAt
+      Γ₀ ρ headType level c ls R := by
+  intro rargs p r mcap xs ys A out outTy hpat hmatch hrhs hleaf trace
+    hterm hAType hhead hspineX hspineY hout hlegacy hA
+  obtain ⟨rec, major, ctor, arity, rfl⟩ :=
+    hmatch.iota_of_pat_nonempty hpat hleaf.legacy.nonempty
+  exact H hpat hmatch hrhs hleaf trace hterm hAType hhead
+    hspineX hspineY hout hlegacy hA
+
+/--
+info: 'Lean4Lean.SExpr.LRD.PatternLeafDefEqAt.of_iota' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.PatternLeafDefEqAt.of_iota
 
 /-- The witness-aware iota obligation at the exact constant-argument level. -/
 def LR.IotaWitnessStepAt (Γ₀ : List SExpr) (level : Nat) : Prop :=
@@ -2492,6 +8081,38 @@ def LR.FixedHeadConvertStep (Γ₀ : List SExpr) : Prop :=
     IsDefEq Γ₀ A B (.sort u) →
     (LR Γ₀).TyDefEq A A a →
     (LR Γ₀).TyDefEq A B a
+
+/-- The legacy fixed-head conversion contract is definitionally the legacy
+half consumed by guarded completion.  This bridge lets the existing CR-ladder
+producers feed the direct path zipper without restating their interface. -/
+theorem LRD.FixedHeadLegacyConvertStep.of_legacy
+    (legacy : LR.FixedHeadConvertStep Γ₀) :
+    LRD.FixedHeadLegacyConvertStep Γ₀ :=
+  legacy
+
+/-- Package an existing legacy fixed-head conversion together with guarded
+validity of its right endpoint into the conversion contract used by the direct
+path zipper. -/
+theorem LRD.FixedHeadConvertStep.of_legacy_and_right
+    (legacy : LR.FixedHeadConvertStep Γ₀)
+    (right : LRD.FixedHeadConvertRightValidStep Γ₀) :
+    LRD.FixedHeadConvertStep Γ₀ :=
+  LRD.FixedHeadConvertStep.of_parts
+    (LRD.FixedHeadLegacyConvertStep.of_legacy legacy) right
+
+/--
+info: 'Lean4Lean.SExpr.LRD.FixedHeadLegacyConvertStep.of_legacy' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.FixedHeadLegacyConvertStep.of_legacy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.FixedHeadConvertStep.of_legacy_and_right' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.FixedHeadConvertStep.of_legacy_and_right
 
 /-- THE ONE MISSING INPUT of `LR.FixedHeadConvertStep`: a raw type conversion
 transports validity to its right endpoint at the *same* observation.
@@ -4225,6 +9846,1748 @@ theorem LR.iotaActions_of_exactEqAt
     rule, siteX, siteY, actionX, actionY, hcapAligned,
     .tail hredX (.extra actionX), .tail hredY (.extra actionY)⟩
 
+/-- Generated-iota-RHS congruence in the guarded relation.  Recursor
+captures retain paired direct evidence at level `n + 1`; constructor fields
+remain in the established predecessor relation at level `n`.  Concrete
+families may upgrade exactly the constructor captures their RHS uses. -/
+def LRD.IotaRHSDefEq
+    {Γ : List SExpr} {n : Nat} (R : TShape → SExpr → Prop)
+    {rec ctor : Name} {major arity : Nat}
+    (recLs : List SLevel)
+    (mrec : (Pattern.varN (.const rec) major).Path → TShape)
+    (mctor : (Pattern.varN (.const ctor) arity).Path → TShape)
+    (r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check)
+    (rule : Pattern.IotaRule r)
+    (out : WShape (n + 1)) : Prop :=
+  LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+  ∀ {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {A : SExpr} {outTy : WShape (n + 1)},
+    SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    SExpr.PathSpineWF Γ my captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor p) (mx path) (my path) (captureType path)) →
+    out.HasType outTy →
+    (LRD Γ).TyDefEq A A outTy →
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy
+
+/-- Guarded iota-RHS congruence with the recursor-prefix captures retained at
+their literal materialized shapes.
+
+This is a conservative strengthening of `LRD.IotaRHSDefEq`: constructor
+fields still use the predecessor relation, while every recursor path also
+exposes the exact element/type shape pair from the direct argument spine.
+Concrete registered leaves can therefore synchronize a generated RHS tower
+without reopening an existential capture witness. -/
+def LRD.IotaRHSDefEqAlignedRec
+    {Γ : List SExpr} {n : Nat} (R : TShape → SExpr → Prop)
+    {rec ctor : Name} {major arity : Nat}
+    (recLs : List SLevel)
+    (mrec : (Pattern.varN (.const rec) major).Path → TShape)
+    (mctor : (Pattern.varN (.const ctor) arity).Path → TShape)
+    (r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check)
+    (recXs recYs : List SExpr) (recShapes : List (WShape (n + 1)))
+    (rule : Pattern.IotaRule r)
+    (out : WShape (n + 1)) : Prop :=
+  LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+  ∀ {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)}
+      {A : SExpr} {outTy : WShape (n + 1)},
+    SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    SExpr.PathSpineWF Γ my captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor p) (mx path) (my path) (captureType path)) →
+    (∀ path : (Pattern.varN (.const rec) major).Path,
+      LR.DirectCaptureDefEqAligned.AtShapes
+        (n := n + 1) (LRD Γ) (mrec path)
+        (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+        (recElemShape path) (recTypeShape path)) →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => mx (.inl path)) = recXs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => my (.inl path)) = recYs.reverse →
+    (Pattern.varNPaths (.const rec) major).map recElemShape =
+      recShapes.reverse →
+    out.HasType outTy →
+    (LRD Γ).TyDefEq A A outTy →
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy
+
+/-- Forget the exact recursor shape maps when an ordinary guarded RHS
+consumer already suffices. -/
+theorem LRD.IotaRHSDefEq.toAlignedRec
+    {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {recXs recYs : List SExpr} {recShapes : List (WShape (n + 1))}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (H : LRD.IotaRHSDefEq (Γ := Γ) R recLs
+      mrec mctor r rule out) :
+    LRD.IotaRHSDefEqAlignedRec (Γ := Γ) R recLs
+      mrec mctor r recXs recYs recShapes rule out := by
+  intro hrhs mx my captureType recElemShape recTypeShape A outTy
+    hspineX hspineY hcap _hcapRec _hrecXs _hrecYs _hrecShapes hout hA
+  exact H hrhs hspineX hspineY hcap hout hA
+
+/-- Fully listed guarded iota-RHS congruence.  This is the registered-leaf
+boundary: all recursor capture maps are tied to explicit newest-first lists
+of syntax, raw types, element shapes, and type shapes. -/
+def LRD.IotaRHSDefEqListedRec
+    {Γ : List SExpr} {n : Nat} (R : TShape → SExpr → Prop)
+    {rec ctor : Name} {major arity : Nat}
+    (recLs : List SLevel)
+    (mrec : (Pattern.varN (.const rec) major).Path → TShape)
+    (mctor : (Pattern.varN (.const ctor) arity).Path → TShape)
+    (r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check)
+    (recXs recYs recTypes : List SExpr)
+    (recShapes recTypeShapes : List (WShape (n + 1)))
+    (rule : Pattern.IotaRule r) (out : WShape (n + 1)) : Prop :=
+  LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+  ∀ {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)}
+      {A : SExpr} {outTy : WShape (n + 1)},
+    SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    SExpr.PathSpineWF Γ my captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor p) (mx path) (my path) (captureType path)) →
+    (∀ path : (Pattern.varN (.const rec) major).Path,
+      LR.DirectCaptureDefEqAligned.AtShapes
+        (n := n + 1) (LRD Γ) (mrec path)
+        (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+        (recElemShape path) (recTypeShape path)) →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => mx (.inl path)) = recXs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => my (.inl path)) = recYs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => captureType (.inl path)) = recTypes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recElemShape =
+      recShapes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recTypeShape =
+      recTypeShapes.reverse →
+    out.HasType outTy →
+    (LRD Γ).TyDefEq A A outTy →
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy
+
+/-- Fixed-result form of the listed guarded RHS contract.
+
+The native exact leaf already fixes `A`, `out`, and `outTy` before it
+materializes an iota action.  Retaining those indices here lets a registered
+consumer reuse the exact terminal observation of its application trace; a
+contract universally quantified over an unrelated output type would demand
+the false type-functionality principle that the dominance design avoids. -/
+def LRD.IotaRHSDefEqListedRecAt
+    {Γ : List SExpr} {n : Nat} (R : TShape → SExpr → Prop)
+    {rec ctor : Name} {major arity : Nat}
+    (recLs : List SLevel)
+    (mrec : (Pattern.varN (.const rec) major).Path → TShape)
+    (mctor : (Pattern.varN (.const ctor) arity).Path → TShape)
+    (r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check)
+    (recXs recYs recTypes : List SExpr)
+    (recShapes recTypeShapes : List (WShape (n + 1)))
+    (rule : Pattern.IotaRule r) (A : SExpr)
+    (out outTy : WShape (n + 1)) : Prop :=
+  LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+  ∀ {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)},
+    SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    SExpr.PathSpineWF Γ my captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+          (mctor p) (mx path) (my path) (captureType path)) →
+    (∀ path : (Pattern.varN (.const rec) major).Path,
+      LR.DirectCaptureDefEqAligned.AtShapes
+        (n := n + 1) (LRD Γ) (mrec path)
+        (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+        (recElemShape path) (recTypeShape path)) →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => mx (.inl path)) = recXs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => my (.inl path)) = recYs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => captureType (.inl path)) = recTypes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recElemShape =
+      recShapes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recTypeShape =
+      recTypeShapes.reverse →
+    out.HasType outTy →
+    (LRD Γ).TyDefEq A A outTy →
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy
+
+/-- Fixed-result generated-RHS contract with both sides of the iota split
+fully listed and guarded.
+
+The ordinary listed contract intentionally leaves constructor captures in
+the predecessor legacy relation.  A framed non-nullary constructor instead
+rebuilds those fields at the root relation from strict recursive evidence;
+this refinement records their raw types, element shapes, and type shapes so
+the RHS consumes precisely that rebuilt payload. -/
+def LRD.IotaRHSDefEqDirectListedRecAt
+    {Γ : List SExpr} {n : Nat} (R : TShape → SExpr → Prop)
+    {rec ctor : Name} {major arity : Nat}
+    (recLs : List SLevel)
+    (mrec : (Pattern.varN (.const rec) major).Path → TShape)
+    (mctor : (Pattern.varN (.const ctor) arity).Path → TShape)
+    (r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check)
+    (recXs recYs recTypes : List SExpr)
+    (recShapes recTypeShapes : List (WShape (n + 1)))
+    (ctorXs ctorYs ctorTypes : List SExpr)
+    (ctorShapes ctorTypeShapes : List (WShape n))
+    (rule : Pattern.IotaRule r) (A : SExpr)
+    (out outTy : WShape (n + 1)) : Prop :=
+  LE_Interp.RHS recLs (Sum.elim mrec mctor) R out.T r.1 →
+  ∀ {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+      {recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1)}
+      {ctorElemShape ctorTypeShape :
+        (Pattern.varN (.const ctor) arity).Path → WShape n},
+    SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    SExpr.PathSpineWF Γ my captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+    (∀ path : (Pattern.varN (.const rec) major).Path,
+      LR.DirectCaptureDefEqAligned.AtShapes
+        (n := n + 1) (LRD Γ) (mrec path)
+        (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+        (recElemShape path) (recTypeShape path)) →
+    (∀ path : (Pattern.varN (.const ctor) arity).Path,
+      LR.DirectCaptureDefEqAligned.AtShapes
+        (n := n) (LRD Γ) (mctor path)
+        (mx (.inr path)) (my (.inr path)) (captureType (.inr path))
+        (ctorElemShape path) (ctorTypeShape path)) →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => mx (.inl path)) = recXs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => my (.inl path)) = recYs.reverse →
+    (Pattern.varNPaths (.const rec) major).map
+      (fun path => captureType (.inl path)) = recTypes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recElemShape =
+      recShapes.reverse →
+    (Pattern.varNPaths (.const rec) major).map recTypeShape =
+      recTypeShapes.reverse →
+    (Pattern.varNPaths (.const ctor) arity).map
+      (fun path => mx (.inr path)) = ctorXs.reverse →
+    (Pattern.varNPaths (.const ctor) arity).map
+      (fun path => my (.inr path)) = ctorYs.reverse →
+    (Pattern.varNPaths (.const ctor) arity).map
+      (fun path => captureType (.inr path)) = ctorTypes.reverse →
+    (Pattern.varNPaths (.const ctor) arity).map ctorElemShape =
+      ctorShapes.reverse →
+    (Pattern.varNPaths (.const ctor) arity).map ctorTypeShape =
+      ctorTypeShapes.reverse →
+    out.HasType outTy →
+    (LRD Γ).TyDefEq A A outTy →
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy
+
+/-- Specialize a universally listed RHS consumer to the terminal indices of
+one exact leaf. -/
+theorem LRD.IotaRHSDefEqListedRec.toAt
+    {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {recXs recYs recTypes : List SExpr}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {rule : Pattern.IotaRule r} {A : SExpr} {out outTy : WShape (n + 1)}
+    (H : LRD.IotaRHSDefEqListedRec (Γ := Γ) R recLs mrec mctor r
+      recXs recYs recTypes recShapes recTypeShapes rule out) :
+    LRD.IotaRHSDefEqListedRecAt (Γ := Γ) R recLs mrec mctor r
+      recXs recYs recTypes recShapes recTypeShapes rule A out outTy := by
+  intro hrhs mx my captureType recElemShape recTypeShape
+    hspineX hspineY hcap hcapRec hrecXs hrecYs hrecTypes
+    hrecShapes hrecTypeShapes hout hA
+  exact H hrhs hspineX hspineY hcap hcapRec hrecXs hrecYs hrecTypes
+    hrecShapes hrecTypeShapes hout hA
+
+/-- An ordinary guarded RHS consumer can ignore all five listed recursor
+readbacks. -/
+theorem LRD.IotaRHSDefEq.toListedRec
+    {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {recXs recYs recTypes : List SExpr}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (H : LRD.IotaRHSDefEq (Γ := Γ) R recLs
+      mrec mctor r rule out) :
+    LRD.IotaRHSDefEqListedRec (Γ := Γ) R recLs mrec mctor r
+      recXs recYs recTypes recShapes recTypeShapes rule out := by
+  intro hrhs mx my captureType recElemShape recTypeShape A outTy
+    hspineX hspineY hcap _hcapRec _hrecXs _hrecYs _hrecTypes
+    _hrecShapes _hrecTypeShapes hout hA
+  exact H hrhs hspineX hspineY hcap hout hA
+
+/-- Reduce the guarded generated-RHS contract to its non-bottom fixed-head
+case.  Recursor-prefix captures keep their paired guarded evidence, while
+constructor captures contribute the predecessor relation used to reconstruct
+the semantic head's typed lower approximation. -/
+theorem LRD.IotaRHSDefEq.of_nonbot
+    {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)},
+      LE_Interp.RHS (p := RecursorIotaPattern rec major ctor arity)
+        recLs (Sum.elim mrec mctor) R head
+        (.fixed rule.df.rhs rule.rhsClosed) →
+      IsDefEqStrong Γ (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) R recLs
+      mrec mctor r rule out := by
+  intro hrhs mx my captureType A outTy hspineX hspineY hcap hout hA
+  obtain hbot | ⟨head, hhead, hshapeSpine⟩ := rule.rhsShapeSpine hrhs
+  · have houtBot : out = .bot := TShape.le_bot.1 hbot
+    subst out
+    exact LRD.DefEq.bot hout.isType
+  · have hcapTyped : ∀ path,
+        ∃ elem elemTy : TShape,
+          Sum.elim mrec mctor path ≤ elem ∧ elem.HasType elemTy := by
+      intro path
+      cases path with
+      | inl path =>
+        obtain ⟨elem, elemTy, hshape, htype, _⟩ := hcap (.inl path)
+        exact ⟨elem.T, elemTy.T, hshape, htype.T⟩
+      | inr path =>
+        obtain ⟨elem, elemTy, hshape, htype, _⟩ := hcap (.inr path)
+        exact ⟨elem.T, elemTy.T, hshape, htype.T⟩
+    have hheadTyped := hshapeSpine.typedLowerHead hcapTyped hout.T
+    exact H hhead (rule.rhsStrong recLs) hshapeSpine hheadTyped
+      hspineX hspineY hcap hout hA
+
+/-- Proof-relevant guarded fixed-head form.  The callback receives the exact
+semantic witness selected by the enclosing RHS derivation, so a recursive
+successor result cannot be silently reselected at the same public indices. -/
+theorem LRD.IotaRHSDefEq.of_nonbotWitness
+    {R : TShape → SExpr → Prop} {ρ : Valuation}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)},
+      LE_Interp.Witness ρ head (SExpr.mkInst recLs rule.df.rhs) →
+      IsDefEqStrong Γ (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) (LE_Interp.Lower R) recLs
+      mrec mctor r rule out := by
+  apply LRD.IotaRHSDefEq.of_nonbot
+  intro head mx my captureType A outTy hhead hstrong hshape htyped
+    hspineX hspineY hcap hout hA
+  exact H (hhead.fixedLowerWitness hR) hstrong hshape htyped
+    hspineX hspineY hcap hout hA
+
+/-- Recursive-result-preserving guarded form of `of_nonbotWitness`.
+
+The fixed head and its attached predicate are selected together through
+`fixedLowerWitnessResult`.  This is the proof-relevant boundary needed by a
+guarded coherent leaf: retained evaluator seeds, child trees, or semantic
+typing data cannot be silently paired with a second witness at the same
+public indices. -/
+theorem LRD.IotaRHSDefEq.of_nonbotWitnessResult
+    {R : TShape → SExpr → Prop} {ρ : Valuation}
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hP : ∀ {m M} (hr : R m M), P (hR hr))
+    (hmono : ∀ {m m' M} (hle : m ≤ m')
+      (hM : LE_Interp.Witness ρ m' M), P hM → P (hM.mono hle))
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)}
+        (hhead : LE_Interp.Witness ρ head
+          (SExpr.mkInst recLs rule.df.rhs)),
+      P hhead →
+      IsDefEqStrong Γ (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) (LE_Interp.Lower R) recLs
+      mrec mctor r rule out := by
+  intro hrhs mx my captureType A outTy hspineX hspineY hcap hout hA
+  by_cases houtBot : out.T ≤ TShape.bot
+  · have houtEq : out = .bot := TShape.le_bot.1 houtBot
+    subst out
+    exact LRD.DefEq.bot hout.isType
+  obtain hbot | ⟨head, hhead, hshapeSpine⟩ := rule.rhsShapeSpine hrhs
+  · exact (houtBot hbot).elim
+  have hheadNonbot : ¬head ≤ TShape.bot := by
+    intro hbot
+    exact houtBot (hshapeSpine.le_bot hbot)
+  have hcapTyped : ∀ path,
+      ∃ elem elemTy : TShape,
+        Sum.elim mrec mctor path ≤ elem ∧ elem.HasType elemTy := by
+    intro path
+    cases path with
+    | inl path =>
+      obtain ⟨elem, elemTy, hshape, htype, _⟩ := hcap (.inl path)
+      exact ⟨elem.T, elemTy.T, hshape, htype.T⟩
+    | inr path =>
+      obtain ⟨elem, elemTy, hshape, htype, _⟩ := hcap (.inr path)
+      exact ⟨elem.T, elemTy.T, hshape, htype.T⟩
+  have hheadTyped := hshapeSpine.typedLowerHead hcapTyped hout.T
+  let headResult :=
+    hhead.fixedLowerWitnessResult hR hP hmono hheadNonbot
+  exact H headResult.1 headResult.2 (rule.rhsStrong recLs)
+    hshapeSpine hheadTyped hspineX hspineY hcap hout hA
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.of_nonbotWitnessResult' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.of_nonbotWitnessResult
+
+/-- Guarded exact iota action materialization.  Recursor-prefix captures
+retain paired legacy/direct evidence at one selected type; constructor-field
+captures stay in the predecessor legacy relation.  The theorem also builds
+the registered reduction actions and returns the complete contractions. -/
+theorem LRD.iotaActions_of_exactEqAt
+    {n : Nat} {rec ctor : Name} {major arity : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEq (LRD Γ₀)
+      recXs recYs recShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ₀)
+      ctorXs ctorYs ctorShapes)
+    (hMajorX : WHRedS Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs)))
+    (hMajorY : WHRedS Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs')))
+    (hsiteTypeX : ∀ (_ : WHRedS Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs)))),
+      Γ₀ ⊢
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) : A)
+    (hsiteTypeY : ∀ (_ : WHRedS Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs')))),
+      Γ₀ ⊢
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) : A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    {recHeadType ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      majorType : SExpr}
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hrecSpineX : SExpr.SpineWF Γ₀ recHeadType
+      (recXs.reverse ++ [majorX]) A)
+    (hrecSpineY : SExpr.SpineWF Γ₀ recHeadType
+      (recYs.reverse ++ [majorY]) A)
+    (hctorHeadX : Γ₀ ⊢ .const ctor ctorLs : ctorHeadTypeX)
+    (hctorHeadY : Γ₀ ⊢ .const ctor ctorLs' : ctorHeadTypeY)
+    (hctorSpineX : SExpr.SpineWF Γ₀ ctorHeadTypeX
+      ctorXs.reverse ctorResultX)
+    (hctorSpineY : SExpr.SpineWF Γ₀ ctorHeadTypeY
+      ctorYs.reverse ctorResultY)
+    (hMajorEqX : IsDefEq Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)) majorType)
+    (hMajorEqY : IsDefEq Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')) majorType) :
+    ∃ (mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1))
+      (captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType)
+      (captureTypingY : Pattern.CaptureTyping Γ₀ my captureType)
+      (rule : Pattern.IotaRule r)
+      (siteX : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs
+        recXs ctorXs majorX A mx captureType captureTypingX)
+      (siteY : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs'
+        recYs ctorYs majorY A my captureType captureTypingY),
+      ∃ actionX : Pattern.Action Γ₀ r
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) recLs mx A,
+      ∃ actionY : Pattern.Action Γ₀ r
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) recLs my A,
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ₀) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ₀)
+            (mctor p) (mx path) (my path) (captureType path)) ∧
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes
+          (n := n + 1) (LRD Γ₀) (mrec path)
+          (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+          (recElemShape path) (recTypeShape path)) ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      WHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        (r.1.applyS recLs mx) ∧
+      WHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        (r.1.applyS recLs my) := by
+  obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+      hmatchX, hmatchY, hrecXsPaths, hrecYsPaths, hrecShapePaths,
+      hcapRec, hcapCtor, hredX, hredY⟩ :=
+    LE_Interp.Matches.iota_materializeDirectRecAlignedAt hpat hmf hma
+      hrecargs hctorargs hMajorX hMajorY
+  let typingX : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs
+      recXs ctorXs majorX A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeX
+    ctorResultType := ctorResultX
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineX
+    ctorHead := hctorHeadX
+    ctorSpine := hctorSpineX
+    majorEq := hMajorEqX }
+  let typingY : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs'
+      recYs ctorYs majorY A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeY
+    ctorResultType := ctorResultY
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineY
+    ctorHead := hctorHeadY
+    ctorSpine := hctorSpineY
+    majorEq := hMajorEqY }
+  classical
+  let captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p =>
+        exact (hcapRec p).2.2.2.2.1.hasType.1
+      | inr p =>
+        exact (LRS.CaptureDefEqAligned.witness
+          (hcapCtor p)).defeq.hasType.1 }
+  let captureTypingY : Pattern.CaptureTyping Γ₀ my captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p =>
+        exact (hcapRec p).2.2.2.2.1.hasType.2
+      | inr p =>
+        exact (LRS.CaptureDefEqAligned.witness
+          (hcapCtor p)).defeq.hasType.2 }
+  let rule := Params.Semantic.iotaRule hpat
+  let siteX := Params.Semantic.iotaSite rule captureType captureTypingX
+    hΓ.reify typingX hmatchX (hsiteTypeX hredX) hAType
+  let siteY := Params.Semantic.iotaSite rule captureType captureTypingY
+    hΓ.reify typingY hmatchY (hsiteTypeY hredY) hAType
+  let actionX := siteX.action
+  let actionY := siteY.action
+  have hcapAligned : ∀ path :
+      (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ₀) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ₀)
+          (mctor p) (mx path) (my path) (captureType path) := by
+    intro path
+    cases path with
+    | inl p =>
+      exact ⟨recElemShape p, recTypeShape p, hcapRec p⟩
+    | inr p => exact hcapCtor p
+  exact ⟨mx, my, captureType, recElemShape, recTypeShape,
+    captureTypingX, captureTypingY,
+    rule, siteX, siteY, actionX, actionY, hcapAligned, hcapRec,
+    hrecXsPaths, hrecYsPaths, hrecShapePaths,
+    .tail hredX (.extra actionX), .tail hredY (.extra actionY)⟩
+
+/-- Guarded iota action materialization from an explicitly listed recursor
+prefix.  The resulting sites and contractions retain canonical readback
+equations for syntax, capture types, element shapes, and type shapes. -/
+theorem LRD.iotaActions_of_exactListedAt
+    {n : Nat} {rec ctor : Name} {major arity : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ₀)
+      ctorXs ctorYs ctorShapes)
+    (hMajorX : WHRedS Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs)))
+    (hMajorY : WHRedS Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs')))
+    (hsiteTypeX : ∀ (_ : WHRedS Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs)))),
+      Γ₀ ⊢
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) : A)
+    (hsiteTypeY : ∀ (_ : WHRedS Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs')))),
+      Γ₀ ⊢
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) : A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    {recHeadType ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      majorType : SExpr}
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hrecSpineX : SExpr.SpineWF Γ₀ recHeadType
+      (recXs.reverse ++ [majorX]) A)
+    (hrecSpineY : SExpr.SpineWF Γ₀ recHeadType
+      (recYs.reverse ++ [majorY]) A)
+    (hctorHeadX : Γ₀ ⊢ .const ctor ctorLs : ctorHeadTypeX)
+    (hctorHeadY : Γ₀ ⊢ .const ctor ctorLs' : ctorHeadTypeY)
+    (hctorSpineX : SExpr.SpineWF Γ₀ ctorHeadTypeX
+      ctorXs.reverse ctorResultX)
+    (hctorSpineY : SExpr.SpineWF Γ₀ ctorHeadTypeY
+      ctorYs.reverse ctorResultY)
+    (hMajorEqX : IsDefEq Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)) majorType)
+    (hMajorEqY : IsDefEq Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')) majorType) :
+    ∃ (mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (captureType : (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1))
+      (captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType)
+      (captureTypingY : Pattern.CaptureTyping Γ₀ my captureType)
+      (rule : Pattern.IotaRule r)
+      (siteX : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs
+        recXs ctorXs majorX A mx captureType captureTypingX)
+      (siteY : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs'
+        recYs ctorYs majorY A my captureType captureTypingY),
+      ∃ actionX : Pattern.Action Γ₀ r
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) recLs mx A,
+      ∃ actionY : Pattern.Action Γ₀ r
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) recLs my A,
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ₀) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ₀)
+            (mctor p) (mx path) (my path) (captureType path)) ∧
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes
+          (n := n + 1) (LRD Γ₀) (mrec path)
+          (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+          (recElemShape path) (recTypeShape path)) ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => captureType (.inl path)) = recTypes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recTypeShape =
+        recTypeShapes.reverse ∧
+      WHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        (r.1.applyS recLs mx) ∧
+      WHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        (r.1.applyS recLs my) := by
+  obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+      hmatchX, hmatchY, hrecXsPaths, hrecYsPaths, hrecTypePaths,
+      hrecShapePaths, hrecTypeShapePaths, hcapRec, hcapCtor,
+      hredX, hredY⟩ :=
+    LE_Interp.Matches.iota_materializeDirectRecListedAt hpat hmf hma
+      hrecargs hctorargs hMajorX hMajorY
+  let typingX : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs
+      recXs ctorXs majorX A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeX
+    ctorResultType := ctorResultX
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineX
+    ctorHead := hctorHeadX
+    ctorSpine := hctorSpineX
+    majorEq := hMajorEqX }
+  let typingY : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs'
+      recYs ctorYs majorY A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeY
+    ctorResultType := ctorResultY
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineY
+    ctorHead := hctorHeadY
+    ctorSpine := hctorSpineY
+    majorEq := hMajorEqY }
+  classical
+  let captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p => exact (hcapRec p).2.2.2.2.1.hasType.1
+      | inr p =>
+        exact (LRS.CaptureDefEqAligned.witness
+          (hcapCtor p)).defeq.hasType.1 }
+  let captureTypingY : Pattern.CaptureTyping Γ₀ my captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p => exact (hcapRec p).2.2.2.2.1.hasType.2
+      | inr p =>
+        exact (LRS.CaptureDefEqAligned.witness
+          (hcapCtor p)).defeq.hasType.2 }
+  let rule := Params.Semantic.iotaRule hpat
+  let siteX := Params.Semantic.iotaSite rule captureType captureTypingX
+    hΓ.reify typingX hmatchX (hsiteTypeX hredX) hAType
+  let siteY := Params.Semantic.iotaSite rule captureType captureTypingY
+    hΓ.reify typingY hmatchY (hsiteTypeY hredY) hAType
+  let actionX := siteX.action
+  let actionY := siteY.action
+  have hcapAligned : ∀ path :
+      (RecursorIotaPattern rec major ctor arity).Path,
+      match path with
+      | Sum.inl p => LR.DirectCaptureDefEqAligned
+          (n := n + 1) (LRD Γ₀) (mrec p)
+          (mx path) (my path) (captureType path)
+      | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ₀)
+          (mctor p) (mx path) (my path) (captureType path) := by
+    intro path
+    cases path with
+    | inl p => exact ⟨recElemShape p, recTypeShape p, hcapRec p⟩
+    | inr p => exact hcapCtor p
+  exact ⟨mx, my, captureType, recElemShape, recTypeShape,
+    captureTypingX, captureTypingY, rule, siteX, siteY,
+    actionX, actionY, hcapAligned, hcapRec,
+    hrecXsPaths, hrecYsPaths, hrecTypePaths,
+    hrecShapePaths, hrecTypeShapePaths,
+    .tail hredX (.extra actionX), .tail hredY (.extra actionY)⟩
+
+/-- Materialize the registered actions while retaining fully listed paired
+guarded captures on both sides of the recursor/constructor split. -/
+theorem LRD.iotaActions_of_exactDirectListedAt
+    {n : Nat} {rec ctor : Name} {major arity : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes ctorTypeShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs ctorTypes : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      ctorXs ctorYs ctorTypes ctorShapes ctorTypeShapes)
+    (hMajorX : WHRedS Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs)))
+    (hMajorY : WHRedS Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a) (.const ctor ctorLs')))
+    (hsiteTypeX : ∀ (_ : WHRedS Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs)))),
+      Γ₀ ⊢
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) : A)
+    (hsiteTypeY : ∀ (_ : WHRedS Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs')))),
+      Γ₀ ⊢
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) : A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    {recHeadType ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      majorType : SExpr}
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hrecSpineX : SExpr.SpineWF Γ₀ recHeadType
+      (recXs.reverse ++ [majorX]) A)
+    (hrecSpineY : SExpr.SpineWF Γ₀ recHeadType
+      (recYs.reverse ++ [majorY]) A)
+    (hctorHeadX : Γ₀ ⊢ .const ctor ctorLs : ctorHeadTypeX)
+    (hctorHeadY : Γ₀ ⊢ .const ctor ctorLs' : ctorHeadTypeY)
+    (hctorSpineX : SExpr.SpineWF Γ₀ ctorHeadTypeX
+      ctorXs.reverse ctorResultX)
+    (hctorSpineY : SExpr.SpineWF Γ₀ ctorHeadTypeY
+      ctorYs.reverse ctorResultY)
+    (hMajorEqX : IsDefEq Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)) majorType)
+    (hMajorEqY : IsDefEq Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')) majorType) :
+    ∃ (mx my captureType :
+        (RecursorIotaPattern rec major ctor arity).Path → SExpr)
+      (recElemShape recTypeShape :
+        (Pattern.varN (.const rec) major).Path → WShape (n + 1))
+      (ctorElemShape ctorTypeShape :
+        (Pattern.varN (.const ctor) arity).Path → WShape n)
+      (captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType)
+      (captureTypingY : Pattern.CaptureTyping Γ₀ my captureType)
+      (rule : Pattern.IotaRule r)
+      (siteX : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs
+        recXs ctorXs majorX A mx captureType captureTypingX)
+      (siteY : Pattern.IotaReductionSite Γ₀ r rule recLs ctorLs'
+        recYs ctorYs majorY A my captureType captureTypingY),
+      ∃ actionX : Pattern.Action Γ₀ r
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) recLs mx A,
+      ∃ actionY : Pattern.Action Γ₀ r
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs'))) recLs my A,
+      (∀ path : (Pattern.varN (.const rec) major).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes
+          (n := n + 1) (LRD Γ₀) (mrec path)
+          (mx (.inl path)) (my (.inl path)) (captureType (.inl path))
+          (recElemShape path) (recTypeShape path)) ∧
+      (∀ path : (Pattern.varN (.const ctor) arity).Path,
+        LR.DirectCaptureDefEqAligned.AtShapes
+          (n := n) (LRD Γ₀) (mctor path)
+          (mx (.inr path)) (my (.inr path)) (captureType (.inr path))
+          (ctorElemShape path) (ctorTypeShape path)) ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => mx (.inl path)) = recXs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => my (.inl path)) = recYs.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map
+        (fun path => captureType (.inl path)) = recTypes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recElemShape =
+        recShapes.reverse ∧
+      (Pattern.varNPaths (.const rec) major).map recTypeShape =
+        recTypeShapes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => mx (.inr path)) = ctorXs.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => my (.inr path)) = ctorYs.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map
+        (fun path => captureType (.inr path)) = ctorTypes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map ctorElemShape =
+        ctorShapes.reverse ∧
+      (Pattern.varNPaths (.const ctor) arity).map ctorTypeShape =
+        ctorTypeShapes.reverse ∧
+      WHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorX)
+        (r.1.applyS recLs mx) ∧
+      WHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app majorY)
+        (r.1.applyS recLs my) := by
+  obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+      ctorElemShape, ctorTypeShape, hmatchX, hmatchY,
+      hrecXsPaths, hrecYsPaths, hrecTypePaths,
+      hrecShapePaths, hrecTypeShapePaths,
+      hctorXsPaths, hctorYsPaths, hctorTypePaths,
+      hctorShapePaths, hctorTypeShapePaths,
+      hcapRec, hcapCtor, hredX, hredY⟩ :=
+    LE_Interp.Matches.iota_materializeDirectListedAt hpat hmf hma
+      hrecargs hctorargs hMajorX hMajorY
+  let typingX : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs
+      recXs ctorXs majorX A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeX
+    ctorResultType := ctorResultX
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineX
+    ctorHead := hctorHeadX
+    ctorSpine := hctorSpineX
+    majorEq := hMajorEqX }
+  let typingY : Pattern.IotaTyping Γ₀ rec ctor recLs ctorLs'
+      recYs ctorYs majorY A := {
+    recHeadType := recHeadType
+    ctorHeadType := ctorHeadTypeY
+    ctorResultType := ctorResultY
+    majorType := majorType
+    recHead := hrecHead
+    recSpine := hrecSpineY
+    ctorHead := hctorHeadY
+    ctorSpine := hctorSpineY
+    majorEq := hMajorEqY }
+  let captureTypingX : Pattern.CaptureTyping Γ₀ mx captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p => exact (hcapRec p).2.2.2.2.1.hasType.1
+      | inr p => exact (hcapCtor p).2.2.2.2.1.hasType.1 }
+  let captureTypingY : Pattern.CaptureTyping Γ₀ my captureType := {
+    typed := by
+      intro path
+      cases path with
+      | inl p => exact (hcapRec p).2.2.2.2.1.hasType.2
+      | inr p => exact (hcapCtor p).2.2.2.2.1.hasType.2 }
+  let rule := Params.Semantic.iotaRule hpat
+  let siteX := Params.Semantic.iotaSite rule captureType captureTypingX
+    hΓ.reify typingX hmatchX (hsiteTypeX hredX) hAType
+  let siteY := Params.Semantic.iotaSite rule captureType captureTypingY
+    hΓ.reify typingY hmatchY (hsiteTypeY hredY) hAType
+  let actionX := siteX.action
+  let actionY := siteY.action
+  exact ⟨mx, my, captureType, recElemShape, recTypeShape,
+    ctorElemShape, ctorTypeShape, captureTypingX, captureTypingY,
+    rule, siteX, siteY, actionX, actionY, hcapRec, hcapCtor,
+    hrecXsPaths, hrecYsPaths, hrecTypePaths,
+    hrecShapePaths, hrecTypeShapePaths,
+    hctorXsPaths, hctorYsPaths, hctorTypePaths,
+    hctorShapePaths, hctorTypeShapePaths,
+    .tail hredX (.extra actionX), .tail hredY (.extra actionY)⟩
+
+/-- Consume explicitly listed iota-site data after the constructor leaf has
+already been normalized.  This is the data-level core of the exact-leaf
+handler: it needs only the two raw constructor spines and their finite field
+relation, so a nullary constructor can be reused across a `CtorFrame`
+without transporting the frame's ambient logical relation. -/
+theorem LRD.iotaDefEq_of_exactListedDataAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LRS.CtorArgsDefEq (LR Γ₀)
+      ctorXs ctorYs ctorShapes)
+    (hMajorRedX : WHRedS Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)))
+    (hMajorRedY : WHRedS Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')))
+    (hsiteTypeX : Γ₀ ⊢
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs))) : A)
+    (hsiteTypeY : Γ₀ ⊢
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs'))) : A)
+    (hsiteEqX : IsDefEq Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs))) A)
+    (hsiteEqY : IsDefEq Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs'))) A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    {recHeadType ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      majorType : SExpr}
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hrecSpineX : SExpr.SpineWF Γ₀ recHeadType
+      (recXs.reverse ++ [majorX]) A)
+    (hrecSpineY : SExpr.SpineWF Γ₀ recHeadType
+      (recYs.reverse ++ [majorY]) A)
+    (hctorHeadX : Γ₀ ⊢ .const ctor ctorLs : ctorHeadTypeX)
+    (hctorHeadY : Γ₀ ⊢ .const ctor ctorLs' : ctorHeadTypeY)
+    (hctorSpineX : SExpr.SpineWF Γ₀ ctorHeadTypeX
+      ctorXs.reverse ctorResultX)
+    (hctorSpineY : SExpr.SpineWF Γ₀ ctorHeadTypeY
+      ctorYs.reverse ctorResultY)
+    (hMajorEqX : IsDefEq Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)) majorType)
+    (hMajorEqY : IsDefEq Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')) majorType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEqListedRecAt (Γ := Γ₀) R recLs mrec mctor r
+        recXs recYs recTypes recShapes recTypeShapes rule A out outTy) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+      captureTypingX, captureTypingY, rule, siteX, siteY,
+      actionX, actionY, hcap, hcapRec,
+      hrecXsPaths, hrecYsPaths, hrecTypePaths,
+      hrecShapePaths, hrecTypeShapePaths, hredX, hredY⟩ :=
+    LRD.iotaActions_of_exactListedAt hΓ hpat hmf hma
+      hrecargs hctorargs hMajorRedX hMajorRedY
+      (fun _ => hsiteTypeX) (fun _ => hsiteTypeY)
+      hAType hrecHead hrecSpineX hrecSpineY
+      hctorHeadX hctorHeadY hctorSpineX hctorSpineY
+      hMajorEqX hMajorEqY
+  have hrhsDefEq : (LRD Γ₀).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy :=
+    rhsDefEq rule hrhs siteX.captureSpine siteY.captureSpine
+      hcap hcapRec hrecXsPaths hrecYsPaths hrecTypePaths
+      hrecShapePaths hrecTypeShapePaths hout hA
+  have htypedX : TypedWHRedS Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      (r.1.applyS recLs mx) A :=
+    ⟨hsiteEqX.trans actionX.sound, hredX⟩
+  have htypedY : TypedWHRedS Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      (r.1.applyS recLs my) A :=
+    ⟨hsiteEqY.trans actionY.sound, hredY⟩
+  exact (LRD.DefEq.whr hA htypedX htypedY).2 hrhsDefEq
+
+/-- Consume explicitly listed iota-site data when the normalized constructor
+fields have already been rebuilt in the paired guarded root relation. -/
+theorem LRD.iotaDefEq_of_exactDirectListedDataAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes ctorTypeShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes ctorXs ctorYs ctorTypes : List SExpr}
+    {recLs ctorLs ctorLs' : List SLevel}
+    {majorX majorY A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hctorargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      ctorXs ctorYs ctorTypes ctorShapes ctorTypeShapes)
+    (hMajorRedX : WHRedS Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)))
+    (hMajorRedY : WHRedS Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')))
+    (hsiteTypeX : Γ₀ ⊢
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs))) : A)
+    (hsiteTypeY : Γ₀ ⊢
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs'))) : A)
+    (hsiteEqX : IsDefEq Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs))) A)
+    (hsiteEqY : IsDefEq Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app
+          (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+            (.const ctor ctorLs'))) A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    {recHeadType ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      majorType : SExpr}
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hrecSpineX : SExpr.SpineWF Γ₀ recHeadType
+      (recXs.reverse ++ [majorX]) A)
+    (hrecSpineY : SExpr.SpineWF Γ₀ recHeadType
+      (recYs.reverse ++ [majorY]) A)
+    (hctorHeadX : Γ₀ ⊢ .const ctor ctorLs : ctorHeadTypeX)
+    (hctorHeadY : Γ₀ ⊢ .const ctor ctorLs' : ctorHeadTypeY)
+    (hctorSpineX : SExpr.SpineWF Γ₀ ctorHeadTypeX
+      ctorXs.reverse ctorResultX)
+    (hctorSpineY : SExpr.SpineWF Γ₀ ctorHeadTypeY
+      ctorYs.reverse ctorResultY)
+    (hMajorEqX : IsDefEq Γ₀ majorX
+      (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs)) majorType)
+    (hMajorEqY : IsDefEq Γ₀ majorY
+      (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const ctor ctorLs')) majorType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEqDirectListedRecAt (Γ := Γ₀) R
+        recLs mrec mctor r recXs recYs recTypes recShapes recTypeShapes
+        ctorXs ctorYs ctorTypes ctorShapes ctorTypeShapes
+        rule A out outTy) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+      ctorElemShape, ctorTypeShape, captureTypingX, captureTypingY,
+      rule, siteX, siteY, actionX, actionY, hcapRec, hcapCtor,
+      hrecXsPaths, hrecYsPaths, hrecTypePaths,
+      hrecShapePaths, hrecTypeShapePaths,
+      hctorXsPaths, hctorYsPaths, hctorTypePaths,
+      hctorShapePaths, hctorTypeShapePaths, hredX, hredY⟩ :=
+    LRD.iotaActions_of_exactDirectListedAt hΓ hpat hmf hma
+      hrecargs hctorargs hMajorRedX hMajorRedY
+      (fun _ => hsiteTypeX) (fun _ => hsiteTypeY)
+      hAType hrecHead hrecSpineX hrecSpineY
+      hctorHeadX hctorHeadY hctorSpineX hctorSpineY
+      hMajorEqX hMajorEqY
+  have hrhsDefEq : (LRD Γ₀).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy :=
+    rhsDefEq rule hrhs siteX.captureSpine siteY.captureSpine
+      hcapRec hcapCtor
+      hrecXsPaths hrecYsPaths hrecTypePaths
+      hrecShapePaths hrecTypeShapePaths
+      hctorXsPaths hctorYsPaths hctorTypePaths
+      hctorShapePaths hctorTypeShapePaths hout hA
+  have htypedX : TypedWHRedS Γ₀
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      (r.1.applyS recLs mx) A :=
+    ⟨hsiteEqX.trans actionX.sound, hredX⟩
+  have htypedY : TypedWHRedS Γ₀
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      (r.1.applyS recLs my) A :=
+    ⟨hsiteEqY.trans actionY.sound, hredY⟩
+  exact (LRD.DefEq.whr hA htypedX htypedY).2 hrhsDefEq
+
+/-- Consume one native constructor leaf using an explicitly listed recursor
+prefix.  The generated-RHS callback receives the five canonical readbacks
+from the registered Pi domains used to build its reduction sites. -/
+theorem LRD.iotaDefEq_of_ctorExactListedAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes recTypeShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs recTypes : List SExpr} {recLs : List SLevel}
+    {majorX majorY recHeadType A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    {hwf : IsStruct ctor → WShape.ListNonZero ctorShapes.reverse}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (leaf : LRS.CtorExact Γ₀ (LR Γ₀) majorX majorY
+      (.ctor ctor ctorShapes.reverse hwf))
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) recHeadType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor ctor ctorShapes.reverse hwf) :: recShapes) A out outTy)
+    (hrecargs : LR.DirectCtorArgsDefEqListed (LRD Γ₀)
+      recXs recYs recTypes recShapes recTypeShapes)
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEqListedRecAt (Γ := Γ₀) R recLs mrec mctor r
+        recXs recYs recTypes recShapes recTypeShapes rule A out outTy) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  generalize hm : WShape.ctor ctor ctorShapes.reverse hwf = m at leaf
+  cases leaf with
+  | @intro _ ctorLeafShapes _ ctorLs ctorLs' ctorXs ctorYs
+      ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      hctorClass hctorLenX hctorLenY hctorLevels hctorHeadX hctorHeadY
+      hctorSpineX hctorSpineY hctorArgs hctorAligned hctorMirror =>
+    subst ctorLs'
+    obtain ⟨rfl, hctorShapes⟩ := WShape.ctor.inj.1 hm
+    have hctorShapes' : ctorShapes = ctorLeafShapes := by
+      exact List.reverse_inj.1 hctorShapes
+    subst ctorShapes
+    have hterm : Γ₀ ⊢
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ≡
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) : A := by
+      simpa only [List.foldl_reverse, List.foldr_cons] using
+        hleaf.legacy.aligned.spine.congr hrecHead
+    have hAType : ∃ u, Γ₀ ⊢ A : .sort u :=
+      ⟨hleaf.legacy.pair.resultSortX,
+        hleaf.legacy.pair.resultX.hasType.2⟩
+    have hrecSpineX := hleaf.legacy.pair.fullX
+    rw [← hleaf.legacy.args_eq] at hrecSpineX
+    simp only [List.reverse_cons] at hrecSpineX
+    have hrecSpineY := hleaf.legacy.pair.fullY
+    rw [← hleaf.legacy.args'_eq] at hrecSpineY
+    simp only [List.reverse_cons] at hrecSpineY
+    obtain ⟨_, hmajor⟩ := hleaf.legacy.majorDefEq
+    obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+        captureTypingX, captureTypingY, rule, siteX, siteY,
+        actionX, actionY, hcap, hcapRec,
+        hrecXsPaths, hrecYsPaths, hrecTypePaths,
+        hrecShapePaths, hrecTypeShapePaths, hredX, hredY⟩ :=
+      LRD.iotaActions_of_exactListedAt hΓ hpat hmf hma
+        hrecargs hctorArgs .rfl .rfl
+        (fun _ => hterm.hasType.1) (fun _ => hterm.hasType.2)
+        hAType hrecHead hrecSpineX hrecSpineY
+        hctorHeadX hctorHeadY hctorSpineX hctorSpineY
+        hmajor.hasType.1 hmajor.hasType.2
+    have hrhsDefEq : (LRD Γ₀).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy :=
+      rhsDefEq rule hrhs siteX.captureSpine siteY.captureSpine
+        hcap hcapRec hrecXsPaths hrecYsPaths hrecTypePaths
+        hrecShapePaths hrecTypeShapePaths hout hA
+    have htypedX : TypedWHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs)))
+        (r.1.applyS recLs mx) A := ⟨actionX.sound, hredX⟩
+    have htypedY : TypedWHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs)))
+        (r.1.applyS recLs my) A := ⟨actionY.sound, hredY⟩
+    exact (LRD.DefEq.whr hA htypedX htypedY).2 hrhsDefEq
+
+/-- Consume one native constructor leaf while exposing the exact materialized
+recursor capture shapes to the generated-RHS consumer.  The registered
+actions themselves provide the typed equalities for both contractions, so
+guarded weak-head transport needs no external subject-reduction theorem. -/
+theorem LRD.iotaDefEq_of_ctorExactAlignedAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs : List SExpr} {recLs : List SLevel}
+    {majorX majorY recHeadType A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    {hwf : IsStruct ctor → WShape.ListNonZero ctorShapes.reverse}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (leaf : LRS.CtorExact Γ₀ (LR Γ₀) majorX majorY
+      (.ctor ctor ctorShapes.reverse hwf))
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) recHeadType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor ctor ctorShapes.reverse hwf) :: recShapes) A out outTy)
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEqAlignedRec (Γ := Γ₀) R recLs
+        mrec mctor r recXs recYs recShapes rule out) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  generalize hm : WShape.ctor ctor ctorShapes.reverse hwf = m at leaf
+  cases leaf with
+  | @intro _ ctorLeafShapes _ ctorLs ctorLs' ctorXs ctorYs
+      ctorHeadTypeX ctorHeadTypeY ctorResultX ctorResultY
+      hctorClass hctorLenX hctorLenY hctorLevels hctorHeadX hctorHeadY
+      hctorSpineX hctorSpineY hctorArgs hctorAligned hctorMirror =>
+    subst ctorLs'
+    obtain ⟨rfl, hctorShapes⟩ := WShape.ctor.inj.1 hm
+    have hctorShapes' : ctorShapes = ctorLeafShapes := by
+      exact List.reverse_inj.1 hctorShapes
+    subst ctorShapes
+    have hterm : Γ₀ ⊢
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) ≡
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs))) : A := by
+      simpa only [List.foldl_reverse, List.foldr_cons] using
+        hleaf.legacy.aligned.spine.congr hrecHead
+    have hAType : ∃ u, Γ₀ ⊢ A : .sort u :=
+      ⟨hleaf.legacy.pair.resultSortX,
+        hleaf.legacy.pair.resultX.hasType.2⟩
+    have hrecSpineX := hleaf.legacy.pair.fullX
+    rw [← hleaf.legacy.args_eq] at hrecSpineX
+    simp only [List.reverse_cons] at hrecSpineX
+    have hrecSpineY := hleaf.legacy.pair.fullY
+    rw [← hleaf.legacy.args'_eq] at hrecSpineY
+    simp only [List.reverse_cons] at hrecSpineY
+    obtain ⟨_, hmajor⟩ := hleaf.legacy.majorDefEq
+    obtain ⟨mx, my, captureType, recElemShape, recTypeShape,
+        captureTypingX, captureTypingY, rule, siteX, siteY,
+        actionX, actionY, hcap, hcapRec,
+        hrecXsPaths, hrecYsPaths, hrecShapePaths, hredX, hredY⟩ :=
+      LRD.iotaActions_of_exactEqAt hΓ hpat hmf hma
+        hleaf.directArgs.tail hctorArgs .rfl .rfl
+        (fun _ => hterm.hasType.1) (fun _ => hterm.hasType.2)
+        hAType hrecHead hrecSpineX hrecSpineY
+        hctorHeadX hctorHeadY hctorSpineX hctorSpineY
+        hmajor.hasType.1 hmajor.hasType.2
+    have hrhsDefEq : (LRD Γ₀).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy :=
+      rhsDefEq rule hrhs siteX.captureSpine siteY.captureSpine
+        hcap hcapRec hrecXsPaths hrecYsPaths hrecShapePaths hout hA
+    have htypedX : TypedWHRedS Γ₀
+        ((recXs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorXs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs)))
+        (r.1.applyS recLs mx) A := ⟨actionX.sound, hredX⟩
+    have htypedY : TypedWHRedS Γ₀
+        ((recYs.foldr (fun (a f : SExpr) => f.app a)
+          (.const rec recLs)).app
+            (ctorYs.foldr (fun (a f : SExpr) => f.app a)
+              (.const ctor ctorLs)))
+        (r.1.applyS recLs my) A := ⟨actionY.sound, hredY⟩
+    exact (LRD.DefEq.whr hA htypedX htypedY).2 hrhsDefEq
+
+/-- Consume one native constructor leaf in the guarded relation.  This
+compatibility wrapper forgets the exact recursor shape maps exposed by
+`iotaDefEq_of_ctorExactAlignedAt`. -/
+theorem LRD.iotaDefEq_of_ctorExactAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs : List SExpr} {recLs : List SLevel}
+    {majorX majorY recHeadType A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    {hwf : IsStruct ctor → WShape.ListNonZero ctorShapes.reverse}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (leaf : LRS.CtorExact Γ₀ (LR Γ₀) majorX majorY
+      (.ctor ctor ctorShapes.reverse hwf))
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) recHeadType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor ctor ctorShapes.reverse hwf) :: recShapes) A out outTy)
+    (hrecHead : Γ₀ ⊢ .const rec recLs : recHeadType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEq (Γ := Γ₀) R recLs
+        mrec mctor r rule out) :
+    (LRD Γ₀).DefEq
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  exact LRD.iotaDefEq_of_ctorExactAlignedAt hΓ hpat hmf hma hrhs
+    leaf hleaf hrecHead hout hA
+    (fun rule => (rhsDefEq rule).toAlignedRec
+      (recXs := recXs) (recYs := recYs) (recShapes := recShapes))
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCtorArgsDefEq.tail' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCtorArgsDefEq.tail
+
+/--
+info: 'Lean4Lean.SExpr.LR.DirectCaptureDefEqAt.Witness.aligned' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.DirectCaptureDefEqAt.Witness.aligned
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.toAlignedRec' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.toAlignedRec
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEqListedRec.toAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEqListedRec.toAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.toListedRec' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.toListedRec
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaActions_of_exactEqAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaActions_of_exactEqAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaActions_of_exactListedAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaActions_of_exactListedAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaActions_of_exactDirectListedAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaActions_of_exactDirectListedAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_exactListedDataAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_exactListedDataAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_exactDirectListedDataAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_exactDirectListedDataAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_ctorExactAlignedAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_ctorExactAlignedAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_ctorExactListedAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_ctorExactListedAt
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEq_of_ctorExactAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEq_of_ctorExactAt
+
+/-- Consume one native constructor leaf as a synchronized guarded iota
+rectangle.  The two row edges retain the original related majors and choose
+the left or right direct recursor prefix; the cross edge is the original
+paired leaf.  All three calls therefore share the exact result observation
+and the registered actions' typed contractions. -/
+theorem LRD.iotaDefEqRect_of_ctorExactAt
+    {n : Nat} {R : TShape → SExpr → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recShapes : List (WShape (n + 1))}
+    {ctorShapes : List (WShape n)}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {recXs recYs : List SExpr} {recLs : List SLevel}
+    {majorX majorY recHeadType A : SExpr}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {out outTy : WShape (n + 1)}
+    {hwf : IsStruct ctor → WShape.ListNonZero ctorShapes.reverse}
+    (hΓ : Ctx.WF Γ₀)
+    (hpat : Params.Pat (RecursorIotaPattern rec major ctor arity) r)
+    (hmf : LE_Interp.Matches (n := n + 1)
+      (Pattern.varN (.const rec) major) rec recShapes mrec)
+    (hma : LE_Interp.Matches (n := n)
+      (Pattern.varN (.const ctor) arity) ctor ctorShapes mctor)
+    (hrhs : LE_Interp.RHS recLs (Sum.elim mrec mctor)
+      R out.T r.1)
+    (leaf : LRS.CtorExact Γ₀ (LR Γ₀) majorX majorY
+      (.ctor ctor ctorShapes.reverse hwf))
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀) recHeadType
+      (majorX :: recXs) (majorY :: recYs)
+      ((.ctor ctor ctorShapes.reverse hwf) :: recShapes) A out outTy)
+    (hrecHead : IsDefEq Γ₀ (.const rec recLs) (.const rec recLs)
+      recHeadType)
+    (hout : out.HasType outTy)
+    (hA : (LRD Γ₀).TyDefEq A A outTy)
+    (rhsDefEq : ∀ rule : Pattern.IotaRule r,
+      LRD.IotaRHSDefEq (Γ := Γ₀) R recLs
+        mrec mctor r rule out) :
+    LR.DirectDefEqRect (LRD Γ₀)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recXs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorX)
+      ((recYs.foldr (fun (a f : SExpr) => f.app a)
+        (.const rec recLs)).app majorY)
+      A out outTy := by
+  refine ⟨?_, ?_, ?_⟩
+  · exact LRD.iotaDefEq_of_ctorExactAt hΓ hpat hmf hma hrhs leaf
+      hleaf.leftPrefixes hrecHead hout hA rhsDefEq
+  · exact LRD.iotaDefEq_of_ctorExactAt hΓ hpat hmf hma hrhs leaf
+      hleaf.rightPrefixes hrecHead hout hA rhsDefEq
+  · exact LRD.iotaDefEq_of_ctorExactAt hΓ hpat hmf hma hrhs leaf
+      hleaf hrecHead hout hA rhsDefEq
+
+/--
+info: 'Lean4Lean.SExpr.LRD.iotaDefEqRect_of_ctorExactAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.iotaDefEqRect_of_ctorExactAt
+
 /-- Consume a native exact constructor leaf without appealing to generic
 weak-head subject reduction.
 
@@ -4797,6 +12160,821 @@ theorem LR.constDefEq
       exact ⟨⟨c, ls, xs, hleaf.args.lengths.1.symm ▸ hcl', .rfl⟩,
         ⟨c, ls, ys, hleaf.args.lengths.2.symm ▸ hcl', .rfl⟩⟩
 
+/-- Direct constant evaluation.  This is the recursive counterpart of
+`LR.constDefEq`: the result type arrives as `DirectTyDefEq`, so every Pi
+layer supplies both its own path-typed root and the next instantiated
+codomain observation.  No `PiPathInv` or subject-reduction callback appears
+in the interface. -/
+theorem LR.constDefEqDirect
+    {c : Name} {ls : List SLevel} {R : TShape → SExpr → Prop}
+    (hRmono : ∀ {m m' M}, m ≤ m' → R m' M → R m M)
+    {n : Nat} {rargs : List (WShape n)} {mout : TShape}
+    (hC : LE_Interp.Const c ls R rargs mout)
+    {n' : Nat} {rargs' : List (WShape n')}
+    {xs ys : List SExpr} {CHead A : SExpr} {out outTy : WShape n'}
+    (evalPat : LR.PatternLeafDefEqAt Γ₀ n' c ls R)
+    (hargle : List.Forall₂ (fun x y => x.T ≤ y.T) rargs rargs')
+    (hleaf : LR.PatternLeafSpine Γ₀ (LR Γ₀)
+      CHead xs ys rargs' A out outTy)
+    (hterm : Γ₀ ⊢
+      (xs.foldr (fun a f => f.app a) (.const c ls)) ≡
+      (ys.foldr (fun a f => f.app a) (.const c ls)) : A)
+    (hAType : ∃ u, Γ₀ ⊢ A : .sort u)
+    (hhead : Γ₀ ⊢ .const c ls : CHead)
+    (hspineX : SExpr.SpineWF Γ₀ CHead xs.reverse A)
+    (hspineY : SExpr.SpineWF Γ₀ CHead ys.reverse A)
+    (hout : out.HasType outTy)
+    (hADirect : LR.DirectTyDefEq Γ₀ A A outTy)
+    (houtle : out.T ≤ mout) :
+    (LR Γ₀).DefEq
+      (xs.foldr (fun a f => f.app a) (.const c ls))
+      (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy := by
+  induction hC generalizing rargs' xs ys A out outTy with
+  | bot =>
+    have hb : out.T ≤ TShape.bot := houtle.trans TShape.bot_eqv.1
+    have heq : out = .bot := TShape.le_bot.1 hb
+    subst out
+    exact (LR Γ₀).bot hout.isType
+  | pat hpat hmatch hrhs =>
+    obtain ⟨mcap', hmatch', hcap⟩ :=
+      hmatch.mono_lT (Params.pat_wf hpat) hargle
+    have hrhs' : LE_Interp.RHS ls mcap' R out.T _ :=
+      (hrhs.mono_l hcap).mono (R' := R) houtle
+        (fun le hr => hRmono le hr)
+    exact evalPat hpat hmatch' hrhs' hleaf hterm hAType
+      hhead hspineX hspineY hout hADirect.toTyDefEq
+  | @lam f rargs mout hrec hlam ih =>
+    have hlam₀ := houtle.trans hlam
+    have hlam' := hlam₀
+    cases hout.unfold with
+    | bot hm => exact (LR Γ₀).bot hm
+    | sort => exact (TShape.sort_not_le_lam' hlam').elim
+    | forallE => exact (TShape.forallE_not_le_lam' hlam').elim
+    | @lam q g a₁ a₂ htm =>
+      rw [LR_succ]
+      unfold WShape.lam' at hlam' ⊢
+      split at hlam' <;> rename_i hg
+      · obtain ⟨B₁, F₁, B₂, F₂, u, v, rootA, _rootA₂,
+          hB, hF, hValB, hPi₀, hDirectPi⟩ :=
+          hADirect.toValTyPi2DirectRec
+        obtain ⟨uA, rootPath, rootRed⟩ := rootA
+        have hPi := LRS.PiDefEq.left hPi₀
+        have evalChild : ∀ {K : Nat}, K = q + 1 → ∀
+            {x y : SExpr} {p : WShape K} {x₀ y₀ : WShape n}
+            {zs zs' : List SExpr},
+            LRS.CtorSpineDefEq (LR Γ₀) CHead zs zs' rargs' A →
+            Γ₀ ⊢
+              (zs.foldr (fun a f => f.app a) (.const c ls)) ≡
+              (zs'.foldr (fun a f => f.app a) (.const c ls)) : A →
+            SExpr.SpineWF Γ₀ CHead zs.reverse A →
+            SExpr.SpineWF Γ₀ CHead zs'.reverse A →
+            p.HasType (a₁.lift K) →
+            Γ₀ ⊢ x ≡ y : B₁ →
+            (LR Γ₀).DefEq x y B₁ p (a₁.lift K) →
+            (x₀, y₀) ∈ f → x₀.T ≤ p.T →
+            ((g.lift K).app p).T ≤ y₀.T →
+            (LR Γ₀).DefEq
+              ((zs.foldr (fun a (acc : SExpr) => acc.app a) (SExpr.const c ls)).app x)
+              ((zs'.foldr (fun a (acc : SExpr) => acc.app a) (SExpr.const c ls)).app y)
+              (F₁.inst x) ((g.lift K).app p)
+                ((a₂.lift K).app p) := by
+          intro K hK
+          subst K
+          intro x y p x₀ y₀ zs zs' htailAligned htailTerm
+            htailSpineX htailSpineY hp hxy hv hmem hx hy
+          have hchildLe : List.Forall₂ (fun x y => x.T ≤ y.T)
+              (x₀ :: rargs) (p :: rargs') := by
+            exact .cons hx hargle
+          have hBK : (LR Γ₀).TyDefEq B₁ B₁ (a₁.lift (q + 1)) :=
+            (LR.TyDefEq.lift (Nat.le_succ q)
+              (WShape.HasTypePi.iff.1 htm.1).1.isType).2
+              hValB.left.toTyDefEq
+          have htmK : WShape.HasTypeLam (g.lift (q + 1))
+              (a₁.lift (q + 1)) (a₂.lift (q + 1)) :=
+            (WShape.HasTypeLam.lift (Nat.le_succ q)).2 htm
+          have houtK : ((g.lift (q + 1)).app p).HasType
+              ((a₂.lift (q + 1)).app p) :=
+            (WShape.HasTypeLam.iff.1 htmK).2.2 p hp
+          have hPiK : LRS.PiDefEq (LR Γ₀) B₁ F₁ F₁
+              (a₁.lift (q + 1)) (a₂.lift (q + 1)) :=
+            (LRS.PiDefEq.lift (Nat.le_succ q) htm.1).2 hPi
+          have hAK : LR.DirectTyDefEq Γ₀ (F₁.inst x) (F₁.inst x)
+              ((a₂.lift (q + 1)).app p) :=
+            (hDirectPi (Nat.le_succ q) hp hxy.hasType.1
+              ((LR Γ₀).left hv)).left
+          have htailPi : Γ₀ ⊢
+              (zs.foldr (fun a f => f.app a) (.const c ls)) ≡
+              (zs'.foldr (fun a f => f.app a) (.const c ls)) :
+                .forallE B₁ F₁ :=
+            rootPath.defeqDF htailTerm
+          have hchildTerm : Γ₀ ⊢
+              (zs.foldr (fun a (f : SExpr) => f.app a) (SExpr.const c ls)).app x ≡
+              (zs'.foldr (fun a (f : SExpr) => f.app a) (SExpr.const c ls)).app y :
+                F₁.inst x :=
+            .appDF htailPi hxy
+          have hchildType : Γ₀ ⊢ F₁.inst x : .sort v :=
+            (IsDefEq.beta hF.leftType hxy.hasType.1).hasType.2
+          have hchildSpineX : SExpr.SpineWF Γ₀ CHead
+              (x :: zs).reverse (F₁.inst x) := by
+            simpa only [List.reverse_cons] using
+              htailSpineX.snoc_path rootPath hxy.hasType.1
+          obtain ⟨_, hCodomain⟩ := (hPiK.1 hp hxy hv).leftDefEq
+          have hchildSpineY : SExpr.SpineWF Γ₀ CHead
+              (y :: zs').reverse (F₁.inst x) := by
+            have hspine := htailSpineY.snoc_path rootPath hxy.hasType.2
+            simpa only [List.reverse_cons] using
+              SExpr.SpineWF.ret hspine hCodomain.symm
+          obtain ⟨hchildLeaf⟩ := LR.PatternLeafSpine.of_cons_path
+            (g := g.lift (q + 1)) (f := a₂.lift (q + 1))
+            htailSpineX htailSpineY htailAligned rootPath hp htmK.1 hBK
+            hxy hv hCodomain.symm hPiK
+          simpa only [List.foldr_cons] using
+            ih x₀ y₀ hmem hchildLe hchildLeaf
+              hchildTerm ⟨v, hchildType⟩ hchildSpineX hchildSpineY
+              houtK hAK hy
+        rw [dif_pos hg]
+        refine (LRS.DefEq.lam_forallE
+          (M := xs.foldr (fun a f => f.app a) (.const c ls))
+          (N := ys.foldr (fun a f => f.app a) (.const c ls))
+          (A := A) (f := g) (hf := hg) (a₁ := a₁) (a₂ := a₂)
+          (LR Γ₀)).2 ?_
+        refine ⟨B₁, F₁, u, v, rootRed, hB.leftType,
+          hValB.left.toTyDefEq, hF.leftType, hPi, ?_⟩
+        exact LR.constLamDefEq (hf := hg) (nArgs := q + 1) htm hlam₀
+          (fun {_ _ _ _ _} hp hxy hv hmem hx hy => ⟨
+            evalChild (Nat.max_eq_right (Nat.le_succ q))
+              hleaf.aligned.left hterm.hasType.1
+              hspineX hspineX hp hxy hv hmem hx hy,
+            evalChild (Nat.max_eq_right (Nat.le_succ q))
+              hleaf.aligned.right hterm.hasType.2
+              hspineY hspineY hp hxy hv hmem hx hy,
+            evalChild (Nat.max_eq_right (Nat.le_succ q))
+              hleaf.aligned hterm hspineX hspineY
+              hp hxy hv hmem hx hy⟩)
+      · rw [dif_neg hg]
+        exact (LR Γ₀).bot hout.isType
+    | ctor => exact (TShape.ctor_not_le_lam' hlam').elim
+    | indTy => exact (TShape.indTy_not_le_lam' hlam').elim
+  | @ctor semOut semArgs hcl hctor =>
+    have hlen : semArgs.length = rargs'.length := by
+      simpa using Lean4Lean.List.Forall₂.length_eq hargle
+    have hcl' : Params.classify c = some (.ctor rargs'.length) := hlen ▸ hcl
+    let K := max n n'
+    have hnK : n ≤ K := Nat.le_max_left ..
+    have hn'K : n' ≤ K := Nat.le_max_right ..
+    have hargsK := WShape.forall₂_liftT hnK hn'K hargle
+    have hctorT : (WShape.ctor' c semArgs.reverse).T ≤
+        (WShape.ctor' c rargs'.reverse).T := by
+      apply (TShape.LE.def (Nat.succ_le_succ hnK)
+        (Nat.succ_le_succ hn'K)).2
+      rw [WShape.lift_ctor' hnK, WShape.lift_ctor' hn'K,
+        List.map_reverse, List.map_reverse]
+      exact WShape.ctor'_le_ctor' (List.Forall₂.reverse.2 hargsK)
+    have hctor' := houtle.trans (hctor.trans hctorT)
+    cases hout.unfold with
+    | bot hm => exact (LR Γ₀).bot hm
+    | sort => exact (TShape.sort_not_le_ctor' hctor').elim
+    | forallE => exact (TShape.forallE_not_le_ctor' hctor').elim
+    | lam htm =>
+      unfold WShape.lam' at hctor' ⊢
+      split at hctor' <;> rename_i hnonzero
+      · exact (TShape.lam_not_le_ctor' hctor').elim
+      · simpa [hnonzero] using (LR Γ₀).bot hout.isType
+    | @ctor q c' fields hwf =>
+      have hIndHead : LRS.IndTyHead Γ₀ A := by
+        simpa only [LR_succ, LRS.TyDefEq.indTy_m] using
+          hADirect.toTyDefEq.1
+      rw [LR_succ]
+      change LRS.IndDefEq Γ₀ (LR Γ₀)
+        (xs.foldr (fun a f => f.app a) (.const c ls))
+        (ys.foldr (fun a f => f.app a) (.const c ls)) A
+        (WShape.ctor c' fields hwf)
+      exact ⟨hIndHead, LRS.CtorDefEq.of_exact_ctor_spines
+        hleaf.args hleaf.aligned hleaf.aligned.symm hcl' rfl hhead hhead
+        hspineX hspineY hctor'⟩
+    | indTy => exact (TShape.indTy_not_le_ctor' hctor').elim
+  | @indTy semOut semArgs hcl hind =>
+    have hlen : semArgs.length = rargs'.length := by
+      simpa using Lean4Lean.List.Forall₂.length_eq hargle
+    have hcl' : Params.classify c = some (.indTy rargs'.length) := hlen ▸ hcl
+    have hind' := houtle.trans hind
+    cases hout.unfold with
+    | bot hm => exact (LR Γ₀).bot hm
+    | sort => exact (TShape.sort_not_le_indTy hind').elim
+    | forallE => exact (TShape.forallE_not_le_indTy hind').elim
+    | lam htm =>
+      unfold WShape.lam' at hind' ⊢
+      split at hind' <;> rename_i hnonzero
+      · exact (TShape.lam_not_le_indTy hind').elim
+      · simpa [hnonzero] using (LR Γ₀).bot hout.isType
+    | ctor => exact (TShape.ctor_not_le_indTy hind').elim
+    | indTy =>
+      rw [LR_succ]
+      change LRS.IndTyHead Γ₀
+          (xs.foldr (fun a f => f.app a) (.const c ls)) ∧
+        LRS.IndTyHead Γ₀
+          (ys.foldr (fun a f => f.app a) (.const c ls))
+      exact ⟨⟨c, ls, xs, hleaf.args.lengths.1.symm ▸ hcl', .rfl⟩,
+        ⟨c, ls, ys, hleaf.args.lengths.2.symm ▸ hcl', .rfl⟩⟩
+
+/--
+info: 'Lean4Lean.SExpr.LR.constDefEqDirect' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.constDefEqDirect
+/-- Evaluate a semantic constant in the guarded relation.  The established
+result is supplied explicitly for the additive first projection; every
+informative function layer is rebuilt from typed roots, a retained direct Pi
+action, and recursive guarded children.  Thus this evaluator itself has no
+Pi-inversion or subject-reduction premise. -/
+theorem LRD.constDefEq
+    {c : Name} {ls : List SLevel} {R : TShape → SExpr → Prop}
+    {ρ : Valuation}
+    (hRmono : ∀ {m m' M}, m ≤ m' → R m' M → R m M)
+    {n : Nat} {rargs : List (WShape n)} {mout : TShape}
+    (hC : LE_Interp.Const c ls R rargs mout)
+    {n' : Nat} {rargs' : List (WShape n')}
+    {xs ys : List SExpr} {CHead A : SExpr}
+    {out outTy : WShape n'}
+    (evalPat : LRD.RegisteredPatternLeafDefEqAt
+      Γ₀ ρ CHead n' c ls R)
+    (hargle : List.Forall₂ (fun x y => x.T ≤ y.T) rargs rargs')
+    (hleaf : LR.DirectPatternLeafSpine Γ₀ (LRD Γ₀)
+      CHead xs ys rargs' A out outTy)
+    (htrace : LR.DirectRegisteredTypeTrace Γ₀ ρ CHead
+      xs ys rargs' A outTy)
+    (hterm : IsDefEq Γ₀
+      (xs.foldr (fun a f => f.app a) (.const c ls))
+      (ys.foldr (fun a f => f.app a) (.const c ls)) A)
+    (hAType : ∃ u, IsDefEq Γ₀ A A (.sort u))
+    (hhead : IsDefEq Γ₀ (.const c ls) (.const c ls) CHead)
+    (hspineX : SExpr.SpineWF Γ₀ CHead xs.reverse A)
+    (hspineY : SExpr.SpineWF Γ₀ CHead ys.reverse A)
+    (hout : out.HasType outTy)
+    (hlegacy : (LR Γ₀).DefEq
+      (xs.foldr (fun a f => f.app a) (.const c ls))
+      (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy)
+    (hADirect : (LRD Γ₀).TyDefEq A A outTy)
+    (houtle : out.T ≤ mout) :
+    (LRD Γ₀).DefEq
+      (xs.foldr (fun a f => f.app a) (.const c ls))
+      (ys.foldr (fun a f => f.app a) (.const c ls)) A out outTy := by
+  induction hC generalizing rargs' xs ys A out outTy with
+  | bot =>
+    have hb : out.T ≤ TShape.bot := houtle.trans TShape.bot_eqv.1
+    have heq : out = .bot := TShape.le_bot.1 hb
+    subst out
+    exact LRD.DefEq.bot hout.isType
+  | pat hpat hmatch hrhs =>
+    obtain ⟨mcap', hmatch', hcap⟩ :=
+      hmatch.mono_lT (Params.pat_wf hpat) hargle
+    have hrhs' : LE_Interp.RHS ls mcap' R out.T _ :=
+      (hrhs.mono_l hcap).mono (R' := R) houtle
+        (fun le hr => hRmono le hr)
+    exact evalPat hpat hmatch' hrhs' hleaf htrace hterm hAType hhead
+      hspineX hspineY hout hlegacy hADirect
+  | @lam f rargs mout hrec hlam ih =>
+    have hlam₀ := houtle.trans hlam
+    have hlam' := hlam₀
+    cases hout.unfold with
+    | bot hm => exact LRD.DefEq.bot hm
+    | sort => exact (TShape.sort_not_le_lam' hlam').elim
+    | forallE => exact (TShape.forallE_not_le_lam' hlam').elim
+    | @lam q g a₁ a₂ htm =>
+      unfold WShape.lam' at hlam' ⊢
+      split at hlam' <;> rename_i hg
+      · rw [dif_pos hg]
+        rw [LRD_succ] at hADirect
+        obtain ⟨B₁, F₁, B₂, F₂, u, v, rootTyped, _rootA₂,
+            hB, hF, hValB, hDirectPi⟩ :=
+          hADirect.2.2 a₁ a₂ rfl
+        have rootReduction := rootTyped.toWHRedS
+        obtain ⟨uRoot, rootPath, rootRaw⟩ := rootTyped
+        obtain ⟨BL, FL, BR, FR, uL, vL, rootLegacy, _rootLegacyR,
+            hBL, hFL, hValBL, hPiLegacy⟩ := hADirect.1
+        have hrootEq : SExpr.forallE BL FL = .forallE B₁ F₁ :=
+          rootLegacy.determ .forallE rootReduction .forallE
+        cases hrootEq
+        have hPiLegacyLeft : LRS.PiDefEq (LR Γ₀)
+            B₁ F₁ F₁ a₁ a₂ := LRS.PiDefEq.left hPiLegacy
+        have hValBLeft : (LRD Γ₀).TyDefEq B₁ B₁ a₁ :=
+          LRD.TyDefEq.left hValB
+        have hDirectPiLeft : LR.DirectPiDefEq (LRD Γ₀)
+            B₁ F₁ F₁ a₁ a₂ := by
+          constructor
+          · intro x y p hp hxy hv
+            have h := hDirectPi.1 hp hxy hv
+            exact ⟨h.leftTy, h.leftTy, h.leftDefEq, h.leftDefEq⟩
+          · intro x p hp hxy hv
+            exact (hDirectPi.1 hp hxy hv).leftTy
+        have hlegacy' : (LR Γ₀).DefEq
+            (xs.foldr (fun a f => f.app a) (.const c ls))
+            (ys.foldr (fun a f => f.app a) (.const c ls)) A
+            (.lam g hg) (.forallE a₁ a₂) := by
+          simpa only [WShape.lam', dif_pos hg] using hlegacy
+        have legacyRect : LogRel.DefEqRect (LR Γ₀)
+            (xs.foldr (fun a f => f.app a) (.const c ls))
+            (xs.foldr (fun a f => f.app a) (.const c ls))
+            (ys.foldr (fun a f => f.app a) (.const c ls))
+            (ys.foldr (fun a f => f.app a) (.const c ls)) A
+            (.lam g hg) (.forallE a₁ a₂) :=
+          ⟨(LR Γ₀).left hlegacy',
+            (LR Γ₀).left ((LR Γ₀).symm hlegacy'), hlegacy'⟩
+        have legacyChildren : ∀ {K : Nat}, K = q + 1 → ∀
+            {x y : SExpr} {p : WShape K},
+            p.HasType (a₁.lift K) →
+            IsDefEq Γ₀ x y B₁ →
+            (LRD Γ₀).DefEq x y B₁ p (a₁.lift K) →
+            LogRel.DefEqRect (LR Γ₀)
+              ((xs.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app x)
+              ((xs.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app y)
+              ((ys.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app x)
+              ((ys.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app y)
+              (F₁.inst x) ((g.lift K).app p)
+                ((a₂.lift K).app p) := by
+          intro K hK
+          subst K
+          intro x y p hp hxy hv
+          have leq : q ≤ q + 1 := Nat.le_succ q
+          have hgK : (g.lift (q + 1)).NonZero :=
+            (WShapeFun.NonZero.lift_iff leq).2 hg
+          have htmShape : (WShape.lam g hg).HasType
+              (.forallE a₁ a₂) := by
+            simpa only [WShape.lam', dif_pos hg] using
+              WShape.HasType.lam htm
+          have liftLegacy {P Q : SExpr}
+              (H : (LR Γ₀).DefEq P Q A
+                (.lam g hg) (.forallE a₁ a₂)) :
+              (LR Γ₀).DefEq P Q A
+                (.lam (g.lift (q + 1)) hgK)
+                (.forallE (a₁.lift (q + 1))
+                  (a₂.lift (q + 1))) := by
+            simpa only [WShape.lift_lam leq,
+              WShape.lift_forallE leq] using
+              (LR.DefEq.lift (Nat.succ_le_succ leq)
+                htmShape).2 H
+          have legacyRectK : LogRel.DefEqRect (LR Γ₀)
+              (xs.foldr (fun a f => f.app a) (.const c ls))
+              (xs.foldr (fun a f => f.app a) (.const c ls))
+              (ys.foldr (fun a f => f.app a) (.const c ls))
+              (ys.foldr (fun a f => f.app a) (.const c ls)) A
+              (.lam (g.lift (q + 1)) hgK)
+              (.forallE (a₁.lift (q + 1))
+                (a₂.lift (q + 1))) :=
+            ⟨liftLegacy legacyRect.left, liftLegacy legacyRect.right,
+              liftLegacy legacyRect.cross⟩
+          obtain ⟨B, F, u', v', rootLegacyK, hBTy, hBRel,
+              hFTy, hPiK, applyLegacy⟩ :=
+            LRS.DefEqRect.app_exposed (x := x) (y := y)
+              legacyRectK hp
+          have hrootEq : SExpr.forallE B F = .forallE B₁ F₁ :=
+            rootLegacyK.determ .forallE rootReduction .forallE
+          cases hrootEq
+          exact applyLegacy hxy (LRD.defLegacy hv)
+        have evalChild : ∀ {K : Nat}, K = q + 1 → ∀
+            {x y : SExpr} {p : WShape K} {x₀ y₀ : WShape n}
+            {zs zs' : List SExpr},
+            LRS.CtorSpineDefEq (LR Γ₀) CHead zs zs' rargs' A →
+            LR.DirectCtorArgsDefEq (LRD Γ₀) zs zs' rargs' →
+            LR.DirectRegisteredTypeTrace Γ₀ ρ CHead
+              zs zs' rargs' A (.forallE a₁ a₂) →
+            IsDefEq Γ₀
+              (zs.foldr (fun a f => f.app a) (.const c ls))
+              (zs'.foldr (fun a f => f.app a) (.const c ls)) A →
+            SExpr.SpineWF Γ₀ CHead zs.reverse A →
+            SExpr.SpineWF Γ₀ CHead zs'.reverse A →
+            p.HasType (a₁.lift K) →
+            IsDefEq Γ₀ x y B₁ →
+            (LRD Γ₀).DefEq x y B₁ p (a₁.lift K) →
+            (LR Γ₀).DefEq
+              ((zs.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app x)
+              ((zs'.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app y)
+              (F₁.inst x) ((g.lift K).app p)
+                ((a₂.lift K).app p) →
+            (x₀, y₀) ∈ f → x₀.T ≤ p.T →
+            ((g.lift K).app p).T ≤ y₀.T →
+            (LRD Γ₀).DefEq
+              ((zs.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app x)
+              ((zs'.foldr (fun a (acc : SExpr) => acc.app a)
+                (SExpr.const c ls)).app y)
+              (F₁.inst x) ((g.lift K).app p)
+                ((a₂.lift K).app p) := by
+          intro K hK
+          subst K
+          intro x y p x₀ y₀ zs zs' htailAligned htailDirect htailTrace
+            htailTerm htailSpineX htailSpineY hp hxy hv legacyEdge
+            hmem hx hy
+          have leq : q ≤ q + 1 := Nat.le_succ q
+          have htmK : WShape.HasTypeLam (g.lift (q + 1))
+              (a₁.lift (q + 1)) (a₂.lift (q + 1)) :=
+            (WShape.HasTypeLam.lift leq).2 htm
+          have hchildLe : List.Forall₂ (fun x y => x.T ≤ y.T)
+              (x₀ :: rargs) (p :: rargs') := .cons hx hargle
+          have hBKDirect : (LRD Γ₀).TyDefEq B₁ B₁
+              (a₁.lift (q + 1)) :=
+            (LRD.TyDefEq.lift leq
+              (WShape.HasTypePi.iff.1 htm.1).1.isType).2 hValBLeft
+          have hPiLegacyK : LRS.PiDefEq (LR Γ₀)
+              B₁ F₁ F₁ (a₁.lift (q + 1))
+                (a₂.lift (q + 1)) :=
+            (LRS.PiDefEq.lift leq htm.1).2 hPiLegacyLeft
+          have hPiDirectK : LR.DirectPiDefEq (LRD Γ₀)
+              B₁ F₁ F₁ (a₁.lift (q + 1))
+                (a₂.lift (q + 1)) :=
+            (LR.DirectPiDefEq.lift leq htm.1).2 hDirectPiLeft
+          have houtK : ((g.lift (q + 1)).app p).HasType
+              ((a₂.lift (q + 1)).app p) :=
+            (WShape.HasTypeLam.iff.1 htmK).2.2 p hp
+          have hAK : (LRD Γ₀).TyDefEq
+              (F₁.inst x) (F₁.inst x)
+              ((a₂.lift (q + 1)).app p) :=
+            LRD.TyDefEq.left
+              (hPiDirectK.1 hp hxy hv).leftTy
+          have hchildTerm : IsDefEq Γ₀
+              ((zs.foldr (fun a (f : SExpr) => f.app a)
+                (SExpr.const c ls)).app x)
+              ((zs'.foldr (fun a (f : SExpr) => f.app a)
+                (SExpr.const c ls)).app y) (F₁.inst x) :=
+            .appDF (rootPath.defeqDF htailTerm) hxy
+          obtain ⟨_, hCodomain⟩ :=
+            (hPiLegacyK.1 hp hxy (LRD.defLegacy hv)).leftDefEq
+          have hchildType : IsDefEq Γ₀ (F₁.inst x)
+              (F₁.inst x) (.sort v) :=
+            (IsDefEq.beta hF.leftType hxy.hasType.1).hasType.2
+          have hchildSpineX : SExpr.SpineWF Γ₀ CHead
+              (x :: zs).reverse (F₁.inst x) := by
+            simpa only [List.reverse_cons] using
+              htailSpineX.snoc_path rootPath hxy.hasType.1
+          have hchildSpineY : SExpr.SpineWF Γ₀ CHead
+              (y :: zs').reverse (F₁.inst x) := by
+            have hspine :=
+              htailSpineY.snoc_path rootPath hxy.hasType.2
+            simpa only [List.reverse_cons] using
+              SExpr.SpineWF.ret hspine hCodomain.symm
+          obtain ⟨hchildLeaf⟩ :=
+            LR.DirectPatternLeafSpine.of_cons_path
+              htailSpineX htailSpineY htailAligned htailDirect
+              rootPath hp htmK.1
+              (LRD.tyLegacy hBKDirect) hBKDirect hxy
+              (LRD.defLegacy hv) hv hCodomain.symm
+              hPiLegacyK hPiDirectK
+          have hchildTrace : LR.DirectRegisteredTypeTrace Γ₀ ρ CHead
+              (x :: zs) (y :: zs') (p :: rargs') (F₁.inst x)
+              ((a₂.lift (q + 1)).app p) :=
+            .cons leq htailTrace rootPath hp
+              (LRD.tyLegacy hBKDirect) hBKDirect hxy
+              (LRD.defLegacy hv) hv hchildType hCodomain.symm hAK
+          simpa only [List.foldr_cons] using
+            ih x₀ y₀ hmem hchildLe hchildLeaf hchildTrace hchildTerm
+              ⟨v, hchildType⟩ hchildSpineX hchildSpineY
+              houtK legacyEdge hAK hy
+        have action : LR.DirectLamDefEq (LRD Γ₀)
+            (xs.foldr (fun a f => f.app a) (.const c ls))
+            (ys.foldr (fun a f => f.app a) (.const c ls))
+            B₁ F₁ g a₁ a₂ :=
+          LRD.constLamDefEq (hf := hg) (nArgs := q + 1)
+            htm hlam₀
+            (fun hp hxy hv hmem hx hy => by
+              have children := legacyChildren
+                (Nat.max_eq_right (Nat.le_succ q)) hp hxy hv
+              exact ⟨
+                evalChild (Nat.max_eq_right (Nat.le_succ q))
+                  hleaf.legacy.aligned.left hleaf.directArgs.left
+                  htrace.left
+                  hterm.hasType.1
+                  hspineX hspineX hp hxy hv children.left hmem hx hy,
+                evalChild (Nat.max_eq_right (Nat.le_succ q))
+                  hleaf.legacy.aligned.right hleaf.directArgs.right
+                  htrace.right
+                  hterm.hasType.2
+                  hspineY hspineY hp hxy hv children.right hmem hx hy,
+                evalChild (Nat.max_eq_right (Nat.le_succ q))
+                  hleaf.legacy.aligned hleaf.directArgs htrace hterm
+                  hspineX hspineY
+                  hp hxy hv children.cross hmem hx hy⟩)
+        exact LRD.DefEq.lam hlegacy' <|
+          ⟨B₁, F₁, u, v, ⟨uRoot, rootPath, rootRaw⟩,
+            hB.leftType, hValBLeft,
+            hF.leftType, hDirectPiLeft, action⟩
+      · rw [dif_neg hg]
+        exact LRD.DefEq.bot hout.isType
+    | ctor => exact (TShape.ctor_not_le_lam' hlam').elim
+    | indTy => exact (TShape.indTy_not_le_lam' hlam').elim
+  | @ctor semOut semArgs hcl hctor =>
+    have hlen : semArgs.length = rargs'.length := by
+      simpa using Lean4Lean.List.Forall₂.length_eq hargle
+    let K := max n n'
+    have hnK : n ≤ K := Nat.le_max_left ..
+    have hn'K : n' ≤ K := Nat.le_max_right ..
+    have hargsK := WShape.forall₂_liftT hnK hn'K hargle
+    have hctorT : (WShape.ctor' c semArgs.reverse).T ≤
+        (WShape.ctor' c rargs'.reverse).T := by
+      apply (TShape.LE.def (Nat.succ_le_succ hnK)
+        (Nat.succ_le_succ hn'K)).2
+      rw [WShape.lift_ctor' hnK, WShape.lift_ctor' hn'K,
+        List.map_reverse, List.map_reverse]
+      exact WShape.ctor'_le_ctor' (List.Forall₂.reverse.2 hargsK)
+    have hctor' := houtle.trans (hctor.trans hctorT)
+    cases hout.unfold with
+    | bot hm => exact LRD.DefEq.bot hm
+    | sort => exact (TShape.sort_not_le_ctor' hctor').elim
+    | forallE => exact (TShape.forallE_not_le_ctor' hctor').elim
+    | lam htm =>
+      unfold WShape.lam' at hctor' ⊢
+      split at hctor' <;> rename_i hnonzero
+      · exact (TShape.lam_not_le_ctor' hctor').elim
+      · rw [dif_neg hnonzero]
+        exact LRD.DefEq.bot hout.isType
+    | ctor => exact LRD.DefEq.of_legacy_indTy hlegacy
+    | indTy => exact (TShape.indTy_not_le_ctor' hctor').elim
+  | @indTy semOut semArgs hcl hind =>
+    have hind' := houtle.trans hind
+    cases hout.unfold with
+    | bot hm => exact LRD.DefEq.bot hm
+    | sort => exact (TShape.sort_not_le_indTy hind').elim
+    | forallE => exact (TShape.forallE_not_le_indTy hind').elim
+    | lam htm =>
+      unfold WShape.lam' at hind' ⊢
+      split at hind' <;> rename_i hnonzero
+      · exact (TShape.lam_not_le_indTy hind').elim
+      · rw [dif_neg hnonzero]
+        exact LRD.DefEq.bot hout.isType
+    | ctor => exact (TShape.ctor_not_le_indTy hind').elim
+    | indTy => exact LRD.DefEq.of_legacy_indTy_type hlegacy
+
+/--
+info: 'Lean4Lean.SExpr.LRD.constDefEq' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.constDefEq
+
+/-- Package the root lambda layer of a semantic constant around the guarded
+constant evaluator.  The ordinary root edge supplies the additive projection
+and its synchronized child rectangle; the direct type observation supplies
+the typed root and guarded Pi action used to seed each recursive paired
+spine. -/
+theorem LRD.constDefEqRootLam
+    {c : Name} {ls : List SLevel} {R : TShape → SExpr → Prop}
+    {ρ : Valuation}
+    {n nsem : Nat} {f : WShapeFun n} {hf : f.NonZero}
+    {a₁ : WShape n} {a₂ : WShapeFun n} {fsem : WShapeFun nsem}
+    {A : SExpr}
+    (htm : WShape.HasTypeLam f a₁ a₂)
+    (hlam : (WShape.lam' f).T ≤ (WShape.lam' fsem).T)
+    (hrec : ∀ x y : WShape nsem, (x, y) ∈ fsem →
+      LE_Interp.Const c ls R [x] y.T)
+    (hRmono : ∀ {m m' : TShape} {M : SExpr},
+      m ≤ m' → R m' M → R m M)
+    (evalPat : ∀ k,
+      LRD.RegisteredPatternLeafDefEqAt Γ₀ ρ A k c ls R)
+    (hhead : IsDefEq Γ₀ (.const c ls) (.const c ls) A)
+    (hlegacy : (LR Γ₀).DefEq (.const c ls) (.const c ls) A
+      (.lam f hf) (.forallE a₁ a₂))
+    (hADirect : (LRD Γ₀).TyDefEq A A (.forallE a₁ a₂))
+    (hRegistered : LE_Interp.Witness ρ
+      (WShape.forallE a₁ a₂).T A) :
+    (LRD Γ₀).DefEq (.const c ls) (.const c ls) A
+      (.lam f hf) (.forallE a₁ a₂) := by
+  rw [LRD_succ] at hADirect
+  obtain ⟨B₁, F₁, B₂, F₂, u, v, rootTyped, _rootA₂,
+      hB, hF, hValB, hDirectPi⟩ :=
+    hADirect.2.2 a₁ a₂ rfl
+  have rootReduction := rootTyped.toWHRedS
+  obtain ⟨uRoot, rootPath, rootRaw⟩ := rootTyped
+  obtain ⟨BL, FL, BR, FR, uL, vL, rootLegacy, _rootLegacyR,
+      hBL, hFL, hValBL, hPiLegacy⟩ := hADirect.1
+  have hrootEq : SExpr.forallE BL FL = .forallE B₁ F₁ :=
+    rootLegacy.determ .forallE rootReduction .forallE
+  cases hrootEq
+  have hPiLegacyLeft : LRS.PiDefEq (LR Γ₀)
+      B₁ F₁ F₁ a₁ a₂ := LRS.PiDefEq.left hPiLegacy
+  have hValBLeft : (LRD Γ₀).TyDefEq B₁ B₁ a₁ :=
+    LRD.TyDefEq.left hValB
+  have hDirectPiLeft : LR.DirectPiDefEq (LRD Γ₀)
+      B₁ F₁ F₁ a₁ a₂ := by
+    constructor
+    · intro x y p hp hxy hv
+      have h := hDirectPi.1 hp hxy hv
+      exact ⟨h.leftTy, h.leftTy, h.leftDefEq, h.leftDefEq⟩
+    · intro x p hp hxy hv
+      exact (hDirectPi.1 hp hxy hv).leftTy
+  have legacyRect : LogRel.DefEqRect (LR Γ₀)
+      (.const c ls) (.const c ls) (.const c ls) (.const c ls) A
+      (.lam f hf) (.forallE a₁ a₂) :=
+    LogRel.DefEqRect.diagonal hlegacy
+  let registeredRoot : LR.DirectRegisteredTypeRoot Γ₀ ρ A := {
+    level := n
+    domain := a₁
+    codomain := a₂
+    witness := hRegistered
+    related := hADirect }
+  let registeredTrace : LR.DirectRegisteredTypeTrace Γ₀ ρ A
+      ([] : List SExpr) [] [] A (.forallE a₁ a₂) :=
+    .nil registeredRoot
+  have eval : ∀ {K : Nat}, K = n → ∀
+      {x y : SExpr} {p : WShape K} {x₀ y₀ : WShape nsem},
+      p.HasType (a₁.lift K) →
+      IsDefEq Γ₀ x y B₁ →
+      (LRD Γ₀).DefEq x y B₁ p (a₁.lift K) →
+      (x₀, y₀) ∈ fsem → x₀.T ≤ p.T →
+      ((f.lift K).app p).T ≤ y₀.T →
+      LR.DirectDefEqRect (LRD Γ₀)
+        ((SExpr.const c ls).app x) ((SExpr.const c ls).app y)
+        ((SExpr.const c ls).app x) ((SExpr.const c ls).app y)
+        (F₁.inst x) ((f.lift K).app p) ((a₂.lift K).app p) := by
+    intro K hK
+    subst K
+    intro x y p x₀ y₀ hp hxy hv hmem hx hy
+    simp only [WShape.lift_self, WShapeFun.lift_self] at hp hv hy ⊢
+    have htmK : WShape.HasTypeLam f a₁ a₂ := htm
+    have hBKDirect : (LRD Γ₀).TyDefEq B₁ B₁ a₁ := hValBLeft
+    have hPiLegacyK : LRS.PiDefEq (LR Γ₀)
+        B₁ F₁ F₁ a₁ a₂ := hPiLegacyLeft
+    have hPiDirectK : LR.DirectPiDefEq (LRD Γ₀)
+        B₁ F₁ F₁ a₁ a₂ := hDirectPiLeft
+    have hout : (f.app p).HasType (a₂.app p) :=
+      (WShape.HasTypeLam.iff.1 htmK).2.2 p hp
+    have hAK : (LRD Γ₀).TyDefEq (F₁.inst x) (F₁.inst x)
+        (a₂.app p) :=
+      LRD.TyDefEq.left (hPiDirectK.1 hp hxy hv).leftTy
+    have hAppTerm : IsDefEq Γ₀ ((SExpr.const c ls).app x)
+        ((SExpr.const c ls).app y) (F₁.inst x) :=
+      .appDF (rootPath.defeqDF hhead) hxy
+    obtain ⟨_, hCodomain⟩ :=
+      (hPiLegacyK.1 hp hxy (LRD.defLegacy hv)).leftDefEq
+    have hAppType : IsDefEq Γ₀ (F₁.inst x) (F₁.inst x) (.sort v) :=
+      (IsDefEq.beta hF.leftType hxy.hasType.1).hasType.2
+    have hAppSpineX : SExpr.SpineWF Γ₀ A [x] (F₁.inst x) := by
+      simpa only [List.nil_append] using
+        (SExpr.SpineWF.nil (Γ := Γ₀) (A := A)).snoc_path
+          rootPath hxy.hasType.1
+    have hAppSpineY : SExpr.SpineWF Γ₀ A [y] (F₁.inst x) := by
+      have hspine :=
+        (SExpr.SpineWF.nil (Γ := Γ₀) (A := A)).snoc_path
+          rootPath hxy.hasType.2
+      exact SExpr.SpineWF.ret hspine hCodomain.symm
+    obtain ⟨hAppLeaf⟩ := LR.DirectPatternLeafSpine.of_cons_path
+      (g := f) (f := a₂)
+      (SExpr.SpineWF.nil (Γ := Γ₀) (A := A))
+      (SExpr.SpineWF.nil (Γ := Γ₀) (A := A))
+      (LRS.CtorSpineDefEq.nil (IH := LR Γ₀) (Head := A))
+      (LR.DirectCtorArgsDefEq.nil (IH := LRD Γ₀))
+      rootPath hp htmK.1 (LRD.tyLegacy hBKDirect) hBKDirect
+      hxy (LRD.defLegacy hv) hv hCodomain.symm
+      hPiLegacyK hPiDirectK
+    have hAppTrace : LR.DirectRegisteredTypeTrace Γ₀ ρ A
+        [x] [y] [p] (F₁.inst x) (a₂.app p) := by
+      exact LR.DirectRegisteredTypeTrace.consSelf
+        registeredTrace rootPath hp (LRD.tyLegacy hBKDirect)
+        hBKDirect hxy (LRD.defLegacy hv) hv hAppType
+        hCodomain.symm hAK
+    obtain ⟨B, F, u', v', rootLegacyK, hBTy, hBRel,
+        hFTy, hPiK, applyLegacy⟩ :=
+      LRS.DefEqRect.app_exposed (x := x) (y := y) legacyRect hp
+    have hrootEq : SExpr.forallE B F = .forallE B₁ F₁ :=
+      rootLegacyK.determ .forallE rootReduction .forallE
+    cases hrootEq
+    have legacyChildren := applyLegacy hxy (LRD.defLegacy hv)
+    have run (legacyEdge : (LR Γ₀).DefEq
+        ((SExpr.const c ls).app x) ((SExpr.const c ls).app y)
+        (F₁.inst x) (f.app p) (a₂.app p)) :
+        (LRD Γ₀).DefEq
+          ((SExpr.const c ls).app x) ((SExpr.const c ls).app y)
+          (F₁.inst x) (f.app p) (a₂.app p) := by
+      simpa only [List.foldr_cons, List.foldr_nil] using
+        LRD.constDefEq (Γ₀ := Γ₀) (c := c) (ls := ls) (R := R)
+          hRmono (hrec x₀ y₀ hmem) (evalPat n)
+          (.cons hx .nil) hAppLeaf hAppTrace hAppTerm
+          ⟨v, hAppType⟩ hhead
+          hAppSpineX hAppSpineY hout legacyEdge hAK hy
+    exact ⟨run legacyChildren.left, run legacyChildren.right,
+      run legacyChildren.cross⟩
+  exact LRD.DefEq.lam hlegacy <|
+    ⟨B₁, F₁, u, v, ⟨uRoot, rootPath, rootRaw⟩,
+      hB.leftType, hValBLeft, hF.leftType, hDirectPiLeft,
+      LRD.constLamDefEq (hf := hf) (nArgs := 0) htm hlam
+        (fun hp hxy hv hmem hx hy =>
+          eval (Nat.max_eq_left (Nat.zero_le n))
+            hp hxy hv hmem hx hy)⟩
+
+/--
+info: 'Lean4Lean.SExpr.LRD.constDefEqRootLam' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.constDefEqRootLam
+
+/-- Package the root lambda layer of a semantic constant around
+`LR.constDefEqDirect`.
+
+This is the syntax-directed caller boundary used by the direct fundamental
+constant case.  Its registered type arrives as a recursive direct
+observation.  The selected root path authorizes the initial application
+spine, and each recursive codomain observation is passed back to the direct
+evaluator.  Consequently neither this caller nor the evaluator has a
+`PiPathInv` or context-WF premise. -/
+theorem LR.constDefEqDirectRootLam
+    {c : Name} {ls : List SLevel} {R : TShape → SExpr → Prop}
+    {n nsem : Nat} {f : WShapeFun n} {hf : f.NonZero}
+    {a₁ : WShape n} {a₂ : WShapeFun n} {fsem : WShapeFun nsem}
+    {A : SExpr}
+    (htm : WShape.HasTypeLam f a₁ a₂)
+    (hlam : (WShape.lam' f).T ≤ (WShape.lam' fsem).T)
+    (hrec : ∀ x y : WShape nsem, (x, y) ∈ fsem →
+      LE_Interp.Const c ls R [x] y.T)
+    (hRmono : ∀ {m m' : TShape} {M : SExpr},
+      m ≤ m' → R m' M → R m M)
+    (evalPat : ∀ k, LR.PatternLeafDefEqAt Γ₀ k c ls R)
+    (hhead : IsDefEq Γ₀ (.const c ls) (.const c ls) A)
+    (hADirect : LR.DirectTyDefEq Γ₀ A A (.forallE a₁ a₂)) :
+    (LR Γ₀).DefEq (.const c ls) (.const c ls) A
+      (.lam f hf) (.forallE a₁ a₂) := by
+  rw [LR_succ]
+  obtain ⟨B₁, F₁, B₂, F₂, u₁, v, rootA, _rootA₂,
+    hB, hF, hValB, hPi₀, hDirectPi⟩ :=
+    hADirect.toValTyPi2DirectRec
+  obtain ⟨_, rootPath, rootRed⟩ := rootA
+  have hPi := LRS.PiDefEq.left hPi₀
+  refine (LRS.DefEq.lam_forallE
+    (M := .const c ls) (N := .const c ls) (A := A)
+    (f := f) (hf := hf) (a₁ := a₁) (a₂ := a₂) (LR Γ₀)).2 ?_
+  refine ⟨B₁, F₁, u₁, v, rootRed, hB.leftType,
+    hValB.left.toTyDefEq, hF.leftType, hPi, ?_⟩
+  have eval : ∀ {K : Nat}, K = n → ∀
+      {x y : SExpr} {p : WShape K} {x₀ y₀ : WShape nsem},
+      p.HasType (a₁.lift K) →
+      IsDefEq Γ₀ x y B₁ →
+      (LR Γ₀).DefEq x y B₁ p (a₁.lift K) →
+      (x₀, y₀) ∈ fsem → x₀.T ≤ p.T →
+      ((f.lift K).app p).T ≤ y₀.T →
+      (LR Γ₀).DefEq ((SExpr.const c ls).app x)
+        ((SExpr.const c ls).app y)
+        (F₁.inst x) ((f.lift K).app p) ((a₂.lift K).app p) := by
+    intro K hK
+    subst K
+    intro x y p x₀ y₀ hp hxy hv hmem hx hy
+    have hn : n ≤ n := Nat.le_refl n
+    have hBK : (LR Γ₀).TyDefEq B₁ B₁ (a₁.lift n) :=
+      (LR.TyDefEq.lift hn
+        (WShape.HasTypePi.iff.1 htm.1).1.isType).2
+        hValB.left.toTyDefEq
+    have htmK : WShape.HasTypeLam (f.lift n)
+        (a₁.lift n) (a₂.lift n) :=
+      (WShape.HasTypeLam.lift hn).2 htm
+    have hout : ((f.lift n).app p).HasType ((a₂.lift n).app p) :=
+      (WShape.HasTypeLam.iff.1 htmK).2.2 p hp
+    have hPiK : LRS.PiDefEq (LR Γ₀) B₁ F₁ F₁
+        (a₁.lift n) (a₂.lift n) :=
+      (LRS.PiDefEq.lift hn htm.1).2 hPi
+    have hAK : LR.DirectTyDefEq Γ₀ (F₁.inst x) (F₁.inst x)
+        ((a₂.lift n).app p) :=
+      (hDirectPi hn hp hxy.hasType.1 ((LR Γ₀).left hv)).left
+    have hConstPi : IsDefEq Γ₀ (SExpr.const c ls) (SExpr.const c ls)
+        (.forallE B₁ F₁) := rootPath.defeqDF hhead
+    have hAppTerm : IsDefEq Γ₀ ((SExpr.const c ls).app x)
+        ((SExpr.const c ls).app y) (F₁.inst x) :=
+      .appDF hConstPi hxy
+    have hAppType : IsDefEq Γ₀ (F₁.inst x) (F₁.inst x) (.sort v) :=
+      (IsDefEq.beta hF.leftType hxy.hasType.1).hasType.2
+    have hAppSpineX : SExpr.SpineWF Γ₀ A [x] (F₁.inst x) := by
+      simpa only [List.nil_append] using
+        (SExpr.SpineWF.nil (Γ := Γ₀) (A := A)).snoc_path
+          rootPath hxy.hasType.1
+    obtain ⟨_, hAppCodomain⟩ := (hPiK.1 hp hxy hv).leftDefEq
+    have hAppSpineY : SExpr.SpineWF Γ₀ A [y] (F₁.inst x) := by
+      have hspine :=
+        (SExpr.SpineWF.nil (Γ := Γ₀) (A := A)).snoc_path
+          rootPath hxy.hasType.2
+      exact SExpr.SpineWF.ret hspine hAppCodomain.symm
+    obtain ⟨hAppLeaf⟩ := LR.PatternLeafSpine.of_cons_path
+      (g := f.lift n) (f := a₂.lift n)
+      (SExpr.SpineWF.nil (Γ := Γ₀) (A := A))
+      (SExpr.SpineWF.nil (Γ := Γ₀) (A := A))
+      (LRS.CtorSpineDefEq.nil (IH := LR Γ₀) (Head := A))
+      rootPath hp htmK.1 hBK hxy hv hAppCodomain.symm hPiK
+    simpa only [List.foldr_cons, List.foldr_nil] using
+      LR.constDefEqDirect (Γ₀ := Γ₀) (c := c) (ls := ls) (R := R)
+        hRmono (hrec x₀ y₀ hmem) (evalPat n)
+        (.cons hx .nil) hAppLeaf hAppTerm ⟨v, hAppType⟩ hhead
+        hAppSpineX hAppSpineY hout hAK hy
+  exact LR.constLamDefEq (hf := hf) (nArgs := 0) htm hlam
+    (fun {_ _ _ _ _} hp hxy hv hmem hx hy =>
+      LogRel.DefEqRect.diagonal
+        (eval (Nat.max_eq_left (Nat.zero_le n))
+          hp hxy hv hmem hx hy))
+
+/--
+info: 'Lean4Lean.SExpr.LR.constDefEqDirectRootLam' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.constDefEqDirectRootLam
+
 /-- Adequacy is closed under dependent application once the function,
 argument, and instantiated-result premises are available.  This isolates the
 shape join needed by application from the induction that supplies those
@@ -5094,6 +13272,43 @@ theorem LR.adequateDefeq
            (LR Γ₀).conv (tyConv W.left) ((ihE hM hA hmem).1 W).2⟩
   · exact (LR Γ₀).conv (tyConv W) ((ihE hM hA hmem).2 W)
 
+/-- Guarded adequacy is closed under displayed-type conversion once the
+strict predecessor supplies the heterogeneous guarded adequacy of the type
+edge.  This is the direct analogue of `LR.adequateDefeq`: the proof uses the
+retained direct substitution throughout and never collapses a type path or
+invokes a semantic inversion package. -/
+theorem LRD.adequateDefeq
+    {Γ : List SExpr} {A B e : SExpr} {u : SLevel}
+    {ρ : Valuation} {n : Nat} {m b : WShape n}
+    (Hty : IsDefEqStrong Γ A B (.sort u))
+    (hM : LE_Interp ρ m.T e)
+    (hB : LE_Interp ρ b.T B)
+    (hmem : m.HasType b)
+    (ihTy : ∀ {n'} {ma sa : WShape n'},
+      LE_Interp ρ ma.T A → LE_Interp ρ sa.T (.sort u) → ma.HasType sa →
+      LRD.Adequate Γ₀ Γ ρ A B (.sort u) ma sa)
+    (ihE : ∀ {n'} {me ae : WShape n'},
+      LE_Interp ρ me.T e → LE_Interp ρ ae.T A → me.HasType ae →
+      LRD.Adequate Γ₀ Γ ρ e e A me ae) :
+    LRD.Adequate Γ₀ Γ ρ e e B m b := by
+  have tyConv {σ} (W : LR.DirectSubstWF Γ₀ σ σ Γ ρ) :=
+    have hA := (LE_Interp.sound Hty W.fits).1.2 hB
+    have ⟨_, a', _, le_n, le_a, hA', hSort, hmem'⟩ :=
+      (LE_Interp.sound Hty W.fits).2 hA |>.out
+    LRD.toValTy le_n le_a hmem.isType hSort hmem'
+      ((ihTy hA' hSort hmem').2 W)
+  refine ⟨fun σ σ' W => ?_, fun σ W => ?_⟩ <;>
+    have hA := (LE_Interp.sound Hty W.left.fits).1.2 hB
+  · exact ⟨LRD.DefEq.conv (tyConv W.left) ((ihE hM hA hmem).1 W).1,
+           LRD.DefEq.conv (tyConv W.left) ((ihE hM hA hmem).1 W).2⟩
+  · exact LRD.DefEq.conv (tyConv W) ((ihE hM hA hmem).2 W)
+
+/--
+info: 'Lean4Lean.SExpr.LRD.adequateDefeq' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.adequateDefeq
+
 /-- Self-validity is closed under a displayed-type conversion using the
 joint adequacy/uniqueness tower.
 
@@ -5190,6 +13405,37 @@ def LR.SelfAdequateAt (Γ₀ : List SExpr)
     LE_Interp.Witness ρ bx.T B →
     LR.Adequate Γ₀ Δ ρ X X B mx bx
 
+/-- Guarded self-adequacy for every lower observation of one exact
+interpretation witness.  This is the full term-and-type counterpart of
+`LR.DirectSelfTypeAt`: it retains the level-guarded `LRD` action selected by
+the caller rather than projecting immediately to the legacy relation. -/
+def LRD.SelfAdequateAt (Γ₀ : List SExpr)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X)
+    (depth : Nat) : Prop :=
+  ∀ {n : Nat} {mx bx : WShape n} {Δ : List SExpr} {core : Bool}
+      {B : SExpr},
+    mx.T ≤ root →
+    HasTypeStratifiedS Δ X B core depth →
+    mx.HasType bx →
+    LE_Interp.Witness ρ bx.T B →
+    LRD.Adequate Γ₀ Δ ρ X X B mx bx
+
+/-- Downward-closed direct validity for a term known syntactically to be a
+type.  Unlike ordinary self-adequacy, this package does not choose a second
+semantic observation for the displayed sort.  It therefore supplies a
+`DirectTyDefEq` at the exact lower type shape requested by a constant
+caller, avoiding any cross-level projection of recursively retained
+codomain evidence. -/
+def LR.DirectSelfTypeAt (Γ₀ : List SExpr)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X)
+    (depth : Nat) : Prop :=
+  ∀ {n : Nat} {mx : WShape n} {Δ : List SExpr} {u : SLevel},
+    mx.T ≤ root →
+    HasTypeStratifiedS Δ X (.sort u) true depth →
+    mx.HasType .type →
+    ∀ {{σ σ'}}, LR.SubstWF Γ₀ σ σ' Δ ρ →
+      LR.DirectTyDefEq Γ₀ (X.subst σ) (X.subst σ') mx
+
 /-- Consume a synchronized lower fixed-head endpoint at one common shape
 level.
 
@@ -5226,6 +13472,127 @@ theorem LR.SelfAdequateAt.of_typedLowerWitness
   refine ⟨n, mx, bx, hmxElem.trans helem, hmxbx, ?_⟩
   exact H ((hmxElem.trans helem).trans hhead) hstrat hmxbx
     (hB.mono hbxTy)
+
+/-- Select one synchronized lower term/type endpoint from a typed semantic
+head and consume it with guarded self-adequacy.  Both shapes are lifted only
+to their common maximum level, so no arbitrary higher refinement is
+projected back into `LRD`. -/
+theorem LRD.SelfAdequateAt.of_typedLowerWitness
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.SelfAdequateAt Γ₀ hX depth)
+    {Δ : List SExpr} {B : SExpr} {core : Bool}
+    {head : TShape}
+    (hhead : head ≤ root)
+    (hstrat : HasTypeStratifiedS Δ X B core depth)
+    (endpoint : ∃ headElem headTy : TShape,
+      headElem ≤ head ∧ headElem.HasType headTy ∧
+        Nonempty (LE_Interp.Witness ρ headTy B)) :
+    ∃ (n : Nat) (mx bx : WShape n),
+      mx.T ≤ head ∧ mx.HasType bx ∧
+        LRD.Adequate Γ₀ Δ ρ X X B mx bx := by
+  obtain ⟨headElem, headTy, helem, htyped, ⟨hB⟩⟩ := endpoint
+  let n := max headElem.1 headTy.1
+  have hElemLevel : headElem.1 ≤ n := Nat.le_max_left _ _
+  have hTyLevel : headTy.1 ≤ n := Nat.le_max_right _ _
+  let mx : WShape n := headElem.2.lift n
+  let bx : WShape n := headTy.2.lift n
+  have hmxElem : mx.T ≤ headElem := by
+    exact (TShape.lift_eqv hElemLevel).1
+  have hbxTy : bx.T ≤ headTy := by
+    exact (TShape.lift_eqv hTyLevel).1
+  have hmxbx : mx.HasType bx := by
+    exact (TShape.HasType.def hElemLevel hTyLevel).1 htyped
+  refine ⟨n, mx, bx, hmxElem.trans helem, hmxbx, ?_⟩
+  exact H ((hmxElem.trans helem).trans hhead) hstrat hmxbx
+    (hB.mono hbxTy)
+
+/-- Read the closed fixed head selected by guarded self-adequacy at one
+literal lower endpoint.  Closedness removes the direct substitution without
+changing the chosen term or type shapes. -/
+theorem LRD.SelfAdequateAt.closedHeadSelf
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.SelfAdequateAt Γ₀ hX depth)
+    {Δ : List SExpr} {σ σ' : Subst} {headType : SExpr} {core : Bool}
+    {head : TShape}
+    (hhead : head ≤ root)
+    (hstrat : HasTypeStratifiedS Δ X headType core depth)
+    (W : LR.DirectSubstWF Γ₀ σ σ' Δ ρ)
+    (hXClosed : X.ClosedN) (hTypeClosed : headType.ClosedN)
+    {n : Nat} {headElem headElemTy : WShape n}
+    (helem : headElem.T ≤ head)
+    (htyped : headElem.HasType headElemTy)
+    (hTy : LE_Interp.Witness ρ headElemTy.T headType) :
+    (LRD Γ₀).DefEq X X headType headElem headElemTy := by
+  have hrel := ((H (helem.trans hhead) hstrat htyped hTy).1 W).1
+  rw [hXClosed.subst_eq .zero, hXClosed.subst_eq .zero,
+    hTypeClosed.subst_eq .zero] at hrel
+  exact hrel
+
+/--
+info: 'Lean4Lean.SExpr.LRD.SelfAdequateAt.of_typedLowerWitness' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.SelfAdequateAt.of_typedLowerWitness
+
+/--
+info: 'Lean4Lean.SExpr.LRD.SelfAdequateAt.closedHeadSelf' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.SelfAdequateAt.closedHeadSelf
+
+/-- Close a generated guarded RHS application directly from recursive
+self-adequacy and the proof-relevant guarded telescope producer.
+
+The producer supplies the registered-type witness at the exact head type
+selected by its direct capture chain.  `closedHeadSelf` therefore consumes
+its genuine `LE_Interp.Witness` premise; no witness is inferred from an
+arbitrary `HasType` proof. -/
+theorem LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerSelfAdequacy
+    {Γ : List SExpr} {ρ : Valuation}
+    {rec ctor : Name} {major arity : Nat}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {recLs : List SLevel}
+    {mcap : (RecursorIotaPattern rec major ctor arity).Path → TShape}
+    {mx my captureType :
+      (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+    {resultType : SExpr} {head root : TShape}
+    {outLevel : Nat} {out outTy : WShape outLevel}
+    {depth : Nat}
+    {hX : LE_Interp.Witness ρ root (SExpr.mkInst recLs rule.df.rhs)}
+    (H : LE_Interp.RHS.ShapeSpine mcap head rule.capturePaths out.T)
+    (producer : LR.DirectFixedHeadProducer Γ ρ mx my captureType H
+      (headType := SExpr.mkInst recLs rule.df.type) (outTy := outTy))
+    (houtNonbot : ¬out.T ≤ TShape.bot)
+    (hne : rule.capturePaths ≠ [])
+    (raw : SExpr.PathSpineWF Γ mx captureType
+      (SExpr.mkInst recLs rule.df.type) rule.capturePaths resultType)
+    (resultRel : (LRD Γ).TyDefEq resultType resultType outTy)
+    (convert : LRD.FixedHeadConvertStep Γ)
+    (hself : LRD.SelfAdequateAt Γ hX depth)
+    (hhead : head ≤ root)
+    {Δ : List SExpr} {σ σ' : Subst} {core : Bool}
+    (hstrat : HasTypeStratifiedS Δ
+      (SExpr.mkInst recLs rule.df.rhs)
+      (SExpr.mkInst recLs rule.df.type) core depth)
+    (W : LR.DirectSubstWF Γ σ σ' Δ ρ) :
+    (LRD Γ).DefEq
+      (r.1.applyS recLs mx) (r.1.applyS recLs my)
+      resultType out outTy := by
+  apply H.directApplyRuleWithProducerHeadSelf producer houtNonbot hne
+      raw resultRel convert
+  intro headLevel headElem headElemTy helem htyped hTy
+  exact hself.closedHeadSelf hhead hstrat W
+    rule.rhsClosed.mkInstS (rule.typeClosed recLs)
+    helem htyped hTy
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerSelfAdequacy' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.ShapeSpine.directApplyRuleWithProducerSelfAdequacy
 
 /-- The ordered telescope is a complete producer for the synchronized
 endpoint consumed by `SelfAdequateAt.of_typedLowerWitness`. -/
@@ -5436,6 +13803,72 @@ def LR.CoherentRetainedAt (Γ₀ : List SExpr)
   LR.SelfAdequateAt Γ₀ hX depth ∧
     LR.FixedHeadResultAt Γ₀ hX depth
 
+/-- Add the downward-closed direct type rung to the existing coherent
+consumer package.  The legacy halves remain literal fields so all current
+iota and fixed-head consumers can project them unchanged while the direct
+fundamental induction is developed additively. -/
+def LR.DirectCoherentRetainedAt (Γ₀ : List SExpr)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X)
+    (depth : Nat) : Prop :=
+  LR.CoherentRetainedAt Γ₀ hX depth ∧
+    LR.DirectSelfTypeAt Γ₀ hX depth
+
+/-- Add full level-guarded term adequacy to the established coherent
+consumer package.
+
+The first component is retained literally: evaluator seed reconstruction and
+all existing fixed-head consumers continue to use the same legacy package.
+The second component is the stronger term-and-type action required by the
+direct generated-RHS zipper. -/
+def LRD.CoherentRetainedAt (Γ₀ : List SExpr)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X)
+    (depth : Nat) : Prop :=
+  LR.CoherentRetainedAt Γ₀ hX depth ∧
+    LRD.SelfAdequateAt Γ₀ hX depth
+
+/-- The all-depth direct coherent consumer attached to one exact evaluator
+witness.  Its legacy half remains the seed used by the established evaluator
+recursion; the guarded half is assembled by a separate strong induction over
+syntax depth below. -/
+def LRD.CoherentRetainedResult (Γ₀ : List SExpr)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X) : Prop :=
+  ∀ depth, LRD.CoherentRetainedAt Γ₀ hX depth
+
+/-- Inspectable recursive evidence for the full guarded coherent package.
+
+The left injection is reserved for a genuine evaluator child and retains its
+`LRD` result at every syntax depth.  A witness rebuilt after a strict syntax
+decrease receives only the right injection at that exact depth.  This is the
+guarded analogue of `LR.CoherentSeedAt`; keeping the two distinct prevents an
+all-depth legacy result from being mistaken for all-depth guarded
+self-adequacy. -/
+abbrev LRD.CoherentSeedAt (Γ₀ : List SExpr) (depth : Nat)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X) : Prop :=
+  LE_Interp.Witness.NatSeed
+    (fun hX depth => LRD.CoherentRetainedAt Γ₀ hX depth) depth hX
+
+/-- Inject the all-depth guarded result of a genuine evaluator child. -/
+theorem LRD.CoherentSeedAt.all
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentRetainedResult Γ₀ hX) :
+    LRD.CoherentSeedAt Γ₀ depth hX :=
+  .inl H
+
+/-- Inject a guarded result justified only at one strict syntax
+predecessor. -/
+theorem LRD.CoherentSeedAt.local
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentRetainedAt Γ₀ hX depth) :
+    LRD.CoherentSeedAt Γ₀ depth hX :=
+  .inr H
+
+/-- Consume either guarded provenance branch at its stated depth. -/
+theorem LRD.CoherentSeedAt.result
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentSeedAt Γ₀ depth hX) :
+    LRD.CoherentRetainedAt Γ₀ hX depth :=
+  H.elim (fun H => H depth) id
+
 /-- The depth-polymorphic consumer attached to one exact evaluator witness.
 
 This is not itself used as an undifferentiated tree predicate.  Semantic `R`
@@ -5454,6 +13887,82 @@ abbrev LR.CoherentSeedAt (Γ₀ : List SExpr) (depth : Nat)
     {ρ root X} (hX : LE_Interp.Witness ρ root X) : Prop :=
   LE_Interp.Witness.NatSeed
     (fun hX depth => LR.CoherentRetainedAt Γ₀ hX depth) depth hX
+
+/-- Conversion callback for the level-guarded fundamental induction.
+
+Its source certificate is strictly shallower than the current syntax rung,
+exactly as in `LR.SelfAdequateDefeqStepAt`; only the three recursive adequacy
+premises and the conclusion are strengthened to `LRD`. -/
+def LRD.SelfAdequateDefeqStepAt
+    (Γ₀ : List SExpr) (outerDepth : Nat) : Prop :=
+  ∀ {Γ : List SExpr} {A B e : SExpr} {u : SLevel} {depth : Nat}
+      {ρ : Valuation} {n : Nat} {m b : WShape n},
+    depth < outerDepth →
+    HasTypeStratifiedS Γ A (.sort u) true depth →
+    IsDefEqStrong Γ A B (.sort u) →
+    LE_Interp ρ m.T e → LE_Interp ρ b.T B → m.HasType b →
+    (∀ {n'} {ma sa : WShape n'},
+      LE_Interp ρ ma.T A → LE_Interp ρ sa.T (.sort u) →
+      ma.HasType sa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma sa) →
+    (∀ {n'} {mb sb : WShape n'},
+      LE_Interp ρ mb.T B → LE_Interp ρ sb.T (.sort u) →
+      mb.HasType sb → LRD.Adequate Γ₀ Γ ρ B B (.sort u) mb sb) →
+    (∀ {n'} {me ae : WShape n'},
+      LE_Interp ρ me.T e → LE_Interp ρ ae.T A →
+      me.HasType ae → LRD.Adequate Γ₀ Γ ρ e e A me ae) →
+    LRD.Adequate Γ₀ Γ ρ e e B m b
+
+/-- Well-founded implementation of the guarded conversion callback.  The
+heterogeneous type edge is obtained from the strict predecessor adequacy
+rung; the term's self edge is the local recursive hypothesis.  No inversion
+or path collapse is used. -/
+theorem LRD.SelfAdequateDefeqStepAt.of_lowerAdequacy
+    (hΓ₀ : Ctx.WF Γ₀) (outerDepth : Nat)
+    (lowerAdequacy : ∀ d, d < outerDepth →
+      LRD.ContextualAdequacyAtDepth d) :
+    LRD.SelfAdequateDefeqStepAt Γ₀ outerDepth := by
+  intro Γ A B e u depth ρ n m b hdepth hAty hEq hM hB hmem _ _ ihe
+  apply LRD.adequateDefeq hEq hM hB hmem
+  · intro n' ma sa hA hSort hma
+    exact (lowerAdequacy depth hdepth hΓ₀)
+      hEq hAty hA hSort hma
+  · exact ihe
+
+/--
+info: 'Lean4Lean.SExpr.LRD.SelfAdequateDefeqStepAt.of_lowerAdequacy' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.SelfAdequateDefeqStepAt.of_lowerAdequacy
+
+/-- Constant callback for the level-guarded fundamental induction.
+
+The semantic child tree is indexed by `LRD.CoherentSeedAt`: genuine evaluator
+children retain all-depth guarded coherence, while strict restarts remain
+local.  The established constant result is passed separately, just as it is
+for the Pi and lambda constructors: direct substitutions cannot manufacture
+adequacy quantified over every legacy `SubstWF`. -/
+def LRD.SelfAdequateConstStep (Γ₀ : List SExpr) : Prop :=
+  ∀ {c : Name} {ci : VConstant} {Γ : List SExpr}
+      {ls : List SLevel} {u : SLevel} {depth : Nat}
+      {ρ : Valuation} {n : Nat} {mx bx : WShape n},
+    Params.env.constants c = some ci →
+    ls.length = ci.uvars →
+    HasTypeStratifiedS Γ (SExpr.mkInst ls ci.type)
+      (.sort u) true depth →
+    (∀ (d' : Nat), d' < depth + 1 →
+      ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
+        hX'.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX' d') →
+    mx.HasType bx →
+    LE_Interp.Witness ρ bx.T (SExpr.mkInst ls ci.type) →
+    ∀ (hX : LE_Interp.Witness ρ mx.T (.const c ls)),
+      hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ (depth + 1)) →
+      LR.Adequate Γ₀ Γ ρ (.const c ls) (.const c ls)
+        (SExpr.mkInst ls ci.type) mx bx →
+      LRD.Adequate Γ₀ Γ ρ (.const c ls) (.const c ls)
+        (SExpr.mkInst ls ci.type) mx bx
 
 /-- A recursive RHS witness together with exactly the typing evidence needed
 to consume it as a fixed head.
@@ -5581,6 +14090,60 @@ theorem LR.CoherentSeedAt.result
     (H : LR.CoherentSeedAt Γ₀ depth hX) :
     LR.CoherentRetainedAt Γ₀ hX depth :=
   H.elim (fun H => H depth) id
+
+/-- Forget only the guarded component while preserving whether a seed is a
+genuine all-depth child or a rebuilt local child. -/
+theorem LRD.CoherentSeedAt.toLegacy
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentSeedAt Γ₀ depth hX) :
+    LR.CoherentSeedAt Γ₀ depth hX := by
+  cases H with
+  | inl hall => exact .inl (fun d => (hall d).1)
+  | inr hlocal => exact .inr hlocal.1
+
+/-- Expose the native/local distinction without losing guarded coherence.
+A genuine evaluator child may select the registered term's native typing
+depth; a rebuilt child remains pinned to its supplied local rung. -/
+theorem LRD.CoherentSeedAt.nativeOrLocal
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentSeedAt Γ₀ depth hX)
+    (hstrong : IsDefEqStrong Δ X X B) :
+    (∃ nativeDepth,
+      LRD.CoherentRetainedAt Γ₀ hX nativeDepth ∧
+        HasTypeStratifiedS Δ X B true nativeDepth) ∨
+      LRD.CoherentRetainedAt Γ₀ hX depth := by
+  cases H with
+  | inl hall =>
+    obtain ⟨nativeDepth, hstrat, _⟩ := hstrong.stratify
+    exact .inl ⟨nativeDepth, hall nativeDepth, hstrat⟩
+  | inr hlocal => exact .inr hlocal
+
+/-- Expose the depth distinction carried by one coherent evaluator seed.
+
+A genuine semantic child can be paired with the registered term's native
+stratification depth because its retained result is depth-polymorphic.  A
+rebuilt child remains explicitly local to the caller's rung.  In particular,
+this eliminator never asks a local seed to type a syntactically deeper
+registered RHS. -/
+theorem LR.CoherentSeedAt.nativeOrLocal
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LR.CoherentSeedAt Γ₀ depth hX)
+    (hstrong : IsDefEqStrong Δ X X B) :
+    (∃ nativeDepth,
+      LR.CoherentRetainedAt Γ₀ hX nativeDepth ∧
+        HasTypeStratifiedS Δ X B true nativeDepth) ∨
+      LR.CoherentRetainedAt Γ₀ hX depth := by
+  cases H with
+  | inl hall =>
+    obtain ⟨nativeDepth, hstrat, _⟩ := hstrong.stratify
+    exact .inl ⟨nativeDepth, hall nativeDepth, hstrat⟩
+  | inr hlocal => exact .inr hlocal
+
+/--
+info: 'Lean4Lean.SExpr.LR.CoherentSeedAt.nativeOrLocal' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.CoherentSeedAt.nativeOrLocal
 
 /-- Inject the structurally recursive, all-depth result of a genuine
 evaluator child into depth-local provenance. -/
@@ -5785,6 +14348,20 @@ theorem LR.CoherentSeedAt.rebuild
     (fun hX children =>
       LR.CoherentSeedAt.local (seed hX children)) hX
 
+/-- Rebuild a freshly selected witness after a strict syntax decrease, marking
+every abstract evaluator edge as local guarded evidence.  Only the outer
+semantic recursion may introduce the all-depth branch. -/
+theorem LRD.CoherentSeedAt.rebuild
+    (seed : ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+      hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ depth) →
+        LRD.CoherentRetainedAt Γ₀ hX depth)
+    {hX : LE_Interp.Witness ρ root X} :
+    hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ depth) :=
+  LE_Interp.Witness.RDeepChildren.of_step
+    (P := LRD.CoherentSeedAt Γ₀ depth)
+    (fun hX children =>
+      LRD.CoherentSeedAt.local (seed hX children)) hX
+
 /-- Use a completed strictly-smaller Nat rung at a freshly selected exact
 witness.
 
@@ -5805,6 +14382,192 @@ theorem LR.CoherentRetainedAt.restart
     LR.CoherentSeedAt.rebuild
       (seed := fun hX children => lower depth hdepth hX children)
   exact lower depth hdepth hX children
+
+/-- Guarded restart for the additive direct package.  Rebuilding still uses
+the established coherent seed tree; each local seed projects the legacy
+consumer half, while the final restart retains the direct type half too. -/
+theorem LR.DirectCoherentRetainedAt.restart
+    (lower : ∀ (d' : Nat), d' < outerDepth →
+      ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+        hX.RDeepChildren (LR.CoherentSeedAt Γ₀ d') →
+        LR.DirectCoherentRetainedAt Γ₀ hX d')
+    (hdepth : depth < outerDepth)
+    {hX : LE_Interp.Witness ρ root X} :
+    LR.DirectCoherentRetainedAt Γ₀ hX depth := by
+  let children : hX.RDeepChildren
+      (LR.CoherentSeedAt Γ₀ depth) :=
+    LR.CoherentSeedAt.rebuild
+      (seed := fun hX children => (lower depth hdepth hX children).1)
+  exact lower depth hdepth hX children
+
+/-- Guarded restart for the full direct coherent package.  The rebuilt tree
+uses only local `LRD` seeds; no strict restart is promoted to the all-depth
+branch reserved for genuine semantic children. -/
+theorem LRD.CoherentRetainedAt.restart
+    (lower : ∀ (d' : Nat), d' < outerDepth →
+      ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+        hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX d')
+    (hdepth : depth < outerDepth)
+    {hX : LE_Interp.Witness ρ root X} :
+    LRD.CoherentRetainedAt Γ₀ hX depth := by
+  let children : hX.RDeepChildren
+      (LRD.CoherentSeedAt Γ₀ depth) :=
+    LRD.CoherentSeedAt.rebuild
+      (seed := fun hX children => lower depth hdepth hX children)
+  exact lower depth hdepth hX children
+
+/-- Assemble full level-guarded self-adequacy by induction on one exact
+stratified typing certificate.
+
+All non-constant constructors are discharged here.  Application, lambda and
+Pi use the already proved `LRD` adequacy constructors; lambda and Pi also
+consume the legacy adequacy produced at the same root, preserving the honest
+quantifier distinction between `SubstWF` and `DirectSubstWF`.  Recursive
+syntax calls use only strict-depth restarts.  Consequently the two remaining
+inputs are localized exactly where they belong: conversion and constant
+evaluation. -/
+theorem LRD.selfAdequateAtStep
+    (outerDepth : Nat)
+    (defeqStep : LRD.SelfAdequateDefeqStepAt Γ₀ outerDepth)
+    (constStep : LRD.SelfAdequateConstStep Γ₀)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X)
+    (children : hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ outerDepth))
+    (legacy : LR.SelfAdequateAt Γ₀ hX outerDepth)
+    (lower : ∀ (d' : Nat), d' < outerDepth → ∀ {ρ root X}
+      (hX' : LE_Interp.Witness ρ root X),
+      hX'.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+      LRD.CoherentRetainedAt Γ₀ hX' d') :
+    LRD.SelfAdequateAt Γ₀ hX outerDepth := by
+  intro n mx bx Δ core B hroot hTyping htyped hB
+  have restartDirect : ∀ (d' : Nat), d' < outerDepth →
+      ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
+        LRD.SelfAdequateAt Γ₀ hX' d' := by
+    intro d' hdepth ρ root X hX'
+    exact (LRD.CoherentRetainedAt.restart
+      (lower := lower) hdepth (hX := hX')).2
+  let hX' := hX.mono hroot
+  let children' : hX'.RDeepChildren
+      (LRD.CoherentSeedAt Γ₀ outerDepth) := children.mono hroot
+  have legacyAdequate : LR.Adequate Γ₀ Δ ρ X X B mx bx :=
+    legacy hroot hTyping htyped hB
+  induction hTyping generalizing ρ n mx bx with
+  | base htypedCore ih =>
+    exact ih defeqStep hX children legacy lower hroot htyped hB
+      restartDirect legacyAdequate
+  | @sort' Δ l depth =>
+    exact LRD.Adequate.sort hX'.toInterp htyped
+  | @bvar Δ i A u depth hlookup hA ihA =>
+    exact LRD.Adequate.bvar hlookup hX'.toInterp hB.toInterp htyped
+  | @const c ci Γ ls u depth hreg hlen hTy _ =>
+    exact constStep hreg hlen hTy lower htyped hB hX' children'
+      legacyAdequate
+  | @app Γ A u depth B v f x hAty hBty hfty hxty hRty
+      _ _ _ _ _ =>
+    have hdepth : depth < depth + 1 := Nat.lt_succ_self depth
+    have ihf : ∀ {ρ : Valuation} {n' : Nat} {mf af : WShape n'},
+        LE_Interp ρ mf.T f → LE_Interp ρ af.T (.forallE A B) →
+        mf.HasType af →
+        LRD.Adequate Γ₀ Γ ρ f f (.forallE A B) mf af := by
+      intro ρ n' mf af hf hPi hmf
+      exact (restartDirect depth hdepth hf.witness)
+        .rfl hfty hmf hPi.witness
+    have ihx : ∀ {ρ : Valuation} {n' : Nat} {ma aa : WShape n'},
+        LE_Interp ρ ma.T x → LE_Interp ρ aa.T A → ma.HasType aa →
+        LRD.Adequate Γ₀ Γ ρ x x A ma aa := by
+      intro ρ n' ma aa hx hA hma
+      exact (restartDirect depth hdepth hx.witness)
+        .rfl hxty hma hA.witness
+    have ihR : ∀ {ρ : Valuation} {n' : Nat} {mb av : WShape n'},
+        LE_Interp ρ mb.T (B.inst x) → LE_Interp ρ av.T (.sort v) →
+        mb.HasType av →
+        LRD.Adequate Γ₀ Γ ρ (B.inst x) (B.inst x) (.sort v) mb av := by
+      intro ρ n' mb av hResult hv hmb
+      exact (restartDirect depth hdepth hResult.witness)
+        .rfl hRty hmb hv.witness
+    exact LRD.adequateApp hfty.strong hxty.strong hRty.strong
+      hX'.toInterp hB.toInterp htyped ihf ihx ihR
+  | @lam Γ A u depth B v body hAty hBty hbodyty hPity
+      _ _ _ _ =>
+    have hdepth : depth < depth + 1 := Nat.lt_succ_self depth
+    have ihA : ∀ {ρ : Valuation} {n' : Nat} {ma aa : WShape n'},
+        LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+        ma.HasType aa →
+        LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa := by
+      intro ρ n' ma aa hA hSort hma
+      exact (restartDirect depth hdepth hA.witness)
+        .rfl hAty hma hSort.witness
+    have ihB : ∀ {ρ : Valuation} {n' : Nat} {mb ab : WShape n'},
+        LE_Interp ρ mb.T B → LE_Interp ρ ab.T (.sort v) →
+        mb.HasType ab →
+        LRD.Adequate Γ₀ (A :: Γ) ρ B B (.sort v) mb ab := by
+      intro ρ n' mb ab hBody hSort hmb
+      exact (restartDirect depth hdepth hBody.witness)
+        .rfl hBty hmb hSort.witness
+    have ihBody : ∀ {ρ : Valuation} {n' : Nat} {mb ab : WShape n'},
+        LE_Interp ρ mb.T body → LE_Interp ρ ab.T B →
+        mb.HasType ab →
+        LRD.Adequate Γ₀ (A :: Γ) ρ body body B mb ab := by
+      intro ρ n' mb ab hBody hBTy hmb
+      exact (restartDirect depth hdepth hBody.witness)
+        .rfl hbodyty hmb hBTy.witness
+    exact LRD.Adequate.lamSelf hAty.strong hBty.strong hbodyty.strong
+      hX'.toInterp hB.toInterp htyped ihA ihB ihBody
+      legacyAdequate
+  | @forallE Γ A u depth body v hAty hbodyty _ _ =>
+    have hdepth : depth < depth + 1 := Nat.lt_succ_self depth
+    have ihA : ∀ {ρ : Valuation} {n' : Nat} {ma aa : WShape n'},
+        LE_Interp ρ ma.T A → LE_Interp ρ aa.T (.sort u) →
+        ma.HasType aa →
+        LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma aa := by
+      intro ρ n' ma aa hA hSort hma
+      exact (restartDirect depth hdepth hA.witness)
+        .rfl hAty hma hSort.witness
+    have ihBody : ∀ {ρ : Valuation} {n' : Nat} {mb ab : WShape n'},
+        LE_Interp ρ mb.T body → LE_Interp ρ ab.T (.sort v) →
+        mb.HasType ab →
+        LRD.Adequate Γ₀ (A :: Γ) ρ body body (.sort v) mb ab := by
+      intro ρ n' mb ab hBody hSort hmb
+      exact (restartDirect depth hdepth hBody.witness)
+        .rfl hbodyty hmb hSort.witness
+    exact LRD.Adequate.forallESelf hAty.strong hbodyty.strong
+      hX'.toInterp hB.toInterp htyped ihA ihBody
+      legacyAdequate
+  | @defeq Γ A B u depth e hEq hAty hBty heTy
+      ihA ihB ihe =>
+    have hdepth : depth < depth + 1 := Nat.lt_succ_self depth
+    have ihA' : ∀ {ρ : Valuation} {n' : Nat} {ma sa : WShape n'},
+        LE_Interp ρ ma.T A → LE_Interp ρ sa.T (.sort u) →
+        ma.HasType sa → LRD.Adequate Γ₀ Γ ρ A A (.sort u) ma sa := by
+      intro ρ n' ma sa hA hSort hma
+      exact (restartDirect depth hdepth hA.witness)
+        .rfl hAty hma hSort.witness
+    have ihB' : ∀ {ρ : Valuation} {n' : Nat} {mb sb : WShape n'},
+        LE_Interp ρ mb.T B → LE_Interp ρ sb.T (.sort u) →
+        mb.HasType sb → LRD.Adequate Γ₀ Γ ρ B B (.sort u) mb sb := by
+      intro ρ n' mb sb hB hSort hmb
+      exact (restartDirect depth hdepth hB.witness)
+        .rfl hBty hmb hSort.witness
+    have ihe' : ∀ {ρ : Valuation} {n' : Nat} {me ae : WShape n'},
+        LE_Interp ρ me.T e → LE_Interp ρ ae.T A →
+        me.HasType ae → LRD.Adequate Γ₀ Γ ρ e e A me ae := by
+      intro ρ n' me ae he hA hme
+      exact (restartDirect depth hdepth he.witness)
+        .rfl heTy hme hA.witness
+    exact defeqStep hdepth hAty hEq hX'.toInterp hB.toInterp htyped
+      ihA' ihB' ihe'
+
+/--
+info: 'Lean4Lean.SExpr.LRD.CoherentRetainedAt.restart' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.CoherentRetainedAt.restart
+
+/--
+info: 'Lean4Lean.SExpr.LRD.selfAdequateAtStep' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.selfAdequateAtStep
 
 /-- The guarded restart together with the exact rebuilt evaluator tree used
 to justify it. -/
@@ -6043,6 +14806,44 @@ theorem LR.SelfAdequateAt.of_le
   intro n mx bx Δ core B hroot hTyping htyped hB
   exact H hroot (hTyping.mono hdepth) htyped hB
 
+/-- Root lowering preserves guarded self-adequacy. -/
+theorem LRD.SelfAdequateAt.mono
+    (hle : root ≤ root')
+    {hX : LE_Interp.Witness ρ root' X}
+    (H : LRD.SelfAdequateAt Γ₀ hX depth) :
+    LRD.SelfAdequateAt Γ₀ (hX.mono hle) depth := by
+  intro n mx bx Δ core B hroot hTyping htyped hB
+  exact H (hroot.trans hle) hTyping htyped hB
+
+/-- A guarded result constructed at a larger syntax depth consumes every
+smaller typing certificate. -/
+theorem LRD.SelfAdequateAt.of_le
+    (hdepth : depth ≤ outerDepth)
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.SelfAdequateAt Γ₀ hX outerDepth) :
+    LRD.SelfAdequateAt Γ₀ hX depth := by
+  intro n mx bx Δ core B hroot hTyping htyped hB
+  exact H hroot (hTyping.mono hdepth) htyped hB
+
+/-- Root lowering preserves the direct type package. -/
+theorem LR.DirectSelfTypeAt.mono
+    (hle : root ≤ root')
+    {hX : LE_Interp.Witness ρ root' X}
+    (H : LR.DirectSelfTypeAt Γ₀ hX depth) :
+    LR.DirectSelfTypeAt Γ₀ (hX.mono hle) depth := by
+  intro n mx Δ u hroot hTyping htyped σ σ' W
+  exact H (hroot.trans hle) hTyping htyped W
+
+/-- A direct type package at a larger syntax depth consumes every smaller
+typing certificate. -/
+theorem LR.DirectSelfTypeAt.of_le
+    (hdepth : depth ≤ outerDepth)
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LR.DirectSelfTypeAt Γ₀ hX outerDepth) :
+    LR.DirectSelfTypeAt Γ₀ hX depth := by
+  intro n mx Δ u hroot hTyping htyped σ σ' W
+  exact H hroot (hTyping.mono hdepth) htyped W
+
 /-- Fixed-head validity is contravariant in its explicit typing-depth index.
 Only the stratification premise changes; the generated application result is
 independent of which enlarged certificate discharged it. -/
@@ -6110,6 +14911,44 @@ theorem LR.CoherentRetainedAt.mono
     LR.CoherentRetainedAt Γ₀ (hX.mono hle) depth :=
   ⟨LR.SelfAdequateAt.mono (hX := hX) hle H.1,
     LR.FixedHeadResultAt.mono (hX := hX) hle H.2⟩
+
+/-- Root lowering preserves both the established coherent package and its
+guarded self-adequacy sidecar. -/
+theorem LRD.CoherentRetainedAt.mono
+    (hle : root ≤ root')
+    {hX : LE_Interp.Witness ρ root' X}
+    (H : LRD.CoherentRetainedAt Γ₀ hX depth) :
+    LRD.CoherentRetainedAt Γ₀ (hX.mono hle) depth :=
+  ⟨LR.CoherentRetainedAt.mono (hX := hX) hle H.1,
+    LRD.SelfAdequateAt.mono (hX := hX) hle H.2⟩
+
+/-- Lower both components of a guarded coherent package to a smaller syntax
+depth. -/
+theorem LRD.CoherentRetainedAt.of_le
+    (hdepth : depth ≤ outerDepth)
+    {hX : LE_Interp.Witness ρ root X}
+    (H : LRD.CoherentRetainedAt Γ₀ hX outerDepth) :
+    LRD.CoherentRetainedAt Γ₀ hX depth :=
+  ⟨LR.CoherentRetainedAt.of_le (hX := hX) hdepth H.1,
+    LRD.SelfAdequateAt.of_le (hX := hX) hdepth H.2⟩
+
+/-- Root lowering preserves an all-depth guarded coherent result. -/
+theorem LRD.CoherentRetainedResult.mono
+    (hle : root ≤ root')
+    {hX : LE_Interp.Witness ρ root' X}
+    (H : LRD.CoherentRetainedResult Γ₀ hX) :
+    LRD.CoherentRetainedResult Γ₀ (hX.mono hle) :=
+  fun depth => LRD.CoherentRetainedAt.mono (hX := hX) hle (H depth)
+
+/-- Root lowering preserves the direct seed's provenance class. -/
+theorem LRD.CoherentSeedAt.mono
+    (hle : root ≤ root')
+    {hX : LE_Interp.Witness ρ root' X}
+    (H : LRD.CoherentSeedAt Γ₀ depth hX) :
+    LRD.CoherentSeedAt Γ₀ depth (hX.mono hle) := by
+  cases H with
+  | inl hall => exact .inl (LRD.CoherentRetainedResult.mono hle hall)
+  | inr hlocal => exact .inr (LRD.CoherentRetainedAt.mono hle hlocal)
 
 /-- Lowering the selected RHS observation preserves its coupled provenance
 and local typing budget. -/
@@ -6337,6 +15176,69 @@ theorem LR.coherentRetainedResult_of_natStep
   exact hX.recRDeepNatProvenance
     (Q := fun hX depth => LR.CoherentRetainedAt Γ₀ hX depth)
     step
+
+/-- Guarded semantic-first/Nat-second algebra.  Actual evaluator edges carry
+the all-depth `LRD` result; only arbitrary-witness restarts at a strict syntax
+decrease may carry a local result. -/
+def LRD.CoherentRetainedNatStep (Γ₀ : List SExpr) : Prop :=
+  ∀ (depth : Nat) {ρ root X}
+      (hX : LE_Interp.Witness ρ root X),
+    hX.RDeepChildren (LRD.CoherentSeedAt Γ₀ depth) →
+    (∀ (d' : Nat), d' < depth →
+      ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
+        hX'.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX' d') →
+    LRD.CoherentRetainedAt Γ₀ hX depth
+
+/-- Assemble one exact guarded rung from the completed legacy coherent
+algebra and the two genuinely new direct callbacks.
+
+The guarded package now follows the same semantic-first/Nat-second recursion
+as the legacy package.  Consequently actual evaluator children receive the
+all-depth branch of `LRD.CoherentSeedAt`; strong Nat descent is still the only
+way to restart an arbitrary witness, and such a restart remains local. -/
+theorem LRD.coherentRetainedAt_of_steps
+    (legacyStep : LR.CoherentRetainedNatStep Γ₀)
+    (defeqStep : ∀ depth, LRD.SelfAdequateDefeqStepAt Γ₀ depth)
+    (constStep : LRD.SelfAdequateConstStep Γ₀)
+    (depth : Nat) {ρ root X}
+    (hX : LE_Interp.Witness ρ root X) :
+    LRD.CoherentRetainedAt Γ₀ hX depth := by
+  let step : LRD.CoherentRetainedNatStep Γ₀ := by
+    intro depth ρ root X hY children lower
+    have legacyResult : LR.CoherentRetainedResult Γ₀ hY :=
+      LR.coherentRetainedResult_of_natStep legacyStep hY
+    have hlegacy : LR.CoherentRetainedAt Γ₀ hY depth :=
+      legacyResult depth
+    exact ⟨hlegacy,
+      LRD.selfAdequateAtStep depth (defeqStep depth) constStep
+        hY children hlegacy.1 lower⟩
+  exact hX.recRDeepNatProvenance
+    (Q := fun hX depth => LRD.CoherentRetainedAt Γ₀ hX depth)
+    step depth
+
+/-- Close the all-depth guarded result without changing the established
+evaluator seed recursion. -/
+theorem LRD.coherentRetainedResult_of_steps
+    (legacyStep : LR.CoherentRetainedNatStep Γ₀)
+    (defeqStep : ∀ depth, LRD.SelfAdequateDefeqStepAt Γ₀ depth)
+    (constStep : LRD.SelfAdequateConstStep Γ₀)
+    {ρ root X} (hX : LE_Interp.Witness ρ root X) :
+    LRD.CoherentRetainedResult Γ₀ hX :=
+  fun depth => LRD.coherentRetainedAt_of_steps
+    legacyStep defeqStep constStep depth hX
+
+/--
+info: 'Lean4Lean.SExpr.LRD.coherentRetainedAt_of_steps' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.coherentRetainedAt_of_steps
+
+/--
+info: 'Lean4Lean.SExpr.LRD.coherentRetainedResult_of_steps' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.coherentRetainedResult_of_steps
 
 /-- Forget the coherent construction after selecting its fixed-head half at
 every stratification depth. -/
@@ -7087,6 +15989,62 @@ theorem LE_Interp.Witness.typedRDeep_of_stratifiedLocal
     (LR.coherentDefeqRDeepTransportAt seed)
     H W Wfits hM children
 
+/-- Rebuild proof-relevant valuation bindings in the transportable coherent
+provenance used by retained semantic typing.  Every binding witness is chosen
+from the existing public `Fits` proof and receives a tree rebuilt by the same
+depth-local seed as the term being typed. -/
+theorem Valuation.Fits.toCoherentProvenanceFitsRDeep
+    (W : Valuation.Fits Γ₀ Γ ρ)
+    (seed : ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+      hX.RDeepChildren (LR.CoherentSeedAt Γ₀ depth) →
+        LR.CoherentRetainedAt Γ₀ hX depth) :
+    LE_Interp.Witness.FitsRDeep
+      (LR.CoherentProvenanceAt Γ₀ depth) Γ₀ Γ ρ :=
+  W.toFitsRDeep (fun _ => LR.CoherentProvenanceAt.rebuild seed)
+
+/-- Retained semantic typing of an exact witness at a genuinely smaller
+syntax rung.
+
+The strict predecessor supplies the local coherent seed for arbitrary
+witnesses.  That one seed rebuilds both the witness's provenance tree and
+all valuation-binding trees, after which `typedRDeep_of_stratifiedLocal`
+returns the registered term/type witnesses without any proof-irrelevant
+reselection at the consumer boundary. -/
+theorem LE_Interp.Witness.typedRDeep_of_stratifiedRestart
+    (lower : ∀ (d' : Nat), d' < outerDepth →
+      ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+        hX.RDeepChildren (LR.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX d')
+    (hdepth : depth < outerDepth)
+    (H : HasTypeStratifiedS Γ M A core depth)
+    (W : Valuation.Fits Γ₀ Γ ρ)
+    (hM : LE_Interp.Witness ρ m M) :
+    LE_Interp.Witness.TypedRDeep
+      (LR.CoherentProvenanceAt Γ₀ depth) ρ m M A := by
+  let seed : ∀ {ρ root X} (hX : LE_Interp.Witness ρ root X),
+      hX.RDeepChildren (LR.CoherentSeedAt Γ₀ depth) →
+        LR.CoherentRetainedAt Γ₀ hX depth := fun hX children =>
+    (lower depth hdepth hX children).1
+  exact LE_Interp.Witness.typedRDeep_of_stratifiedLocal seed H
+    (W.toCoherentProvenanceFitsRDeep seed) W hM
+    (LR.CoherentProvenanceAt.rebuild seed)
+
+/--
+info: 'Lean4Lean.SExpr.Valuation.Fits.toCoherentProvenanceFitsRDeep' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Valuation.Fits.toCoherentProvenanceFitsRDeep
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Witness.typedRDeep_of_stratifiedRestart' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Witness.typedRDeep_of_stratifiedRestart
+
 /-- Package the direct retained-typing theorem at one exact stratification
 depth. -/
 theorem LE_Interp.Witness.soundRDeepAt_of_defeqTransport
@@ -7109,6 +16067,317 @@ theorem LE_Interp.Witness.soundRDeepAt_true
     (LE_Interp.Witness.defeqRDeepTransport_true Gamma0)
     (LE_Interp.Witness.RDeepChildren.trivial hM) depth
 
+/-- Type one exact proof-relevant witness at its strong derivation's native
+stratification depth while retaining only trivial recursive-edge data.
+
+This is the appropriate registered-type observation for a fixed-head
+producer: it stays paired with the selected term witness, but it neither
+requires a caller-fixed depth nor promotes a local coherent seed. -/
+theorem LE_Interp.Witness.typedRDeepTrue_of_strong
+    (hM : LE_Interp.Witness ρ m M)
+    (H : IsDefEqStrong Γ M M A)
+    (W : Valuation.Fits Γ₀ Γ ρ) :
+    LE_Interp.Witness.TypedRDeep (fun _ => True) ρ m M A := by
+  obtain ⟨depth, hstrat, _⟩ := H.stratify
+  exact hM.soundRDeepAt_true depth hstrat W.toFitsRDeepTrue W
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.Witness.typedRDeepTrue_of_strong' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.Witness.typedRDeepTrue_of_strong
+
+/-- Select one non-bottom fixed head together with both the recursive result
+carried by its exact abstract edge and semantic typing of that same witness.
+
+The typing observation is constructed at the registered term's native
+stratification depth, so this package does not require a depth restart or a
+strict predecessor certificate from its caller. -/
+noncomputable def LE_Interp.RHS.fixedLowerWitnessTypedResult
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hP : ∀ {m M} (hr : R m M), P (hR hr))
+    (hmono : ∀ {m m' M} (hle : m ≤ m')
+      (H : LE_Interp.Witness ρ m' M), P H → P (H.mono hle))
+    (H : LE_Interp.RHS ls m2 (LE_Interp.Lower R) m (.fixed e cl))
+    (hnonbot : ¬m ≤ TShape.bot)
+    (hstrong : IsDefEqStrong Γ (SExpr.mkInst ls e)
+      (SExpr.mkInst ls e) A)
+    (W : Valuation.Fits Γ₀ Γ ρ) :
+    {h : LE_Interp.Witness ρ m (SExpr.mkInst ls e) //
+      P h ∧ LE_Interp.Witness.TypedRDeep
+        (fun _ => True) ρ m (SExpr.mkInst ls e) A} :=
+  let result := H.fixedLowerWitnessResult hR hP hmono hnonbot
+  ⟨result.1, result.2,
+    result.1.typedRDeepTrue_of_strong hstrong W⟩
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.fixedLowerWitnessTypedResult' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.fixedLowerWitnessTypedResult
+
+/-- Select a fixed lower head together with its exact coherent seed branch,
+native/local typing distinction, and proof-relevant semantic type witness.
+
+Root lowering preserves the original provenance tag through
+`CoherentSeedAt.mono`; the result therefore never upgrades a rebuilt local
+edge to the genuine all-depth branch. -/
+noncomputable def LE_Interp.RHS.fixedLowerWitnessCoherentResult
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hseed : ∀ {m M} (hr : R m M),
+      LR.CoherentSeedAt Γ₀ depth (hR hr))
+    (H : LE_Interp.RHS ls m2 (LE_Interp.Lower R) m (.fixed e cl))
+    (hnonbot : ¬m ≤ TShape.bot)
+    (hstrong : IsDefEqStrong Δ (SExpr.mkInst ls e)
+      (SExpr.mkInst ls e) A)
+    (W : Valuation.Fits Γ₁ Δ ρ) :
+    {h : LE_Interp.Witness ρ m (SExpr.mkInst ls e) //
+      ((∃ nativeDepth,
+          LR.CoherentRetainedAt Γ₀ h nativeDepth ∧
+            HasTypeStratifiedS Δ (SExpr.mkInst ls e) A true nativeDepth) ∨
+        LR.CoherentRetainedAt Γ₀ h depth) ∧
+      LE_Interp.Witness.TypedRDeep
+        (fun _ => True) ρ m (SExpr.mkInst ls e) A} :=
+  let result := H.fixedLowerWitnessTypedResult hR hseed
+    (fun hle hM H => LR.CoherentSeedAt.mono (hX := hM) hle H)
+    hnonbot hstrong W
+  ⟨result.1, result.2.1.nativeOrLocal hstrong, result.2.2⟩
+
+/--
+info: 'Lean4Lean.SExpr.LE_Interp.RHS.fixedLowerWitnessCoherentResult' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LE_Interp.RHS.fixedLowerWitnessCoherentResult
+
+/-- Typed recursive-result-preserving form of `of_nonbotWitnessResult`.
+
+The callback receives semantic typing of the exact fixed-head witness selected
+with its recursive result.  The observation is recovered from the registered
+strong typing at its native stratification depth, independently of the
+caller's guarded coherence rung. -/
+theorem LRD.IotaRHSDefEq.of_nonbotWitnessResultTyped
+    {R : TShape → SExpr → Prop} {ρ : Valuation}
+    {P : ∀ {ρ m M}, LE_Interp.Witness ρ m M → Prop}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hP : ∀ {m M} (hr : R m M), P (hR hr))
+    (hmono : ∀ {m m' M} (hle : m ≤ m')
+      (hM : LE_Interp.Witness ρ m' M), P hM → P (hM.mono hle))
+    (W : Valuation.Fits Γ₀ Γ ρ)
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)}
+        (hhead : LE_Interp.Witness ρ head
+          (SExpr.mkInst recLs rule.df.rhs)),
+      P hhead →
+      LE_Interp.Witness.TypedRDeep (fun _ => True) ρ head
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) (LE_Interp.Lower R) recLs
+      mrec mctor r rule out := by
+  apply LRD.IotaRHSDefEq.of_nonbotWitnessResult hR hP hmono
+  intro head mx my captureType A outTy hhead hresult hstrong hshape
+    htyped hspineX hspineY hcap hout hA
+  exact H hhead hresult
+    (hhead.typedRDeepTrue_of_strong hstrong W) hshape htyped
+    hspineX hspineY hcap hout hA
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.of_nonbotWitnessResultTyped' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.of_nonbotWitnessResultTyped
+
+/-- Coherent recursive-result-preserving form of the guarded fixed-RHS
+consumer.
+
+The callback receives the exact selected witness together with its genuine
+native-depth or rebuilt local branch and proof-relevant semantic typing.  The
+registered RHS is strongly typed directly in the valuation's source context;
+no relation-context certificate is transported or paired with a reselected
+witness. -/
+theorem LRD.IotaRHSDefEq.of_nonbotWitnessResultCoherent
+    {R : TShape → SExpr → Prop} {ρ : Valuation}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    {depth : Nat} {Δ Γ₁ : List SExpr}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hseed : ∀ {m M} (hr : R m M),
+      LR.CoherentSeedAt Γ₀ depth (hR hr))
+    (W : Valuation.Fits Γ₁ Δ ρ)
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)}
+        (hhead : LE_Interp.Witness ρ head
+          (SExpr.mkInst recLs rule.df.rhs)),
+      ((∃ nativeDepth,
+          LR.CoherentRetainedAt Γ₀ hhead nativeDepth ∧
+            HasTypeStratifiedS Δ
+              (SExpr.mkInst recLs rule.df.rhs)
+              (SExpr.mkInst recLs rule.df.type) true nativeDepth) ∨
+        LR.CoherentRetainedAt Γ₀ hhead depth) →
+      LE_Interp.Witness.TypedRDeep (fun _ => True) ρ head
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) (LE_Interp.Lower R) recLs
+      mrec mctor r rule out := by
+  apply LRD.IotaRHSDefEq.of_nonbotWitnessResult hR hseed
+    (fun hle hM H => LR.CoherentSeedAt.mono (hX := hM) hle H)
+  intro head mx my captureType A outTy hhead hresult _hstrong hshape
+    htyped hspineX hspineY hcap hout hA
+  have hstrongΔ : IsDefEqStrong Δ
+      (SExpr.mkInst recLs rule.df.rhs)
+      (SExpr.mkInst recLs rule.df.rhs)
+      (SExpr.mkInst recLs rule.df.type) :=
+    rule.rhsStrong recLs
+  exact H hhead (hresult.nativeOrLocal hstrongΔ)
+    (hhead.typedRDeepTrue_of_strong hstrongΔ W) hshape htyped
+    hspineX hspineY hcap hout hA
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.of_nonbotWitnessResultCoherent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.of_nonbotWitnessResultCoherent
+
+/-- Guarded-coherent recursive-result form of the fixed-RHS consumer.
+
+Unlike `of_nonbotWitnessResultCoherent`, genuine evaluator children expose
+their all-depth `LRD` result.  A rebuilt child is still local, so the callback
+must handle the two provenance branches separately and may not promote the
+second one. -/
+theorem LRD.IotaRHSDefEq.of_nonbotWitnessResultDirectCoherent
+    {R : TShape → SExpr → Prop} {ρ : Valuation}
+    {rec ctor : Name} {major arity : Nat}
+    {recLs : List SLevel}
+    {mrec : (Pattern.varN (.const rec) major).Path → TShape}
+    {mctor : (Pattern.varN (.const ctor) arity).Path → TShape}
+    {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+      (RecursorIotaPattern rec major ctor arity).Check}
+    {rule : Pattern.IotaRule r} {out : WShape (n + 1)}
+    {depth : Nat} {Δ Γ₁ : List SExpr}
+    (hR : ∀ {m M}, R m M → LE_Interp.Witness ρ m M)
+    (hseed : ∀ {m M} (hr : R m M),
+      LRD.CoherentSeedAt Γ₀ depth (hR hr))
+    (W : Valuation.Fits Γ₁ Δ ρ)
+    (H : ∀ {head : TShape}
+        {mx my : (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {captureType :
+          (RecursorIotaPattern rec major ctor arity).Path → SExpr}
+        {A : SExpr} {outTy : WShape (n + 1)}
+        (hhead : LE_Interp.Witness ρ head
+          (SExpr.mkInst recLs rule.df.rhs)),
+      ((∃ nativeDepth,
+          LRD.CoherentRetainedAt Γ₀ hhead nativeDepth ∧
+            HasTypeStratifiedS Δ
+              (SExpr.mkInst recLs rule.df.rhs)
+              (SExpr.mkInst recLs rule.df.type) true nativeDepth) ∨
+        LRD.CoherentRetainedAt Γ₀ hhead depth) →
+      LE_Interp.Witness.TypedRDeep (fun _ => True) ρ head
+        (SExpr.mkInst recLs rule.df.rhs)
+        (SExpr.mkInst recLs rule.df.type) →
+      LE_Interp.RHS.ShapeSpine (Sum.elim mrec mctor)
+        head rule.capturePaths out.T →
+      (∃ headElem headTy : TShape,
+        headElem ≤ head ∧ headElem.HasType headTy) →
+      SExpr.PathSpineWF Γ mx captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      SExpr.PathSpineWF Γ my captureType
+        (SExpr.mkInst recLs rule.df.type) rule.capturePaths A →
+      (∀ path : (RecursorIotaPattern rec major ctor arity).Path,
+        match path with
+        | Sum.inl p => LR.DirectCaptureDefEqAligned
+            (n := n + 1) (LRD Γ) (mrec p)
+            (mx path) (my path) (captureType path)
+        | Sum.inr p => LRS.CaptureDefEqAligned (n := n) (LR Γ)
+            (mctor p) (mx path) (my path) (captureType path)) →
+      out.HasType outTy →
+      (LRD Γ).TyDefEq A A outTy →
+      (LRD Γ).DefEq
+        (r.1.applyS recLs mx) (r.1.applyS recLs my) A out outTy) :
+    LRD.IotaRHSDefEq (Γ := Γ) (LE_Interp.Lower R) recLs
+      mrec mctor r rule out := by
+  apply LRD.IotaRHSDefEq.of_nonbotWitnessResult hR hseed
+    (fun hle hM H => LRD.CoherentSeedAt.mono (hX := hM) hle H)
+  intro head mx my captureType A outTy hhead hresult _hstrong hshape
+    htyped hspineX hspineY hcap hout hA
+  have hstrongΔ : IsDefEqStrong Δ
+      (SExpr.mkInst recLs rule.df.rhs)
+      (SExpr.mkInst recLs rule.df.rhs)
+      (SExpr.mkInst recLs rule.df.type) :=
+    rule.rhsStrong recLs
+  exact H hhead (hresult.nativeOrLocal hstrongΔ)
+    (hhead.typedRDeepTrue_of_strong hstrongΔ W) hshape htyped
+    hspineX hspineY hcap hout hA
+
+/--
+info: 'Lean4Lean.SExpr.LRD.IotaRHSDefEq.of_nonbotWitnessResultDirectCoherent' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.IotaRHSDefEq.of_nonbotWitnessResultDirectCoherent
+
 /-- The direct constant producer left by the syntax-directed self-adequacy
 algebra.
 
@@ -7129,6 +16398,30 @@ def LR.SelfAdequateConstStep (Γ₀ : List SExpr) : Prop :=
       ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
         hX'.RDeepChildren (LR.CoherentSeedAt Γ₀ d') →
         LR.CoherentRetainedAt Γ₀ hX' d') →
+    mx.HasType bx →
+    LE_Interp.Witness ρ bx.T (SExpr.mkInst ls ci.type) →
+    ∀ (hX : LE_Interp.Witness ρ mx.T (.const c ls)),
+      hX.RDeepChildren (LR.CoherentSeedAt Γ₀ (depth + 1)) →
+      LR.Adequate Γ₀ Γ ρ (.const c ls) (.const c ls)
+        (SExpr.mkInst ls ci.type) mx bx
+
+/-- Direct constant-step contract.  It differs from
+`SelfAdequateConstStep` only in the guarded predecessor package: every
+strictly smaller restart also carries `DirectSelfTypeAt`.  The produced term
+adequacy remains the established relation, so the direct route can be wired
+into the current coherent algebra without changing its consumers. -/
+def LR.SelfAdequateConstStepDirect (Γ₀ : List SExpr) : Prop :=
+  ∀ {c : Name} {ci : VConstant} {Γ : List SExpr}
+      {ls : List SLevel} {u : SLevel} {depth : Nat}
+      {ρ : Valuation} {n : Nat} {mx bx : WShape n},
+    Params.env.constants c = some ci →
+    ls.length = ci.uvars →
+    HasTypeStratifiedS Γ (SExpr.mkInst ls ci.type)
+      (.sort u) true depth →
+    (∀ (d' : Nat), d' < depth + 1 →
+      ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
+        hX'.RDeepChildren (LR.CoherentSeedAt Γ₀ d') →
+        LR.DirectCoherentRetainedAt Γ₀ hX' d') →
     mx.HasType bx →
     LE_Interp.Witness ρ bx.T (SExpr.mkInst ls ci.type) →
     ∀ (hX : LE_Interp.Witness ρ mx.T (.const c ls)),
@@ -7586,6 +16879,211 @@ def LR.CoherentIotaLeafStep (Γ₀ : List SExpr) : Prop :=
         LR.CoherentRetainedAt Γ₀ hX' d') →
     ∀ (level : Nat),
       LR.IotaLeafDefEqAt Γ₀ level c ls (LE_Interp.Lower R)
+
+/-- Guarded counterpart of `LR.CoherentIotaLeafStep`.
+
+Genuine semantic evaluator edges retain all-depth guarded coherence through
+`LRD.CoherentSeedAt`; rebuilt strict predecessors remain explicitly local.
+The ambient substitution, paired leaf spine, and result relation retain their
+guarded forms. -/
+def LRD.CoherentIotaLeafStep (Γ₀ : List SExpr) : Prop :=
+  ∀ (depth : Nat) {Δ : List SExpr} {σ σ' : Subst}
+      {ρ : Valuation} {c : Name} {ls : List SLevel}
+      {R : TShape → SExpr → Prop}
+      (hR : ∀ m M, R m M → LE_Interp.Witness ρ m M),
+    Ctx.WF Γ₀ →
+    LR.DirectSubstWF Γ₀ σ σ' Δ ρ →
+    (∀ m M (hr : R m M), LRD.CoherentSeedAt Γ₀ depth (hR m M hr)) →
+    (∀ m M (hr : R m M),
+      (hR m M hr).RDeepChildren (LRD.CoherentSeedAt Γ₀ depth)) →
+    (∀ (d' : Nat), d' < depth →
+      ∀ {ρ' : Valuation} {root : TShape} {X : SExpr}
+        (hX' : LE_Interp.Witness ρ' root X),
+        hX'.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX' d') →
+    ∀ (level : Nat),
+      LRD.IotaLeafDefEqAt Γ₀ level c ls (LE_Interp.Lower R)
+
+/-- A guarded iota-leaf callback indexed by the registered constant type's
+actual stratification certificate.
+
+Unlike `LRD.CoherentIotaLeafStep`, this interface exposes the registration,
+universe-arity, and typing evidence that created the enclosing constant
+witness.  Its evaluator seeds live at the corresponding strict successor,
+so a leaf implementation can justify strict recursive restarts from the
+registered type instead of from an unrelated numeric budget. -/
+def LRD.CoherentTypedIotaLeafStep (Γ₀ : List SExpr) : Prop :=
+  ∀ (typeDepth : Nat) {Δ : List SExpr} {σ σ' : Subst}
+      {ρ : Valuation} {c : Name} {ci : VConstant}
+      {ls : List SLevel} {u : SLevel}
+      {R : TShape → SExpr → Prop},
+    Params.env.constants c = some ci →
+    ls.length = ci.uvars →
+    HasTypeStratifiedS Δ (SExpr.mkInst ls ci.type)
+      (.sort u) true typeDepth →
+    (hR : ∀ m M, R m M → LE_Interp.Witness ρ m M) →
+    Ctx.WF Γ₀ →
+    LR.DirectSubstWF Γ₀ σ σ' Δ ρ →
+    (∀ m M (hr : R m M),
+      LRD.CoherentSeedAt Γ₀ (typeDepth + 1) (hR m M hr)) →
+    (∀ m M (hr : R m M),
+      (hR m M hr).RDeepChildren
+        (LRD.CoherentSeedAt Γ₀ (typeDepth + 1))) →
+    (∀ (d' : Nat), d' < typeDepth + 1 →
+      ∀ {ρ' : Valuation} {root : TShape} {X : SExpr}
+        (hX' : LE_Interp.Witness ρ' root X),
+        hX'.RDeepChildren (LRD.CoherentSeedAt Γ₀ d') →
+        LRD.CoherentRetainedAt Γ₀ hX' d') →
+    ∀ (level : Nat),
+      LRD.RegisteredIotaLeafDefEqAt Γ₀ ρ
+        (SExpr.mkInst ls ci.type) level c ls (LE_Interp.Lower R)
+
+/-- The original numeric-budget leaf callback remains a source for the typed
+interface: instantiate it at the registered type's strict successor. -/
+theorem LRD.CoherentIotaLeafStep.toTyped
+    (H : LRD.CoherentIotaLeafStep Γ₀) :
+    LRD.CoherentTypedIotaLeafStep Γ₀ := by
+  intro typeDepth Δ σ σ' ρ c ci ls u R _hreg _hlen _hTy
+    hR hΓ W pR cR lower level
+  exact LRD.IotaLeafDefEqAt.toRegistered
+    (ρ := ρ) (headType := SExpr.mkInst ls ci.type)
+    (H (typeDepth + 1) hR hΓ W pR cR lower level)
+
+/-- Build the full guarded constant callback when zero-argument registered
+patterns are impossible.
+
+This is the exact generic interface needed by the iota-only Nat fixture.
+The registered type is restarted at the strict syntax predecessor and its
+guarded Pi observation feeds `LRD.constDefEqRootLam`; reached nonempty leaves
+are delegated to `LRD.CoherentIotaLeafStep`.  Constructor and inductive-head
+observations add no guarded side condition, and the caller's separately
+supplied legacy result provides their additive first projection. -/
+theorem LRD.SelfAdequateConstStep.of_noConstPat_typed
+    (hΓ₀ : Ctx.WF Γ₀)
+    (leafStep : LRD.CoherentTypedIotaLeafStep Γ₀)
+    (noConstPat : ∀ {c : Name}
+      {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      Params.Pat (.const c) r → False) :
+    LRD.SelfAdequateConstStep Γ₀ := by
+  intro c ci Γ ls u depth ρ n mx bx hreg hlen hTy lower htyped hB hX
+    children legacyAdequate
+  cases children with
+  | bot => exact LRD.Adequate.bot htyped.isType
+  | const cA pR cR =>
+    rename_i a₀ ci' R m' hm'ty n₀ hR hle hreg' hlen' hA'w hC
+    cases hreg.symm.trans hreg'
+    have restartDirect : ∀ {ρ' : Valuation} {root : TShape} {X : SExpr}
+        (hX' : LE_Interp.Witness ρ' root X),
+        LRD.SelfAdequateAt Γ₀ hX' depth := fun hX' =>
+      (LRD.CoherentRetainedAt.restart (lower := lower)
+        (Nat.lt_succ_self depth) (hX := hX')).2
+    suffices h : ∀ {σ σ'}, LR.DirectSubstWF Γ₀ σ σ' Γ ρ →
+        (LRD Γ₀).DefEq (.const c ls) (.const c ls)
+          ((SExpr.mkInst ls ci.type).subst σ) mx bx from
+      ⟨fun _ _ W => ⟨h W, h W⟩, fun _ W => h W⟩
+    intro σ σ' W
+    have hlegacy : (LR Γ₀).DefEq (.const c ls) (.const c ls)
+        ((SExpr.mkInst ls ci.type).subst σ) mx bx := by
+      simpa only [SExpr.subst] using
+        (legacyAdequate.2 W.left.toSubstWF)
+    rw [(Params.henv.closedC hreg).mkInstS.subst_eq .zero]
+    rw [(Params.henv.closedC hreg).mkInstS.subst_eq .zero] at hlegacy
+    have hC' : LE_Interp.Const c ls (LE_Interp.Lower R) [] mx.T :=
+      hC.mono hle fun le hr => ⟨_, le, hr⟩
+    cases hC' with
+    | bot => exact LRD.DefEq.bot htyped.isType
+    | lam hrec hlam =>
+      rename_i fsem
+      cases htyped.unfold with
+      | bot hm => exact LRD.DefEq.bot hm
+      | sort => exact (TShape.sort_not_le_lam' hlam).elim
+      | forallE => exact (TShape.forallE_not_le_lam' hlam).elim
+      | @lam k f a₁ a₂ htm =>
+        obtain ⟨n', mTy, sTy, le_n, le_a, hTy', hSort, hmTy⟩ :=
+          (LE_Interp.sound hTy.strong W.left.fits).2 hB.toInterp |>.out
+        have htyAdequate := (restartDirect hTy'.witness)
+          .rfl hTy hmTy hSort.witness
+        have htyRelation : (LRD Γ₀).DefEq
+            (mkInst ls ci.type) (mkInst ls ci.type) (.sort u) mTy sTy := by
+          simpa only [SExpr.subst,
+            (Params.henv.closedC hreg).mkInstS.subst_eq .zero] using
+            (htyAdequate.2 W.left)
+        have htyDirect : (LRD Γ₀).TyDefEq
+            (mkInst ls ci.type) (mkInst ls ci.type) (.forallE a₁ a₂) :=
+          LRD.toValTy le_n le_a htyped.isType hSort hmTy htyRelation
+        have hregistered : LE_Interp.Witness ρ
+            (WShape.forallE a₁ a₂).T (mkInst ls ci.type) :=
+          hTy'.witness.mono le_a
+        unfold WShape.lam'
+        split <;> rename_i hf
+        · have evalPat : ∀ j,
+              LRD.RegisteredPatternLeafDefEqAt Γ₀ ρ
+                (mkInst ls ci.type) j c ls
+                (LE_Interp.Lower R) := fun j =>
+            LRD.RegisteredPatternLeafDefEqAt.of_iota
+              (leafStep depth hreg hlen hTy hR hΓ₀ W pR cR lower j)
+          exact LRD.constDefEqRootLam (hf := hf) htm hlam hrec
+            (fun le hr => hr.mono le) evalPat (.const hreg hlen)
+            (by simpa [WShape.lam', hf] using hlegacy) htyDirect
+            hregistered
+        · exact LRD.DefEq.bot htyped.isType
+      | ctor => exact (TShape.ctor_not_le_lam' hlam).elim
+      | indTy => exact (TShape.indTy_not_le_lam' hlam).elim
+    | ctor hcl hctor =>
+      cases htyped.unfold with
+      | bot hm => exact LRD.DefEq.bot hm
+      | sort => exact (TShape.sort_not_le_ctor' hctor).elim
+      | forallE => exact (TShape.forallE_not_le_ctor' hctor).elim
+      | lam htm =>
+        unfold WShape.lam' at hctor ⊢
+        split at hctor <;> rename_i hnz
+        · exact (TShape.lam_not_le_ctor' hctor).elim
+        · simpa [hnz] using LRD.DefEq.bot htyped.isType
+      | ctor => exact LRD.DefEq.of_legacy_indTy hlegacy
+      | indTy => exact (TShape.indTy_not_le_ctor' hctor).elim
+    | indTy hcl hind =>
+      cases htyped.unfold with
+      | bot hm => exact LRD.DefEq.bot hm
+      | sort => exact (TShape.sort_not_le_indTy hind).elim
+      | forallE => exact (TShape.forallE_not_le_indTy hind).elim
+      | lam htm =>
+        unfold WShape.lam' at hind ⊢
+        split at hind <;> rename_i hnz
+        · exact (TShape.lam_not_le_indTy hind).elim
+        · simpa [hnz] using LRD.DefEq.bot htyped.isType
+      | ctor => exact (TShape.ctor_not_le_indTy hind).elim
+      | indTy => exact LRD.DefEq.of_legacy_indTy_type hlegacy
+    | pat hpat hmatch hrhs =>
+      have hp := hmatch.nil_inv
+      subst hp
+      exact (noConstPat hpat).elim
+
+/-- Compatibility wrapper for callers that already discharge every numeric
+leaf budget.  New fixture-specific proofs should prefer
+`of_noConstPat_typed`, which exposes the enclosing registered-type evidence. -/
+theorem LRD.SelfAdequateConstStep.of_noConstPat
+    (hΓ₀ : Ctx.WF Γ₀)
+    (leafStep : LRD.CoherentIotaLeafStep Γ₀)
+    (noConstPat : ∀ {c : Name}
+      {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+      Params.Pat (.const c) r → False) :
+    LRD.SelfAdequateConstStep Γ₀ :=
+  LRD.SelfAdequateConstStep.of_noConstPat_typed
+    hΓ₀ leafStep.toTyped noConstPat
+
+/--
+info: 'Lean4Lean.SExpr.LRD.SelfAdequateConstStep.of_noConstPat_typed' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.SelfAdequateConstStep.of_noConstPat_typed
+
+/--
+info: 'Lean4Lean.SExpr.LRD.SelfAdequateConstStep.of_noConstPat' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LRD.SelfAdequateConstStep.of_noConstPat
 
 /-- The definitional-unfold obligation of the constant producer at a local
 (guarded-restart) evaluator seed.
@@ -8128,6 +17626,166 @@ theorem LR.SelfAdequateConstStep.of_steps
         have hv := (adV.1 W).1
         simpa only [closed.mkInstS.subst_eq .zero,
           (Params.henv.closedC hreg).mkInstS.subst_eq .zero] using hv
+
+/-- Build the constant step from the direct guarded predecessor package.
+The lambda branch is the only changed branch: it asks the recursive type
+rung for the registered type at the caller's exact Pi shape and delegates to
+`constDefEqDirectRootLam`.  Constructor, inductive-head, and definitional
+unfold branches project the established coherent predecessor unchanged. -/
+theorem LR.SelfAdequateConstStepDirect.of_steps
+    (hΓ₀ : Ctx.WF Γ₀)
+    (leafStep : LR.CoherentIotaLeafStep Γ₀)
+    (defnStep : LR.ConstDefnDeepInstStep Γ₀) :
+    LR.SelfAdequateConstStepDirect Γ₀ := by
+  intro c ci Γ ls u depth ρ n mx bx hreg hlen hTy lower htyped hB hX children
+  cases children with
+  | bot => exact LR.Adequate.bot htyped.isType
+  | const cA pR cR =>
+    rename_i a₀ ci' R m' hm'ty n₀ hR hle hreg' hlen' hA'w hC
+    cases hreg.symm.trans hreg'
+    have lowerLegacy : ∀ (d' : Nat), d' < depth + 1 →
+        ∀ {ρ root X} (hX' : LE_Interp.Witness ρ root X),
+          hX'.RDeepChildren (LR.CoherentSeedAt Γ₀ d') →
+          LR.CoherentRetainedAt Γ₀ hX' d' :=
+      fun d' hd {ρ root X} hX' children =>
+        (lower d' hd hX' children).1
+    have restartSelf : ∀ {ρ' : Valuation} {root : TShape} {X : SExpr}
+        (hX' : LE_Interp.Witness ρ' root X),
+        LR.SelfAdequateAt Γ₀ hX' depth := fun hX' =>
+      (LR.CoherentRetainedAt.restart (lower := lowerLegacy)
+        (Nat.lt_succ_self depth) (hX := hX')).1
+    have restartDirect : ∀ {ρ' : Valuation} {root : TShape} {X : SExpr}
+        (hX' : LE_Interp.Witness ρ' root X),
+        LR.DirectCoherentRetainedAt Γ₀ hX' depth := fun hX' =>
+      LR.DirectCoherentRetainedAt.restart (lower := lower)
+        (Nat.lt_succ_self depth) (hX := hX')
+    suffices h : ∀ {σ σ'}, LR.SubstWF Γ₀ σ σ' Γ ρ →
+        (LR Γ₀).DefEq (.const c ls) (.const c ls)
+          ((SExpr.mkInst ls ci.type).subst σ) mx bx from
+      ⟨fun _ _ W => ⟨h W, h W⟩, fun _ W => h W⟩
+    intro σ σ' W
+    rw [(Params.henv.closedC hreg).mkInstS.subst_eq .zero]
+    have hC' : LE_Interp.Const c ls (LE_Interp.Lower R) [] mx.T :=
+      hC.mono hle fun le hr => ⟨_, le, hr⟩
+    cases hC' with
+    | bot => exact (LR Γ₀).bot htyped.isType
+    | lam hrec hlam =>
+      rename_i fsem
+      cases htyped.unfold with
+      | bot hm => exact (LR Γ₀).bot hm
+      | sort => exact (TShape.sort_not_le_lam' hlam).elim
+      | forallE => exact (TShape.forallE_not_le_lam' hlam).elim
+      | @lam k f a₁ a₂ htm =>
+        obtain ⟨n', mTy, sTy, le_n, le_a, hTy', hSort, hmTy⟩ :=
+          (LE_Interp.sound hTy.strong W.left.fits).2 hB.toInterp |>.out
+        have htyDirect := (restartDirect hTy'.witness).2
+          le_a hTy htyped.isType W.left
+        rw [(Params.henv.closedC hreg).mkInstS.subst_eq .zero] at htyDirect
+        unfold WShape.lam'
+        split <;> rename_i hf
+        · have evalPat : ∀ j, LR.PatternLeafDefEqAt Γ₀ j c ls
+              (LE_Interp.Lower R) := fun j =>
+            LR.PatternLeafDefEqAt.of_iota
+              (leafStep (depth + 1) hR hΓ₀ W pR cR lowerLegacy j)
+          exact LR.constDefEqDirectRootLam (hf := hf) htm hlam hrec
+            (fun le hr => hr.mono le) evalPat (.const hreg hlen) htyDirect
+        · exact (LR Γ₀).bot htyped.isType
+      | ctor => exact (TShape.ctor_not_le_lam' hlam).elim
+      | indTy => exact (TShape.indTy_not_le_lam' hlam).elim
+    | ctor hcl hctor =>
+      cases htyped.unfold with
+      | bot hm => exact (LR Γ₀).bot hm
+      | sort => exact (TShape.sort_not_le_ctor' hctor).elim
+      | forallE => exact (TShape.forallE_not_le_ctor' hctor).elim
+      | lam htm =>
+        unfold WShape.lam' at hctor ⊢
+        split at hctor <;> rename_i hnz
+        · exact (TShape.lam_not_le_ctor' hctor).elim
+        · simpa [hnz] using (LR Γ₀).bot htyped.isType
+      | @ctor k c' l' h' =>
+        obtain ⟨hc, hl⟩ := TShape.ctor_le_ctor'_nil (by simpa using hcl) hctor
+        subst c'
+        subst l'
+        obtain ⟨n', mTy, sTy, le_n, le_a, hTy', hSort, hmTy⟩ :=
+          (LE_Interp.sound hTy.strong W.left.fits).2 hB.toInterp |>.out
+        have hty' := (restartSelf hTy'.witness .rfl hTy hmTy
+          hSort.witness).2 W.left
+        rw [(Params.henv.closedC hreg).mkInstS.subst_eq .zero] at hty'
+        have htyB : (LR Γ₀).TyDefEq (mkInst ls ci.type) (mkInst ls ci.type)
+            .indTy :=
+          toValTy le_n le_a htyped.isType hSort hmTy hty'
+        have hhead : LRS.IndTyHead Γ₀ (mkInst ls ci.type) := by
+          rw [LR_succ] at htyB
+          have h : LRS.IndTyHead Γ₀ (mkInst ls ci.type) ∧
+              LRS.IndTyHead Γ₀ (mkInst ls ci.type) := htyB
+          exact h.1
+        rw [LR_succ]
+        change LRS.IndDefEq Γ₀ (LR Γ₀) (const c ls) (const c ls) (mkInst ls ci.type)
+          (WShape.ctor c [] h')
+        exact ⟨hhead, LRS.CtorDefEq.exact
+          (IH := LR Γ₀) (c := c) (rargs := [])
+          (M := const c ls) (N := const c ls)
+          (ls := ls) (ls' := ls) (args := []) (args' := [])
+          (by simpa using hcl) rfl rfl rfl .rfl .rfl
+          (.const hreg hlen) (.const hreg hlen)
+          (.nil (Γ := Γ₀) (A := mkInst ls ci.type))
+          (.nil (Γ := Γ₀) (A := mkInst ls ci.type)) .nil
+          (LRS.CtorSpineDefEq.nil
+            (IH := LR Γ₀) (Head := mkInst ls ci.type))
+          (LRS.CtorSpineDefEq.nil
+            (IH := LR Γ₀) (Head := mkInst ls ci.type))⟩
+      | indTy => exact (TShape.indTy_not_le_ctor' hctor).elim
+    | indTy hcl hind =>
+      cases htyped.unfold with
+      | bot hm => exact (LR Γ₀).bot hm
+      | sort => exact (TShape.sort_not_le_indTy hind).elim
+      | forallE => exact (TShape.forallE_not_le_indTy hind).elim
+      | lam htm =>
+        unfold WShape.lam' at hind ⊢
+        split at hind <;> rename_i hnz
+        · exact (TShape.lam_not_le_indTy hind).elim
+        · simpa [hnz] using (LR Γ₀).bot htyped.isType
+      | ctor => exact (TShape.ctor_not_le_indTy hind).elim
+      | indTy =>
+        rw [LR_succ]
+        change LRS.IndTyHead Γ₀ (const c ls) ∧ LRS.IndTyHead Γ₀ (const c ls)
+        have hhead : LRS.IndTyHead Γ₀ (const c ls) :=
+          ⟨c, ls, [], by simpa using hcl, .rfl⟩
+        exact ⟨hhead, hhead⟩
+    | pat hpat hmatch hrhs =>
+      have hp := hmatch.nil_inv
+      subst hp
+      obtain ⟨value, closed, hr, hdefΓ, _⟩ :=
+        Params.Semantic.defn_whRed (Γ := Γ) hpat hreg hlen
+      subst hr
+      obtain ⟨value', closed', hr', hdef₀, hred₀⟩ :=
+        Params.Semantic.defn_whRed (Γ := Γ₀) hpat hreg hlen
+      cases hr'
+      cases hrhs with
+      | bot => exact (LR Γ₀).bot htyped.isType
+      | const hvalue =>
+        obtain ⟨m₁, hle₁, hr₁⟩ := hvalue
+        obtain ⟨nV, -, hstratV⟩ := hdefΓ.stratify
+        have adV : LR.Adequate Γ₀ Γ ρ (SExpr.mkInst ls value)
+            (SExpr.mkInst ls value) (SExpr.mkInst ls ci.type) mx bx := by
+          cases pR m₁ _ hr₁ with
+          | inl hall => exact (hall nV).1 hle₁ hstratV htyped hB
+          | inr hlocal =>
+            exact defnStep hpat hreg hlen (depth + 1)
+              (hR m₁ _ hr₁) hlocal (cR m₁ _ hr₁) lowerLegacy hΓ₀
+              hle₁ hstratV htyped hB
+        have hredS : Γ₀ ⊢ .const c ls ⤳* SExpr.mkInst ls value :=
+          .tail .rfl hred₀
+        refine ((LR Γ₀).whr hredS hredS).2 ?_
+        have hv := (adV.1 W).1
+        simpa only [closed.mkInstS.subst_eq .zero,
+          (Params.henv.closedC hreg).mkInstS.subst_eq .zero] using hv
+
+/--
+info: 'Lean4Lean.SExpr.LR.SelfAdequateConstStepDirect.of_steps' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms LR.SelfAdequateConstStepDirect.of_steps
 
 /-- The complete constant self-adequacy producer, modulo the independently
 staged rank recursion and coherent iota leaf. -/
@@ -8936,23 +18594,6 @@ result and the leaf-field adequacy that `piInv` alone does not yet
 provide), and `LR.MajorLinkRect` names exactly that residual; it is
 discharged at 16N-N5 and nowhere before. -/
 
-/-- Argument-count rigidity of a semantic `varN` match: the matched list
-has exactly the pattern's arity. -/
-theorem LE_Interp.Matches.varN_length
-    {c c' : Name} {k : Nat} : ∀ {n : Nat} {rargs : List (WShape n)}
-      {m : (Pattern.varN (.const c) k).Path → TShape},
-    LE_Interp.Matches (Pattern.varN (.const c) k) c' rargs m →
-    rargs.length = k := by
-  induction k with
-  | zero =>
-    intro n rargs m H
-    cases H
-    rfl
-  | succ k ih =>
-    intro n rargs m H
-    cases H with
-    | var H => simpa using ih H
-
 /-- The type observation of an ordinary-constructor shape is forced to
 `WShape.indTy` (the `ctor'`-typing row of the shape table, extracted from
 the body of `LR.DefEq.ctor'_inv` so the wrap can pin the major type shape
@@ -8996,6 +18637,53 @@ theorem WShape.lift_ctor_inv {n m' : Nat} (le : n ≤ m')
   | indTy =>
     rw [WShape.lift_indTy] at heq
     simp [WShape.ext_iff, WShape.indTy, WShape.ctor] at heq
+
+/-- A constructor frame preserves each root field as a lower observation of
+the corresponding native field.  The comparison is stated between total
+shapes because `lift` and `unlift` frames may change the relation level.
+
+This is the fieldwise invariant hidden by `CtorFrame.shape_ctor`: native
+evidence can safely be consumed above the registered observation, whereas an
+arbitrary native field cannot in general be projected back to the exact root
+field. -/
+theorem LRS.CtorFrame.shape_ctor_fields {Γ : List SExpr}
+    {n k : Nat} {IH : LogRel Γ n} {J : LogRel Γ k}
+    {m : WShape (n + 1)} {p : WShape (k + 1)}
+    (F : LRS.CtorFrame Γ IH m J p) :
+    ∀ {c : Name} {l : List (WShape n)} {h},
+      m = WShape.ctor c l h →
+      ∃ l' h', p = WShape.ctor c l' h' ∧
+        l.Forall₂ (fun root native => root.T ≤ native.T) l' := by
+  induction F with
+  | refl =>
+    intro c l h hm
+    exact ⟨l, h, hm,
+      List.Forall₂.rfl fun _ _ => TShape.LE.rfl⟩
+  | mono hle F' ih =>
+    intro c l h hm
+    subst hm
+    obtain ⟨l₂, h₂, rfl, hroot⟩ := WShape.ctor_le.1 hle
+    obtain ⟨l', h', rfl, hnative⟩ := ih rfl
+    exact ⟨l', h', rfl,
+      List.Forall₂.trans
+        (fun _ _ _ h₁ h₂ => (WShape.LE.T h₁).trans h₂)
+        hroot hnative⟩
+  | lift le E F' ih =>
+    intro c l h hm
+    obtain ⟨l₀, h₀, rfl, rfl⟩ := WShape.lift_ctor_inv le hm
+    obtain ⟨l', h', rfl, hnative⟩ := ih rfl
+    refine ⟨l', h', rfl, ?_⟩
+    rw [List.forall₂_map_left_iff]
+    exact Lean4Lean.List.Forall₂.imp (h := hnative) fun root native hroot =>
+      (TShape.lift_eqv le).1.trans hroot
+  | unlift le E F' ih =>
+    intro c l h hm
+    subst hm
+    obtain ⟨l', h', rfl, hnative⟩ := ih (WShape.lift_ctor le)
+    refine ⟨l', h', rfl, ?_⟩
+    rw [List.forall₂_map_left_iff] at hnative
+    exact Lean4Lean.List.Forall₂.imp (h := hnative) fun root native hroot =>
+      (TShape.lift_eqv le).2.trans hroot
 
 /-- A constructor frame preserves the constructor observation's head and
 field count: every shape a `CtorFrame` connects to a `.ctor`-rooted

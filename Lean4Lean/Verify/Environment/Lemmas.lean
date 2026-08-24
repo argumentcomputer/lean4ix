@@ -1,4 +1,4 @@
-import Lean4Lean.Std.SMap
+import Lean4Lean.Verify.Axioms
 import Lean4Lean.Declaration
 import Lean4Lean.Verify.Environment.Basic
 

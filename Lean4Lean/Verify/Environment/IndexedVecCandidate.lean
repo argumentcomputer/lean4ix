@@ -245,7 +245,8 @@ private theorem indexedVecInferTypeFuel
               (state.inferTypeC.insert (.sort (.succ (.param `u)))
                 (.sort (.succ (.succ (.param `u))))) }) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 @[simp] private theorem indexedVecInferTypeSortCachedCore
@@ -259,7 +260,8 @@ private theorem indexedVecInferTypeFuel
       (indexedVecTypeCheckerContext lctx)
       state = .ok (.sort (.succ (.succ (.param `u))), state) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache]
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache]
 
 @[simp] private theorem indexedVecInferConstantNat
     (lctx : LocalContext) :
@@ -314,7 +316,8 @@ private theorem indexedVecInferTypeFuel
               (state.inferTypeC.insert (.const ``Nat [])
                 (.sort (.succ .zero))) }) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     indexedVecInferConstantNat,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -330,7 +333,8 @@ theorem indexedVecPreFamilyInferTypeFVarCore
         .ok (type, { state with inferTypeC :=
           state.inferTypeC.insert (.fvar id) type }) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     Lean4Lean.TypeChecker.Inner.inferFVar,
     indexedVecTypeCheckerContext, hfind, LocalDecl.type,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -346,7 +350,8 @@ theorem indexedVecPreFamilyInferTypeZeroCore
           (state.inferTypeC.insert (.const ``Nat.zero [])
             (.const ``Nat [])) }) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     indexedVecPreFamilyInferConstantZero,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -362,7 +367,8 @@ theorem indexedVecPreFamilyInferTypeSuccCore
             (.const ``Nat.succ [])
             (.forallE `n (.const ``Nat []) (.const ``Nat []) .default)) }) := by
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     indexedVecPreFamilyInferConstantSucc,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -583,7 +589,8 @@ private theorem indexedVecFamilyCheckTypeInner :
     indexedVecFamilyCandidateContext.toTypeChecker
     ({} : Lean4Lean.TypeChecker.State) = _
   unfold Lean4Lean.TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     indexedVecFamilyInferForall, indexedVecFamilyCheckedState,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -821,7 +828,7 @@ private theorem indexedVecInner_checkTypeM :
       ({} : Lean4Lean.TypeChecker.State)) = _
   unfold Lean4Lean.TypeChecker.Inner.inferType'
   simp [indexedVecInnerKernel, Expr.hasLooseBVars,
-    Expr.looseBVarRange',
+    Expr.looseBVarRange_eq, Expr.looseBVarRange',
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [show
     Lean4Lean.TypeChecker.Inner.inferForall
@@ -895,7 +902,8 @@ private theorem indexedVecPreFamilyNatInferOnly
     ({} : Lean4Lean.TypeChecker.State) = _
   unfold Lean4Lean.TypeChecker.Inner.inferType'
   simp [indexedVecPreFamilyNatInferOnlyState,
-    Expr.hasLooseBVars, Expr.looseBVarRange',
+    Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     indexedVecInferConstantNatOnly, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -1026,7 +1034,8 @@ theorem indexedVecPreFamilyIndexTelescopeCheckTypeM
       ({} : Lean4Lean.TypeChecker.State)) = _
   unfold Lean4Lean.TypeChecker.Inner.inferType'
   simp [indexedVecPreFamilyIndexTelescope, Expr.hasLooseBVars,
-    Expr.looseBVarRange', Bind.bind, ReaderT.bind, StateT.bind,
+    Expr.looseBVarRange_eq, Expr.looseBVarRange',
+    Bind.bind, ReaderT.bind, StateT.bind,
     Except.bind]
   rw [show
     Lean4Lean.TypeChecker.Inner.inferForall
@@ -1177,14 +1186,16 @@ private def indexedVecParamDomainCandidateTrace :
       simpa [Lean4Lean.AddInductive.CandidateCheckTypeStep.Valid,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        indexedVecTerminalKernel] using
+        indexedVecTerminalKernel, Expr.instantiate1_eq,
+        Expr.instantiate1'] using
           indexedVecSort_checkTypeM
             indexedVecFamilyCandidateContext.lctx)
     (by
       simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
-        indexedVecTerminalKernel] using
+        indexedVecTerminalKernel, Expr.instantiate1_eq,
+        Expr.instantiate1'] using
           indexedVecSort_whnfM indexedVecFamilyCandidateContext.lctx)
 
 private def indexedVecIndexDomainCandidateTrace :
@@ -1223,7 +1234,8 @@ private def indexedVecTerminalCandidateTrace :
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl,
-        indexedVecTerminalKernel] using
+        indexedVecTerminalKernel, Expr.instantiate1_eq,
+        Expr.instantiate1'] using
           indexedVecSort_checkTypeM indexedVecIndexCandidateContext.lctx)
     (by
       simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
@@ -1232,7 +1244,8 @@ private def indexedVecTerminalCandidateTrace :
         indexedVecFamilyCandidateContext, indexedVecInfo,
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl,
-        indexedVecTerminalKernel] using
+        indexedVecTerminalKernel, Expr.instantiate1_eq,
+        Expr.instantiate1'] using
           indexedVecSort_whnfM indexedVecIndexCandidateContext.lctx)
 
 private def indexedVecInnerCandidateTrace :
@@ -1254,7 +1267,7 @@ private def indexedVecInnerCandidateTrace :
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl,
         indexedVecInnerKernel, indexedVecTerminalKernel,
-        Expr.instantiate1'] using
+        Expr.instantiate1_eq, Expr.instantiate1'] using
           indexedVecInner_checkTypeM)
     (by
       simpa [Lean4Lean.AddInductive.CandidateWhnfStep.Valid,
@@ -1263,7 +1276,7 @@ private def indexedVecInnerCandidateTrace :
         ConstantInfo.levelParams, ConstantInfo.toConstantVal,
         Lean4Lean.AddInductive.Context.pushLocalDecl,
         indexedVecInnerKernel, indexedVecTerminalKernel,
-        Expr.instantiate1'] using
+        Expr.instantiate1_eq, Expr.instantiate1'] using
           indexedVecInner_whnfM)
     indexedVecIndexDomainCandidateTrace indexedVecTerminalCandidateTrace
 

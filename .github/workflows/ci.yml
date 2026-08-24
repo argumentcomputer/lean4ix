@@ -38,13 +38,10 @@ jobs:
       - name: Build Lean4Lean.Experimental
         run: lake build Lean4Lean.Experimental
 
-      # Enforce the trusted sorry frontier: fail if any `Theory`/`Verify`
-      # declaration gains, loses, or renames a `sorry` versus the allowlist in
-      # `Lean4Lean/Audit/SorryFrontier.lean`. Asks the compiled environment which
-      # declarations use `sorryAx`, so it can't drift over comments or string
-      # literals the way a source grep can. Not a default target, so it is built
-      # explicitly here; the surface it imports is already built above.
-      - name: Check sorry frontier
+      # Enforce the trusted sorry frontier and the exact custom-axiom manifest.
+      # Both sections ask the compiled environment for dependencies, so the
+      # checks cannot drift over source syntax. This is not a default target.
+      - name: Check trust frontier
         run: lake build --wfail Lean4Lean.Audit.SorryFrontier
 
       # `lake build` only establishes that lean4lean compiles; these check that it still

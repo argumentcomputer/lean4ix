@@ -77,7 +77,8 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
       simp [Expr.getAppRevArgs_eq] at h4 ⊢
       obtain ⟨l₁, l₂, h5, rfl⟩ : ∃ l₁ l₂, e.getAppArgsRevList = l₁ ++ l₂ ∧ l₂.length = i :=
         ⟨_, _, (List.take_append_drop (e.getAppArgsRevList.length - i) ..).symm, by simp; omega⟩
-      simp [loop.cont, h5, List.take_of_length_le]
+      simp [loop.cont, h5, List.take_of_length_le, Expr.instantiateRange_eq,
+        Expr.instantiate_eq]
       rw [Expr.mkAppRevRange_eq_rev (l₁ := []) (l₂ := l₁) (l₃ := l₂) (by simp) (by rfl) (by rfl)]
       have br := BetaReduce.inst_reduce (l₁ := l₂.reverse)
         [] (by simpa using h3) (Expr.instantiateList_append ..) (h := by
@@ -117,6 +118,7 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
       refine (whnfCore.WF h4).bind fun _ _ _ ⟨h5, h6⟩ => ?_
       refine hsave (h3.trans h5) (h6.defeq c.Ewf c.Δwf eq)
   · let .letE h1 h2 h3 h4 := he
+    rw [Expr.instantiate1_eq]
     refine (whnfCore.WF (h4.inst_let c.Ewf.ordered h3)).bind fun _ _ _ ⟨h1, h2⟩ => ?_
     exact hsave (.trans (fun _ _ he => he.2.2.instantiate1 he.2.1) h1) h2
   · refine (reduceProj.WF he).bind fun _ _ _ H => ?_

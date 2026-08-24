@@ -2155,6 +2155,141 @@ theorem d2Defn (univs : Nat) {c : Name}
   simpa only [transport_context_roundtrip, transportExpr_const,
     transportExpr_mkInst, transport_level_list_roundtrip] using H1
 
+/-- Weakening specialized to the partially assembled D2 semantic bridge.
+
+The generic `IsDefEqStrong.weak'` is stated under a complete
+`Params.Semantic` instance, which is exactly what the registered-tower proof
+is constructing.  D2 already has every fragment weakening actually needs:
+`d2Ctor` rebuilds constructor bundles at the target context, `d2Defn`
+rebuilds constant-pattern contractions there, and local iota actions carry
+their own pointwise weakening.  Keeping this lemma outside the eventual
+semantic instance breaks the otherwise artificial registered/weakening
+cycle. -/
+theorem d2StrongWeak (univs : Nat)
+    {rho : Lift} {Gamma Gamma' : List (@SExpr (d2Params univs))}
+    {e1 e2 A : @SExpr (d2Params univs)}
+    (W : @Ctx.Lift' (d2Params univs) rho Gamma Gamma')
+    (H : @IsDefEqStrong (d2Params univs) Gamma e1 e2 A) :
+    @IsDefEqStrong (d2Params univs) Gamma'
+      (@SExpr.lift' (d2Params univs) e1 rho)
+      (@SExpr.lift' (d2Params univs) e2 rho)
+      (@SExpr.lift' (d2Params univs) A rho) := by
+  letI : Params := d2Params univs
+  induction H generalizing rho Gamma' with
+  | bvar h _ ihA => exact .bvar (h.weak' W) (ihA W)
+  | symm _ ih => exact (ih W).symm
+  | trans _ _ ih1 ih2 => exact (ih1 W).trans (ih2 W)
+  | sort => exact .sort
+  | @const c ci Gamma ls u hreg hlen hTy F hF hDef ihTy ihF ihDef =>
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero]
+    have hTy' := ihTy W
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero] at hTy'
+    let F' : ∀ cl, CtorBundle c cl := fun cl =>
+      (d2Ctor univs (Gamma := Gamma') hreg hlen cl).1
+    have hF' : ∀ cl, IsDefEqStrong Gamma'
+        (SExpr.mkInst ls ci.type) ((F' cl).rhs ls) (.sort (F' cl).u) := by
+      intro cl
+      exact (d2Ctor univs (Gamma := Gamma') hreg hlen cl).2
+    have hDef' : ∀ {r : (Pattern.const c).RHS × (Pattern.const c).Check},
+        Params.Pat (.const c) r →
+        IsDefEqStrong Gamma' (r.1.applyS ls Empty.elim) (.const c ls)
+          (SExpr.mkInst ls ci.type) := by
+      intro r hpat
+      obtain ⟨value, closed, hr, hdef⟩ := d2Defn univs hpat
+      subst r
+      simpa only [Pattern.RHS.applyS] using
+        (hdef hreg hlen : IsDefEqStrong Gamma'
+          (.const c ls) (SExpr.mkInst ls value)
+          (SExpr.mkInst ls ci.type)).symm
+    exact .const hreg hlen hTy' F' hF' hDef'
+  | appDF _ _ _ _ _ ihA ihCod ihf iha ihResult =>
+    have hResult := ihResult W
+    rw [SExpr.lift'_inst_hi, SExpr.lift'_inst_hi] at hResult
+    exact SExpr.lift'_inst_hi .. ▸
+      .appDF (ihA W) (ihCod W.cons) (ihf W) (iha W) hResult
+  | lamDF _ _ _ _ _ ihA ihB ihB' ihBody ihBody' =>
+    exact .lamDF (ihA W) (ihB W.cons) (ihB' W.cons)
+      (ihBody W.cons) (ihBody' W.cons)
+  | forallEDF _ _ _ ihA ihBody ihBody' =>
+    exact .forallEDF (ihA W) (ihBody W.cons) (ihBody' W.cons)
+  | defeqDF _ _ ihA ihe => exact .defeqDF (ihA W) (ihe W)
+  | beta _ _ _ _ ihBody ihArg ihApp ihInst =>
+    have hApp := ihApp W
+    have hInst := ihInst W
+    simp only [SExpr.lift'_inst_hi] at hApp hInst
+    rw [SExpr.lift'_inst_hi, SExpr.lift'_inst_hi]
+    exact .beta (ihBody W.cons) (ihArg W) hApp hInst
+  | @eta Gamma e A B hTerm hLam ihTerm ihLam =>
+    have hLam' : IsDefEqStrong Gamma'
+        (.lam (A.lift' rho) ((e.lift' rho).lift.app (.bvar 0)))
+        (.lam (A.lift' rho) ((e.lift' rho).lift.app (.bvar 0)))
+        (.forallE (A.lift' rho) (B.lift' rho.cons)) := by
+      simpa [SExpr.lift, ← SExpr.lift'_comp] using ihLam W
+    simpa [SExpr.lift, ← SExpr.lift'_comp] using
+      IsDefEqStrong.eta (ihTerm W) hLam'
+  | proofIrrel _ _ _ ihProp ihLeft ihRight =>
+    exact .proofIrrel (ihProp W) (ihLeft W) (ihRight W)
+  | @defn c ci Gamma ls u r hreg hlen hTy F hF action hRhs
+      ihTy ihF ihRhs =>
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero]
+    have hTy' := ihTy W
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero] at hTy'
+    let F' : ∀ cl, CtorBundle c cl := fun cl =>
+      (d2Ctor univs (Gamma := Gamma') hreg hlen cl).1
+    have hF' : ∀ cl, IsDefEqStrong Gamma'
+        (SExpr.mkInst ls ci.type) ((F' cl).rhs ls) (.sort (F' cl).u) := by
+      intro cl
+      exact (d2Ctor univs (Gamma := Gamma') hreg hlen cl).2
+    have hempty :
+        (fun path : Empty => (Empty.elim path : SExpr).lift' rho) = Empty.elim := by
+      funext path
+      exact nomatch path
+    have hAction := action.weak' W
+    simp only [SExpr.lift'] at hAction
+    rw [hempty, ((Params.henv.closedC hreg).mkInstS).lift'_eq .zero] at hAction
+    have hRhs' := ihRhs W
+    rw [Pattern.RHS.lift'_applyS] at hRhs'
+    rw [hempty, ((Params.henv.closedC hreg).mkInstS).lift'_eq .zero] at hRhs'
+    rw [Pattern.RHS.lift'_applyS, hempty]
+    exact IsDefEqStrong.defn hreg hlen hTy' F' hF' hAction hRhs'
+  | extra action _ _ ihLeft ihRight =>
+    have hRight := ihRight W
+    rw [Pattern.RHS.lift'_applyS] at hRight
+    simpa only [Pattern.RHS.lift'_applyS] using
+      IsDefEqStrong.extra (action.weak' W) (ihLeft W) hRight
+
+/-- Strong self-typing of a registered D2 constant once its declared type is
+strongly known.  Constructor bundles and constant-pattern equations are
+supplied by the already-closed `ctor`/`defn` fragments, so callers proving a
+generated rule body only have to establish the declaration's type. -/
+theorem d2ConstStrong (univs : Nat)
+    {c : Name} {ci : VConstant}
+    {ls : List (@SLevel (d2Params univs))}
+    {Gamma : List (@SExpr (d2Params univs))}
+    {u : @SLevel (d2Params univs)}
+    (hreg : d2Env.constants c = some ci) (hlen : ls.length = ci.uvars)
+    (hTy : @IsDefEqStrong (d2Params univs) Gamma
+      (@SExpr.mkInst (d2Params univs) ls ci.type)
+      (@SExpr.mkInst (d2Params univs) ls ci.type)
+      (@SExpr.sort (d2Params univs) u)) :
+    @IsDefEqStrong (d2Params univs) Gamma
+      (@SExpr.const (d2Params univs) c ls)
+      (@SExpr.const (d2Params univs) c ls)
+      (@SExpr.mkInst (d2Params univs) ls ci.type) := by
+  letI : Params := d2Params univs
+  let F : ∀ cl : CtorBundle.IsCtor c, CtorBundle c cl := fun cl =>
+    (d2Ctor univs (Gamma := Gamma) hreg hlen cl).1
+  refine .const hreg hlen hTy F ?_ ?_
+  · intro cl
+    exact (d2Ctor univs (Gamma := Gamma) hreg hlen cl).2
+  · intro r hpat
+    obtain ⟨value, closed, hr, hdef⟩ := d2Defn univs hpat
+    subst r
+    simpa only [Pattern.RHS.applyS] using
+      (hdef hreg hlen : IsDefEqStrong Gamma
+        (.const c ls) (SExpr.mkInst ls value)
+        (SExpr.mkInst ls ci.type)).symm
+
 /-! ## `Params.Semantic.registered`: inherited rules
 
 A registered defeq of `d2Env` is either one of the block's five generated
@@ -2341,28 +2476,35 @@ def d2DeltaRank (univs : Nat) :
 
 /-! ## The parked block obligations
 
-Four obligations of the *block* half of `Params.Semantic` are not delivered
-here.  They are stated as named `Prop`s and bundled by the preferred premise
-`D2BlockStepExact`, so that every downstream statement carries them
-explicitly and the residual is exactly stated rather than described.  The
-earlier pair-shaped `D2BlockStep` remains as the internal assembler input;
-`D2BlockStepExact.toBlockStep` supplies its now-proved bookkeeping fields.
+The legacy internal assembler names four obligations of the *block* half of
+`Params.Semantic`.  The preferred `D2BlockStepExact` removes discharged
+bookkeeping and inherited Nat replay, leaving three fields: the Tree check,
+one paired Tree replay, and the generated registered bodies.  The earlier
+pair-shaped `D2BlockStep` remains as the internal assembler input;
+`D2BlockStepExact.toBlockStep` reconstructs it.
 
-Only the first is genuinely blocked: it is `L4L-18A′` strength.  The other
-three are mechanical per-rule volume which the generic engine deliberately
-takes as input — exactly as Theory's own generic block-rule soundness
-theorem takes its capture spine as a hypothesis.
+The first obligation is directly `L4L-18A′`-blocked.  The Tree/TreeList
+parts of the next two share that boundary: after the common recursor prefix
+is replayed, their field telescope and rebuilt constructor use the
+recursor-derived parameter and source levels, while the concrete constructor
+spine is typed at its own parameter and levels.  Relating those two
+instantiations needs both the checked parameter equality and canonical source-
+level alignment.  The finite telescope/body calculations after alignment
+and the registered bodies are mechanical; the inherited Nat cases are now
+proved below.
 
-**Scope note.**  Capture-spine and β-collapse premises quantify over *every*
-iota rule of the D2 inventory, i.e. the block's five plus the two inherited
-`Nat` rules — not only the five new ones.  That is forced, not sloppy: a
+**Scope note.**  The legacy capture-spine and β-collapse contracts quantify
+over *every* iota rule of the D2 inventory, i.e. the block's five plus the two
+inherited `Nat` rules — not only the five new ones.  That is forced, not sloppy: a
 reduction-site certificate cannot be transported *downwards* along
 `d1Env ≤ d2Env`, because its inputs (`typing`, `matched`) are D2-instance
 derivations whose contexts and captures may mention the block's constants,
 and `d1StrongToD2` only runs in the growing direction.  D1 met exactly this
 and re-replayed D0's two `Nat` rules rather than transporting them
-(`SExprParamsD1.lean:1925-1929`); D2 would have to re-replay them a third
-time.  The two `Nat` checks are now discharged by `d2NatChecked`, and
+(`SExprParamsD1.lean:1925-1929`).  D2 now performs that third replay through
+the generic engine (`d2NatZeroRuleReplay`, `d2NatSuccRuleReplay`), so the
+preferred residual quantifies only over the five block rules.  Their checks
+are likewise discharged by `d2NatChecked`, and
 `D2CheckedStep.of_tree` lifts the five-entry `D2TreeCheckedStep` to the full
 inventory.  The genuinely 18A′-gated premise therefore quantifies over the
 five block rules only. -/
@@ -2376,7 +2518,7 @@ inductive-type application, `L4L-18A′` strength — see
 `plans/probes/probeG-generic-instance.lean:320` (`iotaCheck_param`).  The
 semantic side cannot help: the logical relation realizes `indTy` arguments
 at `.bot` (`ShapeLogRel.lean:9244`), so it retains no argument information.
-This is the one genuinely blocked obligation. -/
+This is one of the two explicit alignment facts needed by the Tree replay. -/
 def D2CheckedStep (univs : Nat) : Prop :=
   letI : Params := d2Params univs
   ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
@@ -2475,6 +2617,25 @@ def D2TreeCheckedStep (univs : Nat) : Prop :=
           (List.mem_of_getElem? hentry)).defeqsS recLs mcap ∧
       ∀ a b B, (B, a, b) ∈ dfs → IsDefEq Gamma a b B
 
+/-- Canonical source-level alignment needed by the generated Tree/TreeList
+capture and collapse replay.  Theory's block theorem states its constructor
+spine directly at `sourceLevels.map (VLevel.inst recLs)`; an SExpr reduction
+site instead permits an independently typed `ctorLs`.  Showing that the two
+lists agree is a head-injectivity/normalization consequence, not a finite
+rule computation.  This contract names that shared research boundary; it is
+currently subsumed by the paired `D2TreeReplayStep` premise below rather than
+added as a redundant field of `D2BlockStepExact`. -/
+def D2TreeLevelAlignmentStep (univs : Nat) : Prop :=
+  letI : Params := d2Params univs
+  ∀ {i : Nat} {constructor : NormalizedBlockCtor},
+    TreeGen.flatCtors[i]? = some constructor →
+    ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+      {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr},
+      D2ContextValid univs Gamma →
+      Pattern.IotaTyping Gamma (TreeGen.ruleRecName constructor)
+        constructor.ctor.raw.name recLs ctorLs recArgs ctorArgs majorTerm A →
+      ctorLs = TreeGen.sourceLevels.map (SLevel.instV recLs)
+
 /-- Lift the five-rule block check to the complete D2 inventory.  The two
 Nat cases are discharged by `d2NatChecked`; definition extensions cannot
 inhabit a recursor-iota pattern. -/
@@ -2508,11 +2669,14 @@ telescope, with the rule's level arity.  The generic engine
 (`SExpr.iotaSiteOf`) consumes this and supplies every other site field;
 Theory's own generic block-rule soundness theorem takes the same spine as a
 hypothesis (`InductivePatternWF.lean`, the `hcaps` argument), so this is the
-engine's interface boundary rather than an omission.  It is mechanical
-per-rule volume: the recursor-spine peels plus the constructor's fields for
-the five block rules and the two inherited Nat rules.  The level-arity
-conjunct in this legacy form is proved unconditionally later by
-`d2IotaRule_levelsLength`; `D2CaptureSpineCoreStep` is the exact residual. -/
+engine's interface boundary rather than an omission.  The inherited Nat
+cases and the eight common Tree recursor arguments are mechanical.  The
+remaining Tree field suffix is typed at the constructor-side parameter and
+levels, so replaying it at the generated rule's canonical recursor-side
+telescope also consumes `D2TreeCheckedStep` and
+`D2TreeLevelAlignmentStep`-strength facts.  The level-arity conjunct in this
+legacy form is proved unconditionally later by `d2IotaRule_levelsLength`;
+`D2CaptureSpineCoreStep` is the current, deliberately unfactored residual. -/
 def D2CaptureSpineStep (univs : Nat) : Prop :=
   letI : Params := d2Params univs
   ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
@@ -2534,9 +2698,12 @@ def D2CaptureSpineStep (univs : Nat) : Prop :=
         (rule.capturePaths.map mcap) A
 
 /-- (iii) The β-collapse of the rule's applied left tower back onto the
-matched redex.  Given (ii) this is `SExpr.ruleCollapse` plus a per-rule
-`instRev` computation and one type conversion; it is listed separately
-because that computation is per-rule. -/
+matched redex.  Once the raw capture spine and constructor alignment are
+available, this is `SExpr.ruleCollapse` plus a finite `instRev` computation
+and one type conversion.  For the parameterized Tree rules, however, that
+body comparison rebuilds the constructor at the recursor-derived parameter
+and source levels, so the same two alignment facts as (ii) are genuine
+inputs to the straightforward proof route. -/
 def D2CollapseStep (univs : Nat) : Prop :=
   letI : Params := d2Params univs
   ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
@@ -2562,18 +2729,96 @@ def D2CollapseStep (univs : Nat) : Prop :=
         (fun (f a : SExpr) => f.app a) (SExpr.mkInst recLs rule.df.lhs)) A
 
 /-- (iv) `Params.Semantic.registered` at the five block rules: the D0-style
-lambda-tower descent (`SExprParamsD0.lean:2898-5496`) re-run for this
-block. -/
+lambda-tower descent re-run for this block.
+
+The endpoint self-typings are retained here exactly as they are in
+`Params.Semantic.registered`.  The previous parked contract accidentally
+dropped them and therefore asked for a strictly stronger theorem than the
+semantic bridge consumes; D0's `natRegistered` correctly keeps both inputs.
+They provide the native tower typing used by the structural lambda/eta
+descent, without assuming the semantic instance being assembled. -/
 def D2RegisteredTowerStep (univs : Nat) : Prop :=
   letI : Params := d2Params univs
   ∀ {df : VDefEq} {ls : List SLevel} {Gamma : List SExpr},
     df ∈ TreeGen.generatedRules → ls.length = df.uvars →
+    IsDefEqStrong Gamma (SExpr.mkInst ls df.lhs) (SExpr.mkInst ls df.lhs)
+      (SExpr.mkInst ls df.type) →
+    IsDefEqStrong Gamma (SExpr.mkInst ls df.rhs) (SExpr.mkInst ls df.rhs)
+      (SExpr.mkInst ls df.type) →
     IsDefEqStrong Gamma (SExpr.mkInst ls df.lhs) (SExpr.mkInst ls df.rhs)
       (SExpr.mkInst ls df.type)
 
-/-- The block half of the D2 semantic bridge, as one named premise.  Only
-`checked` is genuinely blocked (`L4L-18A′`); the other three are mechanical
-per-rule volume that the generic engine deliberately takes as input. -/
+/-- The result at the bottom of a generated Tree/TreeList rule telescope. -/
+def d2RuleResult (constructor : NormalizedBlockCtor) : VExpr :=
+  VExpr.appN
+    (.bvar (TreeGen.familyCount - 1 - constructor.owner +
+      TreeGen.minorCount + TreeGen.ruleFieldCount constructor))
+    (TreeGen.ruleIdx constructor ++ [TreeGen.ruleCtorApp constructor])
+
+/-- The genuinely rule-specific leaf of registered-tower closure.
+
+The generic `SExpr.closeTel_strong` theorem now supplies every prefix
+application, lambda congruence, and eta contraction.  What remains per rule
+is exactly the strongly typed equality at the fully opened generated body:
+the recursor/constructor redex versus the registered RHS tower applied to
+the canonical binder variables. -/
+def D2RegisteredBodyStep (univs : Nat) : Prop :=
+  letI : Params := d2Params univs
+  ∀ {i : Nat} {constructor : NormalizedBlockCtor}
+    (_hentry : TreeGen.flatCtors[i]? = some constructor)
+    {ls : List SLevel} {Gamma : List SExpr},
+    ls.length = (TreeGen.rule i constructor).uvars →
+    IsDefEqStrong Gamma
+      (SExpr.mkInst ls (TreeGen.rule i constructor).rhs)
+      (SExpr.mkInst ls (TreeGen.rule i constructor).rhs)
+      (SExpr.mkInst ls (TreeGen.rule i constructor).type) →
+    let As := (TreeGen.ruleBinders constructor).map (SExpr.mkInst ls)
+    IsDefEqStrong (As.reverse ++ Gamma)
+      (SExpr.mkInst ls (TreeGen.ruleLhsBody constructor))
+      (SExpr.applyTelVars As
+        (SExpr.mkInst ls (TreeGen.rule i constructor).rhs))
+      (SExpr.mkInst ls (d2RuleResult constructor))
+
+/-- Close the five local generated-body leaves into the complete semantic
+registered contract.  This is the rule-independent part formerly repeated
+by hand in D0. -/
+theorem D2RegisteredTowerStep.of_body (univs : Nat)
+    (h : D2RegisteredBodyStep univs) : D2RegisteredTowerStep univs := by
+  letI : Params := d2Params univs
+  intro df ls Gamma hmem hlen _hLhs hRhs
+  change df ∈ TreeGen.flatCtors.zipIdx.map
+    (fun ic => TreeGen.rule ic.2 ic.1) at hmem
+  obtain ⟨⟨constructor, i⟩, hpair, rfl⟩ := List.mem_map.1 hmem
+  obtain ⟨-, hentry⟩ := List.mem_zipIdx_getElem? hpair
+  rw [Nat.sub_zero] at hentry
+  let As : List SExpr :=
+    (TreeGen.ruleBinders constructor).map (SExpr.mkInst ls)
+  let B : SExpr := SExpr.mkInst ls (d2RuleResult constructor)
+  have htype : SExpr.mkInst ls (TreeGen.rule i constructor).type =
+      As.foldr .forallE B := by
+    rw [TreeGen.rule_type, SExpr.mkInst_forallN]
+    rfl
+  have hlhs : SExpr.mkInst ls (TreeGen.rule i constructor).lhs =
+      SExpr.lamTel As
+        (SExpr.mkInst ls (TreeGen.ruleLhsBody constructor)) := by
+    rw [TreeGen.rule_lhs, SExpr.mkInst_lamN]
+  have hRhs' : IsDefEqStrong Gamma
+      (SExpr.mkInst ls (TreeGen.rule i constructor).rhs)
+      (SExpr.mkInst ls (TreeGen.rule i constructor).rhs)
+      (As.foldr .forallE B) := htype ▸ hRhs
+  have hLocal := h hentry hlen hRhs
+  have hClosed := SExpr.closeTel_strong
+    (fun W H => d2StrongWeak univs W H) hRhs' hLocal
+  rw [hlhs, htype]
+  exact hClosed
+
+/-- The block half of the D2 semantic bridge, as one named premise.  The
+`checked` field is directly `L4L-18A′`-blocked.  The Tree portions of
+`captureSpine` and `lhsCollapse` additionally hide canonical constructor
+level alignment of the same normalization/injectivity strength; their
+remaining finite replay, the Nat cases, and `registeredTower` are
+engineering.  The preferred exact bundle supplies those Nat cases
+internally. -/
 structure D2BlockStep (univs : Nat) : Prop where
   checked : D2TreeCheckedStep univs
   captureSpine : D2CaptureSpineStep univs
@@ -2624,11 +2869,11 @@ theorem d2Registered (univs : Nat) (h : D2BlockStep univs)
     {df : VDefEq} {ls : List (@SLevel (d2Params univs))}
     {Gamma : List (@SExpr (d2Params univs))}
     (hreg : d2Env.defeqs df) (hlen : ls.length = df.uvars)
-    (_hLhs : @IsDefEqStrong (d2Params univs) Gamma
+    (hLhs : @IsDefEqStrong (d2Params univs) Gamma
       (@SExpr.mkInst (d2Params univs) ls df.lhs)
       (@SExpr.mkInst (d2Params univs) ls df.lhs)
       (@SExpr.mkInst (d2Params univs) ls df.type))
-    (_hRhs : @IsDefEqStrong (d2Params univs) Gamma
+    (hRhs : @IsDefEqStrong (d2Params univs) Gamma
       (@SExpr.mkInst (d2Params univs) ls df.rhs)
       (@SExpr.mkInst (d2Params univs) ls df.rhs)
       (@SExpr.mkInst (d2Params univs) ls df.type)) :
@@ -2638,7 +2883,7 @@ theorem d2Registered (univs : Nat) (h : D2BlockStep univs)
       (@SExpr.mkInst (d2Params univs) ls df.type) := by
   rw [d2Env_defeqs_iff] at hreg
   rcases hreg with hnew | hold
-  · exact h.registeredTower hnew hlen
+  · exact h.registeredTower hnew hlen hLhs hRhs
   · exact d2Registered_old univs hold hlen
 
 /-- The complete D2 bridge, conditional on the block step: the inherited
@@ -3111,6 +3356,377 @@ theorem d2IotaRule_levelsLength (univs : Nat)
         exact hlen
   exact hP typing
 
+/-! ### Inherited Nat replay
+
+The two Nat rules have no parameter or source-level alignment problem.  Their
+three common recursor arguments can therefore be replayed in any D2 context
+directly from `Pattern.IotaTyping`; the zero rule stops there and the
+successor rule appends its one constructor field. -/
+
+/-- The major-premise tail after the motive and two Nat minors. -/
+def d2NatRecTailV : VExpr :=
+  VExpr.forallE (VExpr.const ``Nat [])
+    ((VExpr.bvar 3).app (VExpr.bvar 0))
+
+theorem d2NatRecTypePrefixV_eq :
+    probeNatRecTypeV =
+      VExpr.forallN probeNatRuleBindersV d2NatRecTailV := by
+  rfl
+
+theorem d2NatZeroRuleTypePrefixV_eq :
+    (NatGeneration.rule 0 NatGeneration.flatCtors[0]).type =
+      VExpr.forallN probeNatRuleBindersV probeNatZeroRuleResultV := by
+  rw [probeNatZeroRuleTypeV_eq]
+  rfl
+
+theorem d2NatSuccRuleTypePrefixV_eq :
+    (NatGeneration.rule 1 NatGeneration.flatCtors[1]).type =
+      VExpr.forallN probeNatRuleBindersV
+        (VExpr.forallE (VExpr.const ``Nat []) probeNatSuccRuleResultV) := by
+  rw [probeNatSuccRuleTypeV_eq]
+  rfl
+
+/-- Replay the motive and two minor premises from a typed `Nat.rec` spine as
+the common prefix of a rule whose remaining result is `newResult`. -/
+theorem d2NatRuleCommonRawSpine (univs : Nat)
+    (level : @SLevel (d2Params univs)) (newResult : VExpr)
+    {Gamma : List (@SExpr (d2Params univs))}
+    {A majorTerm : @SExpr (d2Params univs)}
+    {ctor : Name} {ctorLs : List (@SLevel (d2Params univs))}
+    {recArgs ctorArgs : List (@SExpr (d2Params univs))}
+    (hGamma : D2ContextValid univs Gamma)
+    (typing : @Pattern.IotaTyping (d2Params univs) Gamma ``Nat.rec
+      ctor [level] ctorLs recArgs ctorArgs majorTerm A)
+    (hlen : recArgs.length = 3) :
+    letI : Params := d2Params univs
+    SpineWF Gamma
+      (SExpr.mkInst [level]
+        (VExpr.forallN probeNatRuleBindersV newResult))
+      recArgs.reverse
+      (SExpr.mk
+        ((newResult.instL [level.reify]).instRev
+          (recArgs.reverse.map SExpr.reify))) := by
+  letI : Params := d2Params univs
+  let vls : List VLevel := [level.reify]
+  have hvls : ∀ l ∈ vls, l.WF univs := by
+    intro l hl
+    have : l = level.reify := List.mem_singleton.mp hl
+    subst l
+    exact SLevel.reify_wf level
+  have hrec : IsDefEq Gamma (.const ``Nat.rec [level])
+      (.const ``Nat.rec [level])
+      (SExpr.mkInst [level]
+        (VInductDecl.recConst 0 ``Nat 0 InductiveFixtures.natType).type) :=
+    .const (d1Env_le_d2Env.constants d1NatRecEnvLookup) rfl
+  rw [probeNatRecTypeV_eq, d2NatRecTypePrefixV_eq] at hrec
+  have hHead := typeUniq (d2Replay univs) hGamma hrec typing.recHead
+  have hlevel : (VExpr.forallN
+      (probeNatRuleBindersV.map (VExpr.instL vls))
+      (d2NatRecTailV.instL vls)).LevelWF univs := by
+    have H : ((VExpr.forallN probeNatRuleBindersV d2NatRecTailV).instL vls).LevelWF
+        univs := VExpr.LevelWF.instL hvls
+    rwa [VExpr.instL_forallN] at H
+  have holdShape : SExpr.mk
+      (VExpr.forallN (probeNatRuleBindersV.map (VExpr.instL vls))
+        (d2NatRecTailV.instL vls)) =
+      SExpr.mkInst [level]
+        (VExpr.forallN probeNatRuleBindersV d2NatRecTailV) := by
+    calc
+      _ = SExpr.mk ((VExpr.forallN probeNatRuleBindersV
+          d2NatRecTailV).instL vls) := by
+        rw [VExpr.instL_forallN]
+      _ = _ := by
+        simpa only [vls, List.map_cons, List.map_nil] using
+          (@SExpr.mk_instL_map_reify (d2Params univs)
+            (VExpr.forallN probeNatRuleBindersV d2NatRecTailV) [level])
+  have hprefix := spinePrefixForallN (d2Replay univs) hGamma
+    (n := 3)
+    (binders := probeNatRuleBindersV.map (VExpr.instL vls))
+    (oldResult := d2NatRecTailV.instL vls)
+    (newResult := newResult.instL vls)
+    (args := recArgs.reverse) (suffix := [majorTerm])
+    (by simp [probeNatRuleBindersV]) (by simp [hlen]) hlevel
+      (holdShape ▸ hHead)
+      typing.recSpine
+  have hnewShape : SExpr.mk
+      (VExpr.forallN (probeNatRuleBindersV.map (VExpr.instL vls))
+        (newResult.instL vls)) =
+      SExpr.mkInst [level]
+        (VExpr.forallN probeNatRuleBindersV newResult) := by
+    calc
+      _ = SExpr.mk ((VExpr.forallN probeNatRuleBindersV
+          newResult).instL vls) := by
+        rw [VExpr.instL_forallN]
+      _ = _ := by
+        simpa only [vls, List.map_cons, List.map_nil] using
+          (@SExpr.mk_instL_map_reify (d2Params univs)
+            (VExpr.forallN probeNatRuleBindersV newResult) [level])
+  rw [hnewShape] at hprefix
+  simpa only [vls] using hprefix
+
+/-- The inherited zero-rule match exposes exactly its three recursor
+captures, now in the ambient D2 syntax. -/
+theorem d2NatZeroCaptureValues (univs : Nat)
+    {recLs ctorLs : List (@SLevel (d2Params univs))}
+    {recArgs ctorArgs : List (@SExpr (d2Params univs))}
+    {mcap : (RecursorIotaPattern ``Nat.rec 3 ``Nat.zero 0).Path →
+      @SExpr (d2Params univs)}
+    (H : @Pattern.MatchesS (d2Params univs)
+      (RecursorIotaPattern ``Nat.rec 3 ``Nat.zero 0)
+      (@SExpr.app (d2Params univs)
+        (recArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.rec recLs))
+        (ctorArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.zero ctorLs))) recLs mcap) :
+    recArgs.length = 3 ∧ ctorArgs = [] ∧
+      (natCapturePaths NatGeneration.flatCtors[0]).map mcap =
+        recArgs.reverse := by
+  letI : Params := d2Params univs
+  cases H with
+  | @app _ _ _ recCap _ _ _ ctorCap hrec hctor =>
+    obtain ⟨-, hrecLen, hrecValues⟩ := ParamsD0.matchesS_varN_foldr hrec
+    obtain ⟨-, hctorLen, -⟩ := ParamsD0.matchesS_varN_foldr hctor
+    have hctorArgs : ctorArgs = [] := List.length_eq_zero_iff.mp hctorLen
+    subst ctorArgs
+    refine ⟨hrecLen, rfl, ?_⟩
+    rw [natZeroCapturePaths]
+    change
+      ((Pattern.varNPaths (.const ``Nat.rec) 3).map Sum.inl).map
+          (Sum.elim recCap ctorCap) = recArgs.reverse
+    simpa [List.map_map, Function.comp_def] using hrecValues
+
+/-- The inherited successor-rule match exposes the same three recursor
+captures followed by its predecessor field. -/
+theorem d2NatSuccCaptureValues (univs : Nat)
+    {recLs ctorLs : List (@SLevel (d2Params univs))}
+    {recArgs ctorArgs : List (@SExpr (d2Params univs))}
+    {mcap : (RecursorIotaPattern ``Nat.rec 3 ``Nat.succ 1).Path →
+      @SExpr (d2Params univs)}
+    (H : @Pattern.MatchesS (d2Params univs)
+      (RecursorIotaPattern ``Nat.rec 3 ``Nat.succ 1)
+      (@SExpr.app (d2Params univs)
+        (recArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.rec recLs))
+        (ctorArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.succ ctorLs))) recLs mcap) :
+    recArgs.length = 3 ∧ ctorArgs.length = 1 ∧
+      (natCapturePaths NatGeneration.flatCtors[1]).map mcap =
+        recArgs.reverse ++ ctorArgs.reverse := by
+  letI : Params := d2Params univs
+  cases H with
+  | @app _ _ _ recCap _ _ _ ctorCap hrec hctor =>
+    obtain ⟨-, hrecLen, hrecValues⟩ := ParamsD0.matchesS_varN_foldr hrec
+    obtain ⟨-, hctorLen, hctorValues⟩ :=
+      ParamsD0.matchesS_varN_foldr hctor
+    refine ⟨hrecLen, hctorLen, ?_⟩
+    rw [natSuccCapturePaths]
+    change
+      (((Pattern.varNPaths (.const ``Nat.rec) 3).map Sum.inl ++
+          (Pattern.varNPaths (.const ``Nat.succ) 1).map Sum.inr).map
+        (Sum.elim recCap ctorCap)) = recArgs.reverse ++ ctorArgs.reverse
+    simp [List.map_append, List.map_map, Function.comp_def,
+      hrecValues, hctorValues]
+
+/-- Both site obligations for the inherited Nat zero rule, replayed in the
+actual D2 context. -/
+theorem d2NatZeroRuleReplay (univs : Nat)
+    {Gamma : List (@SExpr (d2Params univs))}
+    {A majorTerm : @SExpr (d2Params univs)}
+    {recLs ctorLs : List (@SLevel (d2Params univs))}
+    {recArgs ctorArgs : List (@SExpr (d2Params univs))}
+    {mcap : (RecursorIotaPattern ``Nat.rec 3 ``Nat.zero 0).Path →
+      @SExpr (d2Params univs)}
+    (hGamma : D2ContextValid univs Gamma)
+    (typing : @Pattern.IotaTyping (d2Params univs) Gamma ``Nat.rec
+      ``Nat.zero recLs ctorLs recArgs ctorArgs majorTerm A)
+    (matched : @Pattern.MatchesS (d2Params univs)
+      (RecursorIotaPattern ``Nat.rec 3 ``Nat.zero 0)
+      (@SExpr.app (d2Params univs)
+        (recArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.rec recLs))
+        (ctorArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.zero ctorLs))) recLs mcap) :
+    letI : Params := d2Params univs
+    SpineWF Gamma
+      (SExpr.mkInst recLs
+        (NatGeneration.rule 0 NatGeneration.flatCtors[0]).type)
+      ((natCapturePaths NatGeneration.flatCtors[0]).map mcap) A ∧
+    IsDefEq Gamma
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+        (SExpr.const ``Nat.rec recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const ``Nat.zero ctorLs)))
+      (((natCapturePaths NatGeneration.flatCtors[0]).map mcap).foldl
+        (fun (f a : SExpr) => f.app a)
+        (SExpr.mkInst recLs
+          (NatGeneration.rule 0 NatGeneration.flatCtors[0]).lhs)) A := by
+  letI : Params := d2Params univs
+  have hrecLen := typing.recHead.const_left_levelsLength
+    (d1Env_le_d2Env.constants d1NatRecEnvLookup)
+  change recLs.length = 1 at hrecLen
+  obtain ⟨level, rfl⟩ := List.length_eq_one_iff.mp hrecLen
+  have hctorLen := typing.ctorHead.const_left_levelsLength
+    (d1Env_le_d2Env.constants d1NatZeroEnvLookup)
+  change ctorLs.length = 0 at hctorLen
+  have hctorLs : ctorLs = [] := List.length_eq_zero_iff.mp hctorLen
+  subst ctorLs
+  obtain ⟨hrecArgsLen, hctorArgs, hcaptures⟩ :=
+    d2NatZeroCaptureValues univs matched
+  subst ctorArgs
+  have hrecArgs : ∃ x y z, recArgs = [x, y, z] :=
+    ⟨recArgs[0], recArgs[1], recArgs[2],
+      List.eq_getElem_of_length_eq_three recArgs hrecArgsLen⟩
+  obtain ⟨minorSucc, minorZero, motive, rfl⟩ := hrecArgs
+  have hraw := d2NatRuleCommonRawSpine univs level
+    probeNatZeroRuleResultV hGamma typing rfl
+  rw [← d2NatZeroRuleTypePrefixV_eq] at hraw
+  let vls : List VLevel := [level.reify]
+  have hbodyV :
+      (probeNatZeroRuleLhsBodyV.instL vls).instRev
+          [motive.reify, minorZero.reify, minorSucc.reify] =
+        ((((VExpr.const ``Nat.rec [level.reify]).app motive.reify).app
+          minorZero.reify).app minorSucc.reify).app
+          (VExpr.const ``Nat.zero []) := by
+    simp [probeNatZeroRuleLhsBodyV, vls, VExpr.instRev, VExpr.instL,
+      VExpr.inst, VExpr.instVar,
+      VExpr.liftN_succ, VExpr.liftN_zero, probeReifyInstVParamZero,
+      VExpr.inst_lift]
+    simpa only [VExpr.liftN_zero] using
+      probeVCancelTwoLifts motive.reify minorZero.reify minorSucc.reify
+  have hbody : SExpr.mk
+      ((probeNatZeroRuleLhsBodyV.instL vls).instRev
+        ([motive, minorZero, minorSucc].map SExpr.reify)) =
+      (((((SExpr.const ``Nat.rec [level]).app motive).app minorZero).app
+        minorSucc).app (SExpr.const ``Nat.zero [])) := by
+    simpa only [vls, SExpr.mk, List.map_cons, List.map_nil,
+      SLevel.mk_reify, SExpr.mk_reify] using congrArg SExpr.mk hbodyV
+  have hredex := Pattern.IotaTyping.redexSelf
+    (d2Replay univs) hGamma typing
+  have hreg : d2Env.defeqs
+      (NatGeneration.rule 0 NatGeneration.flatCtors[0]) :=
+    d1Env_le_d2Env.defeqs <| d0Env_le_d1Env.defeqs <|
+      natFinalEnv_le_d0Env.defeqs <|
+        natRule_registered
+          (show NatGeneration.flatCtors[0]? =
+            some NatGeneration.flatCtors[0] from rfl)
+  have hreplay := ruleReplayOfRawSpine (d2Replay univs) hGamma
+    hreg
+    (by simpa [probeNatZeroRuleLhsV] using probeNatZeroRuleLhsV_eq)
+    d2NatZeroRuleTypePrefixV_eq rfl
+    (by simp [probeNatRuleBindersV]) hraw hbody hredex
+  simpa only [List.reverse_cons, List.reverse_nil, List.append_nil,
+    List.foldr, hcaptures] using hreplay
+
+/-- Both site obligations for the inherited Nat successor rule, including
+the one constructor-field suffix. -/
+theorem d2NatSuccRuleReplay (univs : Nat)
+    {Gamma : List (@SExpr (d2Params univs))}
+    {A majorTerm : @SExpr (d2Params univs)}
+    {recLs ctorLs : List (@SLevel (d2Params univs))}
+    {recArgs ctorArgs : List (@SExpr (d2Params univs))}
+    {mcap : (RecursorIotaPattern ``Nat.rec 3 ``Nat.succ 1).Path →
+      @SExpr (d2Params univs)}
+    (hGamma : D2ContextValid univs Gamma)
+    (typing : @Pattern.IotaTyping (d2Params univs) Gamma ``Nat.rec
+      ``Nat.succ recLs ctorLs recArgs ctorArgs majorTerm A)
+    (matched : @Pattern.MatchesS (d2Params univs)
+      (RecursorIotaPattern ``Nat.rec 3 ``Nat.succ 1)
+      (@SExpr.app (d2Params univs)
+        (recArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.rec recLs))
+        (ctorArgs.foldr (fun a f => @SExpr.app (d2Params univs) f a)
+          (@SExpr.const (d2Params univs) ``Nat.succ ctorLs))) recLs mcap) :
+    letI : Params := d2Params univs
+    SpineWF Gamma
+      (SExpr.mkInst recLs
+        (NatGeneration.rule 1 NatGeneration.flatCtors[1]).type)
+      ((natCapturePaths NatGeneration.flatCtors[1]).map mcap) A ∧
+    IsDefEq Gamma
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+        (SExpr.const ``Nat.rec recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const ``Nat.succ ctorLs)))
+      (((natCapturePaths NatGeneration.flatCtors[1]).map mcap).foldl
+        (fun (f a : SExpr) => f.app a)
+        (SExpr.mkInst recLs
+          (NatGeneration.rule 1 NatGeneration.flatCtors[1]).lhs)) A := by
+  letI : Params := d2Params univs
+  have hrecLen := typing.recHead.const_left_levelsLength
+    (d1Env_le_d2Env.constants d1NatRecEnvLookup)
+  change recLs.length = 1 at hrecLen
+  obtain ⟨level, rfl⟩ := List.length_eq_one_iff.mp hrecLen
+  have hctorLen := typing.ctorHead.const_left_levelsLength
+    (d1Env_le_d2Env.constants d1NatSuccEnvLookup)
+  change ctorLs.length = 0 at hctorLen
+  have hctorLs : ctorLs = [] := List.length_eq_zero_iff.mp hctorLen
+  subst ctorLs
+  obtain ⟨hrecArgsLen, hctorArgsLen, hcaptures⟩ :=
+    d2NatSuccCaptureValues univs matched
+  obtain ⟨pred, rfl⟩ := List.length_eq_one_iff.mp hctorArgsLen
+  have hrecArgs : ∃ x y z, recArgs = [x, y, z] :=
+    ⟨recArgs[0], recArgs[1], recArgs[2],
+      List.eq_getElem_of_length_eq_three recArgs hrecArgsLen⟩
+  obtain ⟨minorSucc, minorZero, motive, rfl⟩ := hrecArgs
+  have hcommon := d2NatRuleCommonRawSpine univs level
+    (VExpr.forallE (VExpr.const ``Nat []) probeNatSuccRuleResultV)
+    hGamma typing rfl
+  rw [← d2NatSuccRuleTypePrefixV_eq] at hcommon
+  have hctorCanonical : IsDefEq Gamma
+      (.const ``Nat.succ []) (.const ``Nat.succ [])
+      (SExpr.mkInst [] InductiveFixtures.natType.ctors[1].type) :=
+    .const (d1Env_le_d2Env.constants d1NatSuccEnvLookup) rfl
+  rw [probeNatSuccCtorTypeV_eq] at hctorCanonical
+  have hctorCanonical' : IsDefEq Gamma
+      (.const ``Nat.succ []) (.const ``Nat.succ [])
+      (.forallE (.const ``Nat []) (.const ``Nat [])) := by
+    simpa [SExpr.mkInst] using hctorCanonical
+  have hctorType := typeUniq (d2Replay univs) hGamma
+    hctorCanonical' typing.ctorHead
+  let predView := spineConsView (d2Replay univs) hGamma
+    hctorType typing.ctorSpine
+  have hpred : IsDefEq Gamma pred pred (.const ``Nat []) := by
+    simpa using predView.argumentExpected
+  have hraw := hcommon.append (.cons hpred .nil)
+  let vls : List VLevel := [level.reify]
+  have hbodyV :
+      (probeNatSuccRuleLhsBodyV.instL vls).instRev
+          [motive.reify, minorZero.reify, minorSucc.reify, pred.reify] =
+        ((((VExpr.const ``Nat.rec [level.reify]).app motive.reify).app
+          minorZero.reify).app minorSucc.reify).app
+          ((VExpr.const ``Nat.succ []).app pred.reify) := by
+    simp [probeNatSuccRuleLhsBodyV, vls, VExpr.instRev, VExpr.instL,
+      VExpr.inst, VExpr.instVar,
+      VExpr.liftN_succ, VExpr.liftN_zero, probeReifyInstVParamZero,
+      VExpr.inst_lift]
+    constructor
+    · simpa only [VExpr.liftN_zero] using
+        probeVCancelThreeLifts motive.reify minorZero.reify
+          minorSucc.reify pred.reify
+    · simpa only [VExpr.liftN_zero] using
+        probeVCancelTwoLifts minorZero.reify minorSucc.reify pred.reify
+  have hbody : SExpr.mk
+      ((probeNatSuccRuleLhsBodyV.instL vls).instRev
+        ([motive, minorZero, minorSucc, pred].map SExpr.reify)) =
+      (((((SExpr.const ``Nat.rec [level]).app motive).app minorZero).app
+        minorSucc).app ((SExpr.const ``Nat.succ []).app pred)) := by
+    simpa only [vls, SExpr.mk, List.map_cons, List.map_nil,
+      SLevel.mk_reify, SExpr.mk_reify] using congrArg SExpr.mk hbodyV
+  have hredex := Pattern.IotaTyping.redexSelf
+    (d2Replay univs) hGamma typing
+  have hreg : d2Env.defeqs
+      (NatGeneration.rule 1 NatGeneration.flatCtors[1]) :=
+    d1Env_le_d2Env.defeqs <| d0Env_le_d1Env.defeqs <|
+      natFinalEnv_le_d0Env.defeqs <|
+        natRule_registered
+          (show NatGeneration.flatCtors[1]? =
+            some NatGeneration.flatCtors[1] from rfl)
+  have hreplay := ruleReplayOfRawSpine (d2Replay univs) hGamma hreg
+    (by simpa [probeNatSuccRuleLhsV] using probeNatSuccRuleLhsV_eq)
+    (by simpa [probeNatSuccRuleTypeV] using probeNatSuccRuleTypeV_eq)
+    rfl (by simp [probeNatSuccRuleBindersV, probeNatRuleBindersV])
+    hraw hbody hredex
+  simpa [hcaptures] using hreplay
+
 /-- The actual per-rule capture obligation after removing the universe-arity
 field proved by `d2IotaRule_levelsLength`. -/
 def D2CaptureSpineCoreStep (univs : Nat) : Prop :=
@@ -3142,25 +3758,215 @@ theorem D2CaptureSpineStep.of_core (univs : Nat)
   exact ⟨d2IotaRule_levelsLength univs rule typing,
     h rule hGamma typing matched⟩
 
+/-- The genuinely remaining site replay, restricted to the five new
+Tree/TreeList entries.  Both outputs share one concrete site because the
+field telescope and collapsed body consume the same parameter/source-level
+alignment. -/
+def D2TreeReplayStep (univs : Nat) : Prop :=
+  letI : Params := d2Params univs
+  ∀ {i : Nat} {constructor : NormalizedBlockCtor}
+    (_hentry : TreeGen.flatCtors[i]? = some constructor)
+    {Gamma : List SExpr} {A majorTerm : SExpr}
+    {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+    {mcap : ((TreeGen.rulePattern constructor).toPattern).Path → SExpr},
+    D2ContextValid univs Gamma →
+    Pattern.IotaTyping Gamma (TreeGen.ruleRecName constructor)
+      constructor.ctor.raw.name recLs ctorLs recArgs ctorArgs majorTerm A →
+    ((TreeGen.rulePattern constructor).toPattern).MatchesS
+      ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+        (SExpr.const (TreeGen.ruleRecName constructor) recLs)).app
+        (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const constructor.ctor.raw.name ctorLs))) recLs mcap →
+    SpineWF Gamma
+        (SExpr.mkInst recLs (TreeGen.rule i constructor).type)
+        ((treeCapturePaths constructor).map mcap) A ∧
+      IsDefEq Gamma
+        ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+          (SExpr.const (TreeGen.ruleRecName constructor) recLs)).app
+          (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const constructor.ctor.raw.name ctorLs)))
+        (((treeCapturePaths constructor).map mcap).foldl
+          (fun (f a : SExpr) => f.app a)
+          (SExpr.mkInst recLs (TreeGen.rule i constructor).lhs)) A
+
+/-- Fill the complete seven-rule capture contract from the two proved Nat
+replays and a five-rule Tree replay premise. -/
+theorem D2CaptureSpineCoreStep.of_treeReplay (univs : Nat)
+    (h : D2TreeReplayStep univs) : D2CaptureSpineCoreStep univs := by
+  letI : Params := d2Params univs
+  let P : ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check},
+      @Pattern.IotaRule (d2Params univs) rec major ctor arity r → Prop :=
+    fun {rec} {major} {ctor} {arity} {_r} selected =>
+      ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+        {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+        {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr},
+        D2ContextValid univs Gamma →
+        Pattern.IotaTyping Gamma rec ctor recLs ctorLs
+          recArgs ctorArgs majorTerm A →
+        (RecursorIotaPattern rec major ctor arity).MatchesS
+          ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+            (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+              (SExpr.const ctor ctorLs))) recLs mcap →
+        SpineWF Gamma (SExpr.mkInst recLs selected.df.type)
+          (selected.capturePaths.map mcap) A
+  intro rec major ctor arity r Gamma A majorTerm recLs ctorLs recArgs ctorArgs
+    mcap rule
+  have hP : P rule := by
+    apply d2IotaRule_entry_elim univs P
+    · intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+        ctorArgs mcap hGamma typing matched
+      have hi : i = 0 ∨ i = 1 := by
+        obtain ⟨hlt, -⟩ := List.getElem?_eq_some_iff.mp hentry
+        have : NatGeneration.flatCtors.length = 2 := rfl
+        omega
+      rcases hi with rfl | rfl
+      · have hc := Option.some.inj
+          (probeNatFlatCtorZero_lookup.symm.trans hentry)
+        subst constructor
+        change @SpineWF (d2Params univs) Gamma
+          (@SExpr.mkInst (d2Params univs) recLs
+            (NatGeneration.rule 0 NatGeneration.flatCtors[0]).type)
+          ((natCapturePaths NatGeneration.flatCtors[0]).map mcap) A
+        exact (d2NatZeroRuleReplay univs hGamma typing matched).1
+      · have hc := Option.some.inj
+          (probeNatFlatCtorSucc_lookup.symm.trans hentry)
+        subst constructor
+        change @SpineWF (d2Params univs) Gamma
+          (@SExpr.mkInst (d2Params univs) recLs
+            (NatGeneration.rule 1 NatGeneration.flatCtors[1]).type)
+          ((natCapturePaths NatGeneration.flatCtors[1]).map mcap) A
+        exact (d2NatSuccRuleReplay univs hGamma typing matched).1
+    · intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+        ctorArgs mcap hGamma typing matched
+      change @SpineWF (d2Params univs) Gamma
+        (@SExpr.mkInst (d2Params univs) recLs
+          (TreeGen.rule i constructor).type)
+        ((treeCapturePaths constructor).map mcap) A
+      exact (h hentry hGamma typing matched).1
+  exact hP
+
+/-- Fill the complete seven-rule collapse contract from the same Tree replay
+premise and the two proved Nat replays. -/
+theorem D2CollapseStep.of_treeReplay (univs : Nat)
+    (h : D2TreeReplayStep univs) : D2CollapseStep univs := by
+  letI : Params := d2Params univs
+  let P : ∀ {rec : Name} {major : Nat} {ctor : Name} {arity : Nat}
+      {r : (RecursorIotaPattern rec major ctor arity).RHS ×
+        (RecursorIotaPattern rec major ctor arity).Check},
+      @Pattern.IotaRule (d2Params univs) rec major ctor arity r → Prop :=
+    fun {rec} {major} {ctor} {arity} {_r} selected =>
+      ∀ {Gamma : List SExpr} {A majorTerm : SExpr}
+        {recLs ctorLs : List SLevel} {recArgs ctorArgs : List SExpr}
+        {mcap : (RecursorIotaPattern rec major ctor arity).Path → SExpr},
+        D2ContextValid univs Gamma →
+        Pattern.IotaTyping Gamma rec ctor recLs ctorLs
+          recArgs ctorArgs majorTerm A →
+        (RecursorIotaPattern rec major ctor arity).MatchesS
+          ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+            (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+              (SExpr.const ctor ctorLs))) recLs mcap →
+        IsDefEq Gamma
+          ((recArgs.foldr (fun (a f : SExpr) => f.app a)
+            (SExpr.const rec recLs)).app
+            (ctorArgs.foldr (fun (a f : SExpr) => f.app a)
+              (SExpr.const ctor ctorLs)))
+          ((selected.capturePaths.map mcap).foldl
+            (fun (f a : SExpr) => f.app a)
+            (SExpr.mkInst recLs selected.df.lhs)) A
+  intro rec major ctor arity r Gamma A majorTerm recLs ctorLs recArgs ctorArgs
+    mcap rule
+  have hP : P rule := by
+    apply d2IotaRule_entry_elim univs P
+    · intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+        ctorArgs mcap hGamma typing matched
+      have hi : i = 0 ∨ i = 1 := by
+        obtain ⟨hlt, -⟩ := List.getElem?_eq_some_iff.mp hentry
+        have : NatGeneration.flatCtors.length = 2 := rfl
+        omega
+      rcases hi with rfl | rfl
+      · have hc := Option.some.inj
+          (probeNatFlatCtorZero_lookup.symm.trans hentry)
+        subst constructor
+        change @IsDefEq (d2Params univs) Gamma
+          ((recArgs.foldr (fun (a f : @SExpr (d2Params univs)) => f.app a)
+            (@SExpr.const (d2Params univs) ``Nat.rec recLs)).app
+            (ctorArgs.foldr
+              (fun (a f : @SExpr (d2Params univs)) => f.app a)
+              (@SExpr.const (d2Params univs) ``Nat.zero ctorLs)))
+          (((natCapturePaths NatGeneration.flatCtors[0]).map mcap).foldl
+            (fun (f a : @SExpr (d2Params univs)) => f.app a)
+            (@SExpr.mkInst (d2Params univs) recLs
+              (NatGeneration.rule 0 NatGeneration.flatCtors[0]).lhs)) A
+        exact (d2NatZeroRuleReplay univs hGamma typing matched).2
+      · have hc := Option.some.inj
+          (probeNatFlatCtorSucc_lookup.symm.trans hentry)
+        subst constructor
+        change @IsDefEq (d2Params univs) Gamma
+          ((recArgs.foldr (fun (a f : @SExpr (d2Params univs)) => f.app a)
+            (@SExpr.const (d2Params univs) ``Nat.rec recLs)).app
+            (ctorArgs.foldr
+              (fun (a f : @SExpr (d2Params univs)) => f.app a)
+              (@SExpr.const (d2Params univs) ``Nat.succ ctorLs)))
+          (((natCapturePaths NatGeneration.flatCtors[1]).map mcap).foldl
+            (fun (f a : @SExpr (d2Params univs)) => f.app a)
+            (@SExpr.mkInst (d2Params univs) recLs
+              (NatGeneration.rule 1 NatGeneration.flatCtors[1]).lhs)) A
+        exact (d2NatSuccRuleReplay univs hGamma typing matched).2
+    · intro i constructor hentry Gamma A majorTerm recLs ctorLs recArgs
+        ctorArgs mcap hGamma typing matched
+      change @IsDefEq (d2Params univs) Gamma
+        ((recArgs.foldr (fun (a f : @SExpr (d2Params univs)) => f.app a)
+          (@SExpr.const (d2Params univs)
+            (TreeGen.ruleRecName constructor) recLs)).app
+          (ctorArgs.foldr
+            (fun (a f : @SExpr (d2Params univs)) => f.app a)
+            (@SExpr.const (d2Params univs)
+              constructor.ctor.raw.name ctorLs)))
+        (((treeCapturePaths constructor).map mcap).foldl
+          (fun (f a : @SExpr (d2Params univs)) => f.app a)
+          (@SExpr.mkInst (d2Params univs) recLs
+            (TreeGen.rule i constructor).lhs)) A
+      exact (h hentry hGamma typing matched).2
+  exact hP
+
 /-- The exact remaining D2 bridge contract.
 
-Compared with the internal `D2BlockStep`, this removes both obligations now
-proved by the fixture itself: inherited Nat checks and recursor level arity.
-Its four fields are therefore the five-rule 18A′ check, the seven-rule
-capture spine, the seven-rule β-collapse, and the five generated strong
-towers. -/
+Compared with the internal `D2BlockStep`, this removes the obligations now
+proved by the fixture itself: inherited Nat checks, recursor level arity, and
+both inherited Nat site replays.  Its three fields are therefore the
+five-rule 18A′ check, one paired five-rule Tree replay, and the five generated
+strong body leaves.  The latter is pure finite work and
+`D2RegisteredTowerStep.of_body` closes it into the registered lambda towers
+generically.  The paired Tree replay still subsumes the shared
+parameter/source-level alignment boundary named by
+`D2TreeLevelAlignmentStep`; they are not pure volume as currently packaged. -/
 structure D2BlockStepExact (univs : Nat) : Prop where
   checked : D2TreeCheckedStep univs
-  captureSpine : D2CaptureSpineCoreStep univs
-  lhsCollapse : D2CollapseStep univs
-  registeredTower : D2RegisteredTowerStep univs
+  replay : D2TreeReplayStep univs
+  registeredBody : D2RegisteredBodyStep univs
+
+/-- Recover the old full-inventory capture contract from the smaller exact
+bundle.  Kept as a named projection-compatible theorem for downstream code. -/
+theorem D2BlockStepExact.captureSpine (h : D2BlockStepExact univs) :
+    D2CaptureSpineCoreStep univs :=
+  D2CaptureSpineCoreStep.of_treeReplay univs h.replay
+
+/-- Recover the old full-inventory collapse contract from the smaller exact
+bundle. -/
+theorem D2BlockStepExact.lhsCollapse (h : D2BlockStepExact univs) :
+    D2CollapseStep univs :=
+  D2CollapseStep.of_treeReplay univs h.replay
 
 theorem D2BlockStepExact.toBlockStep (h : D2BlockStepExact univs) :
     D2BlockStep univs where
   checked := h.checked
   captureSpine := D2CaptureSpineStep.of_core univs h.captureSpine
   lhsCollapse := h.lhsCollapse
-  registeredTower := h.registeredTower
+  registeredTower := D2RegisteredTowerStep.of_body univs h.registeredBody
 
 /-- Preferred complete semantic bridge, conditional only on the exact
 residual contract. -/
@@ -3201,12 +4007,12 @@ half of `iotaSite` and `registered`, packaged by the single preferred premise
 `D2BlockStepExact`; `d2SemanticExact`/`d2SortInvSExact` are conditional on
 exactly that premise and nothing else.  Descriptor uniqueness and
 `d2IotaRule_entry_elim` reduce arbitrary proof-relevant descriptors to the
-seven literal generated entries.  The inherited Nat check branches and the
-recursor level-arity field are proved outright and do not appear in the
-preferred premise.
+seven literal generated entries.  The inherited Nat check branches, both Nat
+site replays, and the recursor level-arity field are proved outright and do
+not appear in the preferred premise.
 
 The earlier record here called the residual "pure volume".  That is
-**wrong** for one of its four components:
+**wrong** for both non-registered fields of the current exact bundle:
 
 * `D2TreeCheckedStep` is *not* volume.  `TreeGen.ruleCheck` folds one `.defeq`
   per `treeDecl.nparams`, and Tree has one parameter, so discharging it at
@@ -3219,19 +4025,34 @@ The earlier record here called the residual "pure volume".  That is
   D0/D1 never met this wall because `Nat` has no parameters and no indices,
   which is why both discharge `checked` by `simp`.
 
-* `D2CaptureSpineCoreStep`, `D2CollapseStep` and
-  `D2RegisteredTowerStep` *are*
-  volume, but far less of it than the old note claimed, because the
-  rule-independent part has been factored out into the generic engine
+* `D2TreeReplayStep` pairs the remaining capture and collapse results and
+  still mixes finite replay with the same research boundary.  The generated
+  field telescope and collapsed lhs
+  rebuild constructors using the recursor-derived parameter and canonical
+  `TreeGen.sourceLevels`; `Pattern.IotaTyping` types the concrete constructor
+  at independent `ctorLs` and its own parameter.  The checked parameter
+  equality plus `D2TreeLevelAlignmentStep` are therefore required before the
+  Tree suffix/body can be connected.  Theory's `pat_wf` makes this explicit
+  by requiring constructor heads at
+  `sourceLevels.map (VLevel.inst recLs)`.
+
+* The finite remainder is now much smaller because the eight common recursor
+  arguments, conversion-aware collapse, and redex self-typing have been
+  factored into the generic engine
   `Lean4Lean/Experimental/SExprGenericReplay.lean`
-  (`SExpr.ruleCollapse`, `SExpr.iotaSiteOf`) and the syntax transport into
+  (`SExpr.spinePrefixForallN`, `SExpr.ruleReplayOfRawSpine_defeq`,
+  `Pattern.IotaTyping.redexSelf`, `SExpr.iotaSiteOf`) and the
+  syntax transport into
   `Lean4Lean/Experimental/SExprTransport.lean`.  Notably `ruleCollapse` —
   the whole reify/`instL_lamN`/`lamN_wf`/`retarget`/`appN_lamN`/`mkS`
   chain that D0 and D1 inline once per rule — is proved once, generically,
-  and is `sorryAx`-free.  Theory's own generic block-rule soundness theorem
-  takes the capture spine as a hypothesis for the same reason this engine
-  does, so `D2CaptureSpineCoreStep` marks an interface boundary, not an
-  omission.
+  and `closeTel_strong` supplies every registered-rule prefix,
+  lambda congruence, and eta contraction from one fully opened body equality.
+  The concrete five registered bodies are discharged separately.  The raw
+  `ruleCollapse` and `closeTel_strong` kernels are `sorryAx`-free; the
+  conversion-aware wrappers inherit the ladder's existing 16C′ `sorryAx`.
+  The two inherited Nat rules are fully replayed in D2 and are no longer
+  premises of `D2BlockStepExact`.
 
 The old note also claimed the D1→D2 transport functor was missing; it is
 now landed (`d1StrongToD2` and the generic transport it rests on), which is

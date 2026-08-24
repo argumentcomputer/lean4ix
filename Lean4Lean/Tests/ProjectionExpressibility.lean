@@ -1232,7 +1232,7 @@ theorem emptyRecordDecl_wf : emptyRecordDecl.WF VEnv.empty := by
   · simp [emptyRecordDecl, emptyRecordType, emptyRecordCtor,
       VInductDecl.ctorFields, VInductDecl.recFieldIdxs,
       VInductDecl.sortLevel, VExpr.dropN, VExpr.resultOf,
-      VExpr.forallN, VExpr.liftTelN, VExpr.appArgs]
+      VExpr.forallN, VExpr.appArgs]
     exact .nil
 
 theorem emptyRecordGeneration_wf :

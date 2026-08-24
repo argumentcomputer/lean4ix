@@ -657,8 +657,8 @@ theorem toConstructor_hasLevelParam :
   cases l with simp [Literal.toConstructor]
   | natVal n => cases n <;> simp [natLitToConstructor, hasLevelParam', natZero, natSucc]
   | strVal s =>
-    simp [strLitToConstructor, hasLevelParam']
-    induction s.toList <;> simp_all [hasLevelParam', Level.hasParam']
+    simp [strLitToConstructor, hasLevelParam', Level.hasParam_eq]
+    induction s.toList <;> simp_all [hasLevelParam', Level.hasParam_eq, Level.hasParam']
 
 protected theorem beq_iff_eq {m n : Literal} : m == n ↔ m = n := by
   cases m <;> cases n <;> simp! [(· == ·)]
@@ -1121,7 +1121,8 @@ theorem instantiateList_instantiate1_comm (h : a.looseBVarRange' = 0) :
 
 theorem instantiateRev_push {e : Expr} {subst a} :
     instantiateRev e (subst.push a) = instantiateRev (e.instantiate1' a) subst := by
-  let ⟨subst⟩ := subst; simp [instantiateList]
+  let ⟨subst⟩ := subst
+  simp [instantiateRev_eq, instantiate_eq, instantiateList]
 
 theorem abstractList_eq_foldl {e : Expr} {as k} :
     abstractList e as k = List.foldl (fun e a => abstract1 a e k) e as := by
@@ -1237,7 +1238,9 @@ def instantiateLevelParamsCore' : Expr → Expr
 
 theorem instantiateLevelParamsCore_eq_self (h : e.hasLevelParam' = false) :
     instantiateLevelParamsCore' red s e = e := by
-  induction e <;> simp_all [instantiateLevelParamsCore', hasLevelParam', Level.substParams_eq_self]
+  induction e <;>
+    simp_all [instantiateLevelParamsCore', hasLevelParam', Level.hasParam_eq,
+      Level.substParams_eq_self]
   exact List.map_id''' _ fun _ h' => Level.substParams_eq_self (h _ h')
 
 theorem instantiateLevelParamsCore_id {e : Expr} :
@@ -1248,7 +1251,7 @@ open private instantiateLevelParamsCore.replaceFn from Lean.Util.InstantiateLeve
 theorem instantiateLevelParamsCore_eq :
     instantiateLevelParamsCore s e =
     instantiateLevelParamsCore' true (fun x => (s x).getD (.param x)) e := by
-  simp [instantiateLevelParamsCore]
+  simp [instantiateLevelParamsCore, replace_eq]
   have (e) (H : e.hasLevelParam' = true →
         replaceNoCache (instantiateLevelParamsCore.replaceFn s) e =
         instantiateLevelParamsCore' true (fun x => (s x).getD (Level.param x)) e) :
@@ -1281,11 +1284,11 @@ theorem instantiateLevelParams_eq {e ps ls} :
 
 theorem eqv_sort {e : Expr} : e == .sort u ↔ e = .sort u := by
   conv => lhs; simp [(· == ·)]
-  cases e <;> simp [eqv']
+  cases e <;> simp [eqv_eq, eqv']
 
 theorem eqv_const {e : Expr} : e == .const c ls ↔ e = .const c ls := by
   conv => lhs; simp [(· == ·)]
-  cases e <;> simp [eqv']
+  cases e <;> simp [eqv_eq, eqv']
 
 theorem structuralEq_const {e : Expr} :
     structuralEq e (.const c ls) = true ↔ e = .const c ls := by
@@ -1301,13 +1304,14 @@ theorem structuralEq_eqv {a b : Expr} :
     structuralEq a b = true → a == b := by
   simp only [(· == ·)]
   induction a generalizing b <;> cases b <;>
-    simp_all [structuralEq, eqv']
+    simp_all [structuralEq, eqv_eq, eqv']
 
 theorem eqv_refl (e : Expr) : e == e := by
-  simp [(· == ·)]; induction e <;> simp [eqv', *]
+  simp [(· == ·), eqv_eq]
+  induction e <;> simp [eqv', *]
 
 theorem eqv_euc {e₁ e₂ e₃ : Expr} : e₁ == e₂ → e₁ == e₃ → e₂ == e₃ := by
-  simp [(· == ·)]
+  simp [(· == ·), eqv_eq]
   induction e₁ generalizing e₂ e₃
   all_goals
     cases e₂ <;> try change false = _ → _; rintro ⟨⟩
@@ -1324,7 +1328,8 @@ instance : EquivBEq Expr where
   rfl := eqv_refl _
 
 theorem data_eq {e₁ e₂ : Expr} : e₁ == e₂ → e₁.data = e₂.data := by
-  simp [(· == ·)]; induction e₁ generalizing e₂
+  simp [(· == ·), eqv_eq]
+  induction e₁ generalizing e₂
   all_goals
     cases e₂ <;> try change false = _ → _; rintro ⟨⟩
     simp [eqv']; intros; subst_vars; try simp [*]
@@ -1335,12 +1340,13 @@ instance : LawfulHashable Expr where
 
 theorem instantiate1_eqv {e₁ e₂ : Expr} :
     e₁ == e₂ → e₁.instantiate1' a k == e₂.instantiate1' a k := by
-  simp [(· == ·)]; induction e₁ generalizing e₂ k
+  simp [(· == ·), eqv_eq]
+  induction e₁ generalizing e₂ k
   all_goals
     cases e₂ <;> try change false = _ → _; rintro ⟨⟩
     simp [instantiate1', eqv']
   all_goals intros; subst_vars; try simp [*]
-  split <;> [skip; split] <;> simpa [(· == ·)] using eqv_refl _
+  split <;> [skip; split] <;> simpa [(· == ·), eqv_eq] using eqv_refl _
 
 theorem instantiateList_eqv {e₁ e₂ : Expr} (h : e₁ == e₂) :
     e₁.instantiateList as k == e₂.instantiateList as k := by

@@ -1,4 +1,4 @@
-import Lean4Lean.Std.PersistentHashMap
+import Lean4Lean.Verify.Axioms
 import Lean4Lean.Verify.Expr
 import Lean4Lean.Verify.Typing.Expr
 import Lean4Lean.Verify.Typing.Lemmas
@@ -139,7 +139,7 @@ theorem WF.map_toList : WF lctx →
     lctx.fvarIdToDecl.toList' ~ lctx.toList.map fun d => (d.fvarId, d)
   | .nil => by simp [LocalContext.toList]
   | .cons h1 h2 _ h4 => by
-    subst h1; simp [LocalContext.toList]
+    subst h1; simp [LocalContext.toList, PersistentArray.toList'_push]
     refine h4.map_wf.toList'_insert _ _ |>.trans (.cons _ ?_)
     rw [List.filter_eq_self.2]; · exact h4.map_toList
     simp; rintro _ b h rfl
@@ -157,7 +157,7 @@ theorem WF.nodup : WF lctx → (lctx.toList.map (·.fvarId)).Nodup
   | .cons h1 h2 h3 h4 => by
     have := h4.nodup
     have := h4.find?_eq_find?_toList.symm.trans h2
-    simp_all [toList]
+    simp_all [toList, PersistentArray.toList'_push]
     simpa [eq_comm] using this
 
 protected theorem WF.mkLocalDecl
@@ -171,12 +171,12 @@ protected theorem WF.mkLetDecl
 @[simp] theorem mkLocalDecl_toList {lctx : LocalContext} :
     (lctx.mkLocalDecl fv name ty bi kind).toList =
     .cdecl lctx.decls.size fv name ty bi kind :: lctx.toList := by
-  simp [mkLocalDecl, toList]
+  simp [mkLocalDecl, toList, PersistentArray.toList'_push]
 
 @[simp] theorem mkLetDecl_toList {lctx : LocalContext} :
     (lctx.mkLetDecl fv name ty val bi kind).toList =
     .ldecl lctx.decls.size fv name ty val bi kind :: lctx.toList := by
-  simp [mkLetDecl, toList]
+  simp [mkLetDecl, toList, PersistentArray.toList'_push]
 
 end Lean.LocalContext
 

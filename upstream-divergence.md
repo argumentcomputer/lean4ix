@@ -1153,8 +1153,9 @@ to the replacement.
   the deterministic recursor-encoded projector list, and carries syntactic
   lift/substitution laws. Registration is monotone and ordered; the equality
   constructor retains an exact family parameter spine and both endpoint
-  typings. The complete design and case inventory are recorded in
-  `plans/l4l-15-structure-eta-design.md`.
+  typings. The durable design summary and removal condition are consolidated
+  in `plans/roadmap.md` under TRUST/DIFF/RELEASE; the full original design and
+  case inventory remain in git history.
 - **Downstream impact:** every exhaustive `IsDefEq` consumer gains a case,
   including strong typing/inversion, weakening and substitution, environment
   monotonicity, Church--Rosser/parallel reduction, head standardization,
@@ -1192,8 +1193,9 @@ to the replacement.
   obligation for every raw registered equation in every well-formed context.
   `CertifiedExtension.covers` records only a match after `VExpr.stripLams`,
   where generated iota and quotient tower bodies actually expose a
-  first-order pattern. The full rationale and trust matrix are in
-  `plans/l4l-18b-extension-interface-design.md`.
+  first-order pattern. The durable rationale, trust boundary, and removal
+  condition are consolidated in `plans/roadmap.md` under
+  TRUST/DIFF/RELEASE; the full original trust matrix remains in git history.
 - **Downstream impact:** Church--Rosser and head standardization transport the
   local equality certificate through weakening, substitution, context
   conversion, match inversion, and triangle proofs. Only results that invoke

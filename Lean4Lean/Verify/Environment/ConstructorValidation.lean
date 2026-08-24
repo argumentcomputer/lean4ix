@@ -2051,8 +2051,7 @@ info: 'Lean4Lean.AddInductive.constructorUniverseSemanticGe_ofLevel' depends on 
  Quot.sound,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
- Level.normalize_eq,
- Std.TreeMap.all_eq_all_toList]
+ Level.normalize_eq]
 -/
 #guard_msgs in
 #print axioms constructorUniverseSemanticGe_ofLevel
@@ -8810,7 +8809,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8818,7 +8816,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8846,7 +8843,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8854,7 +8850,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8882,7 +8877,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8890,7 +8884,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8918,7 +8911,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8926,7 +8918,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8954,7 +8945,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8962,7 +8952,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8990,7 +8979,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -8998,7 +8986,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9026,7 +9013,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -9034,7 +9020,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9062,7 +9047,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -9070,7 +9054,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9117,7 +9100,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
@@ -9125,7 +9107,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

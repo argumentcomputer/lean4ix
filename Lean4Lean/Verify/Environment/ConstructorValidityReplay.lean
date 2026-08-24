@@ -2600,7 +2600,7 @@ theorem prbCandidateCheckTypeFVar
       (TypeChecker.Methods.withFuel 9999) context.toTypeChecker
       ({} : TypeChecker.State)) = .ok type
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
     TypeChecker.Inner.inferFVar, AddInductive.Context.toTypeChecker, hfind,
     LocalDecl.type, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rfl
@@ -2653,7 +2653,7 @@ theorem prbValidationSortCheckValid :
       prbValidationRootContext.toTypeChecker
       ({} : TypeChecker.State)) = _
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
     prbValidationCheckLevelSuccParam, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
   rfl
@@ -3172,7 +3172,7 @@ theorem prbValidationInferTypeFamilyCore
       .ok (propRecursiveBoundaryKernelType.type,
         prbValidationConstState state) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', hcache,
     prbValidationConstState, prbReplayInsert,
     prbValidationInferConstantFamily context henv hlparams hsafety,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -3187,7 +3187,7 @@ theorem prbValidationInferTypeFVarCore
         (TypeChecker.Methods.withFuel fuel) context.toTypeChecker state =
       .ok (type, prbReplayInsert state (.fvar id) type) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', hcache,
     TypeChecker.Inner.inferFVar, AddInductive.Context.toTypeChecker,
     hfind, LocalDecl.type, prbReplayInsert,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -3233,14 +3233,14 @@ theorem prbValidationInferFirstAppAlphaCachedCore
   have alphaRun := prbValidationInferTypeCachedCore fuel context
     (prbValidationConstState state) (.fvar alphaId)
     (.sort (.succ (.param `u)))
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange']) alphaCache
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']) alphaCache
   have appRun := prbInferAppCoreOf fuel context.toTypeChecker state
     (prbValidationConstState state) (prbValidationConstState state)
     (.const propRecursiveBoundaryKernelType.name [.param `u])
     (.fvar alphaId) (.sort (.succ (.param `u)))
     (.forallE prbValidationAName (.bvar 0) (.sort .zero) .default)
     `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange']) happ
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']) happ
     (by simpa [prbValidationAName, propRecursiveBoundaryKernelType,
       propRecursiveBoundaryInfo, ConstantInfo.type,
       ConstantInfo.toConstantVal, Expr.bindingBody!,
@@ -3345,7 +3345,7 @@ theorem prbValidationNextBodyInferExists :
     (.fvar prbValidationNextInternalBId)
     (.fvar prbValidationAlphaId) (.sort .zero)
     prbValidationAName .default
-    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     appMiss firstRun argRun (by rfl)
   refine ⟨prbValidationCachedFamilyAppState prbValidationNextBodyState
     prbValidationAlphaId prbValidationNextInternalBId, ?_⟩
@@ -3427,7 +3427,7 @@ theorem prbValidationNextDomainCheckValid :
     prbValidationAContext.toTypeChecker ({} : TypeChecker.State)
     bodyFinalState `b prbValidationAlpha
     (prbValidationFamilyApp (.bvar 0)) (.sort .zero) .default
-    (by simp [prbValidationFamilyApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [prbValidationFamilyApp, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     Std.HashMap.getElem?_empty
     (by simpa [prbValidationNextDomain] using forallRun)
   unfold AddInductive.CandidateCheckTypeStep.Valid
@@ -3480,7 +3480,7 @@ theorem prbValidationInferFirstAppCore
     (.fvar alphaId) (.sort (.succ (.param `u)))
     (.forallE prbValidationAName (.bvar 0) (.sort .zero) .default)
     `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange']) happ
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']) happ
     (by simpa [prbValidationAName, propRecursiveBoundaryKernelType,
       propRecursiveBoundaryInfo, ConstantInfo.type,
       ConstantInfo.toConstantVal, Expr.bindingBody!,
@@ -3547,7 +3547,7 @@ theorem prbValidationFamilyAppCheckValid
     (prbValidationArgumentState initial alphaId argId)
     (prbValidationFirstApp (.fvar alphaId)) (.fvar argId)
     (.fvar alphaId) (.sort .zero) prbValidationAName .default
-    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [prbValidationFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp [initial]) firstRun argRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
@@ -4400,7 +4400,7 @@ theorem prbPreFamilyFVarInferOnlyReplay
     ({} : TypeChecker.State) = _
   unfold TypeChecker.Inner.inferType'
   simp [prbPreFamilyFVarInferOnlyStateReplay,
-    Expr.hasLooseBVars, Expr.looseBVarRange',
+    Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
     TypeChecker.Inner.inferFVar, AddInductive.Context.toTypeChecker,
     find, LocalDecl.type, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
@@ -4464,7 +4464,7 @@ theorem prbPreFamilySortCheckValidReplay
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State)) = _
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
     prbPreFamilyCheckLevelSuccParamReplay context lparams,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rfl
@@ -4488,8 +4488,9 @@ theorem prbPreFamilySortZeroCheckValidReplay
       (TypeChecker.Methods.withFuel 9999)
       context.toTypeChecker ({} : TypeChecker.State)) = _
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
     TypeChecker.Inner.checkLevel, Level.getUndefParam,
+    Level.hasParam_eq,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rfl
 
@@ -4530,7 +4531,7 @@ theorem prbPreFamilyInferSortZeroCoreReplay
         .ok (.sort (.succ .zero),
           prbReplayInsert state (.sort .zero) (.sort (.succ .zero))) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', miss, prbReplayInsert, Bind.bind, ReaderT.bind,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', miss, prbReplayInsert, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
 theorem prbPreFamilyIndexTelescopeCheckValidReplay
@@ -4620,7 +4621,7 @@ theorem prbPreFamilyIndexTelescopeCheckValidReplay
     prbValidationAName prbValidationAlpha (.sort .zero)
     (.sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero)))
     .default
-    (by simp [prbValidationAlpha_shape, Expr.hasLooseBVars, Expr.looseBVarRange']) Std.HashMap.getElem?_empty forallRun
+    (by simp [prbValidationAlpha_shape, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']) Std.HashMap.getElem?_empty forallRun
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run context.env context.safety context.lctx
     context.lparams context.fuel
@@ -5862,7 +5863,7 @@ theorem cvmInferTypeFVarOnlyCoreTest
       (TypeChecker.Methods.withFuel fuel) context.toTypeChecker state =
         .ok (type, cvmInferOnlyInsertTest state (.fvar id) type) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', hcache,
     TypeChecker.Inner.inferFVar, AddInductive.Context.toTypeChecker,
     hfind, LocalDecl.type, cvmInferOnlyInsertTest,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -5963,11 +5964,12 @@ theorem cvmValidationProofInferOnlyTest :
           #[.fvar cvmValidationXIdTest] := by
     rfl
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', TypeChecker.Inner.inferApp,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', TypeChecker.Inner.inferApp,
     TypeChecker.Inner.inferApp.loop, appFn, appArgs, pRun, cvmValidationPDomainTest,
     cvmValidationProofFinalStateTest, cvmValidationProofPStateTest, cvmInferOnlyInsertTest,
-    cvmCtorProofDomainValidationShapeTest, Expr.instantiateRev_eq, Expr.instantiate_eq,
-    Expr.instantiate1', Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    cvmCtorProofDomainValidationShapeTest, Expr.instantiateRevRange_eq,
+    Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem cvmValidationProofEnsureTest :
     AddInductive.ConstructorEnsureTypeStep.Valid
@@ -6068,7 +6070,7 @@ theorem cvmInferTypeFamilyOnlyCoreTest
             (.const constructorValidityMatrixKernelType.name [.param `u])
             constructorValidityMatrixKernelType.type) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', cacheMiss,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', cacheMiss,
     cvmInferConstantFamilyOnlyTest context envEq,
     cvmInferOnlyInsertTest, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
@@ -6134,7 +6136,8 @@ theorem cvmInferTypeFamilyApplicationOnlyTest
     cvmValidationFamilyApplicationStateTest,
     cvmValidationFamilyOnlyStateTest, cvmInferOnlyInsertTest,
     cvmKernelFamilyTypeShapeTest,
-    Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiateRevRange_eq, Expr.instantiateRev_eq,
+    Expr.instantiate_eq,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 def cvmValidationFamilyOnlyStateFromTest
@@ -6194,7 +6197,8 @@ theorem cvmInferTypeFamilyApplicationOnlyCoreTest
     cvmValidationFamilyApplicationStateFromTest,
     cvmValidationFamilyOnlyStateFromTest, cvmInferOnlyInsertTest,
     cvmKernelFamilyTypeShapeTest,
-    Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiateRevRange_eq, Expr.instantiateRev_eq,
+    Expr.instantiate_eq,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem cvmInferTypeForallOnlyCoreTest
@@ -6255,7 +6259,7 @@ theorem cvmValidationDirectEnsureTest :
       (.fvar cvmValidationAlphaIdTest) (.fvar cvmValidationPIdTest)
       cvmValidationProofEnvTest cvmValidationProofDepthTest
       (by simp [cvmValidationFamilyApplicationTest,
-        Expr.hasLooseBVars, Expr.looseBVarRange']))
+        Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']))
 
 def cvmValidationDirectContextTest : AddInductive.Context :=
   cvmValidationProofContextTest.pushLocalDecl `direct .default
@@ -6417,7 +6421,7 @@ theorem cvmValidationFunctionInferOnlyTest :
         (.fvar cvmValidationAlphaIdTest) (.fvar cvmValidationPIdTest)
         familyMiss applicationMiss (by rfl)
         (by simp [cvmValidationFamilyApplicationTest,
-          Expr.hasLooseBVars, Expr.looseBVarRange'])
+          Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
   have forallRun : TypeChecker.Inner.inferForall
       (.forallE `y (.fvar cvmValidationAlphaIdTest)
         (cvmValidationFamilyApplicationTest
@@ -6503,7 +6507,7 @@ theorem cvmValidationFunctionInferOnlyTest :
       (.fvar cvmValidationAlphaIdTest) (.fvar cvmValidationPIdTest))
     (.sort (.succ (.param `u))) .default
     (by simp [cvmValidationFamilyApplicationTest,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+      Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     Std.HashMap.getElem?_empty forallRun
   change TypeChecker.Inner.inferType' cvmCtorFunctionDomain true
     (TypeChecker.Methods.withFuel 9999)
@@ -6686,7 +6690,8 @@ theorem cvmInferTypePredicateApplicationOnlyTest
   simp [TypeChecker.Inner.inferApp, TypeChecker.Inner.inferApp.loop, appFn, appArgs, predicateRun,
     cvmValidationPDomainTest, cvmValidationPredicateApplicationTest,
     cvmValidationPredicateApplicationStateTest, cvmValidationPredicateStateTest,
-    cvmInferOnlyInsertTest, Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
+    cvmInferOnlyInsertTest, Expr.instantiateRevRange_eq,
+    Expr.instantiateRev_eq, Expr.instantiate_eq,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem cvmValidationPFindInProofTest :
@@ -6767,7 +6772,7 @@ theorem cvmValidationLaterProofEnsureTest :
       cvmValidationPIdTest (.fvar cvmValidationLaterIdTest)
       cvmValidationPFindInLaterTest cvmValidationLaterDepthTest
       (by simp [cvmValidationPredicateApplicationTest,
-        Expr.hasLooseBVars, Expr.looseBVarRange']))
+        Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']))
 
 def cvmValidationLaterProofContextTest : AddInductive.Context :=
   cvmValidationLaterContextTest.pushLocalDecl `laterProof .default
@@ -7239,7 +7244,7 @@ theorem cvmValidationAlphaToPropCheckTest (indexName : Name) :
     (.fvar cvmValidationAlphaIdTest) (.sort .zero)
     (.sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))) .default
     (by simp [Expr.hasLooseBVars,
-      Expr.looseBVarRange']) Std.HashMap.getElem?_empty
+      Expr.looseBVarRange_eq, Expr.looseBVarRange']) Std.HashMap.getElem?_empty
     forallRun
   unfold AddInductive.CandidateCheckTypeStep.Valid
   change TypeChecker.M.run cvmValidationRootContextTest.env
@@ -7344,7 +7349,7 @@ theorem cvmValidationInferTypeFamilyCoreTest
       .ok (constructorValidityMatrixKernelType.type,
         cvmValidationFamilyConstStateTest state) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', cacheMiss,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange', cacheMiss,
     cvmValidationFamilyConstStateTest, prbReplayInsert,
     cvmInferConstantFamilyFullTest context envEq lparams safety,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -7437,7 +7442,7 @@ theorem cvmValidationFamilyApplicationCheckTest
         (.sort .zero) .default)
       (.sort (.succ (.param `u))) .default)
     `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp [initial])
     (by simpa [cvmKernelFamilyTypeShapeTest] using familyRun)
     alphaRun (by rfl)
@@ -7481,7 +7486,7 @@ theorem cvmValidationFamilyApplicationCheckTest
     (.forallE cvmValidationIndexNameTest (.fvar alphaId)
       (.sort .zero) .default)
     (.sort (.succ (.param `u))) `P .default
-    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp [initial])
     firstRun' predicateRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
@@ -7580,7 +7585,7 @@ theorem cvmValidationPredicateApplicationCheckTest
     (.fvar predicateId) (.fvar argumentId)
     (.fvar cvmValidationAlphaIdTest) (.sort .zero)
     cvmValidationIndexNameTest .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp [initial])
     predicateRun argumentRun (by rfl)
   unfold AddInductive.CandidateCheckTypeStep.Valid
@@ -7802,7 +7807,7 @@ theorem cvmValidationInferFirstAppAlphaCachedCoreTest
   have alphaRun := prbValidationInferTypeCachedCore fuel context
     (cvmValidationFamilyConstStateTest state) (.fvar alphaId)
     (.sort (.succ (.param `u)))
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange']) alphaCache'
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']) alphaCache'
   have appRun := prbInferAppCoreOf fuel context.toTypeChecker state
     (cvmValidationFamilyConstStateTest state)
     (cvmValidationFamilyConstStateTest state)
@@ -7813,7 +7818,7 @@ theorem cvmValidationInferFirstAppAlphaCachedCoreTest
         (.sort .zero) .default)
       (.sort (.succ (.param `u))) .default)
     `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     firstMiss
     (by simpa [cvmKernelFamilyTypeShapeTest] using familyRun)
     alphaRun (by rfl)
@@ -7875,7 +7880,7 @@ theorem cvmValidationFamilyApplicationAlphaCachedCoreTest
     (.forallE cvmValidationIndexNameTest (.fvar alphaId)
       (.sort .zero) .default)
     (.sort (.succ (.param `u))) `P .default
-    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [cvmValidationFirstAppFullTest, Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     applicationMiss firstRun predicateRun (by rfl)
   simpa [cvmValidationFamilyApplicationTest,
     cvmValidationFirstAppFullTest,
@@ -8085,7 +8090,7 @@ theorem cvmValidationFunctionCheckTest :
       (.fvar cvmValidationAlphaIdTest) (.fvar cvmValidationPIdTest))
     (.sort (.succ (.param `u))) .default
     (by simp [cvmValidationFamilyApplicationTest,
-      Expr.hasLooseBVars, Expr.looseBVarRange'])
+      Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     Std.HashMap.getElem?_empty forallRun
   rw [cvmCtorFunctionDomainValidationShapeTest]
   unfold AddInductive.CandidateCheckTypeStep.Valid
@@ -10044,7 +10049,7 @@ def cvmPreFamilyPredicateEnsureTest
       (cvmInferTypePredicateApplicationOnlyTest context
         cvmValidationPIdTest (.fvar argumentId) predicateFind depth
         (by simp [cvmValidationPredicateApplicationTest,
-          Expr.hasLooseBVars, Expr.looseBVarRange']))⟩
+          Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']))⟩
 
 def cvmPreFamilyReflAnnotationsTest
     (context : AddInductive.Context) (source : Expr) :
@@ -11390,7 +11395,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.cvmStagedPreFamilyInput' depends on axi
  PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert,
  cvmExecutionResult_isOk._native.native_decide.ax_1_1]

@@ -556,7 +556,7 @@ def treeReplay11 : BlockReplayArtifact where
     isUnsafe := false
     context := treeKernelContext
     execution := treeExecution
-    produced := treeProducedExecution.property
+    produced := treeBlockGenerationShape.producedExecution
     familyNames := rfl
     constructorNames := rfl }
   generationProduced := rfl
@@ -579,7 +579,7 @@ def indexedTreeReplay11 : BlockReplayArtifact where
     isUnsafe := false
     context := indexedTreeKernelContext
     execution := indexedTreeExecution
-    produced := indexedTreeProducedExecution.property
+    produced := indexedTreeBlockGenerationShape.producedExecution
     familyNames := rfl
     constructorNames := rfl }
   generationProduced := rfl
@@ -742,7 +742,6 @@ info: 'Lean4Lean.CompleteInductiveReplay.completeReplayMatrix_metadataComplete' 
  Lean.PersistentArray.toList'_push,
  Lean.PersistentHashMap.findAux_isSome,
  Lean.Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert,
  Lean4Lean.CompleteInductiveReplay.singletonCandidateReplayMatrix._native.native_decide.ax_1,
@@ -751,8 +750,8 @@ info: 'Lean4Lean.CompleteInductiveReplay.completeReplayMatrix_metadataComplete' 
  Lean4Lean.DeepNestedReplayFixtures.deepNestedC_some._native.native_decide.ax_1_1,
  Lean4Lean.DeepNestedReplayFixtures.deepRecursors_eq._native.native_decide.ax_1_1,
  Lean4Lean.DeepNestedReplayFixtures.deepRules_eq._native.native_decide.ax_1_1,
- Lean4Lean.MutualInductiveReplayFixtures.indexedTreeExecutionResult_isOk._native.native_decide.ax_1_1,
- Lean4Lean.MutualInductiveReplayFixtures.treeExecutionResult_isOk._native.native_decide.ax_1_1,
+ Lean4Lean.MutualInductiveReplayFixtures.indexedTreeBlockGenerationShapeResult_isOk._native.native_decide.ax_1_1,
+ Lean4Lean.MutualInductiveReplayFixtures.treeBlockGenerationShapeResult_isOk._native.native_decide.ax_1_1,
  Lean4Lean.NestedReplayFixtures.nvKTarget09._native.native_decide.ax_1_1,
  Lean4Lean.NestedReplayFixtures.nvNestedC._native.native_decide.ax_1,
  Lean4Lean.NestedReplayFixtures.nvRecursors_eq._native.native_decide.ax_1_1,

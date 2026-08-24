@@ -1,18 +1,55 @@
 import Batteries.Tactic.OpenPrivate
+import Lean.Data.SMap
+import Std.Data.HashMap.Lemmas
 import Lean4Lean.Std.Basic
+import Lean4Lean.Std.HashMap
 import Lean4Lean.Std.NodupKeys
+
+namespace Std.DTreeMap.Internal.Impl
+
+private theorem any_eq_any_toListModel
+    {α : Type u} {β : α → Type v} {p : (a : α) → β a → Bool} {m : Impl α β} :
+    m.any p = m.toListModel.any (fun x => p x.1 x.2) := by
+  simp [any, ForIn.forIn, Id.run_bind]
+  rw [forIn_eq_forIn_toListModel, ← toList_eq_toListModel, forIn_eq_forIn']
+  induction m.toList with
+  | nil => simp
+  | cons hd tl ih =>
+    simp only [forIn'_eq_forIn, List.any_cons]
+    by_cases h : p hd.fst hd.snd = true
+    · simp [h]
+    · simp only [forIn'_eq_forIn] at ih
+      simp [h, ih]
+
+end Std.DTreeMap.Internal.Impl
 
 namespace Std.TreeMap
 
 variable {α : Type u} {β : Type v} {cmp : α → α → Ordering} {t : TreeMap α β cmp}
 
 /-- https://github.com/leanprover/lean4/issues/12798 -/
-axiom all_eq_all_toList {p : α → β → Bool} :
-    t.all p = t.toList.all fun a => p a.1 a.2
+theorem all_eq_all_toList {p : α → β → Bool} :
+    t.all p = t.toList.all fun a => p a.1 a.2 := by
+  change t.inner.inner.all p =
+    (Std.DTreeMap.Internal.Impl.Const.toList t.inner.inner).all fun a => p a.1 a.2
+  rw [Std.DTreeMap.Internal.Impl.all_eq_all_toListModel,
+    Std.DTreeMap.Internal.Impl.Const.toList_eq_toListModel_map]
+  generalize t.inner.inner.toListModel = l
+  induction l with
+  | nil => rfl
+  | cons x l ih => cases x; simp [ih]
 
 /-- https://github.com/leanprover/lean4/issues/12798 -/
-axiom any_eq_any_toList {p : α → β → Bool} :
-    t.any p = t.toList.any fun a => p a.1 a.2
+theorem any_eq_any_toList {p : α → β → Bool} :
+    t.any p = t.toList.any fun a => p a.1 a.2 := by
+  change t.inner.inner.any p =
+    (Std.DTreeMap.Internal.Impl.Const.toList t.inner.inner).any fun a => p a.1 a.2
+  rw [Std.DTreeMap.Internal.Impl.any_eq_any_toListModel,
+    Std.DTreeMap.Internal.Impl.Const.toList_eq_toListModel_map]
+  generalize t.inner.inner.toListModel = l
+  induction l with
+  | nil => rfl
+  | cons x l ih => cases x; simp [ih]
 
 end Std.TreeMap
 
@@ -36,7 +73,7 @@ noncomputable def toList' (arr : PersistentArray α) : List α :=
 @[simp] theorem toList'_empty : (.empty : PersistentArray α).toList' = [] := rfl
 
 /-- We cannot prove this because `insertNewLeaf` is partial -/
-@[simp] axiom toList'_push {α} (arr : PersistentArray α) (x : α) :
+axiom toList'_push {α} (arr : PersistentArray α) (x : α) :
     (arr.push x).toList' = arr.toList' ++ [x]
 
 @[simp] theorem size_empty : (.empty : PersistentArray α).size = 0 := rfl
@@ -46,7 +83,7 @@ noncomputable def toList' (arr : PersistentArray α) : List α :=
   simp [push]; split <;> [rfl; (simp [mkNewTail]; split <;> rfl)]
 
 @[simp] theorem WF.toList'_length (h : WF arr) : arr.toList'.length = arr.size := by
-  induction h <;> simp [*]
+  induction h <;> simp [*, toList'_push]
 
 end PersistentArray
 
@@ -83,7 +120,119 @@ axiom WF.find?_eq {α β} [BEq α] [Hashable α]
 axiom findAux_isSome {α β} [BEq α] {node : Node α β} (i : USize) (a : α) :
     containsAux node i a = (findAux node i a).isSome
 
+@[simp] theorem toList'_empty [BEq α] [Hashable α] :
+    (.empty : PersistentHashMap α β).toList' = [] := by
+  have this n : @Node.toList' α β (.entries ⟨.replicate n .null⟩) = [] := by
+    simp [Node.toList']
+    induction n <;> simp [*, List.replicate_succ]
+  apply this
+
+@[simp] theorem toList'_empty' [BEq α] [Hashable α] :
+    ({} : PersistentHashMap α β).toList' = [] := toList'_empty
+
+theorem find?_isSome {α β} [BEq α] [Hashable α]
+    (m : PersistentHashMap α β) (a : α) : m.contains a = (m.find? a).isSome := findAux_isSome ..
+
+theorem WF.nodupKeys [BEq α] [Hashable α]
+    [LawfulBEq α] [LawfulHashable α]
+    {m : PersistentHashMap α β} (h : WF m) : m.toList'.NodupKeys := by
+  induction h with
+  | empty => simp; exact .nil
+  | insert h1 ih =>
+    refine (h1.toList'_insert ..).nodupKeys_iff.2 (List.nodupKeys_cons.2 ⟨?_, ih.filter _⟩)
+    rintro _ h3 rfl
+    simpa using (List.mem_filter.1 h3).2
+
+variable [BEq α] [LawfulBEq α] [Hashable α] [LawfulHashable α] in
+theorem WF.find?_insert {s : PersistentHashMap α β} (h : s.WF) :
+    (s.insert k v).find? x = if k == x then some v else s.find? x := by
+  rw [h.insert.find?_eq, h.find?_eq, BEq.comm,
+    (h.toList'_insert ..).lookup_eq h.insert.nodupKeys, List.lookup]
+  cases eq : x == k <;> simp
+  induction s.toList' with
+  | nil => rfl
+  | cons kv l ih =>
+    simp [List.filter]; split <;> simp [List.lookup, *]
+    split <;> [skip; rfl]
+    rename_i h1 _ h2
+    simp at h1 h2; simp [h1, h2] at eq
+
 end PersistentHashMap
+
+namespace SMap
+
+variable [BEq α] [Hashable α]
+structure WF (s : SMap α β) where
+  map₂ : s.map₂.WF
+  stage : s.stage₁ → s.map₂ = .empty
+  disjoint : s.map₂.contains a → ¬a ∈ s.map₁
+
+theorem WF.empty : WF ({} : SMap α β) := ⟨.empty, fun _ => rfl, by simp⟩
+
+protected nonrec theorem WF.insert [LawfulBEq α] [LawfulHashable α] {s : SMap α β}
+    (h : s.WF) (k : α) (v : β) (hn : s.find? k = none) : (s.insert k v).WF := by
+  unfold insert; split
+  · refine ⟨h.map₂, h.stage, fun _ h' => ?_⟩
+    have := h.stage
+    simp_all [find?, PersistentHashMap.find?_isSome, PersistentHashMap.WF.empty.find?_eq]
+  · refine ⟨h.map₂.insert .., nofun, fun h1 => ?_⟩
+    simp_all [PersistentHashMap.find?_isSome, h.map₂.find?_insert]
+    revert ‹_›; split
+    · simp_all [find?]
+    · exact h.disjoint ∘ by simp [PersistentHashMap.find?_isSome]
+
+variable [LawfulBEq α] [LawfulHashable α] in
+theorem WF.find?_insert {s : SMap α β} (h : s.WF) :
+    (s.insert k v).find? x = if k == x then some v else s.find? x := by
+  unfold insert; split <;> simp [find?]
+  · exact Std.HashMap.getElem?_insert (α := α)
+  · rw [h.map₂.find?_insert]; split <;> rfl
+
+noncomputable def toList' [BEq α] [Hashable α] (m : SMap α β) :
+    List (α × β) := m.map₂.toList' ++ m.map₁.toList
+
+open scoped _root_.List in
+theorem WF.toList'_insert {α β} [BEq α] [LawfulBEq α] [Hashable α] [LawfulHashable α]
+    {m : SMap α β} (wf : WF m) (a : α) (b : β)
+    (h : m.find? a = none) :
+    (m.insert a b).toList' ~ (a, b) :: m.toList' := by
+  unfold insert; split <;> simp [toList']
+  · have : EquivBEq α := inferInstance; clear ‹LawfulBEq _›
+    have := wf.stage rfl; simp [find?] at this h; subst this; simp
+    refine (List.filter_eq_self.2 ?_ ▸ Std.HashMap.insert_toList (α := α) .. :)
+    rintro ⟨a', b⟩ h
+    refine Decidable.by_contra fun h2 => ?_
+    simp at h2
+    have := Std.HashMap.getElem?_eq_some_iff_exists_beq_and_mem_toList.2 ⟨_, h2, h⟩
+    exact ‹¬_› (Std.HashMap.mem_of_getElem? this)
+  · refine .append_right (l₂ := _::_) _ ?_
+    refine (List.filter_eq_self.2 ?_ ▸ wf.map₂.toList'_insert .. :)
+    rintro ⟨a', b⟩ h'
+    have := wf.map₂.find?_eq a
+    simp_all [find?]; rintro rfl
+    exact h.1 _ _ h' rfl
+
+theorem WF.find?_eq {α β} [BEq α] [Hashable α] [LawfulBEq α] [LawfulHashable α]
+    {m : SMap α β} (wf : WF m) (a : α) : m.find? a = m.toList'.lookup a := by
+  simp [find?]; split
+  · cases wf.stage rfl
+    simp [toList']
+    exact Std.HashMap.getElem?_eq_lookup_toList ..
+  · simp [toList', List.lookup_append, wf.map₂.find?_eq]
+    cases List.lookup a .. <;> simp [Std.HashMap.getElem?_eq_lookup_toList]
+
+theorem WF.find?'_eq_find? {α β} [BEq α] [Hashable α] [EquivBEq α] [LawfulHashable α]
+    {m : SMap α β} (wf : WF m) (a : α) : m.find?' a = m.find? a := by
+  simp [find?, find?']; split; · rfl
+  rename_i m₁ m₂
+  cases e1 : m₁[a]? <;> cases e2 : m₂.find? a <;> simp
+  cases wf.disjoint (by simp [PersistentHashMap.find?_isSome, e2]) (Std.HashMap.mem_of_getElem? e1)
+
+theorem find?_isSome {α β} [BEq α] [Hashable α] [EquivBEq α] [LawfulHashable α]
+    (m : SMap α β) (a : α) : m.contains a = (m.find? a).isSome := by
+  simp [find?, contains]; split <;> simp [← PersistentHashMap.find?_isSome, Bool.or_comm]
+
+end SMap
 
 namespace Syntax
 
@@ -112,7 +261,7 @@ theorem structEq'_node :
 
 /-- This is a `partial` because it is not obviously terminating. The `structEq'_node` theorem
 shows that a definition with the same clauses can be defined manually. -/
-@[simp] axiom structEq_eq : structEq a b = structEq' a b
+axiom structEq_eq : structEq a b = structEq' a b
 end Syntax
 
 namespace Level
@@ -160,8 +309,7 @@ theorem size_getLevelOffset (l : Level) :
   rw [getOffsetAux_eq l 1]; omega
 
 end Total
-open private accMax mkIMaxAux mkMaxAux skipExplicit isExplicitSubsumedAux
-  isExplicitSubsumed from Lean.Level
+open private accMax mkIMaxAux isExplicitSubsumedAux isExplicitSubsumed from Lean.Level
 
 def Total.mkMaxAux (lvls : Array Level) (extraK : Nat) (i : Nat)
     (prev : Level) (prevK : Nat) (result : Level) : Level :=
@@ -173,16 +321,10 @@ def Total.mkMaxAux (lvls : Array Level) (extraK : Nat) (i : Nat)
     else mkMaxAux lvls extraK (i+1) curr currK (accMax result prev (extraK + prevK))
   else accMax result prev (extraK + prevK)
 
-/-- Patch for `partial def Lean.Level.mkMaxAux`. -/
-@[simp] axiom mkMaxAux_eq : mkMaxAux = Total.mkMaxAux
-
 def Total.skipExplicit (lvls : Array Level) (i : Nat) : Nat :=
   if h : i < lvls.size then
     if lvls[i].getLevelOffset.isZero then skipExplicit lvls (i+1) else i
   else i
-
-/-- Patch for `partial def Lean.Level.skipExplicit`. -/
-@[simp] axiom skipExplicit_eq : skipExplicit = Total.skipExplicit
 
 def Total.isExplicitSubsumedAux (lvls : Array Level) (maxExplicit : Nat) (i : Nat) : Bool :=
   if h : i < lvls.size then
@@ -191,7 +333,7 @@ def Total.isExplicitSubsumedAux (lvls : Array Level) (maxExplicit : Nat) (i : Na
   else false
 
 /-- Patch for `partial def Lean.Level.isExplicitSubsumedAux`. -/
-@[simp] axiom isExplicitSubsumedAux_eq : isExplicitSubsumedAux = Total.isExplicitSubsumedAux
+axiom isExplicitSubsumedAux_eq : isExplicitSubsumedAux = Total.isExplicitSubsumedAux
 
 mutual
 
@@ -276,7 +418,7 @@ def hasParam' : Level → Bool
 
 /-- This was false prior to the fix of lean4#8554; it should now be provable
 using `mkData_eq` and friends, but this has not been done yet -/
-@[simp] axiom hasParam_eq (l : Level) : l.hasParam = l.hasParam'
+axiom hasParam_eq (l : Level) : l.hasParam = l.hasParam'
 
 def hasMVar' : Level → Bool
   | .mvar .. => true
@@ -286,21 +428,10 @@ def hasMVar' : Level → Bool
 
 /-- This was false prior to the fix of lean4#8554; it should now be provable
 using `mkData_eq` and friends, but this has not been done yet -/
-@[simp] axiom hasMVar_eq (l : Level) : l.hasMVar = l.hasMVar'
+axiom hasMVar_eq (l : Level) : l.hasMVar = l.hasMVar'
 
 /-- This is because the `BEq` instance is implemented in C++ -/
 @[instance] axiom instLawfulBEqLevel : LawfulBEq Level
-
-@[inline] private def mkIMaxCore (u v : Level) (elseK : Unit → Level) : Level :=
-  if v.isNeverZero then mkLevelMax' u v
-  else if v.isZero then v
-  else if u.isZero || u matches .succ .zero then v
-  else if u == v then u
-  else elseK ()
-
-open private mkLevelIMaxCore from Lean.Level in
-/-- Workaround for https://github.com/leanprover/lean4/pull/7631#issuecomment-3289800246 -/
-@[simp] axiom mkLevelIMaxCore_eq (e : Expr) (n : Nat) : mkLevelIMaxCore = mkIMaxCore
 
 end Level
 
@@ -357,10 +488,10 @@ def looseBVarRange' : Expr → Nat
 
 /-- This was false prior to the fix of lean4#8554; it should now be provable
 using `mkData_eq` and friends, but this has not been done yet -/
-@[simp] axiom looseBVarRange_eq (e : Expr) : e.looseBVarRange = e.looseBVarRange'
+axiom looseBVarRange_eq (e : Expr) : e.looseBVarRange = e.looseBVarRange'
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom replace_eq (e : Expr) (f) : e.replace f = e.replaceNoCache f
+axiom replace_eq (e : Expr) (f) : e.replace f = e.replaceNoCache f
 
 def liftLooseBVars' (e : @& Expr) (s d : @& Nat) : Expr :=
   match e with
@@ -377,9 +508,6 @@ def liftLooseBVars' (e : @& Expr) (s d : @& Nat) : Expr :=
   | e@(.fvar _)
   | e@(.mvar _)
   | e@(.lit _) => e
-
-/-- This could be an `@[implemented_by]` -/
-@[simp] axiom liftLooseBVars_eq (e : Expr) (s d) : e.liftLooseBVars s d = e.liftLooseBVars' s d
 
 def lowerLooseBVars' (e : @& Expr) (s d : @& Nat) : Expr :=
   if s < d then e else
@@ -399,7 +527,7 @@ def lowerLooseBVars' (e : @& Expr) (s d : @& Nat) : Expr :=
   | e@(.lit _) => e
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom lowerLooseBVars_eq (e : Expr) (s d) : e.lowerLooseBVars s d = e.lowerLooseBVars' s d
+axiom lowerLooseBVars_eq (e : Expr) (s d) : e.lowerLooseBVars s d = e.lowerLooseBVars' s d
 
 def instantiate1' (e : Expr) (subst : Expr) (d := 0) : Expr :=
   match e with
@@ -418,26 +546,26 @@ def instantiate1' (e : Expr) (subst : Expr) (d := 0) : Expr :=
   | .lit _ => e
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom instantiate1_eq (e : Expr) (subst) : e.instantiate1 subst = e.instantiate1' subst
+axiom instantiate1_eq (e : Expr) (subst) : e.instantiate1 subst = e.instantiate1' subst
 
 @[simp] def instantiateList : Expr → List Expr → (k :_:= 0) → Expr
   | e, [], _ => e
   | e, a :: as, k => instantiateList (instantiate1' e a k) as k
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom instantiate_eq (e : Expr) (subst) :
+axiom instantiate_eq (e : Expr) (subst) :
     e.instantiate subst = e.instantiateList subst.toList
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom instantiateRev_eq (e : Expr) (subst) :
+axiom instantiateRev_eq (e : Expr) (subst) :
     e.instantiateRev subst = e.instantiate subst.reverse
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom instantiateRange_eq (e : Expr) (subst) :
+axiom instantiateRange_eq (e : Expr) (subst) :
     e.instantiateRange start stop subst = e.instantiate (subst.extract start stop)
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom instantiateRevRange_eq (e : Expr) (subst) :
+axiom instantiateRevRange_eq (e : Expr) (subst) :
     e.instantiateRevRange start stop subst = e.instantiateRev (subst.extract start stop)
 
 def abstract1 (v : FVarId) : Expr → (k :_:= 0) → Expr
@@ -460,11 +588,11 @@ def abstract1 (v : FVarId) : Expr → (k :_:= 0) → Expr
   | e, a :: as, k => abstractList (abstract1 a e k) as k
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom abstract_eq (e : Expr) (xs : List FVarId) :
+axiom abstract_eq (e : Expr) (xs : List FVarId) :
     e.abstract ⟨xs.map .fvar⟩ = e.abstractList xs
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom abstractRange_eq (e : Expr) (n : Nat) (xs : Array Expr) :
+axiom abstractRange_eq (e : Expr) (n : Nat) (xs : Array Expr) :
     e.abstractRange n xs = e.abstract (xs.extract 0 n)
 
 def hasLooseBVar' : (e : @& Expr) → (bvarIdx : @& Nat) → Bool
@@ -482,7 +610,7 @@ def hasLooseBVar' : (e : @& Expr) → (bvarIdx : @& Nat) → Bool
   | .lit _, _ => false
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom hasLooseBVar_eq (e : Expr) (n : Nat) : e.hasLooseBVar n = e.hasLooseBVar' n
+axiom hasLooseBVar_eq (e : Expr) (n : Nat) : e.hasLooseBVar n = e.hasLooseBVar' n
 
 def eqv' : (e1 e2 : Expr) → (strict : Bool := false) → Bool
   | .bvar i, .bvar i', _
@@ -502,9 +630,6 @@ def eqv' : (e1 e2 : Expr) → (strict : Bool := false) → Bool
   | _, _, _ => false
 
 /-- This could be an `@[implemented_by]` -/
-@[simp] axiom eqv_eq (e1 e2 : Expr) : e1.eqv e2 = e1.eqv' e2
-
-/-- This could be an `@[implemented_by]` -/
-@[simp] axiom equal_eq (e1 e2 : Expr) : e1.equal e2 = e1.eqv' e2 (strict := true)
+axiom eqv_eq (e1 e2 : Expr) : e1.eqv e2 = e1.eqv' e2
 
 end Expr

@@ -57,26 +57,41 @@ theorem indexedVecDeclareRoot :
         #[indexedVecKernelType] 0 false
         indexedVecFamilyCandidateContext =
       .ok ctorEnv := by
-  simp [AddInductive.declareInductiveTypes,
-    AddInductive.declaredInductiveInfos,
-    AddInductive.declaredInductiveInfo,
-    AddInductive.declareInductiveInfoList,
-    indexedVecCandidateInductiveStats_nindices,
-    indexedVecCandidateInductiveStats_indConsts,
-    indexedVecKernelType, indexedVecKernelNil, indexedVecKernelCons,
-    indexedVecInfo, indexedVecNilInfo, indexedVecConsInfo,
-    ConstantInfo.name, ConstantInfo.type, ConstantInfo.toConstantVal,
-    ctorEnv, indexedVecKernelEnv, indexedVecFamilyCandidateContext,
-    indexedVecTypeMap,
-    AddInductive.isRec, AddInductive.isRec.loop,
-    AddInductive.isReflexive, AddInductive.isReflexive.loop,
-    AddInductive.hasIndOcc, Expr.constName!,
-    Bind.bind, Except.bind]
   have hcheck :
       (Kernel.Environment.ofConstants `_indexedVecCandidate natMap).checkName
           ``IndexedVec false = .ok () := by
     simpa [indexedVecKernelEnv] using validationFamilyEnvCheckName
-  rw [hcheck]
+  have hInfos :
+      (AddInductive.declaredInductiveInfos indexedVecCandidateInductiveStats 1
+        #[indexedVecKernelType] 0 false
+        indexedVecFamilyCandidateContext).toList =
+      [AddInductive.singletonDeclaredInfo indexedVecCandidateInductiveStats
+        1 1 indexedVecKernelType 0 false
+          indexedVecFamilyCandidateContext] :=
+    AddInductive.declaredInductiveInfos_singleton _ _ _ _ _ _ _
+      indexedVecCandidateInductiveStats_nindices
+  have hInfo :
+      ConstantInfo.inductInfo
+          (AddInductive.singletonDeclaredInfo
+            indexedVecCandidateInductiveStats 1 1 indexedVecKernelType 0
+              false indexedVecFamilyCandidateContext) = indexedVecInfo := by
+    simp [AddInductive.singletonDeclaredInfo,
+      indexedVecCandidateInductiveStats_indConsts,
+      indexedVecKernelType, indexedVecKernelNil, indexedVecKernelCons,
+      indexedVecInfo, indexedVecNilInfo, indexedVecConsInfo,
+      indexedVecFamilyCandidateContext, AddInductive.isRec,
+      AddInductive.isRec.loop, AddInductive.isReflexive,
+      AddInductive.isReflexive.loop, AddInductive.hasIndOcc,
+      Expr.constName!, ConstantInfo.name, ConstantInfo.type,
+      ConstantInfo.toConstantVal]
+    exact ⟨rfl, rfl⟩
+  simp only [AddInductive.declareInductiveTypes]
+  rw [hInfos]
+  simp only [AddInductive.declareInductiveInfoList]
+  rw [hInfo]
+  simp only [AddInductive.singletonDeclaredInfo, indexedVecKernelType,
+    indexedVecFamilyCandidateContext, indexedVecKernelEnv]
+  rw [show indexedVecInfo.name = ``IndexedVec by rfl, hcheck]
   rfl
 
 theorem indexedVecDeclareFromTerminal :
@@ -188,7 +203,8 @@ theorem indexedVecValidationAlphaFind :
     AddInductive.Context.pushLocalDecl,
     AddInductive.Context.freshFVarId,
     LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId,
+    LocalContext.toList, PersistentArray.toList'_push,
+    LocalDecl.fvarId,
     NameGenerator.next, NameGenerator.curr]
 
 @[simp] theorem indexedVecValidationAlphaShape : indexedVecValidationAlpha =
@@ -303,7 +319,7 @@ theorem ctorIndexedVecFVarCheckTypeM
         (validationIndexState alphaId nId)
         (.fvar alphaId) (.fvar nId)
         (by simp [ctorIndexedVecApp, Expr.hasLooseBVars,
-          Expr.looseBVarRange'])
+          Expr.looseBVarRange_eq, Expr.looseBVarRange'])
         htail hfirst hnrun (by rfl))
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType'
@@ -806,7 +822,8 @@ theorem inferTypeNatOnlyCore
           validationInferOnlyInsert state (.const ``Nat [])
             (.sort (.succ .zero))) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     validationInferOnlyInsert, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -821,7 +838,8 @@ theorem inferTypeFamilyOnlyCore
           validationInferOnlyInsert state
             (.const ``IndexedVec [.param `u]) indexedVecInfo.type) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     validationInferOnlyInsert, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -834,7 +852,8 @@ theorem inferTypeFVarOnlyCore
       (TypeChecker.Methods.withFuel fuel) (tcContext lctx) state =
         .ok (type, validationInferOnlyInsert state (.fvar id) type) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     TypeChecker.Inner.inferFVar, tcContext, hfind, LocalDecl.type,
     validationInferOnlyInsert, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
@@ -883,7 +902,8 @@ theorem inferTypeIndexedVecOnlyCore
     validationInferOnlyInsert,
     inferTypeFamilyOnlyCore,
     indexedVecInfoTypeShape, vecFamilyTail,
-    Expr.instantiate1',
+    Expr.instantiateRevRange_eq, Expr.instantiateRev_eq,
+    Expr.instantiate_eq,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem ensureTypeMOfInferOnly
@@ -999,7 +1019,7 @@ theorem indexedVecValidationTailInferOnly :
     indexedVecValidationHeadContext.lctx
     indexedVecValidationAlpha indexedVecValidationNExpr
     (by simp [ctorIndexedVecApp, Expr.hasLooseBVars,
-      Expr.looseBVarRange'])
+      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
 
 theorem indexedVecValidationTailEnsureTypeM :
     TypeChecker.M.run indexedVecValidationHeadContext.env

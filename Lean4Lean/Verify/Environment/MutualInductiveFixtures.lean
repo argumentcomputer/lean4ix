@@ -1,4 +1,7 @@
 import Lean4Lean.Verify.Environment.InductiveFixtures
+import Lean4Lean.Verify.Environment.IndexedVecSemanticReplay
+import Lean4Lean.Verify.Environment.NormalizationElimination
+import Lean4Lean.Verify.Environment.NormalizationReadiness
 import Lean4Lean.Theory.MutualInductiveFixtures
 
 /-!
@@ -152,6 +155,10 @@ def agrees (row : MutualKernelBlockRow) : Bool :=
 
 end MutualKernelBlockRow
 
+def kernelRecursorInfo? : ConstantInfo → Option RecursorVal
+  | .recInfo info => some info
+  | _ => none
+
 /-! ## Executable kernel validation -/
 
 def treeKernelInfo : ConstantInfo := kernelInductInfo% Tree
@@ -206,23 +213,150 @@ def treeKernelContext : AddInductive.Context where
   safety := .safe
   allowPrimitive := false
 
-def treeExecutionResult :=
-  AddInductive.buildNormalizationCandidateExecution 1 treeKernelTypes 0 false
+def treeBlockGenerationShapeResult :=
+  produceBlockGenerationShapeCandidate treeDecl treeKernelTypes 0 false
     treeKernelContext
 
-theorem treeExecutionResult_isOk : treeExecutionResult.isOk = true := by
+theorem treeBlockGenerationShapeResult_isOk :
+    treeBlockGenerationShapeResult.isOk = true := by
   native_decide
 
-def treeProducedExecution :
-    { execution // treeExecutionResult = .ok execution } :=
-  match h : treeExecutionResult with
-  | .ok execution => ⟨execution, rfl⟩
+def treeProducedBlockGenerationShape :
+    { produced // treeBlockGenerationShapeResult = .ok produced } :=
+  match h : treeBlockGenerationShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
   | .error _ => by
-      have hOk := treeExecutionResult_isOk
+      have hOk := treeBlockGenerationShapeResult_isOk
       rw [h] at hOk
       contradiction
 
-def treeExecution := treeProducedExecution.val
+def treeBlockGenerationShape := treeProducedBlockGenerationShape.val
+
+/-- All later validation and generation fixtures consume the one detailed
+execution retained by the strengthened block-shape producer. -/
+def treeExecution := treeBlockGenerationShape.execution
+
+/-- The detailed normalization execution owns the exact mutual-family
+statistics and continuation context selected by its own successful family
+validation phase. -/
+theorem treeExecution_familyValidationResult_run :
+    observeFamilyValidationBlock 1 treeKernelTypes treeKernelContext =
+      .ok treeExecution.familyValidationResult := by
+  exact treeBlockGenerationShape.familyValidationResult_run
+
+/-- The generalized generation-shape gate accepts the complete unindexed
+mutual block produced by the ordinary kernel-facing candidate pass. -/
+theorem treeExecution_generationShape :
+    normalizationCandidateBlockGenerationShape treeDecl
+      treeExecution.candidate = true :=
+  treeBlockGenerationShape.shape
+
+/-- Strengthen the retained ordinary producer through constructor declaration
+and the exact elimination-level and K-target decisions used by the kernel. -/
+def treeBlockEliminationShapeResult :=
+  produceBlockEliminationShapeCandidate treeDecl treeKernelTypes 0 false
+    treeKernelContext
+
+theorem treeBlockEliminationShapeResult_isOk :
+    treeBlockEliminationShapeResult.isOk = true := by
+  native_decide
+
+def treeProducedBlockEliminationShape :
+    { produced // treeBlockEliminationShapeResult = .ok produced } :=
+  match h : treeBlockEliminationShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
+  | .error _ => by
+      have hOk := treeBlockEliminationShapeResult_isOk
+      rw [h] at hOk
+      contradiction
+
+def treeBlockEliminationShape := treeProducedBlockEliminationShape.val
+
+def treeEliminationExecution := treeBlockEliminationShape.execution
+
+/-- The strengthened run starts with exactly the detailed normalization
+execution already retained by the generation-shape producer. -/
+theorem treeEliminationNormalization_eq :
+    treeEliminationExecution.normalization = treeExecution := by
+  apply Except.ok.inj
+  exact (treeEliminationExecution.normalization_run
+    treeBlockEliminationShape.producedExecution).symm.trans
+      treeBlockGenerationShape.producedExecution
+
+theorem treeBlockEliminationBase_eq :
+    treeBlockEliminationShape.base = treeBlockGenerationShape := by
+  apply ProducedBlockGenerationShapeCandidate.eq_of_execution_eq
+  exact treeEliminationNormalization_eq
+
+/-- The actual post-constructor decisions agree with every elimination field
+consumed by the ordinary mutual Theory generation. -/
+def treeBlockEliminationAlignment :
+    CheckerBlockEliminationRun treeGeneration treeEliminationExecution :=
+  (CheckerBlockEliminationRun.build? treeGeneration
+    treeEliminationExecution).get (by native_decide)
+
+/-- The same ordinary block execution continued through actual recursor
+synthesis and declaration. -/
+def treeBlockRecursorShapeResult :=
+  produceBlockRecursorShapeCandidate treeDecl treeKernelTypes 0 false
+    treeKernelContext
+
+theorem treeBlockRecursorShapeResult_isOk :
+    treeBlockRecursorShapeResult.isOk = true := by
+  native_decide
+
+def treeProducedBlockRecursorShape :
+    { produced // treeBlockRecursorShapeResult = .ok produced } :=
+  match h : treeBlockRecursorShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
+  | .error _ => by
+      have hOk := treeBlockRecursorShapeResult_isOk
+      rw [h] at hOk
+      contradiction
+
+def treeBlockRecursorShape := treeProducedBlockRecursorShape.val
+
+def treeRecursorExecution := treeBlockRecursorShape.execution
+
+theorem treeRecursorElimination_eq :
+    treeRecursorExecution.eliminationExecution =
+      treeEliminationExecution := by
+  apply Except.ok.inj
+  exact (treeRecursorExecution.prefix_run
+    treeBlockRecursorShape.producedExecution).symm.trans
+      treeBlockEliminationShape.producedExecution
+
+theorem treeBlockRecursorEliminationBase_eq :
+    treeBlockRecursorShape.eliminationBase =
+      treeBlockEliminationShape := by
+  apply ProducedBlockEliminationShapeCandidate.eq_of_execution_eq
+  exact treeRecursorElimination_eq
+
+/-- The records synthesized by the instrumented ordinary run are the complete
+kernel recursor records, including their rule payloads. -/
+theorem treeGeneratedRecursorInfos_match :
+    List.beq (treeRecursorExecution.recursors.infos.map some)
+      [kernelRecursorInfo? treeRecKernelInfo,
+        kernelRecursorInfo? treeListRecKernelInfo] = true := by
+  native_decide
+
+/-- Stored kernel recursor records in the same family order as the ordinary
+producer.  The preceding `Option`-valued comparison also checks that both
+lookups really are recursor records. -/
+def treeExpectedRecursorInfos : List RecursorVal :=
+  [(kernelRecursorInfo? treeRecKernelInfo).get!,
+    (kernelRecursorInfo? treeListRecKernelInfo).get!]
+
+theorem treeGeneratedAddInductiveRun :
+    AddInductive.run treeDecl.nparams treeKernelTypes 0 treeKernelContext =
+      .ok treeRecursorExecution.recursors.env :=
+  treeBlockRecursorShape.addInductiveRun
+
+/-- A shortened raw family inventory cannot pass the complete block gate. -/
+theorem treeExecution_shortGenerationShape_rejected :
+    normalizationCandidateBlockGenerationShape
+      { treeDecl with types := [treeType] } treeExecution.candidate = false := by
+  native_decide
 
 def treeFamilyValidationResult :=
   FamilyValidationBlockRun.buildExecution 1 treeKernelTypes treeKernelContext
@@ -240,7 +374,12 @@ def treeProducedFamilyValidation :
       rw [h] at hOk
       contradiction
 
-def treeFamilyValidation := treeProducedFamilyValidation.val
+/-- The proof-carrying terminal family invariants come from the same detailed
+execution as the block-generation shape.  The separately replayed result
+above remains an independent executable parity check. -/
+def treeFamilyValidation :
+    FamilyValidationBlockRun 1 treeKernelTypes treeKernelContext :=
+  treeBlockGenerationShape.familyValidation (by decide)
 
 def treeConstructorContext : AddInductive.Context :=
   { treeExecution.validationContext with env := treeExecution.familyEnv }
@@ -262,7 +401,12 @@ def treeProducedConstructorValidation :
       rw [h] at hOk
       contradiction
 
-def treeConstructorValidation := treeProducedConstructorValidation.val
+/-- Constructor semantics are consumed from the exact successful validation
+equation retained by the ordinary normalization execution. -/
+def treeConstructorValidation :
+    ConstructorBlockValidationRun treeKernelTypes treeExecution.stats false
+      treeConstructorContext :=
+  treeBlockGenerationShape.constructorValidation
 
 /-- The real positivity traversal selects both sibling targets and records the
 one Pi binder above `Tree.branch`'s recursive occurrence. -/
@@ -403,24 +547,141 @@ def indexedTreeKernelContext : AddInductive.Context where
   safety := .safe
   allowPrimitive := false
 
-def indexedTreeExecutionResult :=
-  AddInductive.buildNormalizationCandidateExecution 1 indexedTreeKernelTypes
+def indexedTreeBlockGenerationShapeResult :=
+  produceBlockGenerationShapeCandidate indexedTreeDecl indexedTreeKernelTypes
     0 false indexedTreeKernelContext
 
-theorem indexedTreeExecutionResult_isOk :
-    indexedTreeExecutionResult.isOk = true := by
+theorem indexedTreeBlockGenerationShapeResult_isOk :
+    indexedTreeBlockGenerationShapeResult.isOk = true := by
   native_decide
 
-def indexedTreeProducedExecution :
-    { execution // indexedTreeExecutionResult = .ok execution } :=
-  match h : indexedTreeExecutionResult with
-  | .ok execution => ⟨execution, rfl⟩
+def indexedTreeProducedBlockGenerationShape :
+    { produced // indexedTreeBlockGenerationShapeResult = .ok produced } :=
+  match h : indexedTreeBlockGenerationShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
   | .error _ => by
-      have hOk := indexedTreeExecutionResult_isOk
+      have hOk := indexedTreeBlockGenerationShapeResult_isOk
       rw [h] at hOk
       contradiction
 
-def indexedTreeExecution := indexedTreeProducedExecution.val
+def indexedTreeBlockGenerationShape :=
+  indexedTreeProducedBlockGenerationShape.val
+
+/-- The indexed block likewise uses the one detailed execution retained by
+its successful shape producer. -/
+def indexedTreeExecution := indexedTreeBlockGenerationShape.execution
+
+/-- The indexed detailed execution retains the exact result of the family
+validator which invoked its post-validation phases. -/
+theorem indexedTreeExecution_familyValidationResult_run :
+    observeFamilyValidationBlock 1 indexedTreeKernelTypes
+      indexedTreeKernelContext =
+      .ok indexedTreeExecution.familyValidationResult := by
+  exact indexedTreeBlockGenerationShape.familyValidationResult_run
+
+/-- The complete indexed mutual candidate also satisfies the generalized
+source-ordered generation-shape gate. -/
+theorem indexedTreeExecution_generationShape :
+    normalizationCandidateBlockGenerationShape indexedTreeDecl
+      indexedTreeExecution.candidate = true :=
+  indexedTreeBlockGenerationShape.shape
+
+/-- Indexed counterpart of the retained post-constructor elimination
+execution. -/
+def indexedTreeBlockEliminationShapeResult :=
+  produceBlockEliminationShapeCandidate indexedTreeDecl indexedTreeKernelTypes
+    0 false indexedTreeKernelContext
+
+theorem indexedTreeBlockEliminationShapeResult_isOk :
+    indexedTreeBlockEliminationShapeResult.isOk = true := by
+  native_decide
+
+def indexedTreeProducedBlockEliminationShape :
+    { produced // indexedTreeBlockEliminationShapeResult = .ok produced } :=
+  match h : indexedTreeBlockEliminationShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
+  | .error _ => by
+      have hOk := indexedTreeBlockEliminationShapeResult_isOk
+      rw [h] at hOk
+      contradiction
+
+def indexedTreeBlockEliminationShape :=
+  indexedTreeProducedBlockEliminationShape.val
+
+def indexedTreeEliminationExecution :=
+  indexedTreeBlockEliminationShape.execution
+
+theorem indexedTreeEliminationNormalization_eq :
+    indexedTreeEliminationExecution.normalization =
+      indexedTreeExecution := by
+  apply Except.ok.inj
+  exact (indexedTreeEliminationExecution.normalization_run
+    indexedTreeBlockEliminationShape.producedExecution).symm.trans
+      indexedTreeBlockGenerationShape.producedExecution
+
+theorem indexedTreeBlockEliminationBase_eq :
+    indexedTreeBlockEliminationShape.base =
+      indexedTreeBlockGenerationShape := by
+  apply ProducedBlockGenerationShapeCandidate.eq_of_execution_eq
+  exact indexedTreeEliminationNormalization_eq
+
+def indexedTreeBlockEliminationAlignment :
+    CheckerBlockEliminationRun indexedTreeGeneration
+      indexedTreeEliminationExecution :=
+  (CheckerBlockEliminationRun.build? indexedTreeGeneration
+    indexedTreeEliminationExecution).get (by native_decide)
+
+def indexedTreeBlockRecursorShapeResult :=
+  produceBlockRecursorShapeCandidate indexedTreeDecl indexedTreeKernelTypes
+    0 false indexedTreeKernelContext
+
+theorem indexedTreeBlockRecursorShapeResult_isOk :
+    indexedTreeBlockRecursorShapeResult.isOk = true := by
+  native_decide
+
+def indexedTreeProducedBlockRecursorShape :
+    { produced // indexedTreeBlockRecursorShapeResult = .ok produced } :=
+  match h : indexedTreeBlockRecursorShapeResult with
+  | .ok produced => ⟨produced, rfl⟩
+  | .error _ => by
+      have hOk := indexedTreeBlockRecursorShapeResult_isOk
+      rw [h] at hOk
+      contradiction
+
+def indexedTreeBlockRecursorShape :=
+  indexedTreeProducedBlockRecursorShape.val
+
+def indexedTreeRecursorExecution := indexedTreeBlockRecursorShape.execution
+
+theorem indexedTreeRecursorElimination_eq :
+    indexedTreeRecursorExecution.eliminationExecution =
+      indexedTreeEliminationExecution := by
+  apply Except.ok.inj
+  exact (indexedTreeRecursorExecution.prefix_run
+    indexedTreeBlockRecursorShape.producedExecution).symm.trans
+      indexedTreeBlockEliminationShape.producedExecution
+
+theorem indexedTreeBlockRecursorEliminationBase_eq :
+    indexedTreeBlockRecursorShape.eliminationBase =
+      indexedTreeBlockEliminationShape := by
+  apply ProducedBlockEliminationShapeCandidate.eq_of_execution_eq
+  exact indexedTreeRecursorElimination_eq
+
+theorem indexedTreeGeneratedRecursorInfos_match :
+    List.beq (indexedTreeRecursorExecution.recursors.infos.map some)
+      [kernelRecursorInfo? indexedTreeRecKernelInfo,
+        kernelRecursorInfo? indexedTreeListRecKernelInfo] = true := by
+  native_decide
+
+def indexedTreeExpectedRecursorInfos : List RecursorVal :=
+  [(kernelRecursorInfo? indexedTreeRecKernelInfo).get!,
+    (kernelRecursorInfo? indexedTreeListRecKernelInfo).get!]
+
+theorem indexedTreeGeneratedAddInductiveRun :
+    AddInductive.run indexedTreeDecl.nparams indexedTreeKernelTypes 0
+        indexedTreeKernelContext =
+      .ok indexedTreeRecursorExecution.recursors.env :=
+  indexedTreeBlockRecursorShape.addInductiveRun
 
 def indexedTreeFamilyValidationResult :=
   FamilyValidationBlockRun.buildExecution 1 indexedTreeKernelTypes
@@ -439,7 +700,13 @@ def indexedTreeProducedFamilyValidation :
       rw [h] at hOk
       contradiction
 
-def indexedTreeFamilyValidation := indexedTreeProducedFamilyValidation.val
+/-- The indexed terminal family invariants are owned by the block producer's
+single detailed execution; the standalone builder above remains a parity
+check. -/
+def indexedTreeFamilyValidation :
+    FamilyValidationBlockRun 1 indexedTreeKernelTypes
+      indexedTreeKernelContext :=
+  indexedTreeBlockGenerationShape.familyValidation (by decide)
 
 def indexedTreeConstructorContext : AddInductive.Context :=
   { indexedTreeExecution.validationContext with
@@ -462,8 +729,12 @@ def indexedTreeProducedConstructorValidation :
       rw [h] at hOk
       contradiction
 
-def indexedTreeConstructorValidation :=
-  indexedTreeProducedConstructorValidation.val
+/-- The indexed fixture likewise consumes the real execution's exact
+constructor-validation equation rather than selecting a parallel trace. -/
+def indexedTreeConstructorValidation :
+    ConstructorBlockValidationRun indexedTreeKernelTypes
+      indexedTreeExecution.stats false indexedTreeConstructorContext :=
+  indexedTreeBlockGenerationShape.constructorValidation
 
 /-- Indexed recursive fields retain sibling ordinals after the ordinary Nat
 binder, while nonrecursive fields occupy explicit `none` slots. -/
@@ -2132,6 +2403,449 @@ theorem treeListConsKernelInfo_tr :
             (treeReplayNodeEnv_le_branchEnv.trans
               treeReplayBranchEnv_le_nilEnv))))
 
+/-! ## Exact ordinary-candidate block generation -/
+
+/-- Minimal verifier family used at the ordinary candidate's pre-family
+kernel environment. -/
+def treeCandidateVEnvs : VEnvs where
+  venv _ := VEnv.empty
+
+theorem treeCandidateHasPrimitives : VEnv.HasPrimitives VEnv.empty := by
+  apply VEnv.HasPrimitives.of_avoids
+  intro name membership
+  rfl
+
+theorem treeCandidateSafePrimitives :
+    treeKernelContext.env.find? name = some info →
+      Environment.primitives.contains name →
+      info.safety = .safe ∧ info.levelParams = [] := by
+  intro found primitive
+  change ({} : ConstMap).find?' name = some info at found
+  rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at found
+  simp [SMap.find?] at found
+
+theorem treeCandidateVEnvsWF :
+    treeCandidateVEnvs.WF treeKernelContext.env where
+  tr := by
+    intro safety
+    change TrEnv' safety ({} : ConstMap) false VEnv.empty
+    exact .empty
+  hasPrimitives := treeCandidateHasPrimitives
+  safePrimitives := treeCandidateSafePrimitives
+  mono := fun _ => .rfl
+  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+    intro name info found
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at found
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at found
+    simp [SMap.find?] at found
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
+    intro name info found
+    change ({} : ConstMap).find?' name = some (.ctorInfo info) at found
+    rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at found
+    simp [SMap.find?] at found
+
+theorem treeCandidateNamePrefixNe :
+    treeKernelContext.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix := by
+  decide
+
+def treeCandidatePreContextRun :
+    TypeChecker.CandidateContextRun { treeKernelContext with lctx := {} } :=
+  TypeChecker.CandidateContextRun.root treeCandidateVEnvsWF rfl
+    treeCandidateNamePrefixNe
+
+def treeCandidatePreStage : TypeChecker.CandidateSemanticStage
+    { treeKernelContext with lctx := {} } VEnv.empty [`u] where
+  contextRun := treeCandidatePreContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
+theorem treeKernelLevelParams : treeKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeListKernelLevelParams :
+    treeListKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeLeafKernelLevelParams :
+    treeLeafKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeNodeKernelLevelParams :
+    treeNodeKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeBranchKernelLevelParams :
+    treeBranchKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeListNilKernelLevelParams :
+    treeListNilKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeListConsKernelLevelParams :
+    treeListConsKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem treeReplayTypeEnv_eq_blockEnv : treeReplayTypeEnv = treeBlockEnv := rfl
+
+theorem treeCandidateValidationEnv_eq :
+    treeExecution.validationContext.env = treeKernelContext.env := by
+  exact treeExecution.validationContext_env
+    treeBlockGenerationShape.producedExecution (by decide)
+
+theorem treeFamilySourceTr :
+    TrExprS VEnv.empty [`u] [] treeKernelType.type treeType.type := by
+  simpa only [treeKernelType, treeKernelLevelParams] using
+    treeKernelInfo_tr.1.2.2
+
+theorem treeListFamilySourceTr :
+    TrExprS VEnv.empty [`u] [] treeListKernelType.type treeListType.type := by
+  have shape : TrTypeExpr VEnv.empty treeListKernelInfo.levelParams []
+      treeListKernelInfo.type treeListType.type := by
+    tr_type_expr_tac
+  rw [treeListKernelLevelParams] at shape
+  simpa [treeListKernelType] using shape.to_trExprS
+    (show VEnv.empty.Ordered from .empty) trivial
+    (treeFamilyTypeWF treeListType (.inr rfl))
+
+def treeCandidateFamilySources : CandidateBlockFamilyTypeSourceListInput
+    VEnv.empty [`u] treeKernelTypes treeDecl.types :=
+  .cons {
+      name_eq := rfl
+      uvars_eq := rfl
+      source_tr := treeFamilySourceTr }
+    (.cons {
+      name_eq := rfl
+      uvars_eq := rfl
+      source_tr := treeListFamilySourceTr } .nil)
+
+theorem treeCandidateBlockEnvOrdered : treeBlockEnv.Ordered :=
+  treeReplayTypeEnv_ordered
+
+theorem treeLeafSourceTr :
+    TrExprS treeBlockEnv [`u] [] treeKernelType.ctors[0].type
+      treeType.ctors[0].type := by
+  simpa [treeKernelType, treeLeafKernelLevelParams,
+    treeReplayTypeEnv_eq_blockEnv] using treeLeafKernelInfo_tr.1.2.2
+
+theorem treeNodeSourceTr :
+    TrExprS treeBlockEnv [`u] [] treeKernelType.ctors[1].type
+      treeType.ctors[1].type := by
+  have hTree : treeBlockEnv.constants ``Tree =
+      some treeType.toVConstant := rfl
+  have hTreeList : treeBlockEnv.constants ``TreeList =
+      some treeListType.toVConstant := rfl
+  have shape : TrTypeExpr treeBlockEnv treeNodeKernelInfo.levelParams []
+      treeNodeKernelInfo.type treeType.ctors[1].type := by
+    tr_type_expr_tac
+  rw [treeNodeKernelLevelParams] at shape
+  simpa [treeKernelType] using shape.to_trExprS
+    treeCandidateBlockEnvOrdered trivial
+    (treeCtorWF treeType.ctors[1] (.inl (by simp [treeType])))
+
+theorem treeBranchSourceTr :
+    TrExprS treeBlockEnv [`u] [] treeKernelType.ctors[2].type
+      treeType.ctors[2].type := by
+  have hTree : treeBlockEnv.constants ``Tree =
+      some treeType.toVConstant := rfl
+  have hTreeList : treeBlockEnv.constants ``TreeList =
+      some treeListType.toVConstant := rfl
+  have shape : TrTypeExpr treeBlockEnv treeBranchKernelInfo.levelParams []
+      treeBranchKernelInfo.type treeType.ctors[2].type := by
+    tr_type_expr_tac
+  rw [treeBranchKernelLevelParams] at shape
+  simpa [treeKernelType] using shape.to_trExprS
+    treeCandidateBlockEnvOrdered trivial
+    (treeCtorWF treeType.ctors[2] (.inl (by simp [treeType])))
+
+theorem treeListNilSourceTr :
+    TrExprS treeBlockEnv [`u] [] treeListKernelType.ctors[0].type
+      treeListType.ctors[0].type := by
+  have hTree : treeBlockEnv.constants ``Tree =
+      some treeType.toVConstant := rfl
+  have hTreeList : treeBlockEnv.constants ``TreeList =
+      some treeListType.toVConstant := rfl
+  have shape : TrTypeExpr treeBlockEnv treeListNilKernelInfo.levelParams []
+      treeListNilKernelInfo.type treeListType.ctors[0].type := by
+    tr_type_expr_tac
+  rw [treeListNilKernelLevelParams] at shape
+  simpa [treeListKernelType] using shape.to_trExprS
+    treeCandidateBlockEnvOrdered trivial
+    (treeCtorWF treeListType.ctors[0] (.inr (by simp [treeListType])))
+
+theorem treeListConsSourceTr :
+    TrExprS treeBlockEnv [`u] [] treeListKernelType.ctors[1].type
+      treeListType.ctors[1].type := by
+  have hTree : treeBlockEnv.constants ``Tree =
+      some treeType.toVConstant := rfl
+  have hTreeList : treeBlockEnv.constants ``TreeList =
+      some treeListType.toVConstant := rfl
+  have shape : TrTypeExpr treeBlockEnv treeListConsKernelInfo.levelParams []
+      treeListConsKernelInfo.type treeListType.ctors[1].type := by
+    tr_type_expr_tac
+  rw [treeListConsKernelLevelParams] at shape
+  simpa [treeListKernelType] using shape.to_trExprS
+    treeCandidateBlockEnvOrdered trivial
+    (treeCtorWF treeListType.ctors[1] (.inr (by simp [treeListType])))
+
+theorem treeCandidateFamilyEnvNoCtorInfo :
+    ∀ name info, treeExecution.familyEnv.find? name ≠
+      some (.ctorInfo info) := by
+  intro name info
+  have initialWF : treeExecution.validationContext.env.constants.WF := by
+    rw [treeCandidateValidationEnv_eq]
+    exact SMap.WF.empty
+  have finalWF := declarationTraceConstantsWF treeExecution.declareTrace
+    initialWF
+  intro found
+  change treeExecution.familyEnv.constants.find?' name =
+    some (.ctorInfo info) at found
+  rw [finalWF.find?'_eq_find?] at found
+  exact declarationTraceNoCtorInfo treeExecution.declareTrace initialWF
+    (by
+      intro n i h
+      rw [treeCandidateValidationEnv_eq] at h
+      simp [treeKernelContext, Kernel.Environment.ofConstants,
+        SMap.find?] at h) name info found
+
+/-- The exact shared family stage derived from the ordinary mutual candidate
+execution and its family-only declaration trace. -/
+def treeCandidateStaging : NormalizationCandidateBlockStagingInput
+    treeKernelContext treeExecution VEnv.empty treeBlockEnv [`u] treeDecl where
+  uvars_eq := rfl
+  preFamily := treeCandidatePreStage
+  familyTypes := treeCandidateFamilySources.staged
+    treeExecution.candidate.families (by
+      change CandidateFamilyTypeListProduced _
+        treeExecution.families.candidates.familyTypes
+      rw [treeExecution.families.produced.familyTypes_eq]
+      exact treeExecution.familyTypes.produced) 9999 rfl
+  terminals := CandidateBlockFamilyTerminalSortList.of_check
+    treeExecution.candidate.families (by native_decide)
+  stage := treeStage
+  nindices_size := treeFamilyValidation.nindices_size
+  validation_env_eq := treeCandidateValidationEnv_eq
+  validation_lparams_eq := by native_decide
+  context_safety_eq := rfl
+  isUnsafe_eq := rfl
+  preMapWF := SMap.WF.empty
+  names_not_primitive := by
+    intro raw member
+    simp [treeDecl] at member
+    rcases member with rfl | rfl
+    · constructor
+      · simp [treeType, VEnv.reflectedPrimitiveNames]
+      · simp [treeType, Kernel.Environment.primitives, NameSet.ofList,
+          NameSet.contains]
+    · constructor
+      · simp [treeListType, VEnv.reflectedPrimitiveNames]
+      · simp [treeListType, Kernel.Environment.primitives, NameSet.ofList,
+          NameSet.contains]
+  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+    intro name info found
+    exact treeCandidateFamilyEnvNoCtorInfo name info found
+  structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
+    intro name info found
+    exact treeCandidateFamilyEnvNoCtorInfo name info found
+
+def treeCandidateConstructorSources :
+    CandidateBlockConstructorSourceListInput treeBlockEnv [`u]
+      treeKernelTypes treeDecl.types :=
+  .cons
+    (.cons {
+        name_eq := rfl
+        uvars_eq := rfl
+        source_tr := treeLeafSourceTr }
+      (.cons {
+          name_eq := rfl
+          uvars_eq := rfl
+          source_tr := treeNodeSourceTr }
+        (.cons {
+            name_eq := rfl
+            uvars_eq := rfl
+            source_tr := treeBranchSourceTr }
+          .nil)))
+    (.cons
+      (.cons {
+          name_eq := rfl
+          uvars_eq := rfl
+          source_tr := treeListNilSourceTr }
+        (.cons {
+            name_eq := rfl
+            uvars_eq := rfl
+            source_tr := treeListConsSourceTr }
+          .nil))
+      .nil)
+
+def treeCandidateConstructors : CandidateBlockConstructorStagedListInput
+    treeCandidateStaging.postFamily treeExecution.candidate.families
+      treeDecl.types :=
+  treeCandidateConstructorSources.staged treeExecution.candidate.families
+    treeExecution.families.produced.constructorLists 9999 rfl
+
+/-- Complete pre/post-family staged owner for the ordinary mutual candidate. -/
+def treeStagedCandidateSemantic :
+    StagedNormalizationCandidateBlockSemanticInput treeCandidateStaging where
+  constructors := treeCandidateConstructors
+
+/-- Identity-specialized semantic interpretation of the exact ordinary
+candidate hierarchy. -/
+def treeCandidateIdentitySemantic : NormalizationCandidateBlockSemanticRun
+    VEnv.empty treeBlockEnv [`u] treeExecution.candidate treeDecl :=
+  treeStagedCandidateSemantic.semanticRunOfIdentity (by native_decide)
+
+theorem treeCandidateIdentityNormalization :
+    treeCandidateIdentitySemantic.normalization =
+      Normalization.identity treeDecl := by
+  simpa only [treeCandidateIdentitySemantic] using
+    treeStagedCandidateSemantic.semanticRunOfIdentity_normalization
+      (by native_decide)
+
+theorem treeCandidateIdentityAnalysis :
+    treeCandidateIdentitySemantic.normalization.checkBlock? =
+      some treeGeneration.block := by
+  rw [treeCandidateIdentityNormalization]
+  rfl
+
+def treeProducedCandidateIdentitySemantic :
+    ProducedNormalizationCandidateBlockSemanticRun
+      { treeKernelContext with lctx := {} }
+      { treeKernelContext with env := treeExecution.familyEnv, lctx := {} }
+      VEnv.empty treeBlockEnv [`u] treeExecution.candidate treeDecl where
+  semantic := treeCandidateIdentitySemantic
+  familyTypesProduced := by
+    change CandidateFamilyTypeListProduced _
+      treeExecution.families.candidates.familyTypes
+    rw [treeExecution.families.produced.familyTypes_eq]
+    exact treeExecution.familyTypes.produced
+  familiesProduced := treeExecution.families.produced.reindex
+
+/-- Exact dependent closure from the ordinary kernel-facing producer through
+the generic block-generation assembler. -/
+def treeExactProducedBlockGeneration : ExactProducedBlockGenerationRun
+    VEnv.empty treeBlockEnv [`u] treeBlockGenerationShape treeGeneration where
+  producedSemantic := treeProducedCandidateIdentitySemantic
+  analysis := treeCandidateIdentityAnalysis
+  checked := treeCheckedBlockWF
+  resultLevelWF := by decide
+
+/-- The ordinary exact semantic run paired with the constructor environment,
+elimination level, recursor universe layout, and K decision from the same
+strengthened kernel execution. -/
+def treeExactProducedBlockElimination : ExactProducedBlockEliminationRun
+    VEnv.empty treeBlockEnv [`u] treeBlockEliminationShape treeGeneration where
+  block := by
+    rw [treeBlockEliminationBase_eq]
+    exact treeExactProducedBlockGeneration
+  elimination := treeBlockEliminationAlignment
+  isUnsafe_eq := rfl
+  validation_lparams_eq := by
+    change treeEliminationExecution.normalization.validationContext.lparams =
+      [`u]
+    rw [treeEliminationNormalization_eq]
+    exact treeCandidateStaging.validation_lparams_eq
+
+/-- Exact semantic generation indexed by the ordinary run that has already
+synthesized and installed both mutual recursors. -/
+def treeExactProducedBlockRecursor : ExactProducedBlockRecursorRun
+    VEnv.empty treeBlockEnv [`u] treeBlockRecursorShape treeGeneration where
+  elimination := by
+    rw [treeBlockRecursorEliminationBase_eq]
+    exact treeExactProducedBlockElimination
+
+/-- Reindex the already-derived family staging input onto the normalization
+execution retained by the stronger producer. -/
+def treeExactEliminationStaging : NormalizationCandidateBlockStagingInput
+    treeKernelContext treeEliminationExecution.normalization
+      VEnv.empty treeBlockEnv [`u] treeDecl := by
+  rw [treeEliminationNormalization_eq]
+  exact treeCandidateStaging
+
+/-- Reindex the same semantic staging data onto the stronger execution that
+continues through actual recursor synthesis. -/
+def treeExactRecursorStaging : NormalizationCandidateBlockStagingInput
+    treeKernelContext
+      treeBlockRecursorShape.execution.eliminationExecution.normalization
+      VEnv.empty treeBlockEnv [`u] treeDecl := by
+  change NormalizationCandidateBlockStagingInput treeKernelContext
+    treeRecursorExecution.eliminationExecution.normalization
+      VEnv.empty treeBlockEnv [`u] treeDecl
+  rw [treeRecursorElimination_eq]
+  exact treeExactEliminationStaging
+
+/-- One exact owner of both declaration phases preceding recursor synthesis. -/
+noncomputable def treeExactDeclarationRun :
+    ExactProducedBlockDeclarationRun treeExactProducedBlockElimination :=
+  treeExactProducedBlockElimination.declarationRun
+    treeExactEliminationStaging
+
+/-- The identical family/constructor prefix, now indexed by the execution
+that owns the generated recursor records. -/
+noncomputable def treeExactRecursorDeclarationRun :=
+  treeExactProducedBlockRecursor.elimination.declarationRun
+    treeExactRecursorStaging
+
+/-- Exact paired family declaration underlying the shared constructor
+checker context. -/
+noncomputable def treeExactFamilyDeclaration :
+    FamilyDeclarationStagingRun
+      treeExecution.validationContext.allowPrimitive
+      treeExecution.validationContext.env treeExecution.familyEnv
+      treeExecution.declaredInfos VEnv.empty treeBlockEnv
+      treeDecl.blockTypeConstants treeExecution.validationContext.env.quotInit := by
+  rw [← treeEliminationNormalization_eq]
+  exact treeExactDeclarationRun.families
+
+theorem treeExactFamilyDeclaration_fold :
+    treeDecl.blockTypeConstants.foldlM
+      (fun env family => env.addConst family.name family.toVConstant)
+      VEnv.empty = some treeBlockEnv :=
+  treeExactFamilyDeclaration.addTypes.to_foldlM
+
+/-- The retained ordinary constructor declaration interpreted directly as a
+kernel/Theory staging run.  Its map is the real post-constructor kernel map,
+and its Theory environment is constructed from the exact raw constructor
+inventory rather than the replay fixture below. -/
+noncomputable def treeExactConstructorDeclaration :
+    ConstructorDeclarationStagingRun
+      treeEliminationExecution.constructorContext.allowPrimitive
+      treeEliminationExecution.normalization.familyEnv
+      treeEliminationExecution.constructorEnv
+      treeEliminationExecution.declaredConstructorInfos
+      treeBlockEnv treeDecl.blockConstructorConstants
+      treeEliminationExecution.normalization.validationContext.env.quotInit :=
+  treeExactDeclarationRun.constructors
+
+theorem treeExactConstructorDeclaration_fold :
+    treeDecl.blockConstructorConstants.foldlM
+      (fun env constructor =>
+        env.addConst constructor.name constructor.toVConstant)
+      treeBlockEnv = some treeExactConstructorDeclaration.ctorEnv :=
+  treeExactConstructorDeclaration.addCtors.to_foldlM
+
+/-- The Theory environment constructed from the recursor-owning execution is
+the existing post-constructor replay boundary. -/
+theorem treeExactRecursorConstructorEnv_eq :
+    (treeExactProducedBlockRecursor.elimination.declarationRun
+      treeExactRecursorStaging).constructors.ctorEnv =
+        treeReplayCtorEnv := by
+  have replay : treeDecl.blockConstructorConstants.foldlM
+      (fun env constructor =>
+        env.addConst constructor.name constructor.toVConstant)
+      treeBlockEnv = some treeReplayCtorEnv := by rfl
+  rw [(treeExactProducedBlockRecursor.elimination.declarationRun
+    treeExactRecursorStaging).constructors.addCtors.to_foldlM] at replay
+  exact Option.some.inj replay
+
+/-- The real mutual block's generation certificate can be reconstructed from
+the ordinary normalization execution without fixture-selected family or
+constructor inventories. -/
+theorem treeBlockGenerationWF_fromCandidate :
+    treeGeneration.WF VEnv.empty treeBlockEnv :=
+  treeExactProducedBlockGeneration.blockGenerationRun.wf
+
 theorem treeRecKernelInfo_tr :
     TrConstVal .safe treeReplayCtorEnv treeRecKernelInfo
       treeGeneration.recursors[0] := by
@@ -2158,31 +2872,91 @@ theorem treeRecKernelInfo_tr :
   exact hshape.to_trExprS treeReplayCtorEnv_ordered trivial
     ⟨.sort u, hrec⟩
 
-theorem treeListRecKernelInfo_tr :
-    TrConstVal .safe treeReplayFirstRecEnv treeListRecKernelInfo
+theorem treeListRecKernelInfo_tr_atCtor :
+    TrConstVal .safe treeReplayCtorEnv treeListRecKernelInfo
       treeGeneration.recursors[1] := by
-  have hTree : treeReplayFirstRecEnv.constants ``Tree =
+  have hTree : treeReplayCtorEnv.constants ``Tree =
       some treeType.toVConstant := rfl
-  have hTreeList : treeReplayFirstRecEnv.constants ``TreeList =
+  have hTreeList : treeReplayCtorEnv.constants ``TreeList =
       some treeListType.toVConstant := rfl
-  have hLeaf : treeReplayFirstRecEnv.constants ``Tree.leaf =
+  have hLeaf : treeReplayCtorEnv.constants ``Tree.leaf =
       some treeType.ctors[0].toVConstant := rfl
-  have hNode : treeReplayFirstRecEnv.constants ``Tree.node =
+  have hNode : treeReplayCtorEnv.constants ``Tree.node =
       some treeType.ctors[1].toVConstant := rfl
-  have hBranch : treeReplayFirstRecEnv.constants ``Tree.branch =
+  have hBranch : treeReplayCtorEnv.constants ``Tree.branch =
       some treeType.ctors[2].toVConstant := rfl
-  have hNil : treeReplayFirstRecEnv.constants ``TreeList.nil =
+  have hNil : treeReplayCtorEnv.constants ``TreeList.nil =
       some treeListType.ctors[0].toVConstant := rfl
-  have hCons : treeReplayFirstRecEnv.constants ``TreeList.cons =
+  have hCons : treeReplayCtorEnv.constants ``TreeList.cons =
       some treeListType.ctors[1].toVConstant := rfl
   refine ⟨⟨by decide, rfl, ?_⟩, rfl⟩
-  have hshape : TrTypeExpr treeReplayFirstRecEnv
+  have hshape : TrTypeExpr treeReplayCtorEnv
       treeListRecKernelInfo.levelParams [] treeListRecKernelInfo.type
       treeGeneration.recursors[1].type := by tr_type_expr_tac
   obtain ⟨u, hrec⟩ :=
     treeReplayGenerationEnv.recursor_wf (.tail _ (.head _))
-  exact hshape.to_trExprS treeReplayFirstRecEnv_ordered trivial
-    ⟨.sort u, hrec.mono treeReplayCtorEnv_le_firstRecEnv⟩
+  exact hshape.to_trExprS treeReplayCtorEnv_ordered trivial
+    ⟨.sort u, hrec⟩
+
+theorem treeListRecKernelInfo_tr :
+    TrConstVal .safe treeReplayFirstRecEnv treeListRecKernelInfo
+      treeGeneration.recursors[1] :=
+  treeListRecKernelInfo_tr_atCtor.mono treeReplayCtorEnv_le_firstRecEnv
+
+/-- Semantic translations of the stored kernel recursor records at their
+shared post-constructor boundary. -/
+theorem treeExpectedRecursorEvidence : List.Forall₂
+    (fun info raw =>
+      TrConstVal .safe treeReplayCtorEnv (.recInfo info) raw)
+    treeExpectedRecursorInfos treeGeneration.recursors := by
+  have hrecs : treeGeneration.recursors =
+      [treeGeneration.recursors[0], treeGeneration.recursors[1]] := rfl
+  rw [hrecs]
+  exact .cons
+    (by
+      simpa [treeExpectedRecursorInfos, treeRecKernelInfo,
+        kernelRecursorInfo?] using treeRecKernelInfo_tr)
+    (.cons
+      (by
+        simpa [treeExpectedRecursorInfos, treeListRecKernelInfo,
+          kernelRecursorInfo?] using treeListRecKernelInfo_tr_atCtor)
+      .nil)
+
+/-- Translation evidence for the records synthesized by the actual ordinary
+run, obtained from full stored-record parity without asserting propositional
+equality of opaque kernel expressions. -/
+theorem treeGeneratedRecursorEvidence : List.Forall₂
+    (fun info raw => TrConstVal .safe
+      (treeExactProducedBlockRecursor.elimination.declarationRun
+        treeExactRecursorStaging).constructors.ctorEnv
+      (.recInfo info) raw)
+    treeBlockRecursorShape.execution.recursors.infos
+      treeGeneration.recursors := by
+  rw [treeExactRecursorConstructorEnv_eq]
+  apply recursorInfoTranslationList_of_option_beq
+    (expected := treeExpectedRecursorInfos)
+  · simpa [treeRecursorExecution, treeExpectedRecursorInfos,
+      treeRecKernelInfo, treeListRecKernelInfo,
+      kernelRecursorInfo?] using treeGeneratedRecursorInfos_match
+  · exact treeExpectedRecursorEvidence
+
+theorem treeGeneratedRecursorsWF :
+    ∀ raw ∈ treeGeneration.recursors,
+      raw.toVConstant.WF
+        (treeExactProducedBlockRecursor.elimination.declarationRun
+          treeExactRecursorStaging).constructors.ctorEnv := by
+  intro raw member
+  rw [treeExactRecursorConstructorEnv_eq]
+  simp only [BlockGenerationChecked.recursors, List.mem_map] at member
+  obtain ⟨family, hfamily, rfl⟩ := member
+  exact treeReplayGenerationEnv.recursor_wf hfamily
+
+/-- The ordinary mutual fixture now consumes the actual synthesized recursor
+inventory in the same exact family/constructor/recursor staging prefix. -/
+noncomputable def treeExactMetadataPrefixRun :
+    ExactProducedBlockMetadataPrefixRun treeExactProducedBlockRecursor :=
+  treeExactProducedBlockRecursor.metadataPrefix treeExactRecursorStaging
+    treeGeneratedRecursorEvidence treeGeneratedRecursorsWF
 
 def treeReplayFirstTypeMap : ConstMap :=
   ({} : ConstMap).insert ``Tree treeKernelInfo
@@ -2419,6 +3193,46 @@ theorem treeAddInductBlock :
     AddInductBlock ({} : ConstMap) VEnv.empty treeDecl
       treeReplayMap treeFinalEnv :=
   ⟨treeAddInductBlockTrace⟩
+
+/-- The Theory recursor fold constructed from the actual synthesized records
+has the same endpoint as the independently replayed raw-constant fold. -/
+theorem treeExactProducedRecEnv_eq :
+    treeExactMetadataPrefixRun.recursors.recEnv = treeReplayRecEnv := by
+  have ctorEnvEq :
+      treeExactMetadataPrefixRun.declarations.constructors.ctorEnv =
+        treeReplayCtorEnv := by
+    change (treeExactProducedBlockRecursor.elimination.declarationRun
+      treeExactRecursorStaging).constructors.ctorEnv = treeReplayCtorEnv
+    exact treeExactRecursorConstructorEnv_eq
+  have exactFold := treeExactMetadataPrefixRun.recursors.addRecs.to_foldlM
+  have replayFold : treeGeneration.recursors.foldlM
+      (fun env recursor => env.addConst recursor.name recursor.toVConstant)
+      treeReplayCtorEnv = some treeReplayRecEnv := by rfl
+  have folds := congrArg
+    (fun start => treeGeneration.recursors.foldlM
+      (fun env recursor => env.addConst recursor.name recursor.toVConstant)
+      start) ctorEnvEq
+  rw [exactFold, replayFold] at folds
+  exact Option.some.inj folds
+
+/-- The ordinary exact transaction now ends in the actual synthesized kernel
+map.  Family, constructor, recursor, and K evidence all come from the retained
+producer; only the deterministic Theory rule fold closes the transaction. -/
+noncomputable def treeExactProducedBlockMetadataTrace :
+    AddInductBlockTrace
+      treeRecursorExecution.eliminationExecution.normalization.validationContext.env.constants
+      VEnv.empty treeDecl
+      treeRecursorExecution.recursors.env.constants treeFinalEnv :=
+  treeExactMetadataPrefixRun.addInductBlockTrace (env₂ := treeFinalEnv) ⟨by
+    rw [treeExactProducedRecEnv_eq]
+    rfl⟩
+
+theorem treeExactProducedBlockMetadata :
+    AddInductBlock
+      treeRecursorExecution.eliminationExecution.normalization.validationContext.env.constants
+      VEnv.empty treeDecl
+      treeRecursorExecution.recursors.env.constants treeFinalEnv :=
+  ⟨treeExactProducedBlockMetadataTrace⟩
 
 theorem tree_trEnv' : TrEnv' .safe treeReplayMap false treeFinalEnv :=
   .inductBlock treeAddInductBlock .empty
@@ -2755,6 +3569,490 @@ theorem indexedTreeListConsKernelInfo_tr :
           (indexedReplayLeafEnv_le_nodeEnv.trans
             indexedReplayNodeEnv_le_nilEnv)))
 
+/-! ## Exact indexed-candidate block generation -/
+
+/-- The indexed candidate reuses the exact Nat model and readiness
+certificate, transported across the fixture-specific kernel module header. -/
+def indexedTreeCandidateVEnvs : VEnvs :=
+  indexedVecSemanticNatVEnvs
+
+theorem indexedTreeCandidateKernelConstants_eq :
+    indexedVecKernelEnv.constants = indexedTreeKernelContext.env.constants :=
+  rfl
+
+theorem indexedTreeCandidateVEnvsWF :
+    indexedTreeCandidateVEnvs.WF indexedTreeKernelContext.env where
+  tr := by
+    intro safety
+    change TrEnv' safety natMap false natFinalEnv
+    exact nat_trEnv'
+  hasPrimitives := indexedVecSemanticNatHasPrimitives
+  safePrimitives := by
+    intro name info found primitive
+    exact indexedVecSemanticNatSafePrimitives found primitive
+  mono := fun _ => .rfl
+  projectionReady :=
+    indexedVecSemanticNatVEnvsWF.projectionReady.of_constants_eq
+      indexedTreeCandidateKernelConstants_eq
+  structureEtaReady :=
+    indexedVecSemanticNatVEnvsWF.structureEtaReady.of_constants_eq
+      indexedTreeCandidateKernelConstants_eq
+
+theorem indexedTreeCandidateNamePrefixNe :
+    indexedTreeKernelContext.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix := by
+  decide
+
+def indexedTreeCandidatePreContextRun :
+    TypeChecker.CandidateContextRun
+      { indexedTreeKernelContext with lctx := {} } :=
+  TypeChecker.CandidateContextRun.root indexedTreeCandidateVEnvsWF rfl
+    indexedTreeCandidateNamePrefixNe
+
+def indexedTreeCandidatePreStage : TypeChecker.CandidateSemanticStage
+    { indexedTreeKernelContext with lctx := {} } natFinalEnv [`u] where
+  contextRun := indexedTreeCandidatePreContextRun
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
+theorem indexedTreeKernelLevelParams :
+    indexedTreeKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeListKernelLevelParams :
+    indexedTreeListKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeLeafKernelLevelParams :
+    indexedTreeLeafKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeNodeKernelLevelParams :
+    indexedTreeNodeKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeListNilKernelLevelParams :
+    indexedTreeListNilKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeListConsKernelLevelParams :
+    indexedTreeListConsKernelInfo.levelParams = [`u] := by
+  native_decide
+
+theorem indexedTreeCandidateValidationEnv_eq :
+    indexedTreeExecution.validationContext.env =
+      indexedTreeKernelContext.env := by
+  exact indexedTreeExecution.validationContext_env
+    indexedTreeBlockGenerationShape.producedExecution (by decide)
+
+theorem indexedTreeFamilySourceTr :
+    TrExprS natFinalEnv [`u] [] indexedTreeKernelType.type
+      indexedTreeType.type := by
+  simpa only [indexedTreeKernelType, indexedTreeKernelLevelParams] using
+    indexedTreeKernelInfo_tr.1.2.2
+
+theorem indexedTreeListFamilySourceTr :
+    TrExprS natFinalEnv [`u] [] indexedTreeListKernelType.type
+      indexedTreeListType.type := by
+  have hNat : natFinalEnv.constants ``Nat =
+      some InductiveFixtures.natType.toVConstant := rfl
+  have shape : TrTypeExpr natFinalEnv indexedTreeListKernelInfo.levelParams []
+      indexedTreeListKernelInfo.type indexedTreeListType.type := by
+    tr_type_expr_tac
+  rw [indexedTreeListKernelLevelParams] at shape
+  simpa [indexedTreeListKernelType] using shape.to_trExprS
+    natFinalEnv_ordered trivial
+    (indexedTreeFamilyTypeWF indexedTreeListType (.inr rfl))
+
+def indexedTreeCandidateFamilySources :
+    CandidateBlockFamilyTypeSourceListInput natFinalEnv [`u]
+      indexedTreeKernelTypes indexedTreeDecl.types :=
+  .cons {
+      name_eq := rfl
+      uvars_eq := rfl
+      source_tr := indexedTreeFamilySourceTr }
+    (.cons {
+      name_eq := rfl
+      uvars_eq := rfl
+      source_tr := indexedTreeListFamilySourceTr } .nil)
+
+theorem indexedTreeCandidateBlockEnvOrdered :
+    indexedTreeBlockEnv.Ordered :=
+  indexedReplayTypeEnv_ordered
+
+theorem indexedTreeLeafSourceTr :
+    TrExprS indexedTreeBlockEnv [`u] []
+      indexedTreeKernelType.ctors[0].type
+      indexedTreeType.ctors[0].type := by
+  rw [show indexedTreeBlockEnv = indexedReplayTypeEnv by rfl]
+  simpa [indexedTreeKernelType, indexedTreeLeafKernelLevelParams] using
+    indexedTreeLeafKernelInfo_tr.1.2.2
+
+theorem indexedTreeNodeSourceTr :
+    TrExprS indexedTreeBlockEnv [`u] []
+      indexedTreeKernelType.ctors[1].type
+      indexedTreeType.ctors[1].type := by
+  have hNat : indexedTreeBlockEnv.constants ``Nat =
+      some InductiveFixtures.natType.toVConstant := rfl
+  have hZero : indexedTreeBlockEnv.constants ``Nat.zero =
+      some InductiveFixtures.natType.ctors[0].toVConstant := rfl
+  have hSucc : indexedTreeBlockEnv.constants ``Nat.succ =
+      some InductiveFixtures.natType.ctors[1].toVConstant := rfl
+  have hTree : indexedTreeBlockEnv.constants ``IndexedTree =
+      some indexedTreeType.toVConstant := rfl
+  have hTreeList : indexedTreeBlockEnv.constants ``IndexedTreeList =
+      some indexedTreeListType.toVConstant := rfl
+  have shape : TrTypeExpr indexedTreeBlockEnv
+      indexedTreeNodeKernelInfo.levelParams [] indexedTreeNodeKernelInfo.type
+      indexedTreeType.ctors[1].type := by
+    tr_type_expr_tac
+  rw [indexedTreeNodeKernelLevelParams] at shape
+  simpa [indexedTreeKernelType] using shape.to_trExprS
+    indexedTreeCandidateBlockEnvOrdered trivial
+    (indexedTreeCtorWF indexedTreeType.ctors[1]
+      (.inl (by simp [indexedTreeType])))
+
+theorem indexedTreeListNilSourceTr :
+    TrExprS indexedTreeBlockEnv [`u] []
+      indexedTreeListKernelType.ctors[0].type
+      indexedTreeListType.ctors[0].type := by
+  have hNat : indexedTreeBlockEnv.constants ``Nat =
+      some InductiveFixtures.natType.toVConstant := rfl
+  have hZero : indexedTreeBlockEnv.constants ``Nat.zero =
+      some InductiveFixtures.natType.ctors[0].toVConstant := rfl
+  have hSucc : indexedTreeBlockEnv.constants ``Nat.succ =
+      some InductiveFixtures.natType.ctors[1].toVConstant := rfl
+  have hTree : indexedTreeBlockEnv.constants ``IndexedTree =
+      some indexedTreeType.toVConstant := rfl
+  have hTreeList : indexedTreeBlockEnv.constants ``IndexedTreeList =
+      some indexedTreeListType.toVConstant := rfl
+  have shape : TrTypeExpr indexedTreeBlockEnv
+      indexedTreeListNilKernelInfo.levelParams []
+      indexedTreeListNilKernelInfo.type indexedTreeListType.ctors[0].type := by
+    tr_type_expr_tac
+  rw [indexedTreeListNilKernelLevelParams] at shape
+  simpa [indexedTreeListKernelType] using shape.to_trExprS
+    indexedTreeCandidateBlockEnvOrdered trivial
+    (indexedTreeCtorWF indexedTreeListType.ctors[0]
+      (.inr (by simp [indexedTreeListType])))
+
+theorem indexedTreeListConsSourceTr :
+    TrExprS indexedTreeBlockEnv [`u] []
+      indexedTreeListKernelType.ctors[1].type
+      indexedTreeListType.ctors[1].type := by
+  have hNat : indexedTreeBlockEnv.constants ``Nat =
+      some InductiveFixtures.natType.toVConstant := rfl
+  have hZero : indexedTreeBlockEnv.constants ``Nat.zero =
+      some InductiveFixtures.natType.ctors[0].toVConstant := rfl
+  have hSucc : indexedTreeBlockEnv.constants ``Nat.succ =
+      some InductiveFixtures.natType.ctors[1].toVConstant := rfl
+  have hTree : indexedTreeBlockEnv.constants ``IndexedTree =
+      some indexedTreeType.toVConstant := rfl
+  have hTreeList : indexedTreeBlockEnv.constants ``IndexedTreeList =
+      some indexedTreeListType.toVConstant := rfl
+  have shape : TrTypeExpr indexedTreeBlockEnv
+      indexedTreeListConsKernelInfo.levelParams []
+      indexedTreeListConsKernelInfo.type indexedTreeListType.ctors[1].type := by
+    tr_type_expr_tac
+  rw [indexedTreeListConsKernelLevelParams] at shape
+  simpa [indexedTreeListKernelType] using shape.to_trExprS
+    indexedTreeCandidateBlockEnvOrdered trivial
+    (indexedTreeCtorWF indexedTreeListType.ctors[1]
+      (.inr (by simp [indexedTreeListType])))
+
+def indexedTreeCandidateFamilyTypes :
+    CandidateBlockFamilyTypeStagedListInput indexedTreeCandidatePreStage
+      indexedTreeExecution.candidate.families indexedTreeDecl.types :=
+  indexedTreeCandidateFamilySources.staged
+    indexedTreeExecution.candidate.families (by
+      change CandidateFamilyTypeListProduced _
+        indexedTreeExecution.families.candidates.familyTypes
+      rw [indexedTreeExecution.families.produced.familyTypes_eq]
+      exact indexedTreeExecution.familyTypes.produced) 9999 rfl
+
+theorem indexedTreeCandidateTerminals :
+    CandidateBlockFamilyTerminalSortList
+      indexedTreeExecution.candidate.families :=
+  CandidateBlockFamilyTerminalSortList.of_check
+    indexedTreeExecution.candidate.families (by native_decide)
+
+theorem indexedTreeCandidateDeclaredInfosMulti :
+    ∀ info ∈ indexedTreeExecution.declaredInfos,
+      info.ctors.length ≠ 1 := by
+  native_decide
+
+theorem indexedTreeCandidateNindicesSize :
+    indexedTreeExecution.stats.nindices.size =
+      indexedTreeKernelTypes.length := by
+  have sizes := indexedTreeExecution.familyValidationResult.sizes_of_run
+    (by decide) indexedTreeExecution_familyValidationResult_run
+  simpa only [AddInductive.NormalizationCandidateExecution.familyValidationResult]
+    using sizes.2.1
+
+/-- The exact family declaration trace transports the Nat-backed projection
+and eta certificate across both multi-constructor indexed families. -/
+theorem indexedTreeCandidatePostReadiness :
+    ProjectionReady indexedTreeExecution.familyEnv indexedTreeBlockEnv ∧
+      StructureEtaReady indexedTreeExecution.familyEnv
+        indexedTreeBlockEnv := by
+  have metadata : List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo indexedTreeExecution.stats
+          indexedTreeDecl.nparams indexedTreeKernelTypes.toArray indType
+            numIndices 0 false indexedTreeExecution.validationContext)
+      indexedTreeKernelTypes indexedTreeExecution.declaredInfos := by
+    simpa only [AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches indexedTreeExecution.stats
+        indexedTreeDecl.nparams indexedTreeKernelTypes.toArray 0 false
+        indexedTreeExecution.validationContext
+        indexedTreeCandidateNindicesSize
+  have evidenceFull := indexedTreeCandidateFamilyTypes.declarationEvidence
+    metadata indexedTreeCandidateTerminals (show false = false from rfl)
+      (by native_decide)
+  have evidence : List.Forall₂
+      (fun _ raw => raw.toVConstant.WF natFinalEnv)
+      indexedTreeExecution.declaredInfos indexedTreeDecl.types :=
+    Lean4Lean.List.Forall₂.imp (h := evidenceFull) fun _ _ h => h.2
+  apply declarationTraceMultiConstructorReadiness
+    indexedTreeExecution.declareTrace indexedTreeStage evidence
+    indexedTreeCandidateDeclaredInfosMulti
+  · rw [indexedTreeCandidateValidationEnv_eq]
+    exact natMap_wf
+  · exact natFinalEnv_ordered
+  · rw [indexedTreeCandidateValidationEnv_eq]
+    simpa [indexedTreeCandidateVEnvs,
+      indexedVecSemanticNatVEnvs] using
+      indexedTreeCandidateVEnvsWF.projectionReady (safety := .safe)
+  · rw [indexedTreeCandidateValidationEnv_eq]
+    simpa [indexedTreeCandidateVEnvs,
+      indexedVecSemanticNatVEnvs] using
+      indexedTreeCandidateVEnvsWF.structureEtaReady (safety := .safe)
+
+/-- Exact shared family stage derived from the indexed mutual candidate and
+its retained family-only declaration trace. -/
+def indexedTreeCandidateStaging : NormalizationCandidateBlockStagingInput
+    indexedTreeKernelContext indexedTreeExecution natFinalEnv
+      indexedTreeBlockEnv [`u] indexedTreeDecl where
+  uvars_eq := rfl
+  preFamily := indexedTreeCandidatePreStage
+  familyTypes := indexedTreeCandidateFamilyTypes
+  terminals := indexedTreeCandidateTerminals
+  stage := indexedTreeStage
+  nindices_size := indexedTreeCandidateNindicesSize
+  validation_env_eq := indexedTreeCandidateValidationEnv_eq
+  validation_lparams_eq := by native_decide
+  context_safety_eq := rfl
+  isUnsafe_eq := rfl
+  preMapWF := natMap_wf
+  names_not_primitive := by
+    intro raw member
+    simp [indexedTreeDecl] at member
+    rcases member with rfl | rfl
+    · constructor
+      · simp [indexedTreeType, VEnv.reflectedPrimitiveNames]
+      · simp [indexedTreeType, Kernel.Environment.primitives,
+          NameSet.ofList, NameSet.contains]
+    · constructor
+      · simp [indexedTreeListType, VEnv.reflectedPrimitiveNames]
+      · simp [indexedTreeListType, Kernel.Environment.primitives,
+          NameSet.ofList, NameSet.contains]
+  projectionReady := indexedTreeCandidatePostReadiness.1
+  structureEtaReady := indexedTreeCandidatePostReadiness.2
+
+def indexedTreeCandidateConstructorSources :
+    CandidateBlockConstructorSourceListInput indexedTreeBlockEnv [`u]
+      indexedTreeKernelTypes indexedTreeDecl.types :=
+  .cons
+    (.cons {
+        name_eq := rfl
+        uvars_eq := rfl
+        source_tr := indexedTreeLeafSourceTr }
+      (.cons {
+          name_eq := rfl
+          uvars_eq := rfl
+          source_tr := indexedTreeNodeSourceTr }
+        .nil))
+    (.cons
+      (.cons {
+          name_eq := rfl
+          uvars_eq := rfl
+          source_tr := indexedTreeListNilSourceTr }
+        (.cons {
+            name_eq := rfl
+            uvars_eq := rfl
+            source_tr := indexedTreeListConsSourceTr }
+          .nil))
+      .nil)
+
+def indexedTreeCandidateConstructors :
+    CandidateBlockConstructorStagedListInput
+      indexedTreeCandidateStaging.postFamily
+      indexedTreeExecution.candidate.families indexedTreeDecl.types :=
+  indexedTreeCandidateConstructorSources.staged
+    indexedTreeExecution.candidate.families
+    indexedTreeExecution.families.produced.constructorLists 9999 rfl
+
+/-- Complete pre/post-family staged owner for the indexed mutual candidate. -/
+def indexedTreeStagedCandidateSemantic :
+    StagedNormalizationCandidateBlockSemanticInput
+      indexedTreeCandidateStaging where
+  constructors := indexedTreeCandidateConstructors
+
+/-- Identity-specialized interpretation of the exact indexed candidate
+hierarchy. -/
+def indexedTreeCandidateIdentitySemantic :
+    NormalizationCandidateBlockSemanticRun natFinalEnv indexedTreeBlockEnv
+      [`u] indexedTreeExecution.candidate indexedTreeDecl :=
+  indexedTreeStagedCandidateSemantic.semanticRunOfIdentity (by native_decide)
+
+theorem indexedTreeCandidateIdentityNormalization :
+    indexedTreeCandidateIdentitySemantic.normalization =
+      Normalization.identity indexedTreeDecl := by
+  simpa only [indexedTreeCandidateIdentitySemantic] using
+    indexedTreeStagedCandidateSemantic.semanticRunOfIdentity_normalization
+      (by native_decide)
+
+theorem indexedTreeCandidateIdentityAnalysis :
+    indexedTreeCandidateIdentitySemantic.normalization.checkBlock? =
+      some indexedTreeGeneration.block := by
+  rw [indexedTreeCandidateIdentityNormalization]
+  rfl
+
+def indexedTreeProducedCandidateIdentitySemantic :
+    ProducedNormalizationCandidateBlockSemanticRun
+      { indexedTreeKernelContext with lctx := {} }
+      { indexedTreeKernelContext with
+        env := indexedTreeExecution.familyEnv, lctx := {} }
+      natFinalEnv indexedTreeBlockEnv [`u] indexedTreeExecution.candidate
+        indexedTreeDecl where
+  semantic := indexedTreeCandidateIdentitySemantic
+  familyTypesProduced := by
+    change CandidateFamilyTypeListProduced _
+      indexedTreeExecution.families.candidates.familyTypes
+    rw [indexedTreeExecution.families.produced.familyTypes_eq]
+    exact indexedTreeExecution.familyTypes.produced
+  familiesProduced := indexedTreeExecution.families.produced.reindex
+
+/-- Exact dependent closure from the indexed kernel-facing producer through
+the generic block-generation assembler. -/
+def indexedTreeExactProducedBlockGeneration :
+    ExactProducedBlockGenerationRun natFinalEnv indexedTreeBlockEnv [`u]
+      indexedTreeBlockGenerationShape indexedTreeGeneration where
+  producedSemantic := indexedTreeProducedCandidateIdentitySemantic
+  analysis := indexedTreeCandidateIdentityAnalysis
+  checked := indexedTreeCheckedBlockWF
+  resultLevelWF := by decide
+
+/-- Indexed exact semantic generation paired with its retained ordinary
+post-constructor elimination decisions. -/
+def indexedTreeExactProducedBlockElimination :
+    ExactProducedBlockEliminationRun natFinalEnv indexedTreeBlockEnv [`u]
+      indexedTreeBlockEliminationShape indexedTreeGeneration where
+  block := by
+    rw [indexedTreeBlockEliminationBase_eq]
+    exact indexedTreeExactProducedBlockGeneration
+  elimination := indexedTreeBlockEliminationAlignment
+  isUnsafe_eq := rfl
+  validation_lparams_eq := by
+    change indexedTreeEliminationExecution.normalization.validationContext.lparams =
+      [`u]
+    rw [indexedTreeEliminationNormalization_eq]
+    exact indexedTreeCandidateStaging.validation_lparams_eq
+
+def indexedTreeExactProducedBlockRecursor : ExactProducedBlockRecursorRun
+    natFinalEnv indexedTreeBlockEnv [`u] indexedTreeBlockRecursorShape
+      indexedTreeGeneration where
+  elimination := by
+    rw [indexedTreeBlockRecursorEliminationBase_eq]
+    exact indexedTreeExactProducedBlockElimination
+
+/-- Indexed staging input reindexed onto the retained elimination execution. -/
+def indexedTreeExactEliminationStaging :
+    NormalizationCandidateBlockStagingInput indexedTreeKernelContext
+      indexedTreeEliminationExecution.normalization natFinalEnv
+      indexedTreeBlockEnv [`u] indexedTreeDecl := by
+  rw [indexedTreeEliminationNormalization_eq]
+  exact indexedTreeCandidateStaging
+
+def indexedTreeExactRecursorStaging :
+    NormalizationCandidateBlockStagingInput indexedTreeKernelContext
+      indexedTreeBlockRecursorShape.execution.eliminationExecution.normalization
+      natFinalEnv indexedTreeBlockEnv [`u] indexedTreeDecl := by
+  change NormalizationCandidateBlockStagingInput indexedTreeKernelContext
+    indexedTreeRecursorExecution.eliminationExecution.normalization
+      natFinalEnv indexedTreeBlockEnv [`u] indexedTreeDecl
+  rw [indexedTreeRecursorElimination_eq]
+  exact indexedTreeExactEliminationStaging
+
+/-- Exact indexed owner of the family and constructor declaration prefix. -/
+noncomputable def indexedTreeExactDeclarationRun :
+    ExactProducedBlockDeclarationRun
+      indexedTreeExactProducedBlockElimination :=
+  indexedTreeExactProducedBlockElimination.declarationRun
+    indexedTreeExactEliminationStaging
+
+noncomputable def indexedTreeExactRecursorDeclarationRun :=
+  indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+    indexedTreeExactRecursorStaging
+
+/-- Exact indexed family declaration paired with its Theory staging fold. -/
+noncomputable def indexedTreeExactFamilyDeclaration :
+    FamilyDeclarationStagingRun
+      indexedTreeExecution.validationContext.allowPrimitive
+      indexedTreeExecution.validationContext.env indexedTreeExecution.familyEnv
+      indexedTreeExecution.declaredInfos natFinalEnv indexedTreeBlockEnv
+      indexedTreeDecl.blockTypeConstants
+      indexedTreeExecution.validationContext.env.quotInit := by
+  rw [← indexedTreeEliminationNormalization_eq]
+  exact indexedTreeExactDeclarationRun.families
+
+theorem indexedTreeExactFamilyDeclaration_fold :
+    indexedTreeDecl.blockTypeConstants.foldlM
+      (fun env family => env.addConst family.name family.toVConstant)
+      natFinalEnv = some indexedTreeBlockEnv :=
+  indexedTreeExactFamilyDeclaration.addTypes.to_foldlM
+
+/-- Indexed counterpart of the exact constructor declaration interpreter;
+all four raw constructors and their source order come from the retained
+ordinary execution. -/
+noncomputable def indexedTreeExactConstructorDeclaration :
+    ConstructorDeclarationStagingRun
+      indexedTreeEliminationExecution.constructorContext.allowPrimitive
+      indexedTreeEliminationExecution.normalization.familyEnv
+      indexedTreeEliminationExecution.constructorEnv
+      indexedTreeEliminationExecution.declaredConstructorInfos
+      indexedTreeBlockEnv indexedTreeDecl.blockConstructorConstants
+      indexedTreeEliminationExecution.normalization.validationContext.env.quotInit :=
+  indexedTreeExactDeclarationRun.constructors
+
+theorem indexedTreeExactConstructorDeclaration_fold :
+    indexedTreeDecl.blockConstructorConstants.foldlM
+      (fun env constructor =>
+        env.addConst constructor.name constructor.toVConstant)
+      indexedTreeBlockEnv =
+        some indexedTreeExactConstructorDeclaration.ctorEnv :=
+  indexedTreeExactConstructorDeclaration.addCtors.to_foldlM
+
+theorem indexedTreeExactRecursorConstructorEnv_eq :
+    (indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+      indexedTreeExactRecursorStaging).constructors.ctorEnv =
+        indexedReplayCtorEnv := by
+  have replay : indexedTreeDecl.blockConstructorConstants.foldlM
+      (fun env constructor =>
+        env.addConst constructor.name constructor.toVConstant)
+      indexedTreeBlockEnv = some indexedReplayCtorEnv := by rfl
+  rw [(indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+    indexedTreeExactRecursorStaging).constructors.addCtors.to_foldlM] at replay
+  exact Option.some.inj replay
+
+/-- The indexed mutual block's generation certificate is reconstructed from
+the retained normalization execution, with no fixture-selected inventories. -/
+theorem indexedTreeBlockGenerationWF_fromCandidate :
+    indexedTreeGeneration.WF natFinalEnv indexedTreeBlockEnv :=
+  indexedTreeExactProducedBlockGeneration.blockGenerationRun.wf
+
 theorem indexedTreeRecKernelInfo_tr :
     TrConstVal .safe indexedReplayCtorEnv indexedTreeRecKernelInfo
       indexedTreeGeneration.recursors[0] := by
@@ -2784,36 +4082,96 @@ theorem indexedTreeRecKernelInfo_tr :
   exact hshape.to_trExprS indexedReplayCtorEnv_ordered trivial
     ⟨.sort u, hrec⟩
 
-theorem indexedTreeListRecKernelInfo_tr :
-    TrConstVal .safe indexedReplayFirstRecEnv indexedTreeListRecKernelInfo
+theorem indexedTreeListRecKernelInfo_tr_atCtor :
+    TrConstVal .safe indexedReplayCtorEnv indexedTreeListRecKernelInfo
       indexedTreeGeneration.recursors[1] := by
-  have hNat : indexedReplayFirstRecEnv.constants ``Nat =
+  have hNat : indexedReplayCtorEnv.constants ``Nat =
       some InductiveFixtures.natType.toVConstant := rfl
-  have hZero : indexedReplayFirstRecEnv.constants ``Nat.zero =
+  have hZero : indexedReplayCtorEnv.constants ``Nat.zero =
       some InductiveFixtures.natType.ctors[0].toVConstant := rfl
-  have hSucc : indexedReplayFirstRecEnv.constants ``Nat.succ =
+  have hSucc : indexedReplayCtorEnv.constants ``Nat.succ =
       some InductiveFixtures.natType.ctors[1].toVConstant := rfl
-  have hTree : indexedReplayFirstRecEnv.constants ``IndexedTree =
+  have hTree : indexedReplayCtorEnv.constants ``IndexedTree =
       some indexedTreeType.toVConstant := rfl
-  have hTreeList : indexedReplayFirstRecEnv.constants ``IndexedTreeList =
+  have hTreeList : indexedReplayCtorEnv.constants ``IndexedTreeList =
       some indexedTreeListType.toVConstant := rfl
-  have hLeaf : indexedReplayFirstRecEnv.constants ``IndexedTree.leaf =
+  have hLeaf : indexedReplayCtorEnv.constants ``IndexedTree.leaf =
       some indexedTreeType.ctors[0].toVConstant := rfl
-  have hNode : indexedReplayFirstRecEnv.constants ``IndexedTree.node =
+  have hNode : indexedReplayCtorEnv.constants ``IndexedTree.node =
       some indexedTreeType.ctors[1].toVConstant := rfl
-  have hNil : indexedReplayFirstRecEnv.constants ``IndexedTreeList.nil =
+  have hNil : indexedReplayCtorEnv.constants ``IndexedTreeList.nil =
       some indexedTreeListType.ctors[0].toVConstant := rfl
-  have hCons : indexedReplayFirstRecEnv.constants ``IndexedTreeList.cons =
+  have hCons : indexedReplayCtorEnv.constants ``IndexedTreeList.cons =
       some indexedTreeListType.ctors[1].toVConstant := rfl
   refine ⟨⟨by decide, rfl, ?_⟩, rfl⟩
-  have hshape : TrTypeExpr indexedReplayFirstRecEnv
+  have hshape : TrTypeExpr indexedReplayCtorEnv
       indexedTreeListRecKernelInfo.levelParams []
       indexedTreeListRecKernelInfo.type
       indexedTreeGeneration.recursors[1].type := by tr_type_expr_tac
   obtain ⟨u, hrec⟩ := indexedReplayGenerationEnv.recursor_wf
     (.tail _ (.head _))
-  exact hshape.to_trExprS indexedReplayFirstRecEnv_ordered trivial
-    ⟨.sort u, hrec.mono indexedReplayCtorEnv_le_firstRecEnv⟩
+  exact hshape.to_trExprS indexedReplayCtorEnv_ordered trivial
+    ⟨.sort u, hrec⟩
+
+theorem indexedTreeListRecKernelInfo_tr :
+    TrConstVal .safe indexedReplayFirstRecEnv indexedTreeListRecKernelInfo
+      indexedTreeGeneration.recursors[1] :=
+  indexedTreeListRecKernelInfo_tr_atCtor.mono
+    indexedReplayCtorEnv_le_firstRecEnv
+
+theorem indexedTreeExpectedRecursorEvidence : List.Forall₂
+    (fun info raw =>
+      TrConstVal .safe indexedReplayCtorEnv (.recInfo info) raw)
+    indexedTreeExpectedRecursorInfos indexedTreeGeneration.recursors := by
+  have hrecs : indexedTreeGeneration.recursors =
+      [indexedTreeGeneration.recursors[0],
+        indexedTreeGeneration.recursors[1]] := rfl
+  rw [hrecs]
+  exact .cons
+    (by
+      simpa [indexedTreeExpectedRecursorInfos,
+        indexedTreeRecKernelInfo, kernelRecursorInfo?] using
+          indexedTreeRecKernelInfo_tr)
+    (.cons
+      (by
+        simpa [indexedTreeExpectedRecursorInfos,
+          indexedTreeListRecKernelInfo, kernelRecursorInfo?] using
+            indexedTreeListRecKernelInfo_tr_atCtor)
+      .nil)
+
+theorem indexedTreeGeneratedRecursorEvidence : List.Forall₂
+    (fun info raw => TrConstVal .safe
+      (indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+        indexedTreeExactRecursorStaging).constructors.ctorEnv
+      (.recInfo info) raw)
+    indexedTreeBlockRecursorShape.execution.recursors.infos
+      indexedTreeGeneration.recursors := by
+  rw [indexedTreeExactRecursorConstructorEnv_eq]
+  apply recursorInfoTranslationList_of_option_beq
+    (expected := indexedTreeExpectedRecursorInfos)
+  · simpa [indexedTreeRecursorExecution,
+      indexedTreeExpectedRecursorInfos, indexedTreeRecKernelInfo,
+      indexedTreeListRecKernelInfo, kernelRecursorInfo?] using
+        indexedTreeGeneratedRecursorInfos_match
+  · exact indexedTreeExpectedRecursorEvidence
+
+theorem indexedTreeGeneratedRecursorsWF :
+    ∀ raw ∈ indexedTreeGeneration.recursors,
+      raw.toVConstant.WF
+        (indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+          indexedTreeExactRecursorStaging).constructors.ctorEnv := by
+  intro raw member
+  rw [indexedTreeExactRecursorConstructorEnv_eq]
+  simp only [BlockGenerationChecked.recursors, List.mem_map] at member
+  obtain ⟨family, hfamily, rfl⟩ := member
+  exact indexedReplayGenerationEnv.recursor_wf hfamily
+
+noncomputable def indexedTreeExactMetadataPrefixRun :
+    ExactProducedBlockMetadataPrefixRun
+      indexedTreeExactProducedBlockRecursor :=
+  indexedTreeExactProducedBlockRecursor.metadataPrefix
+    indexedTreeExactRecursorStaging indexedTreeGeneratedRecursorEvidence
+      indexedTreeGeneratedRecursorsWF
 
 def indexedReplayFirstTypeMap : ConstMap :=
   natMap.insert ``IndexedTree indexedTreeKernelInfo
@@ -3065,6 +4423,50 @@ theorem indexedTreeAddInductBlock :
     AddInductBlock natMap natFinalEnv indexedTreeDecl
       indexedReplayMap indexedTreeFinalEnv :=
   ⟨indexedTreeAddInductBlockTrace⟩
+
+/-- The indexed producer-constructed recursor fold agrees with the independent
+raw Theory replay endpoint. -/
+theorem indexedTreeExactProducedRecEnv_eq :
+    indexedTreeExactMetadataPrefixRun.recursors.recEnv =
+      indexedReplayRecEnv := by
+  have ctorEnvEq :
+      indexedTreeExactMetadataPrefixRun.declarations.constructors.ctorEnv =
+        indexedReplayCtorEnv := by
+    change (indexedTreeExactProducedBlockRecursor.elimination.declarationRun
+      indexedTreeExactRecursorStaging).constructors.ctorEnv =
+        indexedReplayCtorEnv
+    exact indexedTreeExactRecursorConstructorEnv_eq
+  have exactFold :=
+    indexedTreeExactMetadataPrefixRun.recursors.addRecs.to_foldlM
+  have replayFold : indexedTreeGeneration.recursors.foldlM
+      (fun env recursor => env.addConst recursor.name recursor.toVConstant)
+      indexedReplayCtorEnv = some indexedReplayRecEnv := by rfl
+  have folds := congrArg
+    (fun start => indexedTreeGeneration.recursors.foldlM
+      (fun env recursor => env.addConst recursor.name recursor.toVConstant)
+      start) ctorEnvEq
+  rw [exactFold, replayFold] at folds
+  exact Option.some.inj folds
+
+/-- Indexed exact transaction through the actual synthesized kernel map. -/
+noncomputable def indexedTreeExactProducedBlockMetadataTrace :
+    AddInductBlockTrace
+      indexedTreeRecursorExecution.eliminationExecution.normalization.validationContext.env.constants
+      natFinalEnv indexedTreeDecl
+      indexedTreeRecursorExecution.recursors.env.constants
+      indexedTreeFinalEnv :=
+  indexedTreeExactMetadataPrefixRun.addInductBlockTrace
+    (env₂ := indexedTreeFinalEnv) ⟨by
+      rw [indexedTreeExactProducedRecEnv_eq]
+      rfl⟩
+
+theorem indexedTreeExactProducedBlockMetadata :
+    AddInductBlock
+      indexedTreeRecursorExecution.eliminationExecution.normalization.validationContext.env.constants
+      natFinalEnv indexedTreeDecl
+      indexedTreeRecursorExecution.recursors.env.constants
+      indexedTreeFinalEnv :=
+  ⟨indexedTreeExactProducedBlockMetadataTrace⟩
 
 theorem indexedTree_trEnv' :
     TrEnv' .safe indexedReplayMap false indexedTreeFinalEnv :=

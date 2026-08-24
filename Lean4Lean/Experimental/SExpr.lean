@@ -2727,6 +2727,57 @@ theorem HasTypeStratifiedS.to_core (H : Γ ⊢ e : A !! n) :
     obtain ⟨A', hA'⟩ := ih rfl
     exact ⟨A', hA'.mono (Nat.le_succ _)⟩
 
+/-- A stratified typing of a syntactic Pi necessarily spends one depth
+layer. -/
+theorem HasTypeStratifiedS.forallE_depth_pos
+    (H : HasTypeStratifiedS Γ (.forallE A B) V true depth) :
+    0 < depth := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H
+  omega
+
+/-- A stratified typing of a concrete application necessarily spends one
+depth layer. -/
+theorem HasTypeStratifiedS.app_depth_pos
+    (H : HasTypeStratifiedS Γ (.app f a) V true depth) :
+    0 < depth := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H
+  omega
+
+/-- A stratified typing of a syntactic lambda necessarily spends one depth
+layer. -/
+theorem HasTypeStratifiedS.lam_depth_pos
+    (H : HasTypeStratifiedS Γ (.lam A body) V true depth) :
+    0 < depth := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H
+  omega
+
+/-- A stratified typing of a constant necessarily spends one depth layer. -/
+theorem HasTypeStratifiedS.const_depth_pos
+    (H : HasTypeStratifiedS Γ (.const c ls) V true depth) :
+    0 < depth := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H
+  omega
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.forallE_depth_pos' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.forallE_depth_pos
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.app_depth_pos' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.app_depth_pos
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.lam_depth_pos' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.lam_depth_pos
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.const_depth_pos' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.const_depth_pos
+
 /-- A stratified typing of a syntactic Pi exposes strictly shallower
 stratified typings for its domain and codomain.  Outer conversions are
 discarded by `to_core`; the remaining core derivation is forced to be the
@@ -2741,6 +2792,44 @@ theorem HasTypeStratifiedS.forallE_inv
   cases H with
   | forallE hA hB =>
     exact ⟨_, _, by simpa using hA, by simpa using hB⟩
+
+/-- A stratified typing of a syntactic lambda exposes its domain, codomain,
+body, and Pi certificate one layer earlier. -/
+theorem HasTypeStratifiedS.lam_inv
+    (H : HasTypeStratifiedS Γ (.lam A body) V true depth) :
+    ∃ u B v,
+      HasTypeStratifiedS Γ A (.sort u) true (depth - 1) ∧
+      HasTypeStratifiedS (A :: Γ) B (.sort v) true (depth - 1) ∧
+      HasTypeStratifiedS (A :: Γ) body B true (depth - 1) ∧
+      HasTypeStratifiedS Γ (.forallE A B)
+        (.sort (.imax u v)) true (depth - 1) := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H with
+  | lam hA hB hbody hPi =>
+    exact ⟨_, _, _, by simpa using hA, by simpa using hB,
+      by simpa using hbody, by simpa using hPi⟩
+
+/-- A stratified typing of a constant exposes its registration, universe
+arity, and registered type certificate one layer earlier. -/
+theorem HasTypeStratifiedS.const_inv
+    (H : HasTypeStratifiedS Γ (.const c ls) V true depth) :
+    ∃ ci u,
+      Params.env.constants c = some ci ∧
+      ls.length = ci.uvars ∧
+      HasTypeStratifiedS Γ (SExpr.mkInst ls ci.type)
+        (.sort u) true (depth - 1) := by
+  obtain ⟨V', H⟩ := H.to_core
+  cases H with
+  | const hreg hlen hTy =>
+    exact ⟨_, _, hreg, hlen, by simpa using hTy⟩
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.lam_inv' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.lam_inv
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.const_inv' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.const_inv
 
 /-- A stratified typing of a concrete application exposes every native
 typing premise one layer earlier.
@@ -3648,6 +3737,45 @@ theorem IsDefEqStrong.weak' [Params.Semantic]
     simpa only [Pattern.RHS.lift'_applyS] using
       IsDefEqStrong.extra (action.weak' W) (ihLeft W) hRight
 
+/-- Stratified typing is stable under a certified context embedding without
+changing its depth index.
+
+The constant and conversion cases use the evidence-rich weakening theorem;
+application uses the exact interaction between lifting and dependent
+instantiation. -/
+theorem HasTypeStratifiedS.weak' [Params.Semantic]
+    (W : Ctx.Lift' ρ Γ Γ')
+    (H : HasTypeStratifiedS Γ e A core depth) :
+    HasTypeStratifiedS Γ' (e.lift' ρ) (A.lift' ρ) core depth := by
+  induction H generalizing ρ Γ' with
+  | bvar h hA ihA =>
+    exact .bvar (h.weak' W) (ihA W)
+  | sort' => exact .sort'
+  | const hreg hlen hTy ihTy =>
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero]
+    have hTy' := ihTy W
+    rw [((Params.henv.closedC hreg).mkInstS).lift'_eq .zero] at hTy'
+    exact .const hreg hlen hTy'
+  | app hA hB hf ha hR ihA ihB ihf iha ihR =>
+    have hR' := ihR W
+    rw [SExpr.lift'_inst_hi] at hR'
+    exact SExpr.lift'_inst_hi .. ▸
+      .app (ihA W) (ihB W.cons) (ihf W) (iha W) hR'
+  | lam hA hB hbody hPi ihA ihB ihbody ihPi =>
+    simpa only [SExpr.lift', SExpr.lift] using
+      HasTypeStratifiedS.lam (ihA W) (ihB W.cons)
+        (ihbody W.cons) (ihPi W)
+  | forallE hA hB ihA ihB =>
+    simpa only [SExpr.lift', SExpr.lift] using
+      HasTypeStratifiedS.forallE (ihA W) (ihB W.cons)
+  | base H ih => exact .base (ih W)
+  | defeq hAB hA hB he ihA ihB ihe =>
+    exact .defeq (hAB.weak' W) (ihA W) (ihB W) (ihe W)
+
+/-- info: 'Lean4Lean.SExpr.HasTypeStratifiedS.weak'' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms HasTypeStratifiedS.weak'
+
 /-- A certified local contraction remains certified after a genuinely typed
 substitution.  In particular, generated-rule checks and the final local
 equality are transported by the same weak-defeq substitution theorem. -/
@@ -3821,6 +3949,14 @@ theorem TypeDefEqPath.subst
   induction H with
   | single h => exact .single (h.subst W)
   | trans _ _ ih₁ ih₂ => exact .trans ih₁ ih₂
+
+/-- Weaken every edge of a heterogeneous type path.  This is the
+`Lift`-specialization of `TypeDefEqPath.subst`; in particular it preserves
+the universe attached to the path's left endpoint. -/
+theorem TypeDefEqPath.weak'
+    (H : TypeDefEqPath Γ A B u) (W : Ctx.Lift' ρ Γ Γ₀) :
+    TypeDefEqPath Γ₀ (A.lift' ρ) (B.lift' ρ) u := by
+  simpa only [SExpr.subst_toSubst] using H.subst W.toSubst
 
 /-! ### Evidence-rich inversion, with the declared-type path
 
@@ -4400,10 +4536,255 @@ theorem WHRedS.weak' (W : Ctx.Lift' ρ Γ Δ) (H : Γ ⊢ e1 ⤳* e2) :
   | rfl => exact .rfl
   | tail _ h2 ih => exact .tail ih (h2.weak' W)
 
+/-! ### Path-typed weak-head reductions
+
+The direct adequacy route must never use an untyped weak-head reduction as
+conversion evidence.  The following two small bundles retain the raw
+reduction for head computation while pairing it with exactly the ordinary
+equality or heterogeneous type path that authorizes conversion.  They are
+syntax-only: neither definition mentions the logical relation or an
+inversion premise. -/
+
+/-- A weak-head reduction paired with an equality at the term's declared
+type.  Both components deliberately have the same endpoints. -/
+structure TypedWHRedS (Γ : List SExpr) (M M' A : SExpr) : Prop where
+  defeq : IsDefEq Γ M M' A
+  reduction : WHRedS Γ M M'
+
+/-- A weak-head reduction between types paired with a heterogeneous path of
+type equalities.  The path retains the universe of its left endpoint; later
+edges may live in different universes.  The level is existential so the
+bundle remains proof-irrelevant. -/
+def TypeWHRedPath (Γ : List SExpr) (A A' : SExpr) : Prop :=
+  ∃ u, TypeDefEqPath Γ A A' u ∧ WHRedS Γ A A'
+
+/-- Package one typed reduction. -/
+theorem TypedWHRedS.of_defeq
+    (h : IsDefEq Γ M M' A) (red : WHRedS Γ M M') :
+    TypedWHRedS Γ M M' A := ⟨h, red⟩
+
+/-- Package one proof-carrying weak-head step. -/
+theorem TypedWHRedS.of_step
+    (h : IsDefEq Γ M M' A) (step : WHRed Γ M M') :
+    TypedWHRedS Γ M M' A := ⟨h, .tail .rfl step⟩
+
+/-- The identity typed reduction supplied by a self-typing. -/
+theorem TypedWHRedS.refl (h : IsDefEq Γ M M A) :
+    TypedWHRedS Γ M M A := ⟨h, .rfl⟩
+
+/-- Compose typed reductions without changing their declared type. -/
+theorem TypedWHRedS.trans
+    (H₁ : TypedWHRedS Γ M N A) (H₂ : TypedWHRedS Γ N P A) :
+    TypedWHRedS Γ M P A :=
+  ⟨H₁.defeq.trans H₂.defeq, H₁.reduction.trans H₂.reduction⟩
+
+/-- Retain the left endpoint as an identity observation. -/
+theorem TypedWHRedS.left (H : TypedWHRedS Γ M M' A) :
+    TypedWHRedS Γ M M A := TypedWHRedS.refl H.defeq.hasType.1
+
+/-- Retain the right endpoint as an identity observation. -/
+theorem TypedWHRedS.right (H : TypedWHRedS Γ M M' A) :
+    TypedWHRedS Γ M' M' A := TypedWHRedS.refl H.defeq.hasType.2
+
+/-- Substitute a typed reduction and its equality in lockstep. -/
+theorem TypedWHRedS.subst
+    (H : TypedWHRedS Γ M M' A)
+    (W : Ctx.Subst (fun Γ e A => Γ ⊢ e : A) Γ₀ σ Γ) :
+    TypedWHRedS Γ₀ (M.subst σ) (M'.subst σ) (A.subst σ) :=
+  ⟨H.defeq.subst W, H.reduction.subst W⟩
+
+/-- Weaken a typed reduction and its equality in lockstep. -/
+theorem TypedWHRedS.weak'
+    (H : TypedWHRedS Γ M M' A) (W : Ctx.Lift' ρ Γ Γ₀) :
+    TypedWHRedS Γ₀ (M.lift' ρ) (M'.lift' ρ) (A.lift' ρ) :=
+  ⟨H.defeq.weak' W, H.reduction.weak' W⟩
+
+/-- Package one path-typed type reduction. -/
+theorem TypeWHRedPath.of_path
+    (path : TypeDefEqPath Γ A A' u) (red : WHRedS Γ A A') :
+    TypeWHRedPath Γ A A' := ⟨u, path, red⟩
+
+/-- Package one ordinary type equality and its weak-head reduction. -/
+theorem TypeWHRedPath.of_defeq
+    (h : IsDefEq Γ A A' (.sort u)) (red : WHRedS Γ A A') :
+    TypeWHRedPath Γ A A' := ⟨u, .single h, red⟩
+
+/-- Forget the one-edge presentation of a typed type reduction while
+retaining its universe as a heterogeneous path. -/
+theorem TypedWHRedS.toTypeWHRedPath
+    (H : TypedWHRedS Γ A A' (.sort u)) : TypeWHRedPath Γ A A' :=
+  .of_defeq H.defeq H.reduction
+
+/-- Regard a typed term reduction as a type reduction when the retained
+displayed-type observation reaches a universe.  The root path, rather than
+an ambient subject-reduction principle, supplies the conversion authority. -/
+theorem TypedWHRedS.toTypeWHRedPathAt
+    (H : TypedWHRedS Γ M M' A)
+    (root : TypeWHRedPath Γ A (.sort u)) :
+    TypeWHRedPath Γ M M' := by
+  obtain ⟨_, path, _⟩ := root
+  exact .of_defeq (path.defeqDF H.defeq) H.reduction
+
+/-- The beta contraction is locally path-typed by its ordinary beta
+equality; no normalization or subject-reduction premise is involved. -/
+theorem TypedWHRedS.beta
+    (hbody : IsDefEq (A :: Γ) body body B)
+    (harg : IsDefEq Γ arg arg A) :
+    TypedWHRedS Γ (.app (.lam A body) arg) (body.inst arg) (B.inst arg) :=
+  .of_step (.beta hbody harg) .beta
+
+/-- A certified registered-pattern contraction is locally typed by the
+equality already retained in its `Pattern.Action`. -/
+theorem _root_.Lean4Lean.Pattern.Action.typedWHRedS
+    (H : Pattern.Action Γ r e m1 m2 A) :
+    TypedWHRedS Γ e (r.1.applyS m1 m2) A :=
+  .of_step H.sound (.extra H)
+
+/-- The identity path-typed reduction supplied by a type self-typing. -/
+theorem TypeWHRedPath.refl (h : IsDefEq Γ A A (.sort u)) :
+    TypeWHRedPath Γ A A := ⟨u, .single h, .rfl⟩
+
+/-- Compose path-typed reductions.  `TypeDefEqPath.trans` deliberately keeps
+the universe stored by the left path, so this operation does too. -/
+theorem TypeWHRedPath.trans
+    (H₁ : TypeWHRedPath Γ A B) (H₂ : TypeWHRedPath Γ B C) :
+    TypeWHRedPath Γ A C := by
+  obtain ⟨u, path₁, red₁⟩ := H₁
+  obtain ⟨_, path₂, red₂⟩ := H₂
+  exact ⟨u, path₁.trans path₂, red₁.trans red₂⟩
+
+/-- Retain the left type endpoint as an identity observation. -/
+theorem TypeWHRedPath.left (H : TypeWHRedPath Γ A B) :
+    TypeWHRedPath Γ A A := by
+  obtain ⟨u, path, -⟩ := H
+  exact ⟨u, path.left, .rfl⟩
+
+/-- Retain the right type endpoint as an identity observation.  Its universe
+is existential because the final edge need not use the left universe. -/
+theorem TypeWHRedPath.right (H : TypeWHRedPath Γ A B) :
+    TypeWHRedPath Γ B B := by
+  obtain ⟨_, path, -⟩ := H
+  obtain ⟨v, path⟩ := path.right
+  exact ⟨v, path, .rfl⟩
+
+/-- Reverse only the conversion authority of a path-typed reduction.  Raw
+weak-head reduction is directional, so no reverse reduction is claimed. -/
+theorem TypeWHRedPath.symmPath (H : TypeWHRedPath Γ A B) :
+    ∃ v : SLevel, TypeDefEqPath Γ B A v := by
+  obtain ⟨_, path, -⟩ := H
+  exact path.symm
+
+/-- Forget the conversion authority and retain the raw head computation. -/
+theorem TypeWHRedPath.toWHRedS (H : TypeWHRedPath Γ A B) :
+    WHRedS Γ A B := by
+  obtain ⟨_, _, red⟩ := H
+  exact red
+
+/-- Convert a term equality through the typed root path.  The raw reduction
+component is intentionally irrelevant to this authorization step. -/
+theorem TypeWHRedPath.defeqDF
+    (H : TypeWHRedPath Γ A B) (h : IsDefEq Γ e₁ e₂ A) :
+    IsDefEq Γ e₁ e₂ B := by
+  obtain ⟨_, path, -⟩ := H
+  exact path.defeqDF h
+
+/-- Replace the newest context entry through the typed root path. -/
+theorem TypeWHRedPath.defeqDF_l
+    (H : TypeWHRedPath Γ A B)
+    (h : IsDefEq (A :: Γ) e₁ e₂ C) :
+    IsDefEq (B :: Γ) e₁ e₂ C := by
+  obtain ⟨_, path, -⟩ := H
+  exact path.defeqDF_l h
+
+/-- Substitute the type path and its raw reduction together. -/
+theorem TypeWHRedPath.subst
+    (H : TypeWHRedPath Γ A B)
+    (W : Ctx.Subst (fun Γ e A => Γ ⊢ e : A) Γ₀ σ Γ) :
+    TypeWHRedPath Γ₀ (A.subst σ) (B.subst σ) := by
+  obtain ⟨u, path, red⟩ := H
+  exact ⟨u, path.subst W, red.subst W⟩
+
+/-- Weaken the type path and its raw reduction together. -/
+theorem TypeWHRedPath.weak'
+    (H : TypeWHRedPath Γ A B) (W : Ctx.Lift' ρ Γ Γ₀) :
+    TypeWHRedPath Γ₀ (A.lift' ρ) (B.lift' ρ) := by
+  obtain ⟨u, path, red⟩ := H
+  exact ⟨u, path.weak' W, red.weak' W⟩
+
+/-- info: 'Lean4Lean.SExpr.TypedWHRedS.beta' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TypedWHRedS.beta
+
+/-- info: 'Lean4Lean.Pattern.Action.typedWHRedS' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.Pattern.Action.typedWHRedS
+
+/-- info: 'Lean4Lean.SExpr.TypeWHRedPath.defeqDF' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TypeWHRedPath.defeqDF
+
 theorem WHRedS.app (H : Γ ⊢ e1 ⤳* e2) : Γ ⊢ e1.app a ⤳* e2.app a := by
   induction H with
   | rfl => exact .rfl
   | tail _ h2 ih => exact .tail ih h2.app
+
+/-- A typed weak-head reduction remains typed when a fixed, well-typed
+argument is appended.  The dependent result type is retained literally. -/
+theorem TypedWHRedS.app
+    (H : TypedWHRedS Γ f f' (.forallE A B))
+    (ha : IsDefEq Γ a a A) :
+    TypedWHRedS Γ (f.app a) (f'.app a) (B.inst a) :=
+  ⟨.appDF H.defeq ha, H.reduction.app⟩
+
+/-- info: 'Lean4Lean.SExpr.TypedWHRedS.app' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TypedWHRedS.app
+
+/-- Weak-head reduction is a congruence under a fixed left application
+spine.  This syntax-only helper is the one-step engine for reducing a fully
+applied generated lambda tower. -/
+theorem WHRedS.foldlApp (args : List SExpr) (H : Γ ⊢ e1 ⤳* e2) :
+    Γ ⊢ args.foldl (fun (f a : SExpr) => f.app a) e1 ⤳*
+      args.foldl (fun (f a : SExpr) => f.app a) e2 := by
+  induction args generalizing e1 e2 with
+  | nil => exact H
+  | cons a args ih => exact ih H.app
+
+/-- A fully applied lambda tower reduces by one beta step per binder.  The
+substitution parameter is accumulated explicitly so dependent binder types
+need no definitional-equality shortcut between consecutive contractions. -/
+theorem WHRedS.lamTowerSubst :
+    ∀ (Ts : List SExpr) (body : SExpr) (args : List SExpr) (σ : Subst),
+      args.length = Ts.length →
+      Γ ⊢ args.foldl (fun (f a : SExpr) => f.app a)
+          ((Ts.foldr .lam body).subst σ) ⤳*
+        body.subst (args.foldl Subst.cons σ) := by
+  intro Ts
+  induction Ts with
+  | nil =>
+    intro body args σ h
+    obtain rfl := List.length_eq_zero_iff.mp h
+    exact .rfl
+  | cons T Ts ih =>
+    intro body args σ h
+    cases args with
+    | nil => cases h
+    | cons a args =>
+      have h' : args.length = Ts.length := Nat.succ.inj h
+      have step := WHRedS.foldlApp (Γ := Γ) args
+        (.tail .rfl (WHRed.beta (Γ := Γ) (A := T.subst σ)
+          (e := (Ts.foldr .lam body).subst σ.lift) (a := a)))
+      rw [SExpr.inst_lift_cons] at step
+      exact ReflTransGen.trans step (ih body args (σ.cons a) h')
+
+/-- Identity-substitution form of `WHRedS.lamTowerSubst`. -/
+theorem WHRedS.lamTower (Ts : List SExpr) (body : SExpr)
+    (args : List SExpr) (h : args.length = Ts.length) :
+    Γ ⊢ args.foldl (fun (f a : SExpr) => f.app a)
+        (Ts.foldr .lam body) ⤳*
+      body.subst (args.foldl Subst.cons Subst.id) := by
+  have := WHRedS.lamTowerSubst (Γ := Γ) Ts body args Subst.id h
+  rwa [SExpr.subst_id] at this
 
 theorem WHRedS.major (H1 : IsMajorPremise f) (H : Γ ⊢ a ⤳* a') :
     Γ ⊢ f.app a ⤳* f.app a' := by
@@ -4418,6 +4799,19 @@ theorem WHRedS.determ_l (H1 : Γ ⊢ e ⤳* e₁) (H2 : Γ ⊢ e ⤳* e₂) (W2 
     cases H2 using ReflTransGen.headIndOn with
     | rfl => cases W2 _ l1
     | head r1 r2 => cases l1.determ r1; exact ih r2 W2
+
+/-- Move the left endpoint of a root observation across a path-typed prefix
+reduction.  Weak-head determinism supplies the new raw reduction, while the
+reversed prefix path supplies conversion authority at the new endpoint. -/
+theorem TypeWHRedPath.retargetLeft
+    (hprefix : TypeWHRedPath Γ A A')
+    (root : TypeWHRedPath Γ A B) (hB : WHNF Γ B) :
+    TypeWHRedPath Γ A' B := by
+  obtain ⟨_, prefixPath, prefixRed⟩ := hprefix
+  obtain ⟨_, rootPath, rootRed⟩ := root
+  obtain ⟨v, prefixBack⟩ := prefixPath.symm
+  exact ⟨v, prefixBack.trans rootPath,
+    prefixRed.determ_l rootRed hB⟩
 
 theorem WHNF.whRedS (W : WHNF Γ e) (H : Γ ⊢ e ⤳* e') : e = e' := by
   cases H using ReflTransGen.headIndOn with
@@ -4677,9 +5071,9 @@ theorem CRDefEq.symm : Γ ⊢ e₁ ≫≪ e₂ : A → Γ ⊢ e₂ ≫≪ e₁ :
 is five lines from `ParRedS.church_rosser`, `NormalEq.parRedS`, and
 `NormalEq.trans`; none of that development exists on the SExpr side, and
 Theory's own `NormalEq.parRed` `.extra` overlap cases are the open
-L4L-18A obligations. Porting the joining argument lands with L4L-18A
-against the finished Theory script — see plans/l4l-16-completion-plan.md
-§L4L-18A′ — and nothing on the L4L-16 gate path consumes it. -/
+CR obligations. Porting the joining argument belongs to the consolidated
+CR work package in `plans/roadmap.md`, against the finished Theory script;
+nothing in the conditional semantic-inversion path consumes it. -/
 
 theorem CRDefEq.defeqDF : Γ ⊢ e₁ ≫≪ e₂ : A → Γ ⊢ A ≡ B : .sort u → Γ ⊢ e₁ ≫≪ e₂ : B
   | ⟨l1, _, _, l3, l4, l5⟩, H => ⟨H.defeqDF l1, _, _, l3, l4, l5.defeqDF H⟩

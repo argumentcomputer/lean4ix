@@ -258,7 +258,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockRecursorRun.metadataPrefix' depen
  Lean.Expr.mkAppData_eq,
  Lean.Expr.mkData_eq,
  Lean.Expr.replace_eq,
- Lean.Level.hasMVar_eq,
  Lean.Level.hasParam_eq,
  Lean.Level.instLawfulBEqLevel,
  Lean.Level.isExplicitSubsumedAux_eq,
@@ -266,7 +265,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockRecursorRun.metadataPrefix' depen
  Lean.PersistentArray.toList'_push,
  Lean.PersistentHashMap.findAux_isSome,
  Lean.Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/
@@ -294,7 +292,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockMetadataPrefixRun.addInductBlockT
  Lean.Expr.mkAppData_eq,
  Lean.Expr.mkData_eq,
  Lean.Expr.replace_eq,
- Lean.Level.hasMVar_eq,
  Lean.Level.hasParam_eq,
  Lean.Level.instLawfulBEqLevel,
  Lean.Level.isExplicitSubsumedAux_eq,
@@ -302,7 +299,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockMetadataPrefixRun.addInductBlockT
  Lean.PersistentArray.toList'_push,
  Lean.PersistentHashMap.findAux_isSome,
  Lean.Syntax.structEq_eq,
- Std.TreeMap.all_eq_all_toList,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/

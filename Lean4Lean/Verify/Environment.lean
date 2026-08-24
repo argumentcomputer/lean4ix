@@ -1,6 +1,5 @@
 import Lean4Lean.Verify.Environment.Quotient
 import Lean4Lean.Verify.Environment.NormalizationElimination
-import Lean4Lean.Verify.Environment.Boundaries
 
 namespace Lean4Lean
 open Lean4Lean

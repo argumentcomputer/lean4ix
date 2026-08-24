@@ -28,6 +28,18 @@ class Params where
     Subpattern (.app p₁' p₂') p' → Subpattern (.var p₃) p₁ → p₁'.inter p₃ = none
   pat_app_uniq : Pat p r → Pat p' r' → Subpattern (.app p₁ p₂) p →
     Subpattern (.app p₁' p₂') p' → Subpattern p₃ p₁ → Subpattern p₃' p₂' → p₃.inter p₃' = none
+  /-- A registered contraction whose matched argument is proof-irrelevant
+  also has a proof-irrelevant result.  This is the exact firing-site fact
+  needed when `NormalEq.proofIrrel` changes the argument so that the rule no
+  longer matches syntactically. -/
+  pat_arg_prop :
+    OnCtx Γ (env.IsType univs) →
+    Pat (Pattern.app p₁ p₂) r →
+    (Pattern.app p₁ p₂).Matches (VExpr.app f b) m1 m2 →
+    HasType env univs Γ f (VExpr.forallE A B) →
+    HasType env univs Γ b A →
+    HasType env univs Γ A (VExpr.sort .zero) →
+    HasType env univs (A :: Γ) B (VExpr.sort .zero)
   /-- Registered-family typing is reflected through weakening.  This is the
   structure-family specialization of `IsDefEqU.weakN_iff`: it retains the
   registered head witness, which the untyped theorem intentionally erases. -/
@@ -1844,6 +1856,35 @@ theorem StructEq.parRed_right (H : StructEq Γ e₁ e₂)
     (R : Γ ⊢ e₂ ≫ e₂') : StructEq Γ e₁ e₂' := by
   have ⟨_, heq⟩ := H.defeq hΓ
   exact H.trans_right hΓ ⟨_, R.defeq hΓ heq.hasType.2⟩
+
+/- Close the proof-irrelevant argument overlap for a registered
+contraction.  The left application need not keep matching the rule: the
+`Params.pat_arg_prop` boundary says that the contractum is a proof whenever
+the changed argument is one, so `NormalEq.proofIrrel` supplies the residual
+equality without taking a reduction step on the left. -/
+variable! (hΓ : OnCtx Γ (IsType env univs)) in
+theorem NormalEq.parRed_extra_propArg
+    {p₁ p₂ : Pattern}
+    {rr : (Pattern.app p₁ p₂).RHS × (Pattern.app p₁ p₂).Check}
+    {f f₂ a b A B m1 m2 m2'}
+    (l1 : Γ ⊢ f : .forallE A B) (l2 : Γ ⊢ f₂ : .forallE A B)
+    (l3 : Γ ⊢ a : A) (l4 : Γ ⊢ b : A)
+    (hprop : Γ ⊢ A : .sort .zero)
+    (l5 : Γ ⊢ f ≡ₚ f₂) (l6 : Γ ⊢ a ≡ₚ b)
+    (r1 : Pat (Pattern.app p₁ p₂) rr)
+    (r2 : (Pattern.app p₁ p₂).Matches (VExpr.app f₂ b) m1 m2)
+    (r3 : rr.2.OK (IsDefEqU env univs Γ) m1 m2)
+    (r4 : IsDefEqU env univs Γ (VExpr.app f₂ b) (rr.1.apply m1 m2))
+    (r5 : ∀ x, Γ ⊢ m2 x ≫ m2' x) :
+    ∃ e₁', Γ ⊢ .app f a ≫* e₁' ∧ Γ ⊢ e₁' ≡ₚ rr.1.apply m1 m2' := by
+  have hstep : Γ ⊢ .app f₂ b ≫ rr.1.apply m1 m2' :=
+    .extra r1 r2 r3 r4 r5
+  have hdefeq : IsDefEqU env univs Γ (.app f a) (rr.1.apply m1 m2') :=
+    IsDefEqU.trans henv hΓ ((NormalEq.appDF l1 l2 l3 l4 l5 l6).defeq hΓ)
+      ⟨_, hstep.defeq hΓ (l2.app l4)⟩
+  have hB : A :: Γ ⊢ B : .sort .zero := pat_arg_prop hΓ r1 r2 l2 l4 hprop
+  exact ⟨_, .rfl, .proofIrrel (hB.instN henv .zero l3) (l1.app l3)
+    (.defeqU_l henv hΓ hdefeq (l1.app l3))⟩
 
 set_option warn.sorry false in
 variable! (hΓ : OnCtx Γ (IsType env univs)) in

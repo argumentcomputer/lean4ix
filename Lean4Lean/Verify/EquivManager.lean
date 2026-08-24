@@ -49,7 +49,8 @@ theorem RelevantEq.symm (H1 : RelevantEq e₁ e₂) : RelevantEq e₂ e₁ := by
   | proj _ ih => exact .proj ih
 
 theorem RelevantEq.of_eqv : e₁ == e₂ → RelevantEq e₁ e₂ := by
-  simp [(· == ·)]; induction e₁ generalizing e₂
+  simp [(· == ·), Expr.eqv_eq]
+  induction e₁ generalizing e₂
   all_goals
     cases e₂ <;> try change false = _ → _; rintro ⟨⟩
     simp [Expr.eqv']; intros; subst_vars; try simp [rfl, *]

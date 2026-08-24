@@ -103,7 +103,8 @@ theorem inferLambda.loop.WF {c : VContext} {e₀ : Expr}
       ∃ e' ty', c.TrTyping e₀ ty e' ty' := by
   unfold inferLambda.loop
   generalize eqfvs : (m.fvarRevList n hn).map Expr.fvar = fvs at *
-  simp [harr, -bind_pure_comp]; split
+  simp [harr, Expr.instantiateRev_eq, Expr.instantiate_eq, -bind_pure_comp]
+  split
   · rename_i name dom body bi
     generalize eqF : withLocalDecl (m := RecM) _ _ _ _ = F
     generalize eqP : (fun ty x => ∃ _, _) = P
@@ -186,7 +187,8 @@ theorem inferForall.loop.WF {c : VContext} {e₀ : Expr}
       ∃ e' u, c.TrTyping e₀ ty e' (.sort u) := by
   unfold inferForall.loop
   generalize eqfvs : (m.fvarRevList n hn).map Expr.fvar = fvs at *
-  simp [harr, -bind_pure_comp]; split
+  simp [harr, Expr.instantiateRev_eq, Expr.instantiate_eq, -bind_pure_comp]
+  split
   · rename_i name dom body bi
     rw [Expr.instantiateList_forallE] at hei; subst ei
     refine (inferType.WF' ?_ ?_).bind fun uv _ le ⟨dom', uv', _, h1, h2, h3⟩ => ?_
@@ -239,7 +241,8 @@ theorem inferApp.loop.WF {c : VContext} {s : VState}
     RecM.WF c s (inferApp.loop e₀ ⟨args⟩ fType j i) fun ty _ =>
       ∃ e₁' ty', c.TrTyping (e.mkAppRevList lm |>.mkAppList lr) ty e₁' ty' := by
   subst i j; rw [inferApp.loop.eq_def]
-  simp [hargs, Expr.instantiateList_reverse]
+  simp [hargs, Expr.instantiateRevRange_eq, Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiateList_reverse]
   have henv := c.Ewf; have hΔ := c.Δwf
   cases lr with simp
   | cons a lr =>
@@ -299,7 +302,8 @@ theorem inferLet.loop.WF {c : VContext} {e₀ : Expr}
       ∃ e' ty', c.TrTyping e₀ ty e' ty' := by
   generalize eqfvs : (m.fvarRevList n hn).map Expr.fvar = fvs at *
   unfold inferLet.loop
-  simp [harr, -bind_pure_comp]; split
+  simp [harr, Expr.instantiateRev_eq, Expr.instantiate_eq, -bind_pure_comp]
+  split
   · rename_i name dom val body nd
     generalize eqF : withLetDecl (m := RecM) _ _ _ _ = F
     generalize eqP : (fun ty x => ∃ _, _) = P
@@ -389,33 +393,7 @@ theorem AppStack.toSpineWF {c : VContext}
       c.venv.SpineWF c.lparams.length c.vlctx.toCtx
         (VExpr.forallN As C) args' (VExpr.instRev C args') ∧
       c.TrExprS (f.mkAppList args) (VExpr.appN f' args') := by
-  induction args generalizing f f' As C with
-  | nil =>
-      cases As with
-      | nil =>
-          let .head hfull := H
-          exact ⟨[], .nil, .nil, by simpa⟩
-      | cons _ _ => simp at hlen
-  | cons arg args ih =>
-      cases As with
-      | nil => simp at hlen
-      | cons A As =>
-        let .app hfun harg hf' harg' Hrest := H
-        have htypes := hf.uniqU c.Ewf c.Δwf hfun
-        have ⟨⟨_, hA⟩, _⟩ := htypes.forallE_inv c.Ewf c.Δwf
-        have hargA := harg.defeqU_r c.Ewf c.Δwf ⟨_, hA.symm⟩
-        have hlen' : args.length = As.length := by simpa using hlen
-        have htailType : c.HasType (.app f' _) ((VExpr.forallN As C).inst _) :=
-          hf.app hargA
-        rw [VExpr.instN_forallN] at htailType
-        obtain ⟨args', hargs', hspine, hfull⟩ :=
-          ih Hrest htailType (by simpa [VExpr.instTelN_length] using hlen')
-        refine ⟨_ :: args', .cons harg' hargs', .cons hargA ?_, ?_⟩
-        have hlenArgsAs : args'.length = As.length :=
-          hargs'.length_eq.symm.trans hlen'
-        rw [VExpr.instN_forallN]
-        simpa [VExpr.instRev, hlenArgsAs] using hspine
-        simpa [Expr.mkAppList, VExpr.appN] using hfull
+  exact Lean4Lean.AppStack.toSpineWF H c.Ewf c.Δwf hf hlen
 
 theorem invalidProj.WF {c : VContext} {s : VState} :
     (invalidProj e : RecM α).WF c s Q := by
@@ -1015,7 +993,8 @@ theorem inferType'.WF
     exact (inferProj.WF hb h1 h2 h3).bind fun ty _ _ ⟨_, ty', h⟩ => hF h
   · exact .readThe <| (M.WF.liftExcept inferFVar.WF).lift.bind fun _ _ _ ⟨_, _, h⟩ => hF h
   · exact .throw
-  · rename_i h _; simp [Expr.hasLooseBVars, Expr.looseBVarRange'] at h
+  · rename_i h _
+    simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange'] at h
   · split <;> rename_i h
     · refine .readThe <| (M.WF.liftExcept (checkLevel.WF h1)).lift.bind fun _ _ _ ⟨_, h⟩ => ?_
       exact hF (infer_sort h)
@@ -1047,7 +1026,7 @@ theorem inferType'.WF
       · exact (isDefEq.WF hl3 ha2).bind fun b _ _ => this
     subst G2; dsimp; rintro s ⟨⟩ H
     · exact .getEnv <| .getLCtx .throw
-    simp [G1, Expr.bindingBody!]
+    simp [G1, Expr.bindingBody!, Expr.instantiate1_eq]
     have hf3 := hf3.defeqU_r c.Ewf c.Δwf hl5.symm
     have ha3 := ha3.defeqU_r c.Ewf c.Δwf (H rfl).symm
     subst hP; refine hF ⟨?_, .app hf3 ha3 hf1 ha1, hl4.inst c.Ewf ha3 ha1, .app hf3 ha3⟩
@@ -1063,7 +1042,6 @@ info: 'Lean4Lean.TypeChecker.Inner.inferProj.WF' depends on axioms: [propext,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
- Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  PersistentArray.toList'_push,

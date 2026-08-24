@@ -288,7 +288,8 @@ theorem inferTypeFamilyCore
               (state.inferTypeC.insert
                 (.const ``IndexedVec [.param `u]) indexedVecInfo.type) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     inferConstantFamily, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -302,7 +303,8 @@ theorem inferTypeFVarCore
         .ok (type, { state with inferTypeC :=
           (state.inferTypeC.insert (.fvar id) type) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     TypeChecker.Inner.inferFVar, tcContext, hfind,
     LocalDecl.type, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -314,7 +316,8 @@ theorem inferTypeZeroCore
         .ok (.const ``Nat [], { state with inferTypeC :=
           (state.inferTypeC.insert (.const ``Nat.zero []) (.const ``Nat [])) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     inferConstantZero, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -327,7 +330,8 @@ theorem inferTypeNatCore
           (state.inferTypeC.insert (.const ``Nat [])
             (.sort (.succ .zero))) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     inferConstantNat, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -341,7 +345,8 @@ theorem inferTypeSuccCore
             (state.inferTypeC.insert (.const ``Nat.succ [])
               (.forallE `n (.const ``Nat []) (.const ``Nat []) .default)) }) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange', hcache,
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange', hcache,
     inferConstantSucc, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
@@ -470,13 +475,14 @@ theorem inferNilFirstApp :
     (.const ``IndexedVec [.param `u]) (.fvar nilAlphaId)
     (.sort (.succ (.param `u))) vecFamilyTail `α .default
     (by
-      simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+      simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+        Expr.looseBVarRange'])
     (by
       simp [nilBodyInitialState, nilRootSortState])
     (by simpa [indexedVecInfoTypeShape] using inferNilFamily)
     inferNilAlpha (by rfl)
   simpa [nilFirstApp, nilFirstAppState, vecFamilyTail,
-    Expr.instantiate1'] using h
+    Expr.instantiate1_eq, Expr.instantiate1'] using h
 
 theorem inferNilZero :
     TypeChecker.Inner.inferType' (.const ``Nat.zero []) false
@@ -503,7 +509,8 @@ theorem inferNilBodyExists : ∃ finalState,
     nilBodyInitialState nilFirstAppState nilZeroState
     nilFirstApp (.const ``Nat.zero []) (.const ``Nat [])
     (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [nilFirstApp, Expr.hasLooseBVars,
+      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp [nilBodyInitialState, nilRootSortState])
     (by simpa [vecFamilyTail] using inferNilFirstApp)
     inferNilZero (by rfl)
@@ -537,7 +544,8 @@ theorem nilRootSortCore :
       (tcContext ({} : LocalContext)) ({} : TypeChecker.State) =
         .ok (.sort (.succ (.succ (.param `u))), nilRootSortState) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     nilRootSortState, checkLevelSuccParam,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -613,7 +621,7 @@ theorem inferNilRootExists : ∃ finalState,
     (.sort (.succ (.param `u))) nilCtorBodyRaw
     (.sort nilCtorInferredLevel) .implicit
     (by simp [nilCtorBodyRaw, Expr.hasLooseBVars,
-      Expr.looseBVarRange'])
+      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp) hforall
 
 theorem nilRootCheckTypeM :
@@ -644,7 +652,8 @@ theorem nilStandaloneSortCore :
       (tcContext ({} : LocalContext)) ({} : TypeChecker.State) =
         .ok (.sort (.succ (.succ (.param `u))), nilRootSortState) := by
   unfold TypeChecker.Inner.inferType'
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange',
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange',
     nilRootSortState, checkLevelSuccParam,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
@@ -794,13 +803,14 @@ theorem inferNilCandidateFirstApp :
     nilCandidateAlphaState (.const ``IndexedVec [.param `u])
     (.fvar nilCandidateAlphaId) (.sort (.succ (.param `u)))
     vecFamilyTail `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+      Expr.looseBVarRange'])
     (by simp) inferNilCandidateFamily
     (by simpa [indexedVecInfoTypeShape] using inferNilCandidateAlpha)
     (by rfl)
   simpa [nilCandidateFirstApp, nilCandidateFirstAppState,
     indexedVecInfoTypeShape, vecFamilyTail,
-    Expr.instantiate1'] using h
+    Expr.instantiate1_eq, Expr.instantiate1'] using h
 
 theorem inferNilCandidateZero :
     TypeChecker.Inner.inferType' (.const ``Nat.zero []) false
@@ -829,7 +839,8 @@ theorem inferNilCandidateBodyExists : ∃ finalState,
     ({} : TypeChecker.State) nilCandidateFirstAppState
     nilCandidateZeroState nilCandidateFirstApp (.const ``Nat.zero [])
     (.const ``Nat []) (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilCandidateFirstApp, Expr.hasLooseBVars, Expr.looseBVarRange'])
+    (by simp [nilCandidateFirstApp, Expr.hasLooseBVars,
+      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
     (by simp) inferNilCandidateFirstApp
     inferNilCandidateZero (by rfl)
   simpa [nilCandidateBodyExpr, nilCandidateFirstApp,
@@ -1513,7 +1524,8 @@ theorem consAlphaFindInHead :
   rw [consHeadContextWF.find?_eq_find?_toList]
   simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
     AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
+    LocalContext.toList, PersistentArray.toList'_push,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consAlphaFindInN :
     consNContext.lctx.find? consAlphaId =
@@ -1522,7 +1534,8 @@ theorem consAlphaFindInN :
   rw [consNContextWF.find?_eq_find?_toList]
   simp [consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
     AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
-    LocalContext.toList, LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
+    LocalContext.toList, PersistentArray.toList'_push,
+    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 theorem consNFindInHead :
     consHeadContext.lctx.find? consNId =
@@ -1531,8 +1544,9 @@ theorem consNFindInHead :
   rw [consHeadContextWF.find?_eq_find?_toList]
   simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
     consNId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
-    NameGenerator.curr]
+    LocalContext.mkLocalDecl, LocalContext.toList,
+    PersistentArray.toList'_push, LocalDecl.fvarId,
+    NameGenerator.next, NameGenerator.curr]
 
 theorem consAlphaFindInTail :
     consTailContext.lctx.find? consAlphaId =
@@ -1541,8 +1555,9 @@ theorem consAlphaFindInTail :
   rw [consTailContextWF.find?_eq_find?_toList]
   simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
     ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl, LocalContext.toList, LocalDecl.fvarId, NameGenerator.next,
-    NameGenerator.curr]
+    LocalContext.mkLocalDecl, LocalContext.toList,
+    PersistentArray.toList'_push, LocalDecl.fvarId,
+    NameGenerator.next, NameGenerator.curr]
 
 theorem consNFindInTail :
     consTailContext.lctx.find? consNId =
@@ -1551,7 +1566,8 @@ theorem consNFindInTail :
   rw [consTailContextWF.find?_eq_find?_toList]
   simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
     ctorContext, consAlphaId, consNId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl, LocalContext.toList,
+    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
+    LocalContext.toList, PersistentArray.toList'_push,
     LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
 
 /-! ## Reusable post-family atom observations -/

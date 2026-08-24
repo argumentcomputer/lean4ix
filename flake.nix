@@ -163,11 +163,17 @@
         # modules compile once, then the sorry frontier:
         # `Lean4Lean.Audit.SorryFrontier` fails the build if any Theory/Verify
         # declaration gains, loses, or renames a `sorry` versus its allowlist.
-        # It is not a default target, so building it over the just-built
-        # surface is the whole check.
+        # Its reachability sections pin every custom project and generated
+        # decision axiom, reject dead/forbidden entries, and emit exact
+        # root-specific closures for Theory, Verify, the shipped library, and
+        # the CLI. This is not a default target, so building it over the
+        # just-built surface is the whole check.
         proofs = mkLakeCheck "Lean4Lean-proofs" [
           "Lean4Lean.Theory"
           "Lean4Lean.Verify"
+          # The audit imports the executable's source module to inspect the
+          # real CLI closure; build only its olean facet, not the executable.
+          "Main"
           "Lean4Lean.Audit.SorryFrontier"
         ];
 
@@ -211,7 +217,7 @@
           '';
 
         # Regression test for the `replayFromImports` teardown segfault (see
-        # plans/DEPRECATED-segfault-fix-plan.md): run the shipped wrapper from a
+        # divergence ledger D002): run the shipped wrapper from a
         # clean environment on a small module and require a clean exit plus the
         # summary line the crash used to swallow.
         cliSmoke = mkCliCheck "cli-smoke" ''
@@ -235,6 +241,282 @@
         cliNoArg = mkCliCheck "cli-noarg" ''
           cp ${./lake-manifest.json} lake-manifest.json
           ${lean4leanCLI}/bin/lean4lean > out
+        '';
+
+        # Differential-harness primitive: an exact declaration succeeds with
+        # the expected replay count, while invalid targets must fail rather
+        # than report a misleading zero-declaration success.
+        cliSingleDecl = mkCliCheck "cli-single-decl" ''
+          unset LEAN_PATH LEAN_SYSROOT
+          ${lean4leanCLI}/bin/lean4lean --decl=Lean.Expr.prop Lean4Lean.Expr > out
+          grep -qx "checked 1 declarations" out
+          if ${lean4leanCLI}/bin/lean4lean --decl=Lean.DoesNotExist \
+            Lean4Lean.Declaration > missing 2>&1; then
+            echo "missing --decl target unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -q "declaration Lean.DoesNotExist is not present in the selected replay set" missing
+          if ${lean4leanCLI}/bin/lean4lean --decl=Lean.Expr.prop \
+            Lean4Lean > ambiguous 2>&1; then
+            echo "ambiguous --decl module unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -q -- "--decl flag requires exactly one selected module" ambiguous
+        '';
+
+        differentialElaborationFixture =
+          pkgs.writeText
+          "DifferentialElaborationFixture.lean"
+          ''
+            namespace DifferentialElaborationFixture
+
+            abbrev FieldAlias := Nat
+
+            inductive RecursiveAlias where
+              | base
+              | step (payload : FieldAlias) (tail : RecursiveAlias)
+
+            end DifferentialElaborationFixture
+          '';
+
+        differentialElaborationRejectFixture =
+          pkgs.writeText
+          "DifferentialElaborationRejectFixture.lean"
+          ''
+            namespace DifferentialElaborationRejectFixture
+
+            def broken : Nat := "not a natural number"
+
+            end DifferentialElaborationRejectFixture
+          '';
+
+        differentialMutualFixture =
+          pkgs.writeText
+          "DifferentialMutualFixture.lean"
+          ''
+            namespace DifferentialMutualFixture
+
+            mutual
+
+            inductive Tree (α : Type u) : Type u where
+              | leaf : α → Tree α
+              | node : TreeList α → Tree α
+              | branch : (α → TreeList α) → Tree α
+
+            inductive TreeList (α : Type u) : Type u where
+              | nil : TreeList α
+              | cons : Tree α → TreeList α → TreeList α
+
+            end
+
+            end DifferentialMutualFixture
+          '';
+
+        # Versioned differential corpus contract: ordinary, normalizing, and
+        # nested inductive cases record raw/Theory/generated metadata
+        # (including analyzer recursion positions and every rule RHS), while
+        # declared selection, elaboration, module-load, and kernel-replay
+        # negatives succeed only at their expected phase. A wrong expectation
+        # must still fail.
+        cliDifferentialCorpus = pkgs.runCommand "lean4lean-cli-differential-corpus" {} ''
+          unset LEAN_PATH LEAN_SYSROOT
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "fuel-config-metadata";
+            module = "Lean4Lean.FuelConfig";
+            declaration = "Lean4Lean.FuelConfig";
+            fresh = false;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > accepted.json
+          ${lean4leanCLI}/bin/lean4lean --case=accepted.json > accepted
+          grep -q '"caseId":"fuel-config-metadata"' accepted
+          grep -q '"outcome":"accepted"' accepted
+          grep -q '"phase":"metadata-comparison"' accepted
+          grep -q '"metadataEqual":true' accepted
+          grep -q '"displayName":"Lean4Lean.FuelConfig.rec"' accepted
+          grep -q '"fieldPositions":\[0,1,2,3,4,5\]' accepted
+          grep -q '"k":false' accepted
+          grep -q '"ruleCount":1' accepted
+          grep -q '"rhs":' accepted
+          grep -q '"theoryTranslation":"verify-tr-expr-s-closed-v1"' accepted
+          grep -q '"theoryBlocks":\[{' accepted
+          grep -q '"normalizationChanged":false' accepted
+          grep -q '"theoryRecursive":false' accepted
+          grep -q '"recursivePositions":\[\]' accepted
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "equiv-manager-normalization";
+            module = "Lean4Lean.EquivManager";
+            declaration = "Lean4Lean.EquivManager";
+            fresh = false;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > normalizing.json
+          ${lean4leanCLI}/bin/lean4lean --case=normalizing.json > normalizing
+          grep -q '"caseId":"equiv-manager-normalization"' normalizing
+          grep -q '"outcome":"accepted"' normalizing
+          grep -q '"normalizationChanged":true' normalizing
+          grep -q '"displayName":"Lean4Lean.EquivManager.rec"' normalizing
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "candidate-list-recursion";
+            module = "Lean4Lean.Inductive.Add";
+            declaration = "Lean4Lean.AddInductive.CandidateList";
+            fresh = false;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > recursive.json
+          ${lean4leanCLI}/bin/lean4lean --case=recursive.json > recursive
+          grep -q '"caseId":"candidate-list-recursion"' recursive
+          grep -q '"outcome":"accepted"' recursive
+          grep -q '"theoryRecursive":true' recursive
+          grep -q '"kernelRecursive":\[true\]' recursive
+          grep -q '"displayName":"Lean4Lean.AddInductive.CandidateList.rec"' recursive
+          grep -q '"recursivePositions":\[3\]' recursive
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "mutual-tree-recursion";
+            source = differentialMutualFixture;
+            module = "DifferentialMutualFixture";
+            declaration = "DifferentialMutualFixture.Tree";
+            fresh = false;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > mutual.json
+          ${lean4leanCLI}/bin/lean4lean --case=mutual.json > mutual
+          grep -q '"caseId":"mutual-tree-recursion"' mutual
+          grep -q '"outcome":"accepted"' mutual
+          grep -q '"kernelRecursive":\[true,true\]' mutual
+          grep -q '"displayName":"DifferentialMutualFixture.Tree.rec"' mutual
+          grep -q '"displayName":"DifferentialMutualFixture.TreeList.rec"' mutual
+          grep -q '"recursivePositions":\[0,1\]' mutual
+
+          # Start from source rather than an existing olean: the case runner
+          # invokes the pinned Lean compiler in a private module root, then
+          # enters the same replay/translation/generation comparison.
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "source-elaboration-recursion";
+            source = differentialElaborationFixture;
+            module = "DifferentialElaborationFixture";
+            declaration = "DifferentialElaborationFixture.RecursiveAlias";
+            fresh = false;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > elaborated.json
+          ${lean4leanCLI}/bin/lean4lean --case=elaborated.json > elaborated-output
+          grep -q '"caseId":"source-elaboration-recursion"' elaborated-output
+          grep -q '"outcome":"accepted"' elaborated-output
+          grep -q '"phase":"metadata-comparison"' elaborated-output
+          grep -q '"normalizationChanged":true' elaborated-output
+          grep -q '"theoryRecursive":true' elaborated-output
+          grep -q '"displayName":"DifferentialElaborationFixture.RecursiveAlias.rec"' \
+            elaborated-output
+          grep -q '"recursivePositions":\[1\]' elaborated-output
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "source-elaboration-rejection";
+            source = differentialElaborationRejectFixture;
+            module = "DifferentialElaborationRejectFixture";
+            declaration = "DifferentialElaborationRejectFixture.broken";
+            fresh = false;
+            expectedOutcome = "rejected";
+            expectedPhase = "elaboration";
+          }}' > elaboration-rejected.json
+          ${lean4leanCLI}/bin/lean4lean --case=elaboration-rejected.json \
+            > elaboration-rejected
+          grep -q '"caseId":"source-elaboration-rejection"' elaboration-rejected
+          grep -q '"outcome":"rejected"' elaboration-rejected
+          grep -q '"phase":"elaboration"' elaboration-rejected
+          grep -q 'source elaboration failed' elaboration-rejected
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "syntax-nested-restoration";
+            module = "Init.Prelude";
+            declaration = "Lean.Syntax";
+            fresh = true;
+            expectedOutcome = "accepted";
+            expectedPhase = "metadata-comparison";
+          }}' > nested.json
+          ${lean4leanCLI}/bin/lean4lean --case=nested.json > nested
+          grep -q '"caseId":"syntax-nested-restoration"' nested
+          grep -q '"outcome":"accepted"' nested
+          grep -q '"phase":"metadata-comparison"' nested
+          grep -q '"transformation":"nested-elimination+normalization"' nested
+          grep -q '"auxiliaryFamilyCount":2' nested
+          grep -q '"kernelAuxiliaryFamilyCount":2' nested
+          grep -q '"displayName":"Lean.Syntax.rec_1"' nested
+          grep -q '"displayName":"Lean.Syntax.rec_2"' nested
+          grep -q '"displayName":"Lean.Syntax.node"' nested
+          grep -q '"recursivePositions":\[2\]' nested
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "ambiguous-module-selection";
+            module = "Lean4Lean";
+            declaration = "Lean4Lean.FuelConfig";
+            fresh = false;
+            expectedOutcome = "rejected";
+            expectedPhase = "selection";
+          }}' > selection.json
+          ${lean4leanCLI}/bin/lean4lean --case=selection.json > selection
+          grep -q '"caseId":"ambiguous-module-selection"' selection
+          grep -q '"outcome":"rejected"' selection
+          grep -q '"phase":"selection"' selection
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "missing-module";
+            module = "Lean4Lean.NoSuchDifferentialModule";
+            declaration = "Lean.DoesNotExist";
+            fresh = false;
+            expectedOutcome = "rejected";
+            expectedPhase = "module-load";
+          }}' > module-load.json
+          ${lean4leanCLI}/bin/lean4lean --case=module-load.json > module-load
+          grep -q '"caseId":"missing-module"' module-load
+          grep -q '"outcome":"rejected"' module-load
+          grep -q '"phase":"module-load"' module-load
+
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "missing-declaration";
+            module = "Lean4Lean.Declaration";
+            declaration = "Lean.DoesNotExist";
+            fresh = false;
+            expectedOutcome = "rejected";
+            expectedPhase = "kernel-replay";
+          }}' > rejected.json
+          ${lean4leanCLI}/bin/lean4lean --case=rejected.json > rejected
+          grep -q '"caseId":"missing-declaration"' rejected
+          grep -q '"outcome":"rejected"' rejected
+          grep -q '"phase":"kernel-replay"' rejected
+
+          sed 's/"expectedOutcome":"rejected"/"expectedOutcome":"accepted"/' \
+            rejected.json > wrong-expectation.json
+          if ${lean4leanCLI}/bin/lean4lean --case=wrong-expectation.json \
+            > wrong-expectation; then
+            echo "mismatched differential expectation unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -q '"outcome":"rejected"' wrong-expectation
+          touch $out
         '';
       in {
         _module.args.pkgs = import nixpkgs {
@@ -264,6 +546,8 @@
           cli-smoke = cliSmoke;
           cli-smoke-external = cliSmokeExternal;
           cli-noarg = cliNoArg;
+          cli-single-decl = cliSingleDecl;
+          cli-differential-corpus = cliDifferentialCorpus;
         };
 
         devShells.default = pkgs.mkShell {

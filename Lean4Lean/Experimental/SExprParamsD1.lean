@@ -20,9 +20,9 @@ itself, never cast back into the smaller one.
 The quotient half of the D1 plan line (`CertifiedExtension.quot`) is
 deliberately not instantiated here; the current `CtorBundle.hu0` interface
 obligation is unsatisfiable for `Quot.mk` (a `Prop`-instantiable
-constructor, exactly the punit disqualification recorded in
-`plans/l4l-16d0-slice-map.md`).  See the obstruction record at the end of
-this file.
+    constructor, exactly the Prop-pattern boundary summarized in
+    `plans/roadmap.md` under the D and NORM work packages).  See the
+    obstruction record at the end of this file.
 -/
 
 namespace Lean4Lean
@@ -2902,7 +2902,8 @@ end SemanticCertificates
 /-! ## Quotient half of the D1 plan line: environment layer and the
 interface obstruction
 
-`plans/l4l-16-completion-plan.md` assigns `CertifiedExtension.quot` to D1.
+The consolidated D work package in `plans/roadmap.md` assigns
+`CertifiedExtension.quot` to D1.
 The environment-layer content is deliverable and is checked below: the D1
 environment extends by the `Eq` axiom and the checked `.quot` history step
 (`VDecl.WF.quot`), producing a WF/Ordered environment that registers
@@ -2919,10 +2920,9 @@ three independent reasons, in escalating strength:
    `ls = [.zero]`, where `mkInst ls quotMkConst.type` is a `Prop`
    (its sort evaluates to `imax 1 (imax 1 0) = 0`), so the bundle's
    equality at `.sort F.u` forces `F.u = .zero` against `CtorBundle.hu0`.
-   This is exactly the punit disqualification recorded in
-   `plans/l4l-16d0-slice-map.md` (Prop-instantiable constructor); the
-   plan's non-Prop staging note (Nat, List, tree blocks) already excludes
-   such constructors from the pre-L4L-17 stage.
+   This is exactly the Prop-instantiable-constructor boundary recorded in
+   `plans/roadmap.md`; the non-Prop staging slice (Nat, List, tree blocks)
+   excludes such constructors until the explicit Prop-pattern policy lands.
 2. Keeping the pattern out of `Pat` but `quotDefEq` in `env.defeqs`
    instead breaks `Params.Semantic.registered`: the required strong
    equality between the two six-binder towers has a stuck

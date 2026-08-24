@@ -1,5 +1,6 @@
 import Lean4Lean.Theory.InductiveFixtures
 import Lean4Lean.Theory.Literals
+import Lean4Lean.Replay
 import Lean4Lean.Verify.Typing.Lemmas
 
 /-! # Literal readiness fixtures
@@ -12,6 +13,35 @@ constructor-unfolded literals with notation-heavy values.
 namespace Lean4Lean.Tests.LiteralReadiness
 
 open Lean
+
+/-! The CLI deliberately does not import Verify's proof/axiom closure.  Pin
+its closed-metadata translator to the deterministic `trExprS?` implementation
+on every syntax boundary it supports, including let-binder depth and rejection
+of malformed loose variables and projections. -/
+
+private def differentialTranslation? (levelParams : List Name) (expr : Expr) :
+    Option VExpr :=
+  (Differential.exprToVExpr levelParams expr).toOption
+
+private def binderTranslationFixture : Expr :=
+  .lam `x (.sort (.succ (.param `u)))
+    (.letE `y (.sort (.succ (.param `u))) (.bvar 0)
+      (.app (.bvar 1) (.bvar 0)) false) .implicit
+
+private def literalTranslationFixture : Expr :=
+  .mdata {} <| .app (.const ``Nat.succ []) (.lit (.natVal 3))
+
+#guard differentialTranslation? [`u] binderTranslationFixture ==
+  trExprS? [`u] [] binderTranslationFixture
+#guard differentialTranslation? [] literalTranslationFixture ==
+  trExprS? [] [] literalTranslationFixture
+#guard differentialTranslation? [] (.lit (.strVal "translation parity")) ==
+  trExprS? [] [] (.lit (.strVal "translation parity"))
+#guard differentialTranslation? [] (.bvar 0) == trExprS? [] [] (.bvar 0)
+#guard differentialTranslation? [] (.proj ``Prod 0 (.const ``Unit.unit [])) ==
+  trExprS? [] [] (.proj ``Prod 0 (.const ``Unit.unit []))
+#guard differentialTranslation? [] (.sort (.param `unknown)) ==
+  trExprS? [] [] (.sort (.param `unknown))
 
 /-! The manual Theory descriptors are exactly the declarations already
 checked against the kernel by `Theory.InductiveFixtures`. -/
