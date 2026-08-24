@@ -485,7 +485,10 @@ to the replacement.
   final `TrEnv' .safe` postcondition on valid partial and unsafe input models
   that contain additional visible constants. This separate path is necessary
   because the family-only intermediate environment for `Bool` or `Nat` cannot
-  satisfy `HasPrimitives` before its constructors have been inserted.
+  satisfy `HasPrimitives` before its constructors have been inserted. Verify now
+  provides lightweight interpreters that construct each exact insertion fold
+  from the retained declaration equation, semantic list translations, and
+  `Aligned`; the primitive replay assembler consumes those results directly.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix

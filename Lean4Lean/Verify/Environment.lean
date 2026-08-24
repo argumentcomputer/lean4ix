@@ -687,6 +687,52 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
 
 namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
 
+/-- Assemble the primitive replay from the three lightweight metadata
+insertion interpreters.  Their retained kernel traces and map endpoints are
+fixed by `execution`; unlike the generic staging records, none carries an
+intermediate `TrEnv' .safe` postcondition. -/
+def ofInsertions
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input output : VEnv}
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants)
+    (generation_wf : (VPrimitiveInductive.canonicalGeneration types).WF input
+      families.blockEnv)
+    (constructors : VInductDecl.ConstructorDeclarationInsertionRun
+      execution.flattened.eliminationExecution.constructorContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.constructorEnv
+      execution.flattened.eliminationExecution.declaredConstructorInfos
+      families.blockEnv
+      (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants)
+    (recursors : VInductDecl.RecursorDeclarationInsertionRun
+      execution.flattened.recursors.allowPrimitive
+      execution.flattened.recursors.initialEnv
+      execution.flattened.recursors.env execution.flattened.recursors.infos
+      constructors.ctorEnv
+      (VPrimitiveInductive.canonicalGeneration types).recursors
+      (VPrimitiveInductive.canonicalGeneration types).kTarget)
+    (addRules : AddDefEqs recursors.recEnv
+      (VPrimitiveInductive.canonicalGeneration types).generatedRules output) :
+    execution.CanonicalPrimitiveReplay input output where
+  blockEnv := families.blockEnv
+  generation_wf := generation_wf
+  addTypes := families.addTypes
+  ctorEnv := constructors.ctorEnv
+  addCtors := constructors.addCtors
+  recEnv := recursors.recEnv
+  addRecs := recursors.addRecs
+  recK := recursors.recK
+  addRules := addRules
+
 /-- Assemble the exact ordinary trace at the retained normalization and
 recursor map endpoints.  All intermediate maps and Theory environments are
 the endpoints of the three execution-indexed insertion folds above. -/
@@ -820,6 +866,14 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_fina
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.ofInsertions' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.ofInsertions
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toFlattenedTrace' depends on axioms: [propext,

@@ -3031,6 +3031,112 @@ private theorem family_forall₂_cons_iff
   · rintro ⟨head, tail⟩
     exact .cons head tail
 
+/-- The exact family-declaration trace replayed only as a Theory insertion
+fold.  Unlike `FamilyDeclarationStagingRun`, this boundary deliberately
+contains no `TrEnv'` postcondition, so it remains usable while a recognized
+primitive family has been inserted but its constructors have not. -/
+structure FamilyDeclarationInsertionRun
+    (allowPrimitive : Bool) (kernelEnv finalKernelEnv : Environment)
+    (infos : List InductiveVal) (env : VEnv) (raws : List VConstVal) where
+  blockEnv : VEnv
+  kernelTrace : AddInductive.DeclareInductiveInfoListRun
+    allowPrimitive kernelEnv infos finalKernelEnv
+  addTypes : AddInductConstants .induct kernelEnv.constants env raws
+    finalKernelEnv.constants blockEnv
+
+/-- Replay a retained family metadata trace against any aligned Theory model.
+`Aligned` supplies only name-domain correspondence; semantic translations are
+transported through earlier insertions, and no whole-history translation is
+constructed at the family-only boundary. -/
+noncomputable def familyDeclarationInsertion
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env : VEnv} {raws : List VConstVal}
+    (declare : AddInductive.declareInductiveInfoList allowPrimitive infos
+      kernelEnv = .ok finalKernelEnv)
+    (evidence : List.Forall₂
+      (fun info raw => TrConstVal .safe env (.inductInfo info) raw)
+      infos raws)
+    (pre : Aligned safety kernelEnv.constants env) :
+    FamilyDeclarationInsertionRun allowPrimitive kernelEnv finalKernelEnv
+      infos env raws := by
+  induction infos generalizing kernelEnv finalKernelEnv env raws with
+  | nil =>
+      cases raws with
+      | nil =>
+          simp only [AddInductive.declareInductiveInfoList,
+            Except.ok.injEq] at declare
+          subst finalKernelEnv
+          exact { blockEnv := env, kernelTrace := .nil, addTypes := .nil }
+      | cons raw raws =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+  | cons info infos ih =>
+      cases raws with
+      | nil =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+      | cons raw raws =>
+          have related := family_forall₂_cons_iff.mp evidence
+          cases hcheck : kernelEnv.checkName info.name allowPrimitive with
+          | error error =>
+              have impossible : False := by
+                simp only [AddInductive.declareInductiveInfoList] at declare
+                rw [hcheck] at declare
+                contradiction
+              exact impossible.elim
+          | ok value =>
+              have value_eq : value = () := Subsingleton.elim _ _
+              subst value
+              have tailDeclare :
+                  AddInductive.declareInductiveInfoList allowPrimitive infos
+                    (kernelEnv.add (.inductInfo info)) =
+                      .ok finalKernelEnv := by
+                simpa only [AddInductive.declareInductiveInfoList, hcheck,
+                  Bind.bind, Except.bind] using declare
+              have mapFresh : kernelEnv.constants.find? raw.name = none := by
+                rw [← related.1.2]
+                simpa [ConstantInfo.toConstantVal, ConstantInfo.name] using
+                  checkName_constants_fresh hcheck
+              have envFresh : env.constants raw.name = none := by
+                cases found : env.constants raw.name with
+                | none => rfl
+                | some ci =>
+                    obtain ⟨kernelInfo, kernelFound, _⟩ :=
+                      pre.find?_iff.mpr ⟨ci, found⟩
+                    rw [mapFresh] at kernelFound
+                    contradiction
+              let nextEnv : VEnv := {
+                env with
+                constants := fun name =>
+                  if raw.name = name then some raw.toVConstant
+                  else env.constants name }
+              have added : env.addConst raw.name raw.toVConstant =
+                  some nextEnv := by
+                simp [VEnv.addConst, envFresh, nextEnv]
+              let add : AddInductConstant .induct kernelEnv.constants env raw
+                  (kernelEnv.add (.inductInfo info)).constants nextEnv := {
+                info := .inductInfo info
+                kind_eq := trivial
+                tr := related.1
+                map_fresh := mapFresh
+                env_add := added
+                map_add := by
+                  rw [← related.1.2]
+                  rfl }
+              have le : env ≤ nextEnv := VEnv.addConst_le added
+              have tailEvidence : List.Forall₂
+                  (fun info raw =>
+                    TrConstVal .safe nextEnv (.inductInfo info) raw)
+                  infos raws :=
+                Lean4Lean.List.Forall₂.imp (h := related.2)
+                  (fun _ _ relation => relation.mono le)
+              let tailResult := ih tailDeclare tailEvidence
+                (pre.addInductConstant add)
+              exact {
+                blockEnv := tailResult.blockEnv
+                kernelTrace := .cons hcheck tailResult.kernelTrace
+                addTypes := .cons add tailResult.addTypes }
+
 /-- A source-ordered family declaration interpreted simultaneously in the
 retained kernel environment and the exact Theory staging fold. -/
 structure FamilyDeclarationStagingRun

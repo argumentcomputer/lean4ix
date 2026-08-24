@@ -370,6 +370,23 @@ theorem Aligned.addInductConstants :
   | .cons h hrest, wf =>
     Aligned.addInductConstants hrest (wf.addInductConstant h)
 
+/-- Upgrade an exact metadata insertion fold to the generic safe staging
+history when every inserted Theory constant is well formed at the fold's
+input.  Primitive replay intentionally consumes the fold without invoking
+this theorem; ordinary staging uses it to recover its stronger postcondition.
+-/
+theorem AddInductConstants.trEnvStaging
+    (H : AddInductConstants kind C₁ env₁ cis C₂ env₂)
+    (rawsWF : ∀ raw ∈ cis, raw.toVConstant.WF env₁)
+    (pre : TrEnv' .safe C₁ Q env₁) : TrEnv' .safe C₂ Q env₂ := by
+  induction H with
+  | nil => exact pre
+  | cons head rest ih =>
+      apply ih
+      · intro raw member
+        exact (rawsWF raw (.tail _ member)).mono head.le
+      · exact .inductStaging head (rawsWF _ (.head _)) pre
+
 theorem Aligned.addDefEqFold : ∀ (dfs : List VDefEq),
     Aligned safety C env → Aligned safety C (dfs.foldl VEnv.addDefEq env)
   | [], wf => wf

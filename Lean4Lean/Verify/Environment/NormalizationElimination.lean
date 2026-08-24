@@ -274,6 +274,112 @@ private theorem constructor_forall₂_cons_iff
   · rintro ⟨head, tail⟩
     exact .cons head tail
 
+/-- The constructor metadata trace replayed as an exact Theory insertion fold,
+without requiring a translated-history postcondition at the post-constructor
+boundary. -/
+structure ConstructorDeclarationInsertionRun
+    (allowPrimitive : Bool) (kernelEnv finalKernelEnv : Environment)
+    (infos : List ConstructorVal) (typeEnv : VEnv)
+    (raws : List VConstVal) where
+  ctorEnv : VEnv
+  kernelTrace : AddInductive.DeclareConstructorInfoListRun
+    allowPrimitive kernelEnv infos finalKernelEnv
+  addCtors : AddInductConstants .ctor kernelEnv.constants typeEnv raws
+    finalKernelEnv.constants ctorEnv
+
+/-- Replay the retained constructor declaration equation using only semantic
+metadata translations and the weaker `Aligned` name-domain invariant.  This
+is valid after a primitive family insertion even though `TrEnv'` is not yet
+available for that incomplete block. -/
+noncomputable def constructorDeclarationInsertion
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal}
+    (declare : AddInductive.declareConstructorInfoList allowPrimitive infos
+      kernelEnv = .ok finalKernelEnv)
+    (evidence : List.Forall₂
+      (fun info raw => TrConstVal .safe typeEnv (.ctorInfo info) raw)
+      infos raws)
+    (pre : Aligned safety kernelEnv.constants typeEnv) :
+    ConstructorDeclarationInsertionRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws := by
+  induction infos generalizing kernelEnv finalKernelEnv typeEnv raws with
+  | nil =>
+      cases raws with
+      | nil =>
+          simp only [AddInductive.declareConstructorInfoList,
+            Except.ok.injEq] at declare
+          subst finalKernelEnv
+          exact { ctorEnv := typeEnv, kernelTrace := .nil, addCtors := .nil }
+      | cons raw raws =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+  | cons info infos ih =>
+      cases raws with
+      | nil =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+      | cons raw raws =>
+          have related := constructor_forall₂_cons_iff.mp evidence
+          cases hcheck : kernelEnv.checkName info.name allowPrimitive with
+          | error error =>
+              have impossible : False := by
+                simp only [AddInductive.declareConstructorInfoList] at declare
+                rw [hcheck] at declare
+                contradiction
+              exact impossible.elim
+          | ok value =>
+              have value_eq : value = () := Subsingleton.elim _ _
+              subst value
+              have tailDeclare :
+                  AddInductive.declareConstructorInfoList allowPrimitive infos
+                    (kernelEnv.add (.ctorInfo info)) = .ok finalKernelEnv := by
+                simpa only [AddInductive.declareConstructorInfoList, hcheck,
+                  Bind.bind, Except.bind] using declare
+              have mapFresh : kernelEnv.constants.find? raw.name = none := by
+                rw [← related.1.2]
+                simpa [ConstantInfo.toConstantVal, ConstantInfo.name] using
+                  checkName_constants_fresh hcheck
+              have envFresh : typeEnv.constants raw.name = none := by
+                cases found : typeEnv.constants raw.name with
+                | none => rfl
+                | some ci =>
+                    obtain ⟨kernelInfo, kernelFound, _⟩ :=
+                      pre.find?_iff.mpr ⟨ci, found⟩
+                    rw [mapFresh] at kernelFound
+                    contradiction
+              let nextEnv : VEnv := {
+                typeEnv with
+                constants := fun name =>
+                  if raw.name = name then some raw.toVConstant
+                  else typeEnv.constants name }
+              have added : typeEnv.addConst raw.name raw.toVConstant =
+                  some nextEnv := by
+                simp [VEnv.addConst, envFresh, nextEnv]
+              let add : AddInductConstant .ctor kernelEnv.constants typeEnv raw
+                  (kernelEnv.add (.ctorInfo info)).constants nextEnv := {
+                info := .ctorInfo info
+                kind_eq := trivial
+                tr := related.1
+                map_fresh := mapFresh
+                env_add := added
+                map_add := by
+                  rw [← related.1.2]
+                  rfl }
+              have le : typeEnv ≤ nextEnv := VEnv.addConst_le added
+              have tailEvidence : List.Forall₂
+                  (fun info raw =>
+                    TrConstVal .safe nextEnv (.ctorInfo info) raw)
+                  infos raws :=
+                Lean4Lean.List.Forall₂.imp (h := related.2)
+                  (fun _ _ relation => relation.mono le)
+              let tailResult := ih tailDeclare tailEvidence
+                (pre.addInductConstant add)
+              exact {
+                ctorEnv := tailResult.ctorEnv
+                kernelTrace := .cons hcheck tailResult.kernelTrace
+                addCtors := .cons add tailResult.addCtors }
+
 /-- A source-ordered constructor declaration interpreted simultaneously in
 the retained kernel environment and its Theory model.  The final Theory
 environment is constructed by this interpreter; it is not supplied by a
@@ -306,95 +412,12 @@ noncomputable def constructorDeclarationStaging
     (pre : TrEnv' .safe kernelEnv.constants Q typeEnv) :
     ConstructorDeclarationStagingRun allowPrimitive kernelEnv finalKernelEnv
       infos typeEnv raws Q := by
-  induction infos generalizing kernelEnv finalKernelEnv typeEnv raws with
-  | nil =>
-      cases raws with
-      | nil =>
-          simp only [AddInductive.declareConstructorInfoList,
-            Except.ok.injEq] at declare
-          subst finalKernelEnv
-          exact {
-            ctorEnv := typeEnv
-            kernelTrace := .nil
-            addCtors := .nil
-            trenv := pre }
-      | cons raw raws =>
-          have impossible : False := by cases evidence
-          exact impossible.elim
-  | cons info infos ih =>
-      cases raws with
-      | nil =>
-          have impossible : False := by cases evidence
-          exact impossible.elim
-      | cons raw raws =>
-          have aligned := constructor_forall₂_cons_iff.mp evidence
-          cases hcheck : kernelEnv.checkName info.name allowPrimitive with
-          | error error =>
-              have impossible : False := by
-                simp only [AddInductive.declareConstructorInfoList] at declare
-                rw [hcheck] at declare
-                contradiction
-              exact impossible.elim
-          | ok value =>
-              have value_eq : value = () := Subsingleton.elim _ _
-              subst value
-              have tailDeclare :
-                  AddInductive.declareConstructorInfoList allowPrimitive infos
-                    (kernelEnv.add (.ctorInfo info)) = .ok finalKernelEnv := by
-                simpa only [AddInductive.declareConstructorInfoList, hcheck,
-                  Bind.bind, Except.bind] using declare
-              have mapFresh : kernelEnv.constants.find? raw.name = none := by
-                rw [← aligned.1.2]
-                simpa [ConstantInfo.toConstantVal, ConstantInfo.name] using
-                  checkName_constants_fresh hcheck
-              have envFresh : typeEnv.constants raw.name = none := by
-                cases found : typeEnv.constants raw.name with
-                | none => rfl
-                | some ci =>
-                    obtain ⟨kernelInfo, kernelFound, _⟩ :=
-                      pre.aligned.find?_iff.mpr ⟨ci, found⟩
-                    rw [mapFresh] at kernelFound
-                    contradiction
-              let nextEnv : VEnv := {
-                typeEnv with
-                constants := fun name =>
-                  if raw.name = name then some raw.toVConstant
-                  else typeEnv.constants name }
-              have added : typeEnv.addConst raw.name raw.toVConstant =
-                  some nextEnv := by
-                simp [VEnv.addConst, envFresh, nextEnv]
-              have add : AddInductConstant .ctor kernelEnv.constants typeEnv raw
-                  (kernelEnv.add (.ctorInfo info)).constants nextEnv := {
-                info := .ctorInfo info
-                kind_eq := trivial
-                tr := aligned.1
-                map_fresh := mapFresh
-                env_add := added
-                map_add := by
-                  rw [← aligned.1.2]
-                  rfl }
-              have headWF : raw.toVConstant.WF typeEnv :=
-                rawsWF raw (.head _)
-              have post : TrEnv' .safe
-                  (kernelEnv.add (.ctorInfo info)).constants Q nextEnv :=
-                .inductStaging add headWF pre
-              have le : typeEnv ≤ nextEnv := VEnv.addConst_le added
-              have tailEvidence : List.Forall₂
-                  (fun info raw =>
-                    TrConstVal .safe nextEnv (.ctorInfo info) raw)
-                  infos raws :=
-                Lean4Lean.List.Forall₂.imp (h := aligned.2)
-                  (fun _ _ relation => relation.mono le)
-              have tailWF : ∀ other ∈ raws,
-                  other.toVConstant.WF nextEnv := by
-                intro other member
-                exact (rawsWF other (.tail _ member)).mono le
-              let tailResult := ih tailDeclare tailEvidence tailWF post
-              exact {
-                ctorEnv := tailResult.ctorEnv
-                kernelTrace := .cons hcheck tailResult.kernelTrace
-                addCtors := .cons add tailResult.addCtors
-                trenv := tailResult.trenv }
+  let insertion := constructorDeclarationInsertion declare evidence pre.aligned
+  exact {
+    ctorEnv := insertion.ctorEnv
+    kernelTrace := insertion.kernelTrace
+    addCtors := insertion.addCtors
+    trenv := insertion.addCtors.trEnvStaging rawsWF pre }
 
 /-- The semantic fields exposed by full executable equality of two generated
 recursor records.  Expression equality deliberately remains `Expr.eqv`:
@@ -556,6 +579,132 @@ theorem recursorInfoTranslationList_of_option_beq
           exact .cons (recursorInfoTranslation_of_beq parity.1 head)
             (ih parity.2)
 
+/-- The generated-recursor declaration trace replayed as an exact Theory
+insertion fold, including the implementation K-flag inventory but no
+whole-history translation postcondition. -/
+structure RecursorDeclarationInsertionRun
+    (allowPrimitive : Bool) (kernelEnv finalKernelEnv : Environment)
+    (infos : List RecursorVal) (ctorEnv : VEnv)
+    (raws : List VConstVal) (kTarget : Bool) where
+  recEnv : VEnv
+  kernelTrace : AddInductive.DeclareRecursorInfoListRun
+    allowPrimitive kernelEnv infos finalKernelEnv
+  addRecs : AddInductConstants .recursor kernelEnv.constants ctorEnv raws
+    finalKernelEnv.constants recEnv
+  recK : RecursorMapKMatches finalKernelEnv.constants raws kTarget
+
+/-- Replay a retained generated-recursor declaration equation from semantic
+translations and `Aligned` name-domain correspondence.  The resulting K
+witness is read from the exact inserted implementation records. -/
+noncomputable def recursorDeclarationInsertion
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List RecursorVal} {ctorEnv : VEnv}
+    {raws : List VConstVal}
+    (declare : AddInductive.declareRecursorInfoList allowPrimitive infos
+      kernelEnv = .ok finalKernelEnv)
+    (evidence : List.Forall₂
+      (fun info raw => TrConstVal .safe ctorEnv (.recInfo info) raw)
+      infos raws)
+    (infosK : ∀ info ∈ infos, info.k = kTarget)
+    (pre : Aligned safety kernelEnv.constants ctorEnv) :
+    RecursorDeclarationInsertionRun allowPrimitive kernelEnv finalKernelEnv
+      infos ctorEnv raws kTarget := by
+  induction infos generalizing kernelEnv finalKernelEnv ctorEnv raws with
+  | nil =>
+      cases raws with
+      | nil =>
+          simp only [AddInductive.declareRecursorInfoList,
+            Except.ok.injEq] at declare
+          subst finalKernelEnv
+          exact {
+            recEnv := ctorEnv
+            kernelTrace := .nil
+            addRecs := .nil
+            recK := by simp [RecursorMapKMatches] }
+      | cons raw raws =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+  | cons info infos ih =>
+      cases raws with
+      | nil =>
+          have impossible : False := by cases evidence
+          exact impossible.elim
+      | cons raw raws =>
+          have related := constructor_forall₂_cons_iff.mp evidence
+          cases hcheck : kernelEnv.checkName info.name allowPrimitive with
+          | error error =>
+              have impossible : False := by
+                simp only [AddInductive.declareRecursorInfoList] at declare
+                rw [hcheck] at declare
+                contradiction
+              exact impossible.elim
+          | ok value =>
+              have value_eq : value = () := Subsingleton.elim _ _
+              subst value
+              have tailDeclare :
+                  AddInductive.declareRecursorInfoList allowPrimitive infos
+                    (kernelEnv.add (.recInfo info)) = .ok finalKernelEnv := by
+                simpa only [AddInductive.declareRecursorInfoList, hcheck,
+                  Bind.bind, Except.bind] using declare
+              have mapFresh : kernelEnv.constants.find? raw.name = none := by
+                rw [← related.1.2]
+                simpa [ConstantInfo.toConstantVal, ConstantInfo.name] using
+                  checkName_constants_fresh hcheck
+              have envFresh : ctorEnv.constants raw.name = none := by
+                cases found : ctorEnv.constants raw.name with
+                | none => rfl
+                | some ci =>
+                    obtain ⟨kernelInfo, kernelFound, _⟩ :=
+                      pre.find?_iff.mpr ⟨ci, found⟩
+                    rw [mapFresh] at kernelFound
+                    contradiction
+              let nextEnv : VEnv := {
+                ctorEnv with
+                constants := fun name =>
+                  if raw.name = name then some raw.toVConstant
+                  else ctorEnv.constants name }
+              have added : ctorEnv.addConst raw.name raw.toVConstant =
+                  some nextEnv := by
+                simp [VEnv.addConst, envFresh, nextEnv]
+              let add : AddInductConstant .recursor kernelEnv.constants
+                  ctorEnv raw (kernelEnv.add (.recInfo info)).constants
+                  nextEnv := {
+                info := .recInfo info
+                kind_eq := trivial
+                tr := related.1
+                map_fresh := mapFresh
+                env_add := added
+                map_add := by
+                  rw [← related.1.2]
+                  rfl }
+              have le : ctorEnv ≤ nextEnv := VEnv.addConst_le added
+              have tailEvidence : List.Forall₂
+                  (fun info raw =>
+                    TrConstVal .safe nextEnv (.recInfo info) raw)
+                  infos raws :=
+                Lean4Lean.List.Forall₂.imp (h := related.2)
+                  (fun _ _ relation => relation.mono le)
+              have tailInfosK : ∀ other ∈ infos,
+                  other.k = kTarget := by
+                intro other member
+                exact infosK other (.tail _ member)
+              let tailResult := ih tailDeclare tailEvidence tailInfosK
+                (pre.addInductConstant add)
+              exact {
+                recEnv := tailResult.recEnv
+                kernelTrace := .cons hcheck tailResult.kernelTrace
+                addRecs := .cons add tailResult.addRecs
+                recK := by
+                  intro candidate member
+                  rcases List.mem_cons.mp member with rfl | member
+                  · refine ⟨.recInfo info, ?_, ?_⟩
+                    · simpa [add] using
+                        tailResult.addRecs.preserve_map_lookup
+                          (add.map_wf pre.map_wf)
+                          (add.map_lookup pre.map_wf)
+                    · exact infosK info (.head _)
+                  · exact tailResult.recK candidate member }
+
 /-- A source-ordered generated-recursor declaration interpreted
 simultaneously in the retained kernel environment and its Theory model. -/
 structure RecursorDeclarationStagingRun
@@ -588,111 +737,14 @@ noncomputable def recursorDeclarationStaging
     (pre : TrEnv' .safe kernelEnv.constants Q ctorEnv) :
     RecursorDeclarationStagingRun allowPrimitive kernelEnv finalKernelEnv
       infos ctorEnv raws kTarget Q := by
-  induction infos generalizing kernelEnv finalKernelEnv ctorEnv raws with
-  | nil =>
-      cases raws with
-      | nil =>
-          simp only [AddInductive.declareRecursorInfoList,
-            Except.ok.injEq] at declare
-          subst finalKernelEnv
-          exact {
-            recEnv := ctorEnv
-            kernelTrace := .nil
-            addRecs := .nil
-            recK := by simp [RecursorMapKMatches]
-            trenv := pre }
-      | cons raw raws =>
-          have impossible : False := by cases evidence
-          exact impossible.elim
-  | cons info infos ih =>
-      cases raws with
-      | nil =>
-          have impossible : False := by cases evidence
-          exact impossible.elim
-      | cons raw raws =>
-          have aligned := constructor_forall₂_cons_iff.mp evidence
-          cases hcheck : kernelEnv.checkName info.name allowPrimitive with
-          | error error =>
-              have impossible : False := by
-                simp only [AddInductive.declareRecursorInfoList] at declare
-                rw [hcheck] at declare
-                contradiction
-              exact impossible.elim
-          | ok value =>
-              have value_eq : value = () := Subsingleton.elim _ _
-              subst value
-              have tailDeclare :
-                  AddInductive.declareRecursorInfoList allowPrimitive infos
-                    (kernelEnv.add (.recInfo info)) = .ok finalKernelEnv := by
-                simpa only [AddInductive.declareRecursorInfoList, hcheck,
-                  Bind.bind, Except.bind] using declare
-              have mapFresh : kernelEnv.constants.find? raw.name = none := by
-                rw [← aligned.1.2]
-                simpa [ConstantInfo.toConstantVal, ConstantInfo.name] using
-                  checkName_constants_fresh hcheck
-              have envFresh : ctorEnv.constants raw.name = none := by
-                cases found : ctorEnv.constants raw.name with
-                | none => rfl
-                | some ci =>
-                    obtain ⟨kernelInfo, kernelFound, _⟩ :=
-                      pre.aligned.find?_iff.mpr ⟨ci, found⟩
-                    rw [mapFresh] at kernelFound
-                    contradiction
-              let nextEnv : VEnv := {
-                ctorEnv with
-                constants := fun name =>
-                  if raw.name = name then some raw.toVConstant
-                  else ctorEnv.constants name }
-              have added : ctorEnv.addConst raw.name raw.toVConstant =
-                  some nextEnv := by
-                simp [VEnv.addConst, envFresh, nextEnv]
-              let add : AddInductConstant .recursor kernelEnv.constants ctorEnv raw
-                  (kernelEnv.add (.recInfo info)).constants nextEnv := {
-                info := .recInfo info
-                kind_eq := trivial
-                tr := aligned.1
-                map_fresh := mapFresh
-                env_add := added
-                map_add := by
-                  rw [← aligned.1.2]
-                  rfl }
-              have headWF : raw.toVConstant.WF ctorEnv :=
-                rawsWF raw (.head _)
-              have post : TrEnv' .safe
-                  (kernelEnv.add (.recInfo info)).constants Q nextEnv :=
-                .inductStaging add headWF pre
-              have le : ctorEnv ≤ nextEnv := VEnv.addConst_le added
-              have tailEvidence : List.Forall₂
-                  (fun info raw =>
-                    TrConstVal .safe nextEnv (.recInfo info) raw)
-                  infos raws :=
-                Lean4Lean.List.Forall₂.imp (h := aligned.2)
-                  (fun _ _ relation => relation.mono le)
-              have tailWF : ∀ other ∈ raws,
-                  other.toVConstant.WF nextEnv := by
-                intro other member
-                exact (rawsWF other (.tail _ member)).mono le
-              have tailInfosK : ∀ other ∈ infos,
-                  other.k = kTarget := by
-                intro other member
-                exact infosK other (.tail _ member)
-              let tailResult := ih tailDeclare tailEvidence tailInfosK tailWF post
-              exact {
-                recEnv := tailResult.recEnv
-                kernelTrace := .cons hcheck tailResult.kernelTrace
-                addRecs := .cons add tailResult.addRecs
-                recK := by
-                  intro candidate member
-                  rcases List.mem_cons.mp member with rfl | member
-                  · refine ⟨.recInfo info, ?_, ?_⟩
-                    · simpa [add] using
-                        tailResult.addRecs.preserve_map_lookup
-                          (add.map_wf pre.map_wf)
-                          (add.map_lookup pre.map_wf)
-                    · simpa [RecursorKMatches] using
-                        infosK info (.head _)
-                  · exact tailResult.recK candidate member
-                trenv := tailResult.trenv }
+  let insertion := recursorDeclarationInsertion declare evidence infosK
+    pre.aligned
+  exact {
+    recEnv := insertion.recEnv
+    kernelTrace := insertion.kernelTrace
+    addRecs := insertion.addRecs
+    recK := insertion.recK
+    trenv := insertion.addRecs.trEnvStaging rawsWF pre }
 
 /-- Every raw constructor constant selected by a complete block-generation
 run is well formed in the shared post-family Theory environment. -/

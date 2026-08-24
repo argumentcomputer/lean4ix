@@ -61,6 +61,17 @@ info: 'Lean4Lean.VInductDecl.familyDeclarationStaging' depends on axioms: [prope
 #print axioms Lean4Lean.VInductDecl.familyDeclarationStaging
 
 /--
+info: 'Lean4Lean.VInductDecl.familyDeclarationInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.familyDeclarationInsertion
+
+/--
 info: 'Lean4Lean.VInductDecl.constructorDeclarationStaging' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -70,6 +81,17 @@ info: 'Lean4Lean.VInductDecl.constructorDeclarationStaging' depends on axioms: [
 -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.constructorDeclarationStaging
+
+/--
+info: 'Lean4Lean.VInductDecl.constructorDeclarationInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.constructorDeclarationInsertion
 
 /--
 info: 'Lean4Lean.VInductDecl.produceBlockEliminationShapeCandidate_eq_ok' depends on axioms: [propext,
@@ -205,6 +227,17 @@ info: 'Lean4Lean.VInductDecl.recursorDeclarationStaging' depends on axioms: [pro
 -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.recursorDeclarationStaging
+
+/--
+info: 'Lean4Lean.VInductDecl.recursorDeclarationInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Lean.PersistentHashMap.findAux_isSome,
+ Lean.PersistentHashMap.WF.find?_eq,
+ Lean.PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.recursorDeclarationInsertion
 
 /--
 info: 'Lean4Lean.VInductDecl.recursorInfoTranslationList_of_option_beq' depends on axioms: [propext,

@@ -19,6 +19,7 @@ open Lean
 #check Lean4Lean.VPrimitiveInductive.natGeneration
 #check Lean4Lean.VPrimitiveInductive.canonicalGeneration
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.ofInsertions
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toTrace
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trace
