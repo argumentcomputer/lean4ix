@@ -35,3 +35,25 @@ theorem IsDefEqU.forallE_inv (henv : VEnv.WF env) (hΓ : OnCtx Γ (env.IsType U)
 set_option warn.sorry false in
 theorem IsDefEqU.sort_forallE_inv (henv : VEnv.WF env) (hΓ : OnCtx Γ (env.IsType U)) :
     ¬env.IsDefEqU U Γ (.sort u) (.forallE A B) := sorry
+
+/-- The quotient-head injectivity consequence consumed by operational
+quotient reduction.  It is deliberately stated only at the classified
+`Quot` application head: a definitional equality exposes the universe,
+carrier, and relation components, but supplies no reduction equality.
+
+The direct normalization/adequacy development is the intended producer of
+this interface.  Keeping the proposition here lets Verify-side consumers
+name the exact remaining boundary without assuming a registered equation's
+contractum as input. -/
+def QuotAppInj (env : VEnv) : Prop :=
+  ∀ {U : Nat} {Γ : List VExpr} {u₁ u₂ : VLevel}
+    {α₁ r₁ α₂ r₂ : VExpr},
+    env.IsDefEqU U Γ
+      (VExpr.appN (.const ``Quot [u₁]) [α₁, r₁])
+      (VExpr.appN (.const ``Quot [u₂]) [α₂, r₂]) →
+    u₁ ≈ u₂ ∧ env.IsDefEqU U Γ α₁ α₂ ∧
+      env.IsDefEqU U Γ r₁ r₂
+
+/-- info: 'Lean4Lean.VEnv.QuotAppInj' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.QuotAppInj

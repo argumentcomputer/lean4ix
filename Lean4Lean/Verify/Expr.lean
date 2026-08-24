@@ -843,6 +843,28 @@ theorem mkAppList_getAppArgsList (e) :
     mkAppList e.getAppFn (getAppArgsList e) = e := by
   rw [← mkAppRevList_reverse, getAppArgsList_reverse, mkAppRevList_getAppArgsRevList]
 
+/-- Recognizing a three-argument constant application exposes its complete
+host expression shape.  This is the arity used by the runtime `Quot.mk`
+recognizer. -/
+theorem eq_app3_of_isAppOfArity {e : Expr} {name : Name}
+    (h : e.isAppOfArity name 3 = true) :
+    ∃ levels a b c,
+      e = .app (.app (.app (.const name levels) a) b) c := by
+  cases e <;> simp [Expr.isAppOfArity] at h
+  rename_i f c
+  cases f <;> simp [Expr.isAppOfArity] at h
+  rename_i f b
+  cases f <;> simp [Expr.isAppOfArity] at h
+  rename_i f a
+  cases f <;> simp [Expr.isAppOfArity] at h
+  rename_i name' levels
+  subst name'
+  exact ⟨levels, a, b, c, rfl⟩
+
+/-- info: 'Lean.Expr.eq_app3_of_isAppOfArity' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean.Expr.eq_app3_of_isAppOfArity
+
 theorem mkAppRange_eq (h1 : args.toList = l₁ ++ l₂ ++ l₃)
     (h2 : l₁.length = i) (h3 : (l₁ ++ l₂).length = j) :
     mkAppRange e i j args = mkAppList e l₂ := loop h1 h2 h3 where
@@ -858,6 +880,34 @@ theorem mkAppRange_eq (h1 : args.toList = l₁ ++ l₂ ++ l₃)
     · simp at h3
       have : l₂.length = 0 := by omega
       simp_all
+
+/-- Applying the initial `n` entries of an array is application to its list
+prefix. -/
+theorem mkAppRange_zero_eq_take (h : n ≤ args.size) :
+    mkAppRange e 0 n args = mkAppList e (args.toList.take n) := by
+  apply mkAppRange_eq (l₁ := []) (l₂ := args.toList.take n)
+    (l₃ := args.toList.drop n)
+  · exact (List.take_append_drop n args.toList).symm
+  · rfl
+  · simp [List.length_take, h]
+
+/-- Applying an array range through its end is application to the
+corresponding list suffix. -/
+theorem mkAppRange_suffix_eq_drop (h : i ≤ args.size) :
+    mkAppRange e i args.size args = mkAppList e (args.toList.drop i) := by
+  apply mkAppRange_eq (l₁ := args.toList.take i)
+    (l₂ := args.toList.drop i) (l₃ := [])
+  · simp only [List.append_nil, List.take_append_drop]
+  · simp [List.length_take, h]
+  · simp
+
+/-- info: 'Lean.Expr.mkAppRange_zero_eq_take' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean.Expr.mkAppRange_zero_eq_take
+
+/-- info: 'Lean.Expr.mkAppRange_suffix_eq_drop' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean.Expr.mkAppRange_suffix_eq_drop
 
 theorem mkAppRange_eq_rev (h1 : args.toList = l₁ ++ l₂ ++ l₃)
     (h2 : l₁.length = i) (h3 : (l₁ ++ l₂).length = j) :
