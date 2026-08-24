@@ -183,6 +183,18 @@ theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i
         have hnumParams : mkInfo.numParams = view.nparams :=
           c.projectionReady.constructorNumParams view mkInfo
             hsemantic.viewWF (by
+              intro hfields
+              have hspecialized :
+                  view.specializedFields levels params = [] := by
+                simp [VStructureView.specializedFields, hfields]
+              have hcodesLength :
+                  (view.projectionCodes levels params).length = 0 := by
+                rw [view.projectionCodes_length levels params, hspecialized]
+                rfl
+              have hcodesNil : view.projectionCodes levels params = [] :=
+                List.length_eq_zero_iff.mp hcodesLength
+              rw [hcodesNil] at hcode
+              contradiction) (by
               rw [← hconstructorName]
               exact hfind)
         have hselectedList :

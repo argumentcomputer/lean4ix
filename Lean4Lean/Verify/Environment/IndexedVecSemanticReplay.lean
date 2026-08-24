@@ -321,6 +321,83 @@ private theorem natMap_constructor_numParams
         · cases hfind
         · simp [SMap.find?] at hfind
 
+/-- A translated `Nat` constructor which actually exposes a projection field
+cannot reinterpret any of its constructor arguments as family parameters.
+The premise is exactly the one available to projection reduction: a retained
+projection program witnesses that the checked view has at least one field. -/
+private theorem natConstructorView_nparams_eq_zero
+    {env : VEnv} (hle : natFinalEnv ≤ env)
+    {view : VStructureView} (hview : view.WF env)
+    (hfields : view.fields ≠ [])
+    (hname : view.constructorName = ``Nat.zero ∨
+      view.constructorName = ``Nat.succ) :
+    view.nparams = 0 := by
+  rcases hname with hzero | hsucc
+  · have hregistered := hview.constructor
+    rw [hzero] at hregistered
+    have hcanonical : env.constants ``Nat.zero =
+        some natType.ctors[0].toVConstant :=
+      hle.constants (show natFinalEnv.constants ``Nat.zero =
+        some natType.ctors[0].toVConstant from rfl)
+    rw [hcanonical] at hregistered
+    have htype : view.constructor.raw.type = natType.ctors[0].type := by
+      simpa using congrArg VConstant.type (Option.some.inj hregistered).symm
+    exfalso
+    apply hfields
+    cases hnp : view.nparams <;>
+      simp [VStructureView.fields, VInductDecl.NormalizedCtor.rawFields,
+        htype, hnp, natType, VExpr.dropN, VInductDecl.ctorFields]
+  · have hregistered := hview.constructor
+    rw [hsucc] at hregistered
+    have hcanonical : env.constants ``Nat.succ =
+        some natType.ctors[1].toVConstant :=
+      hle.constants nat_succ_env_lookup
+    rw [hcanonical] at hregistered
+    have htype : view.constructor.raw.type = natType.ctors[1].type := by
+      simpa using congrArg VConstant.type (Option.some.inj hregistered).symm
+    cases hnp : view.nparams with
+    | zero => rfl
+    | succ n =>
+      exfalso
+      apply hfields
+      cases n <;>
+        simp [VStructureView.fields, VInductDecl.NormalizedCtor.rawFields,
+          htype, hnp, natType, VExpr.dropN, VInductDecl.ctorFields]
+
+private theorem natMap_constructor_numParams_mono
+    {env : VEnv} (hle : natFinalEnv ≤ env)
+    {view : VStructureView} {info : ConstructorVal}
+    (hview : view.WF env) (hfields : view.fields ≠ [])
+    (hfind : natMap.find? view.constructorName = some (.ctorInfo info)) :
+    info.numParams = view.nparams := by
+  rw [natMap, natCtorMap_wf.find?_insert] at hfind
+  split at hfind
+  · cases hfind
+  · rw [natCtorMap, natZeroMap_wf.find?_insert] at hfind
+    split at hfind
+    · rename_i hsucc
+      have hname : view.constructorName = ``Nat.succ := by
+        exact (LawfulBEq.eq_of_beq hsucc).symm
+      simp [natSuccInfo] at hfind
+      cases hfind
+      exact (natConstructorView_nparams_eq_zero hle hview hfields
+        (.inr hname)).symm
+    · rw [natZeroMap, natTypeMap_wf.find?_insert] at hfind
+      split at hfind
+      · rename_i hzero
+        have hname : view.constructorName = ``Nat.zero := by
+          exact (LawfulBEq.eq_of_beq hzero).symm
+        simp [natZeroInfo] at hfind
+        cases hfind
+        exact (natConstructorView_nparams_eq_zero hle hview hfields
+          (.inl hname)).symm
+      · rw [natTypeMap,
+          SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty]
+          at hfind
+        split at hfind
+        · cases hfind
+        · simp [SMap.find?] at hfind
+
 def indexedVecSemanticNatVEnvs : VEnvs where
   venv _ := natFinalEnv
 
@@ -338,12 +415,18 @@ theorem indexedVecSemanticNatVEnvsWF : indexedVecSemanticNatVEnvs.WF indexedVecK
       rw [indexedVecKernelEnv_noProjectionReady] at hready
       contradiction
     constructorNumParams := by
-      intro view info hview hfind
+      intro view info hview _hfields hfind
       change natMap.find?' view.constructorName =
         some (.ctorInfo info) at hfind
       rw [natMap_wf.find?'_eq_find?] at hfind
       exact natMap_constructor_numParams
-        (natFinalEnv_structureView_nparams_eq_zero hview) hfind }
+        (natFinalEnv_structureView_nparams_eq_zero hview) hfind
+    constructorNumParams_mono := by
+      intro venv' hle view info hview hfields hfind
+      change natMap.find?' view.constructorName =
+        some (.ctorInfo info) at hfind
+      rw [natMap_wf.find?'_eq_find?] at hfind
+      exact natMap_constructor_numParams_mono hle hview hfields hfind }
   structureEtaReady := StructureEtaReady.of_no_nonRecStructure
     indexedVecKernelEnv_noStructureEta
 
@@ -410,7 +493,7 @@ def indexedVecFamilyStage :
       rw [indexedVecTypeEnv_noProjectionReady] at hready
       contradiction
     constructorNumParams := by
-      intro view info hview hfind
+      intro view info hview _hfields hfind
       change indexedVecTypeMap.find?' view.constructorName =
         some (.ctorInfo info) at hfind
       rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
@@ -418,7 +501,20 @@ def indexedVecFamilyStage :
       split at hfind
       · cases hfind
       · exact natMap_constructor_numParams
-          (indexedVecTypeEnv_structureView_nparams_eq_zero hview) hfind }
+          (indexedVecTypeEnv_structureView_nparams_eq_zero hview) hfind
+    constructorNumParams_mono := by
+      intro venv' hle view info hview hfields hfind
+      change indexedVecTypeMap.find?' view.constructorName =
+        some (.ctorInfo info) at hfind
+      rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
+        natMap_wf.find?_insert] at hfind
+      split at hfind
+      · cases hfind
+      · exact natMap_constructor_numParams_mono
+          ((VEnv.addConst_le
+            (show natFinalEnv.addConst indexedVecType.name
+              indexedVecType.toVConstant = some indexedVecTypeEnv from rfl)).trans hle)
+          hview hfields hfind }
   structureEtaReady := StructureEtaReady.of_no_nonRecStructure
     indexedVecTypeEnv_noStructureEta
   family_lctx_eq := rfl
