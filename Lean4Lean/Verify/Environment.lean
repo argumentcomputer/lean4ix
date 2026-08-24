@@ -609,13 +609,250 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_n
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
 
+/-- The normalization prefix retained by an outer execution still starts from
+the outer input environment.  Naming this equality lets semantic replay use the
+actual family-declaration trace without exposing its internal reader context as
+an independent input. -/
+theorem AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    execution.flattened.eliminationExecution.normalization.validationContext.env =
+      env := by
+  simpa only [AddInductive.Context.forInductive] using
+    execution.flattened.eliminationExecution.normalization.validationContext_env_all
+      (execution.flattened.normalization_run execution.flattenedRun)
+
+/-- In the ordinary branch, the environment produced by the retained recursor
+declaration is definitionally the outer execution's final environment. -/
+theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_eq : execution.nested.aux2nested.size = 0) :
+    execution.flattened.recursors.env = finalEnv := by
+  cases execution with
+  | mk inputCheck nested nestedRun flattened flattenedRun completion =>
+      cases completion with
+      | ordinary _ => rfl
+      | nested numNested_ne restoration restorationRun =>
+          exact (numNested_ne numNested_eq).elim
+
+/-- Primitive-specific semantic replay of the exact metadata phases retained
+by one ordinary outer execution.  This surface intentionally starts after
+candidate interpretation: a primitive family by itself temporarily violates
+`VEnv.HasPrimitives`, so the generic post-family checker context cannot be used
+between the family and constructor phases.  Each staging run is nevertheless
+indexed by the real kernel environments and metadata lists owned by
+`execution`; no parallel host inventory or normalization run is accepted. -/
+structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (input output : VEnv) where
+  blockEnv : VEnv
+  generation_wf : (VPrimitiveInductive.canonicalGeneration types).WF input
+    blockEnv
+  families : VInductDecl.FamilyDeclarationStagingRun
+    execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+    execution.flattened.eliminationExecution.normalization.validationContext.env
+    execution.flattened.eliminationExecution.normalization.familyEnv
+    execution.flattened.eliminationExecution.normalization.declaredInfos
+    input blockEnv
+    (VPrimitiveInductive.canonicalDecl types).blockTypeConstants
+    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
+  constructors : VInductDecl.ConstructorDeclarationStagingRun
+    execution.flattened.eliminationExecution.constructorContext.allowPrimitive
+    execution.flattened.eliminationExecution.normalization.familyEnv
+    execution.flattened.eliminationExecution.constructorEnv
+    execution.flattened.eliminationExecution.declaredConstructorInfos
+    blockEnv (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants
+    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
+  recursors : VInductDecl.RecursorDeclarationStagingRun
+    execution.flattened.recursors.allowPrimitive
+    execution.flattened.recursors.initialEnv execution.flattened.recursors.env
+    execution.flattened.recursors.infos constructors.ctorEnv
+    (VPrimitiveInductive.canonicalGeneration types).recursors
+    (VPrimitiveInductive.canonicalGeneration types).kTarget
+    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
+  addRules : AddDefEqs recursors.recEnv
+    (VPrimitiveInductive.canonicalGeneration types).generatedRules output
+
+namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
+
+/-- Assemble the exact ordinary trace at the retained normalization and
+recursor map endpoints.  All intermediate maps and Theory environments are
+projections of the three staged metadata phases above. -/
+def toFlattenedTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input output : VEnv}
+    (replay : execution.CanonicalPrimitiveReplay input output) :
+    AddInductBlockTrace
+      execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+      input (VPrimitiveInductive.canonicalDecl types)
+      execution.flattened.recursors.env.constants output where
+  generation := VPrimitiveInductive.canonicalGeneration types
+  blockEnv := replay.blockEnv
+  generation_wf := replay.generation_wf
+  typeMap :=
+    execution.flattened.eliminationExecution.normalization.familyEnv.constants
+  typeEnv := replay.blockEnv
+  ctorMap := execution.flattened.eliminationExecution.constructorEnv.constants
+  ctorEnv := replay.constructors.ctorEnv
+  recEnv := replay.recursors.recEnv
+  addTypes := replay.families.addTypes
+  addCtors := replay.constructors.addCtors
+  addRecs := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      replay.recursors.addRecs
+  recK := replay.recursors.recK
+  addRules := replay.addRules
+
+/-- Retarget the staged replay to the public outer endpoints.  Primitive
+recognition proves that nested elimination was a no-op, so the retained
+recursor environment is the actual final environment. -/
+def toTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input output : VEnv}
+    (replay : execution.CanonicalPrimitiveReplay input output)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    AddInductBlockTrace env.constants input
+      (VPrimitiveInductive.canonicalDecl types) finalEnv.constants output := by
+  have initialEq := execution.flattenedValidationEnv_eq
+  have finalEq := execution.flattenedEnv_eq_final
+    (execution.canonicalPrimitive_noop primitiveResult).2
+  exact {
+    generation := VPrimitiveInductive.canonicalGeneration types
+    blockEnv := replay.blockEnv
+    generation_wf := replay.generation_wf
+    typeMap :=
+      execution.flattened.eliminationExecution.normalization.familyEnv.constants
+    typeEnv := replay.blockEnv
+    ctorMap := execution.flattened.eliminationExecution.constructorEnv.constants
+    ctorEnv := replay.constructors.ctorEnv
+    recEnv := replay.recursors.recEnv
+    addTypes := by simpa only [initialEq] using replay.families.addTypes
+    addCtors := replay.constructors.addCtors
+    addRecs := by
+      simpa only [execution.flattened.recursor_initialEnv_eq, finalEq] using
+        replay.recursors.addRecs
+    recK := by simpa only [finalEq] using replay.recursors.recK
+    addRules := replay.addRules }
+
+end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
+
+/-- The fixed canonical generation replayed against every safety-indexed input
+model.  Coherence is structural: every pointwise trace below is assembled from
+that generation and the same retained kernel execution. -/
+structure AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (input : VEnvs) where
+  output : VEnvs
+  replays : ∀ safety, execution.CanonicalPrimitiveReplay
+    (input.venv safety) (output.venv safety)
+
+namespace AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
+
+/-- Select the exact public trace at one safety level. -/
+def trace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (safety : DefinitionSafety) :
+    AddInductBlockTrace env.constants (input.venv safety)
+      (VPrimitiveInductive.canonicalDecl types) finalEnv.constants
+      (replay.output.venv safety) :=
+  (replay.replays safety).toTrace primitiveResult
+
+@[simp] theorem trace_generation
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (safety : DefinitionSafety) :
+    (replay.trace primitiveResult safety).generation =
+      VPrimitiveInductive.canonicalGeneration types :=
+  rfl
+
+end AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toFlattenedTrace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toFlattenedTrace
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toTrace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.toTrace
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trace
+
 /-- A coherent ordinary replay of a canonical primitive-recognized block.
 Unlike the nonprimitive transaction package, primitive preservation is
 derived from the exact Bool/Nat generated inventory rather than name
 avoidance. The raw Theory declaration is selected directly from the
 recognizer's closed host syntax; producers do not choose a parallel source or
-semantic normalization run. Sharing one generation artifact across safety
-levels supplies cross-safety coherence. The nested-pass facts are derived
+semantic normalization run. The fixed canonical generation is selected
+internally and used at every safety level. The nested-pass facts are derived
 from the retained execution and recognizer result rather than supplied as
 transaction fields. -/
 structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
@@ -625,18 +862,87 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransacti
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe true fuel finalEnv)
     (ves : VEnvs) where
-  output : VEnvs
-  generation : (VPrimitiveInductive.canonicalDecl types).BlockGenerationChecked
-  traces : ∀ safety, AddInductBlockTrace env.constants
-    (ves.venv safety) (VPrimitiveInductive.canonicalDecl types)
-      finalEnv.constants (output.venv safety)
-  generation_eq : ∀ safety, (traces safety).generation = generation
+  primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe true
+  replay : execution.CoherentCanonicalPrimitiveReplay ves
   projectionReady : ∀ safety,
-    ProjectionReady finalEnv (output.venv safety)
+    ProjectionReady finalEnv (replay.output.venv safety)
   structureEtaReady : ∀ safety,
-    StructureEtaReady finalEnv (output.venv safety)
+    StructureEtaReady finalEnv (replay.output.venv safety)
 
 namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+
+abbrev output
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (extension : execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
+    VEnvs :=
+  extension.replay.output
+
+abbrev generation
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (_extension : execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
+    (VPrimitiveInductive.canonicalDecl types).BlockGenerationChecked :=
+  VPrimitiveInductive.canonicalGeneration types
+
+/-- Exact pointwise trace derived from the retained execution replay. -/
+def traces
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (extension : execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
+    (safety : DefinitionSafety) :
+    AddInductBlockTrace env.constants (ves.venv safety)
+      (VPrimitiveInductive.canonicalDecl types) finalEnv.constants
+      (extension.output.venv safety) :=
+  extension.replay.trace extension.primitiveResult safety
+
+@[simp] theorem generation_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (extension : execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
+    (safety : DefinitionSafety) :
+    (extension.traces safety).generation = extension.generation :=
+  rfl
+
+/-- Complete the public primitive transaction package from the staged replay
+of the retained execution.  Projection and structure-eta readiness remain
+separate because they concern the final environment rather than metadata
+alignment. -/
+def ofReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true)
+    (replay : execution.CoherentCanonicalPrimitiveReplay ves)
+    (projectionReady : ∀ safety,
+      ProjectionReady finalEnv (replay.output.venv safety))
+    (structureEtaReady : ∀ safety,
+      StructureEtaReady finalEnv (replay.output.venv safety)) :
+    execution.CanonicalPrimitiveTransactionalVEnvsExtension ves where
+  primitiveResult := primitiveResult
+  replay := replay
+  projectionReady := projectionReady
+  structureEtaReady := structureEtaReady
 
 /-- Recover the exact raw Theory constants from the recognizer-selected
 canonical declaration. -/
@@ -648,12 +954,10 @@ theorem canonicalConstants
       nparams types isUnsafe true fuel finalEnv}
     {ves : VEnvs}
     (_extension :
-      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
-    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true) :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
     (VPrimitiveInductive.canonicalDecl types).CanonicalPrimitiveConstants :=
   VPrimitiveInductive.canonicalDecl_constants
-    (primitiveResult.recognized rfl).2.2.2
+    (_extension.primitiveResult.recognized rfl).2.2.2
 
 /-- Checked generation supplies the recursor name, turning the selected
 family/constructor constants into the complete canonical inventory. -/
@@ -665,12 +969,10 @@ theorem canonicalInventory
       nparams types isUnsafe true fuel finalEnv}
     {ves : VEnvs}
     (extension :
-      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
-    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true) :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
     (VPrimitiveInductive.canonicalDecl types).CanonicalPrimitiveInventory
       extension.generation :=
-  (extension.canonicalConstants primitiveResult).toInventory
+  extension.canonicalConstants.toInventory
     extension.generation
 
 /-- Canonical inventory plus coherent exact replay derives every semantic
@@ -684,17 +986,15 @@ def toTransactionalVEnvsExtension
       nparams types isUnsafe true fuel finalEnv}
     {ves : VEnvs} (wf : ves.WF env)
     (extension :
-      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
-    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true) :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
     execution.TransactionalVEnvsExtension ves where
   source := VPrimitiveInductive.canonicalDecl types
   output := extension.output
   transaction safety :=
-    .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
+    .ordinary (execution.canonicalPrimitive_noop extension.primitiveResult).2
       ⟨extension.traces safety⟩
   hasPrimitives safety :=
-    (extension.canonicalInventory primitiveResult).hasPrimitives
+    extension.canonicalInventory.hasPrimitives
       (extension.traces safety)
       (extension.generation_eq safety)
       (wf.hasPrimitives (safety := safety))
@@ -706,11 +1006,12 @@ def toTransactionalVEnvsExtension
     have transaction : execution.ExactSemanticTransaction
         (VPrimitiveInductive.canonicalDecl types)
         (ves.venv .safe) (extension.output.venv .safe) :=
-      .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
+      .ordinary
+        (execution.canonicalPrimitive_noop extension.primitiveResult).2
         ⟨extension.traces .safe⟩
     have finalTr := transaction.trEnv preTr
     have finalSafe : ConstMapSafePrimitives finalEnv.constants :=
-      (extension.canonicalInventory primitiveResult).safePrimitivesMap
+      extension.canonicalInventory.safePrimitivesMap
         (extension.traces .safe)
         (extension.generation_eq .safe) preTr.map_wf
         (ConstMapSafePrimitives.ofEnvironment preTr.map_wf
@@ -726,6 +1027,14 @@ def toTransactionalVEnvsExtension
   structureEtaReady := extension.structureEtaReady
 
 end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofReplay' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofReplay
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants' depends on axioms: [propext,
@@ -1190,7 +1499,7 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
         checkPrimitiveInductive.WF env lparams nparams types isUnsafe
           true primitiveRun
       exact (primitiveSemantics finalEnv execution primitiveRun
-        primitiveResult).toTransactionalVEnvsExtension wf primitiveResult
+        primitiveResult).toTransactionalVEnvsExtension wf
         |>.toVEnvsExtension wf
 
 /--

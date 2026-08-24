@@ -989,6 +989,31 @@ irrelevant. -/
 def canonicalDecl (types : List Lean.InductiveType) : VInductDecl :=
   if types.any fun type => type.name == ``Bool then boolDecl else natDecl
 
+/-- The unique identity block generation for the canonical Boolean source. -/
+def boolGeneration : boolDecl.BlockGenerationChecked :=
+  boolDecl.identityBlockGeneration?.get (by decide)
+
+/-- The unique identity block generation for the canonical natural-number
+source. -/
+def natGeneration : natDecl.BlockGenerationChecked :=
+  natDecl.identityBlockGeneration?.get (by decide)
+
+/-- Select the fixed checked generation paired with `canonicalDecl`.  Primitive
+replay producers choose neither the raw declaration nor its generated Theory
+inventory. -/
+def canonicalGeneration (types : List Lean.InductiveType) :
+    (canonicalDecl types).BlockGenerationChecked := by
+  unfold canonicalDecl
+  split
+  · exact boolGeneration
+  · exact natGeneration
+
+/--
+info: 'Lean4Lean.VPrimitiveInductive.canonicalGeneration' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VPrimitiveInductive.canonicalGeneration
+
 end VPrimitiveInductive
 
 /-- Exact Theory inventory associated with a primitive-recognized ordinary

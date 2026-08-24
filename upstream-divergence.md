@@ -475,7 +475,15 @@ to the replacement.
   producer-supplied field. The same closed recognizer shape now selects the
   complete canonical Theory declaration directly. Primitive transaction
   producers therefore choose neither a parallel raw declaration nor a
-  source-indexed semantic normalization run.
+  source-indexed semantic normalization run. A dedicated primitive replay now
+  consumes only family, constructor, and recursor staging runs indexed by the
+  retained execution, retargets their exact maps to the public outer endpoints,
+  and constructs the coherent safety-indexed `AddInductBlockTrace` family using
+  an internally selected canonical generation. The public primitive transaction
+  package contains this staged replay rather than accepting arbitrary traces.
+  This separate path is necessary because the
+  family-only intermediate environment for `Bool` or `Nat` cannot satisfy
+  `HasPrimitives` before its constructors have been inserted.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix
@@ -486,8 +494,8 @@ to the replacement.
   executable 14/5/19 inventory equalities; every actual-metadata transaction,
   final alignment, and derived output ordering; exact Fin/Vector dependency
   maps; the pre-Nat value-preservation regression; full Theory/Verify, default
-  Lake, Nix, and flake gates; primitive nested no-op and canonical-source
-  consumer checks; and
+  Lake, Nix, and flake gates; primitive nested no-op, canonical-source, and
+  retained-execution replay consumer checks; and
   compile-time trust manifests for the fixed, normalization, combined replay,
   output-ordering, and both mutual-block roots.
 - **Axiom note:** the guarded roots currently inherit `sorryAx` through
@@ -501,10 +509,14 @@ to the replacement.
   fixture-local native-decision axioms have been removed from their semantic
   closures. Every public root has an exact compile-time manifest; Track P/T2
   must remove or narrowly justify these inherited dependencies before release.
-  The canonical declaration selector uses only the logical baseline. The
+  The canonical declaration and generation selectors use only the logical
+  baseline. The
   primitive nested no-op proof introduces no axiom or admission; its exact
   equality uses the existing classified `Expr.abstract_eq` bridge, which is
-  pinned on the proof and every affected transaction root.
+  pinned on the proof and every affected transaction root. Retargeting the
+  staged primitive replay to the public outer endpoints has the same exact
+  closure; constructing the trace at the retained flattened endpoints uses only
+  the standard logical baseline.
 - **Upstream issue/PR:** TBD; submit with or immediately after the staged
   inductive-semantics series.
 - **Removal condition:** upstream has a non-vacuous inductive alignment with
