@@ -5851,6 +5851,9 @@ private theorem annotatedPi_declareInductiveTypes :
         #[annotatedPiKernelType] 0 false annotatedPiFamilyCandidateContext =
       .ok annotatedPiTypeKernelEnv := by
   simp [AddInductive.declareInductiveTypes, annotatedPiInductiveStats,
+    AddInductive.declaredInductiveInfos,
+    AddInductive.declaredInductiveInfo,
+    AddInductive.declareInductiveInfoList,
     annotatedPiKernelType, annotatedPiKernelCtor,
     annotatedPiInfo, annotatedPiMkInfo, ConstantInfo.name,
     ConstantInfo.type, ConstantInfo.toConstantVal,
@@ -5859,7 +5862,7 @@ private theorem annotatedPi_declareInductiveTypes :
     AddInductive.isRec, AddInductive.isRec.loop,
     AddInductive.isReflexive, AddInductive.isReflexive.loop,
     AddInductive.hasIndOcc, Expr.constName!,
-    Bind.bind, Pure.pure, Except.bind, Except.pure]
+    Bind.bind, Except.bind]
   rw [show (Kernel.Environment.ofConstants `_annotatedPiCandidate
       outParamMap).checkName ``AnnotatedPi = .ok () by
     simpa [outParamKernelEnv] using annotatedPiFamilyEnv_checkName]
@@ -6829,6 +6832,9 @@ private theorem aliasFormer_declareInductiveTypes :
         #[aliasFormerKernelType] 0 false aliasFormerCandidateContext =
       .ok aliasFormerCtorNormalizationKernelEnv := by
   simp [AddInductive.declareInductiveTypes, aliasFormerInductiveStats,
+    AddInductive.declaredInductiveInfos,
+    AddInductive.declaredInductiveInfo,
+    AddInductive.declareInductiveInfoList,
     aliasFormerKernelType, aliasFormerKernelCtor,
     aliasFormerInfo, aliasFormerMkInfo, ConstantInfo.name,
     ConstantInfo.type, ConstantInfo.toConstantVal,
@@ -6837,8 +6843,7 @@ private theorem aliasFormer_declareInductiveTypes :
     AddInductive.isRec,
     AddInductive.isRec.loop, AddInductive.isReflexive,
     AddInductive.isReflexive.loop,
-    Bind.bind, Pure.pure,
-    Except.bind, Except.pure]
+    Bind.bind, Except.bind]
   rw [show (Kernel.Environment.ofConstants `_aliasFormerNormalization
       typeFamilyAliasMap).checkName ``AliasFormer = .ok () by
     simpa [aliasFormerNormalizationKernelEnv] using
@@ -7656,36 +7661,116 @@ private theorem aliasFormerConstructorValidationContext_eq :
       env := aliasFormerCtorCandidateContext.env } =
       aliasFormerCtorCandidateContext := rfl
 
+private theorem aliasFormerFamilyTerminalContext_eq :
+    aliasFormerNormalizationCandidate.families.singleton.familyType.type.trace.terminalContext =
+      aliasFormerCandidateContext := rfl
+
+private theorem aliasFormerConstructorContext_eq :
+    { aliasFormerCandidateContext with
+      env := aliasFormerCtorCandidateContext.env } =
+      aliasFormerCtorCandidateContext := rfl
+
+private theorem aliasFormerValidationStats_eq :
+    aliasFormerStagedUniverseInput.staged.family.validation.stats =
+      aliasFormerInductiveStats := rfl
+
+private theorem aliasFormerCandidateCtorInductiveFuel_eq :
+    aliasFormerCandidateContext.fuel.inductiveFuel =
+      aliasFormerCtorCandidateContext.fuel.inductiveFuel := rfl
+
 private theorem aliasFormerCtorCandidateContext_empty :
     aliasFormerCtorCandidateContext.withEmptyLocalContext =
       aliasFormerCtorCandidateContext := rfl
 
-set_option warn.sorry false in
+/-- The retained AliasFormer validation trace and its analyzer-owned
+candidate replay the exact supplemental alignment checker. -/
 theorem aliasFormerAlignmentRun :
     aliasFormerStagedUniverseInput.staged.constructorValidation.trace.checkCandidateAlignment
       aliasFormerNormalizationCandidate.families.singleton.constructors
       { aliasFormerNormalizationCandidate.families.singleton.familyType.type.trace.terminalContext with
         env := aliasFormerCtorCandidateContext.env } = .ok () := by
-  -- Tier V (L4L-19B, v4.33 reconciliation repair debt): the premerge proof
-  -- stepped `ConstructorCandidateAlignmentTrace.build` with `rw [build.eq_def]`,
-  -- which the v4.33 elaborator no longer matches (and eq_def-in-simp loops).
-  -- The statement is an exact closed checker run and remains true.
-  -- L4L-16R repair findings (2026-08-20): the entry `rw [build.eq_def]` works
-  -- again once `simp only [aliasFormerKernelType]` runs FIRST (v4.33 kabstract
-  -- no longer bridges the `aliasFormerKernelType.ctors`-vs-literal gap), and
-  -- `simp only [aliasFormerConstructorValidationContext_eq] at closed rootCheck`
-  -- (after `rename_i closed rootCheck fresh terminal valid`) aligns the
-  -- record-update trace-hypothesis types. The residual blocker is firing the
-  -- resulting dependent match: `split`/simp-iota refuse it, and
-  -- `rw [build.match_1.eq_2]` fails because the metavar assignments for the
-  -- trace slots type-check at reducible transparency against
-  -- `context.fuel.inductiveFuel`/`head.name`-indexed binder types while the
-  -- goal carries `999`/`ConstantInfo.name`-projection forms — every fixture
-  -- def (`aliasFormerKernelCtor`, fuel projections, `ConstantInfo.name`
-  -- chains) must be pre-normalized into one syntactic form across goal AND
-  -- hypothesis types before `.eq_2` can fire, then the same treatment repeats
-  -- for `ConstructorViewAlignmentTrace.build` and the recursive nil case.
-  sorry
+  simp only [aliasFormerConstructorValidationContext_eq]
+  have candidates_eq :
+      aliasFormerNormalizationCandidate.families.singleton.constructors =
+        .cons aliasFormerConstructorCandidate .nil := rfl
+  rw [candidates_eq]
+  unfold AddInductive.ConstructorListValidationTrace.checkCandidateAlignment
+    AddInductive.ConstructorCandidateAlignmentTrace.check
+  simp only [aliasFormerKernelType]
+  generalize htrace :
+    aliasFormerStagedUniverseInput.staged.constructorValidation.trace = trace at *
+  cases trace with
+  | cons seen head tail fresh closed rootCheck typeTrace tailTrace =>
+    clear htrace candidates_eq
+    simp only [aliasFormerFamilyTerminalContext_eq,
+      aliasFormerConstructorContext_eq,
+      aliasFormerValidationStats_eq,
+      aliasFormerCandidateCtorInductiveFuel_eq] at closed rootCheck typeTrace tailTrace
+    cases typeTrace with
+    | terminal context source fuel argIdx terminal valid =>
+      cases tailTrace
+      let rootScope :=
+        AddInductive.ConstructorCheckedExpr.ofClosedRoot closed rootCheck
+      let sourceCheck : AddInductive.ConstructorCheckedExpr
+          aliasFormerCtorCandidateContext aliasFormerKernelCtor.type :=
+        aliasFormerCtorCandidateContext_empty ▸ rootScope
+      have view_eq : aliasFormerConstructorCandidate.type.view =
+          aliasFormerKernelCtor.type := rfl
+      let viewCheck : AddInductive.ConstructorCheckedExpr
+          aliasFormerCtorCandidateContext
+          aliasFormerConstructorCandidate.type.view :=
+        view_eq.symm ▸ sourceCheck
+      have viewTerminal :
+          aliasFormerConstructorCandidate.type.view.isForall = false := by
+        rw [view_eq]
+        exact terminal
+      have viewValid : AddInductive.isValidIndAppIdx
+          aliasFormerInductiveStats aliasFormerConstructorCandidate.type.view
+          0 = true := by
+        rw [view_eq]
+        exact valid
+      obtain ⟨headAlignment, headRun⟩ :=
+        AddInductive.ConstructorViewAlignmentTrace.build_terminal_ok
+          (stats := aliasFormerInductiveStats) (isUnsafe := false)
+          (familyIdx := 0) (ctor := aliasFormerKernelCtor.name)
+          (context := aliasFormerCtorCandidateContext)
+          (source := aliasFormerKernelCtor.type)
+          (view := aliasFormerConstructorCandidate.type.view)
+          (fuel := 0 + 999) (argIdx := 0)
+          (sourceTerminal := terminal) (sourceValid := valid)
+          sourceCheck viewCheck viewTerminal viewValid
+      have storedSpine :
+          aliasFormerConstructorCandidate.type.trace.storedSpine = true := rfl
+      have spineLength :
+          aliasFormerConstructorCandidate.type.trace.spineLength =
+            (AddInductive.ConstructorTypeValidationTrace.terminal
+              (stats := aliasFormerInductiveStats) (isUnsafe := false)
+              (familyIdx := 0) (ctor := aliasFormerKernelCtor.name)
+              aliasFormerCtorCandidateContext aliasFormerKernelCtor.type
+              (0 + 999) 0 terminal valid).spineLength := by
+        simp [aliasFormerConstructorCandidate, aliasFormerCtorCandidate,
+          AddInductive.CandidateExprTrace.spineLength,
+          AddInductive.ConstructorTypeValidationTrace.spineLength]
+      have candidateDepth :
+          aliasFormerConstructorCandidate.type.context.fuel.recDepth =
+            aliasFormerCtorCandidateContext.fuel.recDepth := rfl
+      let tailAlignment :=
+        AddInductive.ConstructorCandidateAlignmentTrace.nil
+          (stats := aliasFormerInductiveStats) (isUnsafe := false)
+          (familyIdx := 0) (context := aliasFormerCtorCandidateContext)
+          ((∅ : NameSet).insert aliasFormerKernelCtor.name)
+      have tailRun :=
+        AddInductive.ConstructorCandidateAlignmentTrace.build_nil_eq
+          (stats := aliasFormerInductiveStats) (isUnsafe := false)
+          (familyIdx := 0) (context := aliasFormerCtorCandidateContext)
+          ((∅ : NameSet).insert aliasFormerKernelCtor.name)
+      have buildRun :=
+        AddInductive.ConstructorCandidateAlignmentTrace.build_cons_eq
+          (fresh := fresh) (closed := closed) (rootCheck := rootCheck)
+          rootScope storedSpine spineLength candidateDepth headAlignment
+          tailAlignment headRun tailRun
+      have mappedRun := congrArg (Except.map (fun _ => ())) buildRun
+      exact mappedRun.trans rfl
 
 private def aliasFormerStagedPostFamilyInput :
     VInductDecl.StagedNormalizationCandidatePostFamilyInput
