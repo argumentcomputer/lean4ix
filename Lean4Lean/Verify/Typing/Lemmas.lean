@@ -14,7 +14,9 @@ theorem fvarsIn_iff : FVarsIn P e ↔ (∀ fv ∈ e.fvarsList, P fv) ∧ FVarsIn
 
 theorem fvarsIn_iff_hasMVar : FVarsIn (fun _ => True) e ↔ e.hasMVar = false := by
   rw [Expr.hasMVar, ← Expr.hasExprMVar, ← Expr.hasLevelMVar]; simp
-  induction e <;> simp [FVarsIn, Expr.hasExprMVar', Expr.hasLevelMVar', and_assoc, and_left_comm, *]
+  induction e <;>
+    simp [FVarsIn, Expr.hasExprMVar', Expr.hasLevelMVar', Level.hasMVar_eq, and_assoc,
+      and_left_comm, *]
 
 theorem fvarsList_eq_nil {e : Expr} : e.fvarsList = [] ↔ e.hasFVar = false := by
   rw [Expr.hasFVar_eq]
@@ -106,6 +108,73 @@ theorem FVarsIn.instantiate1 (h1 : FVarsIn P e) (h2 : FVarsIn P a) :
 theorem FVarsIn.instantiateList (h1 : FVarsIn P e) (h2 : ∀ a ∈ as, FVarsIn P a) (k := 0) :
     FVarsIn P (Expr.instantiateList e as k) := by
   induction as generalizing e <;> simp_all [Expr.instantiateList, FVarsIn.instantiate1_go]
+
+open private mkLevelMaxCore from Lean.Level in
+/-- Lean's normalized level maximum preserves absence of level metavariables. -/
+theorem Level.mkLevelMax'_hasMVar_eq_false
+    (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
+    (mkLevelMax' u v).hasMVar' = false := by
+  simp only [mkLevelMax', mkLevelMaxCore, Level.getOffset_eq]
+  grind [Lean.mkLevelMax, Level.hasMVar']
+
+open private mkLevelIMaxCore from Lean.Level in
+/-- Lean's normalized impredicative maximum preserves absence of level
+metavariables. -/
+theorem Level.mkLevelIMax'_hasMVar_eq_false
+    (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
+    (mkLevelIMax' u v).hasMVar' = false := by
+  simp only [mkLevelIMax', mkLevelIMaxCore]
+  grind [Lean.mkLevelIMax, Level.hasMVar',
+    Level.mkLevelMax'_hasMVar_eq_false]
+
+/-- Substituting level parameters with metavariable-free levels preserves
+absence of level metavariables. -/
+theorem Level.substParams'_hasMVar_eq_false
+    {s : Name → Level} {u : Level} {red : Bool}
+    (hs : ∀ n, (s n).hasMVar' = false)
+    (hu : u.hasMVar' = false) :
+    (u.substParams' s red).hasMVar' = false := by
+  induction u generalizing red with
+  | zero => rfl
+  | param => exact hs _
+  | mvar => simp [Level.hasMVar'] at hu
+  | succ u ih =>
+    simp only [Level.hasMVar'] at hu ⊢
+    exact ih hu
+  | max u v ihu ihv =>
+    simp only [Level.hasMVar'] at hu
+    have hu' : u.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    have hv' : v.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    simp only [Level.substParams']
+    split
+    · exact Level.mkLevelMax'_hasMVar_eq_false (ihu hu') (ihv hv')
+    · simp [Level.hasMVar', ihu hu', ihv hv']
+  | imax u v ihu ihv =>
+    simp only [Level.hasMVar'] at hu
+    have hu' : u.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    have hv' : v.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    simp only [Level.substParams']
+    split
+    · exact Level.mkLevelIMax'_hasMVar_eq_false (ihu hu') (ihv hv')
+    · simp [Level.hasMVar', ihu hu', ihv hv']
+
+/-- Replacing universe parameters preserves expression free-variable
+containment when every replacement level is metavariable-free. -/
+theorem FVarsIn.instantiateLevelParamsCore'
+    (hs : ∀ n, (s n).hasMVar' = false)
+    (he : FVarsIn P e) :
+    FVarsIn P (Expr.instantiateLevelParamsCore' red s e) := by
+  induction e <;>
+    simp_all [Expr.instantiateLevelParamsCore', FVarsIn,
+      Level.substParams'_hasMVar_eq_false]
 
 theorem FVarsIn.abstract1 (h1 : FVarsIn P e) :
     FVarsIn P (Expr.abstract1 a e k) := by
@@ -551,12 +620,13 @@ theorem TrProj.weakN (henv : env.Ordered) (W : Ctx.LiftN n k Γ Γ')
 /-! ## Replaying closed metadata types -/
 
 variable (env : VEnv) (Us : List Name) in
-/-- The syntax-directed fragment used by kernel declaration types. Unlike
-`TrExprS`, this relation records only the representation translation; the
-typing premises are recovered from a well-formed Theory expression by
-`TrTypeExpr.to_trExprS`. Keeping the two concerns separate lets replay
-fixtures reuse the declaration's real `WF` proof instead of re-running a
-fragile type-synthesis tactic at every application and pi node. -/
+/-- The syntax-directed fragment used by kernel declaration types and closed
+generated rule RHSs. Unlike `TrExprS`, this relation records only the
+representation translation; the typing premises are recovered from a
+well-formed Theory expression by `TrTypeExpr.to_trExprS`. Keeping the two
+concerns separate lets replay fixtures reuse the artifact's real `WF` proof
+instead of re-running a fragile type-synthesis tactic at every application,
+lambda, and pi node. -/
 inductive TrTypeExpr : VLCtx → Expr → VExpr → Prop where
   | bvar : Δ.find? (.inl i) = some (e, A) → TrTypeExpr Δ (.bvar i) e
   | sort : VLevel.ofLevel Us u = some u' → TrTypeExpr Δ (.sort u) (.sort u')
@@ -567,6 +637,9 @@ inductive TrTypeExpr : VLCtx → Expr → VExpr → Prop where
     TrTypeExpr Δ (.const c us) (.const c us')
   | app : TrTypeExpr Δ f f' → TrTypeExpr Δ a a' →
       TrTypeExpr Δ (.app f a) (.app f' a')
+  | lam : TrTypeExpr Δ ty ty' →
+      TrTypeExpr ((none, .vlam ty') :: Δ) body body' →
+      TrTypeExpr Δ (.lam name ty body bi) (.lam ty' body')
   | mdata : TrTypeExpr Δ e e' → TrTypeExpr Δ (.mdata data e) e'
   | forallE : TrTypeExpr Δ ty ty' →
       TrTypeExpr ((none, .vlam ty') :: Δ) body body' →
@@ -587,6 +660,11 @@ theorem TrTypeExpr.to_trExprS
   | app _ _ ihf iha =>
     obtain ⟨A, B, htf, hta⟩ := hwf.app_inv henv hΔ
     exact .app htf hta (ihf hΔ ⟨_, htf⟩) (iha hΔ ⟨_, hta⟩)
+  | lam _ _ ihty ihbody =>
+    obtain ⟨hty, hbody⟩ := hwf.lam_inv henv hΔ
+    obtain ⟨u, hty⟩ := hty
+    exact .lam ⟨u, hty⟩ (ihty hΔ ⟨_, hty⟩)
+      (ihbody ⟨hΔ, ⟨u, hty⟩⟩ hbody)
   | mdata _ ih => exact .mdata (ih hΔ hwf)
   | forallE _ _ ihty ihbody =>
     obtain ⟨_, hwf⟩ := hwf
@@ -909,6 +987,43 @@ theorem ofLevel_hasMVar (h : VLevel.ofLevel ls l = some l') : l.hasMVar' = false
   induction l generalizing l' with simp [VLevel.ofLevel, bind, Level.hasMVar'] at h ⊢
   | succ _ ih => obtain ⟨l', h, ⟨⟩⟩ := h; exact ih h
   | max _ _ ih1 ih2 | imax _ _ ih1 ih2 => obtain ⟨_, h1, _, h2, ⟨⟩⟩ := h; exact ⟨ih1 h1, ih2 h2⟩
+
+/-- A checked list of universe arguments preserves expression free-variable
+containment under `instantiateLevelParams`. -/
+theorem FVarsIn.instantiateLevelParams
+    (he : FVarsIn P e)
+    (Hlevels : levels.mapM (VLevel.ofLevel Us) = some levelVals) :
+    FVarsIn P (e.instantiateLevelParams ps levels) := by
+  rw [Expr.instantiateLevelParams_eq]
+  apply FVarsIn.instantiateLevelParamsCore' _ he
+  have hls : ∀ l ∈ levels, l.hasMVar' = false := by
+    rw [List.mapM_eq_some] at Hlevels
+    intro l hl
+    have ⟨_, _, h⟩ :=
+      Lean4Lean.List.Forall₂.forall_exists_l Hlevels _ hl
+    exact ofLevel_hasMVar h
+  intro n
+  generalize hopt : (ps.idxOf? n).bind (fun i => levels[i]?) = o
+  cases o with
+  | none => simp [Level.hasMVar']
+  | some l =>
+    simp only [Option.getD]
+    obtain ⟨i, _, hi⟩ := Option.bind_eq_some_iff.1 hopt
+    apply hls
+    exact List.mem_iff_getElem?.2 ⟨i, hi⟩
+
+/--
+info: 'Lean4Lean.FVarsIn.instantiateLevelParams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.FVarsIn.instantiateLevelParams
 
 theorem TrExprS.fvarsIn (H : TrExprS env Us Δ e e') : FVarsIn (· ∈ Δ.fvars) e := by
   induction H with
@@ -2319,6 +2434,43 @@ theorem FVarsBelow.rfl : FVarsBelow Δ e e := fun _ _ => id
 theorem FVarsBelow.trans (H1 : FVarsBelow Δ e₁ e₂) (H2 : FVarsBelow Δ e₂ e₃) :
     FVarsBelow Δ e₁ e₃ := fun _ h => H2 _ h ∘ H1 _ h
 
+/-- Every successfully selected application argument is free-variable-below
+the complete application that contains it. -/
+theorem FVarsBelow.getAppArg
+    {Δ : VLCtx} {e arg : Expr} {i : Nat}
+    (harg : e.getAppArgs[i]? = some arg) :
+    FVarsBelow Δ e arg := by
+  intro P _ he
+  apply FVarsIn.getAppArgsList he
+  apply List.mem_iff_getElem?.2
+  refine ⟨i, ?_⟩
+  rw [← Expr.getAppArgs_toList, Array.getElem?_toList]
+  exact harg
+
+/-- In-bounds `getElem!` selection is the total-array form of
+`FVarsBelow.getAppArg`. -/
+theorem FVarsBelow.getAppArg!
+    {Δ : VLCtx} {e : Expr} {i : Nat}
+    (hi : i < e.getAppArgs.size) :
+    FVarsBelow Δ e e.getAppArgs[i]! := by
+  rw [getElem!_pos e.getAppArgs i hi]
+  exact FVarsBelow.getAppArg (Array.getElem?_eq_getElem hi)
+
+/-- The final argument of a known application is free-variable-below that
+application, and hence below any expression already bounding it. -/
+theorem FVarsBelow.appArg!
+    {Δ : VLCtx} {e app : Expr}
+    (H : FVarsBelow Δ e app)
+    (happ : ∃ fn arg, app = .app fn arg) :
+    FVarsBelow Δ e app.appArg! := by
+  obtain ⟨fn, arg, rfl⟩ := happ
+  intro P hP he
+  exact (H P hP he).2
+
+/-- info: 'Lean4Lean.FVarsBelow.getAppArg' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.FVarsBelow.getAppArg
+
 def TrTyping (env : VEnv) (Us : List Name) (Δ : VLCtx) (e A : Expr) (e' A' : VExpr) : Prop :=
   FVarsBelow Δ e A ∧ TrExprS env Us Δ e e' ∧ TrExprS env Us Δ A A' ∧
   env.HasType Us.length Δ.toCtx e' A'
@@ -2335,9 +2487,35 @@ theorem FVarsBelow.mkAppList (H : FVarsBelow Δ e₁ e₂) :
     FVarsBelow Δ (e₁.mkAppList es) (e₂.mkAppList es) := by
   simp [FVarsBelow, FVarsIn.mkAppList] at H ⊢; grind
 
+/-- Appending a suffix of the original expression's application arguments
+preserves `FVarsBelow`. -/
+theorem FVarsBelow.mkAppRange_getAppArgs_suffix
+    (H : FVarsBelow Δ e r) (hi : i ≤ e.getAppArgs.size) :
+    FVarsBelow Δ e
+      (mkAppRange r i e.getAppArgs.size e.getAppArgs) := by
+  rw [Expr.mkAppRange_suffix_eq_drop hi]
+  intro P hP he
+  apply FVarsIn.mkAppList.2
+  refine ⟨H P hP he, ?_⟩
+  intro arg harg
+  apply FVarsIn.getAppArgsList he
+  simpa only [Expr.getAppArgs_toList] using List.mem_of_mem_drop harg
+
 theorem FVarsBelow.mkAppRevList (H : FVarsBelow Δ e₁ e₂) :
     FVarsBelow Δ (e₁.mkAppRevList es) (e₂.mkAppRevList es) := by
   simpa [← Expr.mkAppList_reverse] using H.mkAppList
+
+/-- info: 'Lean4Lean.FVarsBelow.getAppArg!' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.FVarsBelow.getAppArg!
+
+/-- info: 'Lean4Lean.FVarsBelow.appArg!' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Lean4Lean.FVarsBelow.appArg!
+
+/-- info: 'Lean4Lean.FVarsBelow.mkAppRange_getAppArgs_suffix' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.FVarsBelow.mkAppRange_getAppArgs_suffix
 
 inductive LambdaBodyN : Nat → Expr → Expr → Prop
   | zero : LambdaBodyN 0 e e
@@ -2447,7 +2625,7 @@ theorem BetaReduce.cheapBetaReduce (hc : e.Closed) : BetaReduce e e.cheapBetaRed
     have := eqr ▸ hc.getAppArgsList; simp [or_imp, forall_and] at this
     exact this.1
   unfold Expr.cheapBetaReduce.cont; split <;> rename_i h3
-  · simp [Expr.hasLooseBVars] at h3
+  · simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq] at h3
     rw [Expr.mkAppRange_eq (l₂ := l₂) (l₃ := []) (by simp [eq]) rfl (by simp [← eq])]
     rw [← e.mkAppList_getAppArgsList, eqr]; simp
     refine .mkAppList <| .inst_reduce hl₁ [] h1 (Expr.instantiateList_eq_self h3)
@@ -2562,7 +2740,7 @@ theorem TrExpr.rebuild_mkAppList (henv : env.WF) (hΔ : Δ.WF env Us.length)
   exact h2.rebuild_mkAppRevList henv hΔ he h1
 
 theorem TrExprS.eqv (H : TrExprS env Us Δ e₁ e') : e₁ == e₂ → TrExprS env Us Δ e₂ e' := by
-  simp [(· == ·)]
+  simp [(· == ·), Expr.eqv_eq]
   induction H generalizing e₂ <;> (cases e₂ <;> try change false = _ → _; rintro ⟨⟩)
   all_goals simp [Expr.eqv']; grind [TrExprS]
 
@@ -2570,13 +2748,13 @@ theorem TrExpr.eqv (H : TrExpr env Us Δ e₁ e') (h : e₁ == e₂) : TrExpr en
   let ⟨_, h1, h2⟩ := H; ⟨_, h1.eqv h, h2⟩
 
 theorem fvarsList_eqv {e₁ e₂ : Expr} : e₁ == e₂ → e₁.fvarsList = e₂.fvarsList := by
-  simp [(· == ·)]
+  simp [(· == ·), Expr.eqv_eq]
   induction e₁ generalizing e₂ <;> (cases e₂ <;> try change false = _ → _; rintro ⟨⟩)
   all_goals simp [Expr.eqv']; intros; subst_vars; simp [Expr.fvarsList]
   all_goals grind
 
 theorem FVarsIn.eqv : e₁ == e₂ → FVarsIn P e₁ → FVarsIn P e₂ := by
-  simp [(· == ·)]
+  simp [(· == ·), Expr.eqv_eq]
   induction e₁ generalizing e₂ <;> (cases e₂ <;> try change false = _ → _; rintro ⟨⟩)
   all_goals simp [Expr.eqv']; intros; subst_vars; revert ‹FVarsIn ..›; simp [FVarsIn]
   all_goals grind
@@ -2620,10 +2798,36 @@ theorem AppStack.append {e : Expr} (H : AppStack env Us Δ (e.mkAppList as) e' b
 theorem AppStack.build {e : Expr} (H : TrExprS env Us Δ (e.mkAppList as) e') :
     ∃ e', AppStack env Us Δ e e' as := by simpa using AppStack.append (.head H)
 
+/-- A strict translation of an application also translates its syntactic
+head. -/
+theorem TrExprS.getAppFn (H : TrExprS env Us Δ e e') :
+    ∃ f', TrExprS env Us Δ e.getAppFn f' := by
+  let ⟨f', stack⟩ :=
+    AppStack.build (e.mkAppList_getAppArgsList ▸ H)
+  exact ⟨f', stack.tr⟩
+
+/-- When the translated application head is a constant, all universe levels
+on that exact host head passed strict level translation. -/
+theorem TrExprS.getAppFn_const_levels
+    (H : TrExprS env Us Δ e e')
+    (hfn : e.getAppFn = .const name levels) :
+    ∃ levelVals, levels.mapM (VLevel.ofLevel Us) = some levelVals := by
+  obtain ⟨_, hhead⟩ := H.getAppFn
+  rw [hfn] at hhead
+  cases hhead with
+  | const _ hlevels _ => exact ⟨_, hlevels⟩
+
+/-- info: 'Lean4Lean.TrExprS.getAppFn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExprS.getAppFn
+
+/-- info: 'Lean4Lean.TrExprS.getAppFn_const_levels' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExprS.getAppFn_const_levels
+
 /-- Recover the pointwise strict translations of an application spine and
-rebuild the complete translated application.  Unlike the checker-facing
-`AppStack.toSpineWF`, this purely syntactic projection needs no expected
-function type and is therefore available to WHNF reduction. -/
+rebuild the complete translated application.  Unlike `AppStack.toSpineWF`,
+this purely syntactic projection needs no expected function type. -/
 theorem AppStack.argsTranslation
     (H : AppStack env Us Δ f f' args) :
     ∃ args', args.Forall₂ (TrExprS env Us Δ) args' ∧
@@ -2634,6 +2838,127 @@ theorem AppStack.argsTranslation
     obtain ⟨args', hargs, hfull⟩ := ih
     refine ⟨_ :: args', .cons ha hargs, ?_⟩
     simpa [Expr.mkAppList, VExpr.appN] using hfull
+
+/-- Split a translated application stack at a host argument-list boundary.
+The prefix keeps the original head; the suffix is re-headed by the complete
+translated prefix application. -/
+theorem AppStack.split
+    (H : AppStack env Us Δ f f' (front ++ back)) :
+    ∃ front',
+      front.Forall₂ (TrExprS env Us Δ) front' ∧
+      AppStack env Us Δ f f' front ∧
+      AppStack env Us Δ (f.mkAppList front) (VExpr.appN f' front') back := by
+  induction front generalizing f f' with
+  | nil =>
+      exact ⟨[], .nil, .head H.tr, by simpa⟩
+  | cons arg front ih =>
+      let .app hfun harg hf harg' Hrest := H
+      obtain ⟨front', hfront', hprefix, hsuffix⟩ := ih Hrest
+      refine ⟨_ :: front', .cons harg' hfront',
+        .app hfun harg hf harg' hprefix, ?_⟩
+      simpa [Expr.mkAppList, VExpr.appN] using hsuffix
+
+/-- Index-based form of `AppStack.split`, using the canonical
+`take`/`drop` partition consumed by recursor reduction. -/
+theorem AppStack.splitAt
+    (H : AppStack env Us Δ f f' args) (n : Nat) :
+    ∃ front',
+      (args.take n).Forall₂ (TrExprS env Us Δ) front' ∧
+      AppStack env Us Δ f f' (args.take n) ∧
+      AppStack env Us Δ (f.mkAppList (args.take n))
+        (VExpr.appN f' front') (args.drop n) := by
+  have H' : AppStack env Us Δ f f' (args.take n ++ args.drop n) := by
+    simpa using H
+  exact H'.split
+
+/-- Recover the translated arguments and their typed Theory spine from a
+strictly translated application stack whose head has a known telescope type.
+This generic form lives below the type-checker modules so WHNF reduction can
+consume it without importing `InferType`. -/
+theorem AppStack.toSpineWF
+    (H : AppStack env Us Δ f f' args)
+    (henv : env.WF) (hΔ : Δ.WF env Us.length)
+    (hf : env.HasType Us.length Δ.toCtx f' (VExpr.forallN As C))
+    (hlen : args.length = As.length) :
+    ∃ args', args.Forall₂ (TrExprS env Us Δ) args' ∧
+      env.SpineWF Us.length Δ.toCtx
+        (VExpr.forallN As C) args' (VExpr.instRev C args') ∧
+      TrExprS env Us Δ (f.mkAppList args) (VExpr.appN f' args') := by
+  induction args generalizing f f' As C with
+  | nil =>
+      cases As with
+      | nil =>
+          let .head hfull := H
+          exact ⟨[], .nil, .nil, by simpa⟩
+      | cons _ _ => simp at hlen
+  | cons arg args ih =>
+      cases As with
+      | nil => simp at hlen
+      | cons A As =>
+        let .app hfun harg hf' harg' Hrest := H
+        have htypes := hf.uniqU henv hΔ hfun
+        have ⟨⟨_, hA⟩, _⟩ := htypes.forallE_inv henv hΔ
+        have hargA := harg.defeqU_r henv hΔ ⟨_, hA.symm⟩
+        have hlen' : args.length = As.length := by simpa using hlen
+        have htailType : env.HasType Us.length Δ.toCtx
+            (.app f' _) ((VExpr.forallN As C).inst _) :=
+          hf.app hargA
+        rw [VExpr.instN_forallN] at htailType
+        obtain ⟨args', hargs', hspine, hfull⟩ :=
+          ih Hrest htailType (by
+            simpa [VExpr.instTelN_length] using hlen')
+        refine ⟨_ :: args', .cons harg' hargs', .cons hargA ?_, ?_⟩
+        have hlenArgsAs : args'.length = As.length :=
+          hargs'.length_eq.symm.trans hlen'
+        rw [VExpr.instN_forallN]
+        simpa [VExpr.instRev, hlenArgsAs] using hspine
+        simpa [Expr.mkAppList, VExpr.appN] using hfull
+
+/-- Rebuild a strict translation of an iterated host application from a
+translated head, pointwise translated arguments, and the corresponding typed
+Theory spine.  This is the output-side companion to
+`AppStack.toSpineWF`. -/
+theorem TrExprS.mkAppList_of_spine
+    (hf : TrExprS env Us Δ f f')
+    (hhead : env.HasType Us.length Δ.toCtx f' A)
+    (hargs : args.Forall₂ (TrExprS env Us Δ) args')
+    (hspine : env.SpineWF Us.length Δ.toCtx A args' B) :
+    TrExprS env Us Δ (f.mkAppList args) (VExpr.appN f' args') := by
+  induction hargs generalizing f f' A B with
+  | nil =>
+      cases hspine
+      simpa
+  | cons harg hrest ih =>
+      cases hspine with
+      | cons hargType hspineRest =>
+        have happ : TrExprS env Us Δ (.app f _) (.app f' _) :=
+          .app hhead hargType hf harg
+        have happType := hhead.app hargType
+        simpa [Expr.mkAppList, VExpr.appN] using
+          ih happ happType hspineRest
+
+/-- Weak-translation form of `TrExprS.mkAppList_of_spine`.  This is the form
+used after host universe instantiation, whose translation is definitionally
+equal rather than necessarily strict. -/
+theorem TrExpr.mkAppList_of_spine
+    (henv : env.WF) (hΔ : Δ.WF env Us.length)
+    (hf : TrExpr env Us Δ f f')
+    (hhead : env.HasType Us.length Δ.toCtx f' A)
+    (hargs : args.Forall₂ (TrExprS env Us Δ) args')
+    (hspine : env.SpineWF Us.length Δ.toCtx A args' B) :
+    TrExpr env Us Δ (f.mkAppList args) (VExpr.appN f' args') := by
+  induction hargs generalizing f f' A B with
+  | nil =>
+      cases hspine
+      simpa
+  | cons harg hrest ih =>
+      cases hspine with
+      | cons hargType hspineRest =>
+        have happ : TrExpr env Us Δ (.app f _) (.app f' _) :=
+          TrExpr.app henv hΔ hhead hargType hf (harg.trExpr henv.ordered hΔ)
+        have happType := hhead.app hargType
+        simpa [Expr.mkAppList, VExpr.appN] using
+          ih happ happType hspineRest
 
 /-- A successful lookup on the left side of a pointwise list relation has a
 related lookup at the same position on the right. -/
@@ -2651,6 +2976,113 @@ theorem List.Forall₂.getElem?_left
       subst x
       exact ⟨_, rfl, hxy⟩
     | succ i => simpa using ih (i := i) (by simpa using hx)
+
+/-- A strict translation of an application also strictly translates every
+successfully selected host argument. -/
+theorem TrExprS.getAppArg
+    {env : VEnv} {Us : List Name} {Δ : VLCtx}
+    {e arg : Expr} {e' : VExpr} {i : Nat}
+    (H : TrExprS env Us Δ e e')
+    (harg : e.getAppArgs[i]? = some arg) :
+    ∃ arg', TrExprS env Us Δ arg arg' := by
+  obtain ⟨_, stack⟩ :=
+    AppStack.build (e.mkAppList_getAppArgsList ▸ H)
+  obtain ⟨_, hargs, _⟩ := stack.argsTranslation
+  have hargList : e.getAppArgsList[i]? = some arg := by
+    rw [← Expr.getAppArgs_toList, Array.getElem?_toList]
+    exact harg
+  obtain ⟨arg', _, harg'⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_left hargs hargList
+  exact ⟨arg', harg'⟩
+
+/-- A weak translation still exposes a strict translation of every selected
+host application argument.  Definitional equality may change the Theory
+endpoint, but it never changes the host spine whose strict witness is stored
+inside `TrExpr`. -/
+theorem TrExpr.getAppArg
+    {env : VEnv} {Us : List Name} {Δ : VLCtx}
+    {e arg : Expr} {e' : VExpr} {i : Nat}
+    (H : TrExpr env Us Δ e e')
+    (harg : e.getAppArgs[i]? = some arg) :
+    ∃ arg', TrExprS env Us Δ arg arg' := by
+  obtain ⟨_, hstrict, _⟩ := H
+  exact hstrict.getAppArg harg
+
+/-- info: 'Lean4Lean.TrExprS.getAppArg' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExprS.getAppArg
+
+/-- info: 'Lean4Lean.TrExpr.getAppArg' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExpr.getAppArg
+
+/-- Pointwise list relations are preserved by a common prefix cut. -/
+theorem List.Forall₂.take
+    {α : Type u} {β : Type v} {R : α → β → Prop}
+    {xs : List α} {ys : List β}
+    (H : List.Forall₂ R xs ys) (n : Nat) :
+    List.Forall₂ R (xs.take n) (ys.take n) := by
+  induction H generalizing n with
+  | nil => simp
+  | cons h hrest ih =>
+      cases n with
+      | zero => exact .nil
+      | succ n => exact .cons h (ih n)
+
+/-- Pointwise list relations are preserved by dropping a common prefix. -/
+theorem List.Forall₂.drop
+    {α : Type u} {β : Type v} {R : α → β → Prop}
+    {xs : List α} {ys : List β}
+    (H : List.Forall₂ R xs ys) (n : Nat) :
+    List.Forall₂ R (xs.drop n) (ys.drop n) := by
+  induction H generalizing n with
+  | nil => simp
+  | cons h hrest ih =>
+      cases n with
+      | zero => exact .cons h hrest
+      | succ n => exact ih n
+
+/-- Concatenate two pointwise list relations. -/
+theorem List.Forall₂.append
+    {α : Type u} {β : Type v} {R : α → β → Prop}
+    {xs₁ xs₂ : List α} {ys₁ ys₂ : List β}
+    (H₁ : List.Forall₂ R xs₁ ys₁) (H₂ : List.Forall₂ R xs₂ ys₂) :
+    List.Forall₂ R (xs₁ ++ xs₂) (ys₁ ++ ys₂) := by
+  induction H₁ with
+  | nil => exact H₂
+  | cons h _ ih => exact .cons h ih
+
+/-- info: 'Lean4Lean.List.Forall₂.take' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Lean4Lean.List.Forall₂.take
+
+/-- info: 'Lean4Lean.List.Forall₂.drop' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Lean4Lean.List.Forall₂.drop
+
+/-- info: 'Lean4Lean.List.Forall₂.append' does not depend on any axioms -/
+#guard_msgs in
+#print axioms Lean4Lean.List.Forall₂.append
+
+/-- info: 'Lean4Lean.AppStack.split' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.AppStack.split
+
+/-- info: 'Lean4Lean.AppStack.splitAt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.AppStack.splitAt
+
+/-- info: 'Lean4Lean.TrExprS.mkAppList_of_spine' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExprS.mkAppList_of_spine
+
+/-- info: 'Lean4Lean.TrExpr.mkAppList_of_spine' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrExpr.mkAppList_of_spine
+
+/-- info: 'Lean4Lean.AppStack.toSpineWF' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.AppStack.toSpineWF
 
 /--
 info: 'Lean4Lean.TrExprS.toConstructor_ready' depends on axioms: [propext, Classical.choice, Quot.sound]

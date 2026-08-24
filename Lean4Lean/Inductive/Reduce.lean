@@ -68,6 +68,21 @@ def getRecRuleFor (rval : RecursorVal) (major : Expr) : Option RecursorRule := d
   let .const fn _ := major.getAppFn | none
   rval.rules.find? (·.ctor == fn)
 
+/-- Assemble the reduct after a recursor rule has been selected and its major
+constructor arguments have been exposed.  Naming this pure tail keeps the
+runtime operation unchanged while giving verification a stable boundary for
+the three argument slices. -/
+def applyRecursorRule (info : RecursorVal) (rule : RecursorRule)
+    (levels : List Level) (recArgs majorArgs : Array Expr) : Expr :=
+  let rhs := rule.rhs.instantiateLevelParams info.levelParams levels
+  let rhs := mkAppRange rhs 0 info.getFirstIndexIdx recArgs
+  let rhs := mkAppRange rhs (majorArgs.size - rule.nfields)
+    majorArgs.size majorArgs
+  if info.getMajorIdx + 1 < recArgs.size then
+    mkAppRange rhs (info.getMajorIdx + 1) recArgs.size recArgs
+  else
+    rhs
+
 /-- Performs recursor reduction on `e` (returning `none` if not applicable).
 
 For recursor reduction to occur, `e` must be a recursor application where the major premise is
@@ -96,14 +111,6 @@ def inductiveReduceRec [Monad m] (env : Environment) (e : Expr)
   let majorArgs := major.getAppArgs
   if rule.nfields > majorArgs.size then return none
   if ls.length != info.levelParams.length then return none
-  let mut rhs := rule.rhs.instantiateLevelParams info.levelParams ls
-  -- get the parameters, motives and minor premises from the recursor application (recursor rules
-  -- don't need the indices, as these are determined by the constructor and its parameters/fields)
-  rhs := mkAppRange rhs 0 info.getFirstIndexIdx recArgs
-  -- get fields from constructor application
-  rhs := mkAppRange rhs (majorArgs.size - rule.nfields) majorArgs.size majorArgs
-  if majorIdx + 1 < recArgs.size then
-    rhs := mkAppRange rhs (majorIdx + 1) recArgs.size recArgs
-  return rhs
+  return applyRecursorRule info rule ls recArgs majorArgs
 
 end
