@@ -122,6 +122,12 @@ structure ProjectionArtifact (env : Environment) (name : Name)
   rawResult_sort : ∃ resultLevel,
     view.generation.block.rawResult = .sort resultLevel
   programsWF : view.ProgramsWF venv
+  /-- Projector-program typing is a persistent capability.  Readiness is
+  transported across ordinary declaration extensions, so the certificate
+  must cover future abstract environments rather than only the model at
+  which the host artifact was first resolved. -/
+  programsWF_mono : ∀ {venv' : VEnv}, venv ≤ venv' →
+    view.ProgramsWF venv'
 
 /-- Host/Theory coherence needed by primitive projections.
 
@@ -136,8 +142,19 @@ structure ProjectionReady (env : Environment) (venv : VEnv) : Prop where
     Nonempty (ProjectionArtifact env name info venv)
   constructorNumParams : ∀ (view : VStructureView) (info : ConstructorVal),
     view.WF venv →
+    view.fields ≠ [] →
     env.find? view.constructorName = some (.ctorInfo info) →
     info.numParams = view.nparams
+  /-- The positional host invariant remains valid when the Theory model is
+  extended.  Unlike `VStructureView.WF.mono`, this direction cannot be
+  reconstructed from the current-model field because an extension admits
+  new well-formed instantiations. -/
+  constructorNumParams_mono : ∀ {venv' : VEnv}, venv ≤ venv' →
+    ∀ (view : VStructureView) (info : ConstructorVal),
+      view.WF venv' →
+      view.fields ≠ [] →
+      env.find? view.constructorName = some (.ctorInfo info) →
+      info.numParams = view.nparams
 
 /-- Exact host/Theory alignment for one constructor/family pair accepted by
 the runtime structure-eta heuristics.  The underlying projection artifact
@@ -242,7 +259,9 @@ theorem ProjectionReady.of_no_ctorInfo
         hfind hnoCtor
     rw [hfalse] at hready
     contradiction
-  constructorNumParams _view info _hview hfind :=
+  constructorNumParams _view info _hview _hfields hfind :=
+    (hnoCtor _ info hfind).elim
+  constructorNumParams_mono _hle _view info _hview _hfields hfind :=
     (hnoCtor _ info hfind).elim
 
 /-- Environments with no constructor metadata also satisfy structure-eta
@@ -910,16 +929,22 @@ theorem MLCtx.WF.decls_size {c : MLCtx} (wf : c.WF env Us) :
   rw [← wf.tr.1.decls_wf.toList'_length]
   induction c with
   | nil => rfl
-  | vlam _ _ _ _ _ _ ih => simp [lctx, LocalContext.mkLocalDecl, ih wf.1]
-  | vlet _ _ _ _ _ _ _ ih => simp [lctx, LocalContext.mkLetDecl, ih wf.1]
+  | vlam _ _ _ _ _ _ ih =>
+    simp [lctx, LocalContext.mkLocalDecl, Lean.PersistentArray.toList'_push, ih wf.1]
+  | vlet _ _ _ _ _ _ _ ih =>
+    simp [lctx, LocalContext.mkLetDecl, Lean.PersistentArray.toList'_push, ih wf.1]
 
 theorem MLCtx.WF.toList_eq {c : MLCtx} (wf : c.WF env Us) :
     c.lctx.toList = c.decls := by
   simp [LocalContext.toList]
   induction c with
   | nil => rfl
-  | vlam _ _ _ _ _ _ ih => simp [lctx, LocalContext.mkLocalDecl, decls, ih wf.1, wf.1.decls_size]
-  | vlet _ _ _ _ _ _ _ ih => simp [lctx, LocalContext.mkLetDecl, decls, ih wf.1, wf.1.decls_size]
+  | vlam _ _ _ _ _ _ ih =>
+    simp [lctx, LocalContext.mkLocalDecl, decls, Lean.PersistentArray.toList'_push, ih wf.1,
+      wf.1.decls_size]
+  | vlet _ _ _ _ _ _ _ ih =>
+    simp [lctx, LocalContext.mkLetDecl, decls, Lean.PersistentArray.toList'_push, ih wf.1,
+      wf.1.decls_size]
 
 theorem MLCtx.WF.find?_eq {c : MLCtx} (wf : c.WF env Us) :
     c.lctx.find? x = c.decls.find? (x == ·.fvarId) := by
