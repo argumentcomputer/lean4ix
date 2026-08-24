@@ -556,188 +556,32 @@ def toVEnvsExtension
 
 end AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
 
-private theorem primitiveSortTranslation_eq
-    (translation : TrExprS env [] [] (.sort (.succ .zero)) raw) :
-    raw = .sort (.succ .zero) := by
-  have computed := translation.trExprS?_eq (by
-    simp [TrExprS.IsUnique])
-  simpa [trExprS?, VLevel.ofLevel] using (Option.some.inj computed).symm
-
-private theorem primitiveConstTranslation_eq
-    (translation : TrExprS env [] [] (.const name []) raw) :
-    raw = .const name [] := by
-  have computed := translation.trExprS?_eq (by
-    simp [TrExprS.IsUnique])
-  simpa [trExprS?] using (Option.some.inj computed).symm
-
-private theorem primitiveUnaryConstTranslation_eq
-    (translation : TrExprS env [] []
-      (.forallE binderName (.const name []) (.const name []) binderInfo) raw) :
-    raw = .forallE (.const name []) (.const name []) := by
-  have computed := translation.trExprS?_eq (by
-    simp [TrExprS.IsUnique])
-  simpa [trExprS?] using (Option.some.inj computed).symm
-
-private theorem vConstVal_eq_of_fields {left right : VConstVal}
-    (uvars_eq : left.uvars = right.uvars)
-    (type_eq : left.type = right.type)
-    (name_eq : left.name = right.name) : left = right := by
-  cases left with
-  | mk leftConstant leftName =>
-      cases right with
-      | mk rightConstant rightName =>
-          cases leftConstant with
-          | mk leftUvars leftType =>
-              cases rightConstant with
-              | mk rightUvars rightType => simp_all
-
-private theorem boolConstructorConstants_eq
-    {sources : List Constructor}
-    {candidate : AddInductive.CandidateList
-      AddInductive.CandidateConstructor sources}
-    {raws : List VConstVal}
-    (run : VInductDecl.CandidateConstructorSemanticListRun env [] candidate
-      raws)
-    (sources_eq : sources = [
-      ⟨``Bool.false, .const ``Bool []⟩,
-      ⟨``Bool.true, .const ``Bool []⟩]) :
-    raws = VPrimitiveInductive.boolConstructors := by
-  subst sources
-  cases run with
-  | cons falseRun tail =>
-      cases tail with
-      | cons trueRun tail =>
-          cases tail
-          have falseType := primitiveConstTranslation_eq
-            falseRun.type.source_tr
-          have trueType := primitiveConstTranslation_eq
-            trueRun.type.source_tr
-          simp only [VPrimitiveInductive.boolConstructors]
-          congr
-          · apply vConstVal_eq_of_fields
-            · simpa using falseRun.uvars_eq
-            · simpa [VExpr.bool] using falseType
-            · exact falseRun.name_eq.symm
-          · congr
-            apply vConstVal_eq_of_fields
-            · simpa using trueRun.uvars_eq
-            · simpa [VExpr.bool] using trueType
-            · exact trueRun.name_eq.symm
-
-private theorem natConstructorConstants_eq
-    {sources : List Constructor}
-    {candidate : AddInductive.CandidateList
-      AddInductive.CandidateConstructor sources}
-    {raws : List VConstVal}
-    (run : VInductDecl.CandidateConstructorSemanticListRun env [] candidate
-      raws)
-    (sources_eq : sources = [
-      ⟨``Nat.zero, .const ``Nat []⟩,
-      ⟨``Nat.succ, .forallE binderName (.const ``Nat [])
-        (.const ``Nat []) binderInfo⟩]) :
-    raws = VPrimitiveInductive.natConstructors := by
-  subst sources
-  cases run with
-  | cons zeroRun tail =>
-      cases tail with
-      | cons succRun tail =>
-          cases tail
-          have zeroType := primitiveConstTranslation_eq
-            zeroRun.type.source_tr
-          have succType := primitiveUnaryConstTranslation_eq
-            succRun.type.source_tr
-          simp only [VPrimitiveInductive.natConstructors]
-          congr
-          · apply vConstVal_eq_of_fields
-            · simpa using zeroRun.uvars_eq
-            · simpa [VExpr.nat] using zeroType
-            · exact zeroRun.name_eq.symm
-          · congr
-            apply vConstVal_eq_of_fields
-            · simpa using succRun.uvars_eq
-            · simpa [VExpr.nat] using succType
-            · exact succRun.name_eq.symm
-
-/-- The primitive recognizer's concrete host syntax and one retained
-source-indexed semantic normalization run determine the exact raw Theory
-family and constructor inventory. -/
-theorem VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants
-    {env blockEnv : VEnv} {Us : List Name}
-    {types : List InductiveType}
-    {candidate : AddInductive.NormalizationCandidate types}
-    {source : VInductDecl}
-    (run : VInductDecl.NormalizationCandidateBlockSemanticRun env blockEnv
-      Us candidate source)
-    (shape : PrimitiveInductiveShape types) (levels_eq : Us = []) :
-    source.CanonicalPrimitiveConstants := by
-  subst Us
+/-- Primitive recognition selects the complete canonical Theory declaration
+directly.  No independently supplied raw source or semantic normalization run
+is needed on this closed Bool/Nat branch. -/
+theorem VPrimitiveInductive.canonicalDecl_constants
+    {types : List InductiveType} (shape : PrimitiveInductiveShape types) :
+    (VPrimitiveInductive.canonicalDecl types).CanonicalPrimitiveConstants := by
   obtain ⟨type, rfl, type_type, primitive⟩ := shape
-  cases source
-  cases candidate with
-  | mk candidates =>
-      cases candidates with
-      | cons candidate tail =>
-          cases tail
-          cases run with
-          | mk declaration_uvars stage families =>
-              cases families with
-              | @cons familySource familyCandidate rawFamily familySources
-                  familyCandidates rawFamilies family tail =>
-                  cases tail
-                  have familyTranslation := family.type.source_tr
-                  rw [type_type] at familyTranslation
-                  have familyType :=
-                    primitiveSortTranslation_eq familyTranslation
-                  cases primitive with
-                  | inl boolShape =>
-                      obtain ⟨type_name, constructors_eq⟩ := boolShape
-                      have familyConstant :
-                          rawFamily.toVConstVal =
-                            VPrimitiveInductive.boolFamily := by
-                        apply vConstVal_eq_of_fields
-                        · simpa [VPrimitiveInductive.boolFamily] using
-                            family.uvars_eq
-                        · simpa [VPrimitiveInductive.boolFamily] using
-                            familyType
-                        · simpa [VPrimitiveInductive.boolFamily] using
-                            family.name_eq.symm.trans type_name
-                      have rawConstructors :=
-                        boolConstructorConstants_eq family.constructors
-                          constructors_eq
-                      apply VInductDecl.CanonicalPrimitiveConstants.bool
-                      · simpa [VInductDecl.blockTypeConstants] using
-                          familyConstant
-                      · simpa [VInductDecl.blockConstructorConstants] using
-                          rawConstructors
-                  | inr natShape =>
-                      obtain ⟨type_name, binderName, binderInfo,
-                        constructors_eq⟩ := natShape
-                      have familyConstant :
-                          rawFamily.toVConstVal =
-                            VPrimitiveInductive.natFamily := by
-                        apply vConstVal_eq_of_fields
-                        · simpa [VPrimitiveInductive.natFamily] using
-                            family.uvars_eq
-                        · simpa [VPrimitiveInductive.natFamily] using
-                            familyType
-                        · simpa [VPrimitiveInductive.natFamily] using
-                            family.name_eq.symm.trans type_name
-                      have rawConstructors :=
-                        natConstructorConstants_eq family.constructors
-                          constructors_eq
-                      apply VInductDecl.CanonicalPrimitiveConstants.nat
-                      · simpa [VInductDecl.blockTypeConstants] using
-                          familyConstant
-                      · simpa [VInductDecl.blockConstructorConstants] using
-                          rawConstructors
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨type_name, constructors_eq⟩ := boolShape
+      simp only [VPrimitiveInductive.canonicalDecl, type_name,
+        beq_self_eq_true, List.any_cons, List.any_nil, Bool.or_false, if_true]
+      exact .bool rfl rfl
+  | inr natShape =>
+      obtain ⟨type_name, binderName, binderInfo, constructors_eq⟩ := natShape
+      simp only [VPrimitiveInductive.canonicalDecl, type_name, List.any_cons,
+        List.any_nil, Bool.or_false]
+      have nat_ne_bool : (``Nat : Name) ≠ ``Bool := by decide
+      simp [nat_ne_bool]
+      exact .nat rfl rfl
 
 /--
-info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
+info: 'Lean4Lean.VPrimitiveInductive.canonicalDecl_constants' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs in
-#print axioms VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants
+#print axioms VPrimitiveInductive.canonicalDecl_constants
 
 /-- Primitive recognition and the retained public nested-elimination run
 jointly prove that the canonical source list is unchanged and no auxiliary
@@ -768,9 +612,12 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_n
 /-- A coherent ordinary replay of a canonical primitive-recognized block.
 Unlike the nonprimitive transaction package, primitive preservation is
 derived from the exact Bool/Nat generated inventory rather than name
-avoidance. Sharing one generation artifact across safety levels supplies
-cross-safety coherence. The nested-pass facts are derived from the retained
-execution and recognizer result rather than supplied as transaction fields. -/
+avoidance. The raw Theory declaration is selected directly from the
+recognizer's closed host syntax; producers do not choose a parallel source or
+semantic normalization run. Sharing one generation artifact across safety
+levels supplies cross-safety coherence. The nested-pass facts are derived
+from the retained execution and recognizer result rather than supplied as
+transaction fields. -/
 structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -778,16 +625,12 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransacti
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe true fuel finalEnv)
     (ves : VEnvs) where
-  source : VInductDecl
   output : VEnvs
-  generation : source.BlockGenerationChecked
+  generation : (VPrimitiveInductive.canonicalDecl types).BlockGenerationChecked
   traces : ∀ safety, AddInductBlockTrace env.constants
-    (ves.venv safety) source finalEnv.constants (output.venv safety)
+    (ves.venv safety) (VPrimitiveInductive.canonicalDecl types)
+      finalEnv.constants (output.venv safety)
   generation_eq : ∀ safety, (traces safety).generation = generation
-  semanticBlockEnv : VEnv
-  semantic : VInductDecl.NormalizationCandidateBlockSemanticRun
-    (ves.venv .safe) semanticBlockEnv lparams execution.flattened.candidate
-      source
   projectionReady : ∀ safety,
     ProjectionReady finalEnv (output.venv safety)
   structureEtaReady : ∀ safety,
@@ -795,9 +638,8 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransacti
 
 namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
 
-/-- Recover the exact raw Theory constants from the recognizer result and the
-retained source-indexed semantic run.  The only operational bridge is that an
-ordinary primitive execution's nested-elimination source list is unchanged. -/
+/-- Recover the exact raw Theory constants from the recognizer-selected
+canonical declaration. -/
 theorem canonicalConstants
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -805,18 +647,16 @@ theorem canonicalConstants
     {execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe true fuel finalEnv}
     {ves : VEnvs}
-    (extension :
+    (_extension :
       execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
     (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
       true) :
-    extension.source.CanonicalPrimitiveConstants := by
-  apply extension.semantic.canonicalPrimitiveConstants
-  · rw [(execution.canonicalPrimitive_noop primitiveResult).1]
-    exact (primitiveResult.recognized rfl).2.2.2
-  · exact (primitiveResult.recognized rfl).2.1
+    (VPrimitiveInductive.canonicalDecl types).CanonicalPrimitiveConstants :=
+  VPrimitiveInductive.canonicalDecl_constants
+    (primitiveResult.recognized rfl).2.2.2
 
-/-- Checked generation supplies the recursor name, turning the semantically
-recovered family/constructor constants into the complete canonical inventory. -/
+/-- Checked generation supplies the recursor name, turning the selected
+family/constructor constants into the complete canonical inventory. -/
 theorem canonicalInventory
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -828,7 +668,8 @@ theorem canonicalInventory
       execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
     (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
       true) :
-    extension.source.CanonicalPrimitiveInventory extension.generation :=
+    (VPrimitiveInductive.canonicalDecl types).CanonicalPrimitiveInventory
+      extension.generation :=
   (extension.canonicalConstants primitiveResult).toInventory
     extension.generation
 
@@ -847,7 +688,7 @@ def toTransactionalVEnvsExtension
     (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
       true) :
     execution.TransactionalVEnvsExtension ves where
-  source := extension.source
+  source := VPrimitiveInductive.canonicalDecl types
   output := extension.output
   transaction safety :=
     .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
@@ -862,7 +703,8 @@ def toTransactionalVEnvsExtension
     have preTr : TrEnv' .safe env.constants env.quotInit
         (ves.venv .safe) := by
       simpa only [TrEnv] using wf.tr (safety := .safe)
-    have transaction : execution.ExactSemanticTransaction extension.source
+    have transaction : execution.ExactSemanticTransaction
+        (VPrimitiveInductive.canonicalDecl types)
         (ves.venv .safe) (extension.output.venv .safe) :=
       .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
         ⟨extension.traces .safe⟩
@@ -888,8 +730,7 @@ end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVE
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants' depends on axioms: [propext,
  Classical.choice,
- Quot.sound,
- Expr.abstract_eq]
+ Quot.sound]
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants
@@ -897,8 +738,7 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTr
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory' depends on axioms: [propext,
  Classical.choice,
- Quot.sound,
- Expr.abstract_eq]
+ Quot.sound]
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory

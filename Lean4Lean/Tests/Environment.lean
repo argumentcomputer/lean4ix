@@ -13,6 +13,8 @@ open Lean
 
 #check Lean4Lean.ElimNestedInductive.Result.canonicalPrimitive_noop
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
+#check Lean4Lean.VPrimitiveInductive.canonicalDecl
+#check Lean4Lean.VPrimitiveInductive.canonicalDecl_constants
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension
 

@@ -951,6 +951,17 @@ def boolConstructors : List VConstVal := [
   ⟨⟨0, .bool⟩, ``Bool.false⟩,
   ⟨⟨0, .bool⟩, ``Bool.true⟩]
 
+/-- The complete canonical Theory family selected for a recognized Boolean
+inductive declaration. -/
+def boolType : VInductiveType where
+  name := ``Bool
+  uvars := 0
+  type := .sort (.succ .zero)
+  ctors := boolConstructors
+
+/-- The complete canonical Theory declaration for `Bool`. -/
+def boolDecl : VInductDecl := ⟨0, 0, [boolType]⟩
+
 /-- The Theory constant emitted for the canonical natural-number family. -/
 def natFamily : VConstVal :=
   ⟨⟨0, .sort (.succ .zero)⟩, ``Nat⟩
@@ -959,6 +970,24 @@ def natFamily : VConstVal :=
 def natConstructors : List VConstVal := [
   ⟨⟨0, .nat⟩, ``Nat.zero⟩,
   ⟨⟨0, .forallE .nat .nat⟩, ``Nat.succ⟩]
+
+/-- The complete canonical Theory family selected for a recognized natural
+number inductive declaration. -/
+def natType : VInductiveType where
+  name := ``Nat
+  uvars := 0
+  type := .sort (.succ .zero)
+  ctors := natConstructors
+
+/-- The complete canonical Theory declaration for `Nat`. -/
+def natDecl : VInductDecl := ⟨0, 0, [natType]⟩
+
+/-- Select the canonical Theory declaration represented by a primitive host
+source.  Its semantic contract is stated separately under
+`PrimitiveInductiveShape`; outside that recognized domain the fallback is
+irrelevant. -/
+def canonicalDecl (types : List Lean.InductiveType) : VInductDecl :=
+  if types.any fun type => type.name == ``Bool then boolDecl else natDecl
 
 end VPrimitiveInductive
 
