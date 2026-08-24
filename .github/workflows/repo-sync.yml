@@ -6,13 +6,19 @@ on:
   - cron: "0 0 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
+# The sync authenticates with a GitHub App installation token, so the job needs
+# nothing from `secrets.GITHUB_TOKEN`.
+permissions: {}
 
 jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - run: gh repo sync ${{ github.repository }} --branch master --force
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  repo-sync:
+    name: Sync upstream changes
+    uses: argumentcomputer/ci-workflows/.github/workflows/repo-sync.yml@main
+    with:
+      repository: digama0/lean4lean
+      # This fork's default branch is `dev`; `master` is kept as a plain mirror
+      # of upstream, so both sides of the sync share the branch name.
+      branch: master
+    secrets:
+      TOKEN_APP_ID: ${{ secrets.TOKEN_APP_ID }}
+      TOKEN_APP_PRIVATE_KEY: ${{ secrets.TOKEN_APP_PRIVATE_KEY }}
