@@ -441,6 +441,8 @@ private theorem ProjectionReady.markQuotInit (self : ProjectionReady env venv) :
   infer name info hfind hready := by
     obtain ⟨artifact⟩ := self.infer name info hfind hready
     exact ⟨artifact.markQuotInit⟩
+  constructorHead name info hfind :=
+    self.constructorHead name info hfind
   constructorNumParams view info hview hfields hfind :=
     self.constructorNumParams view info hview hfields hfind
   constructorNumParams_mono hle view info hview hfields hfind :=

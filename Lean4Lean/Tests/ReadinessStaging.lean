@@ -15,6 +15,9 @@ namespace Lean4Lean.Tests.ReadinessStaging
 #check StructureEtaReady.of_constants_eq
 #check ProjectionReady.addInductInfo
 #check StructureEtaReady.addInductInfo
+#check AddInduct.constructorHead
+#check AddInductBlock.constructorHead
+#check AddInductNested.constructorHead
 #check VInductDecl.declarationTraceMultiConstructorReadiness
 #check VEnv.AddStructEtas.ordered
 #check VEnv.AddStructEtas.registered

@@ -66,6 +66,37 @@ inductive VEnv.WF' : List VDecl → VEnv → Prop where
 
 def VEnv.WF (env : VEnv) : Prop := ∃ ds, VEnv.WF' ds env
 
+/-- A constant head classified by a genuine completed inductive declaration.
+
+The exact constructor is retained as a member of the declaration's source
+inventory.  In particular, an ordinary axiom with a constructor-shaped type
+and a definition which unfolds to a constructor do not inhabit this
+predicate.  The completed declaration may precede the current environment;
+the final `LE` witness makes the classification persistent under later
+extensions. -/
+def VEnv.ConstructorHead (env : VEnv) (name : Name) : Prop :=
+  ∃ (source : VInductDecl) (before after : VEnv)
+      (constructor : VConstVal),
+    before.WF ∧
+      VDecl.WF before (.induct source) after ∧
+      constructor ∈ source.blockConstructorConstants ∧
+      constructor.name = name ∧
+      after ≤ env
+
+namespace VEnv.ConstructorHead
+
+/-- Constructor-head classification persists under Theory-environment
+extension. -/
+theorem mono {env env' : VEnv} (self : env.ConstructorHead name)
+    (henv : env ≤ env') : env'.ConstructorHead name := by
+  rcases self with
+    ⟨source, before, after, constructor, hbefore, hdecl, hconstructor,
+      hname, hle⟩
+  exact ⟨source, before, after, constructor, hbefore, hdecl,
+    hconstructor, hname, hle.trans henv⟩
+
+end VEnv.ConstructorHead
+
 /- A normalized inductive history entry carries only the standard Theory
 logical baseline; in particular it cannot import Verify's implementation
 axioms into `VEnv.WF`. -/

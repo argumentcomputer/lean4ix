@@ -1063,6 +1063,11 @@ to the replacement.
   `etaRebuild_hasType_of_constructorPrefix`). Verify's `TrProj` became a fully
   constrained existential wrapper over the Theory judgment (no invented
   metadata), and `inferProj.WF`/`reduceProj.WF` are proved against it.
+  The registered-head inversion statement now requires an explicit
+  completed-inductive `VEnv.ConstructorHead` certificate at both constructor
+  conclusions. `ProjectionReady` derives that certificate from every host
+  `ctorInfo` lookup, excluding axiom heads and definition aliases before the
+  still-open injectivity proof is attempted.
   Upstream has no counterpart; its projection handling is unverified executable
   code only.
 - **Ix impact:** downstream checkers obtain a concrete projection-laws package
@@ -1101,35 +1106,37 @@ to the replacement.
 
 ## D017 — checker readiness meets the v4.33 front-end chains
 
-- **Status:** intentional-fork (transitional), created by the v4.33
-  reconciliation
+- **Status:** intentional-fork; extension and quotient transports proved at
+  the 2026-08-24 STAB checkpoint
 - **Delta:** this fork's `VContext`/`VEnvs.WF` carry `ProjectionReady` and,
   since L4L-15B, registered `StructureEtaReady` obligations that upstream's
   newly proved front-end declaration chains (#28) do not establish. The merge
   added the projection field to upstream's `VEnvAt`; L4L-15B paired the exact
   same five transitional declarations with structure-eta readiness, without
   adding or renaming a frontier entry. Both fields are supplied honestly by
-  `VEnvs.WF.toVEnvAt`; their extension-transport obligations remain the five
-  named Tier V sorries (`VEnvAt.addAxioms._f`,
-  `addConstCore.WF`, `addDef.WF`, `addMutualBlock.WF`, `addUnsafeDef.WF`).
-  Upstream's vacuous quotient-initialization proof (`checkEqType.WF` via
-  `TrEnv'.no_inductInfo`) is refutable on this fork — the inductive boundary
-  is implemented, so a translated environment can contain the real `Eq` — and
-  was deleted; `addQuot.WF` is re-sorried with its true statement.
+  `VEnvs.WF.toVEnvAt`; the shared `Verify/Environment/Readiness.lean`
+  transport now proves all five former declaration-extension obligations.
+  `ProjectionReady` additionally maps every successful host `ctorInfo` lookup
+  to a completed Theory inductive transaction and transports that evidence
+  monotonically. Upstream's vacuous quotient-initialization proof
+  (`checkEqType.WF` via `TrEnv'.no_inductInfo`) is refutable on this fork — the
+  inductive boundary is implemented, so a translated environment can contain
+  the real `Eq` — and has been replaced by a constructive `addQuot.WF` proof.
   `TrEnv'.sf_mono` was deleted (upstream's `ignore` constructor makes blanket
   safety-lowering unsound); the fixture `TrEnv'` derivations are now stated
   parametrically in `safety` instead.
 - **Ix impact:** none; `addDecl`-chain roots were transitional premerge and
   remain transitional, now at finer grain.
-- **Tests:** the sorry-frontier audit pins all six entries exactly.
-- **Axiom note:** no new axiom; six new classified `sorryAx` entries
-  (L4L-19B territory), plus upstream's `checkPrimitiveDef.WF` boundary.
+- **Tests:** readiness staging, quotient replay, default Theory/Verify builds,
+  and the exact sorry-frontier/trust audit.
+- **Axiom note:** no new axiom or admission; the five extension entries and
+  quotient entry have left the frontier. Upstream's
+  `checkPrimitiveDef.WF` boundary remains.
 - **Upstream issue/PR:** not applicable upstream (the obligation is
   fork-only); resolved by the L4L-19B transport proofs.
-- **Removal condition:** L4L-19B proves both readiness transports across
-  `Environment.add`/`addConsts`, registers every newly completed eligible
-  structure artifact, and proves constructive quotient initialization,
-  emptying the six entries.
+- **Removal condition:** upstream adopts equivalent projection,
+  constructor-classification, structure-eta, and constructive quotient
+  readiness contracts, or the fork's checker no longer requires them.
 
 ## D018 — v4.33.0 final toolchain (upstream pins v4.33.0-rc2)
 

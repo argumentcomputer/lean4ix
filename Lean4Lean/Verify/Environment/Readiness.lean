@@ -348,6 +348,11 @@ theorem ProjectionReady.of_constants_eq
         using hready
     obtain ⟨artifact⟩ := self.infer name info hfind' hready'
     exact ⟨artifact.of_constants_eq hconstants⟩
+  constructorHead name info hfind := by
+    apply self.constructorHead name info
+    change env'.constants.find?' name = _ at hfind
+    change env.constants.find?' name = _
+    rwa [hconstants]
   constructorNumParams view info hview hfields hfind := by
     apply self.constructorNumParams view info hview hfields
     change env'.constants.find?' view.constructorName = _ at hfind
@@ -421,6 +426,12 @@ theorem ProjectionReady.addInductInfo
         exact hready
       obtain ⟨artifact⟩ := self.infer name info hfind' hready'
       exact ⟨artifact.addInductInfo mapWF info' hfresh hle⟩
+  constructorHead name info hfind := by
+    apply (self.constructorHead name info ?_).mono hle
+    rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh] at hfind
+    split at hfind
+    · cases hfind
+    · exact hfind
   constructorNumParams view info hview hfields hfind := by
     apply self.constructorNumParams_mono hle view info hview hfields
     rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh] at hfind
@@ -442,6 +453,8 @@ theorem ProjectionReady.mono
   infer name info hfind hready := by
     obtain ⟨artifact⟩ := self.infer name info hfind hready
     exact ⟨artifact.mono hle⟩
+  constructorHead name info hfind :=
+    (self.constructorHead name info hfind).mono hle
   constructorNumParams view info hview hfields hfind :=
     self.constructorNumParams_mono hle view info hview hfields hfind
   constructorNumParams_mono hle' view info hview hfields hfind :=
@@ -524,6 +537,11 @@ theorem ProjectionReady.add
                     simp [hctor, hrec]
     obtain ⟨artifact⟩ := self.infer name info hfindOld hreadyOld
     exact ⟨artifact.add mapWF hfresh htransparent hle⟩
+  constructorHead name info hfind := by
+    have hfindOld : env.find? name = some (.ctorInfo info) :=
+      Environment.find?_of_add_structural mapWF hfresh htransparent
+        (.inr (.inl ⟨info, rfl⟩)) hfind
+    exact (self.constructorHead name info hfindOld).mono hle
   constructorNumParams view info hview hfields hfind := by
     have hfindOld : env.find? view.constructorName = some (.ctorInfo info) :=
       Environment.find?_of_add_structural mapWF hfresh htransparent

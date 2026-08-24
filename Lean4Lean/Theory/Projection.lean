@@ -3962,9 +3962,12 @@ The last conclusion deliberately provides only typed alignment—the iota step
 remains the proved `projector_constructor_exact` theorem.
 
 Its eventual proof uses `IsDefEqU.weakN_iff` together with injectivity of
-registered inductive heads.  Keeping the boundary in Theory makes the
-temporary L4L-16/17 dependency explicit instead of leaving Verify's
-structural laws as local holes. -/
+registered inductive heads.  The constructor conclusions additionally
+require a genuine completed-inductive head certificate.  A translated axiom
+with the same result type, or a definition alias which unfolds to a
+constructor, is deliberately not enough.  Keeping the boundary in Theory
+makes the temporary L4L-16/17 dependency explicit instead of leaving
+Verify's structural laws as local holes. -/
 structure RegisteredStructureHeadInversion (env : VEnv) : Prop where
   weak'_inv :
     ∀ {U : Nat} {Γ Γ' : List VExpr} {view : VStructureView}
@@ -3993,6 +3996,7 @@ structure RegisteredStructureHeadInversion (env : VEnv) : Prop where
       {constructorArgs : List VExpr},
       OnCtx Γ (env.IsType U) →
       env.TrProj U Γ view levels params idx major result →
+      env.ConstructorHead constructorName →
       runtimeMajor = VExpr.appN
         (.const constructorName constructorLevels) constructorArgs →
       env.IsDefEqU U Γ runtimeMajor major →
@@ -4006,6 +4010,7 @@ structure RegisteredStructureHeadInversion (env : VEnv) : Prop where
       {constructorArgs : List VExpr},
       OnCtx Γ (env.IsType U) →
       env.TrProj U Γ view levels params idx major result →
+      env.ConstructorHead constructorName →
       (view.projectionCodes levels params)[idx]? = some code →
       runtimeMajor = VExpr.appN
         (.const constructorName constructorLevels) constructorArgs →

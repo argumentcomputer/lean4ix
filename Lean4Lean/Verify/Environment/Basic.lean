@@ -388,6 +388,41 @@ theorem AddInductNested.le
   obtain ⟨nested, -, hadd⟩ := H.to_addInductNested
   exact VEnv.addInductNested_le hadd
 
+/-- A completed singleton replay classifies each source constructor as a
+genuine constructor head in its output Theory environment. -/
+theorem AddInduct.constructorHead
+    (H : AddInduct m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHead constructor.name := by
+  obtain ⟨generation, hgeneration, hadd⟩ := H.to_addInduct
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .induct hgeneration hadd, hconstructor, rfl, VEnv.LE.rfl⟩
+
+/-- A completed mutual replay classifies each source constructor as a
+genuine constructor head in its output Theory environment. -/
+theorem AddInductBlock.constructorHead
+    (H : AddInductBlock m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHead constructor.name := by
+  obtain ⟨generation, blockEnv, hgeneration, hadd⟩ :=
+    H.to_addInductBlock
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .inductBlock (blockEnv := blockEnv) hgeneration hadd,
+    hconstructor, rfl, VEnv.LE.rfl⟩
+
+/-- A completed nested replay classifies each restored source constructor as
+a genuine constructor head in its output Theory environment. -/
+theorem AddInductNested.constructorHead
+    (H : AddInductNested m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHead constructor.name := by
+  obtain ⟨nested, hnested, hadd⟩ := H.to_addInductNested
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .inductNested hnested hadd, hconstructor, rfl, VEnv.LE.rfl⟩
+
 /- The projection relation is now a concrete Theory proposition, so merely
 mentioning `TrExprS` no longer contaminates these projection-free roots with
 the deferred structural-law sorries. -/

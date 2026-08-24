@@ -24,6 +24,8 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.SpineWF.weak'
 #check VEnv.SpineWF.weakN_inv
 #check VEnv.SpineWF.weak'_inv
+#check VEnv.ConstructorHead
+#check VEnv.ConstructorHead.mono
 #check VInductDecl.ElimMode.ofBool
 #check VStructureView.etaRebuild
 #check VStructureView.MinorsWF

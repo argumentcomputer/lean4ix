@@ -84,7 +84,9 @@ The following supported surface is green and is not remaining milestone work:
   notation/prelude replay;
 - consumer-neutral local-context and literal APIs;
 - recursor-encoded projection semantics, structural laws, projection checker
-  proofs, and the registered structure-eta/unit-like checker path;
+  proofs, the completed-inductive `ConstructorHead` classification consumed
+  by projection reduction, and the registered structure-eta/unit-like checker
+  path;
 - proof-carrying extension contractions and explicit registered-equation
   joining, rather than a pattern-membership soundness oracle;
 - level comparison/normalization verification on the v4.33 base; and
@@ -215,9 +217,9 @@ research tiers.
 | **D — semantic instances** | Factor the paired D2 Tree field/body replay over local head-argument and source-level alignment supplied by NORM-DI; then D3 nested equations and D4 registered structure eta | finite replay is independent; the five Tree checks wait on NORM-DI's paired head observation; some generic work waits on META | concrete direct-adequacy instances compile with only explicit registered-rule certificates |
 | **NORM/INV — direct inversion research** | Replace untyped head observations with path-typed ones, prove Nat/D0 adequacy directly, extract the registered-rule interface, retain paired inductive/Quot head arguments, and derive the three Injectivity theorems | M0-M7 below; full normalization is an optional separate track | R1-R3 and `IndTyAppInj`/`QuotAppInj` close without `SortEdgeData`, `BetaFire`, `PiPathInv`, or `MajorLinkRect` as producer premises |
 | **CR — confluence engineering** | Repair the R5 match-stability contract beyond the now-landed `PatArgProp` proof case, then close `NormalEq.parRed` and assemble the live `Params.Extension` instance | eta stability needs an admissible-pattern law; structure overlap must agree with D4; full assembly also uses NORM/INV, SST, and D | R5 closed on a truthful accepted class; later Church--Rosser endpoints unconditional over that class |
-| **SST — strengthening research** | Repair the `.extra` certificate packaging, re-found the per-depth `NormalEq`/CR core, close `weakN_iff`, then finish projection head inversion | CR and the accepted instance surface | R4 and repaired R6 leave the frontier |
+| **SST — strengthening research** | Repair the `.extra` certificate packaging, re-found the per-depth `NormalEq`/CR core, close `weakN_iff`, then prove the repaired projection head inversion | CR and the accepted instance surface | R4 and repaired R6 leave the frontier |
 | **ENV — checker environments** | Prove the `inductDecl` case of `addDecl.WF`; discharge pointwise candidate observers and generated readiness certificates, and assemble the primitive branch's retained semantic run plus no-op nested-source equality (recognition and semantic-run-to-inventory-to-transaction preservation are proved) | committed integration checkpoint; generated certificate/replay surface | V3/V4 closed and full environment translation theorem stated |
-| **REC — recursor verification** | Supply NORM-DI's explicit inductive-head injectivity result to discharge the exhaustive live `SelectedBranchWF` contracts for the main/node and auxiliary/nil/cons Rose consumers, then prove K, structure-expansion, and remaining literal/failure-path semantics while repairing or justifying the sole open-world `constructorNumParams_mono` premise. Exact selected-WHNF premises have been removed from the live contracts; the complete Quot consumer is landed conditional on NORM-M6's `QuotAppInj` producer. | readiness-interface repair; NORM-DI/SST for final clean closure | V5 closed for Quot, singleton, mutual, and nested rules |
+| **REC — recursor verification** | Supply NORM-DI's explicit inductive-head injectivity result to discharge the exhaustive live `SelectedBranchWF` contracts for the main/node and auxiliary/nil/cons Rose consumers, then prove K, structure-expansion, and remaining literal/failure-path semantics while repairing or justifying the sole open-world `constructorNumParams_mono` premise. Exact selected-WHNF premises have been removed from the live contracts; the complete Quot consumer is landed conditional on NORM-M6's `QuotAppInj` producer. | open-world constructor-parameter repair; NORM-DI/SST for final clean closure | V5 closed for Quot, singleton, mutual, and nested rules |
 | **PROMOTE — stable semantic API** | Move the retained SExpr/shape development out of Experimental, regenerate the audit surface, resolve names, and pin root axioms | stable API decision; conditional endpoints are allowed | supported roots import the stable modules and the audit cannot miss them |
 | **TRUST — axiom closure** | Keep the landed four-root policy exact and continue retiring the persistent-container, TreeMap, cached-metadata, and opaque-operation bridges | upstream theorem availability; local bridge consumers | final platform budget contains only tested pointer/layout or lawful-equality contracts, absent from Theory |
 | **DIFF — differential corpus** | Broaden the landed source/ordinary/nested positive and phase-specific negative goldens | current harness | supported positive and negative corpus runs in CI |
@@ -230,8 +232,10 @@ research tiers.
    Lane V proof closures, the completed five-rule D2 registered-body
    discharge, the generic D2 prefix/collapse replay slice, and the exact
    trust manifests while advancing the open streams below.
-2. **Take the cheap truthfulness wins.** Repair the false projection-head
-   statement before proving it. For `NormalEq.parRed`, first repair the
+2. **Take the remaining truthfulness win.** The false projection-head
+   statement is repaired: its constructor fields now require a genuine
+   completed-inductive `ConstructorHead`, and Verify derives that certificate
+   from exact `ctorInfo` lookup readiness. For `NormalEq.parRed`, repair the
    advertised interface: `PatArgProp` closes only the proof-irrelevance
    branch, not eta-expanded or structure-eta arguments.
 3. **Advance independent product work.** Build the V3 decomposition and proof,
@@ -1790,11 +1794,15 @@ syntactic coverage alone is never enough.
 - W7: assemble the already sketched staged inverse; and
 - W8: instantiate it at the accepted generic environment surface.
 
-After `weakN_iff`, repair and prove
-`registeredStructureHeadInversion`. Its `constructor_name_inv` and
-`constructor_inv` fields are false without a runtime head-classification
-premise: an axiom-headed major and a definition alias are counterexamples.
-Add that premise first. The remaining fields then use strengthening,
+The `registeredStructureHeadInversion` statement repair is landed. Its
+`constructor_name_inv` and `constructor_inv` fields now require
+`VEnv.ConstructorHead`: an exact source-constructor membership and completed
+`VDecl.WF.induct` transaction below the current environment. Consequently an
+axiom-headed major and a definition alias cannot satisfy the premise. Verify's
+`ProjectionReady.constructorHead` connects each successful host `ctorInfo`
+lookup to that Theory certificate; singleton, mutual, and nested transaction
+helpers construct it, and ordinary/family-only readiness transports preserve
+it monotonically. After `weakN_iff`, the remaining proof uses strengthening,
 `TrProj.result_eq`, uniqueness, and `IndTyAppInj`.
 
 ### 5.5 ENV and REC — checker closure
@@ -2455,7 +2463,7 @@ Before marking RENAME complete, record in this roadmap:
 | R3 | `IsDefEqU.sort_forallE_inv` | existing disjointness/reflection after R2 | engineering after research |
 | R4 | `IsDefEqU.weakN_iff` forward | SST W4-W8 | research |
 | R5 | `NormalEq.parRed` appDF × `.extra` | `PatArgProp` proof branch landed; repair eta/`StructEq` argument match stability, then use the known transports | statement/interface repair; structure branch depends on D4 |
-| R6 | `WF.registeredStructureHeadInversion` | statement repair, then R4 + `IndTyAppInj` + projection uniqueness | engineering after research |
+| R6 | `WF.registeredStructureHeadInversion` | statement repaired with `ConstructorHead`; then R4 + `IndTyAppInj` + projection uniqueness | engineering after research |
 | V3 | `addDecl.WF`, inductive case | certified checker-run-to-transaction pipeline | engineering, multi-session |
 | V4 | `checkPrimitiveDef.WF` | absorb PR #32 or local run certificate | engineering, external watch |
 | V5 | `reduceRecursor.WF` | landed exact generated heads/owner recovery/same-head major equality, generic matching and typed unindexed consumer, one-parameter dependent-field transport, concrete six-point σ̂ `ConstInterp`, arbitrary-level whole-rule type/LHS/body/runtime alignment, joint capture/body production from local major injectivity for all three Rose rules, matched-body output translation through trailing arguments, generic nonliteral/constructor-headed `inductiveReduceRec` execution/translation composition, exact public Rose recursor/constructor lookups, concrete main/nil/cons pointwise `reduceRecursor` executions, live `RecM.WF` joins for both Quot gates with early exits closed and fallback state threaded, canonical quotient-inventory recovery, typed `Quot.lift` registered-equation reduction, proof-irrelevant `Quot.ind` reduction, exhaustive quotient translation/`FVarsBelow` semantics conditional on `QuotAppInj`, generic checked-level RHS/FVars preservation, strict selected-major projection, exhaustive live `k = false`/non-structure callback analysis across every expression and literal shape, concrete main and joint auxiliary Rose wrappers with no exact WHNF premise, executable successful-selector inversion into node/nil/cons, branch constructors which discharge all nonsemantic `SelectedBranchWF` fields, and operational factorization of K, Nat/String literal, Quot-gate, and early/late failure branches → supply NORM-DI M4/M5 `IndTyAppInj` at the three live semantic outputs and NORM-M6's `QuotAppInj` producer → compose the resulting node/nil/cons translations through the constructed main and auxiliary success contracts and the factored remaining branches → repair/justify sole open-world constructor-parameter premise | engineering plus NORM-DI, multi-session |

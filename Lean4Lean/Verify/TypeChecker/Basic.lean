@@ -132,14 +132,23 @@ structure ProjectionArtifact (env : Environment) (name : Name)
 /-- Host/Theory coherence needed by primitive projections.
 
 Inference obtains one complete registered artifact from ready family
-metadata. Reduction additionally relies on the positional host fact that a
-constructor's cached `numParams` agrees with the registered Theory view;
-ordinary constant translation checks the constructor type but does not
-identify which leading binders the host metadata classifies as parameters. -/
+metadata. Reduction additionally requires every host `ctorInfo` head to come
+from a completed Theory inductive transaction, and relies on the positional
+host fact that a constructor's cached `numParams` agrees with the registered
+Theory view. Ordinary constant translation checks the constructor type but
+establishes neither declaration kind nor which leading binders the host
+metadata classifies as parameters. -/
 structure ProjectionReady (env : Environment) (venv : VEnv) : Prop where
   infer : ∀ name info, env.find? name = some (.inductInfo info) →
     env.isProjectionReadyStructure name = true →
     Nonempty (ProjectionArtifact env name info venv)
+  /-- Host constructor metadata must correspond to a completed Theory
+  inductive transaction.  Ordinary translated constants and definition
+  aliases are intentionally excluded even when their types have constructor
+  shape. -/
+  constructorHead : ∀ name info,
+    env.find? name = some (.ctorInfo info) →
+    venv.ConstructorHead name
   constructorNumParams : ∀ (view : VStructureView) (info : ConstructorVal),
     view.WF venv →
     view.fields ≠ [] →
@@ -259,6 +268,7 @@ theorem ProjectionReady.of_no_ctorInfo
         hfind hnoCtor
     rw [hfalse] at hready
     contradiction
+  constructorHead name info hfind := (hnoCtor name info hfind).elim
   constructorNumParams _view info _hview _hfields hfind :=
     (hnoCtor _ info hfind).elim
   constructorNumParams_mono _hle _view info _hview _hfields hfind :=

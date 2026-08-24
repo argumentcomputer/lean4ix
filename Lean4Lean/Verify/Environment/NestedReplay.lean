@@ -2560,6 +2560,10 @@ theorem RoseFlatCandidateReadiness09.listProjectionReady
   infer name _info _hfind hready := by
     rw [roseInputKernelEnvNoProjectionReady09 name] at hready
     contradiction
+  constructorHead name info hfind := by
+    change listMap07.find?' name = some (.ctorInfo info) at hfind
+    rw [listMapWF07.find?'_eq_find?] at hfind
+    exact listMapConstructorHead07 hfind
   constructorNumParams view info hview hfields hfind :=
     self.constructorNumParams_mono VEnv.LE.rfl view info hview hfields
       hfind
@@ -2824,6 +2828,11 @@ theorem RoseFlatCandidateReadiness09.projectionReady
   infer name _info _hfind hready := by
     rw [roseFlatFamilyEnvNoProjectionReady09 name] at hready
     contradiction
+  constructorHead name info hfind := by
+    have hold := roseFlatFamilyEnvCtorFind09 hfind
+    change listMap07.find?' name = some (.ctorInfo info) at hold
+    rw [listMapWF07.find?'_eq_find?] at hold
+    exact (listMapConstructorHead07 hold).mono roseListFinalToFlatBlock09
   constructorNumParams view info hview hfields hfind :=
     self.constructorNumParams_mono roseListFinalToFlatBlock09 view info
       hview hfields (roseFlatFamilyEnvCtorFind09 hfind)

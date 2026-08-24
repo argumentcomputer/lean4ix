@@ -655,6 +655,40 @@ theorem listAddInduct07 : AddInduct ({} : ConstMap) VEnv.empty listDecl
       env_add := rfl
       map_add := rfl } .nil)
 
+/-- Every constructor metadata entry in the concrete List map comes from the
+completed List inductive transaction. -/
+theorem listMapConstructorHead07
+    {name : Name} {info : ConstructorVal}
+    (hfind : listMap07.find? name = some (.ctorInfo info)) :
+    listFinalEnv07.ConstructorHead name := by
+  rw [listMap07, listCtorMapWF07.find?_insert] at hfind
+  split at hfind
+  · cases hfind
+  · rw [listCtorMap07, listNilMapWF07.find?_insert] at hfind
+    split at hfind
+    · rename_i hcons
+      have hname : name = ``List.cons :=
+        (LawfulBEq.eq_of_beq hcons).symm
+      subst name
+      exact listAddInduct07.constructorHead ⟨[], .empty⟩
+        (constructor := listType.ctors[1]) (by
+          simp [VInductDecl.blockConstructorConstants, listDecl, listType])
+    · rw [listNilMap07, listTypeMapWF07.find?_insert] at hfind
+      split at hfind
+      · rename_i hnil
+        have hname : name = ``List.nil :=
+          (LawfulBEq.eq_of_beq hnil).symm
+        subst name
+        exact listAddInduct07.constructorHead ⟨[], .empty⟩
+          (constructor := listType.ctors[0]) (by
+            simp [VInductDecl.blockConstructorConstants, listDecl, listType])
+      · rw [listTypeMap07,
+          SMap.WF.find?_insert (s := ({} : ConstMap)) SMap.WF.empty]
+          at hfind
+        split at hfind
+        · cases hfind
+        · simp [SMap.find?] at hfind
+
 theorem listAligned07 : Aligned .safe listMap07 listFinalEnv07 :=
   Aligned.addInduct listAddInduct07 .empty
 

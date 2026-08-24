@@ -2886,9 +2886,11 @@ theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i
       · rename_i mkInfo
         refine .pure ?_
         intro selected hselected
+        have hconstructorHead : c.venv.ConstructorHead mkC :=
+          c.projectionReady.constructorHead mkC mkInfo hfind
         have hconstructorName : mkC = view.constructorName :=
           c.Ewf.registeredStructureHeadInversion.constructor_name_inv
-            c.Δwf hsemantic rfl hmajorEq
+            c.Δwf hsemantic hconstructorHead rfl hmajorEq
         have hnumParams : mkInfo.numParams = view.nparams :=
           c.projectionReady.constructorNumParams view mkInfo
             hsemantic.viewWF (by
@@ -2918,7 +2920,8 @@ theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i
           exact hfieldGet
         obtain ⟨alignment⟩ :=
           c.Ewf.registeredStructureHeadInversion.constructor_inv
-            c.Δwf hsemantic hcode rfl hfieldGetCanonical hmajorEq
+            c.Δwf hsemantic hconstructorHead hcode rfl
+              hfieldGetCanonical hmajorEq
         have hiota := hsemantic.projector_constructor_aligned
           c.Ewf c.Δwf hcode hprojector alignment
         have hmajorTyped := hmajorEq.of_r c.Ewf c.Δwf hsemantic.majorType
