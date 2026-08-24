@@ -2,7 +2,7 @@ name: Nix
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

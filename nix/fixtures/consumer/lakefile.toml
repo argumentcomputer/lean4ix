@@ -3,8 +3,8 @@ defaultTargets = ["consumer"]
 
 [[require]]
 name = "lean4lean"
-git = "https://github.com/digama0/lean4lean"
-rev = "master"
+git = "https://github.com/argumentcomputer/lean4ix"
+rev = "main"
 
 [[lean_exe]]
 name = "consumer"

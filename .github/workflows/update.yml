@@ -16,15 +16,13 @@ jobs:
     steps:
       # create-pull-request takes its base from the checked-out branch, and the
       # action passes no `base` of its own, so this is what points the update PR
-      # at `dev`. `dev` is already the default branch; naming it keeps the PR
-      # off `master`, which only mirrors digama0/lean4lean (see repo-sync.yml)
-      # and would discard the commit on its next force-sync.
+      # at `main`, the default branch.
       - uses: actions/checkout@v7
         with:
-          ref: dev
+          ref: main
 
       # Mint a token from the GitHub App so the opened PR triggers CI; pushes
-      # made with GITHUB_TOKEN do not. Same App as repo-sync.yml.
+      # made with GITHUB_TOKEN do not.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
