@@ -485,6 +485,154 @@ info: 'Lean4Lean.TrEnv'.aligned' depends on axioms: [propext,
 
 theorem TrEnv'.map_wf (H : TrEnv' safety C Q venv) : C.WF := H.aligned.map_wf
 
+/-! ## Safety of inductive metadata in translated histories -/
+
+/-- The kernel tags every inductive metadata entry admitted by a translated
+history as safe.  This is the history invariant needed by quotient
+initialization: `checkEqType` checks the shape of `Eq`, while the translation
+history supplies the otherwise implicit safety fact. -/
+def InductSafe : ConstantInfo → Prop
+  | .inductInfo info => info.isUnsafe = false
+  | _ => True
+
+def InductsSafe (C : ConstMap) : Prop :=
+  ∀ name info, C.find? name = some info → InductSafe info
+
+theorem inductSafe_of_safe {ci : ConstantInfo}
+    (h : .safe ≤ ci.safety) : InductSafe ci := by
+  cases ci <;> try trivial
+  rename_i info
+  simp [InductSafe, ConstantInfo.safety,
+    ConstantInfo.isUnsafe, ConstantInfo.isPartial] at h ⊢
+  cases hi : info.isUnsafe <;> simp_all
+  have hEq : DefinitionSafety.safe = .unsafe :=
+    DefinitionSafety.le_antisymm h DefinitionSafety.unsafe_le
+  contradiction
+
+theorem inductsSafe_empty : InductsSafe ({} : ConstMap) := by
+  intro name info h
+  simp [SMap.find?] at h
+
+theorem InductsSafe.insert {C : ConstMap} (hC : C.WF)
+    (h : InductsSafe C) (hci : InductSafe ci) :
+    InductsSafe (C.insert name ci) := by
+  intro name' info hfind
+  rw [hC.find?_insert] at hfind
+  split at hfind
+  · cases hfind
+    exact hci
+  · exact h _ _ hfind
+
+theorem AddInductConstant.inductsSafe
+    (H : AddInductConstant kind C₁ env₁ ci C₂ env₂)
+    (wf : C₁.WF) (h : InductsSafe C₁) : InductsSafe C₂ := by
+  rw [H.map_add]
+  exact h.insert wf (inductSafe_of_safe H.tr.1.1)
+
+theorem AddInductConstants.inductsSafe
+    (H : AddInductConstants kind C₁ env₁ cis C₂ env₂)
+    (wf : C₁.WF) (h : InductsSafe C₁) : InductsSafe C₂ := by
+  induction H with
+  | nil => exact h
+  | cons hstep hrest ih =>
+    exact ih (hstep.map_wf wf) (hstep.inductsSafe wf h)
+
+theorem AddInduct.inductsSafe
+    (H : AddInduct C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) (h : InductsSafe C₁) : InductsSafe C₂ := by
+  rcases H with ⟨H⟩
+  exact H.addRec.inductsSafe (H.addCtors.map_wf (H.addType.map_wf wf))
+    (H.addCtors.inductsSafe (H.addType.map_wf wf)
+      (H.addType.inductsSafe wf h))
+
+theorem AddInductBlock.inductsSafe
+    (H : AddInductBlock C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) (h : InductsSafe C₁) : InductsSafe C₂ := by
+  rcases H with ⟨H⟩
+  exact H.addRecs.inductsSafe (H.addCtors.map_wf (H.addTypes.map_wf wf))
+    (H.addCtors.inductsSafe (H.addTypes.map_wf wf)
+      (H.addTypes.inductsSafe wf h))
+
+theorem AddInductNested.inductsSafe
+    (H : AddInductNested C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) (h : InductsSafe C₁) : InductsSafe C₂ := by
+  rcases H with ⟨H⟩
+  exact H.addRecs.inductsSafe (H.addCtors.map_wf (H.addTypes.map_wf wf))
+    (H.addCtors.inductsSafe (H.addTypes.map_wf wf)
+      (H.addTypes.inductsSafe wf h))
+
+theorem AddQuot.inductsSafe
+    (H : AddQuot C₁ C₂ env₁ env₂) (wf : C₁.WF)
+    (h : InductsSafe C₁) : InductsSafe C₂ := by
+  obtain ⟨lp₁, ty₁, env₁, _, hn₁, _,
+      lp₂, ty₂, env₂, _, hn₂, _,
+      lp₃, ty₃, env₃, _, hn₃, _,
+      lp₄, ty₄, env₄, _, hn₄, _, rfl, _⟩ := H
+  let ci₁ : ConstantInfo := .quotInfo {
+    name := ``Quot, kind := .type, levelParams := lp₁, type := ty₁ }
+  let ci₂ : ConstantInfo := .quotInfo {
+    name := ``Quot.mk, kind := .ctor, levelParams := lp₂, type := ty₂ }
+  let ci₃ : ConstantInfo := .quotInfo {
+    name := ``Quot.lift, kind := .lift, levelParams := lp₃, type := ty₃ }
+  let ci₄ : ConstantInfo := .quotInfo {
+    name := ``Quot.ind, kind := .ind, levelParams := lp₄, type := ty₄ }
+  have wf₁ : (C₁.insert ``Quot ci₁).WF := wf.insert _ _ hn₁
+  have wf₂ : ((C₁.insert ``Quot ci₁).insert ``Quot.mk ci₂).WF :=
+    wf₁.insert _ _ hn₂
+  have wf₃ : (((C₁.insert ``Quot ci₁).insert ``Quot.mk ci₂).insert
+      ``Quot.lift ci₃).WF := wf₂.insert _ _ hn₃
+  have hs₁ : InductSafe ci₁ := by trivial
+  have hs₂ : InductSafe ci₂ := by trivial
+  have hs₃ : InductSafe ci₃ := by trivial
+  have hs₄ : InductSafe ci₄ := by trivial
+  exact (((h.insert wf hs₁).insert wf₁ hs₂).insert wf₂ hs₃).insert wf₃ hs₄
+
+theorem InductsSafe.insertDefs : ∀ {cis : List DefinitionVal} {C : ConstMap},
+    C.WF → InductsSafe C →
+    (∀ ci ∈ cis, C.find? ci.name = none) →
+    (cis.map (·.name)).Nodup → InductsSafe (insertDefs C cis)
+  | [], _, _, h, _, _ => h
+  | ci :: cis, C, wf, h, hfr, hnd => by
+    simp only [List.map_cons, List.nodup_cons] at hnd
+    have hn := hfr ci (.head _)
+    have wf' := wf.insert ci.name (.defnInfo ci) hn
+    change InductsSafe (_root_.Lean4Lean.insertDefs
+      (C.insert ci.name (.defnInfo ci)) cis)
+    apply InductsSafe.insertDefs wf' (h.insert wf (by trivial))
+    · intro d hd
+      rw [wf.find?_insert]
+      have hne : ci.name ≠ d.name := by
+        intro heq
+        exact hnd.1 (by
+          simpa [heq] using (List.mem_map.2 ⟨d, hd, rfl⟩ :
+            d.name ∈ cis.map (·.name)))
+      simp [hne]
+      exact hfr d (.tail _ hd)
+    · exact hnd.2
+
+theorem TrEnv'.inductsSafe (H : TrEnv' .unsafe C Q venv) : InductsSafe C := by
+  induction H with
+  | empty => exact inductsSafe_empty
+  | ignore _ hhidden _ _ => exact (hhidden DefinitionSafety.unsafe_le).elim
+  | «axiom» _ _ _ _ H ih => exact ih.insert H.map_wf trivial
+  | defn _ _ _ _ H ih => exact ih.insert H.map_wf trivial
+  | mutualDef _ hnd hfr _ _ _ H ih =>
+    exact InductsSafe.insertDefs H.map_wf ih hfr hnd
+  | thm _ _ _ _ _ H ih => exact ih.insert H.map_wf trivial
+  | «opaque» _ _ _ _ H ih => exact ih.insert H.map_wf trivial
+  | quot _ hadd H ih => exact hadd.inductsSafe H.map_wf ih
+  | inductStaging hadd _ H ih => exact hadd.inductsSafe H.map_wf ih
+  | induct hadd H ih => exact hadd.inductsSafe H.map_wf ih
+  | inductBlock hadd H ih => exact hadd.inductsSafe H.map_wf ih
+  | inductNested hadd H ih => exact hadd.inductsSafe H.map_wf ih
+  | structEta _ _ ih => exact ih
+
+theorem TrEnv.inductInfo_safe (H : TrEnv .unsafe env venv)
+    (hfind : env.find? name = some (.inductInfo info)) : info.isUnsafe = false := by
+  apply H.inductsSafe name (.inductInfo info)
+  rw [← H.map_wf.find?'_eq_find?]
+  exact hfind
+
 theorem Aligned.find? (H : Aligned safety C venv)
     (h : C.find? name = some ci) (hs : safety ≤ ci.safety) :
     ∃ ci', venv.constants name = some ci' ∧ TrConstant safety venv ci ci' := by
@@ -564,6 +712,59 @@ theorem VEnv.addDefEqs_self : ∀ {cis' : List VDefVal} {venv : VEnv} {ci'}, ci'
     cases hc with
     | head => exact VEnv.addDefEqs_le.defeqs VEnv.addDefEq_self
     | tail _ hc => exact VEnv.addDefEqs_self hc
+
+/-- A translated host environment whose quotient-initialization flag is true
+contains the complete canonical Theory quotient inventory.  Later
+declarations and structure-eta registrations preserve the inventory by
+environment inclusion. -/
+theorem TrEnv'.quotObjects
+    (H : TrEnv' safety C Q env) (hQ : Q = true) :
+    env.HasObjects [.defeq quotDefEq, .const `Quot.ind quotIndConst,
+      .const `Quot.lift quotLiftConst, .const `Quot.mk quotMkConst,
+      .const `Quot quotConst] := by
+  induction H with
+  | empty => simp at hQ
+  | ignore _ _ _ ih => exact ih hQ
+  | «axiom» _ _ _ hadd _ ih =>
+    exact (ih hQ).mono (VEnv.addConst_le hadd)
+  | defn _ _ _ hadd _ ih =>
+    exact (ih hQ).mono ((VEnv.addConst_le hadd).trans VEnv.addDefEq_le)
+  | mutualDef _ _ _ _ hadd _ _ ih =>
+    exact (ih hQ).mono ((VEnv.addConsts_le hadd).trans VEnv.addDefEqs_le)
+  | thm _ _ _ _ hadd _ ih =>
+    exact (ih hQ).mono (VEnv.addConst_le hadd)
+  | «opaque» _ _ _ hadd _ ih =>
+    exact (ih hQ).mono (VEnv.addConst_le hadd)
+  | quot _ hadd _ _ => exact VEnv.addQuot_objs hadd.to_addQuot
+  | inductStaging hadd _ _ ih => exact (ih hQ).mono hadd.le
+  | induct hadd _ ih => exact (ih hQ).mono hadd.le
+  | inductBlock hadd _ ih => exact (ih hQ).mono hadd.le
+  | inductNested hadd _ ih => exact (ih hQ).mono hadd.le
+  | structEta _ _ ih => exact (ih hQ).mono VEnv.addStructEta_le
+
+/-- The registered quotient equation projected from the canonical inventory. -/
+theorem TrEnv'.quotDefEq
+    (H : TrEnv' safety C Q env) (hQ : Q = true) :
+    env.defeqs quotDefEq :=
+  (H.quotObjects hQ).1
+
+/-- Environment-level specialization of `TrEnv'.quotDefEq`. -/
+theorem TrEnv.quotDefEq_of_quotInit
+    (H : TrEnv safety host env) (hquot : host.quotInit = true) :
+    env.defeqs quotDefEq :=
+  TrEnv'.quotDefEq H hquot
+
+/-- info: 'Lean4Lean.TrEnv'.quotDefEq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrEnv'.quotDefEq
+
+/-- info: 'Lean4Lean.TrEnv'.quotObjects' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrEnv'.quotObjects
+
+/-- info: 'Lean4Lean.TrEnv.quotDefEq_of_quotInit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.TrEnv.quotDefEq_of_quotInit
 
 theorem insertDefs_find? : ∀ {cis : List DefinitionVal} {C : ConstMap} {name ci}, C.WF →
     (∀ d ∈ cis, C.find? d.name = none) → (cis.map (·.name)).Nodup →

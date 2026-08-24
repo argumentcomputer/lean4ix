@@ -956,6 +956,29 @@ theorem nonempty_of_check
       contradiction
   | ok alignment => exact ⟨alignment⟩
 
+/-- A retained terminal-view alignment replays the exact terminal builder
+branch.  This is the nonrecursive base used by closed constructor fixtures. -/
+theorem build_terminal_ok
+    {stats : InductiveStats} {isUnsafe : Bool} {familyIdx : Nat}
+    {ctor : Name} {context : Context} {source view : Expr}
+    {fuel argIdx : Nat}
+    {sourceTerminal : source.isForall = false}
+    {sourceValid : isValidIndAppIdx stats source familyIdx = true}
+    (sourceCheck : ConstructorCheckedExpr context source)
+    (viewCheck : ConstructorCheckedExpr context view)
+    (viewTerminal : view.isForall = false)
+    (viewValid : isValidIndAppIdx stats view familyIdx = true) :
+    ∃ alignment,
+      build (stats := stats) (isUnsafe := isUnsafe) (familyIdx := familyIdx)
+        (ctor := ctor)
+        (.terminal context source fuel argIdx sourceTerminal sourceValid) view =
+          .ok alignment := by
+  rw [build.eq_def]
+  dsimp only [build.match_4]
+  rw [sourceCheck.check_eq, viewCheck.check_eq]
+  simp only [dif_pos viewTerminal, dif_pos viewValid]
+  exact ⟨_, rfl⟩
+
 end ConstructorViewAlignmentTrace
 
 /-- Supplemental checker audit for the exact analyzer-owned view of one
@@ -1088,6 +1111,53 @@ theorem build_ok_of_check
       change Except.error error = Except.ok () at success
       contradiction
   | ok alignment => exact ⟨alignment, rfl⟩
+
+/-- The empty retained constructor alignment replays the empty builder
+branch. -/
+theorem build_nil_eq (seen : NameSet) :
+    build (stats := stats) (isUnsafe := isUnsafe) (familyIdx := familyIdx)
+      (context := context) (.nil seen) .nil = .ok (.nil seen) := by
+  rfl
+
+/-- Replaying successful component observations reproduces one retained
+constructor-alignment node exactly. -/
+theorem build_cons_eq
+    {seen : NameSet} {head : Constructor} {tail : List Constructor}
+    {fresh : seen.contains head.name = false}
+    {closed : context.env.checkNoMVarNoFVar head.name head.type = .ok ()}
+    {rootCheck : CandidateCheckTypeObservation
+      context.withEmptyLocalContext head.type}
+    {typeTrace : ConstructorTypeValidationTrace stats isUnsafe familyIdx
+      head.name context head.type 0 context.fuel.inductiveFuel}
+    {tailTrace : ConstructorListValidationTrace stats isUnsafe familyIdx
+      context (seen.insert head.name) tail}
+    {candidate : AddInductive.CandidateConstructor head}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor tail}
+    (rootScope : ConstructorCheckedExpr context.withEmptyLocalContext
+      head.type)
+    (storedSpine : candidate.type.trace.storedSpine = true)
+    (spineLength : candidate.type.trace.spineLength = typeTrace.spineLength)
+    (candidateDepth : candidate.type.context.fuel.recDepth =
+      context.fuel.recDepth)
+    (headAlignment : ConstructorViewAlignmentTrace typeTrace
+      candidate.type.view)
+    (tailAlignment : ConstructorCandidateAlignmentTrace stats isUnsafe
+      familyIdx context tailTrace candidates)
+    (headRun : ConstructorViewAlignmentTrace.build typeTrace
+      candidate.type.view = .ok headAlignment)
+    (tailRun : build tailTrace candidates = .ok tailAlignment) :
+    build (.cons seen head tail fresh closed rootCheck typeTrace tailTrace)
+        (.cons candidate candidates) =
+      .ok (.cons rootScope storedSpine spineLength candidateDepth
+        headAlignment tailAlignment) := by
+  rw [build.eq_def]
+  rw [build.match_1.eq_2]
+  rw [rootScope.check_eq]
+  simp only [dif_pos storedSpine, dif_pos spineLength,
+    dif_pos candidateDepth]
+  rw [headRun, tailRun]
+  rfl
 
 end ConstructorCandidateAlignmentTrace
 

@@ -154,26 +154,9 @@ private def allowlist : Array Lean.Name := #[
   -- recognizer (Verify/Environment/Boundaries.lean), added by #28 at the
   -- v4.33 reconciliation.
   `Lean4Lean.checkPrimitiveDef.WF,
-  -- `ProjectionReady`/registered `StructureEtaReady` transport across the
-  -- front-end environment extensions (Verify/Environment/Extension.lean):
-  -- upstream's proved v4.33 declaration chains do not establish these fork
-  -- obligations on `VContext`; the transport proofs are L4L-19B content. The
-  -- mutual-block entry is the compiled recursive functional of
-  -- `VEnvAt.addAxioms`.
-  `Lean4Lean.VEnvAt.addAxioms._f,
-  `Lean4Lean.addConstCore.WF,
-  `Lean4Lean.addDef.WF,
-  `Lean4Lean.addMutualBlock.WF,
-  `Lean4Lean.addUnsafeDef.WF,
-  -- Quotient initialization (Verify/Environment.lean): upstream's v4.33
-  -- proof was vacuous via the fork-refutable `TrEnv'.no_inductInfo`; the
-  -- constructive connection to the Theory quotient transaction is L4L-19B
-  -- content.
-  `Lean4Lean.addQuot.WF,
-  -- v4.33 reconciliation repair debt: the exact alignment-run fixture's
-  -- `build.eq_def` stepping no longer elaborates; the closed checker-run
-  -- statement is unchanged (Verify/Environment/InductiveFixtures.lean).
-  `Lean4Lean.InductiveReplayFixtures.aliasFormerAlignmentRun,
+  -- The five ordinary-extension readiness transports, constructive quotient
+  -- initialization, and exact AliasFormer replay left the frontier with
+  -- Lane V1/V2.
   `Lean4Lean.TypeChecker.Inner.reduceRecursor.WF,
   -- Tier R — research-grade metatheory (upstream-driven, not scheduled)
   `Lean4Lean.VEnv.IsDefEqU.sort_inv,

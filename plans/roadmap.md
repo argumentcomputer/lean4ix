@@ -89,7 +89,7 @@ required for the final release; they can be reached in separate milestones.
 | Parent lineage | the squash flattened git ancestry: all content through digama `upstream/master` `b292275c` (the v4.33 reconciliation `99a7f8ae`) is absorbed in the squash, but the published line no longer carries the merge commits, so the L4L-16R merge will see an old git merge-base — the same situation the post-PR#3 line was in when `99a7f8ae` landed green, so precedent stands. Lean on v4.33.0 final, lean4-nix on `argumentcomputer/lean4-nix` (upstream still pins v4.33.0-rc2 — ledger D018, re-verified 2026-08-20) |
 | Fixed `master` baseline | historical baseline `1a16b72d2e35932a82aa501beb29ef2c3d072580`; the tracked local `master` bookmark auto-advanced to `origin/master` `715bfaff` at the 2026-08-20 fetch (content already absorbed in-tree) |
 | Remote drift | **reconciled at L4L-16R** (2026-08-20, merge `29d67a7c`): local and merged upstream tip = `e0e3f6bc`; nothing unabsorbed. Standing watch items, re-checked at every checkpoint boundary (§7): **PR #43** (third-party iota-reduction formalization — 16 of 20 files collide with fork-modified files; unreviewed by Mario; the fork's appDF×`.extra` refutation applies to its CR `.pat` TODO and the design comparison lives in the drift note + ledger D022 context), **PR #32** (+24k-line HasPrimitives verification overlapping D017 Tier-V debt — the V4 absorb-don't-duplicate tripwire), **#27** (would prove two of the three forbidden cached-field axioms — absorb at the next reconcile). History: `plans/l4l-16-boundary-digama-drift.md` |
-| Trust frontier | exactly 16 sorried proof declarations, one token each (10 Tier V, 6 Tier R; the `NormalEq.parRed` `constDF` half closed 2026-08-15, its remaining token is the `appDF`×`.extra` case) plus six kernel-rejection recovery declarations — 22 compiled allowlist entries — and 34 custom-axiom declarations; all pinned by exact audits. `Experimental/` carries **zero** sorry tokens and zero `stop`-hidden admissions since the 16C′w wrap (2026-08-20): the former three tokens closed by conditionalization on the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`) and by the E3 chain deletion, and the token-carrying scratch prototypes were deleted (jj-recoverable). Every mainline sorry has a named closure route in §5.0 |
+| Trust frontier | exactly 10 sorried proof declarations, one token each (4 Tier V, 6 Tier R; Lane V1/V2 closed the five ordinary-extension readiness transports and constructive quotient initialization on 2026-08-24; the `NormalEq.parRed` `constDF` half closed 2026-08-15, its remaining token is the `appDF`×`.extra` case) plus six kernel-rejection recovery declarations — 16 compiled allowlist entries — and 34 custom-axiom declarations; all pinned by exact audits. `Experimental/` carries **zero** sorry tokens and zero `stop`-hidden admissions since the 16C′w wrap (2026-08-20): the former three tokens closed by conditionalization on the named leaf inputs (`LRS.PiPathInv`, `LR.MajorLinkRect`) and by the E3 chain deletion, and the token-carrying scratch prototypes were deleted (jj-recoverable). Every mainline sorry has a named closure route in §5.0 |
 | Gates | the L4L-16N halt checkpoint re-ran every §6 gate on 2026-08-20: Theory/Verify (165 jobs), 22-entry frontier OK (160 jobs), default build (213 jobs), Experimental including the failure record (134 jobs), `nix build` both targets, `nix flake check` all-passed, `nix fmt --check`, and whitespace/import-boundary checks. Earlier full evidence remains at the pre-rebase `e73d29fd` checkpoint and the rebased `jcb/formalization3` line |
 
 ### 2.1 What is green
@@ -362,15 +362,15 @@ never generation-shape authority or Theory semantics.
 
 The sorry audit (`Lean4Lean/Audit/SorryFrontier.lean`, a declaration-level
 `sorryAx` allowlist over the compiled Theory/Verify surface) accepts exactly
-16 sorried proof declarations — one source token each, verified 2026-08-20 —
+10 sorried proof declarations — one source token each, verified 2026-08-24 —
 plus six deliberately kernel-rejected fixture recoveries that are not proof
-debt. The compiled allowlist therefore contains 22 declarations. Every row
+debt. The compiled allowlist therefore contains 16 declarations. Every row
 below has a named closure route and milestone in §5.0.
 
 | Area | Live debt |
 |---|---|
 | Core metatheory (Tier R, 6) | `Injectivity.lean`: `IsDefEqU.sort_inv` (:12), `IsDefEqU.forallE_inv_stratified` (:21), `IsDefEqU.sort_forallE_inv` (:34); `UniqueTyping.lean`: `IsDefEqU.weakN_iff` (:174, forward direction; gates `church_rosser` only); `ChurchRosser.lean`: `NormalEq.parRed` (:1893, the `appDF`×`.extra` case; `constDF` closed 2026-08-15); `Projection.lean`: `VEnv.WF.registeredStructureHeadInversion` (:3520; two constructor fields are false as stated and need a head-classification premise before proof) |
-| Checker verification (Tier V, 10) | `Verify/Environment.lean` x2 (`addDecl.WF` — only its `inductDecl` case — and `addQuot.WF`, whose upstream v4.33 proof was vacuous); `Boundaries.lean` x1 (`checkPrimitiveDef.WF`); `Extension.lean` x5 (the D017 readiness transports at :274/:355/:439/:522/:587 — verified to share one `ProjectionReady ∧ StructureEtaReady` transport argument across declaration kinds); `Verify/TypeChecker/WHNF.lean` x1 (`reduceRecursor.WF`); `InductiveFixtures.lean` x1 (`aliasFormerAlignmentRun` — pure v4.33 elaborator-shape repair, statement true) |
+| Checker verification (Tier V, 4) | `Verify/Environment.lean` x1 (`addDecl.WF` — only its `inductDecl` case); `Boundaries.lean` x1 (`checkPrimitiveDef.WF`); `Verify/TypeChecker/WHNF.lean` x1 (`reduceRecursor.WF`); `InductiveFixtures.lean` x1 (`aliasFormerAlignmentRun` — pure v4.33 elaborator-shape repair, statement true) |
 
 All Tier V entries are lane/L4L-19 territory; the eight added at the v4.33
 reconciliation are classified in ledger row D017. `Experimental/` has
@@ -622,8 +622,6 @@ and fallbacks in the owning milestone entry).
 | R4 | `IsDefEqU.weakN_iff` (`UniqueTyping.lean:174`, forward) | L4L-18S | SST route per `plans/l4l-16-weakn-design.md`: W0–W3 proved (probeE2, corrected dependency direction); W4 is the `Pattern.Action`-at-`:↑` repackaging decision; residual risk concentrated in W5+W6 (coupled `NormalEq`/per-depth-CR cores) | research, contained |
 | R5 | `NormalEq.parRed` appDF×`.extra` (`ChurchRosser.lean:1893`) | L4L-18A′ | new `Params` field `PatArgProp` — "a registered contraction with a Prop-typed argument position has a Prop-typed result" (`probeCR2-extra.lean:208` closed the math; `normalEq_parRed_appDF_propArg` :219); every live instance satisfies it vacuously, and its falsity for `Acc.rec`/`Eq.rec`-class large elimination is the true boundary of this CR presentation (see 16N stretch tiers), not a route defect | engineering |
 | R6 | `VEnv.WF.registeredStructureHeadInversion` (`Projection.lean:3520`) | L4L-18S | statement repair first — the `constructor_name_inv`/`constructor_inv` fields are false as stated (axiom-headed-major / defn-alias counterexamples) and take a head-classification premise; then `weak'_inv` from R4, `unique` from `TrProj.result_eq` + uniqueness, constructor fields from a future replacement for 16N's intended `IndTyAppInj` corollary | engineering after inputs |
-| V1 | `Extension.lean` x5 readiness transports (:274/:355/:439/:522/:587) | Lane V | verified to share one argument: a `ProjectionReady.add`/`StructureEtaReady.add` lemma pair (stability of old lookups under fresh non-`inductInfo`/`ctorInfo` `Environment.add`; `VEnv.LE`-monotonicity of `ProjectionArtifact` and the `structEtas` registry) in a new `Verify/Environment/Readiness.lean`, then five one-line applications — kept separate so a PR #32 merge re-applies trivially | engineering, 1–2 sessions |
-| V2 | `addQuot.WF` (`Verify/Environment.lean:126`) | Lane V | constructive link replacing upstream's vacuous proof: `checkEqType` postcondition → `VEnv.addQuot` + `Theory/Typing/QuotLemmas.lean` `addQuot_WF` + the `addQuot_objs` lookup suite through a `TrEnv'` quot step, plus the V1 transport for the result | engineering, 1–2 sessions |
 | V3 | `addDecl.WF` `inductDecl` case (`Verify/Environment.lean:222`) | L4L-19B | the generic front-end of what all 25 replay rows do concretely: checker inductive path → `buildNormalizationCandidate` → `GenerationCertificate`/`addInductCertified` → `TrEnv'.inductBlock`/`inductNested`, mirroring `addMutual.WF`'s structure, plus V1's transport; this is the "no semantic placeholders" criterion's `Verify.Environment.AddInduct` model | engineering, multi-session |
 | V4 | `checkPrimitiveDef.WF` (`Boundaries.lean:35`) | Lane V, #32-gated | upstream PR #32 (+24k lines) verifies exactly this recognizer; absorb and adapt if Mario merges it, prove in-fork (M.WF-style run proof producing `PrimitiveResult`) if it stalls past the 18A′ checkpoint | engineering |
 | V5 | `reduceRecursor.WF` (`Verify/TypeChecker/WHNF.lean:8`) | L4L-19A | selected rule/match/checks/RHS translation/result typing from certified generated metadata via `pat_wf` (sheds its transitional closure at 16X) and the block-certificate pattern surface; quot branch against the quot lemmas; nested branch needs the σ̂ β-collapse bridge plus `NestedBlockCertificate` pattern facts | engineering, multi-session |
@@ -639,11 +637,11 @@ checkpoint `e73d29fd` (2026-08-20): `Experimental/` carries zero sorry
 tokens, and the gate endpoints are conditional on the two named leaf
 inputs `LRS.PiPathInv` and `LR.MajorLinkRect`. L4L-16N halted before
 discharging either input; the conditional endpoints remain the supported
-state. The remaining sorries are exactly the 16 mainline rows above.
+state. The remaining sorries are exactly the 10 mainline rows above.
 
 **Lane phase after the L4L-16N halt.** Lane R re-opens at **L4L-16N′**
 (below) — the approved third route, whose rung-0 truth-status evidence is
-probe Z16. Lane V runs the V1 → V2 rows of §5.0, starts the V3 skeleton
+probe Z16. Lane V closed V1/V2 on 2026-08-24 and next starts the V3 skeleton
 (statement-level decomposition with named holes), holds V4 on the #32
 watch, and takes R6's independent statement repair in its first
 Theory-touching session. Lane D runs the D-ladder volume: the three
@@ -1014,8 +1012,8 @@ named design docs and probe files.
 
 ### Checker closure (L4L-19A–L4L-19C)
 
-Lane V pre-closes V1/V2 (and V4 unless PR #32 lands it first) during the
-lane phase; L4L-19 proper picks up the remainder on the reconciled
+Lane V closed V1/V2 on 2026-08-24 (and holds V4 for PR #32 or its fallback)
+during the lane phase; L4L-19 proper picks up the remainder on the reconciled
 checker text.
 
 **L4L-19A — recursor reduction verification.** V5: prove

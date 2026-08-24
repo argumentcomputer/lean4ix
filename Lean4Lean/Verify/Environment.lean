@@ -1,4 +1,4 @@
-import Lean4Lean.Verify.Environment.Extension
+import Lean4Lean.Verify.Environment.Quotient
 
 namespace Lean4Lean
 open Lean4Lean
@@ -18,7 +18,8 @@ theorem addAxiom.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : Axi
   refine (checkConstantVal.WF wf (.axiomInfo v) false hsafety).run wf |>.bind fun _ h => ?_
   obtain ⟨ci', htr, hci, hn, hnonprim⟩ := h
   have ⟨ves', hwf, hstep⟩ := addConst.WF wf (.axiomInfo v) ci' checkSafety ?_ htr hci hn
-    (hnonprim rfl) fun _ _ htr hci hadd old => ?_
+    (by simp [Lean.ConstantInfo.ReadinessTransparent]) (hnonprim rfl)
+    fun _ _ htr hci hadd old => ?_
   · exact .pure ⟨ves', hwf, ci', hstep⟩
   · intro safety _
     cases v.isUnsafe <;> cases safety <;> trivial
@@ -36,7 +37,8 @@ theorem addDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     refine (checkNoMVarNoFVar.WF _ _ _).bind fun _ h => ?_
     have ⟨vesA, wfA, hstepA⟩ := addConst.WF wf (.axiomInfo { v with isUnsafe := true }) ci0
       .unsafe (fun _ => id) ⟨⟨DefinitionSafety.unsafe_le, htr.1.2.1, htr.1.2.2⟩, htr.2⟩
-      hwfc hn (hnonprim rfl) fun _ _ htr' hci' hadd' old =>
+      hwfc hn (by simp [Lean.ConstantInfo.ReadinessTransparent]) (hnonprim rfl)
+      fun _ _ htr' hci' hadd' old =>
         .axiom htr' (by rwa [← old.map_wf.find?'_eq_find?]) hci' hadd' old
     have hadd := (hstepA .unsafe).2.2
     refine checkBodyCore.WF (wfA.toVEnvAt .unsafe) (.defnDecl v)
@@ -79,7 +81,8 @@ theorem addTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : T
   refine (checkTheorem.WF wf v).run wf |>.bind fun _ h => ?_
   obtain ⟨ci', htr, hbody, hprop, hn, hnonprim⟩ := h
   have ⟨ves', hwf, hstep⟩ := addConst.WF wf (.thmInfo v) ci'.toVConstVal .safe
-    (fun _ _ => DefinitionSafety.le_safe) htr.1 ⟨_, hprop⟩ hn hnonprim
+    (fun _ _ => DefinitionSafety.le_safe) htr.1 ⟨_, hprop⟩ hn
+    (by simp [Lean.ConstantInfo.ReadinessTransparent]) hnonprim
     fun safety _ hheader _ hadd old => ?_
   · exact .pure ⟨ves', hwf, ci'.toVConstVal, hstep⟩
   have hle := wf.mono hheader.1
@@ -102,7 +105,8 @@ theorem addOpaque.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : Op
   have htr : TrConstVal checkSafety (ves.venv checkSafety) (.opaqueInfo v) ci'.toVConstVal :=
     ⟨⟨hsafety.symm ▸ DefinitionSafety.le_rfl, hu, ht.mono hmono⟩, hname⟩
   have ⟨ves', hwf, hstep⟩ := addConst.WF wf (.opaqueInfo v) ci'.toVConstVal checkSafety ?_ htr
-    (hciC.mono hmono) hfresh hnonprim fun safety _ htr hciW hadd old => ?_
+    (hciC.mono hmono) hfresh (by simp [Lean.ConstantInfo.ReadinessTransparent]) hnonprim
+    fun safety _ htr hciW hadd old => ?_
   · exact .pure ⟨ves', hwf, ci'.toVConstVal, hstep⟩
   · intro safety hvisible
     rwa [hsafety] at hvisible
@@ -110,21 +114,6 @@ theorem addOpaque.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : Op
     have hto := hmono.trans (wf.mono hvis)
     exact .opaque (ci' := ci') ⟨⟨htr, hname⟩, hvalue.mono hto⟩
       (by rwa [← old.map_wf.find?'_eq_find?]) (hci.mono hto) hadd old
-
-set_option warn.sorry false in
-/- Tier V (L4L-19B): upstream's v4.33 proof of this statement was vacuous —
-it derived `False` from a successful `checkEqType` run via
-`TrEnv'.no_inductInfo`, which is refutable on this fork (the inductive
-verification boundary is implemented, so a translated environment can
-contain the real `Eq`, and quotient initialization can genuinely succeed).
-That auxiliary lemma was deleted at the reconciliation; the constructive
-proof connects `checkEqType`/`Environment.addQuot` success to the Theory
-quotient transaction (`VEnv.addQuot`, `addQuot_WF`) and is checker-closure
-work, not merge resolution. -/
-theorem addQuot.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) :
-    (Environment.addQuot env).WF fun env' =>
-      ∃ ves' : VEnvs, ves'.WF env' ∧ ∀ safety, ves.venv safety ≤ ves'.venv safety := by
-  sorry
 
 private theorem Except.WF.throw' {e : ε} {Q : α → Prop} : (throw e : Except ε α).WF Q :=
   fun _ h => nomatch h
