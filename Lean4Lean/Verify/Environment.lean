@@ -646,9 +646,13 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
 by one ordinary outer execution.  This surface intentionally starts after
 candidate interpretation: a primitive family by itself temporarily violates
 `VEnv.HasPrimitives`, so the generic post-family checker context cannot be used
-between the family and constructor phases.  Each staging run is nevertheless
-indexed by the real kernel environments and metadata lists owned by
-`execution`; no parallel host inventory or normalization run is accepted. -/
+between the family and constructor phases.  It also retains only the insertion
+folds needed by the public trace, rather than the generic staging records'
+`TrEnv' .safe` postconditions; those postconditions would incorrectly exclude
+partial and unsafe input models containing additional visible constants.  All
+kernel-map endpoints and Theory inventories remain fixed by `execution` and the
+canonical declaration, so no parallel host inventory or normalization run is
+accepted. -/
 structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -659,36 +663,33 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
   blockEnv : VEnv
   generation_wf : (VPrimitiveInductive.canonicalGeneration types).WF input
     blockEnv
-  families : VInductDecl.FamilyDeclarationStagingRun
-    execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
-    execution.flattened.eliminationExecution.normalization.validationContext.env
-    execution.flattened.eliminationExecution.normalization.familyEnv
-    execution.flattened.eliminationExecution.normalization.declaredInfos
-    input blockEnv
+  addTypes : AddInductConstants .induct
+    execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+    input
     (VPrimitiveInductive.canonicalDecl types).blockTypeConstants
-    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
-  constructors : VInductDecl.ConstructorDeclarationStagingRun
-    execution.flattened.eliminationExecution.constructorContext.allowPrimitive
-    execution.flattened.eliminationExecution.normalization.familyEnv
-    execution.flattened.eliminationExecution.constructorEnv
-    execution.flattened.eliminationExecution.declaredConstructorInfos
+    execution.flattened.eliminationExecution.normalization.familyEnv.constants
+    blockEnv
+  ctorEnv : VEnv
+  addCtors : AddInductConstants .ctor
+    execution.flattened.eliminationExecution.normalization.familyEnv.constants
     blockEnv (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants
-    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
-  recursors : VInductDecl.RecursorDeclarationStagingRun
-    execution.flattened.recursors.allowPrimitive
-    execution.flattened.recursors.initialEnv execution.flattened.recursors.env
-    execution.flattened.recursors.infos constructors.ctorEnv
+    execution.flattened.eliminationExecution.constructorEnv.constants ctorEnv
+  recEnv : VEnv
+  addRecs : AddInductConstants .recursor
+    execution.flattened.recursors.initialEnv.constants ctorEnv
+    (VPrimitiveInductive.canonicalGeneration types).recursors
+    execution.flattened.recursors.env.constants recEnv
+  recK : RecursorMapKMatches execution.flattened.recursors.env.constants
     (VPrimitiveInductive.canonicalGeneration types).recursors
     (VPrimitiveInductive.canonicalGeneration types).kTarget
-    execution.flattened.eliminationExecution.normalization.validationContext.env.quotInit
-  addRules : AddDefEqs recursors.recEnv
+  addRules : AddDefEqs recEnv
     (VPrimitiveInductive.canonicalGeneration types).generatedRules output
 
 namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
 
 /-- Assemble the exact ordinary trace at the retained normalization and
 recursor map endpoints.  All intermediate maps and Theory environments are
-projections of the three staged metadata phases above. -/
+the endpoints of the three execution-indexed insertion folds above. -/
 def toFlattenedTrace
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -708,17 +709,17 @@ def toFlattenedTrace
     execution.flattened.eliminationExecution.normalization.familyEnv.constants
   typeEnv := replay.blockEnv
   ctorMap := execution.flattened.eliminationExecution.constructorEnv.constants
-  ctorEnv := replay.constructors.ctorEnv
-  recEnv := replay.recursors.recEnv
-  addTypes := replay.families.addTypes
-  addCtors := replay.constructors.addCtors
+  ctorEnv := replay.ctorEnv
+  recEnv := replay.recEnv
+  addTypes := replay.addTypes
+  addCtors := replay.addCtors
   addRecs := by
     simpa only [execution.flattened.recursor_initialEnv_eq] using
-      replay.recursors.addRecs
-  recK := replay.recursors.recK
+      replay.addRecs
+  recK := replay.recK
   addRules := replay.addRules
 
-/-- Retarget the staged replay to the public outer endpoints.  Primitive
+/-- Retarget the insertion-fold replay to the public outer endpoints.  Primitive
 recognition proves that nested elimination was a no-op, so the retained
 recursor environment is the actual final environment. -/
 def toTrace
@@ -744,14 +745,14 @@ def toTrace
       execution.flattened.eliminationExecution.normalization.familyEnv.constants
     typeEnv := replay.blockEnv
     ctorMap := execution.flattened.eliminationExecution.constructorEnv.constants
-    ctorEnv := replay.constructors.ctorEnv
-    recEnv := replay.recursors.recEnv
-    addTypes := by simpa only [initialEq] using replay.families.addTypes
-    addCtors := replay.constructors.addCtors
+    ctorEnv := replay.ctorEnv
+    recEnv := replay.recEnv
+    addTypes := by simpa only [initialEq] using replay.addTypes
+    addCtors := replay.addCtors
     addRecs := by
       simpa only [execution.flattened.recursor_initialEnv_eq, finalEq] using
-        replay.recursors.addRecs
-    recK := by simpa only [finalEq] using replay.recursors.recK
+        replay.addRecs
+    recK := by simpa only [finalEq] using replay.recK
     addRules := replay.addRules }
 
 end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay

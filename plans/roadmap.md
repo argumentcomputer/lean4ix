@@ -1877,13 +1877,15 @@ Three checker sorries remain:
   canonical Bool/Nat sources are unchanged and generate no auxiliary family;
   the primitive transaction package no longer asks producers for either fact.
   A primitive-specific replay now consumes the family, constructor, and
-  recursor staging runs indexed by that retained execution, constructs the
+  recursor insertion folds indexed by that retained execution, constructs the
   exact public `AddInductBlockTrace`, and uses the fixed canonical generation at
   every safety level. The public primitive transaction package contains this replay
-  rather than accepting arbitrary traces. This bypasses the intentionally
-  unavailable `HasPrimitives` invariant between insertion of a primitive family
-  and its constructors without weakening that invariant globally. Next derive
-  the three metadata staging witnesses and rule folds from the retained Bool/Nat
+  rather than accepting arbitrary traces. Keeping the replay at the exact fold
+  boundary bypasses both the intentionally unavailable `HasPrimitives` invariant
+  between insertion of a primitive family and its constructors and the generic
+  staging records' final `TrEnv' .safe` postcondition, which would exclude valid
+  partial and unsafe input models with additional visible constants. Next derive
+  the three metadata insertion folds and rule fold from the retained Bool/Nat
   execution, supply primitive readiness, derive
   selecting-minor and persistent eta-rule
   certificates, and discharge the remaining recursive candidate observers

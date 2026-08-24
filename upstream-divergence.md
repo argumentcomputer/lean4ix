@@ -476,14 +476,16 @@ to the replacement.
   complete canonical Theory declaration directly. Primitive transaction
   producers therefore choose neither a parallel raw declaration nor a
   source-indexed semantic normalization run. A dedicated primitive replay now
-  consumes only family, constructor, and recursor staging runs indexed by the
+  consumes only family, constructor, and recursor insertion folds indexed by the
   retained execution, retargets their exact maps to the public outer endpoints,
   and constructs the coherent safety-indexed `AddInductBlockTrace` family using
   an internally selected canonical generation. The public primitive transaction
-  package contains this staged replay rather than accepting arbitrary traces.
-  This separate path is necessary because the
-  family-only intermediate environment for `Bool` or `Nat` cannot satisfy
-  `HasPrimitives` before its constructors have been inserted.
+  package contains this exact replay rather than accepting arbitrary traces.
+  This fold-level surface also avoids imposing the generic staging records'
+  final `TrEnv' .safe` postcondition on valid partial and unsafe input models
+  that contain additional visible constants. This separate path is necessary
+  because the family-only intermediate environment for `Bool` or `Nat` cannot
+  satisfy `HasPrimitives` before its constructors have been inserted.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix
