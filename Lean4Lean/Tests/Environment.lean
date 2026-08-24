@@ -1,4 +1,4 @@
-import Lean4Lean.Environment
+import Lean4Lean.Verify.Environment
 
 /-!
 Front-end declaration checks that are not covered by `Lean4Lean.Tests.KernelHardening`.
@@ -10,6 +10,11 @@ made the kernel reject both (lean4#14608).
 namespace Lean4Lean.Tests.Environment
 
 open Lean
+
+#check Lean4Lean.ElimNestedInductive.Result.canonicalPrimitive_noop
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension
 
 run_meta
   let env ← Lean.getEnv

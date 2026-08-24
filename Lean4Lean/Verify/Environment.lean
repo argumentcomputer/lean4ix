@@ -739,11 +739,38 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPri
 #guard_msgs in
 #print axioms VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants
 
+/-- Primitive recognition and the retained public nested-elimination run
+jointly prove that the canonical source list is unchanged and no auxiliary
+family was generated. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    execution.nested.types = types ∧
+      execution.nested.aux2nested.size = 0 := by
+  have recognized := primitiveResult.recognized rfl
+  apply execution.nested.canonicalPrimitive_noop recognized.2.2.2
+  simpa only [recognized.2.1, recognized.2.2.1] using execution.nestedRun
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
+
 /-- A coherent ordinary replay of a canonical primitive-recognized block.
 Unlike the nonprimitive transaction package, primitive preservation is
 derived from the exact Bool/Nat generated inventory rather than name
-avoidance.  Sharing one generation artifact across safety levels supplies
-cross-safety coherence. -/
+avoidance. Sharing one generation artifact across safety levels supplies
+cross-safety coherence. The nested-pass facts are derived from the retained
+execution and recognizer result rather than supplied as transaction fields. -/
 structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -753,12 +780,10 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransacti
     (ves : VEnvs) where
   source : VInductDecl
   output : VEnvs
-  numNested_eq : execution.nested.aux2nested.size = 0
   generation : source.BlockGenerationChecked
   traces : ∀ safety, AddInductBlockTrace env.constants
     (ves.venv safety) source finalEnv.constants (output.venv safety)
   generation_eq : ∀ safety, (traces safety).generation = generation
-  kernelSources_eq : execution.nested.types = types
   semanticBlockEnv : VEnv
   semantic : VInductDecl.NormalizationCandidateBlockSemanticRun
     (ves.venv .safe) semanticBlockEnv lparams execution.flattened.candidate
@@ -786,7 +811,7 @@ theorem canonicalConstants
       true) :
     extension.source.CanonicalPrimitiveConstants := by
   apply extension.semantic.canonicalPrimitiveConstants
-  · rw [extension.kernelSources_eq]
+  · rw [(execution.canonicalPrimitive_noop primitiveResult).1]
     exact (primitiveResult.recognized rfl).2.2.2
   · exact (primitiveResult.recognized rfl).2.1
 
@@ -825,7 +850,8 @@ def toTransactionalVEnvsExtension
   source := extension.source
   output := extension.output
   transaction safety :=
-    .ordinary extension.numNested_eq ⟨extension.traces safety⟩
+    .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
+      ⟨extension.traces safety⟩
   hasPrimitives safety :=
     (extension.canonicalInventory primitiveResult).hasPrimitives
       (extension.traces safety)
@@ -838,7 +864,8 @@ def toTransactionalVEnvsExtension
       simpa only [TrEnv] using wf.tr (safety := .safe)
     have transaction : execution.ExactSemanticTransaction extension.source
         (ves.venv .safe) (extension.output.venv .safe) :=
-      .ordinary extension.numNested_eq ⟨extension.traces .safe⟩
+      .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
+        ⟨extension.traces .safe⟩
     have finalTr := transaction.trEnv preTr
     have finalSafe : ConstMapSafePrimitives finalEnv.constants :=
       (extension.canonicalInventory primitiveResult).safePrimitivesMap
@@ -861,7 +888,8 @@ end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVE
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants' depends on axioms: [propext,
  Classical.choice,
- Quot.sound]
+ Quot.sound,
+ Expr.abstract_eq]
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants
@@ -869,7 +897,8 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTr
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory' depends on axioms: [propext,
  Classical.choice,
- Quot.sound]
+ Quot.sound,
+ Expr.abstract_eq]
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory
@@ -878,6 +907,7 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTr
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ Expr.abstract_eq,
  PersistentHashMap.findAux_isSome,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
@@ -1338,6 +1368,7 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_trans
 info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ Expr.abstract_eq,
  Expr.eqv_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,

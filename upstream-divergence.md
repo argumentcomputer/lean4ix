@@ -468,7 +468,11 @@ to the replacement.
   installing the globally flattened rules. L4L-09 adds the corresponding
   restored nested trace/alignment path and two actual-metadata replays; L4L-11
   adds final-map translated role/uniqueness lemmas, the third deep replay, and
-  the unified matrix in D013.
+  the unified matrix in D013. The V3 primitive transaction now derives exact
+  canonical Bool/Nat source preservation and zero nested auxiliaries from the
+  executable recognizer shape plus the retained public nested-elimination run;
+  the transaction record no longer accepts either equality as a
+  producer-supplied field.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix
@@ -479,8 +483,9 @@ to the replacement.
   executable 14/5/19 inventory equalities; every actual-metadata transaction,
   final alignment, and derived output ordering; exact Fin/Vector dependency
   maps; the pre-Nat value-preservation regression; full Theory/Verify, default
-  Lake, Nix, and flake gates; compile-time trust manifests for the fixed,
-  normalization, combined replay, output-ordering, and both mutual-block roots.
+  Lake, Nix, and flake gates; primitive nested no-op consumer checks; and
+  compile-time trust manifests for the fixed, normalization, combined replay,
+  output-ordering, and both mutual-block roots.
 - **Axiom note:** the guarded roots currently inherit `sorryAx` through
   `TrConstVal → TrExprS → TrProj`, plus the standard logical baseline. E1
   declares no new axiom. The fixed replay inventory additionally reaches the
@@ -492,6 +497,9 @@ to the replacement.
   fixture-local native-decision axioms have been removed from their semantic
   closures. Every public root has an exact compile-time manifest; Track P/T2
   must remove or narrowly justify these inherited dependencies before release.
+  The primitive nested no-op proof introduces no axiom or admission; its exact
+  equality uses the existing classified `Expr.abstract_eq` bridge, which is
+  pinned on the proof and every affected transaction root.
 - **Upstream issue/PR:** TBD; submit with or immediately after the staged
   inductive-semantics series.
 - **Removal condition:** upstream has a non-vacuous inductive alignment with
