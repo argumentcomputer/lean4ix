@@ -625,6 +625,329 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq
     execution.flattened.eliminationExecution.normalization.validationContext_env_all
       (execution.flattened.normalization_run execution.flattenedRun)
 
+/-- The normalization prefix also retains the outer universe-parameter list
+exactly. -/
+theorem AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    execution.flattened.eliminationExecution.normalization.validationContext.lparams =
+      lparams := by
+  simpa only [AddInductive.Context.forInductive] using
+    execution.flattened.eliminationExecution.normalization.validationContext_lparams_all
+      (execution.flattened.normalization_run execution.flattenedRun)
+
+/-- A recognized primitive execution's exact family metadata translates to
+the canonical Theory family inventory.  The proof selects the sole retained
+metadata record through the validator's source-aligned relation; no parallel
+metadata list is reconstructed. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyEvidence
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv) :
+    List.Forall₂
+      (fun info raw => TrConstVal .safe input (.inductInfo info) raw)
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      (VPrimitiveInductive.canonicalDecl types).blockTypeConstants := by
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨safe, lparamsEq, _, shape⟩ := recognized
+  obtain ⟨type, typesEq, typeType, primitive⟩ := shape
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have nestedTypesEq : execution.nested.types = [type] :=
+    noop.1.trans typesEq
+  have normalizationRun :=
+    execution.flattened.normalization_run execution.flattenedRun
+  have nonempty : execution.nested.types.isEmpty = false := by
+    rw [nestedTypesEq]
+    rfl
+  have nindicesSize :
+      execution.flattened.eliminationExecution.normalization.stats.nindices.size =
+        execution.nested.types.length := by
+    have sizes := execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult.sizes_of_run nonempty
+        (execution.flattened.eliminationExecution.normalization
+          |>.familyValidationResult_run normalizationRun)
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      sizes.2.1
+  have metadata : List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray indType numIndices
+          execution.nested.aux2nested.size isUnsafe
+          execution.flattened.eliminationExecution.normalization.validationContext)
+      execution.nested.types
+      execution.flattened.eliminationExecution.normalization.declaredInfos := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size
+        isUnsafe
+        execution.flattened.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  have sourceGet : execution.nested.types[0]? = some type := by
+    rw [nestedTypesEq]
+    rfl
+  obtain ⟨info, infoGet, alignment⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_left metadata sourceGet
+  have declaredLength :
+      execution.flattened.eliminationExecution.normalization.declaredInfos.length =
+        1 := by
+    calc
+      _ = execution.nested.types.length :=
+        (Lean4Lean.List.Forall₂.length_eq metadata).symm
+      _ = [type].length := congrArg List.length nestedTypesEq
+      _ = 1 := rfl
+  obtain ⟨onlyInfo, declaredInfosEq⟩ :=
+    List.length_eq_one_iff.mp declaredLength
+  rw [declaredInfosEq] at infoGet
+  simp only [List.getElem?_cons_zero, Option.some.injEq] at infoGet
+  subst onlyInfo
+  have validationLparams :
+      execution.flattened.eliminationExecution.normalization.validationContext.lparams =
+        [] := execution.flattenedValidationLparams_eq.trans lparamsEq
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, _⟩ := boolShape
+      have rawFamiliesEq :
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants =
+            [VPrimitiveInductive.boolType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.boolDecl,
+          VPrimitiveInductive.boolType]
+      rw [declaredInfosEq, rawFamiliesEq]
+      apply List.Forall₂.cons
+      · apply VInductDecl.declaredInductiveInfo_tr
+          (raw := VPrimitiveInductive.boolType) alignment safe
+          validationLparams typeName
+        · rfl
+        · simpa [typeType, VPrimitiveInductive.boolType] using
+            (show TrExprS input [] [] (.sort (.succ .zero))
+                (.sort (.succ .zero)) from .sort rfl)
+      · exact .nil
+  | inr natShape =>
+      obtain ⟨typeName, _, _, _⟩ := natShape
+      have rawFamiliesEq :
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants =
+            [VPrimitiveInductive.natType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.natDecl,
+          VPrimitiveInductive.natType]
+      rw [declaredInfosEq, rawFamiliesEq]
+      apply List.Forall₂.cons
+      · apply VInductDecl.declaredInductiveInfo_tr
+          (raw := VPrimitiveInductive.natType) alignment safe
+          validationLparams typeName
+        · rfl
+        · simpa [typeType, VPrimitiveInductive.natType] using
+            (show TrExprS input [] [] (.sort (.succ .zero))
+                (.sort (.succ .zero)) from .sort rfl)
+      · exact .nil
+
+/-- Replay the retained primitive family-declaration fold directly from its
+canonical semantic evidence.  The input alignment is stated at the outer
+environment and retargeted through the validator's preserved-environment
+invariant. -/
+noncomputable def AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyInsertion
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv)
+    (pre : Aligned safety env.constants input) :
+    VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants := by
+  apply VInductDecl.familyDeclarationInsertion
+  · simpa only [AddInductive.declareInductiveTypes,
+      AddInductive.NormalizationCandidateExecution.declaredInfos] using
+      execution.flattened.eliminationExecution.normalization.declareRun
+  · exact execution.canonicalPrimitiveFamilyEvidence primitiveResult input
+  · have initialEq := execution.flattenedValidationEnv_eq
+    simpa only [initialEq] using pre
+
+/-- The exact constructor metadata retained by a recognized primitive
+execution translates to the canonical Bool/Nat constructor inventory in the
+Theory environment produced by its family insertion. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorEvidence
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv)
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants) :
+    List.Forall₂
+      (fun info raw => TrConstVal .safe families.blockEnv (.ctorInfo info) raw)
+      execution.flattened.eliminationExecution.declaredConstructorInfos
+      (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants := by
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨safe, lparamsEq, _, shape⟩ := recognized
+  obtain ⟨type, typesEq, _, primitive⟩ := shape
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have nestedTypesEq : execution.nested.types = [type] :=
+    noop.1.trans typesEq
+  have declaredInfosEq :
+      execution.flattened.eliminationExecution.declaredConstructorInfos =
+        AddInductive.declaredConstructorInfosFor
+          execution.flattened.eliminationExecution.normalization.stats
+          type.name isUnsafe
+          execution.flattened.eliminationExecution.constructorContext 0
+          type.ctors := by
+    simp only [
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+      AddInductive.declaredConstructorInfos_toArray, nestedTypesEq,
+      List.flatMap_cons, List.flatMap_nil, List.append_nil]
+  have constructorLparams :
+      execution.flattened.eliminationExecution.constructorContext.lparams =
+        [] := by
+    simpa only [
+      AddInductive.NormalizationEliminationExecution.constructorContext] using
+      execution.flattenedValidationLparams_eq.trans lparamsEq
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, constructorsEq⟩ := boolShape
+      have rawFamiliesEq :
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants =
+            [VPrimitiveInductive.boolType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.boolDecl,
+          VPrimitiveInductive.boolType]
+      have familyAdds : AddInductConstants .induct
+          execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+          input [VPrimitiveInductive.boolType.toVConstVal]
+          execution.flattened.eliminationExecution.normalization.familyEnv.constants
+          families.blockEnv := by
+        simpa only [rawFamiliesEq] using families.addTypes
+      cases familyAdds with
+      | cons familyAdd familyTail =>
+          cases familyTail
+          have familyLookup : families.blockEnv.constants ``Bool =
+              some VPrimitiveInductive.boolType.toVConstant :=
+            VEnv.addConst_self familyAdd.env_add
+          have rawCtorsEq :
+              (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants =
+                VPrimitiveInductive.boolType.ctors := by
+            simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+              VInductDecl.blockConstructorConstants,
+              VPrimitiveInductive.boolDecl]
+          rw [declaredInfosEq, constructorsEq, rawCtorsEq]
+          simp only [AddInductive.declaredConstructorInfosFor,
+            VPrimitiveInductive.boolType,
+            VPrimitiveInductive.boolConstructors]
+          apply List.Forall₂.cons
+          · apply VInductDecl.declaredConstructorInfo_tr safe
+              constructorLparams rfl rfl
+            exact .const familyLookup rfl rfl
+          · apply List.Forall₂.cons
+            · apply VInductDecl.declaredConstructorInfo_tr safe
+                constructorLparams rfl rfl
+              exact .const familyLookup rfl rfl
+            · exact .nil
+  | inr natShape =>
+      obtain ⟨typeName, binderName, binderInfo, constructorsEq⟩ := natShape
+      have rawFamiliesEq :
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants =
+            [VPrimitiveInductive.natType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.natDecl,
+          VPrimitiveInductive.natType]
+      have familyAdds : AddInductConstants .induct
+          execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+          input [VPrimitiveInductive.natType.toVConstVal]
+          execution.flattened.eliminationExecution.normalization.familyEnv.constants
+          families.blockEnv := by
+        simpa only [rawFamiliesEq] using families.addTypes
+      cases familyAdds with
+      | cons familyAdd familyTail =>
+          cases familyTail
+          have familyLookup : families.blockEnv.constants ``Nat =
+              some VPrimitiveInductive.natType.toVConstant :=
+            VEnv.addConst_self familyAdd.env_add
+          have natIsType (context : List VExpr) :
+              families.blockEnv.IsType 0 context .nat :=
+            ⟨.succ .zero,
+              VEnv.HasType.const familyLookup (by simp) rfl⟩
+          have rawCtorsEq :
+              (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants =
+                VPrimitiveInductive.natType.ctors := by
+            simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+              VInductDecl.blockConstructorConstants,
+              VPrimitiveInductive.natDecl]
+          rw [declaredInfosEq, constructorsEq, rawCtorsEq]
+          simp only [AddInductive.declaredConstructorInfosFor,
+            VPrimitiveInductive.natType,
+            VPrimitiveInductive.natConstructors]
+          apply List.Forall₂.cons
+          · apply VInductDecl.declaredConstructorInfo_tr safe
+              constructorLparams rfl rfl
+            exact .const familyLookup rfl rfl
+          · apply List.Forall₂.cons
+            · apply VInductDecl.declaredConstructorInfo_tr safe
+                constructorLparams rfl rfl
+              exact .forallE (natIsType []) (natIsType [.nat])
+                (.const familyLookup rfl rfl)
+                (.const familyLookup rfl rfl)
+            · exact .nil
+
+/-- Replay the retained primitive constructor-declaration fold immediately
+after its canonical family insertion. -/
+noncomputable def AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorInsertion
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv)
+    (pre : Aligned safety env.constants input)
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants) :
+    VInductDecl.ConstructorDeclarationInsertionRun
+      execution.flattened.eliminationExecution.constructorContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.constructorEnv
+      execution.flattened.eliminationExecution.declaredConstructorInfos
+      families.blockEnv
+      (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants := by
+  apply VInductDecl.constructorDeclarationInsertion
+  · simpa only [AddInductive.declareConstructors,
+      AddInductive.NormalizationEliminationExecution.constructorContext,
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos]
+      using execution.flattened.eliminationExecution.declareConstructorsRun
+  · exact execution.canonicalPrimitiveConstructorEvidence primitiveResult
+      input families
+  · have initialEq := execution.flattenedValidationEnv_eq
+    have initialAligned : Aligned safety
+        execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+        input := by
+      simpa only [initialEq] using pre
+    exact initialAligned.addInductConstants families.addTypes
+
 /-- In the ordinary branch, the environment produced by the retained recursor
 declaration is definitionally the outer execution's final environment. -/
 theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
@@ -858,6 +1181,56 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationE
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyEvidence' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyEvidence
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyInsertion
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorEvidence' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorEvidence
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorInsertion
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final' depends on axioms: [propext,

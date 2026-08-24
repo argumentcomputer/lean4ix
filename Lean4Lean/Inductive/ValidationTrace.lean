@@ -1753,7 +1753,8 @@ private theorem familyValidationOuter_sizes_of_run
     result.stats.nindices.size = indTypes.size ∧
       result.stats.indConsts.size = indTypes.size ∧
       result.stats.params.size = nparams ∧
-      result.validationContext.env = context.env := by
+      result.validationContext.env = context.env ∧
+      result.validationContext.lparams = context.lparams := by
   unfold observeFamilyValidationOuterLoop at success
   rw [checkInductiveTypes.loopInd.eq_1] at success
   by_cases hdIdx : dIdx < indTypes.size
@@ -1880,7 +1881,7 @@ private theorem familyValidationOuter_sizes_of_run
                             · simp only [show dIdx + 1 ≠ 0 by omega,
                                 if_false, nextStats]
                               exact hparams
-                          rw [← henv]
+                          rw [← henv, ← hlparams]
                           apply familyValidationOuter_sizes_of_run nparams
                             indTypes (dIdx + 1) nextStats
                             telescopeResult.context result nonempty nextInvariant
@@ -1920,7 +1921,7 @@ private theorem familyValidationOuter_sizes_of_run
                               · simp only [show dIdx + 1 ≠ 0 by omega,
                                   if_false, nextStats]
                                 exact hparams
-                            rw [← henv]
+                            rw [← henv, ← hlparams]
                             apply familyValidationOuter_sizes_of_run nparams
                               indTypes (dIdx + 1) nextStats
                               telescopeResult.context result nonempty
@@ -1944,7 +1945,7 @@ private theorem familyValidationOuter_sizes_of_run
       Except.bind] at success
     simp [hlevels, hnindices, hindConsts, hparams] at success
     subst result
-    exact ⟨hnindices, hindConsts, hparams, rfl⟩
+    exact ⟨hnindices, hindConsts, hparams, rfl, rfl⟩
 termination_by indTypes.size - dIdx
 decreasing_by
   all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
@@ -2050,7 +2051,8 @@ theorem FamilyValidationBlockResult.invariants_of_run
     result.stats.params.size = nparams ∧
       result.stats.nindices.size = indTypes.length ∧
       result.stats.indConsts.size = indTypes.length ∧
-      result.validationContext.env = context.env := by
+      result.validationContext.env = context.env ∧
+      result.validationContext.lparams = context.lparams := by
   have indTypes_ne : indTypes ≠ [] := by
     intro hempty
     subst indTypes
@@ -2077,7 +2079,7 @@ theorem FamilyValidationBlockResult.invariants_of_run
     (InductiveStats.initial (context.lparams.map .param)) context result
     size_pos initialInvariant outerRun
   exact ⟨sizes.2.2.1, by simpa using sizes.1,
-    by simpa using sizes.2.1, sizes.2.2.2⟩
+    by simpa using sizes.2.1, sizes.2.2.2.1, sizes.2.2.2.2⟩
 
 /-- Terminal counter invariants exposed by any successful nonempty arbitrary-
 block family-validation run. -/
@@ -2100,7 +2102,17 @@ theorem FamilyValidationBlockResult.validationContext_env_of_run
     (run : observeFamilyValidationBlock nparams indTypes context =
       .ok result) :
     result.validationContext.env = context.env :=
-  (result.invariants_of_run nonempty run).2.2.2
+  (result.invariants_of_run nonempty run).2.2.2.1
+
+/-- Family validation preserves the universe-parameter list in its terminal
+reader context. -/
+theorem FamilyValidationBlockResult.validationContext_lparams_of_run
+    (result : FamilyValidationBlockResult)
+    (nonempty : indTypes.isEmpty = false)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.validationContext.lparams = context.lparams :=
+  (result.invariants_of_run nonempty run).2.2.2.2
 
 /-- Family validation never changes the kernel environment in its reader
 context.  The empty block is handled directly; nonempty blocks use the retained
@@ -2124,6 +2136,28 @@ theorem FamilyValidationBlockResult.validationContext_env_of_run_all
       rfl
   | cons head tail =>
       exact result.validationContext_env_of_run (by simp) run
+
+/-- Family validation preserves universe parameters for both empty and
+nonempty blocks. -/
+theorem FamilyValidationBlockResult.validationContext_lparams_of_run_all
+    (result : FamilyValidationBlockResult)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.validationContext.lparams = context.lparams := by
+  cases indTypes with
+  | nil =>
+      unfold observeFamilyValidationBlock checkInductiveTypes at run
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+        Except.bind] at run
+      rw [checkInductiveTypes.loopInd.eq_1] at run
+      simp [InductiveStats.initial, readThe, MonadReader.read,
+        MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind,
+        ReaderT.pure, Pure.pure, Except.pure, Except.bind] at run
+      subst result
+      rfl
+  | cons head tail =>
+      exact result.validationContext_lparams_of_run (by simp) run
 
 /-- The family-validation result stored by a detailed normalization
 execution. -/
@@ -2179,6 +2213,18 @@ theorem NormalizationCandidateExecution.validationContext_env_all
     execution.validationContext.env = context.env := by
   simpa only [NormalizationCandidateExecution.familyValidationResult] using
     execution.familyValidationResult.validationContext_env_of_run_all
+      (execution.familyValidationResult_run produced)
+
+/-- A successful detailed normalization execution retains the input universe
+parameters in its terminal validation context. -/
+theorem NormalizationCandidateExecution.validationContext_lparams_all
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution) :
+    execution.validationContext.lparams = context.lparams := by
+  simpa only [NormalizationCandidateExecution.familyValidationResult] using
+    execution.familyValidationResult.validationContext_lparams_of_run_all
       (execution.familyValidationResult_run produced)
 
 /-- Recover the universally quantified family-validation continuation
@@ -2604,6 +2650,14 @@ info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyValidationRe
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateExecution.familyValidationResult_run
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.validationContext_lparams_all' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.validationContext_lparams_all
 
 /--
 info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyValidation' depends on axioms: [propext,

@@ -489,6 +489,12 @@ to the replacement.
   provides lightweight interpreters that construct each exact insertion fold
   from the retained declaration equation, semantic list translations, and
   `Aligned`; the primitive replay assembler consumes those results directly.
+  The retained family validator now exports preservation of its universe
+  parameters, and the primitive execution uses that invariant plus the closed
+  recognizer shape to derive the canonical family translations.  Its resulting
+  family insertion supplies the exact Theory lookup used to derive both Bool
+  or Nat constructor translations and the constructor insertion fold; neither
+  phase remains a primitive replay input.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix
@@ -500,7 +506,8 @@ to the replacement.
   final alignment, and derived output ordering; exact Fin/Vector dependency
   maps; the pre-Nat value-preservation regression; full Theory/Verify, default
   Lake, Nix, and flake gates; primitive nested no-op, canonical-source, and
-  retained-execution replay consumer checks; and
+  retained-execution replay consumer checks, canonical family/constructor
+  evidence and insertion checks; and
   compile-time trust manifests for the fixed, normalization, combined replay,
   output-ordering, and both mutual-block roots.
 - **Axiom note:** the guarded roots currently inherit `sorryAx` through

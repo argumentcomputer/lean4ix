@@ -184,6 +184,34 @@ end AddInductive
 
 namespace VInductDecl
 
+/-- One exact kernel constructor record translates to a raw Theory
+constructor when their source headers and strict types agree.  This is the
+candidate-independent semantic core used by both retained checker runs and
+closed canonical inventories. -/
+theorem declaredConstructorInfo_tr
+    {stats : AddInductive.InductiveStats} {induct : Name}
+    {source : Constructor} {cidx : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {raw : VConstVal}
+    (safe : isUnsafe = false)
+    (lparams_eq : context.lparams = Us)
+    (name_eq : source.name = raw.name)
+    (uvars_eq : raw.uvars = Us.length)
+    (type_tr : TrExprS env Us [] source.type raw.type) :
+    TrConstVal .safe env
+      (.ctorInfo (AddInductive.declaredConstructorInfo stats induct source
+        cidx isUnsafe context)) raw := by
+  refine ⟨⟨?_, ?_, ?_⟩, ?_⟩
+  · simp [ConstantInfo.safety, ConstantInfo.isUnsafe,
+      ConstantInfo.isPartial, AddInductive.declaredConstructorInfo, safe]
+  · simpa [ConstantInfo.toConstantVal, ConstantInfo.levelParams,
+      AddInductive.declaredConstructorInfo, lparams_eq] using uvars_eq.symm
+  · simpa [ConstantInfo.toConstantVal, ConstantInfo.levelParams,
+      ConstantInfo.type, AddInductive.declaredConstructorInfo,
+      lparams_eq] using type_tr
+  · simpa [ConstantInfo.toConstantVal, ConstantInfo.name,
+      AddInductive.declaredConstructorInfo] using name_eq
+
 /-- One exact kernel constructor record translates to the raw Theory
 constructor at the same source position.  Metadata-only fields such as owner,
 ordinal, and field count do not enter `TrConstVal`; their exact values remain
@@ -200,17 +228,8 @@ theorem CandidateConstructorSemanticRun.declaredConstructorInfo_tr
     TrConstVal .safe env
       (.ctorInfo (AddInductive.declaredConstructorInfo stats induct source
         cidx isUnsafe context)) raw := by
-  refine ⟨⟨?_, ?_, ?_⟩, ?_⟩
-  · simp [ConstantInfo.safety, ConstantInfo.isUnsafe,
-      ConstantInfo.isPartial, AddInductive.declaredConstructorInfo, safe]
-  · simpa [ConstantInfo.toConstantVal, ConstantInfo.levelParams,
-      AddInductive.declaredConstructorInfo, lparams_eq] using
-        run.uvars_eq.symm
-  · simpa [ConstantInfo.toConstantVal, ConstantInfo.levelParams,
-      ConstantInfo.type, AddInductive.declaredConstructorInfo,
-      lparams_eq] using run.type.source_tr
-  · simpa [ConstantInfo.toConstantVal, ConstantInfo.name,
-      AddInductive.declaredConstructorInfo] using run.name_eq
+  exact _root_.Lean4Lean.VInductDecl.declaredConstructorInfo_tr safe
+    lparams_eq run.name_eq run.uvars_eq run.type.source_tr
 
 /-- Translate one complete source-indexed constructor list, preserving the
 kernel's zero-based constructor ordinals. -/

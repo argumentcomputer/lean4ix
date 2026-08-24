@@ -72,6 +72,12 @@ info: 'Lean4Lean.VInductDecl.familyDeclarationInsertion' depends on axioms: [pro
 #print axioms Lean4Lean.VInductDecl.familyDeclarationInsertion
 
 /--
+info: 'Lean4Lean.VInductDecl.declaredConstructorInfo_tr' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.declaredConstructorInfo_tr
+
+/--
 info: 'Lean4Lean.VInductDecl.constructorDeclarationStaging' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
