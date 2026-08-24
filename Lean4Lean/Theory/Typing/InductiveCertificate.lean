@@ -16,6 +16,12 @@ In particular, `BlockCertificate.ruleClosure` derives the closed payload
 required by the generated-pattern API from the registered, well-formed iota
 rules in the completed environment.  A consumer therefore does not need a
 second closedness assumption in order to use `IotaPat`.
+
+For nested transport, `NestedStagedCertificate` non-invasively pairs the
+restored transaction with its otherwise-erased flattened transaction.  Its
+ordinary `BlockCertificate` projection supplies the flattened rule typing,
+closure, and `IotaPat` facts needed before σ̂-restoration, while its per-rule
+bundle identifies the exact registered restored counterpart.
 -/
 
 namespace Lean4Lean
@@ -28,6 +34,18 @@ structure BlockCertificate (source : VInductDecl) (before after : VEnv) where
   semantic : source.BlockGenerationCertificate before
   success : before.addInductBlockCertified semantic = some after
   beforeWF : before.WF
+
+/-- The generated rule at any exact flattened-constructor position belongs
+to the generation's source-ordered rule inventory. -/
+theorem BlockGenerationChecked.rule_mem_generatedRules
+    {source : VInductDecl} (generation : source.BlockGenerationChecked)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : generation.flatCtors[i]? = some constructor) :
+    generation.rule i constructor ∈ generation.generatedRules := by
+  apply List.mem_map.2
+  refine ⟨(constructor, i), ?_, rfl⟩
+  apply List.mem_of_getElem? (i := i)
+  rw [List.getElem?_zipIdx, hentry, Option.map_some, Nat.zero_add]
 
 namespace BlockCertificate
 
@@ -130,6 +148,40 @@ theorem recursorLookup
   rcases certificate.trace with ⟨trace⟩
   exact trace.rec_lookup hrecursor
 
+/-- The completed environment carries the full generation invariant, not
+only its individual lookup consequences.  The transaction trace identifies
+the semantic certificate's post-family environment with the trace's family
+phase, and every later constructor, recursor, and rule phase is monotone. -/
+theorem generationEnv
+    (certificate : BlockCertificate source before after) :
+    BlockGenerationEnv certificate.generation after := by
+  rcases certificate.trace with ⟨trace⟩
+  have hstage := certificate.semantic.wf.blockWF.1.1
+  rw [← blockTypeConstants_foldlM_eq_stageInductiveTypes before source,
+    trace.addTypes] at hstage
+  have htypeEnv : trace.typeEnv = certificate.semantic.blockEnv :=
+    Option.some.inj hstage
+  have hleTC :=
+    (ctorFold_spec source.blockConstructorConstants trace.addCtors).1
+  have hleCR := (ctorFold_spec certificate.generation.recursors
+    trace.addRecs).1
+  have hleRA : trace.recEnv ≤ after := by
+    simpa only [trace.addRules] using
+      (rulesFold_spec certificate.generation.generatedRules trace.recEnv).1
+  have hleBlock : certificate.semantic.blockEnv ≤ after := by
+    rw [← htypeEnv]
+    exact hleTC.trans (hleCR.trans hleRA)
+  apply certificate.semantic.wf.toBlockGenerationEnv certificate.envLE
+    hleBlock certificate.afterWF.ordered
+  · intro family hfamily
+    apply certificate.familyLookup
+    rw [← certificate.generation.families_map_raw]
+    exact List.mem_map.2 ⟨family, hfamily, rfl⟩
+  · intro constructor hconstructor
+    apply certificate.constructorLookup
+    rw [← certificate.generation.flatCtors_map_raw]
+    exact List.mem_map.2 ⟨constructor, hconstructor, rfl⟩
+
 /-- A source family name was fresh at the dependency boundary. -/
 theorem familyFresh (certificate : BlockCertificate source before after)
     {family : VInductiveType} (hfamily : family ∈ source.types) :
@@ -206,16 +258,6 @@ theorem recursorLookup_unique
   exact Option.some.inj
     (hlookup.symm.trans (certificate.recursorLookup hrecursor))
 
-private theorem rule_mem_generatedRules
-    (generation : source.BlockGenerationChecked)
-    {i : Nat} {constructor : NormalizedBlockCtor}
-    (hentry : generation.flatCtors[i]? = some constructor) :
-    generation.rule i constructor ∈ generation.generatedRules := by
-  apply List.mem_map.2
-  refine ⟨(constructor, i), ?_, rfl⟩
-  apply List.mem_of_getElem? (i := i)
-  rw [List.getElem?_zipIdx, hentry, Option.map_some, Nat.zero_add]
-
 private theorem closedN_lamN_body :
     ∀ {binders : List VExpr} {body : VExpr} {k : Nat},
       (VExpr.lamN binders body).ClosedN k →
@@ -271,12 +313,12 @@ theorem ruleClosure
     certificate.generation.RuleClosure := by
   constructor
   · intro i constructor hentry
-    have hmem := rule_mem_generatedRules certificate.generation hentry
+    have hmem := certificate.generation.rule_mem_generatedRules hentry
     exact (certificate.ruleWF hmem).2.closedN
       certificate.afterWF.ordered trivial
   · intro constructor hconstructor expression hexpression
     obtain ⟨i, hentry⟩ := List.mem_iff_getElem?.1 hconstructor
-    have hmem := rule_mem_generatedRules certificate.generation hentry
+    have hmem := certificate.generation.rule_mem_generatedRules hentry
     have hlhs := (certificate.ruleWF hmem).1.closedN
       certificate.afterWF.ordered trivial
     rw [certificate.generation.rule_lhs i constructor] at hlhs
@@ -335,7 +377,7 @@ theorem recursorRuleFacts
     {i : Nat} {constructor : NormalizedBlockCtor}
     (hentry : certificate.generation.ruleEntry i constructor) :
     certificate.RecursorRuleFacts i constructor := by
-  have hmember := rule_mem_generatedRules certificate.generation hentry
+  have hmember := certificate.generation.rule_mem_generatedRules hentry
   exact {
     entry := hentry
     member := hmember
@@ -356,6 +398,17 @@ structure NestedBlockCertificate
   semantic : nested.WF before
   success : before.addInductNested nested = some after
   beforeWF : before.WF
+
+/-- The exact restoration of a flattened rule entry belongs to the nested
+transaction's restored rule inventory. -/
+theorem NestedBlockChecked.restoredRule_mem
+    {source : VInductDecl} (nested : source.NestedBlockChecked)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : nested.generation.ruleEntry i constructor) :
+    nested.restoredRule i constructor ∈ nested.generatedRules := by
+  apply List.mem_map.2
+  exact ⟨nested.generation.rule i constructor,
+    nested.generation.rule_mem_generatedRules hentry, rfl⟩
 
 namespace NestedBlockCertificate
 
@@ -458,6 +511,25 @@ theorem ruleWF
     rule.WF after :=
   certificate.afterWF.ordered.defEqWF (certificate.ruleRegistered hrule)
 
+/-- The restored rule at an exact flattened position is registered by the
+completed nested transaction. -/
+theorem restoredRuleRegistered
+    (certificate : NestedBlockCertificate source before after)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : certificate.nested.generation.ruleEntry i constructor) :
+    after.defeqs (certificate.nested.restoredRule i constructor) :=
+  certificate.ruleRegistered
+    (certificate.nested.restoredRule_mem hentry)
+
+/-- The restored rule at an exact flattened position is well formed in the
+completed nested environment. -/
+theorem restoredRuleWF
+    (certificate : NestedBlockCertificate source before after)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : certificate.nested.generation.ruleEntry i constructor) :
+    (certificate.nested.restoredRule i constructor).WF after :=
+  certificate.ruleWF (certificate.nested.restoredRule_mem hentry)
+
 /-- Exact family lookups are unique. -/
 theorem familyLookup_unique
     (certificate : NestedBlockCertificate source before after)
@@ -490,6 +562,105 @@ theorem recursorLookup_unique
 
 end NestedBlockCertificate
 
+/-! ## Paired flattened/restored nested staging -/
+
+/-- A completed nested transaction together with the exact flattened
+generation transaction from which restoration transport proceeds.  This is
+separate from `NestedBlockCertificate`: consumers of an already-restored
+transaction retain the smaller package, while transport proofs explicitly
+retain the otherwise-erased flattened staging environment. -/
+structure NestedStagedCertificate
+    (source : VInductDecl) (before flatAfter after : VEnv) where
+  restored : source.NestedBlockCertificate before after
+  flatBlockEnv : VEnv
+  flatWF : restored.nested.generation.WF before flatBlockEnv
+  flatSuccess : before.addInductBlockGeneration
+    restored.nested.generation = some flatAfter
+
+namespace NestedStagedCertificate
+
+variable {source : VInductDecl} {before flatAfter after : VEnv}
+
+/-- Erase the restored half and expose the ordinary certificate for the
+exact flattened generation descriptor. -/
+def flatCertificate
+    (certificate : NestedStagedCertificate source before flatAfter after) :
+    certificate.restored.nested.elim.flat.BlockCertificate before
+      flatAfter where
+  semantic := {
+    generation := certificate.restored.nested.generation
+    blockEnv := certificate.flatBlockEnv
+    wf := certificate.flatWF }
+  success := certificate.flatSuccess
+  beforeWF := certificate.restored.beforeWF
+
+/-- The flattened staging transaction preserves environment
+well-formedness. -/
+theorem flatAfterWF
+    (certificate : NestedStagedCertificate source before flatAfter after) :
+    flatAfter.WF :=
+  certificate.flatCertificate.afterWF
+
+/-- The flattened staging transaction supplies the exact closedness bundle
+for its generated iota patterns. -/
+theorem flatRuleClosure
+    (certificate : NestedStagedCertificate source before flatAfter after) :
+    certificate.restored.nested.generation.RuleClosure :=
+  certificate.flatCertificate.ruleClosure
+
+/-- Recover the exact generated iota pattern at a flattened constructor
+position from the retained staging transaction. -/
+theorem flatRecursorPattern
+    (certificate : NestedStagedCertificate source before flatAfter after)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : certificate.restored.nested.generation.ruleEntry i constructor) :
+    certificate.restored.nested.generation.IotaPat
+      certificate.flatRuleClosure
+      ((certificate.restored.nested.generation.rulePattern
+        constructor).toPattern)
+      (certificate.restored.nested.generation.ruleRHS
+          certificate.flatRuleClosure hentry,
+        certificate.restored.nested.generation.ruleCheck
+          certificate.flatRuleClosure (List.mem_of_getElem? hentry)) :=
+  certificate.flatCertificate.recursorPattern hentry
+
+/-- Recover registration, well-formedness, and the generated pattern from
+one exact flattened rule position. -/
+theorem flatRecursorRuleFacts
+    (certificate : NestedStagedCertificate source before flatAfter after)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : certificate.restored.nested.generation.ruleEntry i constructor) :
+    certificate.flatCertificate.RecursorRuleFacts i constructor :=
+  certificate.flatCertificate.recursorRuleFacts hentry
+
+/-- Per-rule nested transport bundle: one flattened position determines its
+ordinary registered rule and generated pattern as well as the exact restored
+rule registered and well formed in the final nested environment. -/
+structure RecursorRuleFacts
+    (certificate : NestedStagedCertificate source before flatAfter after)
+    (i : Nat) (constructor : NormalizedBlockCtor) : Prop where
+  flat : certificate.flatCertificate.RecursorRuleFacts i constructor
+  restoredMember : certificate.restored.nested.restoredRule i constructor ∈
+    certificate.restored.nested.generatedRules
+  restoredRegistered : after.defeqs
+    (certificate.restored.nested.restoredRule i constructor)
+  restoredWF :
+    (certificate.restored.nested.restoredRule i constructor).WF after
+
+/-- Assemble both sides of one nested rule from the same exact flattened
+constructor position. -/
+theorem recursorRuleFacts
+    (certificate : NestedStagedCertificate source before flatAfter after)
+    {i : Nat} {constructor : NormalizedBlockCtor}
+    (hentry : certificate.restored.nested.generation.ruleEntry i constructor) :
+    certificate.RecursorRuleFacts i constructor := {
+  flat := certificate.flatRecursorRuleFacts hentry
+  restoredMember := certificate.restored.nested.restoredRule_mem hentry
+  restoredRegistered := certificate.restored.restoredRuleRegistered hentry
+  restoredWF := certificate.restored.restoredRuleWF hentry }
+
+end NestedStagedCertificate
+
 end VInductDecl
 
 end Lean4Lean
@@ -499,6 +670,10 @@ end Lean4Lean
 /-- info: 'Lean4Lean.VInductDecl.BlockCertificate.afterWF' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.BlockCertificate.afterWF
+
+/-- info: 'Lean4Lean.VInductDecl.BlockCertificate.generationEnv' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockCertificate.generationEnv
 
 /-- info: 'Lean4Lean.VInductDecl.BlockCertificate.ruleClosure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
@@ -515,3 +690,47 @@ end Lean4Lean
 /-- info: 'Lean4Lean.VInductDecl.NestedBlockCertificate.ruleWF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.NestedBlockCertificate.ruleWF
+
+/-- info: 'Lean4Lean.VInductDecl.NestedBlockChecked.restoredRule_mem' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedBlockChecked.restoredRule_mem
+
+/-- info: 'Lean4Lean.VInductDecl.NestedBlockCertificate.restoredRuleWF' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedBlockCertificate.restoredRuleWF
+
+/-- info: 'Lean4Lean.VInductDecl.NestedStagedCertificate.flatAfterWF' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedStagedCertificate.flatAfterWF
+
+/--
+info: 'Lean4Lean.VInductDecl.NestedStagedCertificate.flatRuleClosure' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedStagedCertificate.flatRuleClosure
+
+/--
+info: 'Lean4Lean.VInductDecl.NestedStagedCertificate.flatRecursorPattern' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedStagedCertificate.flatRecursorPattern
+
+/--
+info: 'Lean4Lean.VInductDecl.NestedStagedCertificate.flatRecursorRuleFacts' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedStagedCertificate.flatRecursorRuleFacts
+
+/--
+info: 'Lean4Lean.VInductDecl.NestedStagedCertificate.recursorRuleFacts' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.NestedStagedCertificate.recursorRuleFacts

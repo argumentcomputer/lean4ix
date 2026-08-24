@@ -156,6 +156,87 @@ theorem VEnv.OnTel.instN {env : VEnv} (henv : env.Ordered) {U : Nat}
   | _ :: _, _, _, _, W, ⟨⟨u, hA⟩, hT⟩ =>
     ⟨⟨u, hA.instN henv W h₀⟩, VEnv.OnTel.instN henv h₀ W.succ hT⟩
 
+/-- Extending the closed base of a well-formed telescope on the right leaves
+its binder expressions unchanged. -/
+theorem VEnv.OnTel.weakR {env : VEnv} (henv : env.Ordered)
+    {U : Nat} {Γ Γ' : List VExpr}
+    (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {As : List VExpr}, VEnv.OnTel env U Γ As →
+      VEnv.OnTel env U (Γ ++ Γ') As
+  | [], _ => trivial
+  | A :: As, ⟨hA, hAs⟩ => by
+      obtain ⟨u, hA⟩ := hA
+      refine ⟨⟨u, hA.weakR henv (VEnv.CtxWF.closed henv hΓ) Γ'⟩, ?_⟩
+      have hΓA : OnCtx (A :: Γ) (env.IsType U) :=
+        ⟨hΓ, ⟨u, hA⟩⟩
+      simpa using VEnv.OnTel.weakR henv (Γ := A :: Γ) (Γ' := Γ')
+        hΓA hAs
+
+/-- Pi injectivity turns equality of two iterated-Pi sorts into structural
+telescope equality.  This is the consumer-side inverse of
+`TelDefEq.forallN_defeq`. -/
+theorem VEnv.TelDefEq.of_forallN_sort_defeq
+    {env : VEnv} (henv : env.WF) {U : Nat} {Γ : List VExpr}
+    (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {As As' : List VExpr} {u u' : VLevel},
+      env.IsDefEqU U Γ
+        (VExpr.forallN As (.sort u))
+        (VExpr.forallN As' (.sort u')) →
+      env.TelDefEq U Γ As As'
+  | [], [], _, _, _ => trivial
+  | [], _ :: _, _, _, h =>
+      (VEnv.IsDefEqU.sort_forallE_inv henv hΓ h).elim
+  | _ :: _, [], _, _, h =>
+      (VEnv.IsDefEqU.sort_forallE_inv henv hΓ h.symm).elim
+  | A :: As, A' :: As', _, _, h => by
+      obtain ⟨⟨uA, hA⟩, ⟨uB, hB⟩⟩ :=
+        VEnv.IsDefEqU.forallE_inv henv hΓ h
+      refine ⟨⟨uA, hA⟩, ?_⟩
+      exact VEnv.TelDefEq.of_forallN_sort_defeq henv (Γ := A :: Γ)
+        ⟨hΓ, ⟨uA, hA.hasType.1⟩⟩ ⟨.sort uB, hB⟩
+
+/-- Pi injectivity recovers structural telescope equality from arbitrary
+iterated-Pi codomains when the caller already knows the two telescope
+arities agree.  Unlike `of_forallN_sort_defeq`, no terminal sort/Pi
+disjointness is needed. -/
+theorem VEnv.TelDefEq.of_forallN_defeq_of_length
+    {env : VEnv} (henv : env.WF) {U : Nat} {Γ : List VExpr}
+    (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {As As' : List VExpr} {C C' : VExpr},
+      As.length = As'.length →
+      env.IsDefEqU U Γ (VExpr.forallN As C) (VExpr.forallN As' C') →
+      env.TelDefEq U Γ As As'
+  | [], [], _, _, _, _ => trivial
+  | [], _ :: _, _, _, hlen, _ => by simp at hlen
+  | _ :: _, [], _, _, hlen, _ => by simp at hlen
+  | A :: As, A' :: As', _, _, hlen, h => by
+      obtain ⟨⟨uA, hA⟩, ⟨uB, hB⟩⟩ :=
+        VEnv.IsDefEqU.forallE_inv henv hΓ h
+      refine ⟨⟨uA, hA⟩, ?_⟩
+      exact VEnv.TelDefEq.of_forallN_defeq_of_length henv
+        (Γ := A :: Γ) ⟨hΓ, ⟨uA, hA.hasType.1⟩⟩
+        (by simpa using hlen) ⟨.sort uB, hB⟩
+
+/-- Definitionally equal substitutions into a well-formed dependent
+telescope produce structurally equal instantiated telescopes. -/
+theorem VEnv.OnTel.telDefEq_instDF
+    {env : VEnv} (henv : env.WF) {U : Nat} {Γ : List VExpr}
+    (hΓ : OnCtx Γ (env.IsType U))
+    {A a a' : VExpr}
+    (ha : env.IsDefEq U Γ a a' A)
+    {As : List VExpr}
+    (hAs : VEnv.OnTel env U (A :: Γ) As) :
+    env.TelDefEq U Γ
+      (VExpr.instTelN a As 0)
+      (VExpr.instTelN a' As 0) := by
+  have hsort : env.IsType U (As.reverse ++ A :: Γ) (.sort .zero) :=
+    ⟨.succ .zero, VEnv.HasType.sort trivial⟩
+  obtain ⟨u, htower⟩ := VEnv.IsType.forallN hAs hsort
+  have hinst := VEnv.IsDefEq.instDF henv.ordered hΓ htower ha
+  apply VEnv.TelDefEq.of_forallN_sort_defeq henv hΓ
+  refine ⟨.sort u, ?_⟩
+  simpa [VExpr.instN_forallN, VExpr.inst] using hinst
+
 /-- Pointwise defeq of two application spines against a peeled pi type. -/
 inductive VEnv.SpineDefEq (env : VEnv) (U : Nat) (Γ : List VExpr) :
     VExpr → List VExpr → List VExpr → VExpr → Prop where
@@ -299,6 +380,97 @@ theorem VEnv.SpineWF.instRev_defeq
         (by simpa [VExpr.instTelN_length] using hlen') hterminal'
       simpa [VExpr.instRev, hlen'] using hout
 
+/-- Replay a saturated leading telescope from a longer application spine,
+replacing the suffix-facing result by an arbitrary new codomain.  Generated
+iota rules use this to retain the recursor's parameter/motive/minor prefix
+while replacing its index-and-major tail with constructor fields. -/
+theorem VEnv.SpineWF.prefixForallN
+    {env : VEnv} {U : Nat} {Γ : List VExpr}
+    {binders : List VExpr} {oldResult newResult : VExpr}
+    {args suffix : List VExpr} {B : VExpr}
+    (h : env.SpineWF U Γ (VExpr.forallN binders oldResult)
+      (args ++ suffix) B)
+    (hlen : args.length = binders.length) :
+    env.SpineWF U Γ (VExpr.forallN binders newResult) args
+      (VExpr.instRev newResult args) := by
+  obtain ⟨_, hprefix, _⟩ := h.split
+  exact hprefix.retarget hlen newResult
+
+/-- Retain the exact suffix of a spine after consuming a saturated leading
+telescope.  Unlike `SpineWF.split`, the result names the suffix cursor as the
+iterated instantiation of the original codomain. -/
+theorem VEnv.SpineWF.suffixForallN
+    {env : VEnv} {U : Nat} {Γ : List VExpr} :
+    ∀ {binders args : List VExpr} {result B : VExpr}
+      {suffix : List VExpr},
+      env.SpineWF U Γ (VExpr.forallN binders result)
+        (args ++ suffix) B →
+      args.length = binders.length →
+      env.SpineWF U Γ (VExpr.instRev result args) suffix B
+  | [], args, result, B, suffix, h, hlen => by
+      obtain rfl : args = [] := List.length_eq_zero_iff.1 hlen
+      change env.SpineWF U Γ result suffix B at h
+      exact h
+  | _ :: binders, [], result, B, suffix, _h, hlen => by
+      simp at hlen
+  | D :: binders, e :: args, result, B, suffix, h, hlen => by
+      cases h with
+      | cons _ hrest =>
+        rw [VExpr.instN_forallN] at hrest
+        have hlen' : args.length = binders.length := by simpa using hlen
+        have hlen'' : args.length =
+            (VExpr.instTelN e binders 0).length := by
+          rw [VExpr.instTelN_length]
+          exact hlen'
+        have hout := VEnv.SpineWF.suffixForallN hrest hlen''
+        simpa [VExpr.instRev, hlen'] using hout
+
+/-- Assemble a generated capture spine from a saturated common prefix and a
+field spine.  The source spine may continue with an unrelated suffix (for an
+iota site, indices and the major premise); only its common prefix is replayed
+against the new field-facing codomain. -/
+theorem VEnv.SpineWF.prefixAppendForallN
+    {env : VEnv} {U : Nat} {Γ : List VExpr}
+    {common fields : List VExpr} {oldResult result : VExpr}
+    {commonArgs suffix fieldArgs : List VExpr} {sourceResult B : VExpr}
+    (hsource : env.SpineWF U Γ (VExpr.forallN common oldResult)
+      (commonArgs ++ suffix) sourceResult)
+    (hlen : commonArgs.length = common.length)
+    (hfields : env.SpineWF U Γ
+      (VExpr.instRev (VExpr.forallN fields result) commonArgs)
+      fieldArgs B) :
+    env.SpineWF U Γ (VExpr.forallN (common ++ fields) result)
+      (commonArgs ++ fieldArgs) B := by
+  rw [VExpr.forallN_append]
+  exact (hsource.prefixForallN hlen).append hfields
+
+/-- Extract the final argument typing after a saturated leading telescope.
+Unlike a split through an existential cursor, this structural inversion
+retains the exact iterated instantiation of the final Pi domain. -/
+theorem VEnv.SpineWF.lastForallN
+    {env : VEnv} {U : Nat} {Γ : List VExpr} :
+    ∀ {binders args : List VExpr} {A C a B : VExpr},
+      env.SpineWF U Γ (VExpr.forallN binders (.forallE A C))
+        (args ++ [a]) B →
+      args.length = binders.length →
+      env.HasType U Γ a (VExpr.instRev A args)
+  | [], args, A, C, a, B, h, hlen => by
+      obtain rfl : args = [] := List.length_eq_zero_iff.1 hlen
+      cases h with
+      | cons ha _ => exact ha
+  | _ :: binders, [], A, C, a, B, h, hlen => by simp at hlen
+  | D :: binders, e :: args, A, C, a, B, h, hlen => by
+      cases h with
+      | cons _ hrest =>
+        rw [VExpr.instN_forallN] at hrest
+        have hlen' : args.length = binders.length := by simpa using hlen
+        have hlen'' : args.length =
+            (VExpr.instTelN e binders 0).length := by
+          rw [VExpr.instTelN_length]
+          exact hlen'
+        have hout := VEnv.SpineWF.lastForallN hrest hlen''
+        simpa [VExpr.instRev, hlen'] using hout
+
 /-- Iterated inversion of a lambda tower's typing: the telescope is
 well-formed and the body is typed under it. -/
 theorem VEnv.HasType.lamN_wf {env : VEnv} {U : Nat} (henv : env.Ordered) :
@@ -353,6 +525,52 @@ theorem Pattern.Check.OK.of_foldr {p : Pattern} {α : Type _}
     rcases List.mem_cons.1 hx with rfl | hx
     · exact h1
     · exact h3 x hx
+
+/-- Build the `OK` predicate for a folded list of defeq checks from one
+pointwise fact per list entry and an already-valid tail. -/
+theorem Pattern.Check.OK.foldr {p : Pattern} {α : Type _}
+    {df : VExpr → VExpr → Prop} {m1 : List VLevel} {m2 : p.Path → VExpr}
+    (f g : α → p.RHS) :
+    ∀ (xs : List α) {rest : p.Check},
+      (∀ x ∈ xs, df ((f x).apply m1 m2) ((g x).apply m1 m2)) →
+      rest.OK df m1 m2 →
+      (xs.foldr (fun x acc => Pattern.Check.defeq (f x) (g x) acc)
+        rest).OK df m1 m2
+  | [], _, _, hrest => hrest
+  | x :: xs, _rest, hall, hrest =>
+    ⟨hall x (.head _), Pattern.Check.OK.foldr f g xs
+      (fun y hy => hall y (.tail _ hy)) hrest⟩
+
+/-- Read a pointwise relation on two mapped lists at every position selected
+by the zip of their source lists. -/
+private theorem forall₂_map_zip {α β : Type _}
+    {R : VExpr → VExpr → Prop} (f : α → VExpr) (g : β → VExpr) :
+    ∀ (xs : List α) (ys : List β),
+      List.Forall₂ R (xs.map f) (ys.map g) →
+      ∀ pair ∈ xs.zip ys, R (f pair.1) (g pair.2)
+  | [], _, _ => by simp
+  | _ :: _, [], h => by cases h
+  | x :: xs, y :: ys, .cons h hrest => by
+    intro pair hpair
+    rcases List.mem_cons.1 hpair with rfl | hpair
+    · exact h
+    · exact forall₂_map_zip f g xs ys hrest pair hpair
+
+/-- The swapped form of `forall₂_map_zip`, matching the generated index
+check's `(expected index, recursor path)` zip orientation. -/
+private theorem forall₂_map_zip_swap {α β : Type _}
+    {R : VExpr → VExpr → Prop} (f : α → VExpr) (g : β → VExpr) :
+    ∀ (xs : List α) (ys : List β),
+      List.Forall₂ R (ys.map g) (xs.map f) →
+      ∀ pair ∈ xs.zip ys, R (g pair.2) (f pair.1)
+  | [], [], _ => by simp
+  | [], _ :: _, h => by cases h
+  | _ :: _, [], h => by cases h
+  | x :: xs, y :: ys, .cons h hrest => by
+    intro pair hpair
+    rcases List.mem_cons.1 hpair with rfl | hpair
+    · exact h
+    · exact forall₂_map_zip_swap f g xs ys hrest pair hpair
 
 /-- Build a pointwise relation between two mapped lists from their zip. -/
 private theorem forall₂_zip_map {α β : Type _} (F : α → VExpr) (G : β → VExpr)
@@ -437,6 +655,135 @@ private theorem forall₂_append {R : VExpr → VExpr → Prop} :
 
 namespace VInductDecl
 
+namespace BlockGenerationEnv
+
+variable {source : VInductDecl} {gen : BlockGenerationChecked source}
+  {env : VEnv} (S : BlockGenerationEnv gen env)
+include S
+
+/-- At recursor universes, a generated constructor head exposes the exact
+generation-parameter and field telescope and ends in its normalized owner
+family application.  This transports the source-level emitted head across
+the generation/checked parameter telescope equality. -/
+theorem ctorConst_emitted_rec
+    {constructor : NormalizedBlockCtor}
+    (hconstructor : constructor ∈ gen.flatCtors)
+    {family : NormalizedFamily}
+    (hname : family.raw.name = constructor.familyName) :
+    env.HasType gen.recUvars []
+      (.const constructor.ctor.raw.name gen.sourceLevels)
+      (VExpr.forallN
+        (gen.paramsTel ++
+          constructor.ctor.fieldsR source.uvars source.nparams
+            gen.elimination)
+        (gen.ruleCtorType constructor)) := by
+  let fields := constructor.ctor.fieldsR source.uvars source.nparams
+    gen.elimination
+  have hchecked := (S.ctorConst_emitted_decl hconstructor).instL
+    (U' := gen.recUvars) gen.sourceLevels_wf
+  have hparams := S.generationParams_defeq.instL
+    (U' := gen.recUvars) gen.sourceLevels_wf
+  have hparams' : env.TelDefEq gen.recUvars [] gen.paramsTel
+      (gen.block.checked.params.map (VExpr.instL gen.sourceLevels)) := by
+    simpa [BlockGenerationChecked.paramsTel] using hparams
+  have htel : env.TelDefEq gen.recUvars []
+      (gen.paramsTel ++ fields)
+      (gen.block.checked.params.map (VExpr.instL gen.sourceLevels) ++
+        fields) := by
+    exact hparams'.append_refl
+      (by simpa only [List.append_nil] using
+        S.generationFields_onTel_rec hconstructor)
+  have happ := S.ctorApp_emitted_rec hconstructor hname
+  have hctx : OnCtx (fields.reverse ++ gen.paramsTel.reverse)
+      (env.IsType gen.recUvars) := by
+    have hall := VEnv.OnTel.append S.paramsTel_onTel
+      (by simpa [List.append_nil] using
+        S.generationFields_onTel_rec hconstructor)
+    simpa [fields] using
+      (VEnv.OnTel.onCtx (env := env) (U := gen.recUvars)
+        (As := gen.paramsTel ++ fields) (Γ := []) (by trivial) hall)
+  obtain ⟨u, hterminal⟩ := happ.isType S.ord hctx
+  have hterminal' : env.IsDefEq gen.recUvars
+      ((gen.paramsTel ++ fields).reverse ++ [])
+      (gen.ruleCtorType constructor)
+      (gen.ruleCtorType constructor) (.sort u) := by
+    simpa [fields, BlockGenerationChecked.ruleCtorType, hname,
+      BlockGenerationChecked.ruleFieldCount, VEnv.HasType] using hterminal
+  obtain ⟨_, htypes⟩ := htel.forallN_defeq hterminal'
+  apply htypes.defeq'
+  have hresultEq :
+      (NormalizedBlockCtor.resultTarget gen constructor).instL
+        gen.sourceLevels = gen.ruleCtorType constructor := by
+    simp [NormalizedBlockCtor.resultTarget,
+      BlockGenerationChecked.ruleCtorType,
+      BlockGenerationChecked.ruleFieldCount,
+      NormalizedCtor.resultIndicesR, NormalizedCtor.fieldsR_length,
+      VExpr.instL_appN, List.map_append, bvarRevRange_instL, VExpr.instL,
+      VLevel.params_map_inst_params']
+  rw [VExpr.instL_forallN, hresultEq] at hchecked
+  simpa [fields, NormalizedBlockCtor.emittedBinders,
+    NormalizedCtor.fieldsR, List.map_append,
+    VExpr.instL_forallN, VExpr.instL,
+    VLevel.params_map_inst_params'] using hchecked
+
+/-- A selected constructor's generated result-index arity is exactly the
+index arity of its certified owner family. -/
+theorem ruleIdx_length_eq_recIndexBinders
+    {constructor : NormalizedBlockCtor}
+    (hconstructor : constructor ∈ gen.flatCtors)
+    {family : NormalizedFamily} (hfamily : family ∈ gen.families)
+    (hindices : family.view.indices = constructor.familyIndices) :
+    (gen.ruleIdx constructor).length =
+      (gen.recIndexBinders family).length := by
+  have hsp := S.result_transport hconstructor hfamily hindices
+    [] (g := 0) rfl [] (d := 0) rfl
+  have hlen := hsp.forallN_sort_length
+  simpa only [BlockGenerationChecked.ruleIdx, List.length_map,
+    BlockGenerationChecked.recIndexBinders,
+    VExpr.liftTelN_length] using hlen
+
+/-- Instantiate a generated recursor lookup at arbitrary runtime universe
+levels and weaken it into an arbitrary local context. -/
+theorem recursor_hasType_instL
+    {family : NormalizedFamily} (hfamily : family ∈ gen.families)
+    (hrec : env.constants (.str family.raw.name "rec") =
+      some (gen.recursor family))
+    {U : Nat} (levels : List VLevel)
+    (hlevels : ∀ level ∈ levels, level.WF U)
+    (hlen : levels.length = gen.recUvars) {Γ : List VExpr} :
+    env.HasType U Γ
+      (.const (.str family.raw.name "rec") levels)
+      ((gen.recType family).instL levels) := by
+  have h := (S.recursor_hasType hfamily hrec
+    (Γ := [])).instL hlevels
+  simp only [VExpr.instL, List.map_nil] at h
+  rw [show gen.recLevels.map (VLevel.inst levels) = levels from
+    VLevel.inst_map_id hlen] at h
+  exact h.weak0 S.ord
+
+/-- Instantiate the normalized emitted constructor-head type at arbitrary
+runtime recursor levels and weaken it into an arbitrary local context. -/
+theorem ctorConst_emitted_instL
+    {constructor : NormalizedBlockCtor}
+    (hconstructor : constructor ∈ gen.flatCtors)
+    {family : NormalizedFamily}
+    (hname : family.raw.name = constructor.familyName)
+    {U : Nat} (levels : List VLevel)
+    (hlevels : ∀ level ∈ levels, level.WF U) {Γ : List VExpr} :
+    env.HasType U Γ
+      (.const constructor.ctor.raw.name
+        (gen.sourceLevels.map (VLevel.inst levels)))
+      (VExpr.forallN
+        ((gen.paramsTel ++
+          constructor.ctor.fieldsR source.uvars source.nparams
+            gen.elimination).map (VExpr.instL levels))
+        ((gen.ruleCtorType constructor).instL levels)) := by
+  have h := (S.ctorConst_emitted_rec hconstructor hname).instL hlevels
+  rw [VExpr.instL_forallN] at h
+  exact h.weak0 S.ord
+
+end BlockGenerationEnv
+
 namespace BlockGenerationChecked
 
 variable {source : VInductDecl} (gen : source.BlockGenerationChecked)
@@ -468,6 +815,275 @@ theorem ruleBinders_length (c : NormalizedBlockCtor) :
     motiveTypes, gen.motiveTypesAux_length, minorTypes,
     gen.minorTypesAux_length, VExpr.liftTelN_length, ruleFieldCount]
   try omega
+
+/-- Completed recursor and constructor spine arities make the canonical
+capture list exactly as long as the generated rule telescope. -/
+theorem ruleCaptureValues_length (c : NormalizedBlockCtor)
+    {fArgs aArgs : List VExpr}
+    (hMlen : fArgs.length = gen.ruleMajorArity c)
+    (hNlen : aArgs.length = gen.ruleArgArity c) :
+    (gen.ruleCaptureValues c fArgs aArgs).length =
+      (gen.ruleBinders c).length := by
+  rw [ruleCaptureValues, List.length_append, List.length_take,
+    List.length_drop, hMlen, hNlen, gen.ruleBinders_length]
+  simp only [ruleMajorArity, ruleArgArity]
+  omega
+
+/-- Pointwise expression transport commutes with the generator's two
+canonical capture slices. -/
+theorem ruleCaptureValues_map (c : NormalizedBlockCtor)
+    (f : VExpr → VExpr) (fArgs aArgs : List VExpr) :
+    (gen.ruleCaptureValues c fArgs aArgs).map f =
+      gen.ruleCaptureValues c (fArgs.map f) (aArgs.map f) := by
+  simp [ruleCaptureValues, List.map_take, List.map_drop]
+
+/-- Canonical captures inspect only the pre-major common prefix, so first
+truncating a full recursor argument list at the generated major index does
+not change them. -/
+theorem ruleCaptureValues_take_major (c : NormalizedBlockCtor)
+    (fArgs aArgs : List VExpr) :
+    gen.ruleCaptureValues c (fArgs.take (gen.ruleMajorArity c)) aArgs =
+      gen.ruleCaptureValues c fArgs aArgs := by
+  unfold ruleCaptureValues
+  rw [List.take_take, Nat.min_eq_left]
+  simp only [ruleMajorArity]
+  omega
+
+/-- The generated binder telescope is the shared parameter/motive/minor
+prefix followed by the selected constructor's field telescope. -/
+theorem ruleBinders_eq_common_append_fields (c : NormalizedBlockCtor) :
+    gen.ruleBinders c = gen.ruleCommonBinders ++ gen.ruleFieldBinders c := by
+  rfl
+
+theorem ruleCommonBinders_length :
+    gen.ruleCommonBinders.length =
+      source.nparams + gen.familyCount + gen.minorCount := by
+  simp only [ruleCommonBinders, List.length_append, gen.paramsTel_length,
+    gen.motiveTypes_length, gen.minorTypes_length]
+
+/-- A generated recursor type consists of the rule-common prefix followed by
+the selected family's indices, major domain, and motive result. -/
+theorem recType_eq_common (family : NormalizedFamily) :
+    gen.recType family =
+      VExpr.forallN gen.ruleCommonBinders
+        (VExpr.forallN (gen.recIndexBinders family)
+          (.forallE (gen.recMajorDomain family)
+            (gen.recMotiveResult family))) := by
+  simp only [BlockGenerationChecked.recType, ruleCommonBinders,
+    recIndexBinders, recMajorDomain, recMotiveResult]
+  rw [VExpr.forallN_append, VExpr.forallN_append]
+
+/-- Universe-instantiated form of `recType_eq_common`, suitable for an exact
+runtime recursor-head spine. -/
+theorem recType_instL_common (family : NormalizedFamily)
+    (levels : List VLevel) :
+    (gen.recType family).instL levels =
+      VExpr.forallN (gen.ruleCommonBinders.map (VExpr.instL levels))
+        (VExpr.forallN
+          ((gen.recIndexBinders family).map (VExpr.instL levels))
+          (.forallE ((gen.recMajorDomain family).instL levels)
+            ((gen.recMotiveResult family).instL levels))) := by
+  rw [gen.recType_eq_common, VExpr.instL_forallN,
+    VExpr.instL_forallN]
+  rfl
+
+/-- Saturating a generated recursor's major domain reads back the recursor
+parameter slice and its explicit index suffix. -/
+theorem recMajorDomain_instL_instRev
+    (family : NormalizedFamily) (levels : List VLevel)
+    (args : List VExpr)
+    (hlen : args.length = source.nparams + gen.familyCount +
+      gen.minorCount + (gen.idxTel family).length) :
+    VExpr.instRev ((gen.recMajorDomain family).instL levels) args =
+      VExpr.appN
+        (.const family.raw.name
+          (gen.sourceLevels.map (VLevel.inst levels)))
+        (args.take source.nparams ++
+          args.drop (source.nparams + gen.familyCount +
+            gen.minorCount)) := by
+  rw [BlockGenerationChecked.recMajorDomain, VExpr.instL_appN]
+  simp only [VExpr.instL]
+  rw [VExpr.instRev_appN]
+  rw [VExpr.instRev_closedN _ (C := .const family.raw.name
+    (gen.sourceLevels.map (VLevel.inst levels))) trivial]
+  simp only [List.map_append]
+  rw [VExpr.bvarRevRange_map_instL, VExpr.bvarRevRange_map_instL]
+  rw [VExpr.map_instRev_bvarRevRange_seg _ source.nparams _ (by omega),
+    VExpr.map_instRev_bvarRevRange_seg _ (gen.idxTel family).length 0
+      (by omega)]
+  rw [show args.length -
+      ((gen.idxTel family).length + gen.familyCount + gen.minorCount) -
+      source.nparams = 0 by omega, List.drop_zero]
+  have hdropLen :
+      (args.drop (source.nparams + gen.familyCount + gen.minorCount)).length =
+        (gen.idxTel family).length := by
+    rw [List.length_drop, hlen]
+    omega
+  rw [show args.length - 0 - (gen.idxTel family).length =
+      source.nparams + gen.familyCount + gen.minorCount by omega]
+  rw [List.take_of_length_le (Nat.le_of_eq hdropLen)]
+
+/-- For an unindexed generated rule, saturating the constructor's normalized
+owner-family result reads back exactly its parameter prefix. -/
+theorem ruleCtorType_instL_instRev_of_unindexed
+    (constructor : NormalizedBlockCtor) (levels : List VLevel)
+    (args : List VExpr)
+    (hidx : gen.ruleIdx constructor = [])
+    (hlen : args.length = gen.ruleArgArity constructor) :
+    VExpr.instRev ((gen.ruleCtorType constructor).instL levels) args =
+      VExpr.appN
+        (.const constructor.familyName
+          (gen.sourceLevels.map (VLevel.inst levels)))
+        (args.take source.nparams) := by
+  have hidxRaw :
+      constructor.ctor.resultIndicesR source.uvars gen.elimination = [] := by
+    simpa only [BlockGenerationChecked.ruleIdx, List.map_eq_nil_iff]
+      using hidx
+  rw [BlockGenerationChecked.ruleCtorType, hidxRaw, List.append_nil,
+    VExpr.instL_appN]
+  simp only [VExpr.instL]
+  rw [VExpr.instRev_appN]
+  rw [VExpr.instRev_closedN _ (C := .const constructor.familyName
+    (gen.sourceLevels.map (VLevel.inst levels))) trivial]
+  rw [VExpr.bvarRevRange_map_instL]
+  rw [VExpr.map_instRev_bvarRevRange_seg _ source.nparams _ (by
+    rw [hlen]
+    simp only [BlockGenerationChecked.ruleArgArity]
+    omega)]
+  rw [show args.length - gen.ruleFieldCount constructor - source.nparams = 0
+    by
+      rw [hlen]
+      simp only [BlockGenerationChecked.ruleArgArity]
+      omega, List.drop_zero]
+
+/-- Universe instantiation exposes a generated rule type as its common
+prefix, then its constructor-field continuation. -/
+theorem rule_type_instL_split (i : Nat) (c : NormalizedBlockCtor)
+    (levels : List VLevel) :
+    (gen.rule i c).type.instL levels =
+      VExpr.forallN
+        (gen.ruleCommonBinders.map (VExpr.instL levels))
+        (VExpr.forallN
+          ((gen.ruleFieldBinders c).map (VExpr.instL levels))
+          ((gen.ruleResult c).instL levels)) := by
+  rw [gen.rule_type, gen.ruleBinders_eq_common_append_fields,
+    VExpr.instL_forallN, List.map_append, VExpr.forallN_append]
+  rfl
+
+/-- Split an exact normalized constructor spine after its generated parameter
+prefix.  The resulting cursor is the constructor-field telescope instantiated
+by the constructor's own runtime parameters. -/
+theorem ruleConstructorFieldSpine
+    (constructor : NormalizedBlockCtor)
+    {env : VEnv} {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+    {args : List VExpr}
+    (hlen : args.length = gen.ruleArgArity constructor)
+    {B : VExpr}
+    (hspine : env.SpineWF U Γ
+      (VExpr.forallN
+        ((gen.paramsTel ++
+          constructor.ctor.fieldsR source.uvars source.nparams
+            gen.elimination).map (VExpr.instL levels))
+        ((gen.ruleCtorType constructor).instL levels))
+      args B) :
+    env.SpineWF U Γ
+      (VExpr.instRev
+        (VExpr.forallN
+          ((constructor.ctor.fieldsR source.uvars source.nparams
+            gen.elimination).map (VExpr.instL levels))
+          ((gen.ruleCtorType constructor).instL levels))
+        (args.take source.nparams))
+      (args.drop source.nparams) B := by
+  have hparamsLen : (args.take source.nparams).length =
+      (gen.paramsTel.map (VExpr.instL levels)).length := by
+    rw [List.length_take, List.length_map, gen.paramsTel_length, hlen]
+    simp only [BlockGenerationChecked.ruleArgArity]
+    omega
+  have hspine' := hspine
+  rw [List.map_append, VExpr.forallN_append] at hspine'
+  rw [← List.take_append_drop source.nparams args] at hspine'
+  exact hspine'.suffixForallN hparamsLen
+
+/-- A generated rule with no constructor fields has its complete field
+continuation by reflexivity. -/
+theorem ruleFieldSpine_of_no_fields
+    (constructor : NormalizedBlockCtor)
+    (hzero : gen.ruleFieldCount constructor = 0)
+    {env : VEnv} {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+    {fArgs aArgs : List VExpr}
+    (hNlen : aArgs.length = gen.ruleArgArity constructor) :
+    env.SpineWF U Γ
+      (VExpr.instRev
+        (VExpr.forallN
+          ((gen.ruleFieldBinders constructor).map (VExpr.instL levels))
+          ((gen.ruleResult constructor).instL levels))
+        (fArgs.take
+          (source.nparams + gen.familyCount + gen.minorCount)))
+      (aArgs.drop source.nparams)
+      (VExpr.instRev
+        (VExpr.forallN
+          ((gen.ruleFieldBinders constructor).map (VExpr.instL levels))
+          ((gen.ruleResult constructor).instL levels))
+        (fArgs.take
+          (source.nparams + gen.familyCount + gen.minorCount))) := by
+  have hbinders : gen.ruleFieldBinders constructor = [] := by
+    have hraw :
+        constructor.ctor.fieldsR source.uvars source.nparams
+          gen.elimination = [] := by
+      apply List.length_eq_zero_iff.1
+      simpa only [BlockGenerationChecked.ruleFieldCount] using hzero
+    rw [BlockGenerationChecked.ruleFieldBinders, hraw]
+    rfl
+  have hargs : aArgs.drop source.nparams = [] := by
+    apply List.length_eq_zero_iff.1
+    rw [List.length_drop, hNlen]
+    simp only [BlockGenerationChecked.ruleArgArity]
+    omega
+  rw [hbinders, List.map_nil, hargs]
+  exact .nil
+
+/-- Build the canonical generated-rule capture spine from a typed common
+recursor prefix and the remaining constructor-field continuation.  The full
+recursor spine may continue with indices, the major premise, and trailing
+arguments; only the saturated common prefix is replayed. -/
+theorem ruleCaptureSpine_of_prefix_fields
+    {env : VEnv} {U : Nat} {Γ : List VExpr}
+    (i : Nat) (c : NormalizedBlockCtor) (levels : List VLevel)
+    {fArgs aArgs suffix : List VExpr}
+    {oldResult sourceResult B : VExpr}
+    (hMlen : fArgs.length = gen.ruleMajorArity c)
+    (hsource : env.SpineWF U Γ
+      (VExpr.forallN
+        (gen.ruleCommonBinders.map (VExpr.instL levels)) oldResult)
+      (fArgs ++ suffix) sourceResult)
+    (hfields : env.SpineWF U Γ
+      (VExpr.instRev
+        (VExpr.forallN
+          ((gen.ruleFieldBinders c).map (VExpr.instL levels))
+          ((gen.ruleResult c).instL levels))
+        (fArgs.take
+          (source.nparams + gen.familyCount + gen.minorCount)))
+      (aArgs.drop source.nparams) B) :
+    env.SpineWF U Γ ((gen.rule i c).type.instL levels)
+      (gen.ruleCaptureValues c fArgs aArgs) B := by
+  rw [gen.rule_type_instL_split, ruleCaptureValues]
+  have hsource' : env.SpineWF U Γ
+      (VExpr.forallN
+        (gen.ruleCommonBinders.map (VExpr.instL levels)) oldResult)
+      (fArgs.take (source.nparams + gen.familyCount + gen.minorCount) ++
+        (fArgs.drop (source.nparams + gen.familyCount + gen.minorCount) ++
+          suffix)) sourceResult := by
+    simpa only [← List.append_assoc, List.take_append_drop] using hsource
+  have hcommonLength :
+      (fArgs.take
+        (source.nparams + gen.familyCount + gen.minorCount)).length =
+        (gen.ruleCommonBinders.map (VExpr.instL levels)).length := by
+    rw [List.length_take, hMlen, List.length_map,
+      gen.ruleCommonBinders_length]
+    simp only [ruleMajorArity]
+    omega
+  simpa only [VExpr.forallN_append] using
+    hsource'.prefixAppendForallN hcommonLength hfields
 
 /-- The instantiated left body as one flattened application spine. -/
 theorem ruleLhsBody_instL (c : NormalizedBlockCtor) {m1 : List VLevel}
@@ -508,7 +1124,7 @@ theorem ruleCtorApp_instL (c : NormalizedBlockCtor) (m1 : List VLevel) :
 
 /-- The captured template values are exactly the shared prefix of the
 recursor spine and the field suffix of the major premise. -/
-private theorem captureArgs_apply {c : NormalizedBlockCtor} {m1 : List VLevel}
+theorem captureArgs_apply {c : NormalizedBlockCtor} {m1 : List VLevel}
     {g1 : Pattern.Path
       (Pattern.varN (.const (gen.ruleRecName c)) (gen.ruleMajorArity c)) → VExpr}
     {g2 : Pattern.Path
@@ -532,6 +1148,146 @@ private theorem captureArgs_apply {c : NormalizedBlockCtor} {m1 : List VLevel}
       (Pattern.varNPaths (.const c.ctor.raw.name)
         (gen.ruleArgArity c))) = _
   rw [List.map_take, List.map_drop, hg1, hg2]
+
+/-- A matched generated RHS computes to the registered rule's right tower
+applied to the canonical runtime captures.  In particular, the result is
+independent of the internal pattern-path representation of the match. -/
+theorem ruleRHS_apply_eq_of_match
+    {i : Nat} {c : NormalizedBlockCtor} {m1 : List VLevel}
+    {m2 : ((gen.rulePattern c).toPattern).Path → VExpr}
+    {fArgs aArgs : List VExpr}
+    (hMlen : fArgs.length = gen.ruleMajorArity c)
+    (hNlen : aArgs.length = gen.ruleArgArity c)
+    (hm : ((gen.rulePattern c).toPattern).Matches
+      (.app (VExpr.appN (.const (gen.ruleRecName c) m1) fArgs)
+        (VExpr.appN (.const c.ctor.raw.name
+          (gen.sourceLevels.map (VLevel.inst m1))) aArgs)) m1 m2)
+    (hcl : gen.RuleClosure) (h : gen.ruleEntry i c) :
+    (gen.ruleRHS hcl h).apply m1 m2 =
+      VExpr.appN ((gen.rule i c).rhs.instL m1)
+        (gen.ruleCaptureValues c fArgs aArgs) := by
+  cases hm with
+  | @app _ _ _ g1 _ _ _ g2 hrec hctor =>
+    have hg1 : (Pattern.varNPaths (.const (gen.ruleRecName c))
+        (gen.ruleMajorArity c)).map g1 = fArgs :=
+      Pattern.varN_matches_paths _ fArgs hrec hMlen
+    have hg2 : (Pattern.varNPaths (.const c.ctor.raw.name)
+        (gen.ruleArgArity c)).map g2 = aArgs :=
+      Pattern.varN_matches_paths _ aArgs hctor hNlen
+    rw [ruleRHS]
+    simp only [Pattern.RHS.appN_apply, gen.captureArgs_apply hg1 hg2,
+      ruleCaptureValues]
+    rfl
+
+/-- The generated checks are exactly the two semantic relations visible at a
+runtime iota site: constructor parameters agree with recursor parameters, and
+the recursor's explicit indices agree with the constructor-computed index
+towers instantiated at the canonical capture spine. -/
+theorem ruleCheck_ok_of_spines {c : NormalizedBlockCtor} {m1 : List VLevel}
+    {m2 : ((gen.rulePattern c).toPattern).Path → VExpr}
+    {fArgs aArgs : List VExpr}
+    (hMlen : fArgs.length = gen.ruleMajorArity c)
+    (hNlen : aArgs.length = gen.ruleArgArity c)
+    (hm : ((gen.rulePattern c).toPattern).Matches
+      (.app (VExpr.appN (.const (gen.ruleRecName c) m1) fArgs)
+        (VExpr.appN (.const c.ctor.raw.name
+          (gen.sourceLevels.map (VLevel.inst m1))) aArgs)) m1 m2)
+    {df : VExpr → VExpr → Prop}
+    (hparams : List.Forall₂ df
+      (aArgs.take source.nparams) (fArgs.take source.nparams))
+    (hindices : List.Forall₂ df
+      (fArgs.drop (source.nparams + gen.familyCount + gen.minorCount))
+      (gen.ruleIndexTargets c m1 fArgs aArgs))
+    (hcl : gen.RuleClosure) (hc : c ∈ gen.flatCtors) :
+    (gen.ruleCheck hcl hc).OK df m1 m2 := by
+  cases hm with
+  | @app _ _ _ g1 _ _ _ g2 hrec hctor =>
+    have hg1 : (Pattern.varNPaths (.const (gen.ruleRecName c))
+        (gen.ruleMajorArity c)).map g1 = fArgs :=
+      Pattern.varN_matches_paths _ fArgs hrec hMlen
+    have hg2 : (Pattern.varNPaths (.const c.ctor.raw.name)
+        (gen.ruleArgArity c)).map g2 = aArgs :=
+      Pattern.varN_matches_paths _ aArgs hctor hNlen
+    have hparams' : List.Forall₂ df
+        ((Pattern.varNPaths (.const c.ctor.raw.name)
+          (gen.ruleArgArity c)).take source.nparams |>.map g2)
+        ((Pattern.varNPaths (.const (gen.ruleRecName c))
+          (gen.ruleMajorArity c)).take source.nparams |>.map g1) := by
+      simpa only [List.map_take, hg1, hg2] using hparams
+    have hindices' : List.Forall₂ df
+        ((Pattern.varNPaths (.const (gen.ruleRecName c))
+          (gen.ruleMajorArity c)).drop
+            (source.nparams + gen.familyCount + gen.minorCount) |>.map g1)
+        ((gen.ruleIdx c).attach.map fun index =>
+          VExpr.appN
+            ((VExpr.lamN (gen.ruleBinders c) index.1).instL m1)
+            (gen.ruleCaptureValues c fArgs aArgs)) := by
+      simpa only [List.map_drop, hg1, ruleIndexTargets] using hindices
+    have hcaptures := gen.captureArgs_apply (m1 := m1) hg1 hg2
+    unfold ruleCheck
+    apply Pattern.Check.OK.foldr
+    · intro pair hpair
+      exact forall₂_map_zip _ _ _ _ hparams' pair hpair
+    · apply Pattern.Check.OK.foldr
+      · intro pair hpair
+        have hpair' := forall₂_map_zip_swap _ _ _ _ hindices' pair hpair
+        simpa only [Pattern.RHS.apply, Pattern.RHS.appN_apply, hcaptures,
+          Sum.elim_inl, ruleCaptureValues] using hpair'
+      · trivial
+
+/-- An unindexed generated rule has empty explicit and computed index lists at
+every completed recursor spine. -/
+theorem ruleIndexTargets_aligned_of_unindexed
+    {c : NormalizedBlockCtor} {m1 : List VLevel}
+    {fArgs aArgs : List VExpr} {df : VExpr → VExpr → Prop}
+    (hidx : gen.ruleIdx c = [])
+    (hMlen : fArgs.length = gen.ruleMajorArity c) :
+    List.Forall₂ df
+      (fArgs.drop (source.nparams + gen.familyCount + gen.minorCount))
+      (gen.ruleIndexTargets c m1 fArgs aArgs) := by
+  have hidxlen : (c.ctor.resultIndicesR source.uvars gen.elimination).length = 0 := by
+    have := congrArg List.length hidx
+    simpa only [ruleIdx, List.length_map, List.length_nil] using this
+  have hcommon : fArgs.length =
+      source.nparams + gen.familyCount + gen.minorCount := by
+    rw [hMlen]
+    simp only [ruleMajorArity, hidxlen, Nat.add_zero]
+  have hdrop : fArgs.drop
+      (source.nparams + gen.familyCount + gen.minorCount) = [] := by
+    apply List.length_eq_zero_iff.1
+    rw [List.length_drop, hcommon]
+    omega
+  rw [hdrop]
+  change List.Forall₂ df []
+    ((gen.ruleIdx c).attach.map fun index =>
+      VExpr.appN
+        ((VExpr.lamN (gen.ruleBinders c) index.1).instL m1)
+        (gen.ruleCaptureValues c fArgs aArgs))
+  rw [hidx]
+  exact .nil
+
+/-- For an unindexed family, the generated check has no computed-index
+component.  Completed spine lengths therefore reduce `Check.OK` to parameter
+agreement alone. -/
+theorem ruleCheck_ok_of_unindexed_spines
+    {c : NormalizedBlockCtor} {m1 : List VLevel}
+    {m2 : ((gen.rulePattern c).toPattern).Path → VExpr}
+    {fArgs aArgs : List VExpr}
+    (hidx : gen.ruleIdx c = [])
+    (hMlen : fArgs.length = gen.ruleMajorArity c)
+    (hNlen : aArgs.length = gen.ruleArgArity c)
+    (hm : ((gen.rulePattern c).toPattern).Matches
+      (.app (VExpr.appN (.const (gen.ruleRecName c) m1) fArgs)
+        (VExpr.appN (.const c.ctor.raw.name
+          (gen.sourceLevels.map (VLevel.inst m1))) aArgs)) m1 m2)
+    {df : VExpr → VExpr → Prop}
+    (hparams : List.Forall₂ df
+      (aArgs.take source.nparams) (fArgs.take source.nparams))
+    (hcl : gen.RuleClosure) (hc : c ∈ gen.flatCtors) :
+    (gen.ruleCheck hcl hc).OK df m1 m2 := by
+  apply gen.ruleCheck_ok_of_spines hMlen hNlen hm hparams
+    (hcl := hcl) (hc := hc)
+  exact gen.ruleIndexTargets_aligned_of_unindexed hidx hMlen
 
 /-- Pattern soundness for one certified block (`pat_wf`): a successful match
 of a rule's pattern whose checks hold is definitionally equal to the
@@ -923,6 +1679,124 @@ milestones land, with no restatement. -/
 #guard_msgs in
 #print axioms Lean4Lean.VEnv.IsDefEq.appN_defEq
 
+/-- info: 'Lean4Lean.VEnv.SpineWF.prefixForallN' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.SpineWF.prefixForallN
+
+/-- info: 'Lean4Lean.VEnv.SpineWF.suffixForallN' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.SpineWF.suffixForallN
+
+/-- info: 'Lean4Lean.VEnv.OnTel.weakR' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.OnTel.weakR
+
+/-- info: 'Lean4Lean.VEnv.TelDefEq.of_forallN_sort_defeq' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.TelDefEq.of_forallN_sort_defeq
+
+/-- info: 'Lean4Lean.VEnv.TelDefEq.of_forallN_defeq_of_length' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.TelDefEq.of_forallN_defeq_of_length
+
+/-- info: 'Lean4Lean.VEnv.OnTel.telDefEq_instDF' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.OnTel.telDefEq_instDF
+
+/-- info: 'Lean4Lean.VEnv.SpineWF.prefixAppendForallN' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.SpineWF.prefixAppendForallN
+
+/-- info: 'Lean4Lean.VEnv.SpineWF.lastForallN' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VEnv.SpineWF.lastForallN
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationEnv.ctorConst_emitted_rec' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationEnv.ctorConst_emitted_rec
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationEnv.ruleIdx_length_eq_recIndexBinders' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationEnv.ruleIdx_length_eq_recIndexBinders
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationEnv.recursor_hasType_instL' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationEnv.recursor_hasType_instL
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationEnv.ctorConst_emitted_instL' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationEnv.ctorConst_emitted_instL
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleBinders_eq_common_append_fields' depends on axioms: [propext,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleBinders_eq_common_append_fields
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_length' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_length
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_map' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_map
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_take_major' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_take_major
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCommonBinders_length' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCommonBinders_length
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.recType_eq_common' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.recType_eq_common
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.recType_instL_common' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.recType_instL_common
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.recMajorDomain_instL_instRev' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.recMajorDomain_instL_instRev
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCtorType_instL_instRev_of_unindexed' depends on axioms: [propext,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCtorType_instL_instRev_of_unindexed
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.rule_type_instL_split' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.rule_type_instL_split
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleConstructorFieldSpine' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleConstructorFieldSpine
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleFieldSpine_of_no_fields' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleFieldSpine_of_no_fields
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureSpine_of_prefix_fields' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureSpine_of_prefix_fields
+
 /-- info: 'Lean4Lean.VEnv.LE.extra' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms Lean4Lean.VEnv.LE.extra
@@ -938,6 +1812,45 @@ milestones land, with no restatement. -/
 /-- info: 'Lean4Lean.Pattern.varN_matches_paths' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms Lean4Lean.Pattern.varN_matches_paths
+
+/-- info: 'Lean4Lean.Pattern.Check.OK.foldr' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms Lean4Lean.Pattern.Check.OK.foldr
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.captureArgs_apply' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.captureArgs_apply
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCheck_ok_of_spines' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCheck_ok_of_spines
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleRHS_apply_eq_of_match' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleRHS_apply_eq_of_match
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleIndexTargets_aligned_of_unindexed' depends on axioms: [propext,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleIndexTargets_aligned_of_unindexed
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCheck_ok_of_unindexed_spines' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCheck_ok_of_unindexed_spines
 
 /--
 info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.pat_wf' depends on axioms: [propext,

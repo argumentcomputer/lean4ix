@@ -5,6 +5,8 @@ namespace Lean4Lean
 
 deriving instance DecidableEq for VLevel
 deriving instance DecidableEq for VExpr
+deriving instance DecidableEq for VConstant
+deriving instance DecidableEq for VConstVal
 
 /-- Syntactic underapproximation of `VLevel.IsNeverZero`,
 mirroring `Lean.Level.isNeverZero`. -/
@@ -158,6 +160,8 @@ structure RecArg where
   binders : List VExpr
   targetType : Nat
   indices : List VExpr
+
+deriving instance DecidableEq for RecArg
 
 /-- Whether an expression mentions any family in a block.  Mutual analysis
 uses one block-wide name set in family formers, recursive-Pi domains, and
@@ -714,6 +718,8 @@ structure CheckedCtor where
   recursive : List RecArg
   recursiveAt : List (Option RecArg)
   resultIndices : List VExpr
+
+deriving instance DecidableEq for CheckedCtor
 
 def CheckedCtor.ofDirect (U : Nat) (T : Name) (np ni : Nat)
     (c : VConstVal) : CheckedCtor where
@@ -2040,6 +2046,18 @@ structure CheckedFamilyData where
   resultLevel : VLevel
   constructors : List CheckedCtor
 
+/-- Erase one dependent checked family while retaining all data consumed by
+block generation. -/
+def CheckedFamily.data {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type) :
+    CheckedFamilyData where
+  ordinal := family.ordinal
+  value := family.value
+  indices := family.indices
+  resultLevel := family.resultLevel
+  constructors := family.constructors
+
 namespace CheckedFamilies
 
 /-- Erase a dependent checked-family spine without changing its order. -/
@@ -2048,11 +2066,7 @@ def data {source : VInductDecl} {params : List VExpr} :
       CheckedFamilies source params ordinal types → List CheckedFamilyData
   | _, _, .nil => []
   | _, _, .cons head tail =>
-      { ordinal := head.ordinal
-        value := head.value
-        indices := head.indices
-        resultLevel := head.resultLevel
-        constructors := head.constructors } :: data tail
+      head.data :: data tail
 
 end CheckedFamilies
 

@@ -58,6 +58,9 @@ theorem indexedVecDeclareRoot :
         indexedVecFamilyCandidateContext =
       .ok ctorEnv := by
   simp [AddInductive.declareInductiveTypes,
+    AddInductive.declaredInductiveInfos,
+    AddInductive.declaredInductiveInfo,
+    AddInductive.declareInductiveInfoList,
     indexedVecCandidateInductiveStats_nindices,
     indexedVecCandidateInductiveStats_indConsts,
     indexedVecKernelType, indexedVecKernelNil, indexedVecKernelCons,
@@ -68,7 +71,7 @@ theorem indexedVecDeclareRoot :
     AddInductive.isRec, AddInductive.isRec.loop,
     AddInductive.isReflexive, AddInductive.isReflexive.loop,
     AddInductive.hasIndOcc, Expr.constName!,
-    Bind.bind, Pure.pure, Except.bind, Except.pure]
+    Bind.bind, Except.bind]
   have hcheck :
       (Kernel.Environment.ofConstants `_indexedVecCandidate natMap).checkName
           ``IndexedVec false = .ok () := by
