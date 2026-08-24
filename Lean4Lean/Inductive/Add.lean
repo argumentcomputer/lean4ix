@@ -306,20 +306,151 @@ def isReflexive (indTypes : Array InductiveType) (indConsts : Array Expr) : Bool
     | _ => false
   indTypes.any fun indType => indType.ctors.any fun ctor => loop ctor.type
 
+/-- One kernel family record assembled before the source-ordered declaration
+fold.  Its full-block arguments retain the mutual names and recursion flags
+computed by the executable producer. -/
+def declaredInductiveInfo (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (indType : InductiveType)
+    (numIndices numNested : Nat) (isUnsafe : Bool)
+    (context : Context) : InductiveVal :=
+  let all := indTypes.map (·.name) |>.toList
+  { indType with
+    numParams, numIndices, all, numNested, isUnsafe
+    levelParams := context.lparams
+    ctors := indType.ctors.map (·.name)
+    isRec := isRec indTypes stats.indConsts
+    isReflexive := isReflexive indTypes stats.indConsts }
+
+/-- Kernel family records assembled before their source-ordered declaration
+fold.  Naming this arbitrary-block payload makes the retained execution usable
+without reconstructing the metadata list in Verify. -/
+def declaredInductiveInfos (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) : Array InductiveVal :=
+  indTypes.zipWith (bs := stats.nindices) fun indType numIndices =>
+    declaredInductiveInfo stats numParams indTypes indType numIndices
+      numNested isUnsafe context
+
+private theorem forall₂_zipWith_exists_right
+    (f : α → β → γ) : ∀ (xs : List α) (ys : List β),
+    xs.length = ys.length →
+      List.Forall₂ (fun x z => ∃ y, z = f x y) xs
+        (List.zipWith f xs ys)
+  | [], [], _ => .nil
+  | x :: xs, y :: ys, length_eq => by
+      simp only [List.length_cons, Nat.succ.injEq] at length_eq
+      exact .cons ⟨y, rfl⟩
+        (forall₂_zipWith_exists_right f xs ys length_eq)
+
+/-- The executable metadata array has one exact full-block record for every
+source family whenever validation has established the index-count invariant.
+The dependent relation preserves source order and exposes the selected index
+count without a partial lookup. -/
+theorem declaredInductiveInfos_matches
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context)
+    (size_eq : stats.nindices.size = indTypes.size) :
+    List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = declaredInductiveInfo stats numParams indTypes indType
+          numIndices numNested isUnsafe context)
+      indTypes.toList
+      (declaredInductiveInfos stats numParams indTypes numNested isUnsafe
+        context).toList := by
+  unfold declaredInductiveInfos
+  rw [Array.toList_zipWith]
+  apply forall₂_zipWith_exists_right
+  simpa using size_eq.symm
+
+/-- Transparent list form of the family-declaration fold. -/
+def declareInductiveInfoList (allowPrimitive : Bool) :
+    List InductiveVal → Environment → Except Exception Environment
+  | [], env => .ok env
+  | info :: infos, env => do
+      env.checkName info.name allowPrimitive
+      declareInductiveInfoList allowPrimitive infos
+        (env.add (.inductInfo info))
+
+/-- Exact source-ordered operational trace of the family-declaration fold. -/
+inductive DeclareInductiveInfoListRun (allowPrimitive : Bool) :
+    Environment → List InductiveVal → Environment → Prop where
+  | nil : DeclareInductiveInfoListRun allowPrimitive env [] env
+  | cons
+      (checkName : env.checkName info.name allowPrimitive = .ok ())
+      (tail : DeclareInductiveInfoListRun allowPrimitive
+        (env.add (.inductInfo info)) infos finalEnv) :
+      DeclareInductiveInfoListRun allowPrimitive env (info :: infos) finalEnv
+
+/-- Interpret one exact successful declaration fold as its dependent trace. -/
+theorem DeclareInductiveInfoListRun.of_run
+    (run : declareInductiveInfoList allowPrimitive infos env = .ok finalEnv) :
+    DeclareInductiveInfoListRun allowPrimitive env infos finalEnv := by
+  induction infos generalizing env with
+  | nil =>
+      simp only [declareInductiveInfoList, Except.ok.injEq] at run
+      subst finalEnv
+      exact .nil
+  | cons info infos ih =>
+      simp only [declareInductiveInfoList] at run
+      cases hcheck : env.checkName info.name allowPrimitive with
+      | error error =>
+          rw [hcheck] at run
+          contradiction
+      | ok value =>
+          have value_eq : value = () := Subsingleton.elim _ _
+          subst value
+          simp only [hcheck] at run
+          exact .cons hcheck (ih run)
+
+/-- Forget the name-check evidence in a successful declaration trace. -/
+theorem DeclareInductiveInfoListRun.environment
+    (run : DeclareInductiveInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv = infos.foldl
+      (fun env info => env.add (.inductInfo info)) env := by
+  induction run with
+  | nil => rfl
+  | cons _ _ ih => simpa only [List.foldl_cons] using ih
+
+private theorem declaredInductiveInfoList_constants : ∀
+    (infos : List InductiveVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.inductInfo info)) env).constants =
+      infos.foldl (fun constants info =>
+        constants.insert info.name (.inductInfo info)) env.constants
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredInductiveInfoList_constants infos (env.add (.inductInfo info))
+
+private theorem declaredInductiveInfoList_quotInit : ∀
+    (infos : List InductiveVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.inductInfo info)) env).quotInit =
+      env.quotInit
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredInductiveInfoList_quotInit infos (env.add (.inductInfo info))
+
+/-- The declaration trace exposes the exact final constant map. -/
+theorem DeclareInductiveInfoListRun.constants
+    (run : DeclareInductiveInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.constants = infos.foldl
+      (fun constants info =>
+        constants.insert info.name (.inductInfo info)) env.constants := by
+  rw [run.environment]
+  exact declaredInductiveInfoList_constants infos env
+
+/-- Declaring family metadata does not change quotient initialization. -/
+theorem DeclareInductiveInfoListRun.quotInit
+    (run : DeclareInductiveInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.quotInit = env.quotInit := by
+  rw [run.environment]
+  exact declaredInductiveInfoList_quotInit infos env
+
 def declareInductiveTypes (stats : InductiveStats) (numParams : Nat)
     (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool) : M Environment :=
-  fun c =>
-  let all := indTypes.map (·.name) |>.toList
-  let infos := indTypes.zipWith (bs := stats.nindices) fun indType numIndices =>
-    { indType with
-      numParams, numIndices, all, numNested, isUnsafe
-      levelParams := c.lparams
-      ctors := indType.ctors.map (·.name)
-      isRec := isRec indTypes stats.indConsts
-      isReflexive := isReflexive indTypes stats.indConsts }
-  infos.foldlM (init := c.env) fun env info => do
-    env.checkName info.name c.allowPrimitive
-    return env.add (.inductInfo info)
+  fun context =>
+  declareInductiveInfoList context.allowPrimitive
+    (declaredInductiveInfos stats numParams indTypes numNested isUnsafe
+      context).toList context.env
 
 /-- The exact kernel family record assembled for a singleton inductive block.
 Naming it exposes the value installed by `declareInductiveTypes` without
@@ -333,6 +464,19 @@ def singletonDeclaredInfo (stats : InductiveStats) (numParams numIndices : Nat)
     ctors := indType.ctors.map (·.name)
     isRec := isRec #[indType] stats.indConsts
     isReflexive := isReflexive #[indType] stats.indConsts }
+
+/-- The arbitrary-block metadata inventory specializes to the named singleton
+record when the retained index-count array has one exact entry. -/
+theorem declaredInductiveInfos_singleton
+    (stats : InductiveStats) (numParams numIndices : Nat)
+    (indType : InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) (hnindices : stats.nindices = #[numIndices]) :
+    (declaredInductiveInfos stats numParams #[indType] numNested isUnsafe
+      context).toList =
+      [singletonDeclaredInfo stats numParams numIndices indType numNested
+        isUnsafe context] := by
+  simp [declaredInductiveInfos, singletonDeclaredInfo,
+    declaredInductiveInfo, hnindices]
 
 /-- A successful singleton family declaration installs exactly the family
 record assembled by the executable producer.  The result equation supplies
@@ -350,14 +494,10 @@ theorem declareInductiveTypes_singleton_constants
       context.env.constants.insert indType.name
         (.inductInfo <| singletonDeclaredInfo stats numParams numIndices
           indType numNested isUnsafe context) := by
-  unfold declareInductiveTypes at hdeclare
-  rw [hnindices] at hdeclare
-  cases hcheck : context.env.checkName indType.name context.allowPrimitive with
-  | error error =>
-      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
-  | ok _ =>
-      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
-      exact congrArg Kernel.Environment.constants hdeclare.symm
+  have run := DeclareInductiveInfoListRun.of_run (by
+    simpa only [declareInductiveTypes] using hdeclare)
+  simpa [declaredInductiveInfos, declaredInductiveInfo, hnindices,
+    singletonDeclaredInfo] using run.constants
 
 /-- A successful singleton family declaration changes only the constant map;
 in particular it preserves the kernel's quotient-initialization flag. -/
@@ -365,20 +505,14 @@ theorem declareInductiveTypes_singleton_quotInit
     (stats : InductiveStats) (numParams numIndices : Nat)
     (indType : InductiveType) (numNested : Nat) (isUnsafe : Bool)
     (context : Context) (familyEnv : Environment)
-    (hnindices : stats.nindices = #[numIndices])
+    (_hnindices : stats.nindices = #[numIndices])
     (hdeclare :
       declareInductiveTypes stats numParams #[indType] numNested isUnsafe context =
         .ok familyEnv) :
     familyEnv.quotInit = context.env.quotInit := by
-  unfold declareInductiveTypes at hdeclare
-  rw [hnindices] at hdeclare
-  cases hcheck : context.env.checkName indType.name context.allowPrimitive with
-  | error error =>
-      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
-  | ok _ =>
-      simp [hcheck, Bind.bind, Except.bind, Pure.pure, Except.pure] at hdeclare
-      subst familyEnv
-      rfl
+  have run := DeclareInductiveInfoListRun.of_run (by
+    simpa only [declareInductiveTypes] using hdeclare)
+  exact run.quotInit
 
 /-- Family declaration observes only the environment, universe parameters,
 and primitive-name policy of its reader context.  In particular, the local
@@ -393,7 +527,7 @@ theorem declareInductiveTypes_context_eq
     (hallow : left.allowPrimitive = right.allowPrimitive) :
     declareInductiveTypes stats numParams indTypes numNested isUnsafe left =
       declareInductiveTypes stats numParams indTypes numNested isUnsafe right := by
-  unfold declareInductiveTypes
+  unfold declareInductiveTypes declaredInductiveInfos declaredInductiveInfo
   rw [henv, hlparams, hallow]
 
 def isValidIndAppIdx (stats : InductiveStats) (t : Expr) (i : Nat) : Bool :=
@@ -1452,6 +1586,15 @@ where
           | result, valid =>
             return .terminal context e inferred result checked valid
 
+/-- The additional recursive checker observations needed to normalize one
+expression are executable in the exact reader context where the candidate
+pass will inspect it.  This is deliberately narrower than successful
+inductive validation: the ordinary validator does not recursively inspect Pi
+domains with `buildCandidateExpr`. -/
+def CandidateExpr.Observable (context : Context) (source : Expr) : Prop :=
+  ∃ candidate : CandidateExpr source,
+    buildCandidateExpr source context = .ok candidate
+
 /-- One terminal recursive step of `buildCandidateExpr`, with its traversal
 budget made explicit. This is the reusable reduction seam for exact producer
 fixtures; all semantic evidence remains the ordinary checker executions
@@ -1793,6 +1936,32 @@ inductive CandidateFamilyTypeListProduced (context : Context) :
       (tail : CandidateFamilyTypeListProduced context candidates) :
       CandidateFamilyTypeListProduced context (.cons candidate candidates)
 
+/-- The first exact traversal equation retained by a nonempty family-type
+producer trace. -/
+theorem CandidateFamilyTypeListProduced.head
+    {context : Context} {source : InductiveType}
+    {sources : List InductiveType}
+    {candidate : CandidateFamilyType source}
+    {candidates : CandidateList CandidateFamilyType sources}
+    (run : CandidateFamilyTypeListProduced context
+      (.cons candidate candidates)) :
+    normalizeCandidateFamilyType source context = .ok candidate := by
+  cases run with
+  | cons head _ => exact head
+
+/-- The exact tail traversal retained by a nonempty family-type producer
+trace. -/
+theorem CandidateFamilyTypeListProduced.tail
+    {context : Context} {source : InductiveType}
+    {sources : List InductiveType}
+    {candidate : CandidateFamilyType source}
+    {candidates : CandidateList CandidateFamilyType sources}
+    (run : CandidateFamilyTypeListProduced context
+      (.cons candidate candidates)) :
+    CandidateFamilyTypeListProduced context candidates := by
+  cases run with
+  | cons _ tail => exact tail
+
 /-- A source-indexed family-type traversal determines the complete executable
 list result for any length, without a fixture-specific list reduction. -/
 theorem CandidateFamilyTypeListProduced.normalize
@@ -1845,6 +2014,32 @@ inductive CandidateConstructorListProduced (context : Context) :
       (tail : CandidateConstructorListProduced context candidates) :
       CandidateConstructorListProduced context (.cons candidate candidates)
 
+/-- The first exact traversal equation retained by a nonempty constructor
+producer trace. -/
+theorem CandidateConstructorListProduced.head
+    {context : Context} {source : Constructor}
+    {sources : List Constructor}
+    {candidate : CandidateConstructor source}
+    {candidates : CandidateList CandidateConstructor sources}
+    (run : CandidateConstructorListProduced context
+      (.cons candidate candidates)) :
+    normalizeCandidateConstructor source context = .ok candidate := by
+  cases run with
+  | cons head _ => exact head
+
+/-- The exact tail traversal retained by a nonempty constructor producer
+trace. -/
+theorem CandidateConstructorListProduced.tail
+    {context : Context} {source : Constructor}
+    {sources : List Constructor}
+    {candidate : CandidateConstructor source}
+    {candidates : CandidateList CandidateConstructor sources}
+    (run : CandidateConstructorListProduced context
+      (.cons candidate candidates)) :
+    CandidateConstructorListProduced context candidates := by
+  cases run with
+  | cons _ tail => exact tail
+
 /-- A source-indexed constructor traversal determines the complete executable
 list result for any length, with no `zip`, partial lookup, or fixture-specific
 cons-chain reduction. -/
@@ -1890,6 +2085,43 @@ inductive CandidateFamilyListProduced (context : Context) :
       CandidateFamilyListProduced context
         (.cons family.familyType familyTypes) (.cons family families)
 
+/-- Constructor traversals retained for every exact family candidate, with
+the family-type assembly index erased but family and constructor positions
+preserved dependently. -/
+inductive CandidateBlockConstructorListProduced (context : Context) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Prop where
+  | nil : CandidateBlockConstructorListProduced context .nil
+  | cons
+      (head : CandidateConstructorListProduced context family.constructors)
+      (tail : CandidateBlockConstructorListProduced context families) :
+      CandidateBlockConstructorListProduced context (.cons family families)
+
+/-- Erase only the family-type assembly index from an exact family producer
+trace, retaining every source-indexed constructor traversal. -/
+theorem CandidateFamilyListProduced.constructorLists
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    CandidateBlockConstructorListProduced context families := by
+  induction run with
+  | nil => exact .nil
+  | cons constructors _ ih => exact .cons constructors ih
+
+/-- The exact first-family constructor traversal in a nonempty block trace. -/
+theorem CandidateBlockConstructorListProduced.head
+    (run : CandidateBlockConstructorListProduced context
+      (.cons family families)) :
+    CandidateConstructorListProduced context family.constructors := by
+  cases run with
+  | cons head _ => exact head
+
+/-- The exact remaining family traversals in a nonempty block trace. -/
+theorem CandidateBlockConstructorListProduced.tail
+    (run : CandidateBlockConstructorListProduced context
+      (.cons family families)) :
+    CandidateBlockConstructorListProduced context families := by
+  cases run with
+  | cons _ tail => exact tail
+
 /-- Source-indexed family assembly determines the exact executable family-list
 result for arbitrary list lengths. -/
 theorem CandidateFamilyListProduced.normalize
@@ -1905,6 +2137,29 @@ theorem CandidateFamilyListProduced.normalize
     simp only [ReaderT.bind, Bind.bind]
     rw [constructors.normalize, ih]
     rfl
+
+/-- Erasing an assembled family list back to its family-type payload recovers
+the exact source-indexed input list used by the traversal. -/
+theorem CandidateFamilyListProduced.familyTypes_eq
+    {sources : List InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType sources}
+    {families : CandidateList CandidateFamily sources}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    families.familyTypes = familyTypes := by
+  induction run with
+  | nil => rfl
+  | cons _ _ ih => simp only [CandidateList.familyTypes, ih]
+
+/-- Reindex an arbitrary-length family-production witness by the family-type
+payload stored in its own assembled result. -/
+theorem CandidateFamilyListProduced.reindex
+    {sources : List InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType sources}
+    {families : CandidateList CandidateFamily sources}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    CandidateFamilyListProduced context families.familyTypes families := by
+  rw [run.familyTypes_eq]
+  exact run
 
 /-- Singleton family assembly reuses, without replacement, the family-type
 candidate produced in the pre-family environment. -/
@@ -2041,6 +2296,128 @@ def executeCandidateFamilyList (context : Context) :
                   (.cons family tail.candidates)
                 exact .cons constructors.produced tail.produced }
 
+/-! ## Exact normalization-observer boundary -/
+
+/-- The recursive family-type observer succeeds in its exact pre-family
+reader context. -/
+def CandidateFamilyType.Observable
+    (context : Context) (source : InductiveType) : Prop :=
+  ∃ candidate : CandidateFamilyType source,
+    normalizeCandidateFamilyType source context = .ok candidate
+
+/-- The recursive constructor-type observer succeeds in its exact post-family
+reader context. -/
+def CandidateConstructor.Observable
+    (context : Context) (source : Constructor) : Prop :=
+  ∃ candidate : CandidateConstructor source,
+    normalizeCandidateConstructor source context = .ok candidate
+
+/-- Pointwise candidate-expression observations for every family type, in
+source order. -/
+inductive CandidateFamilyTypeListObservable (context : Context) :
+    List InductiveType → Prop where
+  | nil : CandidateFamilyTypeListObservable context []
+  | cons
+      (head : CandidateFamilyType.Observable context source)
+      (tail : CandidateFamilyTypeListObservable context sources) :
+      CandidateFamilyTypeListObservable context (source :: sources)
+
+/-- Pointwise candidate-expression observations for one source-ordered
+constructor list. -/
+inductive CandidateConstructorListObservable (context : Context) :
+    List Constructor → Prop where
+  | nil : CandidateConstructorListObservable context []
+  | cons
+      (head : CandidateConstructor.Observable context source)
+      (tail : CandidateConstructorListObservable context sources) :
+      CandidateConstructorListObservable context (source :: sources)
+
+/-- Pointwise constructor observations for every family in a source-ordered
+inductive block.  All constructor types are inspected after the same raw
+family environment has been installed. -/
+inductive CandidateFamilyConstructorListsObservable (context : Context) :
+    List InductiveType → Prop where
+  | nil : CandidateFamilyConstructorListsObservable context []
+  | cons
+      (head : CandidateConstructorListObservable context source.ctors)
+      (tail : CandidateFamilyConstructorListsObservable context sources) :
+      CandidateFamilyConstructorListsObservable context (source :: sources)
+
+/-- Ordered family-type observation succeeds when each underlying recursive
+expression observer succeeds. -/
+theorem executeCandidateFamilyTypeList_ok_of_observable
+    (observable : CandidateFamilyTypeListObservable context sources) :
+    ∃ execution,
+      executeCandidateFamilyTypeList context sources = .ok execution := by
+  induction sources with
+  | nil => exact ⟨_, rfl⟩
+  | cons source sources ih =>
+      cases observable with
+      | cons head tail =>
+          change (∃ candidate : CandidateFamilyType source,
+            normalizeCandidateFamilyType source context = .ok candidate) at head
+          obtain ⟨headCandidate, headRun⟩ := head
+          obtain ⟨tailExecution, tailRun⟩ := ih tail
+          unfold executeCandidateFamilyTypeList
+          split
+          next error actual =>
+            rw [headRun] at actual
+            contradiction
+          next actualHead actual =>
+            split
+            next error actualTail =>
+              rw [tailRun] at actualTail
+              contradiction
+            next actualTail actualTailRun => exact ⟨_, rfl⟩
+
+/-- Ordered constructor observation succeeds when each underlying recursive
+expression observer succeeds. -/
+theorem executeCandidateConstructorList_ok_of_observable
+    (observable : CandidateConstructorListObservable context sources) :
+    ∃ execution,
+      executeCandidateConstructorList context sources = .ok execution := by
+  induction sources with
+  | nil => exact ⟨_, rfl⟩
+  | cons source sources ih =>
+      cases observable with
+      | cons head tail =>
+          change (∃ candidate : CandidateConstructor source,
+            normalizeCandidateConstructor source context = .ok candidate) at head
+          obtain ⟨headCandidate, headRun⟩ := head
+          obtain ⟨tailExecution, tailRun⟩ := ih tail
+          unfold executeCandidateConstructorList
+          split
+          next error actual =>
+            rw [headRun] at actual
+            contradiction
+          next actualHead actual =>
+            split
+            next error actualTail =>
+              rw [tailRun] at actualTail
+              contradiction
+            next actualTail actualTailRun => exact ⟨_, rfl⟩
+
+/-- Ordered family assembly succeeds when every source family owns the exact
+constructor observations used by its candidate traversal. -/
+theorem executeCandidateFamilyList_ok_of_observable
+    (familyTypes : CandidateList CandidateFamilyType sources)
+    (observable :
+      CandidateFamilyConstructorListsObservable context sources) :
+    ∃ execution,
+      executeCandidateFamilyList context familyTypes = .ok execution := by
+  induction observable with
+  | nil =>
+      cases familyTypes
+      exact ⟨_, rfl⟩
+  | @cons sources source head tail ih =>
+      cases familyTypes with
+      | cons familyType familyTypes =>
+          obtain ⟨constructors, constructorsRun⟩ :=
+            executeCandidateConstructorList_ok_of_observable head
+          obtain ⟨tailExecution, tailRun⟩ := ih familyTypes
+          simp only [executeCandidateFamilyList, constructorsRun, tailRun]
+          exact ⟨_, rfl⟩
+
 /-- Detailed operational result of `buildNormalizationCandidate`.
 
 The ordinary result erases to `candidate`.  The remaining fields retain the
@@ -2058,6 +2435,10 @@ structure NormalizationCandidateExecution
   familyEnv : Environment
   declareRun : declareInductiveTypes stats nparams types.toArray
     numNested isUnsafe validationContext = .ok familyEnv
+  declareTrace : DeclareInductiveInfoListRun
+    validationContext.allowPrimitive validationContext.env
+    (declaredInductiveInfos stats nparams types.toArray numNested isUnsafe
+      validationContext).toList familyEnv
   constructorRun : checkConstructors types.toArray stats isUnsafe
     { validationContext with env := familyEnv } = .ok ()
   families : CandidateFamilyListExecution
@@ -2068,6 +2449,32 @@ def NormalizationCandidateExecution.candidate
     (execution : NormalizationCandidateExecution nparams types numNested
       isUnsafe candidateContext) : NormalizationCandidate types :=
   ⟨execution.families.candidates⟩
+
+/-- Exact source-ordered family metadata installed by a retained execution. -/
+def NormalizationCandidateExecution.declaredInfos
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext) : List InductiveVal :=
+  (declaredInductiveInfos execution.stats nparams types.toArray numNested
+    isUnsafe execution.validationContext).toList
+
+/-- The retained declaration trace determines the complete post-family
+constant map, including the empty-block case. -/
+theorem NormalizationCandidateExecution.familyEnv_constants
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext) :
+    execution.familyEnv.constants = execution.declaredInfos.foldl
+      (fun constants info =>
+        constants.insert info.name (.inductInfo info))
+      execution.validationContext.env.constants := by
+  exact execution.declareTrace.constants
+
+/-- Family metadata declaration preserves the quotient-initialization flag. -/
+theorem NormalizationCandidateExecution.familyEnv_quotInit
+    (execution : NormalizationCandidateExecution nparams types numNested
+      isUnsafe candidateContext) :
+    execution.familyEnv.quotInit =
+      execution.validationContext.env.quotInit :=
+  execution.declareTrace.quotInit
 
 /-- The post-family half of the detailed ordinary execution. -/
 def buildNormalizationCandidateExecutionAfterValidation
@@ -2099,6 +2506,8 @@ def buildNormalizationCandidateExecutionAfterValidation
               familyTypes
               familyEnv
               declareRun := by simpa using hdeclare
+              declareTrace := DeclareInductiveInfoListRun.of_run (by
+                simpa only [declareInductiveTypes] using hdeclare)
               constructorRun := by simpa using hconstructors
               families }
 
@@ -2306,6 +2715,30 @@ info: 'Lean4Lean.AddInductive.CandidateFamilyListProduced.normalize' depends on 
 #print axioms CandidateFamilyListProduced.normalize
 
 /--
+info: 'Lean4Lean.AddInductive.executeCandidateFamilyTypeList_ok_of_observable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms executeCandidateFamilyTypeList_ok_of_observable
+
+/--
+info: 'Lean4Lean.AddInductive.executeCandidateConstructorList_ok_of_observable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms executeCandidateConstructorList_ok_of_observable
+
+/--
+info: 'Lean4Lean.AddInductive.executeCandidateFamilyList_ok_of_observable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms executeCandidateFamilyList_ok_of_observable
+
+/--
 info: 'Lean4Lean.AddInductive.CandidateList.singleton' does not depend on any axioms
 -/
 #guard_msgs in
@@ -2421,25 +2854,140 @@ info: 'Lean4Lean.AddInductive.CandidateIsDefEqStep.innerRun' depends on axioms: 
 #guard_msgs in
 #print axioms CandidateIsDefEqStep.innerRun
 
+/-- Number of leading binders stored in a constructor type. -/
+def constructorArity : Expr → Nat → Nat
+  | .forallE _ _ body _, arity => constructorArity body (arity + 1)
+  | _, arity => arity
+
+/-- Exact constructor record assembled by the ordinary declaration phase. -/
+def declaredConstructorInfo (stats : InductiveStats)
+    (induct : Name) (ctor : Constructor) (cidx : Nat)
+    (isUnsafe : Bool) (context : Context) : ConstructorVal :=
+  let arity := constructorArity ctor.type 0
+  { type := ctor.type, cidx, isUnsafe
+    levelParams := context.lparams
+    name := ctor.name
+    induct := induct
+    numParams := stats.params.size
+    numFields := assert! arity ≥ stats.params.size
+      arity - stats.params.size }
+
+/-- Constructor metadata for one family, retaining its zero-based constructor
+ordinal in source order. -/
+def declaredConstructorInfosFor (stats : InductiveStats)
+    (induct : Name) (isUnsafe : Bool) (context : Context) :
+    Nat → List Constructor → List ConstructorVal
+  | _, [] => []
+  | cidx, ctor :: ctors =>
+      declaredConstructorInfo stats induct ctor cidx isUnsafe context ::
+        declaredConstructorInfosFor stats induct isUnsafe context
+          (cidx + 1) ctors
+
+/-- Family-major constructor metadata in the exact order installed by the
+kernel: source families first, then each family's constructor order. -/
+def declaredConstructorInfos (stats : InductiveStats)
+    (indTypes : Array InductiveType) (isUnsafe : Bool)
+    (context : Context) : List ConstructorVal :=
+  indTypes.toList.flatMap fun indType =>
+    declaredConstructorInfosFor stats indType.name isUnsafe context 0
+      indType.ctors
+
+theorem declaredConstructorInfos_toArray
+    (stats : InductiveStats) (indTypes : List InductiveType)
+    (isUnsafe : Bool) (context : Context) :
+    declaredConstructorInfos stats indTypes.toArray isUnsafe context =
+      indTypes.flatMap fun indType =>
+        declaredConstructorInfosFor stats indType.name isUnsafe context 0
+          indType.ctors := by
+  simp [declaredConstructorInfos]
+
+/-- Transparent source-ordered constructor declaration fold. -/
+def declareConstructorInfoList (allowPrimitive : Bool) :
+    List ConstructorVal → Environment → Except Exception Environment
+  | [], env => .ok env
+  | info :: infos, env => do
+      env.checkName info.name allowPrimitive
+      declareConstructorInfoList allowPrimitive infos
+        (env.add (.ctorInfo info))
+
+/-- Exact operational trace of every constructor metadata insertion. -/
+inductive DeclareConstructorInfoListRun (allowPrimitive : Bool) :
+    Environment → List ConstructorVal → Environment → Prop where
+  | nil : DeclareConstructorInfoListRun allowPrimitive env [] env
+  | cons
+      (checkName : env.checkName info.name allowPrimitive = .ok ())
+      (tail : DeclareConstructorInfoListRun allowPrimitive
+        (env.add (.ctorInfo info)) infos finalEnv) :
+      DeclareConstructorInfoListRun allowPrimitive env (info :: infos)
+        finalEnv
+
+theorem DeclareConstructorInfoListRun.of_run
+    (run : declareConstructorInfoList allowPrimitive infos env =
+      .ok finalEnv) :
+    DeclareConstructorInfoListRun allowPrimitive env infos finalEnv := by
+  induction infos generalizing env with
+  | nil =>
+      simp only [declareConstructorInfoList, Except.ok.injEq] at run
+      subst finalEnv
+      exact .nil
+  | cons info infos ih =>
+      simp only [declareConstructorInfoList] at run
+      cases hcheck : env.checkName info.name allowPrimitive with
+      | error error =>
+          rw [hcheck] at run
+          contradiction
+      | ok value =>
+          have value_eq : value = () := Subsingleton.elim _ _
+          subst value
+          simp only [hcheck] at run
+          exact .cons hcheck (ih run)
+
+theorem DeclareConstructorInfoListRun.environment
+    (run : DeclareConstructorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv = infos.foldl
+      (fun env info => env.add (.ctorInfo info)) env := by
+  induction run with
+  | nil => rfl
+  | cons _ _ ih => simpa only [List.foldl_cons] using ih
+
+private theorem declaredConstructorInfoList_constants : ∀
+    (infos : List ConstructorVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.ctorInfo info)) env).constants =
+      infos.foldl (fun constants info =>
+        constants.insert info.name (.ctorInfo info)) env.constants
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredConstructorInfoList_constants infos
+        (env.add (.ctorInfo info))
+
+private theorem declaredConstructorInfoList_quotInit : ∀
+    (infos : List ConstructorVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.ctorInfo info)) env).quotInit =
+      env.quotInit
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredConstructorInfoList_quotInit infos
+        (env.add (.ctorInfo info))
+
+theorem DeclareConstructorInfoListRun.constants
+    (run : DeclareConstructorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.constants = infos.foldl
+      (fun constants info => constants.insert info.name (.ctorInfo info))
+      env.constants := by
+  rw [run.environment]
+  exact declaredConstructorInfoList_constants infos env
+
+theorem DeclareConstructorInfoListRun.quotInit
+    (run : DeclareConstructorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.quotInit = env.quotInit := by
+  rw [run.environment]
+  exact declaredConstructorInfoList_quotInit infos env
+
 def declareConstructors (stats : InductiveStats)
     (indTypes : Array InductiveType) (isUnsafe : Bool) : M Environment :=
-  fun c => indTypes.foldlM (init := c.env) fun env indType => do
-    let (_, env) ← indType.ctors.foldlM (init := (0, env)) fun (cidx, env) ctor => do
-      let type := ctor.type
-      let rec arity i
-        | .forallE _ _ body _ => arity (i+1) body
-        | _ => i
-      let arity := arity 0 type
-      env.checkName ctor.name c.allowPrimitive
-      pure (cidx + 1, env.add <| .ctorInfo {
-        type, cidx, isUnsafe
-        levelParams := c.lparams
-        name := ctor.name
-        induct := indType.name
-        numParams := stats.params.size
-        numFields := assert! arity ≥ stats.params.size; arity - stats.params.size
-      })
-    pure env
+  fun context =>
+    declareConstructorInfoList context.allowPrimitive
+      (declaredConstructorInfos stats indTypes isUnsafe context) context.env
 
 /-- Return true if recursor can map into any universe -/
 def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) : M Bool := do
@@ -2652,6 +3200,215 @@ def mkRecRules (indTypes : Array InductiveType) (elimLevel : Level) (stats : Ind
     rules := rules.push rule
   return rules.toList
 
+/-- Transparent source-ordered recursor declaration fold. -/
+def declareRecursorInfoList (allowPrimitive : Bool) :
+    List RecursorVal → Environment → Except Exception Environment
+  | [], env => .ok env
+  | info :: infos, env => do
+      env.checkName info.name allowPrimitive
+      declareRecursorInfoList allowPrimitive infos
+        (env.add (.recInfo info))
+
+/-- Exact operational trace of every generated recursor insertion. -/
+inductive DeclareRecursorInfoListRun (allowPrimitive : Bool) :
+    Environment → List RecursorVal → Environment → Prop where
+  | nil : DeclareRecursorInfoListRun allowPrimitive env [] env
+  | cons
+      (checkName : env.checkName info.name allowPrimitive = .ok ())
+      (tail : DeclareRecursorInfoListRun allowPrimitive
+        (env.add (.recInfo info)) infos finalEnv) :
+      DeclareRecursorInfoListRun allowPrimitive env (info :: infos) finalEnv
+
+theorem DeclareRecursorInfoListRun.run
+    (trace : DeclareRecursorInfoListRun allowPrimitive env infos finalEnv) :
+    declareRecursorInfoList allowPrimitive infos env = .ok finalEnv := by
+  induction trace with
+  | nil => rfl
+  | cons checkName _ ih =>
+      simp only [declareRecursorInfoList, checkName, Bind.bind, Except.bind]
+      exact ih
+
+theorem DeclareRecursorInfoListRun.environment
+    (trace : DeclareRecursorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv = infos.foldl
+      (fun env info => env.add (.recInfo info)) env := by
+  induction trace with
+  | nil => rfl
+  | cons _ _ ih => simpa only [List.foldl_cons] using ih
+
+private theorem declaredRecursorInfoList_constants : ∀
+    (infos : List RecursorVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.recInfo info)) env).constants =
+      infos.foldl (fun constants info =>
+        constants.insert info.name (.recInfo info)) env.constants
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredRecursorInfoList_constants infos (env.add (.recInfo info))
+
+private theorem declaredRecursorInfoList_quotInit : ∀
+    (infos : List RecursorVal) (env : Environment),
+    (infos.foldl (fun env info => env.add (.recInfo info)) env).quotInit =
+      env.quotInit
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredRecursorInfoList_quotInit infos (env.add (.recInfo info))
+
+theorem DeclareRecursorInfoListRun.constants
+    (trace : DeclareRecursorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.constants = infos.foldl
+      (fun constants info => constants.insert info.name (.recInfo info))
+      env.constants := by
+  rw [trace.environment]
+  exact declaredRecursorInfoList_constants infos env
+
+theorem DeclareRecursorInfoListRun.quotInit
+    (trace : DeclareRecursorInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.quotInit = env.quotInit := by
+  rw [trace.environment]
+  exact declaredRecursorInfoList_quotInit infos env
+
+/-- The exact source-ordered recursor metadata produced by `run`, paired with
+the kernel environment after those records have been installed. -/
+structure RecursorDeclarationResult where
+  initialEnv : Environment
+  allowPrimitive : Bool
+  kTarget : Bool
+  infos : List RecursorVal
+  infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  env : Environment
+  trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
+
+private structure RecursorDeclarationTail
+    (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool) where
+  infos : List RecursorVal
+  infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  env : Environment
+  trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
+
+namespace declareRecursors
+
+/-- Generate and install one recursor per family.  The rule-state counter is
+threaded across the whole block, and each name is checked immediately after
+that family's rules are generated, preserving the operational order of the
+original loop in `run`. -/
+def loop (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (k : Bool) (recInfos : Array RecInfo)
+    (motives minors : Array Expr) (lctx : LocalContext)
+    (lparams : List Name) (isUnsafe allowPrimitive : Bool) :
+    (dIdx : Nat) → (env : Environment) →
+      StateT Nat M (RecursorDeclarationTail allowPrimitive env k)
+  | dIdx, env => do
+      if h : dIdx < indTypes.size then
+        let indType := indTypes[dIdx]
+        let info := recInfos[dIdx]!
+        let ty :=
+          lctx.mkForall stats.params <|
+          lctx.mkForall motives <|
+          lctx.mkForall minors <|
+          lctx.mkForall info.indices <|
+          lctx.mkForall #[info.major] <|
+          .app (mkAppN info.motive info.indices) info.major
+        let rules ← mkRecRules indTypes elimLevel stats dIdx motives minors
+        let name := mkRecName indType.name
+        let recursor : RecursorVal := {
+          levelParams := getRecLevelParams elimLevel lparams
+          type := ty.inferImplicit 1000 false
+          numParams := stats.params.size
+          numIndices := stats.nindices[dIdx]!
+          name, all := indTypes.map (·.name) |>.toList
+          numMotives := motives.size
+          numMinors := minors.size
+          rules, k, isUnsafe }
+        match hcheck : env.checkName name allowPrimitive with
+        | .error error => throw error
+        | .ok () =>
+          let tail ← loop stats indTypes elimLevel k recInfos motives minors lctx
+            lparams isUnsafe allowPrimitive (dIdx + 1)
+              (env.add (.recInfo recursor))
+          pure {
+            infos := recursor :: tail.infos
+            infos_kTarget := by
+              intro other member
+              rcases List.mem_cons.mp member with rfl | member
+              · rfl
+              · exact tail.infos_kTarget other member
+            env := tail.env
+            trace := .cons hcheck tail.trace }
+      else
+        pure {
+          infos := []
+          infos_kTarget := by simp
+          env
+          trace := .nil }
+termination_by dIdx _ => indTypes.size - dIdx
+
+end declareRecursors
+
+private def declareRecursorsAt (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
+    (context : Context) :
+    Except Exception
+      (RecursorDeclarationTail context.allowPrimitive context.env k) :=
+  (mkRecInfos stats indTypes elimLevel fun recInfos => do
+    let motives := recInfos.map (·.motive)
+    let minors := recInfos.flatMap (·.minors)
+    let lctx ← getLCtx
+    StateT.run' (s := 0) <|
+      declareRecursors.loop stats indTypes elimLevel k recInfos motives minors
+        lctx context.lparams (context.safety != .safe)
+          context.allowPrimitive 0 context.env) context
+
+/-- Run the complete ordinary recursor synthesis/declaration phase while
+retaining the generated metadata inventory. -/
+def declareRecursors (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool) :
+    M RecursorDeclarationResult := fun context => do
+  let result ← declareRecursorsAt stats indTypes elimLevel k context
+  pure {
+    initialEnv := context.env
+    allowPrimitive := context.allowPrimitive
+    kTarget := k
+    infos := result.infos
+    infos_kTarget := result.infos_kTarget
+    env := result.env
+    trace := result.trace }
+
+/-- A successful recursor phase records the exact input environment and name-
+checking mode of its reader context. -/
+theorem declareRecursors_input_eq
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.initialEnv = context.env ∧
+      result.allowPrimitive = context.allowPrimitive := by
+  unfold declareRecursors at run
+  cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
+  | error error => simp_all [Bind.bind, Except.bind]
+  | ok tail =>
+      simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
+      cases run
+      exact ⟨rfl, rfl⟩
+
+/-- A successful recursor phase retains the exact K-like flag supplied to
+the producer. -/
+theorem declareRecursors_kTarget_eq
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.kTarget = k := by
+  unfold declareRecursors at run
+  cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
+  | error error => simp_all [Bind.bind, Except.bind]
+  | ok tail =>
+      simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
+      cases run
+      rfl
+
+/-- Every recursor emitted by one successful phase carries the exact K-like
+flag computed for that phase. -/
+theorem declareRecursors_infos_kTarget
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result)
+    {info : RecursorVal} (member : info ∈ result.infos) :
+    info.k = k := by
+  rw [← declareRecursors_kTarget_eq run]
+  exact result.infos_kTarget info member
+
 def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Environment := do
   let isUnsafe := (← read).safety != .safe
   let indTypes := types.toArray
@@ -2663,38 +3420,8 @@ def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Envir
   withEnv (← declareConstructors stats indTypes isUnsafe) do
   let elimLevel ← getElimLevel stats indTypes
   let k ← isKTarget stats indTypes
-  mkRecInfos stats indTypes elimLevel fun recInfos => do
-  let motives := recInfos.map (·.motive)
-  let minors := recInfos.flatMap (·.minors)
-  let numMinors := minors.size
-  let numMotives := motives.size
-  let all := indTypes.map (·.name) |>.toList
-  let lctx ← getLCtx
-  let isUnsafe := (← read).safety != .safe
-  StateT.run' (s := 0) do
-  let mut env ← getEnv
-  let {allowPrimitive, ..} ← read
-  for h : dIdx in [:indTypes.size] do
-    let indType := indTypes[dIdx]
-    let info := recInfos[dIdx]!
-    let ty :=
-      lctx.mkForall stats.params <|
-      lctx.mkForall motives <|
-      lctx.mkForall minors <|
-      lctx.mkForall info.indices <|
-      lctx.mkForall #[info.major] <|
-      .app (mkAppN info.motive info.indices) info.major
-    let rules ← mkRecRules indTypes elimLevel stats dIdx motives minors
-    let name := mkRecName indType.name
-    env.checkName name allowPrimitive
-    env := env.add <| .recInfo {
-      levelParams := getRecLevelParams elimLevel lparams
-      type := ty.inferImplicit 1000 false -- note: flag has reversed polarity from C++
-      numParams := stats.params.size
-      numIndices := stats.nindices[dIdx]!
-      name, all, numMotives, numMinors, rules, k, isUnsafe
-    }
-  pure env
+  let recursors ← declareRecursors stats indTypes elimLevel k
+  pure recursors.env
 
 end AddInductive
 
@@ -2939,47 +3666,251 @@ def checkNoNestedAux (n : Name) (e : Expr) : Except Exception Unit := do
       | _ => false).isSome then
     throw <| .other s!"invalid declaration '{n}', it uses the reserved prefix '_nested'"
 
-def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
-    (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (fuel : FuelConfig := {}) :
-    Except Exception Environment := do
+/-- Closedness and reserved-prefix checks performed before nested
+elimination.  Naming this phase lets a retained outer execution own the exact
+successful precheck equation. -/
+def Environment.checkInductiveInput (env : Environment)
+    (types : List InductiveType) : Except Exception Unit := do
   for indType in types do
     env.checkNoMVarNoFVar indType.name indType.type
     for ctor in indType.ctors do
       env.checkNoMVarNoFVar ctor.name ctor.type
       checkNoNestedAux ctor.name ctor.type
-  let res ← ElimNestedInductive.run fuel.inductiveFuel nparams types env
-    |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
-  let numNested := res.aux2nested.size
-  let safety := if isUnsafe then .unsafe else .safe
-  let env' ← AddInductive.run nparams res.types numNested
-    { env, allowPrimitive, lparams, fuel, safety }
-  if numNested = 0 then return env'
-  let allIndNames := types.map (·.name)
-  let (recNames', recNameMap') := mkAuxRecNameMap env' types
-  (·.2) <$> StateT.run (s := env) do
-  let processRec recName := do
-    let newRecName := recNameMap'.getD recName recName
-    let some (.recInfo recInfo) := env'.find? recName | unreachable!
-    let newRecType := res.restoreNested env' recInfo.type recNameMap'
-    let newRules ← recInfo.rules.mapM fun rule => do
-      let newRhs := res.restoreNested env' rule.rhs recNameMap'
-      let newCtorName := if newRecName == recName then rule.ctor else
-        res.restoreCtorName env' rule.ctor
-      return { rule with ctor := newCtorName, rhs := newRhs }
-    (← MonadState.get).checkName newRecName allowPrimitive
-    modify (·.add <| .recInfo { recInfo with
-      name := newRecName, type := newRecType, all := allIndNames, rules := newRules })
-  for indType in types do
-    let some (.inductInfo ind) := env'.find? indType.name | unreachable!
-    (← get).checkName ind.name allowPrimitive
-    modify (·.add <| .inductInfo { ind with all := allIndNames })
-    for ctorName in ind.ctors do
-      let some (.ctorInfo ctor) := env'.find? ctorName | unreachable!
-      let newType := res.restoreNested env' ctor.type
-      (← get).checkName ctor.name allowPrimitive
-      modify (·.add <| .ctorInfo { ctor with type := newType })
-    processRec (mkRecName indType.name)
-  recNames'.forM processRec
-  TypeChecker.M.run (← get) (safety := safety) (lctx := res.lctx)
+
+/-- Exact initial state used by nested elimination. -/
+def ElimNestedInductive.initialState (lparams : List Name)
+    (types : List InductiveType) : ElimNestedInductive.State where
+  lvls := lparams.map .param
+  newTypes := types.toArray
+
+/-- Run nested elimination at the exact reader/state boundary used by
+`Environment.addInductive`. -/
+def ElimNestedInductive.runAt (env : Environment) (fuel nparams : Nat)
+    (lparams : List Name) (types : List InductiveType) :
+    Except Exception ElimNestedInductive.Result :=
+  ElimNestedInductive.run fuel nparams types env
+    |>.run' (ElimNestedInductive.initialState lparams types)
+
+/-- Reader context passed to the ordinary flattened-block checker. -/
+def AddInductive.Context.forInductive (env : Environment)
+    (lparams : List Name) (isUnsafe allowPrimitive : Bool)
+    (fuel : FuelConfig) : AddInductive.Context where
+  env
+  allowPrimitive
+  lparams
+  fuel
+  safety := if isUnsafe then .unsafe else .safe
+
+/-- Restore one recursor record emitted for the flattened block.  Auxiliary
+recursors are renamed into the source block's public recursor namespace;
+types, rule constructors, and rule right-hand sides are restored exactly as
+in the nested branch of `Environment.addInductive`. -/
+def ElimNestedInductive.Result.restoreRecursorInfo
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (allIndNames : List Name) (recNameMap : NameMap Name)
+    (recName : Name) : RecursorVal := Id.run do
+  let newRecName := recNameMap.getD recName recName
+  let some (.recInfo recInfo) := flatEnv.find? recName | unreachable!
+  let newRecType := res.restoreNested flatEnv recInfo.type recNameMap
+  let newRules := recInfo.rules.map fun rule =>
+    let newRhs := res.restoreNested flatEnv rule.rhs recNameMap
+    let newCtorName := if newRecName == recName then rule.ctor else
+      res.restoreCtorName flatEnv rule.ctor
+    { rule with ctor := newCtorName, rhs := newRhs }
+  return {
+    recInfo with
+    name := newRecName
+    type := newRecType
+    all := allIndNames
+    rules := newRules }
+
+/-- Restore the stored source-family record copied from the flattened block. -/
+def ElimNestedInductive.Result.restoreInductiveInfo
+    (_res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (allIndNames : List Name) (indType : InductiveType) : InductiveVal :=
+  match flatEnv.find? indType.name with
+  | some (.inductInfo ind) => { ind with all := allIndNames }
+  | _ => unreachable!
+
+/-- Restore one source constructor record copied from the flattened block. -/
+def ElimNestedInductive.Result.restoreConstructorInfo
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (ctorName : Name) : ConstructorVal :=
+  match flatEnv.find? ctorName with
+  | some (.ctorInfo ctor) =>
+      { ctor with type := res.restoreNested flatEnv ctor.type }
+  | _ => unreachable!
+
+/-- Complete source-ordered metadata inventory installed by nested
+restoration.  Each source family is followed by its source constructors and
+main recursor; renamed auxiliary recursors form the final suffix. -/
+def restoredNestedInfos (res : ElimNestedInductive.Result)
+    (flatEnv : Environment) (types : List InductiveType) : List ConstantInfo :=
+  Id.run do
+    let allIndNames := types.map (·.name)
+    let (auxRecNames, recNameMap) := mkAuxRecNameMap flatEnv types
+    let mut infos : Array ConstantInfo := #[]
+    for indType in types do
+      let ind := res.restoreInductiveInfo flatEnv allIndNames indType
+      infos := infos.push (.inductInfo ind)
+      for ctorName in ind.ctors do
+        infos := infos.push (.ctorInfo <|
+          res.restoreConstructorInfo flatEnv ctorName)
+      infos := infos.push (.recInfo <|
+        res.restoreRecursorInfo flatEnv allIndNames recNameMap
+          (mkRecName indType.name))
+    for recName in auxRecNames do
+      infos := infos.push (.recInfo <|
+        res.restoreRecursorInfo flatEnv allIndNames recNameMap recName)
+    return infos.toList
+
+/-- Transparent declaration fold used by nested restoration. -/
+def declareRestoredInfoList (allowPrimitive : Bool) :
+    List ConstantInfo → Environment → Except Exception Environment
+  | [], env => .ok env
+  | info :: infos, env => do
+      env.checkName info.name allowPrimitive
+      declareRestoredInfoList allowPrimitive infos (env.add info)
+
+/-- Exact operational trace of the restored metadata fold. -/
+inductive DeclareRestoredInfoListRun (allowPrimitive : Bool) :
+    Environment → List ConstantInfo → Environment → Prop where
+  | nil : DeclareRestoredInfoListRun allowPrimitive env [] env
+  | cons
+      (checkName : env.checkName info.name allowPrimitive = .ok ())
+      (tail : DeclareRestoredInfoListRun allowPrimitive
+        (env.add info) infos finalEnv) :
+      DeclareRestoredInfoListRun allowPrimitive env (info :: infos) finalEnv
+
+theorem DeclareRestoredInfoListRun.of_run
+    (run : declareRestoredInfoList allowPrimitive infos env = .ok finalEnv) :
+    DeclareRestoredInfoListRun allowPrimitive env infos finalEnv := by
+  induction infos generalizing env with
+  | nil =>
+      simp only [declareRestoredInfoList, Except.ok.injEq] at run
+      subst finalEnv
+      exact .nil
+  | cons info infos ih =>
+      simp only [declareRestoredInfoList] at run
+      cases hcheck : env.checkName info.name allowPrimitive with
+      | error error =>
+          rw [hcheck] at run
+          contradiction
+      | ok value =>
+          have value_eq : value = () := Subsingleton.elim _ _
+          subst value
+          simp only [hcheck] at run
+          exact .cons hcheck (ih run)
+
+theorem DeclareRestoredInfoListRun.run
+    (trace : DeclareRestoredInfoListRun allowPrimitive env infos finalEnv) :
+    declareRestoredInfoList allowPrimitive infos env = .ok finalEnv := by
+  induction trace with
+  | nil => rfl
+  | cons checkName _ ih =>
+      simp only [declareRestoredInfoList, checkName, Bind.bind, Except.bind]
+      exact ih
+
+theorem DeclareRestoredInfoListRun.environment
+    (trace : DeclareRestoredInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv = infos.foldl (fun env info => env.add info) env := by
+  induction trace with
+  | nil => rfl
+  | cons _ _ ih => simpa only [List.foldl_cons] using ih
+
+private theorem declaredRestoredInfoList_constants : ∀
+    (infos : List ConstantInfo) (env : Environment),
+    (infos.foldl (fun env info => env.add info) env).constants =
+      infos.foldl (fun constants info =>
+        constants.insert info.name info) env.constants
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredRestoredInfoList_constants infos (env.add info)
+
+private theorem declaredRestoredInfoList_quotInit : ∀
+    (infos : List ConstantInfo) (env : Environment),
+    (infos.foldl (fun env info => env.add info) env).quotInit = env.quotInit
+  | [], _ => rfl
+  | info :: infos, env =>
+      declaredRestoredInfoList_quotInit infos (env.add info)
+
+/-- The restoration trace exposes the exact final persistent constant map. -/
+theorem DeclareRestoredInfoListRun.constants
+    (trace : DeclareRestoredInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.constants = infos.foldl
+      (fun constants info => constants.insert info.name info)
+      env.constants := by
+  rw [trace.environment]
+  exact declaredRestoredInfoList_constants infos env
+
+/-- Restored metadata insertion does not modify quotient initialization. -/
+theorem DeclareRestoredInfoListRun.quotInit
+    (trace : DeclareRestoredInfoListRun allowPrimitive env infos finalEnv) :
+    finalEnv.quotInit = env.quotInit := by
+  rw [trace.environment]
+  exact declaredRestoredInfoList_quotInit infos env
+
+/-- The lean4#14577 escape-hatch check, isolated from metadata restoration so
+its successful equation can be retained by the outer execution. -/
+def checkNestedAuxValues (res : ElimNestedInductive.Result)
+    (env : Environment) (safety : DefinitionSafety) (lparams : List Name)
+    (fuel : FuelConfig) : Except Exception Unit :=
+  TypeChecker.M.run env (safety := safety) (lctx := res.lctx)
       (lparams := lparams) (fuel := fuel) do
-    res.aux2nested.forM fun _ e => do _ ← TypeChecker.checkType e
+    res.aux2nested.forM fun _ e => do
+      _ ← TypeChecker.checkType e
+
+/-- Successful nested restoration retains the exact restored inventory, all
+name checks and insertions, and the final auxiliary-value typecheck. -/
+structure NestedRestorationResult
+    (res : ElimNestedInductive.Result) (flatEnv initialEnv : Environment)
+    (types : List InductiveType) (allowPrimitive : Bool)
+    (safety : DefinitionSafety) (lparams : List Name) (fuel : FuelConfig) where
+  infos : List ConstantInfo
+  infos_eq : infos = restoredNestedInfos res flatEnv types
+  env : Environment
+  trace : DeclareRestoredInfoListRun allowPrimitive initialEnv infos env
+  auxCheck : checkNestedAuxValues res env safety lparams fuel = .ok ()
+
+theorem NestedRestorationResult.constants
+    (result : NestedRestorationResult res flatEnv initialEnv types
+      allowPrimitive safety lparams fuel) :
+    result.env.constants =
+      (restoredNestedInfos res flatEnv types).foldl
+        (fun constants info => constants.insert info.name info)
+        initialEnv.constants := by
+  rw [result.trace.constants, result.infos_eq]
+
+/-- Execute the complete nested restoration phase while retaining its
+data-bearing metadata and auxiliary-check trace. -/
+def restoreNestedEnvironment (res : ElimNestedInductive.Result)
+    (flatEnv initialEnv : Environment) (types : List InductiveType)
+    (allowPrimitive : Bool) (safety : DefinitionSafety)
+    (lparams : List Name) (fuel : FuelConfig) :
+    Except Exception (NestedRestorationResult res flatEnv initialEnv types
+      allowPrimitive safety lparams fuel) :=
+  let infos := restoredNestedInfos res flatEnv types
+  match hdeclare : declareRestoredInfoList allowPrimitive infos initialEnv with
+  | .error error => .error error
+  | .ok restoredEnv =>
+    match hcheck : checkNestedAuxValues res restoredEnv safety lparams fuel with
+    | .error error => .error error
+    | .ok () => .ok {
+        infos
+        infos_eq := rfl
+        env := restoredEnv
+        trace := DeclareRestoredInfoListRun.of_run hdeclare
+        auxCheck := hcheck }
+
+def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
+    (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (fuel : FuelConfig := {}) :
+    Except Exception Environment := do
+  Environment.checkInductiveInput env types
+  let res ← ElimNestedInductive.runAt env fuel.inductiveFuel nparams
+    lparams types
+  let numNested := res.aux2nested.size
+  let env' ← AddInductive.run nparams res.types numNested
+    (AddInductive.Context.forInductive env lparams isUnsafe allowPrimitive fuel)
+  if numNested = 0 then return env'
+  return (← restoreNestedEnvironment res env' env types allowPrimitive
+    (if isUnsafe then .unsafe else .safe) lparams fuel).env

@@ -51,9 +51,7 @@ L4L-09C's obligation.
 
 namespace Lean4Lean
 
-deriving instance DecidableEq for VConstant
 deriving instance DecidableEq for VDefEq
-deriving instance DecidableEq for VConstVal
 deriving instance DecidableEq for VInductiveType
 deriving instance DecidableEq for VInductDecl
 
@@ -293,6 +291,19 @@ def nestedBlockChecked? (targets : List NestedTargetBlock)
   let generation ← elim.flat.identityBlockGeneration?
   return ⟨elim, generation⟩
 
+/-- Project the exact flattened generation transaction retained by a
+successful nested-block check. -/
+theorem NestedBlockChecked.generation_eq_of_check
+    {targets : List NestedTargetBlock} {source : VInductDecl} {fuel : Nat}
+    {nested : NestedBlockChecked source}
+    (h : nestedBlockChecked? targets source fuel = some nested) :
+    nested.elim.flat.identityBlockGeneration? = some nested.generation := by
+  unfold nestedBlockChecked? at h
+  obtain ⟨elim, _helim, h⟩ := Option.bind_eq_some_iff.mp h
+  obtain ⟨generation, hgeneration, h⟩ := Option.bind_eq_some_iff.mp h
+  cases h
+  exact hgeneration
+
 /-- Structural acceptance for a nested declaration. -/
 def nestedStage3 (targets : List NestedTargetBlock)
     (source : VInductDecl) (fuel : Nat := 1000) : Bool :=
@@ -421,14 +432,22 @@ def recursors (nested : NestedBlockChecked source) : List VConstVal :=
     ⟨⟨r.uvars, nested.restoreRec r.type⟩,
       ((nested.recMap.find? (·.1 == r.name)).map (·.2)).getD r.name⟩
 
+/-- Restore all three expression payloads of one flattened generated rule. -/
+def restoreRule (nested : NestedBlockChecked source) (rule : VDefEq) : VDefEq :=
+  { rule with
+      lhs := nested.restoreRec rule.lhs
+      rhs := nested.restoreRec rule.rhs
+      type := nested.restoreRec rule.type }
+
+/-- The exact restored rule at one flattened constructor position. -/
+def restoredRule (nested : NestedBlockChecked source) (i : Nat)
+    (constructor : NormalizedBlockCtor) : VDefEq :=
+  nested.restoreRule (nested.generation.rule i constructor)
+
 /-- The restored rule inventory, in the flattened block's globally ordered
 rule order. -/
 def generatedRules (nested : NestedBlockChecked source) : List VDefEq :=
-  nested.generation.generatedRules.map fun df =>
-    { df with
-        lhs := nested.restoreRec df.lhs
-        rhs := nested.restoreRec df.rhs
-        type := nested.restoreRec df.type }
+  nested.generation.generatedRules.map nested.restoreRule
 
 end NestedBlockChecked
 

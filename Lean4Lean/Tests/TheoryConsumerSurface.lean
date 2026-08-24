@@ -26,6 +26,14 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.SpineWF.weak'_inv
 #check VInductDecl.ElimMode.ofBool
 #check VStructureView.etaRebuild
+#check VStructureView.MinorsWF
+#check VStructureView.RebuildWF
+#check VStructureView.projector_hasType_field_of_type
+#check VStructureView.WF.checkedParamsSpine
+#check VStructureView.WF.constructorPrefix_hasType
+#check VStructureView.WF.toProgramsWF_of_minors
+#check VStructureView.WF.toRebuildWF_of_programs
+#check VStructureView.WF.toStructEtaWF_of_rebuilds
 #check VStructureView.ProgramsWF.projectionArgsSpine
 #check VStructureView.ProgramsWF.etaRebuild_hasType_of_constructorPrefix
 
@@ -100,6 +108,48 @@ info: 'Lean4Lean.VStructureView.etaRebuild' depends on axioms: [propext, Quot.so
 -/
 #guard_msgs in
 #print axioms VStructureView.etaRebuild
+
+/--
+info: 'Lean4Lean.VStructureView.projector_hasType_field_of_type' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.projector_hasType_field_of_type
+
+/--
+info: 'Lean4Lean.VStructureView.WF.checkedParamsSpine' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.checkedParamsSpine
+
+/--
+info: 'Lean4Lean.VStructureView.WF.constructorPrefix_hasType' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.constructorPrefix_hasType
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toProgramsWF_of_minors' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toProgramsWF_of_minors
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toRebuildWF_of_programs' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toRebuildWF_of_programs
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toStructEtaWF_of_rebuilds' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toStructEtaWF_of_rebuilds
 
 /--
 info: 'Lean4Lean.VStructureView.ProgramsWF.projectionArgsSpine' depends on axioms: [propext,

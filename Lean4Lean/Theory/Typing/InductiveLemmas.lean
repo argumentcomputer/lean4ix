@@ -213,6 +213,13 @@ theorem liftTelN_instL (ls : List VLevel) (n : Nat) : ∀ (tel : List VExpr) (k 
     show (A.liftN n k).instL ls :: _ = (A.instL ls).liftN n k :: _
     rw [instL_liftN, liftTelN_instL ls n tel (k+1)]
 
+@[simp] theorem liftTelN_zero : ∀ (tel : List VExpr) (k : Nat),
+    liftTelN 0 tel k = tel
+  | [], _ => rfl
+  | _ :: tel, k => by
+    simp only [liftTelN, liftN_zero, List.cons.injEq, true_and]
+    exact liftTelN_zero tel (k + 1)
+
 /-- Pulling a lift out of the middle of a two-step lift: the outer lift at
 the seam between the two inner ones lands on the variables the innermost
 lift moved. -/
@@ -333,6 +340,143 @@ the spine outermost-first. -/
 def instRev : VExpr → List VExpr → VExpr
   | C, [] => C
   | C, e :: es => instRev (C.inst e es.length) es
+
+/-- Instantiate an outermost-first argument list at a fixed binder offset.
+The `k` variables below the substituted telescope remain bound. -/
+def instRevAt : VExpr → List VExpr → Nat → VExpr
+  | e, [], _ => e
+  | e, a :: as, k => instRevAt (e.inst a (k + as.length)) as k
+
+theorem instRevAt_zero (e : VExpr) (args : List VExpr) :
+    e.instRevAt args 0 = e.instRev args := by
+  induction args generalizing e with
+  | nil => rfl
+  | cons arg args ih =>
+      simp only [VExpr.instRevAt, VExpr.instRev]
+      simpa using ih (e := e.inst arg args.length)
+
+theorem instRevAt_closedN (args : List VExpr)
+    {C : VExpr} {k : Nat} (hC : C.ClosedN k) :
+    C.instRevAt args k = C := by
+  induction args generalizing C with
+  | nil => rfl
+  | cons arg args ih =>
+      simp only [VExpr.instRevAt]
+      rw [hC.instN_eq (by omega)]
+      exact ih hC
+
+theorem instRev_forallE_projection
+    (A B : VExpr) (args : List VExpr) :
+    VExpr.instRev (.forallE A B) args =
+      .forallE (VExpr.instRev A args)
+        (VExpr.instRevAt B args 1) := by
+  induction args generalizing A B with
+  | nil => rfl
+  | cons arg args ih =>
+      simp only [VExpr.instRev, VExpr.inst]
+      rw [ih]
+      congr 1
+      simp only [VExpr.instRevAt]
+      rw [show 1 + args.length = args.length + 1 by omega]
+
+theorem instRevAt_forallE_projection
+    (A B : VExpr) (args : List VExpr) (k : Nat) :
+    VExpr.instRevAt (.forallE A B) args k =
+      .forallE (VExpr.instRevAt A args k)
+        (VExpr.instRevAt B args (k + 1)) := by
+  induction args generalizing A B with
+  | nil => rfl
+  | cons arg args ih =>
+      simp only [VExpr.instRevAt, VExpr.inst]
+      rw [ih]
+      congr 1
+      rw [show k + args.length + 1 = k + 1 + args.length by omega]
+
+theorem instRevAt_forallN_projection
+    (As : List VExpr) (B : VExpr) (args : List VExpr) (k : Nat) :
+    VExpr.instRevAt (VExpr.forallN As B) args k =
+      VExpr.forallN
+        (As.zipIdx k |>.map fun x => x.1.instRevAt args x.2)
+        (B.instRevAt args (k + As.length)) := by
+  induction As generalizing k with
+  | nil => rfl
+  | cons A As ih =>
+      simp only [VExpr.forallN, VExpr.instRevAt_forallE_projection,
+        List.zipIdx, List.map_cons, List.length_cons]
+      rw [ih]
+      rw [show k + 1 + As.length = k + (As.length + 1) by omega]
+
+theorem instRev_forallN_projection
+    (As : List VExpr) (B : VExpr) (args : List VExpr) :
+    VExpr.instRev (VExpr.forallN As B) args =
+      VExpr.forallN
+        (As.zipIdx.map fun x => x.1.instRevAt args x.2)
+        (B.instRevAt args As.length) := by
+  cases As with
+  | nil => simp [VExpr.forallN, VExpr.instRevAt_zero]
+  | cons A As =>
+      simp only [VExpr.forallN, VExpr.instRev_forallE_projection,
+        List.zipIdx, List.map_cons, List.length_cons]
+      rw [VExpr.instRevAt_forallN_projection]
+      rw [VExpr.instRevAt_zero]
+      congr 2
+      rw [Nat.add_comm]
+
+/-- Substituting exactly the variables opened by a lift at a fixed offset
+cancels that lift, independently of the substitution values. -/
+theorem instRevAt_liftN_gap (args : List VExpr) (e : VExpr) (k : Nat) :
+    (e.liftN args.length k).instRevAt args k = e := by
+  induction args with
+  | nil => simp [instRevAt]
+  | cons arg args ih =>
+      simp only [List.length_cons, instRevAt]
+      rw [show e.liftN (args.length + 1) k =
+          (e.liftN args.length k).liftN 1 (k + args.length) from
+        (liftN'_liftN' (Nat.le_add_right k args.length)
+          (by omega)).symm,
+        inst_liftN]
+      exact ih
+
+/-- With one retained outer parameter, eliminating a lifted suffix from an
+expression is exactly ordinary instantiation of that parameter. -/
+theorem instRevAt_liftN_suffix_one
+    (e a : VExpr) (suffix : List VExpr) (k : Nat) :
+    (e.liftN suffix.length k).instRevAt (a :: suffix) k =
+      e.inst a k := by
+  simp only [instRevAt]
+  rw [show (e.liftN suffix.length k).inst a (k + suffix.length) =
+      (e.inst a k).liftN suffix.length k from by
+    simpa only [Nat.add_comm] using
+      (liftN_instN_lo suffix.length e a k k (Nat.le_refl k)).symm]
+  exact instRevAt_liftN_gap suffix (e.inst a k) k
+
+theorem map_liftTelN_instRevAt_suffix_one
+    (fields : List VExpr) (a : VExpr) (suffix : List VExpr)
+    (start : Nat) :
+    ((VExpr.liftTelN suffix.length fields start).zipIdx start |>.map
+        fun x => x.1.instRevAt (a :: suffix) x.2) =
+      VExpr.instTelN a fields start := by
+  induction fields generalizing start with
+  | nil => rfl
+  | cons field fields ih =>
+      simp only [VExpr.liftTelN, List.zipIdx, List.map_cons,
+        VExpr.instTelN]
+      rw [instRevAt_liftN_suffix_one]
+      congr 1
+      exact ih (start + 1)
+
+/-- A one-parameter common prefix specializes a generated, lifted field
+telescope to the ordinary dependent substitution through its raw fields. -/
+theorem instRev_forallN_liftTelN_suffix_one
+    (fields : List VExpr) (C a : VExpr) (suffix : List VExpr) :
+    VExpr.instRev
+        (VExpr.forallN (VExpr.liftTelN suffix.length fields 0) C)
+        (a :: suffix) =
+      VExpr.forallN (VExpr.instTelN a fields 0)
+        (C.instRevAt (a :: suffix) fields.length) := by
+  rw [VExpr.instRev_forallN_projection,
+    map_liftTelN_instRevAt_suffix_one]
+  simp only [VExpr.liftTelN_length]
 
 theorem instRev_closedN : ∀ (es : List VExpr) {C : VExpr}, C.ClosedN 0 →
     instRev C es = C
@@ -682,6 +826,24 @@ theorem exists_blockGeneration_of_stage3 {decl : VInductDecl}
   | none => simp [hgeneration] at h
   | some generation => exact ⟨generation, rfl⟩
 
+/-- A successful identity block-generation transaction retains exactly the
+normalized checked block returned by its first analyzer phase. -/
+theorem BlockGenerationChecked.identity_checkBlock?
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    (h : source.identityBlockGeneration? = some generation) :
+    (Normalization.identity source).checkBlock? =
+      some generation.block := by
+  unfold identityBlockGeneration? at h
+  obtain ⟨block, hblock, hgeneration⟩ := Option.bind_eq_some_iff.mp h
+  unfold ValidatedBlock.generation? at hgeneration
+  dsimp only at hgeneration
+  split at hgeneration
+  · have generation_eq := Option.some.inj hgeneration
+    rw [← generation_eq]
+    exact hblock
+  · contradiction
+
 /-- Proof-level constructor-header coherence exported from the computational
 normalization-shape check. -/
 def CtorHeaderEq (source view : VConstVal) : Prop :=
@@ -882,6 +1044,477 @@ theorem GenerationChecked.viewCtors_eq {source : VInductDecl}
 
 /-! ### Block-generation positional facts -/
 
+private theorem blockTarget?_loop_eq_some
+    (U np j : Nat) (names : List Name) (head : VExpr)
+    (args : List VExpr) :
+    ∀ (headers : List FamilyHeader) (offset target : Nat)
+      (indices : List VExpr),
+      blockTarget?.loop U np j names head args offset headers =
+        some (target, indices) →
+      ∃ k header,
+        headers[k]? = some header ∧ target = offset + k ∧
+        head = .const header.name (VLevel.params U) ∧
+        args.take np = VExpr.bvarRevRange j np ∧
+        args.drop np = indices := by
+  intro headers
+  induction headers with
+  | nil =>
+      intro offset target indices found
+      simp [blockTarget?.loop] at found
+  | cons header headers ih =>
+      intro offset target indices found
+      simp only [blockTarget?.loop] at found
+      by_cases condition :
+          (head == .const header.name (VLevel.params U) &&
+            args.length == np + header.indices &&
+            args.take np == VExpr.bvarRevRange j np &&
+            (args.drop np).all fun e => !e.hasAnyConst names) = true
+      · rw [condition] at found
+        simp only [if_true, Option.some.injEq, Prod.mk.injEq] at found
+        simp only [Bool.and_eq_true, beq_iff_eq] at condition
+        refine ⟨0, header, rfl, ?_, condition.1.1.1,
+          condition.1.2, found.2⟩
+        omega
+      · rw [if_neg condition] at found
+        obtain ⟨k, targetHeader, targetAt, targetEq, headEq,
+          paramsEq, indicesEq⟩ := ih (offset + 1) target indices found
+        refine ⟨k + 1, targetHeader, ?_, ?_, headEq, paramsEq, indicesEq⟩
+        · simpa using targetAt
+        · omega
+
+/-- Direct block-target recognition returns the header at the reported mutual
+ordinal and exposes the exact parameter/indices application it recognized. -/
+theorem blockTarget?_eq_some
+    {U np j : Nat} {headers : List FamilyHeader} {names : List Name}
+    {expression : VExpr} {target : Nat} {indices : List VExpr}
+    (found : blockTarget? U np j headers names expression =
+      some (target, indices)) :
+    ∃ header, headers[target]? = some header ∧
+      expression = VExpr.appN
+        (.const header.name (VLevel.params U))
+        (VExpr.bvarRevRange j np ++ indices) := by
+  unfold blockTarget? at found
+  obtain ⟨k, header, headerAt, targetEq, headEq, paramsEq, indicesEq⟩ :=
+    blockTarget?_loop_eq_some U np j names expression.appHead
+      (expression.appArgs []) headers 0 target indices found
+  have targetEq' : target = k := by omega
+  subst target
+  refine ⟨header, ?_, ?_⟩
+  · simpa using headerAt
+  calc
+    expression = VExpr.appN expression.appHead
+        (expression.appArgs []) :=
+      (VExpr.appN_appHead_appArgs expression []).symm
+    _ = VExpr.appN (.const header.name (VLevel.params U))
+        ((expression.appArgs []).take np ++
+          (expression.appArgs []).drop np) := by
+      rw [headEq, List.take_append_drop]
+    _ = VExpr.appN (.const header.name (VLevel.params U))
+        (VExpr.bvarRevRange j np ++ indices) := by
+      rw [paramsEq, indicesEq]
+
+/-- Recursive block-target recognition preserves the complete Pi telescope
+and reports the exact target header below it. -/
+theorem blockRecTarget?_eq_some
+    (U np : Nat) (headers : List FamilyHeader) (names : List Name) :
+    ∀ {j expression binders target indices},
+      blockRecTarget? U np headers names j expression =
+        some (binders, target, indices) →
+      ∃ header, headers[target]? = some header ∧
+        expression = VExpr.forallN binders
+          (VExpr.appN (.const header.name (VLevel.params U))
+            (VExpr.bvarRevRange (j + binders.length) np ++ indices))
+  | j, .forallE domain body, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      split at found
+      · contradiction
+      · cases recursiveFound :
+            blockRecTarget? U np headers names (j + 1) body with
+        | none => simp [recursiveFound] at found
+        | some recursiveResult =>
+          obtain ⟨tailBinders, tailTarget, tailIndices⟩ := recursiveResult
+          rw [recursiveFound] at found
+          simp only [Option.some.injEq, Prod.mk.injEq] at found
+          obtain ⟨rfl, rfl, rfl⟩ := found
+          obtain ⟨header, headerAt, bodyEq⟩ :=
+            blockRecTarget?_eq_some U np headers names recursiveFound
+          refine ⟨header, headerAt, ?_⟩
+          rw [show j + (domain :: tailBinders).length =
+            j + 1 + tailBinders.length by
+              simp only [List.length_cons]
+              omega]
+          simp only [VExpr.forallN, bodyEq]
+  | j, .bvar index, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      cases targetFound : blockTarget? U np j headers names (.bvar index) with
+      | none => simp [targetFound] at found
+      | some result =>
+        obtain ⟨target', indices'⟩ := result
+        rw [targetFound] at found
+        simp only [Option.some.injEq, Prod.mk.injEq] at found
+        obtain ⟨rfl, rfl, rfl⟩ := found
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some targetFound
+        exact ⟨header, headerAt, by simpa using expressionEq⟩
+  | j, .sort level, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      cases targetFound : blockTarget? U np j headers names (.sort level) with
+      | none => simp [targetFound] at found
+      | some result =>
+        obtain ⟨target', indices'⟩ := result
+        rw [targetFound] at found
+        simp only [Option.some.injEq, Prod.mk.injEq] at found
+        obtain ⟨rfl, rfl, rfl⟩ := found
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some targetFound
+        exact ⟨header, headerAt, by simpa using expressionEq⟩
+  | j, .const name levels, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      cases targetFound :
+          blockTarget? U np j headers names (.const name levels) with
+      | none => simp [targetFound] at found
+      | some result =>
+        obtain ⟨target', indices'⟩ := result
+        rw [targetFound] at found
+        simp only [Option.some.injEq, Prod.mk.injEq] at found
+        obtain ⟨rfl, rfl, rfl⟩ := found
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some targetFound
+        exact ⟨header, headerAt, by simpa using expressionEq⟩
+  | j, .app fn arg, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      cases targetFound : blockTarget? U np j headers names (.app fn arg) with
+      | none => simp [targetFound] at found
+      | some result =>
+        obtain ⟨target', indices'⟩ := result
+        rw [targetFound] at found
+        simp only [Option.some.injEq, Prod.mk.injEq] at found
+        obtain ⟨rfl, rfl, rfl⟩ := found
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some targetFound
+        exact ⟨header, headerAt, by simpa using expressionEq⟩
+  | j, .lam domain body, binders, target, indices, found => by
+      simp only [blockRecTarget?] at found
+      cases targetFound :
+          blockTarget? U np j headers names (.lam domain body) with
+      | none => simp [targetFound] at found
+      | some result =>
+        obtain ⟨target', indices'⟩ := result
+        rw [targetFound] at found
+        simp only [Option.some.injEq, Prod.mk.injEq] at found
+        obtain ⟨rfl, rfl, rfl⟩ := found
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some targetFound
+        exact ⟨header, headerAt, by simpa using expressionEq⟩
+
+/-- A successful block recursive-argument analysis fixes the field position
+and exposes the exact target family application recorded in the descriptor. -/
+theorem blockRecArg?_eq_some
+    {U np : Nat} {headers : List FamilyHeader} {names : List Name}
+    {j : Nat} {expression : VExpr} {recursive : RecArg}
+    (found : blockRecArg? U np headers names j expression = some recursive) :
+    recursive.fieldIndex = j ∧
+      ∃ header, headers[recursive.targetType]? = some header ∧
+        expression = VExpr.forallN recursive.binders
+          (VExpr.appN (.const header.name (VLevel.params U))
+            (VExpr.bvarRevRange
+              (recursive.fieldIndex + recursive.binders.length) np ++
+              recursive.indices)) := by
+  unfold blockRecArg? at found
+  split at found
+  · next binders targetType indices targetFound =>
+    simp only [Option.some.injEq] at found
+    subst recursive
+    refine ⟨rfl, ?_⟩
+    exact blockRecTarget?_eq_some U np headers names targetFound
+  · contradiction
+
+private theorem blockRecArgs_mem
+    (U np : Nat) (headers : List FamilyHeader) (names : List Name) :
+    ∀ {fields j recursive},
+      recursive ∈ blockRecArgs U np headers names fields j →
+      ∃ k field,
+        recursive.fieldIndex = j + k ∧
+        fields[k]? = some field ∧
+        blockRecArg? U np headers names (j + k) field = some recursive
+  | [], _, _, member => by simp [blockRecArgs] at member
+  | field :: fields, j, recursive, member => by
+      cases found : blockRecArg? U np headers names j field with
+      | none =>
+        simp only [blockRecArgs, found] at member
+        obtain ⟨k, target, fieldIndex, fieldAt, targetFound⟩ :=
+          blockRecArgs_mem U np headers names member
+        refine ⟨k + 1, target, ?_, ?_, ?_⟩
+        · omega
+        · simpa using fieldAt
+        · rw [show j + (k + 1) = j + 1 + k by omega]
+          exact targetFound
+      | some analyzed =>
+        simp only [blockRecArgs, found, List.mem_cons] at member
+        rcases member with rfl | member
+        · refine ⟨0, field, ?_, rfl, ?_⟩
+          · simpa using (blockRecArg?_eq_some found).1
+          · simpa using found
+        · obtain ⟨k, target, fieldIndex, fieldAt, targetFound⟩ :=
+            blockRecArgs_mem U np headers names member
+          refine ⟨k + 1, target, ?_, ?_, ?_⟩
+          · omega
+          · simpa using fieldAt
+          · rw [show j + (k + 1) = j + 1 + k by omega]
+            exact targetFound
+
+/-- Every compact recursive descriptor identifies the exact checked field
+whose block-wide analyzer call produced it. -/
+theorem CheckedCtor.ofBlock_recursive_field
+    {source : VInductDecl} {constructor : VConstVal} {recursive : RecArg}
+    (member : recursive ∈ (CheckedCtor.ofBlock source constructor).recursive) :
+    ∃ field,
+      (CheckedCtor.ofBlock source constructor).fields[recursive.fieldIndex]? =
+        some field ∧
+      blockRecArg? source.uvars source.nparams
+        (familyHeaders source.nparams source.types)
+        (familyNames source.types) recursive.fieldIndex field =
+          some recursive := by
+  simp only [CheckedCtor.ofBlock] at member ⊢
+  obtain ⟨k, field, fieldIndex, fieldAt, found⟩ :=
+    blockRecArgs_mem source.uvars source.nparams
+      (familyHeaders source.nparams source.types)
+      (familyNames source.types) member
+  have indexEq : recursive.fieldIndex = k := by omega
+  subst k
+  exact ⟨field, fieldAt, by simpa using found⟩
+
+private theorem blockTarget?_indices_eq
+    {U np j : Nat} {headers : List FamilyHeader} {names : List Name}
+    {expression : VExpr} {target : Nat} {indices : List VExpr}
+    (found : blockTarget? U np j headers names expression =
+      some (target, indices)) :
+    indices = recFieldIdxs np expression := by
+  unfold blockTarget? at found
+  let head := expression.appHead
+  let args := expression.appArgs []
+  let rec go : ∀ (offset : Nat) (remaining : List FamilyHeader),
+      blockTarget?.loop U np j names head args offset remaining =
+        some (target, indices) →
+      args.drop np = indices
+    | _, [], found => by simp [blockTarget?.loop] at found
+    | offset, header :: remaining, found => by
+      simp only [blockTarget?.loop] at found
+      split at found
+      · simp only [Option.some.injEq, Prod.mk.injEq] at found
+        exact found.2
+      · exact go (offset + 1) remaining found
+  exact (go 0 headers found).symm
+
+/-- An accepted mutual constructor is its complete field telescope followed
+by an application of the header at its owning block ordinal. -/
+theorem blockStage3Ctor_eq
+    (U np : Nat) (headers : List FamilyHeader) (names : List Name)
+    (owner : Nat) : ∀ {j expression},
+      blockStage3Ctor U np headers names owner j expression = true →
+      ∃ header, headers[owner]? = some header ∧
+        expression = VExpr.forallN (ctorFields expression)
+          (VExpr.appN (.const header.name (VLevel.params U))
+            (VExpr.bvarRevRange (j + (ctorFields expression).length) np ++
+              recFieldIdxs np (VExpr.resultOf expression)))
+  | j, .forallE domain body, accepted => by
+      simp only [blockStage3Ctor, Bool.and_eq_true] at accepted
+      obtain ⟨header, headerAt, bodyEq⟩ :=
+        blockStage3Ctor_eq U np headers names owner accepted.2
+      refine ⟨header, headerAt, ?_⟩
+      simp only [ctorFields, VExpr.resultOf, VExpr.forallN]
+      rw [show j + (domain :: ctorFields body).length =
+        j + 1 + (ctorFields body).length by
+          simp only [List.length_cons]
+          omega]
+      exact congrArg (VExpr.forallE domain) bodyEq
+  | j, .bvar index, accepted => by
+      simp only [blockStage3Ctor] at accepted
+      split at accepted
+      · next target indices found =>
+        simp only [beq_iff_eq] at accepted
+        subst target
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some found
+        have indicesEq := blockTarget?_indices_eq found
+        refine ⟨header, headerAt, ?_⟩
+        simpa [ctorFields, VExpr.forallN, VExpr.resultOf,
+          indicesEq] using expressionEq
+      · contradiction
+  | j, .sort level, accepted => by
+      simp only [blockStage3Ctor] at accepted
+      split at accepted
+      · next target indices found =>
+        simp only [beq_iff_eq] at accepted
+        subst target
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some found
+        have indicesEq := blockTarget?_indices_eq found
+        refine ⟨header, headerAt, ?_⟩
+        simpa [ctorFields, VExpr.forallN, VExpr.resultOf,
+          indicesEq] using expressionEq
+      · contradiction
+  | j, .const name levels, accepted => by
+      simp only [blockStage3Ctor] at accepted
+      split at accepted
+      · next target indices found =>
+        simp only [beq_iff_eq] at accepted
+        subst target
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some found
+        have indicesEq := blockTarget?_indices_eq found
+        refine ⟨header, headerAt, ?_⟩
+        simpa [ctorFields, VExpr.forallN, VExpr.resultOf,
+          indicesEq] using expressionEq
+      · contradiction
+  | j, .app fn arg, accepted => by
+      simp only [blockStage3Ctor] at accepted
+      split at accepted
+      · next target indices found =>
+        simp only [beq_iff_eq] at accepted
+        subst target
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some found
+        have indicesEq := blockTarget?_indices_eq found
+        refine ⟨header, headerAt, ?_⟩
+        simpa [ctorFields, VExpr.forallN, VExpr.resultOf,
+          indicesEq] using expressionEq
+      · contradiction
+  | j, .lam domain body, accepted => by
+      simp only [blockStage3Ctor] at accepted
+      split at accepted
+      · next target indices found =>
+        simp only [beq_iff_eq] at accepted
+        subst target
+        obtain ⟨header, headerAt, expressionEq⟩ :=
+          blockTarget?_eq_some found
+        have indicesEq := blockTarget?_indices_eq found
+        refine ⟨header, headerAt, ?_⟩
+        simpa [ctorFields, VExpr.forallN, VExpr.resultOf,
+          indicesEq] using expressionEq
+      · contradiction
+
+/-- The compact recursive-argument inventory is exactly the `some` projection
+of the analyzer's field-positioned classification list. -/
+theorem blockRecArgs_eq_filterMap
+    (U np : Nat) (headers : List FamilyHeader) (names : List Name) :
+    ∀ (fields : List VExpr) (j : Nat),
+      blockRecArgs U np headers names fields j =
+        (blockRecArgsAt U np headers names fields j).filterMap id
+  | [], _ => rfl
+  | field :: fields, j => by
+      simp only [blockRecArgs, blockRecArgsAt]
+      cases blockRecArg? U np headers names j field <;>
+        simp [blockRecArgs_eq_filterMap U np headers names fields (j + 1)]
+
+/-- Every compact recursive descriptor retains the same `some` entry in the
+field-positioned analyzer classification. -/
+theorem CheckedCtor.ofBlock_recursive_mem_recursiveAt
+    {source : VInductDecl} {constructor : VConstVal} {recursive : RecArg}
+    (member : recursive ∈ (CheckedCtor.ofBlock source constructor).recursive) :
+    some recursive ∈
+      (CheckedCtor.ofBlock source constructor).recursiveAt := by
+  simp only [CheckedCtor.ofBlock] at member ⊢
+  rw [blockRecArgs_eq_filterMap] at member
+  obtain ⟨entry, entryMember, entryEq⟩ := List.mem_filterMap.mp member
+  simpa only [id_eq] using entryEq.symm ▸ entryMember
+
+/-- A successful lookup in the dependent family-index projection recovers
+the exact erased family data at that ordinal. -/
+theorem CheckedFamilies.exists_data_of_indices_get?
+    {source : VInductDecl} {params : List VExpr} :
+    ∀ {ordinal types}
+      (families : CheckedFamilies source params ordinal types)
+      {target : Nat} {indices : List VExpr},
+      families.indices[target]? = some indices →
+      ∃ family ∈ families.data,
+        family.ordinal = ordinal + target ∧ family.indices = indices
+  | _, _, .nil, target, _, lookup => by
+      simp [CheckedFamilies.indices] at lookup
+  | ordinal, _, .cons head tail, 0, _, lookup => by
+      simp only [CheckedFamilies.indices, List.getElem?_cons_zero,
+        Option.some.injEq] at lookup
+      refine ⟨head.data, .head _, rfl, ?_⟩
+      simpa [CheckedFamily.data] using lookup
+  | ordinal, _, .cons head tail, target + 1, _, lookup => by
+      simp only [CheckedFamilies.indices, List.getElem?_cons_succ] at lookup
+      obtain ⟨family, member, familyOrdinal, familyIndices⟩ :=
+        CheckedFamilies.exists_data_of_indices_get? tail lookup
+      refine ⟨family, .tail _ member, ?_, familyIndices⟩
+      omega
+
+/-- Erasing the dependent checked-family spine to generation data preserves
+the exact normalized family values indexing that spine. -/
+theorem CheckedFamilies.data_map_value
+    {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) :
+    families.data.map (fun family => family.value) = types := by
+  induction families with
+  | nil => rfl
+  | cons head tail ih =>
+      simp only [CheckedFamilies.data, List.map_cons,
+        CheckedFamily.data, CheckedFamily.value, List.cons.injEq, true_and]
+      exact ih
+
+/-- Membership in the erased family-data list recovers the exact dependent
+checked family that supplied that datum. -/
+theorem CheckedFamilies.exists_family_of_data_mem
+    {source : VInductDecl} {params : List VExpr} :
+    ∀ {ordinal types}
+      (families : CheckedFamilies source params ordinal types)
+      {data : CheckedFamilyData}, data ∈ families.data →
+      ∃ (familyOrdinal : Nat) (familyType : VInductiveType)
+        (family : CheckedFamily source params familyOrdinal familyType),
+        family.data = data
+  | _, _, .nil, _, member => by
+      simp [CheckedFamilies.data] at member
+  | _, _, .cons head tail, data, member => by
+      simp only [CheckedFamilies.data, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨_, _, head, rfl⟩
+      · exact CheckedFamilies.exists_family_of_data_mem tail member
+
+/-- The analyzer's accepted family shape certifies that its terminal result
+level is well formed in the declaration universe context. -/
+theorem CheckedFamily.resultLevel_wf
+    {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type) :
+    family.resultLevel.WF source.uvars := by
+  have accepted := family.accepted
+  simp only [blockFamilyCore, Bool.and_eq_true, beq_iff_eq] at accepted
+  have result := accepted.1.1.1.1.2
+  rw [family.result_eq] at result
+  simpa using result
+
+/-- Every dependent family result level is semantically equivalent to the
+validator-owned common block result level. -/
+theorem CheckedBlock.WF.resultLevels
+    {source : VInductDecl} {env : VEnv} {resultLevel : VLevel}
+    {checked : CheckedBlock source}
+    (wf : checked.WF env resultLevel) :
+    ∀ level ∈ checked.families.resultLevels, level ≈ resultLevel := by
+  unfold CheckedBlock.WF at wf
+  let rec go :
+      ∀ {ordinal types}
+        (families : CheckedFamilies source checked.params ordinal types),
+        checkedFamilyListsWF source checked.params env resultLevel
+          checked.families.indices families.resultLevels families.indices
+          families.constructors →
+        ∀ level ∈ families.resultLevels, level ≈ resultLevel
+    | _, _, .nil, _ => by simp [CheckedFamilies.resultLevels]
+    | _, _, .cons head tail, familyWF => by
+        simp only [CheckedFamilies.resultLevels,
+          CheckedFamilies.indices, CheckedFamilies.constructors,
+          checkedFamilyListsWF] at familyWF
+        intro level member
+        simp only [CheckedFamilies.resultLevels, List.mem_cons] at member
+        rcases member with rfl | member
+        · exact familyWF.1
+        · exact go tail familyWF.2.2.2 level member
+  exact go checked.families wf
+
 theorem pairNormalizedFamilies_map_raw :
     ∀ (raws : List VInductiveType) (views : List CheckedFamilyData),
       raws.length = views.length →
@@ -966,6 +1599,33 @@ theorem BlockGenerationChecked.families_map_raw {source : VInductDecl}
   apply pairNormalizedFamilies_map_raw
   exact gen.shape.2.2.1.symm.trans gen.shape.2.2.2.1
 
+/-- Positional pairing retains every analyzer-owned checked-family datum in
+the same source order. -/
+theorem BlockGenerationChecked.families_map_view {source : VInductDecl}
+    (gen : BlockGenerationChecked source) :
+    gen.families.map (·.view) = gen.block.checked.families.data := by
+  apply pairNormalizedFamilies_map_view
+  exact gen.shape.2.2.1.symm.trans gen.shape.2.2.2.1
+
+/-- Resolve a validator/analyzer family-index lookup to the exact normalized
+family consumed by generation. -/
+theorem BlockGenerationChecked.exists_family_of_indices_get?
+    {source : VInductDecl} (gen : BlockGenerationChecked source)
+    {target : Nat} {indices : List VExpr}
+    (lookup : gen.block.checked.families.indices[target]? = some indices) :
+    ∃ family ∈ gen.families,
+      family.view.ordinal = target ∧ family.view.indices = indices := by
+  obtain ⟨view, viewMember, ordinalEq, indicesEq⟩ :=
+    gen.block.checked.families.exists_data_of_indices_get? lookup
+  have mappedMember : view ∈ gen.families.map (·.view) := by
+    rw [gen.families_map_view]
+    exact viewMember
+  obtain ⟨family, familyMember, familyView⟩ := List.mem_map.mp mappedMember
+  refine ⟨family, familyMember, ?_, ?_⟩
+  · rw [familyView, ordinalEq]
+    omega
+  · exact congrArg CheckedFamilyData.indices familyView |>.trans indicesEq
+
 theorem NormalizedFamily.ctorPairs_map_raw
     {source : VInductDecl} {gen : BlockGenerationChecked source}
     {family : NormalizedFamily} (hfamily : family ∈ gen.families) :
@@ -1042,6 +1702,37 @@ theorem blockTypeConstants_foldlM_eq_stageInductiveTypes
     intro env' _
     exact ih env'
 
+/-- Staging a successful family block only grows the input environment. -/
+theorem _root_.Lean4Lean.VEnv.stageInductiveTypes_le :
+    ∀ {env blockEnv : VEnv} {types : List VInductiveType},
+      env.stageInductiveTypes types = some blockEnv → env ≤ blockEnv
+  | env, blockEnv, [], stage => by
+      simp [VEnv.stageInductiveTypes] at stage
+      subst blockEnv
+      exact .rfl
+  | env, blockEnv, type :: types, stage => by
+      simp only [VEnv.stageInductiveTypes, List.foldlM_cons] at stage
+      obtain ⟨next, added, tail⟩ := Option.bind_eq_some_iff.mp stage
+      exact (VEnv.addConst_le added).trans
+        (VEnv.stageInductiveTypes_le tail)
+
+/-- Every raw family inserted by a successful block staging fold remains at
+its exact constant lookup in the final shared constructor environment. -/
+theorem _root_.Lean4Lean.VEnv.stageInductiveTypes_constants :
+    ∀ {env blockEnv : VEnv} {types : List VInductiveType},
+      env.stageInductiveTypes types = some blockEnv →
+      ∀ type ∈ types,
+        blockEnv.constants type.name = some type.toVConstant
+  | _, _, [], _, type, member => nomatch member
+  | env, blockEnv, head :: types, stage, type, member => by
+      simp only [VEnv.stageInductiveTypes, List.foldlM_cons] at stage
+      obtain ⟨next, added, tail⟩ := Option.bind_eq_some_iff.mp stage
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · exact (VEnv.stageInductiveTypes_le tail).constants
+          (VEnv.addConst_self added)
+      · exact VEnv.stageInductiveTypes_constants tail type member
+
 /-- Identity normalization is computationally the legacy analyzer. -/
 theorem Normalization.identity_checked? (source : VInductDecl) :
     (Normalization.identity source).checked? = source.checked? := rfl
@@ -1076,6 +1767,19 @@ theorem Normalization.generation?_normalization
   · have hgeneration' := Option.some.inj hgeneration
     rw [← hgeneration']
     exact hnorm
+  · contradiction
+
+/-- A successful arbitrary-block analysis retains the exact normalization
+whose dependent checked-family spine it analyzed. -/
+theorem Normalization.checkBlock?_normalization
+    {source : VInductDecl} {norm : Normalization source}
+    {block : NormalizedCheckedBlock source}
+    (h : norm.checkBlock? = some block) :
+    block.normalization = norm := by
+  unfold Normalization.checkBlock? at h
+  split at h
+  · cases h
+    rfl
   · contradiction
 
 theorem identityChecked?_isSome (source : VInductDecl) :
@@ -2326,6 +3030,78 @@ theorem resultOf_appN_const (T : Name) (ls : List VLevel) :
 
 end VExpr
 
+namespace VInductDecl
+
+/-- Recompose the exact shared-parameter, family-index, and result-sort
+telescope retained by one dependent checked family. -/
+theorem CheckedFamily.type_eq
+    {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type) :
+    type.type = VExpr.forallN params
+      (VExpr.forallN family.indices (.sort family.resultLevel)) := by
+  calc
+    type.type = VExpr.forallN (VExpr.telN source.nparams type.type)
+        (VExpr.dropN source.nparams type.type) :=
+      (VExpr.forallN_telN_dropN source.nparams type.type).symm
+    _ = VExpr.forallN params
+        (VExpr.dropN source.nparams type.type) := by
+      rw [family.params_eq]
+    _ = VExpr.forallN params
+        (VExpr.forallN (ctorFields (VExpr.dropN source.nparams type.type))
+          (VExpr.resultOf (VExpr.dropN source.nparams type.type))) := by
+      rw [forallN_ctorFields_resultOf]
+    _ = VExpr.forallN params
+        (VExpr.forallN family.indices (.sort family.resultLevel)) := by
+      rw [family.indices_eq, family.result_eq]
+
+/-- Each checked constructor retains the complete accepted mutual result
+application below its shared-parameter and field telescopes. -/
+theorem CheckedFamily.constructor_type_eq
+    {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type)
+    {constructor : CheckedCtor} (member : constructor ∈ family.constructors) :
+    ∃ header,
+      (familyHeaders source.nparams source.types)[ordinal]? = some header ∧
+      constructor.value.type = VExpr.forallN params
+        (VExpr.forallN constructor.fields
+          (VExpr.appN (.const header.name (VLevel.params source.uvars))
+            (VExpr.bvarRevRange constructor.fields.length source.nparams ++
+              constructor.resultIndices))) := by
+  have accepted := family.accepted
+  simp only [blockFamilyCore, Bool.and_eq_true, beq_iff_eq,
+    List.all_eq_true] at accepted
+  rw [family.constructors_eq] at member
+  obtain ⟨raw, rawMember, rfl⟩ := List.mem_map.mp member
+  obtain ⟨header, headerAt, resultEq⟩ :=
+    blockStage3Ctor_eq source.uvars source.nparams
+      (familyHeaders source.nparams source.types)
+      (familyNames source.types) ordinal (accepted.2 raw rawMember).2
+  refine ⟨header, headerAt, ?_⟩
+  calc
+    raw.type = VExpr.forallN (VExpr.telN source.nparams raw.type)
+        (VExpr.dropN source.nparams raw.type) :=
+      (VExpr.forallN_telN_dropN source.nparams raw.type).symm
+    _ = VExpr.forallN params
+        (VExpr.dropN source.nparams raw.type) := by
+      rw [(accepted.2 raw rawMember).1.2]
+    _ = VExpr.forallN params
+        (VExpr.forallN
+          (ctorFields (VExpr.dropN source.nparams raw.type))
+          (VExpr.appN (.const header.name (VLevel.params source.uvars))
+            (VExpr.bvarRevRange
+                (0 + (ctorFields
+                  (VExpr.dropN source.nparams raw.type)).length)
+                source.nparams ++
+              recFieldIdxs source.nparams
+                (VExpr.resultOf
+                  (VExpr.dropN source.nparams raw.type))))) := by
+      exact congrArg (VExpr.forallN params) resultEq
+    _ = _ := by simp only [CheckedCtor.ofBlock, Nat.zero_add]
+
+end VInductDecl
+
 namespace VEnv
 
 theorem OnTel.mono {env env' : VEnv} {U : Nat} (henv : env ≤ env') :
@@ -2490,6 +3266,34 @@ theorem TelDefEq.forallN_defeq {env : VEnv} {U : Nat} :
       TelDefEq.forallN_defeq hT hC'
     exact ⟨.imax uA v, .forallEDF hA hbody⟩
 
+/-- A saturated spine accepted by the view telescope is accepted by the raw
+telescope with the same arguments.  The terminal codomain is retargeted
+independently, so this is the general capture-spine transport underlying the
+sort-specialized consumer below. -/
+theorem TelDefEq.spine {env : VEnv} {U : Nat} (ord : env.Ordered) :
+    ∀ {Γ As As' es C B}, TelDefEq env U Γ As As' →
+      env.SpineWF U Γ (VExpr.forallN As' C) es B →
+      es.length = As.length →
+      env.SpineWF U Γ (VExpr.forallN As C) es (VExpr.instRev C es)
+  | _, [], [], [], _, _, _, hsp, _ => by cases hsp; exact .nil
+  | _, [], [], _ :: _, _, _, _, _, hlen => by simp at hlen
+  | Γ, A :: As, A' :: As', e :: es, C, B, ⟨⟨_, hA⟩, hT⟩,
+      .cons he hrest, hlen => by
+    have heRaw : env.HasType U Γ e A := hA.defeq' he
+    have hTinst := TelDefEq.instN ord heRaw (.zero) hT
+    have hrest' : env.SpineWF U Γ
+        (VExpr.forallN (VExpr.instTelN e As' 0)
+          (C.inst e As'.length)) es B := by
+      simpa [VExpr.instN_forallN] using hrest
+    have hlen' : es.length = As.length := by simpa using hlen
+    have hlenInst :
+        es.length = (VExpr.instTelN e As 0).length := by
+      rw [VExpr.instTelN_length]
+      exact hlen'
+    have hout := TelDefEq.spine ord hTinst hrest' hlenInst
+    refine .cons heRaw ?_
+    simpa [VExpr.instN_forallN, VExpr.instRev, hlen', hT.length_eq] using hout
+
 /-- A fully applied spine accepted by the view telescope is also accepted by
 the raw telescope. This is the substitution-aware consumer of `TelDefEq`;
 it avoids any appeal to whole-Pi injectivity. -/
@@ -2584,6 +3388,10 @@ info: 'Lean4Lean.VEnv.TelDefEq.generationParams' depends on axioms: [propext, Qu
 -/
 #guard_msgs in
 #print axioms TelDefEq.generationParams
+
+/-- info: 'Lean4Lean.VEnv.TelDefEq.spine' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms TelDefEq.spine
 
 /-- Transport application-spine typing across definitionally equal
 contexts. -/
@@ -2865,6 +3673,60 @@ theorem checkedBlockFieldsWF_mono {env env' : VEnv} {U : Nat}
     | some indices =>
       rw [htarget] at hrecursive
       exact hrecursive.mono henv
+
+/-- Recover the exact field position, selected target-index telescope, and
+recursive semantics for any `some` entry in the analyzer's positional
+classification list. -/
+theorem checkedBlockFieldsWF_some_mem
+    {env : VEnv} {U : Nat} {resultLevel : VLevel}
+    {familyIndices : List (List VExpr)} :
+    ∀ {fields classifications Γ j recursive},
+      checkedBlockFieldsWF env U resultLevel familyIndices
+        fields classifications Γ j →
+      some recursive ∈ classifications →
+      ∃ k field indices,
+        recursive.fieldIndex = j + k ∧
+        fields[k]? = some field ∧
+        familyIndices[recursive.targetType]? = some indices ∧
+        recursive.WF U env resultLevel indices
+          ((fields.take k).reverse ++ Γ)
+  | [], [], _, _, _, _, member => by simp at member
+  | [], _ :: _, _, _, _, fieldsWF, _ => by
+      simp [checkedBlockFieldsWF] at fieldsWF
+  | _ :: _, [], _, _, _, fieldsWF, _ => by
+      simp [checkedBlockFieldsWF] at fieldsWF
+  | field :: fields, none :: classifications, Γ, j, recursive,
+      fieldsWF, member => by
+      simp only [checkedBlockFieldsWF] at fieldsWF
+      simp only [List.mem_cons, reduceCtorEq, false_or] at member
+      obtain ⟨k, target, indices, fieldIndex, fieldAt, targetAt, recursiveWF⟩ :=
+        checkedBlockFieldsWF_some_mem fieldsWF.2 member
+      refine ⟨k + 1, target, indices, ?_, ?_, targetAt, ?_⟩
+      · omega
+      · simpa using fieldAt
+      · simpa [List.take_succ_cons, List.reverse_cons,
+          List.append_assoc] using recursiveWF
+  | field :: fields, some head :: classifications, Γ, j, recursive,
+      fieldsWF, member => by
+      simp only [checkedBlockFieldsWF] at fieldsWF
+      obtain ⟨headFacts, tailWF⟩ := fieldsWF
+      obtain ⟨headIndex, headTarget⟩ := headFacts
+      simp only [List.mem_cons, Option.some.injEq] at member
+      rcases member with rfl | member
+      · cases targetEq : familyIndices[recursive.targetType]? with
+        | none => simp [targetEq] at headTarget
+        | some indices =>
+          rw [targetEq] at headTarget
+          refine ⟨0, field, indices, ?_, rfl, rfl, ?_⟩
+          · simpa using headIndex
+          · simpa using headTarget
+      · obtain ⟨k, target, indices, fieldIndex, fieldAt, targetAt,
+          recursiveWF⟩ := checkedBlockFieldsWF_some_mem tailWF member
+        refine ⟨k + 1, target, indices, ?_, ?_, targetAt, ?_⟩
+        · omega
+        · simpa using fieldAt
+        · simpa [List.take_succ_cons, List.reverse_cons,
+            List.append_assoc] using recursiveWF
 
 /-- The erased family-spine semantics is monotone in the environment. -/
 theorem checkedFamilyListsWF_mono {source : VInductDecl}
@@ -4098,6 +4960,168 @@ theorem BlockGenerationChecked.family_getElem?_ordinal
     simpa using hord
   rwa [hord']
 
+/-- The analyzer header at a retained family's checked ordinal has the raw
+constant name paired with that exact family position. -/
+theorem BlockGenerationChecked.familyHeader_name
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families)
+    {header : FamilyHeader}
+    (headerAt :
+      (familyHeaders generation.block.normalization.view.nparams
+        generation.block.normalization.view.types)[family.view.ordinal]? =
+          some header) :
+    header.name = family.raw.name := by
+  have familyAt := generation.family_getElem?_ordinal familyMember
+  have viewAt :
+      generation.block.checked.families.data[family.view.ordinal]? =
+        some family.view := by
+    rw [← generation.families_map_view, List.getElem?_map, familyAt]
+    rfl
+  have valueAt :
+      generation.block.normalization.view.types[family.view.ordinal]? =
+        some family.view.value := by
+    rw [← CheckedFamilies.data_map_value
+      generation.block.checked.families, List.getElem?_map, viewAt]
+    rfl
+  have expectedHeaderAt :
+      (familyHeaders generation.block.normalization.view.nparams
+        generation.block.normalization.view.types)[family.view.ordinal]? =
+          some ⟨family.view.value.name,
+            (ctorFields (VExpr.dropN
+              generation.block.normalization.view.nparams
+              family.view.value.type)).length⟩ := by
+    simp only [familyHeaders, List.getElem?_map, valueAt, Option.map_some]
+  have headerEq := headerAt.symm.trans expectedHeaderAt
+  have nameEq : header.name = family.view.value.name :=
+    congrArg FamilyHeader.name (Option.some.inj headerEq)
+  exact nameEq.trans
+    (generation.shape.2.2.2.2 family familyMember).1.symm
+
+/-- Recover the exact dependent checked family paired with a retained
+normalized family. -/
+theorem BlockGenerationChecked.exists_checkedFamily
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families) :
+    ∃ (ordinal : Nat) (type : VInductiveType)
+      (checked : CheckedFamily generation.block.normalization.view
+        generation.block.checked.params ordinal type),
+      checked.data = family.view := by
+  have dataMember : family.view ∈
+      generation.block.checked.families.data := by
+    rw [← generation.families_map_view]
+    exact List.mem_map.mpr ⟨family, familyMember, rfl⟩
+  exact generation.block.checked.families.exists_family_of_data_mem
+    dataMember
+
+/-- Every paired checked constructor is exactly the block analyzer result for
+its own normalized constructor value. -/
+theorem BlockGenerationChecked.viewCtor_ofBlock
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families)
+    {constructor : NormalizedCtor} (constructorMember :
+      constructor ∈ family.ctorPairs) :
+    constructor.view = CheckedCtor.ofBlock
+      generation.block.normalization.view constructor.view.value := by
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have viewsEq : family.ctorPairs.map (fun ctor => ctor.view) =
+      family.view.constructors := by
+    apply pairNormalizedCtors_map_view
+    exact familyShape.2.2.2.2.1.symm.trans familyShape.2.2.2.2.2.1
+  have viewMember : constructor.view ∈ family.view.constructors := by
+    rw [← viewsEq]
+    exact List.mem_map.mpr ⟨constructor, constructorMember, rfl⟩
+  obtain ⟨ordinal, type, checked, checkedEq⟩ :=
+    generation.exists_checkedFamily familyMember
+  have checkedMember : constructor.view ∈ checked.constructors := by
+    simpa only [← checkedEq, CheckedFamily.data] using viewMember
+  rw [checked.constructors_eq] at checkedMember
+  obtain ⟨raw, rawMember, viewEq⟩ := List.mem_map.mp checkedMember
+  have rawEq : raw = constructor.view.value :=
+    congrArg CheckedCtor.value viewEq
+  subst raw
+  exact viewEq.symm
+
+/-- The paired checked constructor type is its shared-parameter/field
+telescope followed by the exact raw owning-family application. -/
+theorem BlockGenerationChecked.viewCtorType_eq
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families)
+    {constructor : NormalizedCtor} (constructorMember :
+      constructor ∈ family.ctorPairs) :
+    constructor.view.value.type =
+      VExpr.forallN generation.block.checked.params
+        (VExpr.forallN constructor.view.fields
+          (VExpr.appN
+            (.const family.raw.name (VLevel.params source.uvars))
+            (VExpr.bvarRevRange constructor.view.fields.length
+                source.nparams ++ constructor.view.resultIndices))) := by
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have viewsEq : family.ctorPairs.map (fun ctor => ctor.view) =
+      family.view.constructors := by
+    apply pairNormalizedCtors_map_view
+    exact familyShape.2.2.2.2.1.symm.trans familyShape.2.2.2.2.2.1
+  have viewMember : constructor.view ∈ family.view.constructors := by
+    rw [← viewsEq]
+    exact List.mem_map.mpr ⟨constructor, constructorMember, rfl⟩
+  obtain ⟨ordinal, type, checked, checkedEq⟩ :=
+    generation.exists_checkedFamily familyMember
+  have checkedMember : constructor.view ∈ checked.constructors := by
+    simpa only [← checkedEq, CheckedFamily.data] using viewMember
+  obtain ⟨header, headerAt, constructorType⟩ :=
+    checked.constructor_type_eq checkedMember
+  have ordinalEq : ordinal = family.view.ordinal :=
+    congrArg CheckedFamilyData.ordinal checkedEq
+  rw [ordinalEq] at headerAt
+  have nameEq := generation.familyHeader_name familyMember headerAt
+  rw [constructorType]
+  rw [nameEq, ← generation.block.normalization.shape.1,
+    ← generation.block.normalization.shape.2.1]
+
+/-- Erasing the checked constructor descriptors paired with one retained
+family recovers its exact normalized constructor-value list. -/
+theorem BlockGenerationChecked.familyConstructors_map_value
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families) :
+    family.view.constructors.map (fun constructor => constructor.value) =
+      family.view.value.ctors := by
+  obtain ⟨ordinal, type, checked, checkedEq⟩ :=
+    generation.exists_checkedFamily familyMember
+  have constructorsEq : checked.constructors = family.view.constructors := by
+    simpa only [CheckedFamily.data] using
+      congrArg CheckedFamilyData.constructors checkedEq
+  have valueEq : type = family.view.value := by
+    simpa only [CheckedFamily.data, CheckedFamily.value] using
+      congrArg CheckedFamilyData.value checkedEq
+  rw [← constructorsEq, checked.constructors_eq, List.map_map]
+  change type.ctors.map (fun constructor => constructor) = _
+  rw [List.map_id']
+  exact congrArg VInductiveType.ctors valueEq
+
+/-- Positional constructor pairing preserves every analyzer-selected view
+value in order. -/
+theorem NormalizedFamily.ctorPairs_map_view_value
+    {source : VInductDecl} {generation : BlockGenerationChecked source}
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families) :
+    family.ctorPairs.map (fun constructor => constructor.view.value) =
+      family.view.value.ctors := by
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  calc
+    family.ctorPairs.map (fun constructor => constructor.view.value) =
+        (family.ctorPairs.map (fun constructor => constructor.view)).map
+          (fun constructor => constructor.value) := by
+      simp only [List.map_map, Function.comp_def]
+    _ = family.view.constructors.map
+          (fun constructor => constructor.value) := by
+      have viewsEq := pairNormalizedCtors_map_view family.raw.ctors
+        family.view.constructors
+          (familyShape.2.2.2.2.1.symm.trans
+            familyShape.2.2.2.2.2.1)
+      rw [show family.ctorPairs.map (fun constructor => constructor.view) =
+        family.view.constructors by
+          simpa only [NormalizedFamily.ctorPairs] using viewsEq]
+    _ = family.view.value.ctors :=
+      generation.familyConstructors_map_value familyMember
+
 theorem BlockGenerationChecked.family_ordinal_lt
     {source : VInductDecl} (gen : BlockGenerationChecked source)
     {family : NormalizedFamily} (hfamily : family ∈ gen.families) :
@@ -5302,6 +6326,49 @@ theorem result_transport
   simpa [ls, NormalizedCtor.resultIndicesR,
     VExpr.instL, VExpr.liftN, List.map_map,
     Function.comp_def, List.append_assoc] using h3
+
+/-- A raw mutual constructor constant has the normalized emitted telescope:
+the checked block parameters, raw fields, and normalized owner-family
+result.  This is the head-typing form underlying `ctorApp_emitted_decl`. -/
+theorem ctorConst_emitted_decl
+    {constructor : NormalizedBlockCtor}
+    (hconstructor : constructor ∈ gen.flatCtors) :
+    env.HasType source.uvars []
+      (.const constructor.ctor.raw.name (VLevel.params source.uvars))
+      (VExpr.forallN
+        (NormalizedBlockCtor.emittedBinders gen constructor)
+        (NormalizedBlockCtor.resultTarget gen constructor)) := by
+  let E := NormalizedBlockCtor.emittedBinders gen constructor
+  let V := NormalizedBlockCtor.viewBinders gen constructor
+  have hc : env.HasType source.uvars []
+      (.const constructor.ctor.raw.name (VLevel.params source.uvars))
+      (VExpr.forallN
+        (NormalizedBlockCtor.declaredBinders
+          (source := source) constructor)
+        (NormalizedBlockCtor.rawResult
+          (source := source) constructor)) := by
+    rw [NormalizedBlockCtor.declaredBinders,
+      NormalizedBlockCtor.rawResult,
+      ← constructor.ctor.rawType_eq]
+    exact S.ctorConst_decl hconstructor
+  obtain ⟨_, hdecl⟩ :=
+    (S.ctorWF constructor hconstructor).declaredTel.forallN_defeq
+      (by simpa using
+        (S.ctorWF constructor hconstructor).declaredResult)
+  have hview : env.HasType source.uvars []
+      (.const constructor.ctor.raw.name (VLevel.params source.uvars))
+      (VExpr.forallN V
+        (NormalizedBlockCtor.resultTarget gen constructor)) := by
+    simpa [V] using hdecl.defeq hc
+  have hresult : env.HasType source.uvars E.reverse
+      (NormalizedBlockCtor.resultTarget gen constructor)
+      (.sort gen.validated.resultLevel) := by
+    simpa [E] using
+      (S.ctorWF constructor hconstructor).emittedResult.hasType.2
+  obtain ⟨_, hemit⟩ :=
+    (S.ctorWF constructor hconstructor).emittedTel.forallN_defeq
+      (by simpa [E, VEnv.HasType] using hresult)
+  exact hemit.defeq' (by simpa [V] using hview)
 
 /-- The raw mutual constructor applied to its emitted self-spine at source
 universes. -/

@@ -246,6 +246,43 @@ def ruleBinders (constructor : NormalizedBlockCtor) : List VExpr :=
     VExpr.liftTelN (gen.familyCount + gen.minorCount)
       (constructor.ctor.fieldsR source.uvars source.nparams gen.elimination) 0
 
+/-- The parameter, motive, and minor prefix shared by every generated rule
+for the block.  These are precisely the captures taken from the recursor
+spine before its explicit indices and major premise. -/
+def ruleCommonBinders : List VExpr :=
+  gen.paramsTel ++ gen.motiveTypes ++ gen.minorTypes
+
+/-- The index telescope remaining after the common prefix of one generated
+family recursor. -/
+def recIndexBinders (family : NormalizedFamily) : List VExpr :=
+  VExpr.liftTelN (gen.familyCount + gen.minorCount)
+    (gen.idxTel family) 0
+
+/-- The family application expected for the major premise of one generated
+family recursor. -/
+def recMajorDomain (family : NormalizedFamily) : VExpr :=
+  VExpr.appN (.const family.raw.name gen.sourceLevels)
+    (VExpr.bvarRevRange
+        ((gen.idxTel family).length + gen.familyCount + gen.minorCount)
+        source.nparams ++
+      VExpr.bvarRevRange 0 (gen.idxTel family).length)
+
+/-- The motive application returned after a generated recursor consumes its
+indices and major premise. -/
+def recMotiveResult (family : NormalizedFamily) : VExpr :=
+  VExpr.app
+    (VExpr.appN
+      (.bvar
+        (gen.familyCount - 1 - family.view.ordinal + gen.minorCount +
+          (gen.idxTel family).length + 1))
+      (VExpr.bvarRevRange 1 (gen.idxTel family).length))
+    (.bvar 0)
+
+/-- The constructor-field suffix of one generated rule's binder telescope. -/
+def ruleFieldBinders (constructor : NormalizedBlockCtor) : List VExpr :=
+  VExpr.liftTelN (gen.familyCount + gen.minorCount)
+    (constructor.ctor.fieldsR source.uvars source.nparams gen.elimination) 0
+
 /-- The constructor-headed major premise of one iota rule body. -/
 def ruleCtorApp (constructor : NormalizedBlockCtor) : VExpr :=
   VExpr.appN (.const constructor.ctor.raw.name gen.sourceLevels)
@@ -253,6 +290,21 @@ def ruleCtorApp (constructor : NormalizedBlockCtor) : VExpr :=
         (gen.ruleFieldCount constructor + (gen.familyCount + gen.minorCount))
         source.nparams ++
       VExpr.bvarRevRange 0 (gen.ruleFieldCount constructor))
+
+/-- The owner-family type of the constructor-headed major before motives and
+minors are inserted around its field telescope. -/
+def ruleCtorType (constructor : NormalizedBlockCtor) : VExpr :=
+  VExpr.appN (.const constructor.familyName gen.sourceLevels)
+    (VExpr.bvarRevRange (gen.ruleFieldCount constructor) source.nparams ++
+      constructor.ctor.resultIndicesR source.uvars gen.elimination)
+
+/-- The result below the common and constructor-field binders of one
+generated rule type. -/
+def ruleResult (constructor : NormalizedBlockCtor) : VExpr :=
+  VExpr.appN
+    (.bvar (gen.familyCount - 1 - constructor.owner + gen.minorCount +
+      gen.ruleFieldCount constructor))
+    (gen.ruleIdx constructor ++ [gen.ruleCtorApp constructor])
 
 /-- The exact left body of one generated iota rule: the owner's recursor
 applied to the common arguments, the constructor's result indices, and the
@@ -287,6 +339,32 @@ def ruleArgArity (constructor : NormalizedBlockCtor) : Nat :=
 @[reducible] def rulePattern (constructor : NormalizedBlockCtor) : SimplePattern :=
   .iota (gen.ruleRecName constructor) (gen.ruleMajorArity constructor)
     constructor.ctor.raw.name (gen.ruleArgArity constructor)
+
+/-- Any completed recursor and constructor spines at the generated arities
+match the corresponding generated iota pattern.  This isolates the purely
+structural half of a reduction site: only the rule's semantic `Check`
+obligations remain after the runtime metadata supplies the two lengths. -/
+theorem rulePattern_matches_spines (constructor : NormalizedBlockCtor)
+    (recLevels ctorLevels : List VLevel)
+    (recArgs ctorArgs : List VExpr)
+    (hrec : recArgs.length = gen.ruleMajorArity constructor)
+    (hctor : ctorArgs.length = gen.ruleArgArity constructor) :
+    ∃ captures,
+      ((gen.rulePattern constructor).toPattern).Matches
+        (.app
+          ((VExpr.const (gen.ruleRecName constructor) recLevels).appN recArgs)
+          ((VExpr.const constructor.ctor.raw.name ctorLevels).appN ctorArgs))
+        recLevels captures := by
+  rw [rulePattern, SimplePattern.toPattern_iota]
+  apply RecursorIotaPattern.matches_of
+  · have h := (HeadConstN.const : HeadConstN
+      (gen.ruleRecName constructor) recLevels 0
+      (.const (gen.ruleRecName constructor) recLevels)).appN recArgs
+    simpa [hrec] using h
+  · have h := (HeadConstN.const : HeadConstN
+      constructor.ctor.raw.name ctorLevels 0
+      (.const constructor.ctor.raw.name ctorLevels)).appN ctorArgs
+    simpa [hctor] using h
 
 /-- The generated left body is matched by the rule's pattern, at exactly the
 rule's recursor levels. -/
@@ -548,6 +626,44 @@ def captureArgs (constructor : NormalizedBlockCtor) :
       (gen.ruleArgArity constructor)).drop source.nparams).map
       (fun path => .var (.inr path))
 
+/-- The concrete runtime values selected by `captureArgs`: the recursor's
+parameter/motive/minor prefix followed by the constructor's field suffix. -/
+def ruleCaptureValues (_constructor : NormalizedBlockCtor)
+    (recArgs ctorArgs : List VExpr) : List VExpr :=
+  recArgs.take (source.nparams + gen.familyCount + gen.minorCount) ++
+    ctorArgs.drop source.nparams
+
+/-- The constructor-computed index values expected by a generated rule at a
+runtime capture spine.  `ruleCheck` compares these values with the explicit
+index suffix of the recursor application. -/
+def ruleIndexTargets (constructor : NormalizedBlockCtor)
+    (levels : List VLevel) (recArgs ctorArgs : List VExpr) : List VExpr :=
+  (gen.ruleIdx constructor).attach.map fun index =>
+    VExpr.appN ((VExpr.lamN (gen.ruleBinders constructor) index.1).instL levels)
+      (gen.ruleCaptureValues constructor recArgs ctorArgs)
+
+/-- The canonical capture list is exactly the slicing performed by the host
+recursor reducer once its first-index boundary and selected rule field count
+are aligned with the generator metadata. -/
+theorem ruleCaptureValues_eq_reducerSlices
+    (constructor : NormalizedBlockCtor)
+    (recArgs ctorArgs : List VExpr) (firstIndex nfields : Nat)
+    (hfirst : firstIndex =
+      source.nparams + gen.familyCount + gen.minorCount)
+    (hfields : nfields = gen.ruleFieldCount constructor)
+    (hctorLength : ctorArgs.length = gen.ruleArgArity constructor) :
+    gen.ruleCaptureValues constructor recArgs ctorArgs =
+      recArgs.take firstIndex ++
+        ctorArgs.drop (ctorArgs.length - nfields) := by
+  unfold ruleCaptureValues
+  rw [hfirst, hfields]
+  congr 1
+  have : ctorArgs.length - gen.ruleFieldCount constructor = source.nparams := by
+    rw [hctorLength]
+    simp only [ruleArgArity]
+    omega
+  rw [this]
+
 /-- The RHS template of one rule: the registered right tower applied to the
 captured common arguments and fields. -/
 def ruleRHS (hcl : gen.RuleClosure) {i : Nat} {constructor : NormalizedBlockCtor}
@@ -726,6 +842,17 @@ theorem IotaPat.pat_app_uniq {hcl : gen.RuleClosure} {p p' : Pattern}
     (List.mem_of_getElem? hi')
 
 /-! ## Axiom closures of the generic pattern facts -/
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.rulePattern_matches_spines' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms rulePattern_matches_spines
+
+/--
+info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleCaptureValues_eq_reducerSlices' depends on axioms: [propext,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms ruleCaptureValues_eq_reducerSlices
 
 /-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.ruleLhsBody_matches' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
