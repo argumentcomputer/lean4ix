@@ -1,4 +1,6 @@
 import Lean4Lean.Verify.Environment.Quotient
+import Lean4Lean.Verify.Environment.NormalizationElimination
+import Lean4Lean.Verify.Environment.Boundaries
 
 namespace Lean4Lean
 open Lean4Lean
@@ -194,6 +196,1157 @@ theorem addMutual.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (fun ci hc => ?_) hbase0 ((this.and hbody).imp (fun _ _ h => ⟨h.1.1, h.2.1⟩)) (fun ci hc => ?_)
   · obtain ⟨v, -, h⟩ := this.forall_exists_r ci hc; exact h.2.1
   · obtain ⟨v, -, h⟩ := hbody.forall_exists_r ci hc; exact h.2
+
+/-- Semantic completion boundary for one retained inductive execution.  It
+packages the exact safety-indexed model extension required by `VEnvs.WF`. -/
+def AddInductive.EnvironmentInductiveExecution.PreservesVEnvs
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (_execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (ves : VEnvs) : Prop :=
+  ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+    ∀ safety, ves.venv safety ≤ ves'.venv safety
+
+/-- Pointwise semantic data needed to assemble preservation for one retained
+inductive execution.  This separates transaction translation from primitive
+and readiness preservation and from the cross-safety coherence of the output
+models. -/
+structure AddInductive.EnvironmentInductiveExecution.VEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (_execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (ves : VEnvs) where
+  output : VEnvs
+  tr : ∀ safety, TrEnv safety finalEnv (output.venv safety)
+  hasPrimitives : ∀ safety, VEnv.HasPrimitives (output.venv safety)
+  safePrimitives : ∀ {n ci}, finalEnv.find? n = some ci →
+    Environment.primitives.contains n →
+      ci.safety = .safe ∧ ci.levelParams = []
+  mono : ∀ {safety safety'}, safety ≤ safety' →
+    output.venv safety' ≤ output.venv safety
+  projectionReady : ∀ safety,
+    ProjectionReady finalEnv (output.venv safety)
+  structureEtaReady : ∀ safety,
+    StructureEtaReady finalEnv (output.venv safety)
+  old_le : ∀ safety, ves.venv safety ≤ output.venv safety
+
+namespace AddInductive.EnvironmentInductiveExecution.VEnvsExtension
+
+/-- Assemble the standard bundled environment invariant from its pointwise
+components. -/
+theorem wf
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs}
+    (extension : AddInductive.EnvironmentInductiveExecution.VEnvsExtension
+      execution ves) : extension.output.WF finalEnv where
+  tr {safety} := extension.tr safety
+  hasPrimitives {safety} := extension.hasPrimitives safety
+  safePrimitives {n ci} := extension.safePrimitives (n := n) (ci := ci)
+  mono {safety safety'} := extension.mono (safety := safety)
+    (safety' := safety')
+  projectionReady {safety} := extension.projectionReady safety
+  structureEtaReady {safety} := extension.structureEtaReady safety
+
+/-- Forget the decomposed fields back to the semantic completion boundary
+consumed by the generic `addDecl` bridge. -/
+theorem toPreservesVEnvs
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs}
+    (extension : AddInductive.EnvironmentInductiveExecution.VEnvsExtension
+      execution ves) : execution.PreservesVEnvs ves :=
+  ⟨extension.output, extension.wf, extension.old_le⟩
+
+end AddInductive.EnvironmentInductiveExecution.VEnvsExtension
+
+/-- An exact ordinary or nested semantic transaction whose three constant
+phases avoid every Theory name tracked by `VEnv.HasPrimitives`.  The actual
+data-bearing trace is retained so restored nested recursor names are checked
+after renaming, rather than approximated from the source declaration.  This
+is the non-primitive branch; primitive-recognized declarations require their
+dedicated reflection proof. -/
+inductive AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (source : VInductDecl) (input output : VEnv) : Prop where
+  | ordinary
+      (numNested_eq : execution.nested.aux2nested.size = 0)
+      (trace : AddInductBlockTrace env.constants input source
+        finalEnv.constants output)
+      (typeNames : ∀ ci ∈ source.blockTypeConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (recNames : ∀ ci ∈ trace.generation.recursors,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false) :
+      execution.PrimitivePreservingTransaction source input output
+  | nested
+      (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+      (trace : AddInductNestedTrace env.constants input source
+        finalEnv.constants output)
+      (typeNames : ∀ ci ∈ source.blockTypeConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (recNames : ∀ ci ∈ trace.nested.recursors,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false) :
+      execution.PrimitivePreservingTransaction source input output
+
+namespace AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction
+
+/-- Forget name avoidance while retaining the exact branch transaction. -/
+theorem toExact
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnv}
+    (transaction : execution.PrimitivePreservingTransaction source input
+      output) :
+    execution.ExactSemanticTransaction source input output := by
+  cases transaction with
+  | ordinary numNested_eq trace _ _ _ =>
+      exact .ordinary numNested_eq ⟨trace⟩
+  | nested numNested_ne trace _ _ _ =>
+      exact .nested numNested_ne ⟨trace⟩
+
+/-- A name-avoiding exact transaction transports primitive reflection from
+its input Theory environment to its output. -/
+theorem hasPrimitives
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnv}
+    (transaction : execution.PrimitivePreservingTransaction source input
+      output) (pre : input.HasPrimitives) : output.HasPrimitives := by
+  cases transaction with
+  | ordinary _ trace typeNames ctorNames recNames =>
+      exact trace.hasPrimitives pre
+        (fun ci member => (typeNames ci member).1)
+        (fun ci member => (ctorNames ci member).1)
+        (fun ci member => (recNames ci member).1)
+  | nested _ trace typeNames ctorNames recNames =>
+      exact trace.hasPrimitives pre
+        (fun ci member => (typeNames ci member).1)
+        (fun ci member => (ctorNames ci member).1)
+        (fun ci member => (recNames ci member).1)
+
+/-- The same name-avoidance evidence transports the host primitive-safety
+lookup invariant through the exact metadata map. -/
+theorem safePrimitivesMap
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnv}
+    (transaction : execution.PrimitivePreservingTransaction source input
+      output) (mapWF : env.constants.WF)
+    (pre : ConstMapSafePrimitives env.constants) :
+    ConstMapSafePrimitives finalEnv.constants := by
+  cases transaction with
+  | ordinary _ trace typeNames ctorNames recNames =>
+      exact trace.safePrimitivesMap mapWF pre
+        (fun ci member => (typeNames ci member).2)
+        (fun ci member => (ctorNames ci member).2)
+        (fun ci member => (recNames ci member).2)
+  | nested _ trace typeNames ctorNames recNames =>
+      exact trace.safePrimitivesMap mapWF pre
+        (fun ci member => (typeNames ci member).2)
+        (fun ci member => (ctorNames ci member).2)
+        (fun ci member => (recNames ci member).2)
+
+end AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction
+
+/-- A safety-indexed family of name-avoiding transactions which replays one
+shared ordinary generation or one shared restored nested artifact.  Sharing
+the artifact is the exact condition needed to transport the input
+cross-safety ordering through all constant and rule folds. -/
+inductive AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (source : VInductDecl) (input output : VEnvs) : Prop where
+  | ordinary
+      (numNested_eq : execution.nested.aux2nested.size = 0)
+      (generation : source.BlockGenerationChecked)
+      (traces : ∀ safety, AddInductBlockTrace env.constants
+        (input.venv safety) source finalEnv.constants (output.venv safety))
+      (generation_eq : ∀ safety, (traces safety).generation = generation)
+      (typeNames : ∀ ci ∈ source.blockTypeConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (recNames : ∀ ci ∈ generation.recursors,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false) :
+      execution.CoherentPrimitivePreservingTransactions source input output
+  | nested
+      (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+      (nestedArtifact : source.NestedBlockChecked)
+      (traces : ∀ safety, AddInductNestedTrace env.constants
+        (input.venv safety) source finalEnv.constants (output.venv safety))
+      (nested_eq : ∀ safety, (traces safety).nested = nestedArtifact)
+      (typeNames : ∀ ci ∈ source.blockTypeConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false)
+      (recNames : ∀ ci ∈ nestedArtifact.recursors,
+        ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains ci.name = false) :
+      execution.CoherentPrimitivePreservingTransactions source input output
+
+namespace AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
+
+/-- Select the exact name-avoiding transaction at one safety level. -/
+theorem transaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output) (safety : DefinitionSafety) :
+    execution.PrimitivePreservingTransaction source (input.venv safety)
+      (output.venv safety) := by
+  cases transactions with
+  | ordinary numNested_eq generation traces generation_eq typeNames ctorNames
+      recNames =>
+      exact .ordinary numNested_eq (traces safety) typeNames ctorNames
+        (fun ci member => recNames ci (by
+          simpa only [generation_eq safety] using member))
+  | nested numNested_ne nestedArtifact traces nested_eq typeNames ctorNames
+      recNames =>
+      exact .nested numNested_ne (traces safety) typeNames ctorNames
+        (fun ci member => recNames ci (by
+          simpa only [nested_eq safety] using member))
+
+/-- Shared-artifact replay transports the input cross-safety ordering to the
+output family. -/
+theorem mono
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (pre : ∀ {safety safety'}, safety ≤ safety' →
+      input.venv safety' ≤ input.venv safety)
+    {safety safety' : DefinitionSafety} (hle : safety ≤ safety') :
+    output.venv safety' ≤ output.venv safety := by
+  cases transactions with
+  | ordinary _ generation traces generation_eq _ _ _ =>
+      exact (traces safety').mono (traces safety)
+        ((generation_eq safety').trans (generation_eq safety).symm) (pre hle)
+  | nested _ nestedArtifact traces nested_eq _ _ _ =>
+      exact (traces safety').mono (traces safety)
+        ((nested_eq safety').trans (nested_eq safety).symm) (pre hle)
+
+end AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction.hasPrimitives' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction.hasPrimitives
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction.safePrimitivesMap' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction.safePrimitivesMap
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.mono' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.mono
+
+/-- A family of exact ordinary/nested transactions, one for each safety-indexed
+input model.  Transaction replay supplies translation and monotone extension;
+the remaining fields are precisely the primitive, coherence, and readiness
+obligations not encoded by an `AddInductBlock`/`AddInductNested` trace. -/
+structure AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (ves : VEnvs) where
+  source : VInductDecl
+  output : VEnvs
+  transaction : ∀ safety,
+    execution.ExactSemanticTransaction source (ves.venv safety)
+      (output.venv safety)
+  hasPrimitives : ∀ safety, VEnv.HasPrimitives (output.venv safety)
+  safePrimitives : ∀ {n ci}, finalEnv.find? n = some ci →
+    Environment.primitives.contains n →
+      ci.safety = .safe ∧ ci.levelParams = []
+  mono : ∀ {safety safety'}, safety ≤ safety' →
+    output.venv safety' ≤ output.venv safety
+  projectionReady : ∀ safety,
+    ProjectionReady finalEnv (output.venv safety)
+  structureEtaReady : ∀ safety,
+    StructureEtaReady finalEnv (output.venv safety)
+
+namespace AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
+
+/-- Replay every exact transaction on the corresponding input translation and
+obtain the pointwise component package. -/
+def toVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs} (wf : ves.WF env)
+    (extension :
+      AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
+        execution ves) : execution.VEnvsExtension ves where
+  output := extension.output
+  tr safety := by
+    unfold TrEnv
+    exact (extension.transaction safety).trEnv (wf.tr (safety := safety))
+  hasPrimitives := extension.hasPrimitives
+  safePrimitives := extension.safePrimitives
+  mono := extension.mono
+  projectionReady := extension.projectionReady
+  structureEtaReady := extension.structureEtaReady
+  old_le safety := (extension.transaction safety).le
+
+end AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
+
+private theorem primitiveSortTranslation_eq
+    (translation : TrExprS env [] [] (.sort (.succ .zero)) raw) :
+    raw = .sort (.succ .zero) := by
+  have computed := translation.trExprS?_eq (by
+    simp [TrExprS.IsUnique])
+  simpa [trExprS?, VLevel.ofLevel] using (Option.some.inj computed).symm
+
+private theorem primitiveConstTranslation_eq
+    (translation : TrExprS env [] [] (.const name []) raw) :
+    raw = .const name [] := by
+  have computed := translation.trExprS?_eq (by
+    simp [TrExprS.IsUnique])
+  simpa [trExprS?] using (Option.some.inj computed).symm
+
+private theorem primitiveUnaryConstTranslation_eq
+    (translation : TrExprS env [] []
+      (.forallE binderName (.const name []) (.const name []) binderInfo) raw) :
+    raw = .forallE (.const name []) (.const name []) := by
+  have computed := translation.trExprS?_eq (by
+    simp [TrExprS.IsUnique])
+  simpa [trExprS?] using (Option.some.inj computed).symm
+
+private theorem vConstVal_eq_of_fields {left right : VConstVal}
+    (uvars_eq : left.uvars = right.uvars)
+    (type_eq : left.type = right.type)
+    (name_eq : left.name = right.name) : left = right := by
+  cases left with
+  | mk leftConstant leftName =>
+      cases right with
+      | mk rightConstant rightName =>
+          cases leftConstant with
+          | mk leftUvars leftType =>
+              cases rightConstant with
+              | mk rightUvars rightType => simp_all
+
+private theorem boolConstructorConstants_eq
+    {sources : List Constructor}
+    {candidate : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources}
+    {raws : List VConstVal}
+    (run : VInductDecl.CandidateConstructorSemanticListRun env [] candidate
+      raws)
+    (sources_eq : sources = [
+      ⟨``Bool.false, .const ``Bool []⟩,
+      ⟨``Bool.true, .const ``Bool []⟩]) :
+    raws = VPrimitiveInductive.boolConstructors := by
+  subst sources
+  cases run with
+  | cons falseRun tail =>
+      cases tail with
+      | cons trueRun tail =>
+          cases tail
+          have falseType := primitiveConstTranslation_eq
+            falseRun.type.source_tr
+          have trueType := primitiveConstTranslation_eq
+            trueRun.type.source_tr
+          simp only [VPrimitiveInductive.boolConstructors]
+          congr
+          · apply vConstVal_eq_of_fields
+            · simpa using falseRun.uvars_eq
+            · simpa [VExpr.bool] using falseType
+            · exact falseRun.name_eq.symm
+          · congr
+            apply vConstVal_eq_of_fields
+            · simpa using trueRun.uvars_eq
+            · simpa [VExpr.bool] using trueType
+            · exact trueRun.name_eq.symm
+
+private theorem natConstructorConstants_eq
+    {sources : List Constructor}
+    {candidate : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources}
+    {raws : List VConstVal}
+    (run : VInductDecl.CandidateConstructorSemanticListRun env [] candidate
+      raws)
+    (sources_eq : sources = [
+      ⟨``Nat.zero, .const ``Nat []⟩,
+      ⟨``Nat.succ, .forallE binderName (.const ``Nat [])
+        (.const ``Nat []) binderInfo⟩]) :
+    raws = VPrimitiveInductive.natConstructors := by
+  subst sources
+  cases run with
+  | cons zeroRun tail =>
+      cases tail with
+      | cons succRun tail =>
+          cases tail
+          have zeroType := primitiveConstTranslation_eq
+            zeroRun.type.source_tr
+          have succType := primitiveUnaryConstTranslation_eq
+            succRun.type.source_tr
+          simp only [VPrimitiveInductive.natConstructors]
+          congr
+          · apply vConstVal_eq_of_fields
+            · simpa using zeroRun.uvars_eq
+            · simpa [VExpr.nat] using zeroType
+            · exact zeroRun.name_eq.symm
+          · congr
+            apply vConstVal_eq_of_fields
+            · simpa using succRun.uvars_eq
+            · simpa [VExpr.nat] using succType
+            · exact succRun.name_eq.symm
+
+/-- The primitive recognizer's concrete host syntax and one retained
+source-indexed semantic normalization run determine the exact raw Theory
+family and constructor inventory. -/
+theorem VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants
+    {env blockEnv : VEnv} {Us : List Name}
+    {types : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate types}
+    {source : VInductDecl}
+    (run : VInductDecl.NormalizationCandidateBlockSemanticRun env blockEnv
+      Us candidate source)
+    (shape : PrimitiveInductiveShape types) (levels_eq : Us = []) :
+    source.CanonicalPrimitiveConstants := by
+  subst Us
+  obtain ⟨type, rfl, type_type, primitive⟩ := shape
+  cases source
+  cases candidate with
+  | mk candidates =>
+      cases candidates with
+      | cons candidate tail =>
+          cases tail
+          cases run with
+          | mk declaration_uvars stage families =>
+              cases families with
+              | @cons familySource familyCandidate rawFamily familySources
+                  familyCandidates rawFamilies family tail =>
+                  cases tail
+                  have familyTranslation := family.type.source_tr
+                  rw [type_type] at familyTranslation
+                  have familyType :=
+                    primitiveSortTranslation_eq familyTranslation
+                  cases primitive with
+                  | inl boolShape =>
+                      obtain ⟨type_name, constructors_eq⟩ := boolShape
+                      have familyConstant :
+                          rawFamily.toVConstVal =
+                            VPrimitiveInductive.boolFamily := by
+                        apply vConstVal_eq_of_fields
+                        · simpa [VPrimitiveInductive.boolFamily] using
+                            family.uvars_eq
+                        · simpa [VPrimitiveInductive.boolFamily] using
+                            familyType
+                        · simpa [VPrimitiveInductive.boolFamily] using
+                            family.name_eq.symm.trans type_name
+                      have rawConstructors :=
+                        boolConstructorConstants_eq family.constructors
+                          constructors_eq
+                      apply VInductDecl.CanonicalPrimitiveConstants.bool
+                      · simpa [VInductDecl.blockTypeConstants] using
+                          familyConstant
+                      · simpa [VInductDecl.blockConstructorConstants] using
+                          rawConstructors
+                  | inr natShape =>
+                      obtain ⟨type_name, binderName, binderInfo,
+                        constructors_eq⟩ := natShape
+                      have familyConstant :
+                          rawFamily.toVConstVal =
+                            VPrimitiveInductive.natFamily := by
+                        apply vConstVal_eq_of_fields
+                        · simpa [VPrimitiveInductive.natFamily] using
+                            family.uvars_eq
+                        · simpa [VPrimitiveInductive.natFamily] using
+                            familyType
+                        · simpa [VPrimitiveInductive.natFamily] using
+                            family.name_eq.symm.trans type_name
+                      have rawConstructors :=
+                        natConstructorConstants_eq family.constructors
+                          constructors_eq
+                      apply VInductDecl.CanonicalPrimitiveConstants.nat
+                      · simpa [VInductDecl.blockTypeConstants] using
+                          familyConstant
+                      · simpa [VInductDecl.blockConstructorConstants] using
+                          rawConstructors
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalPrimitiveConstants
+
+/-- A coherent ordinary replay of a canonical primitive-recognized block.
+Unlike the nonprimitive transaction package, primitive preservation is
+derived from the exact Bool/Nat generated inventory rather than name
+avoidance.  Sharing one generation artifact across safety levels supplies
+cross-safety coherence. -/
+structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (ves : VEnvs) where
+  source : VInductDecl
+  output : VEnvs
+  numNested_eq : execution.nested.aux2nested.size = 0
+  generation : source.BlockGenerationChecked
+  traces : ∀ safety, AddInductBlockTrace env.constants
+    (ves.venv safety) source finalEnv.constants (output.venv safety)
+  generation_eq : ∀ safety, (traces safety).generation = generation
+  kernelSources_eq : execution.nested.types = types
+  semanticBlockEnv : VEnv
+  semantic : VInductDecl.NormalizationCandidateBlockSemanticRun
+    (ves.venv .safe) semanticBlockEnv lparams execution.flattened.candidate
+      source
+  projectionReady : ∀ safety,
+    ProjectionReady finalEnv (output.venv safety)
+  structureEtaReady : ∀ safety,
+    StructureEtaReady finalEnv (output.venv safety)
+
+namespace AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+
+/-- Recover the exact raw Theory constants from the recognizer result and the
+retained source-indexed semantic run.  The only operational bridge is that an
+ordinary primitive execution's nested-elimination source list is unchanged. -/
+theorem canonicalConstants
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (extension :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    extension.source.CanonicalPrimitiveConstants := by
+  apply extension.semantic.canonicalPrimitiveConstants
+  · rw [extension.kernelSources_eq]
+    exact (primitiveResult.recognized rfl).2.2.2
+  · exact (primitiveResult.recognized rfl).2.1
+
+/-- Checked generation supplies the recursor name, turning the semantically
+recovered family/constructor constants into the complete canonical inventory. -/
+theorem canonicalInventory
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs}
+    (extension :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    extension.source.CanonicalPrimitiveInventory extension.generation :=
+  (extension.canonicalConstants primitiveResult).toInventory
+    extension.generation
+
+/-- Canonical inventory plus coherent exact replay derives every semantic
+field of the generic transaction package, including both primitive
+invariants and cross-safety monotonicity. -/
+def toTransactionalVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs} (wf : ves.WF env)
+    (extension :
+      execution.CanonicalPrimitiveTransactionalVEnvsExtension ves)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    execution.TransactionalVEnvsExtension ves where
+  source := extension.source
+  output := extension.output
+  transaction safety :=
+    .ordinary extension.numNested_eq ⟨extension.traces safety⟩
+  hasPrimitives safety :=
+    (extension.canonicalInventory primitiveResult).hasPrimitives
+      (extension.traces safety)
+      (extension.generation_eq safety)
+      (wf.hasPrimitives (safety := safety))
+  safePrimitives := by
+    intro n ci found primitive
+    have preTr : TrEnv' .safe env.constants env.quotInit
+        (ves.venv .safe) := by
+      simpa only [TrEnv] using wf.tr (safety := .safe)
+    have transaction : execution.ExactSemanticTransaction extension.source
+        (ves.venv .safe) (extension.output.venv .safe) :=
+      .ordinary extension.numNested_eq ⟨extension.traces .safe⟩
+    have finalTr := transaction.trEnv preTr
+    have finalSafe : ConstMapSafePrimitives finalEnv.constants :=
+      (extension.canonicalInventory primitiveResult).safePrimitivesMap
+        (extension.traces .safe)
+        (extension.generation_eq .safe) preTr.map_wf
+        (ConstMapSafePrimitives.ofEnvironment preTr.map_wf
+          wf.safePrimitives)
+    exact ConstMapSafePrimitives.toEnvironment finalSafe finalTr.map_wf
+      found primitive
+  mono hle :=
+    (extension.traces _).mono (extension.traces _)
+      ((extension.generation_eq _).trans
+        (extension.generation_eq _).symm)
+      (wf.mono hle)
+  projectionReady := extension.projectionReady
+  structureEtaReady := extension.structureEtaReady
+
+end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalConstants
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.canonicalInventory
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension
+
+/-- Safety-indexed non-primitive transactions.  Compared with
+`TransactionalVEnvsExtension`, neither primitive contract nor cross-safety
+coherence is an explicit field: they follow from shared name-avoiding
+transactions and the input `VEnvs.WF`. -/
+structure AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (ves : VEnvs) where
+  source : VInductDecl
+  output : VEnvs
+  transaction :
+    execution.CoherentPrimitivePreservingTransactions source ves output
+  projectionReady : ∀ safety,
+    ProjectionReady finalEnv (output.venv safety)
+  structureEtaReady : ∀ safety,
+    StructureEtaReady finalEnv (output.venv safety)
+
+namespace AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension
+
+/-- Derive the ordinary transaction package, including primitive reflection,
+from the stronger name-avoiding traces. -/
+def toTransactionalVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs} (wf : ves.WF env)
+    (extension : execution.NonprimitiveTransactionalVEnvsExtension ves) :
+    execution.TransactionalVEnvsExtension ves where
+  source := extension.source
+  output := extension.output
+  transaction safety := (extension.transaction.transaction safety).toExact
+  hasPrimitives safety :=
+    (extension.transaction.transaction safety).hasPrimitives
+      (wf.hasPrimitives (safety := safety))
+  safePrimitives := by
+    intro n ci found primitive
+    have preTr : TrEnv' .safe env.constants env.quotInit
+        (ves.venv .safe) := by
+      simpa only [TrEnv] using wf.tr (safety := .safe)
+    have finalTr :=
+      (extension.transaction.transaction .safe).toExact.trEnv preTr
+    have finalSafe : ConstMapSafePrimitives finalEnv.constants :=
+      ((extension.transaction.transaction .safe).safePrimitivesMap preTr.map_wf
+        (ConstMapSafePrimitives.ofEnvironment preTr.map_wf
+          wf.safePrimitives))
+    exact ConstMapSafePrimitives.toEnvironment finalSafe finalTr.map_wf
+      found primitive
+  mono hle := extension.transaction.mono wf.mono hle
+  projectionReady := extension.projectionReady
+  structureEtaReady := extension.structureEtaReady
+
+end AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension
+
+/-- A non-primitive inductive transaction followed by a shared list of
+Theory-only structure-eta registrations.  The exact metadata transaction
+ends at `transactionOutput`; readiness completion may then enlarge only the
+Theory model, leaving the host environment fixed.  Sharing `etaRules` across
+all safety levels is the coherence condition needed for the final `VEnvs`
+ordering. -/
+structure AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (ves : VEnvs) where
+  source : VInductDecl
+  transactionOutput : VEnvs
+  output : VEnvs
+  transaction :
+    execution.CoherentPrimitivePreservingTransactions source ves
+      transactionOutput
+  etaRules : List VStructEta
+  completion : ∀ safety,
+    VEnv.AddStructEtas (transactionOutput.venv safety) etaRules
+      (output.venv safety)
+  /-- Projection artifacts are constructed once all generated constants and
+  iota rules exist; subsequent eta registration transports them monotonically. -/
+  projectionReadyBase : ∀ safety,
+    ProjectionReady finalEnv (transactionOutput.venv safety)
+  /-- Every host nonrecursive structure is either already registered at the
+  transaction boundary or is backed by an exact artifact in `etaRules`. -/
+  structureEtaCoverage : ∀ safety,
+    StructureEtaRegistrationCoverage finalEnv
+      (transactionOutput.venv safety) etaRules
+
+namespace AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension
+
+/-- Assemble the complete semantic extension.  Exact replay supplies the
+host-facing translation and primitive invariants; checked eta registration
+then preserves those facts and provides the larger readiness-complete model. -/
+def toVEnvsExtension
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs} (wf : ves.WF env)
+    (extension :
+      execution.ReadinessCompletedNonprimitiveVEnvsExtension ves) :
+    execution.VEnvsExtension ves where
+  output := extension.output
+  tr safety := by
+    have base := (extension.transaction.transaction safety).toExact.trEnv
+      (wf.tr (safety := safety))
+    exact (extension.completion safety).trEnv base
+  hasPrimitives safety :=
+    (extension.completion safety).hasPrimitives
+      ((extension.transaction.transaction safety).hasPrimitives
+        (wf.hasPrimitives (safety := safety)))
+  safePrimitives := by
+    intro n ci found primitive
+    have preTr : TrEnv' .safe env.constants env.quotInit
+        (ves.venv .safe) := by
+      simpa only [TrEnv] using wf.tr (safety := .safe)
+    have baseTr :=
+      (extension.transaction.transaction .safe).toExact.trEnv preTr
+    have finalSafe : ConstMapSafePrimitives finalEnv.constants :=
+      (extension.transaction.transaction .safe).safePrimitivesMap
+        preTr.map_wf
+        (ConstMapSafePrimitives.ofEnvironment preTr.map_wf
+          wf.safePrimitives)
+    have finalTr := (extension.completion .safe).trEnv baseTr
+    exact ConstMapSafePrimitives.toEnvironment finalSafe finalTr.map_wf
+      found primitive
+  mono hle :=
+    (extension.completion _).mono (extension.completion _)
+      (extension.transaction.mono wf.mono hle)
+  projectionReady safety :=
+    (extension.projectionReadyBase safety).mono
+      (extension.completion safety).le
+  structureEtaReady safety :=
+    (extension.structureEtaCoverage safety).toStructureEtaReady
+      (extension.completion safety)
+  old_le safety :=
+    (extension.transaction.transaction safety).toExact.le.trans
+      (extension.completion safety).le
+
+end AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension
+
+namespace AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension
+
+/-- Regard an already readiness-complete exact transaction as a completion
+with no additional structure-eta registrations. -/
+def toReadinessCompleted
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs} (extension :
+      execution.NonprimitiveTransactionalVEnvsExtension ves) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves where
+  source := extension.source
+  transactionOutput := extension.output
+  output := extension.output
+  transaction := extension.transaction
+  etaRules := []
+  completion _ := .nil
+  projectionReadyBase := extension.projectionReady
+  structureEtaCoverage safety := by
+    intro familyName familyInfo constructorName constructorInfo
+      hfamily hconstructor hnonrec
+    exact .inl <| (extension.structureEtaReady safety).resolve
+      familyName familyInfo constructorName constructorInfo
+        hfamily hconstructor hnonrec
+
+end AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVEnvsExtension
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.toVEnvsExtension' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.toVEnvsExtension
+
+/-- The admitted inductive branch of `addDecl.WF` factors into exactly two
+independent obligations: operational completeness of the retained execution
+and semantic preservation for each retained execution.  Primitive recognition
+only selects the Boolean index shared by those obligations. -/
+theorem addDecl.inductDecl_WF_of_execution
+    {env : Environment} {ves : VEnvs} (_wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (complete : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        AddInductive.EnvironmentInductiveExecution.Complete env lparams
+          nparams types isUnsafe allowPrimitive fuel)
+    (preserves : ∀ allowPrimitive finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe allowPrimitive fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        execution.PreservesVEnvs ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  intro finalEnv success
+  change (do
+    let allowPrimitive ← Environment.checkPrimitiveInductive env lparams
+      nparams types isUnsafe
+    Environment.addInductive env lparams nparams types isUnsafe
+      allowPrimitive fuel) = .ok finalEnv at success
+  cases primitiveResult : Environment.checkPrimitiveInductive env lparams
+      nparams types isUnsafe with
+  | error error =>
+      rw [primitiveResult] at success
+      contradiction
+  | ok allowPrimitive =>
+      rw [primitiveResult] at success
+      obtain ⟨execution⟩ :=
+        complete allowPrimitive primitiveResult finalEnv success
+      exact preserves allowPrimitive finalEnv execution primitiveResult
+
+/-- Fully decomposed inductive-branch contract.  Operational completeness is
+reduced to the one normalization observer boundary for each flattened result;
+semantic completion is supplied as pointwise `VEnvs` components for the exact
+retained outer execution. -/
+theorem addDecl.inductDecl_WF_of_components
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (candidateObservers : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        ∀ nested : ElimNestedInductive.Result,
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                allowPrimitive fuel))
+    (semantics : ∀ allowPrimitive finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe allowPrimitive fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        execution.VEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_execution wf lparams nparams types isUnsafe fuel
+  · intro allowPrimitive primitiveRun
+    exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers
+      (candidateObservers allowPrimitive primitiveRun)
+  · intro allowPrimitive finalEnv execution primitiveRun
+    exact (semantics allowPrimitive finalEnv execution primitiveRun).toPreservesVEnvs
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_components' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_components
+
+/-- Transaction-oriented form of the decomposed inductive branch.  Exact
+ordinary/nested traces discharge both pointwise environment translation and
+the required extension inequalities automatically. -/
+theorem addDecl.inductDecl_WF_of_transactions
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (candidateObservers : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        ∀ nested : ElimNestedInductive.Result,
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                allowPrimitive fuel))
+    (semantics : ∀ allowPrimitive finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe allowPrimitive fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        execution.TransactionalVEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_components wf lparams nparams types isUnsafe
+    fuel candidateObservers
+  intro allowPrimitive finalEnv execution primitiveRun
+  exact (semantics allowPrimitive finalEnv execution primitiveRun).toVEnvsExtension
+    wf
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_transactions' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_transactions
+
+/-- Non-primitive transaction form of the inductive branch.  Exact retained
+traces now discharge translation, extension, and Theory primitive reflection;
+their host-map insertions also discharge kernel primitive safety, and a shared
+generation/restoration artifact discharges cross-safety coherence.  Only
+projection/structure-eta readiness remains explicit. -/
+theorem addDecl.inductDecl_WF_of_nonprimitive_transactions
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (candidateObservers : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        ∀ nested : ElimNestedInductive.Result,
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                allowPrimitive fuel))
+    (semantics : ∀ allowPrimitive finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe allowPrimitive fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        execution.NonprimitiveTransactionalVEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_transactions wf lparams nparams types
+    isUnsafe fuel candidateObservers
+  intro allowPrimitive finalEnv execution primitiveRun
+  exact (semantics allowPrimitive finalEnv execution primitiveRun)
+    |>.toTransactionalVEnvsExtension wf
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_nonprimitive_transactions' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_nonprimitive_transactions
+
+/-- Readiness-completed non-primitive form of the inductive branch.  This is
+the transaction interface used by generated structure artifacts: the exact
+ordinary/nested replay may be followed by checked Theory-only eta
+registrations before the final readiness package is assembled. -/
+theorem addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (candidateObservers : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        ∀ nested : ElimNestedInductive.Result,
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                allowPrimitive fuel))
+    (semantics : ∀ allowPrimitive finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe allowPrimitive fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        execution.ReadinessCompletedNonprimitiveVEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_components wf lparams nparams types
+    isUnsafe fuel candidateObservers
+  intro allowPrimitive finalEnv execution primitiveRun
+  exact (semantics allowPrimitive finalEnv execution primitiveRun)
+    |>.toVEnvsExtension wf
+
+/-- Primitive-aware transaction form of the inductive branch.  Ordinary
+blocks use the readiness-completed, name-avoiding transaction path.  A
+recognizer result of `true` is isolated into its own callback together with
+the proved canonical `Bool`/`Nat` syntax certificate, so primitive reflection
+never has to be approximated by the nonprimitive name-avoidance contract. -/
+theorem addDecl.inductDecl_WF_of_split_primitive_transactions
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool) (fuel : FuelConfig := {})
+    (candidateObservers : ∀ allowPrimitive,
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok allowPrimitive →
+        ∀ nested : ElimNestedInductive.Result,
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                allowPrimitive fuel))
+    (nonprimitiveSemantics : ∀ finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe false fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok false →
+        execution.ReadinessCompletedNonprimitiveVEnvsExtension ves)
+    (primitiveSemantics : ∀ finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe true fuel finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok true →
+      PrimitiveInductiveResult lparams nparams types isUnsafe true →
+        execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := fuel)).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_components wf lparams nparams types
+    isUnsafe fuel candidateObservers
+  intro allowPrimitive finalEnv execution primitiveRun
+  cases allowPrimitive with
+  | false =>
+      exact (nonprimitiveSemantics finalEnv execution primitiveRun)
+        |>.toVEnvsExtension wf
+  | true =>
+      have primitiveResult :
+          PrimitiveInductiveResult lparams nparams types isUnsafe true :=
+        checkPrimitiveInductive.WF env lparams nparams types isUnsafe
+          true primitiveRun
+      exact (primitiveSemantics finalEnv execution primitiveRun
+        primitiveResult).toTransactionalVEnvsExtension wf primitiveResult
+        |>.toVEnvsExtension wf
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_split_primitive_transactions
 
 set_option warn.sorry false in
 /-- Successful checked addition preserves well-formedness and extends every safety-indexed
