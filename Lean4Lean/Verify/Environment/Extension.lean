@@ -1014,6 +1014,271 @@ info: 'Lean4Lean.VPrimitiveInductive.canonicalGeneration' depends on axioms: [pr
 #guard_msgs in
 #print axioms VPrimitiveInductive.canonicalGeneration
 
+/-- The canonical Boolean generation is semantically well formed in any
+input model where staging its sole family produces `blockEnv`. -/
+theorem boolGeneration_wf {env blockEnv : VEnv}
+    (hadd : env.addConst boolType.name boolType.toVConstant = some blockEnv) :
+    boolGeneration.WF env blockEnv := by
+  have families_eq : boolGeneration.families =
+      [boolGeneration.families[0]] := by rfl
+  have constructors_eq : boolGeneration.flatCtors =
+      [boolGeneration.flatCtors[0], boolGeneration.flatCtors[1]] := by rfl
+  refine {
+    blockWF := ?_
+    resultLevelWF := ?_
+    paramsTel := ?_
+    families := ?_
+    constructors := ?_ }
+  · refine ⟨?_, ?_⟩
+    · refine ⟨?_, ?_⟩
+      · simpa [VEnv.stageInductiveTypes, boolDecl] using hadd
+      · change List.Forall₂
+            (fun raw view =>
+              env.IsDefEqU 0 [] raw.type view.type ∧
+                List.Forall₂
+                  (fun rawCtor viewCtor =>
+                    blockEnv.IsDefEqU 0 [] rawCtor.type viewCtor.type)
+                  raw.ctors view.ctors)
+            [boolType] [boolType]
+        apply List.Forall₂.cons
+        · constructor
+          · exact ⟨_, .sortDF (by decide) (by decide) rfl⟩
+          · apply List.Forall₂.cons
+            · exact ⟨_, VEnv.HasType.const
+                (VEnv.addConst_self hadd) (by simp) rfl⟩
+            · apply List.Forall₂.cons
+              · exact ⟨_, VEnv.HasType.const
+                  (VEnv.addConst_self hadd) (by simp) rfl⟩
+              · exact .nil
+        · exact .nil
+    · unfold VInductDecl.CheckedBlock.WF
+      change VInductDecl.checkedFamilyListsWF boolDecl [] env
+        (.succ .zero) [[]] [(.succ .zero)] [[]]
+          [boolType.ctors.map
+            (VInductDecl.CheckedCtor.ofBlock boolDecl)]
+      simp only [VInductDecl.checkedFamilyListsWF]
+      refine ⟨rfl, trivial, ?_, trivial⟩
+      intro constructor member
+      simp [boolType, boolConstructors] at member
+      rcases member with rfl | rfl
+      · exact ⟨trivial, .nil⟩
+      · exact ⟨trivial, .nil⟩
+  · decide
+  · change True
+    trivial
+  · intro family member
+    rw [families_eq] at member
+    simp only [List.mem_singleton] at member
+    subst family
+    refine { familyTel := ?_, familyResult := ?_ }
+    · change True
+      trivial
+    · change env.IsDefEq 0 [] (.sort (.succ .zero))
+          (.sort (.succ .zero)) (.sort (.succ (.succ .zero)))
+      exact .sortDF (by decide) (by decide) rfl
+  · intro constructor member
+    rw [constructors_eq] at member
+    simp at member
+    rcases member with rfl | rfl
+    · refine {
+        declaredTel := ?_
+        declaredResult := ?_
+        emittedTel := ?_
+        emittedResult := ?_
+        owner := ?_
+        recursive := ?_
+        resultSpine := ?_ }
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .bool .bool (.sort (.succ .zero))
+        exact VEnv.HasType.const (VEnv.addConst_self hadd) (by simp) rfl
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .bool .bool (.sort (.succ .zero))
+        exact VEnv.HasType.const (VEnv.addConst_self hadd) (by simp) rfl
+      · refine ⟨boolGeneration.families[0], ?_, rfl, rfl, rfl⟩
+        exact List.getElem_mem (l := boolGeneration.families)
+          (n := 0) (by decide)
+      · intro recursive member
+        change recursive ∈ [] at member
+        simp at member
+      · change blockEnv.SpineWF 0 [] (.sort (.succ .zero)) []
+          (.sort (.succ .zero))
+        exact .nil
+    · refine {
+        declaredTel := ?_
+        declaredResult := ?_
+        emittedTel := ?_
+        emittedResult := ?_
+        owner := ?_
+        recursive := ?_
+        resultSpine := ?_ }
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .bool .bool (.sort (.succ .zero))
+        exact VEnv.HasType.const (VEnv.addConst_self hadd) (by simp) rfl
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .bool .bool (.sort (.succ .zero))
+        exact VEnv.HasType.const (VEnv.addConst_self hadd) (by simp) rfl
+      · refine ⟨boolGeneration.families[0], ?_, rfl, rfl, rfl⟩
+        exact List.getElem_mem (l := boolGeneration.families)
+          (n := 0) (by decide)
+      · intro recursive member
+        change recursive ∈ [] at member
+        simp at member
+      · change blockEnv.SpineWF 0 [] (.sort (.succ .zero)) []
+          (.sort (.succ .zero))
+        exact .nil
+
+/-- The canonical natural-number generation is semantically well formed in
+any input model where staging its sole family produces `blockEnv`. -/
+theorem natGeneration_wf {env blockEnv : VEnv}
+    (hadd : env.addConst natType.name natType.toVConstant = some blockEnv) :
+    natGeneration.WF env blockEnv := by
+  have families_eq : natGeneration.families =
+      [natGeneration.families[0]] := by rfl
+  have constructors_eq : natGeneration.flatCtors =
+      [natGeneration.flatCtors[0], natGeneration.flatCtors[1]] := by rfl
+  have family_lookup : blockEnv.constants ``Nat =
+      some natType.toVConstant := VEnv.addConst_self hadd
+  have nat_isType (context : List VExpr) :
+      blockEnv.IsType 0 context .nat :=
+    ⟨.succ .zero, VEnv.HasType.const family_lookup (by simp) rfl⟩
+  have nat_tel : blockEnv.TelDefEq 0 [] [.nat] [.nat] :=
+    (show blockEnv.OnTel 0 [] [.nat] from
+      ⟨nat_isType [], trivial⟩).telDefEq_refl
+  refine {
+    blockWF := ?_
+    resultLevelWF := ?_
+    paramsTel := ?_
+    families := ?_
+    constructors := ?_ }
+  · refine ⟨?_, ?_⟩
+    · refine ⟨?_, ?_⟩
+      · simpa [VEnv.stageInductiveTypes, natDecl] using hadd
+      · change List.Forall₂
+            (fun raw view =>
+              env.IsDefEqU 0 [] raw.type view.type ∧
+                List.Forall₂
+                  (fun rawCtor viewCtor =>
+                    blockEnv.IsDefEqU 0 [] rawCtor.type viewCtor.type)
+                  raw.ctors view.ctors)
+            [natType] [natType]
+        apply List.Forall₂.cons
+        · constructor
+          · exact ⟨_, .sortDF (by decide) (by decide) rfl⟩
+          · apply List.Forall₂.cons
+            · exact ⟨_, VEnv.HasType.const family_lookup (by simp) rfl⟩
+            · apply List.Forall₂.cons
+              · refine ⟨_, VEnv.HasType.forallE
+                  (u := .succ .zero) (v := .succ .zero) ?_ ?_⟩
+                · exact VEnv.HasType.const family_lookup (by simp) rfl
+                · exact VEnv.HasType.const family_lookup (by simp) rfl
+              · exact .nil
+        · exact .nil
+    · unfold VInductDecl.CheckedBlock.WF
+      change VInductDecl.checkedFamilyListsWF natDecl [] env
+        (.succ .zero) [[]] [(.succ .zero)] [[]]
+          [natType.ctors.map
+            (VInductDecl.CheckedCtor.ofBlock natDecl)]
+      simp only [VInductDecl.checkedFamilyListsWF]
+      refine ⟨rfl, trivial, ?_, trivial⟩
+      intro constructor member
+      simp [natType, natConstructors] at member
+      rcases member with rfl | rfl
+      · exact ⟨trivial, .nil⟩
+      · exact ⟨⟨⟨rfl, trivial, .nil⟩, trivial⟩, .nil⟩
+  · decide
+  · change True
+    trivial
+  · intro family member
+    rw [families_eq] at member
+    simp only [List.mem_singleton] at member
+    subst family
+    refine { familyTel := ?_, familyResult := ?_ }
+    · change True
+      trivial
+    · change env.IsDefEq 0 [] (.sort (.succ .zero))
+          (.sort (.succ .zero)) (.sort (.succ (.succ .zero)))
+      exact .sortDF (by decide) (by decide) rfl
+  · intro constructor member
+    rw [constructors_eq] at member
+    simp at member
+    rcases member with rfl | rfl
+    · refine {
+        declaredTel := ?_
+        declaredResult := ?_
+        emittedTel := ?_
+        emittedResult := ?_
+        owner := ?_
+        recursive := ?_
+        resultSpine := ?_ }
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .nat .nat (.sort (.succ .zero))
+        exact VEnv.HasType.const family_lookup (by simp) rfl
+      · change True
+        trivial
+      · change blockEnv.IsDefEq 0 [] .nat .nat (.sort (.succ .zero))
+        exact VEnv.HasType.const family_lookup (by simp) rfl
+      · refine ⟨natGeneration.families[0], ?_, rfl, rfl, rfl⟩
+        exact List.getElem_mem (l := natGeneration.families)
+          (n := 0) (by decide)
+      · intro recursive member
+        change recursive ∈ [] at member
+        simp at member
+      · change blockEnv.SpineWF 0 [] (.sort (.succ .zero)) []
+          (.sort (.succ .zero))
+        exact .nil
+    · refine {
+        declaredTel := ?_
+        declaredResult := ?_
+        emittedTel := ?_
+        emittedResult := ?_
+        owner := ?_
+        recursive := ?_
+        resultSpine := ?_ }
+      · change blockEnv.TelDefEq 0 [] [.nat] [.nat]
+        exact nat_tel
+      · change blockEnv.IsDefEq 0 [.nat] .nat .nat (.sort (.succ .zero))
+        exact VEnv.HasType.const family_lookup (by simp) rfl
+      · change blockEnv.TelDefEq 0 [] [.nat] [.nat]
+        exact nat_tel
+      · change blockEnv.IsDefEq 0 [.nat] .nat .nat (.sort (.succ .zero))
+        exact VEnv.HasType.const family_lookup (by simp) rfl
+      · refine ⟨natGeneration.families[0], ?_, rfl, rfl, rfl⟩
+        exact List.getElem_mem (l := natGeneration.families)
+          (n := 0) (by decide)
+      · intro recursive member
+        change recursive ∈ [{
+          fieldIndex := 0
+          binders := []
+          targetType := 0
+          indices := [] }] at member
+        simp only [List.mem_singleton] at member
+        subst recursive
+        refine ⟨natGeneration.families[0], ?_, rfl, ?_, ?_⟩
+        · exact List.getElem_mem (l := natGeneration.families)
+            (n := 0) (by decide)
+        · exact ⟨.nat, rfl, rfl⟩
+        · exact ⟨trivial, .nil⟩
+      · change blockEnv.SpineWF 0 [.nat] (.sort (.succ .zero)) []
+          (.sort (.succ .zero))
+        exact .nil
+
+/--
+info: 'Lean4Lean.VPrimitiveInductive.boolGeneration_wf' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VPrimitiveInductive.boolGeneration_wf
+
+/--
+info: 'Lean4Lean.VPrimitiveInductive.natGeneration_wf' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VPrimitiveInductive.natGeneration_wf
+
 end VPrimitiveInductive
 
 /-- Exact Theory inventory associated with a primitive-recognized ordinary

@@ -494,7 +494,11 @@ to the replacement.
   recognizer shape to derive the canonical family translations.  Its resulting
   family insertion supplies the exact Theory lookup used to derive both Bool
   or Nat constructor translations and the constructor insertion fold; neither
-  phase remains a primitive replay input.
+  phase remains a primitive replay input. That same singleton family-add
+  equation now derives the complete canonical Bool/Nat
+  `BlockGenerationChecked.WF`, including the successor recursive-field
+  certificate. `CanonicalPrimitiveReplay.ofInsertions` therefore constructs
+  `generation_wf` internally instead of accepting it from a producer.
 - **Ix impact:** establishes the implementation-to-Theory environment bridge
   needed to translate checked inductive blocks and eventually construct
   `InductiveOracle`. The supported singleton, mutual, and nested replay matrix
@@ -507,7 +511,7 @@ to the replacement.
   maps; the pre-Nat value-preservation regression; full Theory/Verify, default
   Lake, Nix, and flake gates; primitive nested no-op, canonical-source, and
   retained-execution replay consumer checks, canonical family/constructor
-  evidence and insertion checks; and
+  evidence, insertion, and canonical Bool/Nat generation-WF checks; and
   compile-time trust manifests for the fixed, normalization, combined replay,
   output-ordering, and both mutual-block roots.
 - **Axiom note:** the guarded roots currently inherit `sorryAx` through
@@ -528,7 +532,9 @@ to the replacement.
   pinned on the proof and every affected transaction root. Retargeting the
   staged primitive replay to the public outer endpoints has the same exact
   closure; constructing the trace at the retained flattened endpoints uses only
-  the standard logical baseline.
+  the standard logical baseline. The two canonical generation-WF lemmas, their
+  retained-family-fold consumer, and the updated replay assembler likewise use
+  only that logical baseline.
 - **Upstream issue/PR:** TBD; submit with or immediately after the staged
   inductive-semantics series.
 - **Removal condition:** upstream has a non-vacuous inductive alignment with

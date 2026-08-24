@@ -780,6 +780,78 @@ noncomputable def AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveF
   · have initialEq := execution.flattenedValidationEnv_eq
     simpa only [initialEq] using pre
 
+/-- The retained canonical family fold supplies the exact staging equation
+needed to derive the complete Bool/Nat generation certificate.  No semantic
+well-formedness premise remains on the primitive transaction boundary. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveGenerationWF
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv)
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants) :
+    (VPrimitiveInductive.canonicalGeneration types).WF input
+      families.blockEnv := by
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨_, _, _, shape⟩ := recognized
+  obtain ⟨type, typesEq, _, primitive⟩ := shape
+  subst types
+  rcases type with ⟨sourceName, sourceType, sourceCtors⟩
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, _⟩ := boolShape
+      dsimp only [InductiveType.name] at typeName
+      subst sourceName
+      have rawFamiliesEq :
+          VInductDecl.blockTypeConstants (VPrimitiveInductive.canonicalDecl
+            [(⟨``Bool, sourceType, sourceCtors⟩ : InductiveType)]) =
+            [VPrimitiveInductive.boolType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.boolDecl,
+          VPrimitiveInductive.boolType]
+      have familyAdds : AddInductConstants .induct
+          execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+          input [VPrimitiveInductive.boolType.toVConstVal]
+          execution.flattened.eliminationExecution.normalization.familyEnv.constants
+          families.blockEnv := by
+        simpa only [rawFamiliesEq] using families.addTypes
+      cases familyAdds with
+      | cons familyAdd familyTail =>
+          cases familyTail
+          change VPrimitiveInductive.boolGeneration.WF input
+            families.blockEnv
+          exact VPrimitiveInductive.boolGeneration_wf familyAdd.env_add
+  | inr natShape =>
+      obtain ⟨typeName, _, _, _⟩ := natShape
+      dsimp only [InductiveType.name] at typeName
+      subst sourceName
+      have rawFamiliesEq :
+          VInductDecl.blockTypeConstants (VPrimitiveInductive.canonicalDecl
+            [(⟨``Nat, sourceType, sourceCtors⟩ : InductiveType)]) =
+            [VPrimitiveInductive.natType.toVConstVal] := by
+        simp [VPrimitiveInductive.canonicalDecl,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.natDecl,
+          VPrimitiveInductive.natType]
+      have familyAdds : AddInductConstants .induct
+          execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+          input [VPrimitiveInductive.natType.toVConstVal]
+          execution.flattened.eliminationExecution.normalization.familyEnv.constants
+          families.blockEnv := by
+        simpa only [rawFamiliesEq] using families.addTypes
+      cases familyAdds with
+      | cons familyAdd familyTail =>
+          cases familyTail
+          change VPrimitiveInductive.natGeneration.WF input
+            families.blockEnv
+          exact VPrimitiveInductive.natGeneration_wf familyAdd.env_add
+
 /-- The exact constructor metadata retained by a recognized primitive
 execution translates to the canonical Bool/Nat constructor inventory in the
 Theory environment produced by its family insertion. -/
@@ -1027,8 +1099,8 @@ def ofInsertions
       execution.flattened.eliminationExecution.normalization.familyEnv
       execution.flattened.eliminationExecution.normalization.declaredInfos
       input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants)
-    (generation_wf : (VPrimitiveInductive.canonicalGeneration types).WF input
-      families.blockEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true)
     (constructors : VInductDecl.ConstructorDeclarationInsertionRun
       execution.flattened.eliminationExecution.constructorContext.allowPrimitive
       execution.flattened.eliminationExecution.normalization.familyEnv
@@ -1047,7 +1119,8 @@ def ofInsertions
       (VPrimitiveInductive.canonicalGeneration types).generatedRules output) :
     execution.CanonicalPrimitiveReplay input output where
   blockEnv := families.blockEnv
-  generation_wf := generation_wf
+  generation_wf := execution.canonicalPrimitiveGenerationWF
+    primitiveResult input families
   addTypes := families.addTypes
   ctorEnv := constructors.ctorEnv
   addCtors := constructors.addCtors
@@ -1210,6 +1283,14 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFa
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyInsertion
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveGenerationWF' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveGenerationWF
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorEvidence' depends on axioms: [propext,
