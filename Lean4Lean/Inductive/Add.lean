@@ -4019,28 +4019,144 @@ def ElimNestedInductive.Result.restoreConstructorInfo
       { ctor with type := res.restoreNested flatEnv ctor.type }
   | _ => unreachable!
 
+/-- Restore a source-family record while retaining its lookup key as the
+public family name.  Successful flattened declarations already store this
+same name; spelling the identity field explicitly makes restoration
+provenance structural even outside that ambient map invariant. -/
+def ElimNestedInductive.Result.restoreSourceInductiveInfo
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (allIndNames : List Name) (indType : InductiveType) : InductiveVal :=
+  { res.restoreInductiveInfo flatEnv allIndNames indType with
+    name := indType.name }
+
+/-- Restore a source constructor while retaining the family chunk's public
+owner and the constructor lookup key.  The flattened producer already emits
+these exact fields; the explicit updates expose that fact to inventory
+consumers while restoration still changes only the constructor type. -/
+def ElimNestedInductive.Result.restoreSourceConstructorInfo
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (induct ctorName : Name) : ConstructorVal :=
+  { res.restoreConstructorInfo flatEnv ctorName with
+    name := ctorName
+    induct := induct }
+
+/-- Restore a source family's main recursor at its canonical public name.
+Auxiliary recursors continue to use `mkAuxRecNameMap`; source recursors are
+the unrenamed prefix of the restored inventory. -/
+def ElimNestedInductive.Result.restoreSourceRecursorInfo
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (allIndNames : List Name) (recNameMap : NameMap Name)
+    (indType : InductiveType) : RecursorVal :=
+  { res.restoreRecursorInfo flatEnv allIndNames recNameMap
+      (mkRecName indType.name) with
+    name := mkRecName indType.name }
+
+/-- Restored metadata contributed by one source family: the family itself,
+its constructors, and its canonical main recursor. -/
+def restoredNestedFamilyInfos (res : ElimNestedInductive.Result)
+    (flatEnv : Environment) (allIndNames : List Name)
+    (recNameMap : NameMap Name) (indType : InductiveType) :
+    List ConstantInfo :=
+  let ind := res.restoreSourceInductiveInfo flatEnv allIndNames indType
+  [ConstantInfo.inductInfo ind] ++
+    (ind.ctors.map fun ctorName => ConstantInfo.ctorInfo <|
+      res.restoreSourceConstructorInfo flatEnv indType.name ctorName) ++
+    [ConstantInfo.recInfo <|
+      res.restoreSourceRecursorInfo flatEnv allIndNames recNameMap indType]
+
+/-- Restored auxiliary-recursor suffix, in the order selected by
+`mkAuxRecNameMap`. -/
+def restoredNestedAuxRecursorInfos (res : ElimNestedInductive.Result)
+    (flatEnv : Environment) (allIndNames auxRecNames : List Name)
+    (recNameMap : NameMap Name) : List ConstantInfo :=
+  auxRecNames.map fun recName => .recInfo <|
+    res.restoreRecursorInfo flatEnv allIndNames recNameMap recName
+
 /-- Complete source-ordered metadata inventory installed by nested
 restoration.  Each source family is followed by its source constructors and
 main recursor; renamed auxiliary recursors form the final suffix. -/
 def restoredNestedInfos (res : ElimNestedInductive.Result)
     (flatEnv : Environment) (types : List InductiveType) : List ConstantInfo :=
-  Id.run do
-    let allIndNames := types.map (·.name)
-    let (auxRecNames, recNameMap) := mkAuxRecNameMap flatEnv types
-    let mut infos : Array ConstantInfo := #[]
-    for indType in types do
-      let ind := res.restoreInductiveInfo flatEnv allIndNames indType
-      infos := infos.push (.inductInfo ind)
-      for ctorName in ind.ctors do
-        infos := infos.push (.ctorInfo <|
-          res.restoreConstructorInfo flatEnv ctorName)
-      infos := infos.push (.recInfo <|
-        res.restoreRecursorInfo flatEnv allIndNames recNameMap
-          (mkRecName indType.name))
-    for recName in auxRecNames do
-      infos := infos.push (.recInfo <|
-        res.restoreRecursorInfo flatEnv allIndNames recNameMap recName)
-    return infos.toList
+  let allIndNames := types.map (·.name)
+  let (auxRecNames, recNameMap) := mkAuxRecNameMap flatEnv types
+  types.flatMap
+      (restoredNestedFamilyInfos res flatEnv allIndNames recNameMap) ++
+    restoredNestedAuxRecursorInfos res flatEnv allIndNames auxRecNames
+      recNameMap
+
+/-- A restored family record in one source chunk retains that source
+family's exact name. -/
+theorem restoredNestedFamilyInfos_family_cases
+    (member : (.inductInfo info : ConstantInfo) ∈
+      restoredNestedFamilyInfos res flatEnv allIndNames recNameMap indType) :
+    info.name = indType.name := by
+  simp [restoredNestedFamilyInfos] at member
+  obtain rfl := member
+  rfl
+
+/-- A restored constructor record in one source chunk retains that source
+family as its exact owner. -/
+theorem restoredNestedFamilyInfos_constructor_cases
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedFamilyInfos res flatEnv allIndNames recNameMap indType) :
+    info.induct = indType.name := by
+  simp [restoredNestedFamilyInfos] at member
+  obtain ⟨ctorName, _member, rfl⟩ := member
+  rfl
+
+/-- Every source-family chunk contains its canonical restored main
+recursor. -/
+theorem restoredNestedFamilyInfos_recursor
+    (indType : InductiveType) :
+    ∃ info,
+      (.recInfo info : ConstantInfo) ∈
+        restoredNestedFamilyInfos res flatEnv allIndNames recNameMap indType ∧
+      info.name = mkRecName indType.name := by
+  refine ⟨res.restoreSourceRecursorInfo flatEnv allIndNames recNameMap
+    indType, ?_, rfl⟩
+  simp [restoredNestedFamilyInfos]
+
+/-- Every family record in the complete restored inventory is indexed by an
+exact source family. -/
+theorem restoredNestedInfos_family_cases
+    (member : (.inductInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types) :
+    ∃ indType ∈ types, info.name = indType.name := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, sourceMember, familyMember⟩ := member
+    exact ⟨indType, sourceMember,
+      restoredNestedFamilyInfos_family_cases familyMember⟩
+  · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- Every constructor record in the complete restored inventory retains the
+exact source family that owns its chunk. -/
+theorem restoredNestedInfos_constructor_cases
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types) :
+    ∃ indType ∈ types, info.induct = indType.name := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, sourceMember, constructorMember⟩ := member
+    exact ⟨indType, sourceMember,
+      restoredNestedFamilyInfos_constructor_cases constructorMember⟩
+  · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- Every source family owns a canonical main recursor in the complete
+restored inventory. -/
+theorem restoredNestedInfos_recursor_of_family
+    (sourceMember : indType ∈ types) :
+    ∃ info,
+      (.recInfo info : ConstantInfo) ∈ restoredNestedInfos res flatEnv types ∧
+      info.name = mkRecName indType.name := by
+  obtain ⟨info, familyMember, nameEq⟩ :=
+    restoredNestedFamilyInfos_recursor
+      (res := res) (flatEnv := flatEnv)
+      (allIndNames := types.map (·.name))
+      (recNameMap := (mkAuxRecNameMap flatEnv types).2) indType
+  refine ⟨info, ?_, nameEq⟩
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap]
+  exact .inl ⟨indType, sourceMember, familyMember⟩
 
 /-- Transparent declaration fold used by nested restoration. -/
 def declareRestoredInfoList (allowPrimitive : Bool) :

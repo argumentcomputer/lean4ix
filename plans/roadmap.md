@@ -1946,8 +1946,13 @@ Three checker sorries remain:
   restoration fold now likewise preserves map well-formedness, proves every
   restored name fresh in the input map, and classifies final family,
   constructor, and recursor observations as old or exact inventory members.
-  Next expose the source-family grouping of that restored inventory and derive
-  its finite registration coverage, then close `addDecl.WF`.
+  Its pure source-family chunks retain exact family names, constructor owners,
+  and canonical main recursors, so the coherent nested transaction derives
+  its original-source scan and readiness coverage automatically as well. A
+  single readiness constructor now selects the ordinary or nested plan from
+  the retained execution. Next construct the coherent nonprimitive semantic
+  transaction and safe projection readiness at that boundary, then close
+  `addDecl.WF`.
 - **V4 — `checkPrimitiveDef.WF`.** Recheck upstream PR #32 before editing its
   file surface. If it is not merged by the next CR checkpoint, prove the
   recognizer locally with an `M.WF`-style run certificate.

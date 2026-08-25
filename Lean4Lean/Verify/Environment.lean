@@ -2191,6 +2191,132 @@ theorem ordinaryRecursorLookupOfSourceFamily
   refine ⟨info, ?_⟩
   simpa only [execution.flattenedEnv_eq_final numNested_eq, nameEq] using lookup
 
+/-- The retained mixed restoration fold preserves constant-map
+well-formedness through a genuinely nested public final environment. -/
+theorem nestedFinalMapWF
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) : finalEnv.constants.WF := by
+  obtain ⟨restoration, _restorationRun, finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  have restoredMapWF := restoration.trace.map_wf inputMapWF
+  simpa only [finalEq] using restoredMapWF
+
+/-- Classify a family record in a genuinely nested final environment using
+the exact mixed restoration inventory. -/
+theorem nestedFamilyLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : InductiveVal}
+    (found : finalEnv.constants.find? name = some (.inductInfo info)) :
+    env.constants.find? name = some (.inductInfo info) ∨
+      (.inductInfo info : ConstantInfo) ∈
+          restoredNestedInfos execution.nested
+            execution.flattened.recursors.env types ∧
+        info.name = name := by
+  obtain ⟨restoration, _restorationRun, finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  have restoredFound : restoration.env.constants.find? name =
+      some (.inductInfo info) := by
+    simpa only [finalEq] using found
+  rcases restoration.trace.family_map_lookup_cases inputMapWF restoredFound with
+    old | inserted
+  · exact .inl old
+  · exact .inr ⟨by simpa only [restoration.infos_eq] using inserted.1,
+      inserted.2⟩
+
+/-- Classify a constructor record in a genuinely nested final environment
+using the exact mixed restoration inventory. -/
+theorem nestedConstructorLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : ConstructorVal}
+    (found : finalEnv.constants.find? name = some (.ctorInfo info)) :
+    env.constants.find? name = some (.ctorInfo info) ∨
+      (.ctorInfo info : ConstantInfo) ∈
+          restoredNestedInfos execution.nested
+            execution.flattened.recursors.env types ∧
+        info.name = name := by
+  obtain ⟨restoration, _restorationRun, finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  have restoredFound : restoration.env.constants.find? name =
+      some (.ctorInfo info) := by
+    simpa only [finalEq] using found
+  rcases restoration.trace.constructor_map_lookup_cases inputMapWF
+      restoredFound with old | inserted
+  · exact .inl old
+  · exact .inr ⟨by simpa only [restoration.infos_eq] using inserted.1,
+      inserted.2⟩
+
+/-- Classify a recursor record in a genuinely nested final environment using
+the exact mixed restoration inventory. -/
+theorem nestedRecursorLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : RecursorVal}
+    (found : finalEnv.constants.find? name = some (.recInfo info)) :
+    env.constants.find? name = some (.recInfo info) ∨
+      (.recInfo info : ConstantInfo) ∈
+          restoredNestedInfos execution.nested
+            execution.flattened.recursors.env types ∧
+        info.name = name := by
+  obtain ⟨restoration, _restorationRun, finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  have restoredFound : restoration.env.constants.find? name =
+      some (.recInfo info) := by
+    simpa only [finalEq] using found
+  rcases restoration.trace.recursor_map_lookup_cases inputMapWF restoredFound with
+    old | inserted
+  · exact .inl old
+  · exact .inr ⟨by simpa only [restoration.infos_eq] using inserted.1,
+      inserted.2⟩
+
+/-- Every source family has its canonical main recursor in a genuinely
+nested public final environment. -/
+theorem nestedRecursorLookupOfSourceFamily
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {indType : InductiveType}
+    (sourceMember : indType ∈ types) :
+    ∃ info, finalEnv.constants.find? (mkRecName indType.name) =
+      some (.recInfo info) := by
+  obtain ⟨restoration, _restorationRun, finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  obtain ⟨info, inventoryMember, nameEq⟩ :=
+    restoredNestedInfos_recursor_of_family
+      (res := execution.nested)
+      (flatEnv := execution.flattened.recursors.env) sourceMember
+  have restorationMember : (.recInfo info : ConstantInfo) ∈
+      restoration.infos := by
+    simpa only [restoration.infos_eq] using inventoryMember
+  have lookup := restoration.trace.map_lookup inputMapWF restorationMember
+  have namedLookup : restoration.env.constants.find? info.name =
+      some (.recInfo info) := by
+    simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using lookup
+  rw [nameEq] at namedLookup
+  refine ⟨info, ?_⟩
+  simpa only [finalEq] using namedLookup
+
 end AddInductive.EnvironmentInductiveExecution
 
 /-- Primitive-specific semantic replay of the exact metadata phases retained
@@ -3749,6 +3875,105 @@ theorem ordinaryStructureEtaRegistrationCoverage
     exact .inr <| registrationOfSource indType sourceMember
       (sourceName.symm.trans newFamily.2)
 
+/-- In a genuinely nested retained execution, the original source-family
+list is a complete finite scan domain for structure-eta registration.  The
+mixed restoration trace classifies old metadata directly; every new family
+or constructor belongs to an exact source chunk whose canonical main recursor
+is restored in the same inventory. -/
+theorem nestedStructureEtaRegistrationCoverage
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
+    ∀ familyName familyInfo constructorName constructorInfo,
+      finalEnv.find? familyName = some (.inductInfo familyInfo) →
+      finalEnv.find? constructorName = some (.ctorInfo constructorInfo) →
+      finalEnv.isNonRecStructureConstructor familyName constructorName =
+        true →
+      Nonempty (StructureEtaArtifact finalEnv familyName familyInfo
+        constructorName constructorInfo (output.venv .safe)) ∨
+        familyName ∈ types.map (·.name) ∧
+          ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
+            some (.recInfo recursorInfo) := by
+  intro familyName familyInfo constructorName constructorInfo familyFound
+    constructorFound ready
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have finalMapWF := execution.nestedFinalMapWF numNested_ne inputMapWF
+  have familyFoundMap :
+      finalEnv.constants.find? familyName =
+        some (.inductInfo familyInfo) := by
+    change finalEnv.constants.find?' familyName = _ at familyFound
+    rwa [finalMapWF.find?'_eq_find?] at familyFound
+  have constructorFoundMap :
+      finalEnv.constants.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+    change finalEnv.constants.find?' constructorName = _ at constructorFound
+    rwa [finalMapWF.find?'_eq_find?] at constructorFound
+  obtain ⟨isRecEq, ctorsEq, numIndicesEq, owner⟩ :=
+    Kernel.Environment.isNonRecStructureConstructor_info familyFound
+      constructorFound ready
+  have registrationOfSource (indType : InductiveType)
+      (sourceMember : indType ∈ types)
+      (familyNameEq : indType.name = familyName) :
+      familyName ∈ types.map (·.name) ∧
+        ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
+          some (.recInfo recursorInfo) := by
+    refine ⟨List.mem_map.mpr ⟨indType, sourceMember, familyNameEq⟩, ?_⟩
+    obtain ⟨recursorInfo, recursorLookup⟩ :=
+      execution.nestedRecursorLookupOfSourceFamily numNested_ne inputMapWF
+        sourceMember
+    refine ⟨recursorInfo, ?_⟩
+    change finalEnv.constants.find?' (mkRecName familyName) = _
+    rw [finalMapWF.find?'_eq_find?]
+    simpa only [familyNameEq] using recursorLookup
+  rcases execution.nestedFamilyLookupCases numNested_ne inputMapWF
+      familyFoundMap with oldFamily | newFamily
+  · rcases execution.nestedConstructorLookupCases numNested_ne inputMapWF
+        constructorFoundMap with oldConstructor | newConstructor
+    · have oldFamilyFind :
+          env.find? familyName = some (.inductInfo familyInfo) := by
+        change env.constants.find?' familyName = _
+        rw [inputMapWF.find?'_eq_find?]
+        exact oldFamily
+      have oldConstructorFind :
+          env.find? constructorName = some (.ctorInfo constructorInfo) := by
+        change env.constants.find?' constructorName = _
+        rw [inputMapWF.find?'_eq_find?]
+        exact oldConstructor
+      have inputReady :
+          env.isNonRecStructureConstructor familyName constructorName = true :=
+        Kernel.Environment.isNonRecStructureConstructor_of_info oldFamilyFind
+          oldConstructorFind isRecEq ctorsEq numIndicesEq owner
+      obtain ⟨artifact⟩ :=
+        (wf.structureEtaReady (safety := .safe)).resolve familyName familyInfo
+          constructorName constructorInfo oldFamilyFind oldConstructorFind
+          inputReady
+      have outputWF : (output.venv .safe).WF :=
+        ((transactions.transaction .safe).toExact.trEnv
+          (wf.tr (safety := .safe))).wf
+      have artifactFinalFind :
+          finalEnv.find? artifact.projection.view.constructorName =
+            some (.ctorInfo artifact.projection.constructorInfo) := by
+        simpa only [artifact.constructor_name_eq,
+          artifact.constructor_info_eq] using constructorFound
+      exact .inl ⟨artifact.retarget
+        (transactions.transaction .safe).toExact.le outputWF.ordered
+          artifactFinalFind⟩
+    · obtain ⟨indType, sourceMember, constructorOwner⟩ :=
+        restoredNestedInfos_constructor_cases newConstructor.1
+      exact .inr <| registrationOfSource indType sourceMember
+        (constructorOwner.symm.trans owner)
+  · obtain ⟨indType, sourceMember, sourceName⟩ :=
+      restoredNestedInfos_family_cases newFamily.1
+    exact .inr <| registrationOfSource indType sourceMember
+      (sourceName.symm.trans newFamily.2)
+
 end AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
 
 /-- Safety-indexed non-primitive transactions.  Compared with
@@ -4015,6 +4240,54 @@ noncomputable def ofOrdinaryTransaction
   ofSafeFamilyNames wf source transactionOutput transaction
     projectionReadySafe (execution.nested.types.map (·.name))
     (transaction.ordinaryStructureEtaRegistrationCoverage wf numNested_eq)
+
+/-- Complete a genuinely nested coherent nonprimitive replay without a
+separately supplied scan domain or coverage proof.  The retained original
+source-family names are the finite domain, and the exact restored inventory
+supplies family, constructor-owner, and canonical-recursor provenance. -/
+noncomputable def ofNestedTransaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs}
+    (wf : ves.WF env)
+    (source : VInductDecl)
+    (transactionOutput : VEnvs)
+    (transaction : execution.CoherentPrimitivePreservingTransactions source
+      ves transactionOutput)
+    (projectionReadySafe :
+      ProjectionReady finalEnv (transactionOutput.venv .safe))
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
+  ofSafeFamilyNames wf source transactionOutput transaction
+    projectionReadySafe (types.map (·.name))
+    (transaction.nestedStructureEtaRegistrationCoverage wf numNested_ne)
+
+/-- Complete either branch of a coherent nonprimitive replay directly from
+its retained execution.  The branch test selects the flattened or restored
+finite family inventory internally. -/
+noncomputable def ofTransaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs}
+    (wf : ves.WF env)
+    (source : VInductDecl)
+    (transactionOutput : VEnvs)
+    (transaction : execution.CoherentPrimitivePreservingTransactions source
+      ves transactionOutput)
+    (projectionReadySafe :
+      ProjectionReady finalEnv (transactionOutput.venv .safe)) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves := by
+  by_cases numNested_eq : execution.nested.aux2nested.size = 0
+  · exact ofOrdinaryTransaction wf source transactionOutput transaction
+      projectionReadySafe numNested_eq
+  · exact ofNestedTransaction wf source transactionOutput transaction
+      projectionReadySafe numNested_eq
 
 /-- Assemble the complete semantic extension.  Exact replay supplies the
 host-facing translation and primitive invariants; checked eta registration
