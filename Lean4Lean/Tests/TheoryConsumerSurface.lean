@@ -52,13 +52,14 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.HasType.selectFieldMinor_of_weak
 #check VStructureView.fieldProjectionMinorType
 #check VStructureView.generatedProjectionMinorType
+#check VStructureView.generatedProjectionMinorType_instL
 #check VStructureView.projectionMinorType
 #check VStructureView.projectionIHTypes
+#check VStructureView.projectionIHTypes_instL
 #check VStructureView.projectionMinorResult
 #check VStructureView.projectionMinorType_decompose
-#check VStructureView.WF.generatedProjectionMinorType_eq_field
 #check VStructureView.WF.projectionMinorGenerated_shape
-#check VStructureView.WF.projectionIHTypes_length
+#check VStructureView.projectionIHTypes_length
 #check VStructureView.WF.projectionMinorResult_shape
 #check VStructureView.WF.projectionMinorResult_eq_lift
 #check VStructureView.MinorsWF

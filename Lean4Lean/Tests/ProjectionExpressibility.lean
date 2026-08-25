@@ -48,7 +48,6 @@ def dependentRecordView : VStructureView where
   constructor_eq := rfl
   raw_indices_eq := rfl
   checked_indices_eq := rfl
-  recursive_eq := rfl
   fieldSorts := [.succ (.param 0), .succ (.param 1)]
   fieldSorts_length := rfl
 
@@ -1052,11 +1051,9 @@ theorem symbolicValueProjector_hasType :
       (dependentRecordView.projectionMinorType symbolicValueCode.fieldSort
         symbolicLevels (symbolicMajorParams.map (VExpr.liftN 1))
         symbolicValueCode.typeFn.lift)
-    rw [VStructureView.projectionMinorType,
-      dependentRecord_view_wf.generatedProjectionMinorType_eq_field
-        dependentRecordEnv_ordered symbolicValueCode.fieldSort symbolicLevels
-        rfl (symbolicMajorParams.map (VExpr.liftN 1)) rfl
-          symbolicValueCode.typeFn.lift]
+    rw [dependentRecordView.projectionMinorType_decompose
+      symbolicValueCode.fieldSort symbolicLevels rfl
+      (symbolicMajorParams.map (VExpr.liftN 1)) symbolicValueCode.typeFn.lift]
     have hfields : dependentRecordView.specializedFields symbolicLevels
         (symbolicMajorParams.map (VExpr.liftN 1)) =
         [.bvar 3, .app (.bvar 3) (.bvar 0)] := rfl
@@ -1201,7 +1198,6 @@ def emptyRecordView : VStructureView where
   constructor_eq := rfl
   raw_indices_eq := rfl
   checked_indices_eq := rfl
-  recursive_eq := rfl
   fieldSorts := []
   fieldSorts_length := rfl
 
@@ -1285,6 +1281,86 @@ theorem emptyRecord_project_none (idx : Nat) (major : VExpr) :
     emptyRecordView.project? [.param 0] [.bvar 0] idx major = none := by
   simp [VStructureView.project?, show
     emptyRecordView.projectionCodes [.param 0] [.bvar 0] = [] from rfl]
+
+/-! ## Recursive-singleton staging -/
+
+/-- A one-constructor family with a genuine recursive field exercises the
+generated induction-hypothesis telescope independently of Lean's structure
+classification. -/
+inductive RecursiveCell (α : Type w) where
+  | mk : α → RecursiveCell α → RecursiveCell α
+
+def recursiveCellCtor : VConstVal :=
+  ⟨vconst(type_of% @RecursiveCell.mk), ``RecursiveCell.mk⟩
+
+def recursiveCellType : VInductiveType where
+  name := ``RecursiveCell
+  uvars := 1
+  type := vconst(type_of% @RecursiveCell).type
+  ctors := [recursiveCellCtor]
+
+def recursiveCellDecl : VInductDecl :=
+  ⟨1, 1, [recursiveCellType]⟩
+
+example : recursiveCellDecl.checked?.isSome = true := rfl
+
+def recursiveCellChecked : recursiveCellDecl.Checked :=
+  recursiveCellDecl.checked?.get (by decide)
+
+def recursiveCellGeneration : recursiveCellDecl.GenerationChecked :=
+  recursiveCellChecked.identityGeneration
+
+def recursiveCellView : VStructureView where
+  source := recursiveCellDecl
+  generation := recursiveCellGeneration
+  constructor := recursiveCellGeneration.block.ctorPairs[0]
+  constructor_eq := rfl
+  raw_indices_eq := rfl
+  checked_indices_eq := rfl
+  fieldSorts := [.succ (.param 0), .succ (.param 0)]
+  fieldSorts_length := rfl
+
+def recursiveCellLevels : List VLevel := [.param 0]
+
+/-- The parameter is represented in an arbitrary one-entry local context. -/
+def recursiveCellParams : List VExpr := [.bvar 0]
+
+def recursiveCellHeadCode : VStructureView.ProjectionCode :=
+  (recursiveCellView.projectionCodes recursiveCellLevels
+    recursiveCellParams)[0]
+
+def recursiveCellTailCode : VStructureView.ProjectionCode :=
+  (recursiveCellView.projectionCodes recursiveCellLevels
+    recursiveCellParams)[1]
+
+/-- The checked analyzer records the tail field as one recursive argument. -/
+example : recursiveCellView.constructor.view.recursive.length = 1 := rfl
+
+/-- Each generated projection minor therefore retains one IH binder. -/
+example :
+    (recursiveCellView.projectionIHTypes recursiveCellHeadCode.fieldSort
+      recursiveCellLevels recursiveCellParams
+      recursiveCellHeadCode.typeFn).length = 1 := by
+  rw [VStructureView.projectionIHTypes_length]
+  rfl
+
+/-- The head selector binds both constructor fields and then the ignored IH. -/
+example : recursiveCellHeadCode.minor =
+    VExpr.selectFieldMinor
+      (recursiveCellView.specializedFields recursiveCellLevels
+        recursiveCellParams)
+      (recursiveCellView.projectionIHTypes recursiveCellHeadCode.fieldSort
+        recursiveCellLevels recursiveCellParams recursiveCellHeadCode.typeFn)
+      0 := rfl
+
+/-- The recursive field selector uses the same exact generated IH telescope. -/
+example : recursiveCellTailCode.minor =
+    VExpr.selectFieldMinor
+      (recursiveCellView.specializedFields recursiveCellLevels
+        recursiveCellParams)
+      (recursiveCellView.projectionIHTypes recursiveCellTailCode.fieldSort
+        recursiveCellLevels recursiveCellParams recursiveCellTailCode.typeFn)
+      1 := rfl
 
 /--
 info: 'Lean4Lean.Tests.ProjectionExpressibility.dependentRecord_view_wf' depends on axioms: [propext,

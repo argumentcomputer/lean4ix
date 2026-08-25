@@ -188,6 +188,207 @@ theorem VExpr.selectFieldMinor_instN
   | cons binder binders ih =>
       simp [VExpr.dropN, VExpr.forallN, ih]
 
+@[simp] theorem VExpr.telN_liftN (count n k : Nat) (expression : VExpr) :
+    VExpr.telN count (expression.liftN n k) =
+      VExpr.liftTelN n (VExpr.telN count expression) k := by
+  induction count generalizing expression k with
+  | zero => rfl
+  | succ count ih =>
+      cases expression with
+      | forallE domain body =>
+          simp only [VExpr.liftN, VExpr.telN, VExpr.liftTelN]
+          rw [ih (expression := body) (k := k + 1)]
+      | _ => rfl
+
+@[simp] theorem VExpr.dropN_liftN (count n k : Nat)
+    (expression : VExpr) :
+    VExpr.dropN count (expression.liftN n k) =
+      (VExpr.dropN count expression).liftN n
+        (k + (VExpr.telN count expression).length) := by
+  induction count generalizing expression k with
+  | zero => simp [VExpr.dropN, VExpr.telN]
+  | succ count ih =>
+      cases expression with
+      | forallE domain body =>
+          simp only [VExpr.liftN, VExpr.dropN, VExpr.telN,
+            List.length_cons]
+          rw [ih (expression := body) (k := k + 1)]
+          congr 1 <;> omega
+      | _ => simp [VExpr.telN, VExpr.dropN, VExpr.liftN]
+
+@[simp] theorem VExpr.telN_instL (count : Nat) (expression : VExpr)
+    (levels : List VLevel) :
+    VExpr.telN count (expression.instL levels) =
+      (VExpr.telN count expression).map (VExpr.instL levels) := by
+  induction count generalizing expression with
+  | zero => rfl
+  | succ count ih =>
+      cases expression with
+      | forallE domain body =>
+          simp only [VExpr.instL, VExpr.telN, List.map_cons]
+          rw [ih (expression := body)]
+      | _ => rfl
+
+@[simp] theorem VExpr.dropN_instL (count : Nat) (expression : VExpr)
+    (levels : List VLevel) :
+    VExpr.dropN count (expression.instL levels) =
+      (VExpr.dropN count expression).instL levels := by
+  induction count generalizing expression with
+  | zero => rfl
+  | succ count ih =>
+      cases expression with
+      | forallE domain body =>
+          simp only [VExpr.instL, VExpr.dropN]
+          rw [ih (expression := body)]
+      | _ => rfl
+
+private theorem VExpr.projectionIHTel_liftN
+    (fields ihs : List VExpr) (body : VExpr) (n k : Nat) :
+    VExpr.telN ihs.length
+        (VExpr.dropN fields.length
+          ((VExpr.forallN fields (VExpr.forallN ihs body)).liftN n k)) =
+      VExpr.liftTelN n ihs (k + fields.length) := by
+  rw [VExpr.liftN_forallN]
+  have hfields : fields.length = (VExpr.liftTelN n fields k).length := by
+    rw [VExpr.liftTelN_length]
+  rw [hfields, VExpr.dropN_forallN_length]
+  simp only [VExpr.liftTelN_length]
+  rw [VExpr.liftN_forallN]
+  have hihs : ihs.length =
+      (VExpr.liftTelN n ihs (k + fields.length)).length := by
+    rw [VExpr.liftTelN_length]
+  rw [hihs, VExpr.telN_forallN_length]
+
+private theorem VExpr.projectionIHTel_instN
+    (fields ihs : List VExpr) (body a : VExpr) (k : Nat) :
+    VExpr.telN ihs.length
+        (VExpr.dropN fields.length
+          ((VExpr.forallN fields (VExpr.forallN ihs body)).inst a k)) =
+      VExpr.instTelN a ihs (k + fields.length) := by
+  rw [VExpr.instN_forallN]
+  have hfields : fields.length = (VExpr.instTelN a fields k).length := by
+    rw [VExpr.instTelN_length]
+  rw [hfields, VExpr.dropN_forallN_length]
+  simp only [VExpr.instTelN_length]
+  rw [VExpr.instN_forallN]
+  have hihs : ihs.length =
+      (VExpr.instTelN a ihs (k + fields.length)).length := by
+    rw [VExpr.instTelN_length]
+  rw [hihs, VExpr.telN_forallN_length]
+
+/-- Close a dependent `forall` telescope from pointwise closure at each
+binder depth and closure of the terminal body. -/
+private theorem VExpr.forallN_closedN_of_getElem
+    (binders : List VExpr) (body : VExpr) (k : Nat)
+    (hbinders : ∀ (i : Nat) (binder : VExpr), binders[i]? = some binder →
+      binder.ClosedN (k + i))
+    (hbody : body.ClosedN (k + binders.length)) :
+    (VExpr.forallN binders body).ClosedN k := by
+  induction binders generalizing k with
+  | nil => simpa [VExpr.forallN] using hbody
+  | cons binder binders ih =>
+      simp only [VExpr.forallN, VExpr.ClosedN]
+      constructor
+      · exact hbinders 0 binder (by simp)
+      · apply ih (k := k + 1)
+        · intro i binder' hbinder'
+          have hlookup : (binder :: binders)[i + 1]? = some binder' := by
+            simpa [Nat.add_comm] using hbinder'
+          have h := hbinders (i + 1) binder' hlookup
+          simpa only [Nat.add_assoc, Nat.add_comm,
+            Nat.add_left_comm] using h
+        · simpa only [List.length_cons, Nat.add_assoc, Nat.add_comm,
+            Nat.add_left_comm] using hbody
+
+/-- Pointwise closure of a telescope is preserved by telescope lifting. -/
+private theorem VExpr.liftTelN_closedN_of_getElem
+    (binders : List VExpr) (n cutoff base : Nat)
+    (hbinders : ∀ (i : Nat) (binder : VExpr),
+      binders[i]? = some binder →
+      binder.ClosedN (base + i)) :
+    ∀ (i : Nat) (binder : VExpr),
+      (VExpr.liftTelN n binders cutoff)[i]? = some binder →
+      binder.ClosedN (base + n + i) := by
+  intro i binder hbinder
+  rw [VExpr.liftTelN_getElem?] at hbinder
+  obtain ⟨original, horiginal, rfl⟩ :=
+    Option.map_eq_some_iff.1 hbinder
+  have hclosed := (hbinders i original horiginal).liftN
+    (n := n) (j := cutoff + i)
+  simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hclosed
+
+/-- The generated IH for one recursive argument is closed over parameters,
+the motive, all constructor fields, and the preceding IH binders. -/
+private theorem VInductDecl.RecArg.minorIH_closedN
+    (recursive : RecArg) (nparams fields preceding : Nat)
+    (hfield : recursive.fieldIndex < fields)
+    (hbinders : ∀ (i : Nat) (binder : VExpr),
+      recursive.binders[i]? = some binder →
+      binder.ClosedN (nparams + recursive.fieldIndex + i))
+    (hindices : ∀ (index : VExpr), index ∈ recursive.indices →
+      index.ClosedN
+        (nparams + recursive.fieldIndex + recursive.binders.length)) :
+    (recursive.minorIH fields preceding).ClosedN
+      (nparams + 1 + fields + preceding) := by
+  unfold RecArg.minorIH
+  apply VExpr.forallN_closedN_of_getElem
+  · intro i binder hbinder
+    have hfirst := VExpr.liftTelN_closedN_of_getElem
+      recursive.binders 1 recursive.fieldIndex
+      (nparams + recursive.fieldIndex) hbinders
+    have hsecond := VExpr.liftTelN_closedN_of_getElem
+      (VExpr.liftTelN 1 recursive.binders recursive.fieldIndex)
+      (fields - recursive.fieldIndex + preceding) 0
+      (nparams + recursive.fieldIndex + 1) hfirst i binder hbinder
+    have hfield' : recursive.fieldIndex ≤ fields := Nat.le_of_lt hfield
+    have hdepth :
+        nparams + recursive.fieldIndex + 1 +
+            (fields - recursive.fieldIndex + preceding) + i =
+          nparams + 1 + fields + preceding + i := by
+      omega
+    rw [hdepth] at hsecond
+    exact hsecond
+  · have hminorBindersLength :
+        (recursive.minorBinders fields preceding).length =
+          recursive.binders.length := by
+      simp [RecArg.minorBinders, VExpr.liftTelN_length]
+    rw [hminorBindersLength]
+    apply VExpr.ClosedN.appN
+    · change fields + preceding + recursive.binders.length <
+          nparams + 1 + fields + preceding + recursive.binders.length
+      omega
+    · intro argument hargument
+      rcases List.mem_append.1 hargument with hindex | hfieldApp
+      · obtain ⟨index, hindexOriginal, hindexEq⟩ :=
+          List.mem_map.1 hindex
+        subst argument
+        have hclosed := hindices index hindexOriginal
+        have hfirst := hclosed.liftN (n := 1)
+          (j := recursive.fieldIndex + recursive.binders.length)
+        have hsecond := hfirst.liftN
+          (n := fields - recursive.fieldIndex + preceding)
+          (j := recursive.binders.length)
+        have hfield' : recursive.fieldIndex ≤ fields := Nat.le_of_lt hfield
+        have hdepth :
+            nparams + recursive.fieldIndex + recursive.binders.length + 1 +
+                (fields - recursive.fieldIndex + preceding) =
+              nparams + 1 + fields + preceding +
+                recursive.binders.length := by
+          omega
+        rw [hdepth] at hsecond
+        exact hsecond
+      · have hsingleton := List.mem_singleton.1 hfieldApp
+        subst argument
+        apply VExpr.ClosedN.appN
+        · change fields - 1 - recursive.fieldIndex + preceding +
+              recursive.binders.length <
+            nparams + 1 + fields + preceding + recursive.binders.length
+          omega
+        · exact fun argument hargument =>
+            bvarRevRange_closedN recursive.binders.length 0
+              (nparams + 1 + fields + preceding +
+                recursive.binders.length) (by omega) argument hargument
+
 @[simp] theorem VExpr.lamN_append
     (left right : List VExpr) (body : VExpr) :
     VExpr.lamN (left ++ right) body =
@@ -502,6 +703,89 @@ theorem VExpr.instN_instRevAt (e : VExpr) (as : List VExpr)
         VExpr.inst_inst_hi]
       congr 3 <;> omega
 
+private theorem VExpr.liftN_instRevAt_inst_of_closedN_at
+    (e typeFn : VExpr) (params : List VExpr) (n k i : Nat)
+    (hclosed : e.ClosedN (i + params.length + 1)) :
+    (((e.instRevAt params (i + 1)).inst typeFn i).liftN n (k + i)) =
+      (e.instRevAt (params.map fun param => param.liftN n k) (i + 1)).inst
+        (typeFn.liftN n k) i := by
+  rw [VExpr.liftN_instN_hi]
+  rw [show k + i + 1 = k + (i + 1) by omega,
+    VExpr.liftN_instRevAt]
+  rw [hclosed.liftN_eq (by omega)]
+
+private theorem VExpr.instN_instRevAt_inst_of_closedN_at
+    (e typeFn a : VExpr) (params : List VExpr) (k i : Nat)
+    (hclosed : e.ClosedN (i + params.length + 1)) :
+    ((e.instRevAt params (i + 1)).inst typeFn i).inst a (k + i) =
+      (e.instRevAt (params.map fun param => param.inst a k) (i + 1)).inst
+        (typeFn.inst a k) i := by
+  rw [VExpr.inst_inst_hi]
+  rw [show k + i + 1 = k + (i + 1) by omega,
+    VExpr.instN_instRevAt]
+  rw [hclosed.instN_eq (by omega)]
+
+/-- Specializing a generated IH telescope commutes with weakening of its
+external parameter and motive arguments. -/
+private theorem VExpr.specializeProjectionIHs_liftN
+    (rawIHs params : List VExpr) (typeFn : VExpr) (m n k : Nat)
+    (hclosed : ∀ (i : Nat) (ih : VExpr), rawIHs[i]? = some ih →
+      ih.ClosedN (m + i + params.length + 1)) :
+    VExpr.liftTelN n
+        (VExpr.instTelN typeFn
+          ((rawIHs.zipIdx (m + 1)).map fun entry =>
+            entry.1.instRevAt params entry.2) m)
+        (k + m) =
+      VExpr.instTelN (typeFn.liftN n k)
+        ((rawIHs.zipIdx (m + 1)).map fun entry =>
+          entry.1.instRevAt
+            (params.map fun param => param.liftN n k) entry.2) m := by
+  induction rawIHs generalizing m with
+  | nil => rfl
+  | cons ih rawIHs induction =>
+      simp only [List.zipIdx, List.map_cons, VExpr.instTelN,
+        VExpr.liftTelN]
+      congr 1
+      · apply VExpr.liftN_instRevAt_inst_of_closedN_at
+        simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+          hclosed 0 ih (by simp)
+      · apply induction
+        intro i ih' hih'
+        have hlookup : (ih :: rawIHs)[i + 1]? = some ih' := by
+          simpa [Nat.add_comm] using hih'
+        have h := hclosed (i + 1) ih' hlookup
+        simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using h
+
+/-- Specializing a generated IH telescope commutes with term substitution of
+its external parameter and motive arguments. -/
+private theorem VExpr.specializeProjectionIHs_instN
+    (rawIHs params : List VExpr) (typeFn argument : VExpr) (m k : Nat)
+    (hclosed : ∀ (i : Nat) (ih : VExpr), rawIHs[i]? = some ih →
+      ih.ClosedN (m + i + params.length + 1)) :
+    VExpr.instTelN argument
+        (VExpr.instTelN typeFn
+          ((rawIHs.zipIdx (m + 1)).map fun entry =>
+            entry.1.instRevAt params entry.2) m)
+        (k + m) =
+      VExpr.instTelN (typeFn.inst argument k)
+        ((rawIHs.zipIdx (m + 1)).map fun entry =>
+          entry.1.instRevAt
+            (params.map fun param => param.inst argument k) entry.2) m := by
+  induction rawIHs generalizing m with
+  | nil => rfl
+  | cons ih rawIHs induction =>
+      simp only [List.zipIdx, List.map_cons, VExpr.instTelN]
+      congr 1
+      · apply VExpr.instN_instRevAt_inst_of_closedN_at
+        simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+          hclosed 0 ih (by simp)
+      · apply induction
+        intro i ih' hih'
+        have hlookup : (ih :: rawIHs)[i + 1]? = some ih' := by
+          simpa [Nat.add_comm] using hih'
+        have h := hclosed (i + 1) ih' hlookup
+        simpa only [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using h
+
 /-- A telescope whose entries have the exact retained sort levels. -/
 inductive VEnv.OnSortTel (env : VEnv) (U : Nat) :
     List VExpr → List VExpr → List VLevel → Prop where
@@ -742,6 +1026,195 @@ theorem VEnv.OnTel.toOnCtx {env : VEnv} {U : Nat} :
       simpa [List.append_assoc] using
         VEnv.OnTel.toOnCtx hAs (Γ := A :: Γ) ⟨hΓ, hA⟩
 
+/-- A prefix of a well-formed telescope is well formed in the same base
+context. -/
+private theorem VEnv.OnTel.take {env : VEnv} {U : Nat} :
+    ∀ {As Γ}, env.OnTel U Γ As → ∀ count,
+      env.OnTel U Γ (As.take count)
+  | [], _, h, count => by simpa using h
+  | _ :: _, _, _, 0 => trivial
+  | _ :: _, _, ⟨hA, hAs⟩, count + 1 =>
+      ⟨hA, VEnv.OnTel.take hAs count⟩
+
+/-- A selected telescope binder is closed at its exact base-context depth. -/
+private theorem VEnv.OnTel.closedAt {env : VEnv} {U : Nat}
+    (henv : env.Ordered) :
+    ∀ {As Γ}, env.OnTel U Γ As → CtxClosed Γ →
+      ∀ {i : Nat} {binder : VExpr}, As[i]? = some binder →
+        binder.ClosedN (Γ.length + i)
+  | [], _, _, _, _, _, h => by simp at h
+  | _ :: _, Γ, ⟨hA, _⟩, hΓ, 0, _, h => by
+      simp only [List.getElem?_cons_zero] at h
+      cases h
+      obtain ⟨_, hA⟩ := hA
+      simpa using hA.closedN henv hΓ
+  | A :: As, Γ, ⟨hA, hAs⟩, hΓ, i + 1, binder, h => by
+      simp only [List.getElem?_cons_succ] at h
+      obtain ⟨_, hA⟩ := hA
+      have hclosed : A.ClosedN Γ.length := hA.closedN henv hΓ
+      have hout := VEnv.OnTel.closedAt henv hAs ⟨hΓ, hclosed⟩ h
+      have hdepth : (A :: Γ).length + i = Γ.length + (i + 1) := by
+        simp
+        omega
+      rw [hdepth] at hout
+      exact hout
+
+/-- Every argument retained by a well-formed spine has a typing derivation
+in the spine's ambient context.  This local form is used before the public
+projection-consumer theorem of the same shape below. -/
+private theorem VEnv.SpineWF.projectionArg_hasType
+    {env : VEnv} {U : Nat} {Γ : List VExpr} :
+    ∀ {A B : VExpr} {args : List VExpr},
+      env.SpineWF U Γ A args B →
+      ∀ {arg : VExpr}, arg ∈ args → ∃ T, env.HasType U Γ arg T
+  | _, _, _ :: _, .cons harg _, _, .head _ => ⟨_, harg⟩
+  | _, _, _ :: _, .cons _ hrest, _, .tail _ hmem =>
+      projectionArg_hasType hrest hmem
+
+/-- The semantic certificate for one retained recursive argument is enough
+to close its generated induction-hypothesis syntax. -/
+private theorem VInductDecl.GenerationEnv.recArgMinorIH_closedN
+    {source : VInductDecl} {gen : GenerationChecked source}
+    {env : VEnv} (S : GenerationEnv gen env)
+    {ctor : NormalizedCtor}
+    (hctor : ctor ∈ gen.block.ctorPairs) {recursive : RecArg}
+    (hrecursive : recursive ∈
+      ctor.recArgsR source.uvars gen.elimination) (preceding : Nat) :
+    (recursive.minorIH
+      (ctor.fieldsR source.uvars source.nparams
+        gen.elimination).length preceding).ClosedN
+      (source.nparams + 1 +
+        (ctor.fieldsR source.uvars source.nparams
+          gen.elimination).length + preceding) := by
+  obtain ⟨recursive₀, hrecursive₀, rfl⟩ :=
+    NormalizedCtor.recArgsR_mem hrecursive
+  let levels := gen.sourceLevels
+  let recursive := recursive₀.instL levels
+  let fields := ctor.fieldsR source.uvars source.nparams gen.elimination
+  let fieldCount := fields.length
+  let fieldIndex := recursive₀.fieldIndex
+  have hfield : fieldIndex < fieldCount := by
+    have hview := S.viewRecArg_lt hctor hrecursive₀
+    have hfields := (gen.shape.2.2.2.2.2 ctor hctor).2.2.2
+    simp only [fieldIndex, fieldCount, fields,
+      NormalizedCtor.fieldsR_length]
+    omega
+  have hsem := S.rawRecArg_WF hctor hrecursive₀
+  have htel₀ := hsem.1.instL
+    (U' := gen.recUvars) gen.sourceLevels_wf
+  have hspine₀ := hsem.2.instL
+    (U' := gen.recUvars) gen.sourceLevels_wf
+  have htelChecked : env.OnTel gen.recUvars
+      ((fields.take fieldIndex).reverse ++
+        (gen.block.checked.params.map
+          (VExpr.instL gen.sourceLevels)).reverse)
+      recursive.binders := by
+    simpa [NormalizedCtor.fieldsR, GenerationChecked.paramsTel,
+      List.map_append, List.map_reverse, List.map_take,
+      recursive, fields, fieldIndex, levels, RecArg.instL] using htel₀
+  have hspineChecked : env.SpineWF gen.recUvars
+      (recursive.binders.reverse ++
+        ((fields.take fieldIndex).reverse ++
+          (gen.block.checked.params.map
+            (VExpr.instL gen.sourceLevels)).reverse))
+      (VExpr.instL gen.sourceLevels
+        (VExpr.forallN
+          (VExpr.liftTelN
+            (recursive₀.fieldIndex + recursive₀.binders.length)
+            gen.block.checked.indices 0)
+          (.sort gen.block.checked.resultLevel)))
+      recursive.indices
+      (VExpr.instL gen.sourceLevels
+        (.sort gen.block.checked.resultLevel)) := by
+    simpa [NormalizedCtor.fieldsR, GenerationChecked.paramsTel,
+      List.map_append, List.map_reverse, List.map_take,
+      recursive, fields, fieldIndex, levels, RecArg.instL] using hspine₀
+  have hprefix := S.generationFieldPrefix_ctx_rec hctor fieldIndex
+  have htel : env.OnTel gen.recUvars
+      ((fields.take fieldIndex).reverse ++ gen.paramsTel.reverse)
+      recursive.binders :=
+    htelChecked.defeqDFC S.ord (hprefix.symm S.ord)
+  have hfullDefEq := htel.extendDefEqCtx hprefix
+  have hspine :=
+    hspineChecked.defeqDFC S.ord (hfullDefEq.symm S.ord)
+  have hparamsCtx : OnCtx gen.paramsTel.reverse
+      (env.IsType gen.recUvars) := by
+    simpa using VEnv.OnTel.toOnCtx S.paramsTel_onTel (by trivial)
+  have hfieldsPrefix :=
+    VEnv.OnTel.take (S.generationFields_onTel_rec hctor) fieldIndex
+  have hbaseCtx : OnCtx
+      ((fields.take fieldIndex).reverse ++ gen.paramsTel.reverse)
+      (env.IsType gen.recUvars) :=
+    VEnv.OnTel.toOnCtx hfieldsPrefix hparamsCtx
+  have hbaseClosed := VEnv.CtxWF.closed S.ord hbaseCtx
+  have hfullCtx : OnCtx
+      (recursive.binders.reverse ++
+        ((fields.take fieldIndex).reverse ++ gen.paramsTel.reverse))
+      (env.IsType gen.recUvars) :=
+    VEnv.OnTel.toOnCtx htel hbaseCtx
+  have hfullClosed := VEnv.CtxWF.closed S.ord hfullCtx
+  have hbaseLength :
+      ((fields.take fieldIndex).reverse ++ gen.paramsTel.reverse).length =
+        source.nparams + fieldIndex := by
+    simp only [List.length_append, List.length_reverse, List.length_take,
+      GenerationChecked.paramsTel, List.length_map]
+    rw [S.generationParams_length]
+    omega
+  have hfullLength :
+      (recursive.binders.reverse ++
+        ((fields.take fieldIndex).reverse ++ gen.paramsTel.reverse)).length =
+        source.nparams + fieldIndex + recursive.binders.length := by
+    simp only [List.length_append, List.length_reverse, hbaseLength]
+    omega
+  apply RecArg.minorIH_closedN recursive source.nparams fieldCount preceding
+  · simpa [recursive, fieldCount, fieldIndex, RecArg.instL] using hfield
+  · intro index binder hbinder
+    have hclosed :=
+      VEnv.OnTel.closedAt S.ord htel hbaseClosed hbinder
+    rw [hbaseLength] at hclosed
+    simpa [recursive, fieldIndex, RecArg.instL] using hclosed
+  · intro index hindex
+    obtain ⟨_, hindexType⟩ :=
+      VEnv.SpineWF.projectionArg_hasType hspine hindex
+    have hclosed := hindexType.closedN S.ord hfullClosed
+    rw [hfullLength] at hclosed
+    simpa [recursive, fieldIndex, RecArg.instL] using hclosed
+
+/-- Pointwise closure of the generated IH list follows by accumulating the
+number of preceding IH binders. -/
+private theorem VInductDecl.GenerationEnv.ihsFromRecArgs_closedN
+    {source : VInductDecl} {gen : GenerationChecked source}
+    {env : VEnv} (S : GenerationEnv gen env)
+    {ctor : NormalizedCtor}
+    (hctor : ctor ∈ gen.block.ctorPairs) :
+    ∀ (recursive : List RecArg),
+      (∀ argument ∈ recursive,
+        argument ∈ ctor.recArgsR source.uvars gen.elimination) →
+      ∀ (preceding index : Nat) (ih : VExpr),
+        (VInductDecl.ihsFromRecArgs
+          (ctor.fieldsR source.uvars source.nparams
+            gen.elimination).length recursive preceding)[index]? = some ih →
+        ih.ClosedN
+          (source.nparams + 1 +
+            (ctor.fieldsR source.uvars source.nparams
+              gen.elimination).length + preceding + index)
+  | [], _, _, _, _, hlookup => by
+      simp [VInductDecl.ihsFromRecArgs] at hlookup
+  | argument :: recursive, hsub, preceding, 0, ih, hlookup => by
+      simp only [VInductDecl.ihsFromRecArgs,
+        List.getElem?_cons_zero] at hlookup
+      cases hlookup
+      exact S.recArgMinorIH_closedN hctor
+        (hsub argument (.head _)) preceding
+  | argument :: recursive, hsub, preceding, index + 1, ih, hlookup => by
+      simp only [VInductDecl.ihsFromRecArgs,
+        List.getElem?_cons_succ] at hlookup
+      have hclosed := S.ihsFromRecArgs_closedN hctor recursive
+        (fun recursive hrecursive => hsub recursive (.tail _ hrecursive))
+        (preceding + 1) index ih hlookup
+      simpa only [Nat.add_assoc, Nat.add_comm,
+        Nat.add_left_comm] using hclosed
+
 private theorem VEnv.OnSortTel.closedAt {env : VEnv} {U : Nat}
     (henv : env.Ordered) :
     ∀ {As us Γ}, env.OnSortTel U Γ As us → CtxClosed Γ →
@@ -779,14 +1252,16 @@ private theorem VEnv.OnSortTel.liftTelN_eq {env : VEnv} {U : Nat}
       simp only [VExpr.liftTelN, hclosed.liftN_eq (Nat.le_refl _)]
       simpa using VEnv.OnSortTel.liftTelN_eq henv hAs ⟨hΓ, hclosed⟩ n
 
-/-- The checked, generated description of a nonrecursive structure.
+/-- The checked, generated description of a one-constructor unindexed
+structure-shaped inductive family.
 
 `generation` supplies the exact family, constructor, recursor, and iota rule
 artifacts.  The shape fields restrict that general one-family artifact to the
-kernel class on which `.proj` is meaningful: no indices, exactly one
-constructor, and no recursive constructor arguments.  `fieldSorts` records
-the motive universe required by each projection; `WF` below ties every entry
-to the corresponding dependent constructor field type. -/
+kernel class on which generated projection programs are meaningful: no
+indices and exactly one constructor. Recursive constructor arguments are
+retained, together with their generated induction-hypothesis binders.
+`fieldSorts` records the motive universe required by each projection; `WF`
+below ties every entry to the corresponding dependent constructor field type. -/
 structure VStructureView where
   source : VInductDecl
   generation : source.GenerationChecked
@@ -794,7 +1269,6 @@ structure VStructureView where
   constructor_eq : generation.block.ctorPairs = [constructor]
   raw_indices_eq : generation.block.rawIndices = []
   checked_indices_eq : generation.block.checked.indices = []
-  recursive_eq : constructor.view.recursive = []
   fieldSorts : List VLevel
   fieldSorts_length :
     fieldSorts.length = (constructor.rawFields source.nparams).length
@@ -966,9 +1440,9 @@ def projectionConstructorApp (view : VStructureView)
     (params.map (VExpr.liftN fields.length) ++
       VExpr.bvarRevRange 0 fields.length)
 
-/-- The field-only normalization of a one-constructor projection minor.  This
-is retained as the nonrecursive compatibility shape; semantic contracts use
-the exact generated domain below. -/
+/-- The field-context reference shape of a one-constructor projection minor.
+Semantic contracts use the exact generated domain below, which additionally
+retains every recursive induction-hypothesis binder. -/
 def fieldProjectionMinorType (view : VStructureView)
     (levels : List VLevel) (params fields : List VExpr)
     (typeFn : VExpr) : VExpr :=
@@ -1003,6 +1477,102 @@ def projectionIHTypes (view : VStructureView)
     VExpr.dropN (view.specializedFields levels params).length <|
       view.generatedProjectionMinorType fieldSort levels params typeFn
 
+/-- The generated IH telescope before it is recovered from the exact minor
+Pi tower. Naming this syntax makes its parameter/motive naturality explicit. -/
+private def generatedProjectionIHBinders (view : VStructureView)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (typeFn : VExpr) : List VExpr :=
+  let pLevels := view.projectionLevels fieldSort levels
+  let rawFields := view.constructor.fieldsR view.source.uvars
+    view.source.nparams view.generation.elimination
+  let m := rawFields.length
+  let rawIHs := VInductDecl.ihsFromRecArgs m
+    (view.constructor.recArgsR view.source.uvars
+      view.generation.elimination) 0
+  VExpr.instTelN typeFn
+    (((rawIHs.map (VExpr.instL pLevels)).zipIdx (1 + m)).map
+      fun entry => entry.1.instRevAt params entry.2) m
+
+private theorem generatedProjectionMinorType_telescope_shape
+    (view : VStructureView) (fieldSort : VLevel)
+    (levels : List VLevel) (params : List VExpr) (typeFn : VExpr) :
+    ∃ fieldBinders body,
+      fieldBinders.length = (view.specializedFields levels params).length ∧
+      (view.generatedProjectionIHBinders fieldSort levels params typeFn).length =
+        view.constructor.view.recursive.length ∧
+      view.generatedProjectionMinorType fieldSort levels params typeFn =
+        VExpr.forallN fieldBinders
+          (VExpr.forallN
+            (view.generatedProjectionIHBinders fieldSort levels params typeFn)
+            body) := by
+  let pLevels := view.projectionLevels fieldSort levels
+  let rawFields := view.constructor.fieldsR view.source.uvars
+    view.source.nparams view.generation.elimination
+  let recArgs := view.constructor.recArgsR view.source.uvars
+    view.generation.elimination
+  let m := rawFields.length
+  let r := recArgs.length
+  let rawIHs := VInductDecl.ihsFromRecArgs m recArgs 0
+  let fieldBinders := VExpr.instTelN typeFn
+    (((VExpr.liftTelN 1 rawFields 0).map (VExpr.instL pLevels)).zipIdx 1 |>.map
+      fun entry => entry.1.instRevAt params entry.2) 0
+  let ihBinders := view.generatedProjectionIHBinders
+    fieldSort levels params typeFn
+  let rawBody := VExpr.appN (.bvar (m + r))
+    ((view.constructor.resultIndicesR view.source.uvars
+        view.generation.elimination |>.map fun expression =>
+          (expression.liftN 1 m).liftN r) ++
+      [VExpr.appN
+        (.const view.constructor.raw.name view.generation.sourceLevels)
+        (VExpr.bvarRevRange (r + m + 1) view.source.nparams ++
+          VExpr.bvarRevRange r m)])
+  let body := ((rawBody.instL pLevels).instRevAt params (1 + m + r)).inst
+    typeFn (m + r)
+  refine ⟨fieldBinders, body, ?_, ?_, ?_⟩
+  · rw [VExpr.instTelN_length]
+    simp [rawFields, specializedFields, fields,
+      VInductDecl.NormalizedCtor.fieldsR]
+    rw [VExpr.liftTelN_length]
+    simp
+  · unfold generatedProjectionIHBinders
+    rw [VExpr.instTelN_length]
+    simp [VInductDecl.NormalizedCtor.recArgsR,
+      VInductDecl.ihsFromRecArgs_length]
+  · simp [generatedProjectionMinorType,
+      VInductDecl.GenerationChecked.minorType,
+      VExpr.instL_forallN, VExpr.instN_forallN,
+      VExpr.instRevAt_forallN_projection,
+      VExpr.liftTelN_instL, VExpr.liftTelN_length,
+      VInductDecl.ihsFromRecArgs_length,
+      pLevels, rawFields, recArgs, m, r,
+      fieldBinders, generatedProjectionIHBinders, rawBody, body,
+      Nat.add_assoc, Nat.add_comm]
+
+private theorem projectionIHTypes_eq_generatedProjectionIHBinders
+    (view : VStructureView) (fieldSort : VLevel)
+    (levels : List VLevel) (params : List VExpr) (typeFn : VExpr) :
+    view.projectionIHTypes fieldSort levels params typeFn =
+      view.generatedProjectionIHBinders fieldSort levels params typeFn := by
+  obtain ⟨fieldBinders, body, hfields, hihs, hshape⟩ :=
+    generatedProjectionMinorType_telescope_shape
+      view fieldSort levels params typeFn
+  unfold projectionIHTypes
+  rw [hshape, ← hfields, VExpr.dropN_forallN_length,
+    ← hihs, VExpr.telN_forallN_length]
+
+/-- The exact generated minor contains one induction-hypothesis binder for
+every recursive argument, independently of later semantic typing evidence. -/
+@[simp] theorem projectionIHTypes_length (view : VStructureView)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (typeFn : VExpr) :
+    (view.projectionIHTypes fieldSort levels params typeFn).length =
+      view.constructor.view.recursive.length := by
+  obtain ⟨fieldBinders, body, hfields, hihs, hshape⟩ :=
+    generatedProjectionMinorType_telescope_shape view fieldSort levels params typeFn
+  unfold projectionIHTypes
+  rw [hshape, ← hfields, VExpr.dropN_forallN_length,
+    ← hihs, VExpr.telN_forallN_length, hihs]
+
 /-- The generated minor result after stripping its constructor-field and
 induction-hypothesis binders. -/
 def projectionMinorResult (view : VStructureView)
@@ -1011,15 +1581,6 @@ def projectionMinorResult (view : VStructureView)
   VExpr.dropN view.constructor.view.recursive.length <|
     VExpr.dropN (view.specializedFields levels params).length <|
       view.generatedProjectionMinorType fieldSort levels params typeFn
-
-/-- The present nonrecursive view boundary specializes the exact IH
-telescope to the empty list.  This theorem is intentionally the sole
-compatibility reduction used by the legacy projection program. -/
-@[simp] theorem projectionIHTypes_eq_nil (view : VStructureView)
-    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
-    (typeFn : VExpr) :
-    view.projectionIHTypes fieldSort levels params typeFn = [] := by
-  simp [projectionIHTypes, view.recursive_eq, VExpr.telN]
 
 @[simp] theorem projectionLevels_instL (view : VStructureView)
     (fieldSort : VLevel) (levels ls : List VLevel) :
@@ -1057,6 +1618,33 @@ compatibility reduction used by the legacy projection program. -/
         (params.map (VExpr.instL ls)) := by
   simp [specializedFields, VExpr.instL_instRevAt, VExpr.instL_instL, Function.comp_def]
 
+@[simp] theorem generatedProjectionMinorType_instL (view : VStructureView)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (typeFn : VExpr) (ls : List VLevel) :
+    (view.generatedProjectionMinorType fieldSort levels params typeFn).instL ls =
+      view.generatedProjectionMinorType (fieldSort.inst ls)
+        (levels.map (VLevel.inst ls)) (params.map (VExpr.instL ls))
+        (typeFn.instL ls) := by
+  simp [generatedProjectionMinorType, VExpr.instL_instRevAt,
+    VExpr.instL_instL, VExpr.instL_instN,
+    projectionLevels_instL]
+
+@[simp] theorem projectionIHTypes_instL (view : VStructureView)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (typeFn : VExpr) (ls : List VLevel) :
+    (view.projectionIHTypes fieldSort levels params typeFn).map
+        (VExpr.instL ls) =
+      view.projectionIHTypes (fieldSort.inst ls)
+        (levels.map (VLevel.inst ls)) (params.map (VExpr.instL ls))
+        (typeFn.instL ls) := by
+  unfold projectionIHTypes
+  rw [← VExpr.telN_instL, ← VExpr.dropN_instL,
+    generatedProjectionMinorType_instL]
+  have hfields := view.specializedFields_instL levels params ls
+  have hfieldsLength := congrArg List.length hfields
+  simp only [List.length_map] at hfieldsLength
+  rw [hfieldsLength]
+
 private def projectionCode (view : VStructureView)
     (levels : List VLevel) (params allFields : List VExpr)
     (structType field : VExpr) (fieldSort : VLevel) (i : Nat)
@@ -1080,7 +1668,14 @@ private theorem projectionCode_liftN (view : VStructureView)
     (structType field : VExpr) (fieldSort : VLevel) (i : Nat)
     (previous : List ProjectionCode) (n k : Nat)
     (hprevious : previous.length = i)
-    (hi : i < allFields.length) :
+    (hi : i < allFields.length)
+    (hIHTypes : ∀ (sort : VLevel) (fn : VExpr),
+      VExpr.liftTelN n
+          (view.projectionIHTypes sort levels params fn)
+          (k + allFields.length) =
+        view.projectionIHTypes sort levels
+          (params.map fun param => param.liftN n k)
+          (fn.liftN n k)) :
     (projectionCode view levels params allFields structType field
       fieldSort i previous).liftN n k =
     projectionCode view levels
@@ -1110,26 +1705,6 @@ private theorem projectionCode_liftN (view : VStructureView)
             VExpr.app code.projector.lift (.bvar 0)) 0 := by
     rw [VExpr.liftN_instRevAt]
     rw [List.length_map, hprevious, hfieldLift, hpreviousLift]
-  have hminorBody :
-      VExpr.liftN n (.bvar (allFields.length - 1 - i))
-          (k + allFields.length) =
-        .bvar (allFields.length - 1 - i) := by
-    simp only [VExpr.liftN]
-    rw [liftVar_lt]
-    omega
-  have hminorVar :
-      liftVar n (allFields.length - 1 - i)
-          (k + allFields.length) = allFields.length - 1 - i := by
-    rw [liftVar_lt]
-    omega
-  have hminorNestedVar :
-      liftVar n (liftVar 1 (allFields.length - 1 - i)
-          allFields.length) (k + 1 + allFields.length) =
-        liftVar 1 (allFields.length - 1 - i) allFields.length := by
-    have hinner : liftVar 1 (allFields.length - 1 - i)
-        allFields.length = allFields.length - 1 - i :=
-      liftVar_lt (by omega)
-    rw [hinner, liftVar_lt (by omega)]
   have hmotiveLift :
       (((field.liftN 1 i).instRevAt
           (previous.map fun code =>
@@ -1140,26 +1715,48 @@ private theorem projectionCode_liftN (view : VStructureView)
             VExpr.app code.projector.lift (.bvar 0)) 0).liftN 1 1 := by
     rw [VExpr.liftN_liftAt_projection]
     exact congrArg (fun e => e.liftN 1 1) hmotive
+  have hminorLift :
+      (VExpr.selectFieldMinor allFields
+          (view.projectionIHTypes fieldSort levels params
+            (.lam structType
+              ((field.liftN 1 i).instRevAt
+                (previous.map fun code =>
+                  VExpr.app code.projector.lift (.bvar 0)) 0)))
+          i).liftN n k =
+        VExpr.selectFieldMinor (VExpr.liftTelN n allFields k)
+          (view.projectionIHTypes fieldSort levels
+            (params.map fun param => param.liftN n k)
+            (.lam (structType.liftN n k)
+              (((field.liftN n (k + i)).liftN 1 i).instRevAt
+                ((previous.map fun code => code.liftN n k).map fun code =>
+                  VExpr.app code.projector.lift (.bvar 0)) 0)))
+          i := by
+    rw [VExpr.selectFieldMinor_liftN _ _ _ n k hi,
+      hIHTypes fieldSort]
+    simp [VExpr.liftN, hmotive]
   apply ProjectionCode.ext
   · rfl
   · simp [projectionCode, ProjectionCode.liftN, VExpr.liftN,
       hmotive]
-  · simp [projectionCode, ProjectionCode.liftN,
-      VExpr.liftN_lamN_projection, VExpr.liftTelN_length,
-      hminorBody]
+  · simpa [projectionCode, ProjectionCode.liftN] using hminorLift
   · simp [projectionCode, ProjectionCode.liftN, VExpr.liftN,
-      VExpr.liftN_appN, VExpr.liftN_lamN_projection,
-      VExpr.liftTelN_length, VExpr.liftN_lift_projection,
-      VExpr.liftTelN_lift_projection, List.map_append,
+      VExpr.liftN_appN, VExpr.liftN_lift_projection, List.map_append,
       List.map_map, Function.comp_def, hmotive, hmotiveLift,
-      hminorNestedVar]
+      hminorLift]
 
 private theorem projectionCode_instN (view : VStructureView)
     (levels : List VLevel) (params allFields : List VExpr)
     (structType field : VExpr) (fieldSort : VLevel) (i : Nat)
     (previous : List ProjectionCode) (a : VExpr) (k : Nat)
     (hprevious : previous.length = i)
-    (hi : i < allFields.length) :
+    (hi : i < allFields.length)
+    (hIHTypes : ∀ (sort : VLevel) (fn : VExpr),
+      VExpr.instTelN a
+          (view.projectionIHTypes sort levels params fn)
+          (k + allFields.length) =
+        view.projectionIHTypes sort levels
+          (params.map fun param => param.inst a k)
+          (fn.inst a k)) :
     (projectionCode view levels params allFields structType field
       fieldSort i previous).instN a k =
     projectionCode view levels
@@ -1188,21 +1785,32 @@ private theorem projectionCode_instN (view : VStructureView)
             VExpr.app code.projector.lift (.bvar 0)) 0 := by
     rw [VExpr.instN_instRevAt]
     rw [List.length_map, hprevious, hfieldInst, hpreviousInst]
-  have hminorVar :
-      VExpr.instVar (allFields.length - 1 - i) a
-          (k + allFields.length) =
-        .bvar (allFields.length - 1 - i) := by
-    simp [VExpr.instVar, show
-      allFields.length - 1 - i < k + allFields.length by omega]
+  have hminorInst :
+      (VExpr.selectFieldMinor allFields
+          (view.projectionIHTypes fieldSort levels params
+            (.lam structType
+              ((field.liftN 1 i).instRevAt
+                (previous.map fun code =>
+                  VExpr.app code.projector.lift (.bvar 0)) 0)))
+          i).inst a k =
+        VExpr.selectFieldMinor (VExpr.instTelN a allFields k)
+          (view.projectionIHTypes fieldSort levels
+            (params.map fun param => param.inst a k)
+            (.lam (structType.inst a k)
+              (((field.inst a (k + i)).liftN 1 i).instRevAt
+                ((previous.map fun code => code.instN a k).map fun code =>
+                  VExpr.app code.projector.lift (.bvar 0)) 0)))
+          i := by
+    rw [VExpr.selectFieldMinor_instN _ _ _ k a hi,
+      hIHTypes fieldSort]
+    simp [VExpr.inst, hmotive]
   apply ProjectionCode.ext
   · rfl
   · simp [projectionCode, ProjectionCode.instN, VExpr.inst, hmotive]
-  · simp [projectionCode, ProjectionCode.instN, VExpr.inst,
-      VExpr.instN_lamN_projection, VExpr.instTelN_length,
-      hminorVar]
+  · simpa [projectionCode, ProjectionCode.instN] using hminorInst
   · simp [projectionCode, ProjectionCode.instN, VExpr.inst, VExpr.instN_appN,
-      VExpr.instN_lamN_projection, VExpr.instTelN_length, ← VExpr.lift_instN_lo, List.map_append,
-      List.map_map, Function.comp_def, hmotive, hminorVar]
+      ← VExpr.lift_instN_lo, List.map_append, List.map_map,
+      Function.comp_def, hmotive, hminorInst]
 
 private def projectionCodes.go (view : VStructureView)
     (levels : List VLevel) (params : List VExpr)
@@ -1222,7 +1830,14 @@ private theorem projectionCodes.go_instN (view : VStructureView)
     (fieldSorts : List VLevel) (i : Nat)
     (previous : List ProjectionCode) (a : VExpr) (k : Nat)
     (hprevious : previous.length = i)
-    (hfields : i + fields.length = allFields.length) :
+    (hfields : i + fields.length = allFields.length)
+    (hIHTypes : ∀ (sort : VLevel) (fn : VExpr),
+      VExpr.instTelN a
+          (view.projectionIHTypes sort levels params fn)
+          (k + allFields.length) =
+        view.projectionIHTypes sort levels
+          (params.map fun param => param.inst a k)
+          (fn.inst a k)) :
     (projectionCodes.go view levels params allFields structType
         fields fieldSorts i previous).map
       (fun code => code.instN a k) =
@@ -1242,7 +1857,7 @@ private theorem projectionCodes.go_instN (view : VStructureView)
             simp only [List.length_cons] at hfields
             omega
           have hcode := projectionCode_instN view levels params allFields
-            structType field fieldSort i previous a k hprevious hi
+            structType field fieldSort i previous a k hprevious hi hIHTypes
           simp only [projectionCodes.go, List.map_cons,
             VExpr.instTelN]
           rw [hcode]
@@ -1274,8 +1889,7 @@ private theorem projectionCode_instL (view : VStructureView)
       (structType.instL ls) (field.instL ls) (fieldSort.inst ls) i
       (previous.map fun code => code.instL ls) := by
   simp [projectionCode, ProjectionCode.instL, VExpr.instL,
-    VExpr.instL_instRevAt, VExpr.instL_lamN_projection,
-    VExpr.instL_appN, VExpr.instL_liftN,
+    VExpr.instL_instRevAt, VExpr.instL_appN, VExpr.instL_liftN,
     List.map_append, List.map_map, Function.comp_def]
 
 private theorem projectionCodes.go_instL (view : VStructureView)
@@ -1315,7 +1929,14 @@ private theorem projectionCodes.go_liftN (view : VStructureView)
     (fieldSorts : List VLevel) (i : Nat)
     (previous : List ProjectionCode) (n k : Nat)
     (hprevious : previous.length = i)
-    (hfields : i + fields.length = allFields.length) :
+    (hfields : i + fields.length = allFields.length)
+    (hIHTypes : ∀ (sort : VLevel) (fn : VExpr),
+      VExpr.liftTelN n
+          (view.projectionIHTypes sort levels params fn)
+          (k + allFields.length) =
+        view.projectionIHTypes sort levels
+          (params.map fun param => param.liftN n k)
+          (fn.liftN n k)) :
     (projectionCodes.go view levels params allFields structType
         fields fieldSorts i previous).map
       (fun code => code.liftN n k) =
@@ -1335,7 +1956,7 @@ private theorem projectionCodes.go_liftN (view : VStructureView)
             simp only [List.length_cons] at hfields
             omega
           have hcode := projectionCode_liftN view levels params allFields
-            structType field fieldSort i previous n k hprevious hi
+            structType field fieldSort i previous n k hprevious hi hIHTypes
           simp only [projectionCodes.go, List.map_cons,
             VExpr.liftTelN]
           rw [hcode]
@@ -2260,6 +2881,107 @@ theorem WF.specializedFields_instN
       (fun j field hfield => by
         simpa using self.field_closed henv hfield)
 
+/-- The raw generated IH entries are closed at their exact positions before
+parameter and motive specialization.  This proof uses only recursive-argument
+well-formedness, not semantic typing of the complete minor. -/
+private theorem WF.generatedProjectionRawIHs_closedN
+    (self : VStructureView.WF view env) (henv : env.Ordered)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (hparams : params.length = view.nparams) :
+    ∀ (index : Nat) (ih : VExpr),
+      ((VInductDecl.ihsFromRecArgs
+          (view.constructor.fieldsR view.source.uvars view.source.nparams
+            view.generation.elimination).length
+          (view.constructor.recArgsR view.source.uvars
+            view.generation.elimination) 0).map
+        (VExpr.instL (view.projectionLevels fieldSort levels)))[index]? =
+          some ih →
+      ih.ClosedN
+        ((view.constructor.fieldsR view.source.uvars view.source.nparams
+          view.generation.elimination).length + index + params.length + 1) := by
+  let S := self.toGenerationEnv henv
+  have hconstructor :
+      view.constructor ∈ view.generation.block.ctorPairs := by
+    rw [view.constructor_eq]
+    exact .head _
+  intro index ih hlookup
+  rw [List.getElem?_map] at hlookup
+  obtain ⟨rawIH, hrawIH, rfl⟩ := Option.map_eq_some_iff.1 hlookup
+  have hclosed := S.ihsFromRecArgs_closedN hconstructor
+    (view.constructor.recArgsR view.source.uvars
+      view.generation.elimination)
+    (fun _ hrecursive => hrecursive) 0 index rawIH hrawIH
+  have hclosed' := VExpr.ClosedN.instL
+    (ls := view.projectionLevels fieldSort levels) hclosed
+  simpa only [hparams, Nat.zero_add, Nat.add_assoc, Nat.add_comm,
+    Nat.add_left_comm] using hclosed'
+
+private theorem WF.projectionIHTypes_liftN
+    (self : VStructureView.WF view env) (henv : env.Ordered)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (hparams : params.length = view.nparams) (typeFn : VExpr)
+    (n k : Nat) :
+    VExpr.liftTelN n
+        (view.projectionIHTypes fieldSort levels params typeFn)
+        (k + (view.specializedFields levels params).length) =
+      view.projectionIHTypes fieldSort levels
+        (params.map fun param => param.liftN n k) (typeFn.liftN n k) := by
+  rw [projectionIHTypes_eq_generatedProjectionIHBinders,
+    projectionIHTypes_eq_generatedProjectionIHBinders]
+  have hfieldsLength :
+      (view.specializedFields levels params).length =
+        (view.constructor.fieldsR view.source.uvars view.source.nparams
+          view.generation.elimination).length := by
+    simp [specializedFields, fields, NormalizedCtor.fieldsR_length]
+  rw [hfieldsLength]
+  dsimp only [generatedProjectionIHBinders]
+  simpa only [Nat.add_comm] using
+    VExpr.specializeProjectionIHs_liftN
+      ((VInductDecl.ihsFromRecArgs
+        (view.constructor.fieldsR view.source.uvars view.source.nparams
+          view.generation.elimination).length
+        (view.constructor.recArgsR view.source.uvars
+          view.generation.elimination) 0).map
+        (VExpr.instL (view.projectionLevels fieldSort levels)))
+      params typeFn
+      (view.constructor.fieldsR view.source.uvars view.source.nparams
+        view.generation.elimination).length n k
+      (self.generatedProjectionRawIHs_closedN henv fieldSort levels params
+        hparams)
+
+private theorem WF.projectionIHTypes_instN
+    (self : VStructureView.WF view env) (henv : env.Ordered)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (hparams : params.length = view.nparams) (typeFn a : VExpr)
+    (k : Nat) :
+    VExpr.instTelN a
+        (view.projectionIHTypes fieldSort levels params typeFn)
+        (k + (view.specializedFields levels params).length) =
+      view.projectionIHTypes fieldSort levels
+        (params.map fun param => param.inst a k) (typeFn.inst a k) := by
+  rw [projectionIHTypes_eq_generatedProjectionIHBinders,
+    projectionIHTypes_eq_generatedProjectionIHBinders]
+  have hfieldsLength :
+      (view.specializedFields levels params).length =
+        (view.constructor.fieldsR view.source.uvars view.source.nparams
+          view.generation.elimination).length := by
+    simp [specializedFields, fields, NormalizedCtor.fieldsR_length]
+  rw [hfieldsLength]
+  dsimp only [generatedProjectionIHBinders]
+  simpa only [Nat.add_comm] using
+    VExpr.specializeProjectionIHs_instN
+      ((VInductDecl.ihsFromRecArgs
+        (view.constructor.fieldsR view.source.uvars view.source.nparams
+          view.generation.elimination).length
+        (view.constructor.recArgsR view.source.uvars
+          view.generation.elimination) 0).map
+        (VExpr.instL (view.projectionLevels fieldSort levels)))
+      params typeFn a
+      (view.constructor.fieldsR view.source.uvars view.source.nparams
+        view.generation.elimination).length k
+      (self.generatedProjectionRawIHs_closedN henv fieldSort levels params
+        hparams)
+
 private theorem projectionLevels_length (view : VStructureView)
     (fieldSort : VLevel) (levels : List VLevel)
     (hlevels : levels.length = view.uvars) :
@@ -2417,9 +3139,12 @@ private theorem WF.motiveLevel_projectionLevels
   unfold projectionCodes
   rw [self.specializedFields_liftN henv levels params hparams n k]
   rw [← structureType_liftN]
-  apply projectionCodes.go_liftN
+  apply projectionCodes.go_liftN (hIHTypes := ?_)
   · rfl
   · simp
+  · intro fieldSort typeFn
+    exact self.projectionIHTypes_liftN henv fieldSort levels params
+      hparams typeFn n k
 
 @[simp] theorem WF.projectionCodes_instN
     (self : VStructureView.WF view env) (henv : env.Ordered)
@@ -2432,9 +3157,12 @@ private theorem WF.motiveLevel_projectionLevels
   unfold projectionCodes
   rw [self.specializedFields_instN henv levels params hparams a k]
   rw [← structureType_instN]
-  apply projectionCodes.go_instN
+  apply projectionCodes.go_instN (hIHTypes := ?_)
   · rfl
   · simp
+  · intro fieldSort typeFn
+    exact self.projectionIHTypes_instN henv fieldSort levels params
+      hparams typeFn a k
 
 /-- The exact lower-layer structure-eta descriptor generated by a checked
 structure view.  Its projector syntax is the deterministic projector program
@@ -3110,89 +3838,6 @@ private theorem _root_.Lean4Lean.VStructureView.WF.generationParamsSpine
   rw [hparamsTel]
   exact hparamsGeneration
 
-/-- For the current nonrecursive view boundary, the exact generated minor
-domain specializes to the legacy field-only projection minor.  Keeping this
-normalization separate exposes the precise equation that must be generalized
-when recursive singleton structures retain their IH telescope. -/
-theorem _root_.Lean4Lean.VStructureView.WF.generatedProjectionMinorType_eq_field
-    (self : VStructureView.WF view env) (henv : env.Ordered)
-    (fieldSort : VLevel) (levels : List VLevel)
-    (hlevelsLength : levels.length = view.uvars)
-    (params : List VExpr) (hparamsLength : params.length = view.nparams)
-    (typeFn : VExpr) :
-    view.generatedProjectionMinorType fieldSort levels params typeFn =
-      view.fieldProjectionMinorType levels params
-        (view.specializedFields levels params) typeFn := by
-  let S := self.toGenerationEnv henv
-  let pLevels := view.projectionLevels fieldSort levels
-  have hconstructorMem :
-      view.constructor ∈ view.generation.block.ctorPairs := by
-    simp [view.constructor_eq]
-  have hresultIndices : view.constructor.view.resultIndices = [] := by
-    apply List.length_eq_zero_iff.1
-    rw [S.viewResultIndices_length hconstructorMem]
-    simp [view.checked_indices_eq]
-  simp [VStructureView.generatedProjectionMinorType,
-    VInductDecl.GenerationChecked.minorType,
-    VInductDecl.NormalizedCtor.fieldsR,
-    VInductDecl.NormalizedCtor.recArgsR,
-    VInductDecl.NormalizedCtor.resultIndicesR,
-    VInductDecl.ihsFromRecArgs, VStructureView.fieldProjectionMinorType,
-    VStructureView.projectionConstructorApp, hresultIndices,
-    view.recursive_eq, VExpr.instL_forallN, VExpr.instL_appN,
-    VExpr.liftTelN_instL, VExpr.instL_instL, VExpr.instN_forallN,
-    VExpr.instTelN, VExpr.instRevAt_forallN_projection,
-    List.map_append, List.map_map,
-    Function.comp_def,
-    VStructureView.sourceLevels_projectionLevels view fieldSort levels
-      hlevelsLength]
-  have hfieldTel :=
-    VExpr.instTelN_instRevAt_lift_projection
-      ((view.constructor.rawFields view.source.nparams).map
-        (VExpr.instL levels)) params typeFn 0
-  rw [VExpr.instRevAt_map_instL_zipIdx] at hfieldTel
-  have hfieldTel' :
-      VExpr.instTelN typeFn
-          ((VExpr.liftTelN 1
-              ((view.constructor.rawFields view.source.nparams).map
-                (VExpr.instL levels)) 0).zipIdx 1 |>.map
-            fun x => x.1.instRevAt params x.2) 0 =
-        view.specializedFields levels params := by
-    simpa [VStructureView.specializedFields,
-      VStructureView.fields] using hfieldTel
-  rw [hfieldTel']
-  simp only [VExpr.forallN]
-  congr 1
-  have hsourceLevels :=
-    VStructureView.sourceLevels_projectionLevels view fieldSort levels
-      hlevelsLength
-  change
-    (VLevel.params' view.source.uvars
-        view.generation.elimination.offset).map
-          (VLevel.inst pLevels) = levels at hsourceLevels
-  have hliftedLength :
-      (VExpr.liftTelN 1
-          ((view.constructor.rawFields view.source.nparams).map
-            (VExpr.instL levels)) 0).length =
-        (view.constructor.rawFields view.source.nparams).length := by
-    rw [VExpr.liftTelN_length]
-    simp
-  have hspecializedLength :
-      (view.specializedFields levels params).length =
-        (view.constructor.rawFields view.source.nparams).length := by
-    simp [VStructureView.specializedFields,
-      VStructureView.fields]
-  simp only [VExpr.instL,
-    VExpr.bvarRevRange_map_instL, hliftedLength,
-    hspecializedLength]
-  rw [hsourceLevels]
-  have hbody :=
-    VExpr.projectionMinorBody_shape view.constructorName levels
-      params (view.constructor.rawFields view.source.nparams).length 0
-      typeFn
-  rw [hparamsLength] at hbody
-  simpa only [Nat.zero_add, Nat.add_zero, Nat.add_comm] using hbody
-
 /-- The exact generated projection minor retains one IH binder per checked
 recursive argument and, after those binders, applies the motive to the exact
 constructor application. -/
@@ -3289,19 +3934,6 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionMinorGenerated_shape
     rw [hparamsLength] at hbody
     simpa [body, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hbody
 
-/-- The extracted exact IH telescope has one binder for every checked
-recursive constructor argument. -/
-@[simp] theorem _root_.Lean4Lean.VStructureView.WF.projectionIHTypes_length
-    (self : VStructureView.WF view env) (henv : env.Ordered)
-    (fieldSort : VLevel) (levels : List VLevel)
-    (hlevelsLength : levels.length = view.uvars)
-    (params : List VExpr) (hparamsLength : params.length = view.nparams)
-    (typeFn : VExpr) :
-    (view.projectionIHTypes fieldSort levels params typeFn).length =
-      view.constructor.view.recursive.length :=
-  (self.projectionMinorGenerated_shape henv fieldSort levels
-    hlevelsLength params hparamsLength typeFn).1
-
 /-- After stripping the specialized fields and every generated recursive-IH
 binder, the exact minor cursor is the projection motive applied to the exact
 constructor application.  The constructor fields are shifted past the IH
@@ -3342,8 +3974,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionMinorResult_eq_lift
     simp [fields, VStructureView.specializedFields, VStructureView.fields]
   have hihsLength : ihs.length =
       view.constructor.view.recursive.length := by
-    simpa [ihs] using self.projectionIHTypes_length henv fieldSort levels
-      hlevelsLength params hparamsLength typeFn
+    simp [ihs]
   rw [self.projectionMinorResult_shape henv fieldSort levels
     hlevelsLength params hparamsLength typeFn]
   change _ = (VExpr.app (typeFn.liftN fields.length)
@@ -5338,8 +5969,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.projector_constructor_exact
       _ = formalIHs.length := by
         symm
         simpa only [formalIHs] using
-          self.projectionIHTypes_length henv.ordered code.fieldSort levels
-            hlevelsLength params hparamsLength code.typeFn
+          view.projectionIHTypes_length code.fieldSort levels params code.typeFn
   have hallArgsLength : allArgs.length = selectorBinders.length := by
     simp only [allArgs, selectorBinders, List.length_append]
     rw [hfieldsLength, hcapturedIHsLength]
