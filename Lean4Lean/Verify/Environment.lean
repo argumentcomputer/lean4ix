@@ -1826,6 +1826,55 @@ def trace
       VPrimitiveInductive.canonicalGeneration types :=
   rfl
 
+/-- Replay the exact primitive transaction after an existing translated input
+history. -/
+theorem trEnv
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (wf : input.WF env) (safety : DefinitionSafety) :
+    TrEnv safety finalEnv (replay.output.venv safety) := by
+  let transaction : execution.ExactSemanticTransaction
+      (VPrimitiveInductive.canonicalDecl types)
+      (input.venv safety) (replay.output.venv safety) :=
+    .ordinary (execution.canonicalPrimitive_noop primitiveResult).2
+      ⟨replay.trace primitiveResult safety⟩
+  exact transaction.trEnv (wf.tr (safety := safety))
+
+/-- The output selected by the canonical replay is a well-formed Theory
+environment at every safety level. -/
+theorem outputWF
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (wf : input.WF env) (safety : DefinitionSafety) :
+    (replay.output.venv safety).WF :=
+  (replay.trEnv primitiveResult wf safety).wf
+
+/-- Every pointwise primitive replay monotonically extends its input model. -/
+theorem old_le
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (safety : DefinitionSafety) :
+    input.venv safety ≤ replay.output.venv safety :=
+  (replay.trace primitiveResult safety).le
+
 end AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
 
 /-- Assemble the safety-indexed canonical primitive replay from an input
@@ -2081,6 +2130,33 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPri
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trace
 
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trEnv' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.trEnv
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.outputWF' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.outputWF
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.old_le' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.old_le
+
 /-- A coherent ordinary replay of a canonical primitive-recognized block.
 Unlike the nonprimitive transaction package, primitive preservation is
 derived from the exact Bool/Nat generated inventory rather than name
@@ -2178,6 +2254,54 @@ def ofReplay
   replay := replay
   projectionReady := projectionReady
   structureEtaReady := structureEtaReady
+
+/-- Construct the primitive transaction directly from the retained execution
+and the input environment model.  The only remaining arguments are the two
+final-environment readiness predicates; all metadata replay is derived. -/
+noncomputable def ofExecution
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {ves : VEnvs} (wf : ves.WF env)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true)
+    (projectionReady : ∀ safety, ProjectionReady finalEnv
+      ((execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf).output.venv
+        safety))
+    (structureEtaReady : ∀ safety, StructureEtaReady finalEnv
+      ((execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf).output.venv
+        safety)) :
+    execution.CanonicalPrimitiveTransactionalVEnvsExtension ves :=
+  .ofReplay primitiveResult
+    (execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf)
+    projectionReady structureEtaReady
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution
 
 /-- Recover the exact raw Theory constants from the recognizer-selected
 canonical declaration. -/
