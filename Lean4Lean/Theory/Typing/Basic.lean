@@ -109,6 +109,71 @@ def VConstant.WF (env : VEnv) (ci : VConstant) : Prop := env.IsType ci.uvars [] 
 def VDefEq.WF (env : VEnv) (df : VDefEq) : Prop :=
   env.HasType df.uvars [] df.lhs df.type ∧ env.HasType df.uvars [] df.rhs df.type
 
+/-- The part of a structure-eta certificate needed by structural typing
+metatheory.  Weakening and substitution only inspect the retained family's
+closedness; reconstruction subject reduction remains in `VStructEta.WF`. -/
+structure VStructEta.FoundationWF (rule : VStructEta) (_env : VEnv) : Prop where
+  familyType_closed : rule.familyType.ClosedN
+
+/-- A construction-order certificate for the global typing inventory.
+
+Structure-eta entries contribute only their syntactic foundation here.  The
+stronger subject-reduction certificate is retained by `VEnv.WF'`; separating
+the two prevents `Ordered` from being circular with the future-model contract
+in `VStructEta.WF`. -/
+inductive VEnv.Ordered : VEnv → Prop where
+  | empty : Ordered ∅
+  | const :
+    Ordered env → ci.WF env →
+    env.addConst n ci = some env' → Ordered env'
+  | defeq : Ordered env → df.WF env → Ordered (env.addDefEq df)
+  | structEta :
+    Ordered env → rule.FoundationWF env → Ordered (env.addStructEta rule)
+
+/-- The environment-side conversion laws needed to instantiate a retained
+structure-eta rule in a later model.  Raw `VEnv.LE` only preserves inventory:
+it may add unchecked open constants or equations, so it does not imply these
+laws.  Every `VEnv.WF` model supplies this capability in
+`VEnv.WF.conversionRegular`.
+
+Keeping this interface independent of `VEnv.WF` avoids a circularity with the
+environment history, which stores `VStructEta.WF` certificates. -/
+structure VEnv.ConversionRegular (env : VEnv) : Prop where
+  ordered : env.Ordered
+  hasType_uniqU :
+    ∀ {U : Nat} {Γ : List VExpr} {e A B : VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.HasType U Γ e A →
+      env.HasType U Γ e B →
+      env.IsDefEqU U Γ A B
+  forallE_inv :
+    ∀ {U : Nat} {Γ : List VExpr} {A B A' B' : VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.IsDefEqU U Γ (.forallE A B) (.forallE A' B') →
+      (∃ u, env.IsDefEq U Γ A A' (.sort u)) ∧
+        ∃ u, env.IsDefEq U (A :: Γ) B B' (.sort u)
+  hasType_defeqU_r :
+    ∀ {U : Nat} {Γ : List VExpr} {e A B : VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.IsDefEqU U Γ A B →
+      env.HasType U Γ e A →
+      env.HasType U Γ e B
+  isDefEqU_of_l :
+    ∀ {U : Nat} {Γ : List VExpr} {e₁ e₂ A : VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.IsDefEqU U Γ e₁ e₂ →
+      env.HasType U Γ e₁ A →
+      env.IsDefEq U Γ e₁ e₂ A
+  isDefEqU_trans :
+    ∀ {U : Nat} {Γ : List VExpr} {e₁ e₂ e₃ : VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.IsDefEqU U Γ e₁ e₂ →
+      env.IsDefEqU U Γ e₂ e₃ →
+      env.IsDefEqU U Γ e₁ e₃
+
+instance : CoeOut (VEnv.ConversionRegular env) (VEnv.Ordered env) :=
+  ⟨VEnv.ConversionRegular.ordered⟩
+
 /-- Subject-reduction package attached to a registered structure-eta
 descriptor.  It consumes the exact family parameter spine but contains no
 equality premise. -/
@@ -119,6 +184,7 @@ structure VStructEta.WF (rule : VStructEta) (env : VEnv) : Prop where
   familyType_closed : rule.familyType.ClosedN
   rebuild_hasType :
     ∀ {env' : VEnv}, env ≤ env' →
+      env'.ConversionRegular →
       ∀ {U : Nat} {Γ : List VExpr} {levels : List VLevel}
       {params : List VExpr} {major : VExpr},
       OnCtx Γ (env'.IsType U) →
@@ -131,3 +197,7 @@ structure VStructEta.WF (rule : VStructEta) (env : VEnv) : Prop where
       env'.HasType U Γ major (rule.structureType levels params) →
       env'.HasType U Γ (rule.rebuild levels params major)
         (rule.structureType levels params)
+
+theorem VStructEta.WF.toFoundationWF
+    (self : VStructEta.WF rule env) : rule.FoundationWF env :=
+  ⟨self.familyType_closed⟩

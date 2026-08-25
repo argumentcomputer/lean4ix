@@ -80,6 +80,7 @@ end Fixtures
 
 #check VEnv.HasStructureEta
 #check VEnv.hasStructureEta_of_registry
+#check VEnv.WF.structEtaWF
 #check VStructEta.WF.rebuild_hasType
 #check VEnv.IsDefEq.structEta
 #check VEnv.IsDefEq.church_rosser
@@ -97,13 +98,19 @@ info: 'Lean4Lean.VEnv.HasStructureEta' depends on axioms: [propext, Quot.sound]
 #print axioms VEnv.HasStructureEta
 
 /--
-info: 'Lean4Lean.VEnv.hasStructureEta_of_registry' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: 'Lean4Lean.VEnv.hasStructureEta_of_registry' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms VEnv.hasStructureEta_of_registry
 
 /--
-info: 'Lean4Lean.VStructEta.WF.rebuild_hasType' depends on axioms: [propext]
+info: 'Lean4Lean.VEnv.WF.structEtaWF' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VEnv.WF.structEtaWF
+
+/--
+info: 'Lean4Lean.VStructEta.WF.rebuild_hasType' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs in
 #print axioms VStructEta.WF.rebuild_hasType

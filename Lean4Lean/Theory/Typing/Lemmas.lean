@@ -176,7 +176,8 @@ theorem VStructEta.WF.mono {rule : VStructEta} {env env' : VEnv}
     (henv : env ≤ env') (self : VStructEta.WF rule env) :
     VStructEta.WF rule env' where
   familyType_closed := self.familyType_closed
-  rebuild_hasType hle := self.rebuild_hasType (henv.trans hle)
+  rebuild_hasType hle hregular :=
+    self.rebuild_hasType (henv.trans hle) hregular
 
 inductive VObject where
   | const (n : Name) (ci : VConstant)
@@ -290,14 +291,6 @@ theorem IsDefEq.toU {env : VEnv} (H : env.IsDefEq U Γ e1 e2 A) : env.IsDefEqU U
 theorem IsDefEqU.refl {env : VEnv} (h1 : e.WF env U Γ) : env.IsDefEqU U Γ e e := h1
 theorem IsDefEqU.symm {env : VEnv} (h1 : env.IsDefEqU U Γ e₁ e₂) : env.IsDefEqU U Γ e₂ e₁ :=
   h1.imp fun _ => (·.symm)
-
-inductive Ordered : VEnv → Prop where
-  | empty : Ordered ∅
-  | const :
-    Ordered env → ci.WF env →
-    env.addConst n ci = some env' → Ordered env'
-  | defeq : Ordered env → df.WF env → Ordered (env.addDefEq df)
-  | structEta : Ordered env → rule.WF env → Ordered (env.addStructEta rule)
 
 def OnTypes (env : VEnv) (P : Nat → VExpr → VExpr → Prop) : Prop :=
   (∀ {n ci}, env.constants n = some ci → ∃ u, P ci.uvars ci.type (.sort u)) ∧
@@ -524,20 +517,21 @@ theorem Ordered.defEqWF (H : Ordered env) (h : env.defeqs df) : df.WF env := by
     · exact ih h
   | structEta _ _ ih => exact .mono addStructEta_le (ih h)
 
-theorem Ordered.structEtaWF (H : Ordered env) (h : env.structEtas rule) :
-    VStructEta.WF rule env := by
+theorem Ordered.structEtaFoundationWF
+    (H : Ordered env) (h : env.structEtas rule) :
+    VStructEta.FoundationWF rule env := by
   induction H with
   | empty => cases h
   | const _ _ hadd ih =>
-    refine VStructEta.WF.mono (addConst_le hadd) (ih ?_)
+    refine ⟨(ih ?_).familyType_closed⟩
     unfold VEnv.addConst at hadd
     split at hadd <;> cases hadd
     exact h
-  | defeq _ _ ih => exact VStructEta.WF.mono addDefEq_le (ih h)
-  | structEta _ hwf ih =>
+  | defeq _ _ ih => exact ⟨(ih h).familyType_closed⟩
+  | structEta _ hfoundation ih =>
     obtain rfl | h := h
-    · exact VStructEta.WF.mono addStructEta_le hwf
-    · exact VStructEta.WF.mono addStructEta_le (ih h)
+    · exact ⟨hfoundation.familyType_closed⟩
+    · exact ⟨(ih h).familyType_closed⟩
 
 variable! (henv : Ordered env) in
 theorem CtxWF.closed (h : OnCtx Γ (IsType env U)) : CtxClosed Γ :=
@@ -623,7 +617,7 @@ theorem IsDefEq.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEq U Γ e1 e2 A) 
       hlevelsLength hparamsLength _ _ _
       ihSpine ihMajor ihRebuild =>
     have hparamsSpine := ihSpine W
-    rw [(henv.structEtaWF hreg).familyType_closed.instL.liftN_eq
+    rw [(henv.structEtaFoundationWF hreg).familyType_closed.instL.liftN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor := ihMajor W
     rw [VStructEta.structureType_liftN] at hmajor
@@ -833,7 +827,7 @@ theorem IsDefEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.IsDefE
       hlevelsLength hparamsLength _ _ _
       ihSpine ihMajor ihRebuild =>
     have hparamsSpine := ihSpine W
-    rw [(henv.structEtaWF hreg).familyType_closed.instL.instN_eq
+    rw [(henv.structEtaFoundationWF hreg).familyType_closed.instL.instN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor := ihMajor W
     rw [VStructEta.structureType_instN] at hmajor

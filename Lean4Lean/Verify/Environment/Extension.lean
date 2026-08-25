@@ -178,7 +178,7 @@ theorem ordered (trace : AddStructEtas env rules env')
     (pre : env.Ordered) : env'.Ordered := by
   induction trace with
   | nil => exact pre
-  | cons ruleWF _ ih => exact ih (.structEta pre ruleWF)
+  | cons ruleWF _ ih => exact ih (.structEta pre ruleWF.toFoundationWF)
 
 /-- Every descriptor named by the source list is registered in the trace's
 final Theory environment. -/
@@ -252,13 +252,13 @@ info: 'Lean4Lean.VEnv.AddStructEtas.trEnv' depends on axioms: [propext, Classica
 #print axioms VEnv.AddStructEtas.trEnv
 
 /--
-info: 'Lean4Lean.VEnv.AddStructEtas.hasPrimitives' depends on axioms: [propext]
+info: 'Lean4Lean.VEnv.AddStructEtas.hasPrimitives' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs in
 #print axioms VEnv.AddStructEtas.hasPrimitives
 
 /--
-info: 'Lean4Lean.VEnv.AddStructEtas.mono' depends on axioms: [propext]
+info: 'Lean4Lean.VEnv.AddStructEtas.mono' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs in
 #print axioms VEnv.AddStructEtas.mono
@@ -269,7 +269,7 @@ well-formed Theory model. -/
 theorem ProjectionArtifact.rebuildWF
     (self : ProjectionArtifact env familyName familyInfo venv)
     (baseWF : venv.WF) : self.view.RebuildWF venv :=
-  self.viewWF.toRebuildWF_of_programs baseWF self.programsWF
+  self.viewWF.toRebuildWF_of_programs baseWF.conversionRegular self.programsWF
 
 /-- The exact semantic payload needed to register structure eta for one
 newly generated projection artifact.  `ruleWF` is deliberately separate from
@@ -297,7 +297,7 @@ noncomputable def ofRebuilds
     (constructor_info_eq : projection.constructorInfo = constructorInfo)
     (baseWF : venv.WF)
     (rebuilds : ∀ {venv' : VEnv}, venv ≤ venv' →
-      projection.view.RebuildWF venv') :
+      venv'.ConversionRegular → projection.view.RebuildWF venv') :
     StructureEtaRegistrationArtifact env familyName familyInfo
       constructorName constructorInfo venv where
   projection := projection
@@ -306,6 +306,21 @@ noncomputable def ofRebuilds
   baseWF := baseWF
   ruleWF := projection.viewWF.toStructEtaWF_of_rebuilds
     baseWF.ordered rebuilds
+
+/-- Checked projection generation closes the persistent registration
+certificate without a caller-supplied future-model reconstruction oracle. -/
+noncomputable def ofProjection
+    (projection : ProjectionArtifact env familyName familyInfo venv)
+    (constructor_name_eq : projection.view.constructorName = constructorName)
+    (constructor_info_eq : projection.constructorInfo = constructorInfo)
+    (baseWF : venv.WF) :
+    StructureEtaRegistrationArtifact env familyName familyInfo
+      constructorName constructorInfo venv where
+  projection := projection
+  constructor_name_eq := constructor_name_eq
+  constructor_info_eq := constructor_info_eq
+  baseWF := baseWF
+  ruleWF := projection.viewWF.toStructEtaWF baseWF
 
 /-- The deterministic Theory descriptor owned by a registration artifact. -/
 noncomputable def rule
@@ -366,7 +381,7 @@ noncomputable def toStructureEtaArtifact
     StructureEtaArtifact env familyName familyInfo constructorName
       constructorInfo (venv.addStructEta self.rule) := by
   let finalOrd : (venv.addStructEta self.rule).Ordered :=
-    .structEta self.baseWF.ordered self.ruleWF
+    .structEta self.baseWF.ordered self.ruleWF.toFoundationWF
   refine {
     projection := self.projectionAfter
     constructor_name_eq := self.constructor_name_eq

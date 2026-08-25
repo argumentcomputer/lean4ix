@@ -168,6 +168,20 @@ theorem IsDefEqU.trans (henv : VEnv.WF env) (hΓ : OnCtx Γ (env.IsType U))
     (h1 : env.IsDefEqU U Γ e₁ e₂) (h2 : env.IsDefEqU U Γ e₂ e₃) :
     env.IsDefEqU U Γ e₁ e₃ := h1.imp fun _ h1 => let ⟨_, h2⟩ := h2; h1.trans_l henv hΓ h2
 
+/-- Every well-formed Theory environment supplies the conversion laws needed
+to replay a retained structure-eta certificate in that target environment. -/
+theorem WF.conversionRegular (henv : VEnv.WF env) :
+    env.ConversionRegular where
+  ordered := henv.ordered
+  hasType_uniqU hΓ h₁ h₂ := h₁.uniqU henv hΓ h₂
+  forallE_inv hΓ h := h.forallE_inv henv hΓ
+  hasType_defeqU_r hΓ hAB he := he.defeqU_r henv hΓ hAB
+  isDefEqU_of_l hΓ h he := h.of_l henv hΓ he
+  isDefEqU_trans hΓ h₁ h₂ := h₁.trans henv hΓ h₂
+
+instance : CoeOut (VEnv.WF env) (VEnv.ConversionRegular env) :=
+  ⟨WF.conversionRegular⟩
+
 set_option warn.sorry false in
 variable! (henv : VEnv.WF env) (hΓ : OnCtx Γ' (env.IsType U)) in
 theorem IsDefEqU.weakN_iff (W : Ctx.LiftN n k Γ Γ') :

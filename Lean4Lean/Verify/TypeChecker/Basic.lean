@@ -177,8 +177,9 @@ structure StructureEtaArtifact (env : Environment) (familyName : Name)
   constructor_name_eq : projection.view.constructorName = constructorName
   constructor_info_eq : projection.constructorInfo = constructorInfo
   /-- The ordered registry proof fixes the exact descriptor generated from
-  the checked view.  It contains no equality oracle: the associated
-  subject-reduction package is recovered by `Ordered.structEtaWF`. -/
+  the checked view.  It contains no equality oracle: the associated full
+  subject-reduction package is recovered from the consumer's `VEnv.WF`
+  history. -/
   etaOrdered : venv.Ordered
   etaRegistered : venv.structEtas
     (projection.viewWF.toStructEta etaOrdered)
@@ -230,6 +231,7 @@ rule. -/
 theorem StructureEtaArtifact.eta
     (self : StructureEtaArtifact env familyName familyInfo constructorName
       constructorInfo venv)
+    (henv : venv.WF)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr} {major : VExpr}
     (hΓ : OnCtx Γ (venv.IsType U))
@@ -247,9 +249,10 @@ theorem StructureEtaArtifact.eta
       (self.projection.view.structureType levels params) := by
   let rule := self.projection.viewWF.toStructEta self.etaOrdered
   have hruleWF : rule.WF venv :=
-    self.etaOrdered.structEtaWF self.etaRegistered
+    henv.structEtaWF self.etaRegistered
   obtain ⟨resultLevel, hparamsSpine⟩ := hparamsSpine
-  have hrebuild := hruleWF.rebuild_hasType VEnv.LE.rfl hΓ hlevels
+  have hrebuild := hruleWF.rebuild_hasType VEnv.LE.rfl
+    henv.conversionRegular hΓ hlevels
     hlevelsLength hparamsLength ⟨resultLevel, hparamsSpine⟩ hmajor
   have heta := VEnv.IsDefEq.structEta self.etaRegistered hlevels
     hlevelsLength hparamsLength hparamsSpine hmajor hrebuild

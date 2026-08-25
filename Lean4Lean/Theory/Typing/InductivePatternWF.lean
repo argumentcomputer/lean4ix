@@ -495,7 +495,8 @@ theorem HeadConstN.levels_uniq {c : Name} :
 
 /-- Zip a well-typed spine with pointwise defeqs into a defeq spine.
 Reflexive entries need no defeq evidence. -/
-theorem VEnv.SpineWF.defEq_of_pointwise {env : VEnv} (henv : env.WF)
+theorem VEnv.SpineWF.defEq_of_pointwise {env : VEnv}
+    (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U)) :
     ∀ {es es' : List VExpr} {F B : VExpr},
       env.SpineWF U Γ F es B →
@@ -506,13 +507,14 @@ theorem VEnv.SpineWF.defEq_of_pointwise {env : VEnv} (henv : env.WF)
     refine .cons ?_ (hrest.defEq_of_pointwise henv hΓ htl)
     rcases hd with rfl | hd
     · exact he
-    · exact VEnv.IsDefEqU.of_l henv hΓ hd he
+    · exact henv.isDefEqU_of_l hΓ hd he
 
 /-- Pointwise equal saturated spines instantiate a well-typed dependent
 body to definitionally equal results.  The shared telescope controls the
 dependent argument types; no syntactic substitution congruence is assumed. -/
 theorem VEnv.OnTel.instRev_defeq_of_spines
-    {env : VEnv} (henv : env.WF) {U : Nat} {Γ : List VExpr}
+    {env : VEnv} (henv : env.ConversionRegular)
+    {U : Nat} {Γ : List VExpr}
     (hΓ : OnCtx Γ (env.IsType U))
     {As : List VExpr} (hAs : env.OnTel U Γ As)
     {body : VExpr} {u : VLevel}

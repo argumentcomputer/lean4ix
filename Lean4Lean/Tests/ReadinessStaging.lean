@@ -22,6 +22,7 @@ namespace Lean4Lean.Tests.ReadinessStaging
 #check VEnv.AddStructEtas.ordered
 #check VEnv.AddStructEtas.registered
 #check VEnv.AddStructEtas.exists_of_forallWF
+#check StructureEtaRegistrationArtifact.ofProjection
 #check StructureEtaRegistrationArtifact.toStructureEtaArtifact_of_completion
 #check StructureEtaRegistrationCoverage.toStructureEtaReady
 
@@ -77,10 +78,16 @@ info: 'Lean4Lean.VInductDecl.declarationTraceMultiConstructorReadiness' depends 
 #print axioms VInductDecl.declarationTraceMultiConstructorReadiness
 
 /--
-info: 'Lean4Lean.VEnv.AddStructEtas.exists_of_forallWF' depends on axioms: [propext]
+info: 'Lean4Lean.VEnv.AddStructEtas.exists_of_forallWF' depends on axioms: [propext, Quot.sound]
 -/
 #guard_msgs in
 #print axioms VEnv.AddStructEtas.exists_of_forallWF
+
+/--
+info: 'Lean4Lean.StructureEtaRegistrationArtifact.ofProjection' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms StructureEtaRegistrationArtifact.ofProjection
 
 /--
 info: 'Lean4Lean.StructureEtaRegistrationArtifact.toStructureEtaArtifact_of_completion' depends on axioms: [propext,

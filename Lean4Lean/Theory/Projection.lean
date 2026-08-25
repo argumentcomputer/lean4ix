@@ -1614,8 +1614,8 @@ def ConstructorRuleCapturesPrefix (view : VStructureView) (env : VEnv)
 /-- Rule-independent subject reduction for rebuilding one well-typed
 structure value from the canonical generated projections.  This is the
 single-model core of `VStructEta.WF`; the latter additionally requires this
-property in every future Theory extension because eta rules are retained in
-the environment history. -/
+property in every future conversion-regular Theory extension because eta
+rules are retained in the environment history. -/
 def RebuildWF (view : VStructureView) (env : VEnv) : Prop :=
   ∀ {U : Nat} {Γ : List VExpr} {levels : List VLevel}
       {params : List VExpr} {major : VExpr},
@@ -1635,7 +1635,7 @@ dependent field type selected by the same code.  This is the one-code form of
 program proofs proceed in source order without assuming the completed
 `ProgramsWF` package circularly. -/
 theorem projector_hasType_field_of_type
-    {view : VStructureView} {env : VEnv} (henv : env.WF)
+    {view : VStructureView} {env : VEnv} (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr} {idx : Nat} {code : ProjectionCode}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -1661,16 +1661,16 @@ theorem projector_hasType_field_of_type
   obtain ⟨A, B, hlam, harg⟩ := hredexType.app_inv henv hΓ
   obtain ⟨⟨_, hstructType⟩, _, hbodyType⟩ :=
     hlam.lam_inv henv hΓ
-  have hfunTypeEq := hlam.uniqU henv hΓ
+  have hfunTypeEq := henv.hasType_uniqU hΓ hlam
     (hstructType.lam hbodyType)
   obtain ⟨⟨_, hdomainEq⟩, _⟩ :=
-    hfunTypeEq.forallE_inv henv hΓ
-  have harg' := harg.defeqU_r henv hΓ ⟨_, hdomainEq⟩
+    henv.forallE_inv hΓ hfunTypeEq
+  have harg' := henv.hasType_defeqU_r hΓ ⟨_, hdomainEq⟩ harg
   have hbeta : env.IsDefEqU U Γ
       (.app (.lam (view.structureType levels params) typeBody) major)
       (typeBody.inst major) :=
     ⟨_, VEnv.IsDefEq.beta hbodyType harg'⟩
-  have hout := happ.defeqU_r henv hΓ hbeta
+  have hout := henv.hasType_defeqU_r hΓ hbeta happ
   rw [htypeBody] at hout
   refine ⟨field, typeBody, hfield, htypeFn, ?_⟩
   simpa [projectionArgs] using hout
@@ -1679,7 +1679,7 @@ theorem projector_hasType_field_of_type
 corresponding dependent field spine.  The explicit bound is what permits the
 program-typing proof to use strong induction on projection index. -/
 theorem projectionArgsSpineAux_of_prefix
-    {view : VStructureView} {env : VEnv} (henv : env.WF)
+    {view : VStructureView} {env : VEnv} (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr} {major : VExpr} {limit : Nat}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -1750,7 +1750,7 @@ theorem projectionArgsSpineAux_of_prefix
 exposed after substituting all earlier projections. -/
 theorem ProgramsWF.projector_hasType_field
     {view : VStructureView} {env : VEnv}
-    (self : view.ProgramsWF env) (henv : env.WF)
+    (self : view.ProgramsWF env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr} {idx : Nat} {code : ProjectionCode}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -1774,7 +1774,7 @@ theorem ProgramsWF.projector_hasType_field
 
 private theorem ProgramsWF.projectionArgsSpineAux
     {view : VStructureView} {env : VEnv}
-    (self : view.ProgramsWF env) (henv : env.WF)
+    (self : view.ProgramsWF env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -1847,7 +1847,7 @@ well-typed dependent constructor-field spine.  This theorem deliberately
 stops at typing: it does not assert structure eta. -/
 theorem ProgramsWF.projectionArgsSpine
     {view : VStructureView} {env : VEnv}
-    (self : view.ProgramsWF env) (henv : env.WF)
+    (self : view.ProgramsWF env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -1879,7 +1879,7 @@ is well typed.  The constructor-prefix premise is kept explicit so this
 lemma remains independent of any proposed structure-eta equality rule. -/
 theorem ProgramsWF.etaRebuild_hasType_of_constructorPrefix
     {view : VStructureView} {env : VEnv}
-    (self : view.ProgramsWF env) (henv : env.WF)
+    (self : view.ProgramsWF env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr}
     (hΓ : OnCtx Γ (env.IsType U))
@@ -2275,20 +2275,21 @@ namespace VEnv
 
 /-- Registered checked views supply the former semantic structure-eta
 capability.  The registry contributes only membership; subject reduction is
-recovered from the ordered environment, and the equality itself is the
-primitive `IsDefEq.structEta` step. -/
-theorem hasStructureEta_of_registry (henv : env.Ordered)
+recovered from the well-formed environment history, and the equality itself
+is the primitive `IsDefEq.structEta` step. -/
+theorem hasStructureEta_of_registry (henv : env.WF)
     (registered : ∀ (view : VStructureView)
       (hview : view.WF env) (_ : view.ProgramsWF env),
-      env.structEtas (hview.toStructEta henv)) :
+      env.structEtas (hview.toStructEta henv.ordered)) :
     env.HasStructureEta := by
   intro view hview programs U Γ levels params major hΓ hlevels
     hlevelsLength hparamsLength hparamsSpine hmajor
-  let rule := hview.toStructEta henv
+  let rule := hview.toStructEta henv.ordered
   have hregistered : env.structEtas rule := registered view hview programs
   have hruleWF : rule.WF env := henv.structEtaWF hregistered
   obtain ⟨resultLevel, hparamsSpine⟩ := hparamsSpine
-  have hrebuild := hruleWF.rebuild_hasType VEnv.LE.rfl hΓ hlevels
+  have hrebuild := hruleWF.rebuild_hasType VEnv.LE.rfl
+    henv.conversionRegular hΓ hlevels
     hlevelsLength hparamsLength ⟨resultLevel, hparamsSpine⟩ hmajor
   have heta := IsDefEq.structEta hregistered hlevels hlevelsLength
     hparamsLength hparamsSpine hmajor hrebuild
@@ -3105,7 +3106,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionCommonSpine
 field variables form a saturated capture spine for the constructor's
 generated iota rule. -/
 theorem _root_.Lean4Lean.VStructureView.WF.projectionRuleCaptureSpine
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} (levels : List VLevel)
     (hlevels : ∀ level ∈ levels, level.WF U)
     (hlevelsLength : levels.length = view.uvars)
@@ -3348,7 +3349,7 @@ telescope.  No projector iota equation is needed at index zero: its motive is
 the first field type with an empty projection prefix, and the generated minor
 selects the corresponding constructor argument. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one
-    (self : VStructureView.WF view env) (henv : env.WF) :
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) :
     view.MinorsWFPrefix env 1 := by
   intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
     hparamsLength hparamsSpine hcode
@@ -3468,7 +3469,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one
   have hbodyExpected : env.HasType U (fields.reverse ++ Γ) (.bvar q)
       (.app (code.typeFn.liftN m)
         (view.projectionConstructorApp levels params fields)) :=
-    hbody.defeqU_r henv hfieldsCtx hbeta.symm
+    henv.hasType_defeqU_r hfieldsCtx hbeta.symm hbody
   have hminor := VEnv.HasType.lamN hfieldsOnTel hbodyExpected
   rw [hminorShape]
   simpa [VStructureView.projectionMinorType, fields, m, q] using hminor
@@ -3477,7 +3478,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one
 the next source-order field.  This isolates the non-mutual half of the
 minor/program induction: the current selecting minor is not used. -/
 theorem _root_.Lean4Lean.VStructureView.WF.projectionTypeFn_hasType_of_programsPrefix
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} {levels : List VLevel}
     {params : List VExpr} {idx : Nat}
     {code : VStructureView.ProjectionCode}
@@ -3620,7 +3621,7 @@ the matching projector-program prefix.  This is the induction-facing core of
 `toProgramsWF_of_minors`: no proof about a later minor is available while an
 earlier projector is reconstructed. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     {limit : Nat} (minors : view.MinorsWFPrefix env limit) :
     view.ProgramsWFPrefix env limit := by
   intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
@@ -3821,7 +3822,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
 /-- Checked selecting minors determine the exact canonical capture spines
 for every generated iota rule in the same source-order prefix. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toConstructorRuleCapturesPrefix_of_minorsWFPrefix
-    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) {limit : Nat}
     (minors : view.MinorsWFPrefix env limit) :
     view.ConstructorRuleCapturesPrefix env limit := by
   intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
@@ -3858,7 +3859,7 @@ already-generated projectors compute exactly on the canonical constructor.
 The earlier minor prefix supplies their typing; the separate exactness
 contract supplies only the iota equations needed by dependent substitution. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ_of_constructorProjectorsExactPrefix
-    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) {limit : Nat}
     (minors : view.MinorsWFPrefix env limit)
     (exact : view.ConstructorProjectorsExactPrefix env limit) :
     view.MinorsWFPrefix env (limit + 1) := by
@@ -4145,7 +4146,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ_of_constructorP
       (.app (code.typeFn.liftN m)
         (view.projectionConstructorApp levels params fields))
       (field.liftN (m - limit)) := by
-    have h := VEnv.IsDefEqU.trans henv hfieldsCtx hbeta hinstEq
+    have h := henv.isDefEqU_trans hfieldsCtx hbeta hinstEq
     rwa [hrightContract] at h
 
   let q := m - 1 - limit
@@ -4173,7 +4174,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ_of_constructorP
   have hbodyExpected : env.HasType U (fields.reverse ++ Γ) (.bvar q)
       (.app (code.typeFn.liftN m)
         (view.projectionConstructorApp levels params fields)) :=
-    hbody.defeqU_r henv hfieldsCtx hmotiveEq.symm
+    henv.hasType_defeqU_r hfieldsCtx hmotiveEq.symm hbody
   have hminor := VEnv.HasType.lamN hfieldsOnTel hbodyExpected
   rw [hminorShape]
   simpa [VStructureView.projectionMinorType, fields, m, q] using hminor
@@ -4213,7 +4214,7 @@ complete generated projector-program certificate.  Motive functions and
 recursor applications are reconstructed here; consumers need not certify
 those deterministic pieces separately. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     (minors : view.MinorsWF env) : view.ProgramsWF env := by
   intro U Γ levels params idx code hΓ hlevels hlevelsLength
     hparamsLength hparamsSpine hcode
@@ -4227,7 +4228,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
 /-- Checked constructor generation and certified projector programs derive
 the rule-independent, single-model reconstruction typing obligation. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toRebuildWF_of_programs
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     (programs : view.ProgramsWF env) : view.RebuildWF env := by
   intro U Γ levels params major hΓ hlevels hlevelsLength
     hparamsLength hparamsSpine hmajor
@@ -4241,15 +4242,16 @@ the semantic input needed to package the deterministic checked descriptor as
 a registry-valid `VStructEta.WF`. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toStructEtaWF_of_rebuilds
     (self : VStructureView.WF view env) (henv : env.Ordered)
-    (rebuilds : ∀ {env' : VEnv}, env ≤ env' → view.RebuildWF env') :
+    (rebuilds : ∀ {env' : VEnv}, env ≤ env' →
+      env'.ConversionRegular → view.RebuildWF env') :
     (self.toStructEta henv).WF env where
   familyType_closed := by
     change view.familyType.ClosedN
     exact henv.closedC self.family
   rebuild_hasType := by
-    intro env' hle U Γ levels params major hΓ hlevels hlevelsLength
+    intro env' hle hregular U Γ levels params major hΓ hlevels hlevelsLength
       hparamsLength hparamsSpine hmajor
-    simpa using rebuilds hle hΓ hlevels hlevelsLength hparamsLength
+    simpa using rebuilds hle hregular hΓ hlevels hlevelsLength hparamsLength
       hparamsSpine hmajor
 
 theorem SpineWF.instNProjection {env : VEnv} {U k : Nat}
@@ -4267,7 +4269,7 @@ once the registered rule's capture spine has been checked.  This is the
 exact iota layer; constructor-head and parameter-prefix alignment are kept
 outside this theorem. -/
 theorem _root_.Lean4Lean.VStructureView.WF.projector_constructor_exact
-    (self : VStructureView.WF view env) (henv : env.WF)
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular)
     {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U))
     {levels : List VLevel} (hlevels : ∀ level ∈ levels, level.WF U)
     (hlevelsLength : levels.length = view.uvars)
@@ -4436,8 +4438,8 @@ theorem _root_.Lean4Lean.VStructureView.WF.projector_constructor_exact
         (params ++ [code.typeFn, code.minor] ++ fields))
       (VExpr.instRev (rhsBody.instL pLevels)
         (params ++ [code.typeFn, code.minor] ++ fields)) :=
-    VEnv.IsDefEqU.trans henv hΓ ⟨_, hcollapseL.symm⟩
-      (VEnv.IsDefEqU.trans henv hΓ ⟨_, happlied⟩ ⟨_, hcollapseR⟩)
+    henv.isDefEqU_trans hΓ ⟨_, hcollapseL.symm⟩
+      (henv.isDefEqU_trans hΓ ⟨_, happlied⟩ ⟨_, hcollapseR⟩)
   have hconstructorMem : view.constructor ∈
       view.generation.block.ctorPairs := by
     simp [view.constructor_eq]
@@ -4687,13 +4689,13 @@ theorem _root_.Lean4Lean.VStructureView.WF.projector_constructor_exact
     refine ⟨VExpr.instRev (selectedType.liftN (q + 1)) fields, ?_⟩
     rw [hminorShape]
     simpa only [hfieldInst] using hminorBetaRaw
-  exact VEnv.IsDefEqU.trans henv hΓ hprojectorToRule
-    (VEnv.IsDefEqU.trans henv hΓ hiotaBodies hminorBeta)
+  exact henv.isDefEqU_trans hΓ hprojectorToRule
+    (henv.isDefEqU_trans hΓ hiotaBodies hminorBeta)
 
 /-- Registered generated-iota rules turn canonical capture-spine typing into
 the exact projector equations consumed by the dependent minor induction. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toConstructorProjectorsExactPrefix_of_ruleCaptures
-    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) {limit : Nat}
     (minors : view.MinorsWFPrefix env limit)
     (captures : view.ConstructorRuleCapturesPrefix env limit) :
     view.ConstructorProjectorsExactPrefix env limit := by
@@ -4848,7 +4850,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toConstructorProjectorsExactPrefix_of
 source-order segment.  Canonical rule captures and exact earlier-projector
 iota are now derived internally from checked generation. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ
-    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) {limit : Nat}
     (minors : view.MinorsWFPrefix env limit) :
     view.MinorsWFPrefix env (limit + 1) := by
   have captures : view.ConstructorRuleCapturesPrefix env limit :=
@@ -4866,7 +4868,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ
 source-order prefix step, so each dependent field uses only projectors whose
 minors have already been established. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWF
-    (self : VStructureView.WF view env) (henv : env.WF) :
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) :
     view.MinorsWF env := by
   have prefixes : ∀ limit, view.MinorsWFPrefix env limit := by
     intro limit
@@ -4884,16 +4886,26 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWF
 /-- Checked structure generation determines every generated projector
 program; selecting-minor typing is no longer an external premise. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF
-    (self : VStructureView.WF view env) (henv : env.WF) :
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) :
     view.ProgramsWF env :=
   self.toProgramsWF_of_minors henv (self.toMinorsWF henv)
 
 /-- Checked structure generation determines the canonical reconstruction
 typing in the current Theory environment. -/
 theorem _root_.Lean4Lean.VStructureView.WF.toRebuildWF
-    (self : VStructureView.WF view env) (henv : env.WF) :
+    (self : VStructureView.WF view env) (henv : env.ConversionRegular) :
     view.RebuildWF env :=
   self.toRebuildWF_of_programs henv (self.toProgramsWF henv)
+
+/-- Checked generation supplies the persistent structure-eta certificate.
+The retained inventory may grow through raw `VEnv.LE`, while each actual
+typing target supplies the conversion-regularity laws derived from its own
+`VEnv.WF` proof. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toStructEtaWF
+    (self : VStructureView.WF view env) (henv : env.WF) :
+    (self.toStructEta henv.ordered).WF env :=
+  self.toStructEtaWF_of_rebuilds henv.ordered fun hle hregular =>
+    (self.mono hle).toRebuildWF hregular
 
 /-- Environment-indexed projection semantics.
 

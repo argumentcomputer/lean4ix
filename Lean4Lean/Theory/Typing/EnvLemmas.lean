@@ -13,6 +13,72 @@ theorem VEnv.addConsts_le {env env' : VEnv} : ∀ {cis}, env.addConsts cis = som
     obtain ⟨_, h1, h2⟩ := h
     exact (addConst_le h1).trans (addConsts_le h2)
 
+theorem VEnv.addDefEqs_le_theory {env : VEnv} (cis : List VDefVal) :
+    env ≤ env.addDefEqs cis := by
+  induction cis generalizing env with
+  | nil => exact .rfl
+  | cons ci cis ih =>
+      exact VEnv.addDefEq_le.trans (ih (env := env.addDefEq ci.toDefEq))
+
+theorem VEnv.addConst_structEtas_eq {env env' : VEnv}
+    (hadd : env.addConst name ci = some env') :
+    env'.structEtas = env.structEtas := by
+  unfold VEnv.addConst at hadd
+  split at hadd <;> cases hadd
+  rfl
+
+theorem VEnv.addConsts_structEtas_eq {env env' : VEnv} :
+    ∀ {cis : List VDefVal}, env.addConsts cis = some env' →
+      env'.structEtas = env.structEtas
+  | [], h => by cases h; rfl
+  | _ :: _, h => by
+      simp only [VEnv.addConsts, List.foldlM_cons,
+        Option.bind_eq_bind] at h
+      obtain ⟨middle, hhead, htail⟩ := Option.bind_eq_some_iff.1 h
+      exact (VEnv.addConsts_structEtas_eq htail).trans
+        (VEnv.addConst_structEtas_eq hhead)
+
+theorem VEnv.addDefEqs_structEtas_eq (env : VEnv) (cis : List VDefVal) :
+    (env.addDefEqs cis).structEtas = env.structEtas := by
+  induction cis generalizing env with
+  | nil => rfl
+  | cons ci cis ih => exact ih (env := env.addDefEq ci.toDefEq)
+
+theorem VEnv.constFold_structEtas_eq {env env' : VEnv} :
+    ∀ {cis : List VConstVal},
+      cis.foldlM (fun env ci => env.addConst ci.name ci.toVConstant) env =
+        some env' →
+      env'.structEtas = env.structEtas
+  | [], h => by cases h; rfl
+  | _ :: _, h => by
+      simp only [List.foldlM_cons, Option.bind_eq_bind] at h
+      obtain ⟨middle, hhead, htail⟩ := Option.bind_eq_some_iff.1 h
+      exact (VEnv.constFold_structEtas_eq htail).trans
+        (VEnv.addConst_structEtas_eq hhead)
+
+theorem VEnv.constFold_le {env env' : VEnv} :
+    ∀ {cis : List VConstVal},
+      cis.foldlM (fun env ci => env.addConst ci.name ci.toVConstant) env =
+        some env' →
+      env ≤ env'
+  | [], h => by cases h; exact .rfl
+  | _ :: _, h => by
+      simp only [List.foldlM_cons, Option.bind_eq_bind] at h
+      obtain ⟨middle, hhead, htail⟩ := Option.bind_eq_some_iff.1 h
+      exact (VEnv.addConst_le hhead).trans (VEnv.constFold_le htail)
+
+theorem VEnv.rulesFold_structEtas_eq (env : VEnv) (dfs : List VDefEq) :
+    (dfs.foldl VEnv.addDefEq env).structEtas = env.structEtas := by
+  induction dfs generalizing env with
+  | nil => rfl
+  | cons df dfs ih => exact ih (env := env.addDefEq df)
+
+theorem VEnv.rulesFold_le (env : VEnv) (dfs : List VDefEq) :
+    env ≤ dfs.foldl VEnv.addDefEq env := by
+  induction dfs generalizing env with
+  | nil => exact .rfl
+  | cons df dfs ih => exact VEnv.addDefEq_le.trans (ih (env := env.addDefEq df))
+
 theorem VEnv.addConst_eq_none {env : VEnv} {name ci}
     (h : env.constants name = none) : ∃ env', env.addConst name ci = some env' := by
   unfold VEnv.addConst; rw [h]; exact ⟨_, rfl⟩
@@ -85,6 +151,149 @@ theorem VEnv.addDefEqs_ordered : ∀ {env : VEnv} {cis}, Ordered env →
     · exact (VEnv.addDefEq_le (df := ci.toDefEq)).constants (hmem c (.tail _ hc))
     · exact (hw c (.tail _ hc)).mono VEnv.addDefEq_le
 
+theorem VEnv.addQuot_le {env env' : VEnv}
+    (hadd : env.addQuot = some env') : env ≤ env' := by
+  unfold VEnv.addQuot at hadd
+  obtain ⟨env₁, h₁, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₂, h₂, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₃, h₃, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₄, h₄, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.addConst_le h₁).trans <|
+    (VEnv.addConst_le h₂).trans <|
+      (VEnv.addConst_le h₃).trans <|
+        (VEnv.addConst_le h₄).trans VEnv.addDefEq_le
+
+theorem VEnv.addQuot_structEtas_eq {env env' : VEnv}
+    (hadd : env.addQuot = some env') :
+    env'.structEtas = env.structEtas := by
+  unfold VEnv.addQuot at hadd
+  obtain ⟨env₁, h₁, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₂, h₂, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₃, h₃, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨env₄, h₄, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.addConst_structEtas_eq h₄).trans <|
+    (VEnv.addConst_structEtas_eq h₃).trans <|
+      (VEnv.addConst_structEtas_eq h₂).trans <|
+        VEnv.addConst_structEtas_eq h₁
+
+theorem VEnv.addInductGeneration_structEtas_eq
+    {env env' : VEnv} {source : VInductDecl}
+    {gen : source.GenerationChecked}
+    (hadd : VEnv.addInductGeneration env gen = some env') :
+    env'.structEtas = env.structEtas := by
+  unfold VEnv.addInductGeneration at hadd
+  obtain ⟨typeEnv, htype, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrec, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.rulesFold_structEtas_eq recEnv gen.generatedRules).trans <|
+    (VEnv.addConst_structEtas_eq hrec).trans <|
+      (VEnv.constFold_structEtas_eq hctors).trans <|
+        VEnv.addConst_structEtas_eq htype
+
+theorem VEnv.addInductBlockGeneration_structEtas_eq
+    {env env' : VEnv} {source : VInductDecl}
+    {gen : source.BlockGenerationChecked}
+    (hadd : VEnv.addInductBlockGeneration env gen = some env') :
+    env'.structEtas = env.structEtas := by
+  unfold VEnv.addInductBlockGeneration at hadd
+  obtain ⟨typeEnv, htypes, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrecs, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.rulesFold_structEtas_eq recEnv gen.generatedRules).trans <|
+    (VEnv.constFold_structEtas_eq hrecs).trans <|
+      (VEnv.constFold_structEtas_eq hctors).trans <|
+        VEnv.constFold_structEtas_eq htypes
+
+theorem VEnv.addInductNested_structEtas_eq
+    {env env' : VEnv} {source : VInductDecl}
+    {nested : source.NestedBlockChecked}
+    (hadd : VEnv.addInductNested env nested = some env') :
+    env'.structEtas = env.structEtas := by
+  unfold VEnv.addInductNested at hadd
+  obtain ⟨typeEnv, htypes, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrecs, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.rulesFold_structEtas_eq recEnv nested.generatedRules).trans <|
+    (VEnv.constFold_structEtas_eq hrecs).trans <|
+      (VEnv.constFold_structEtas_eq hctors).trans <|
+        VEnv.constFold_structEtas_eq htypes
+
+theorem VEnv.addInductGeneration_le_theory
+    {env env' : VEnv} {source : VInductDecl}
+    {gen : source.GenerationChecked}
+    (hadd : VEnv.addInductGeneration env gen = some env') : env ≤ env' := by
+  unfold VEnv.addInductGeneration at hadd
+  obtain ⟨typeEnv, htype, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrec, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.addConst_le htype).trans <|
+    (VEnv.constFold_le hctors).trans <|
+      (VEnv.addConst_le hrec).trans
+        (VEnv.rulesFold_le recEnv gen.generatedRules)
+
+theorem VEnv.addInductBlockGeneration_le_theory
+    {env env' : VEnv} {source : VInductDecl}
+    {gen : source.BlockGenerationChecked}
+    (hadd : VEnv.addInductBlockGeneration env gen = some env') : env ≤ env' := by
+  unfold VEnv.addInductBlockGeneration at hadd
+  obtain ⟨typeEnv, htypes, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrecs, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.constFold_le htypes).trans <|
+    (VEnv.constFold_le hctors).trans <|
+      (VEnv.constFold_le hrecs).trans
+        (VEnv.rulesFold_le recEnv gen.generatedRules)
+
+theorem VEnv.addInductNested_le_theory
+    {env env' : VEnv} {source : VInductDecl}
+    {nested : source.NestedBlockChecked}
+    (hadd : VEnv.addInductNested env nested = some env') : env ≤ env' := by
+  unfold VEnv.addInductNested at hadd
+  obtain ⟨typeEnv, htypes, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨ctorEnv, hctors, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  obtain ⟨recEnv, hrecs, hadd⟩ := Option.bind_eq_some_iff.1 hadd
+  cases hadd
+  exact (VEnv.constFold_le htypes).trans <|
+    (VEnv.constFold_le hctors).trans <|
+      (VEnv.constFold_le hrecs).trans
+        (VEnv.rulesFold_le recEnv nested.generatedRules)
+
+theorem VDecl.WF.le : VDecl.WF env decl env' → env ≤ env'
+  | .axiom _ hadd => VEnv.addConst_le hadd
+  | .def _ hadd => (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  | .mutualDef _ hadd _ =>
+      (VEnv.addConsts_le hadd).trans (VEnv.addDefEqs_le_theory _)
+  | .opaque _ hadd => VEnv.addConst_le hadd
+  | .example _ => .rfl
+  | .quot _ hadd => VEnv.addQuot_le hadd
+  | .induct _ hadd => VEnv.addInductGeneration_le_theory hadd
+  | .inductBlock _ hadd => VEnv.addInductBlockGeneration_le_theory hadd
+  | .inductNested _ hadd => VEnv.addInductNested_le_theory hadd
+
+theorem VDecl.WF.structEtas_eq :
+    VDecl.WF env decl env' → env'.structEtas = env.structEtas
+  | .axiom _ hadd => VEnv.addConst_structEtas_eq hadd
+  | @«def» env middle ci _ hadd => by
+      change env.structEtas = middle.structEtas
+      exact VEnv.addConst_structEtas_eq hadd
+  | .mutualDef _ hadd _ =>
+      (VEnv.addDefEqs_structEtas_eq _ _).trans
+        (VEnv.addConsts_structEtas_eq hadd)
+  | .opaque _ hadd => VEnv.addConst_structEtas_eq hadd
+  | .example _ => rfl
+  | .quot _ hadd => VEnv.addQuot_structEtas_eq hadd
+  | .induct _ hadd => VEnv.addInductGeneration_structEtas_eq hadd
+  | .inductBlock _ hadd =>
+      VEnv.addInductBlockGeneration_structEtas_eq hadd
+  | .inductNested _ hadd => VEnv.addInductNested_structEtas_eq hadd
+
 theorem VEnv.WF.ordered : WF env → Ordered env
   | ⟨ds, H⟩ => by
     induction H with
@@ -107,6 +316,25 @@ theorem VEnv.WF.ordered : WF env → Ordered env
       | induct h1 h2 => exact addInductGeneration_WF ih h1 h2
       | inductBlock h1 h2 => exact addInductBlockGeneration_WF ih h1 h2
       | inductNested h1 h2 => exact VEnv.addInductNested_WF ih h1 h2
-    | structEta hwf _ ih => exact .structEta ih hwf
+    | structEta hwf _ ih => exact .structEta ih hwf.toFoundationWF
 
 instance : CoeOut (VEnv.WF env) env.Ordered := ⟨(·.ordered)⟩
+
+/-- Recover the full subject-reduction certificate for a registered
+structure-eta rule from the well-formed environment history.  `Ordered`
+retains only the closure fragment needed by structural metatheory; the full
+certificate deliberately lives here. -/
+theorem VEnv.WF.structEtaWF (henv : VEnv.WF env)
+    (hregistered : env.structEtas rule) : VStructEta.WF rule env := by
+  rcases henv with ⟨decls, history⟩
+  induction history with
+  | empty => cases hregistered
+  | decl hdecl _ ih =>
+      have hbefore := hregistered
+      rw [hdecl.structEtas_eq] at hbefore
+      exact (ih hbefore).mono hdecl.le
+  | structEta hrule _ ih =>
+      change _ = _ ∨ _ at hregistered
+      rcases hregistered with rfl | hregistered
+      · exact hrule.mono VEnv.addStructEta_le
+      · exact (ih hregistered).mono VEnv.addStructEta_le

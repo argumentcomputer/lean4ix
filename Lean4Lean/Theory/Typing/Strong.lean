@@ -190,7 +190,7 @@ theorem IsDefEqStrong.weakN (W : Ctx.LiftN n k Γ Γ') (H : env.IsDefEqStrong U 
   | @structEta rule levels _ params _ u major hreg hlevels
       hlevelsLength hparamsLength hparamsSpine hu _ _ _ ihType ihMajor ihRebuild =>
     have hparamsSpine' := hparamsSpine.weakN henv W
-    rw [(henv.structEtaWF hreg).familyType_closed.instL.liftN_eq
+    rw [(henv.structEtaFoundationWF hreg).familyType_closed.instL.liftN_eq
       (Nat.zero_le _)] at hparamsSpine'
     have htype := ihType W
     rw [VStructEta.structureType_liftN] at htype
@@ -471,7 +471,7 @@ theorem IsDefEqStrong.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) (H : env.
   | @structEta rule levels _ params _ u major hreg hlevels
       hlevelsLength hparamsLength hparamsSpine hu _ _ _ ihType ihMajor ihRebuild =>
     have hparamsSpine' := SpineWF.instN henv W h₀.defeq hparamsSpine
-    rw [(henv.structEtaWF hreg).familyType_closed.instL.instN_eq
+    rw [(henv.structEtaFoundationWF hreg).familyType_closed.instL.instN_eq
       (Nat.zero_le _)] at hparamsSpine'
     have htype := ihType W hΓ
     rw [VStructEta.structureType_instN] at htype

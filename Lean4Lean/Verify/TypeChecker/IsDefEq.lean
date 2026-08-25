@@ -474,7 +474,7 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
   have hty₁Struct := VEnv.IsDefEqU.trans c.Ewf c.Δwf
     (htypes htypesTrue) hty₂Struct
   have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hty₁Struct
-  have heta := artifact.eta c.Δwf hlevelsWF hlevelsLength
+  have heta := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
     hparamsLength ⟨_, hparamsSpine⟩ haStruct
   have hF1Size : F1.size = args'.length := by
     calc
@@ -1125,9 +1125,9 @@ theorem isDefEqUnitLike.WF_of_structureEta {c : VContext} {s : VState}
   have hstructTy₂ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq (h hb)
   have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hstructTy₁.symm
   have hbStruct := bTyped.defeqU_r c.Ewf c.Δwf hstructTy₂.symm
-  have heta₁ := artifact.eta c.Δwf hlevelsWF hlevelsLength
+  have heta₁ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
     hparamsLength ⟨_, hparamsFamily⟩ haStruct
-  have heta₂ := artifact.eta c.Δwf hlevelsWF hlevelsLength
+  have heta₂ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
     hparamsLength ⟨_, hparamsFamily⟩ hbStruct
   have hfieldsLength : artifact.projection.view.fields.length = 0 := by
     calc

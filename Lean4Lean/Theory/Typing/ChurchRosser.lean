@@ -298,7 +298,7 @@ theorem StructEq.weakN (W : Ctx.LiftN n k Γ Γ')
       hmajor₁ hmajor₂ hrebuild₁ hrebuild₂ hmajorEq hrebuildEq
       hleft hright =>
     have hparamsSpine := hparamsSpine.weakN henv W
-    rw [(henv.ordered.structEtaWF hreg).familyType_closed.instL.liftN_eq
+    rw [(henv.ordered.structEtaFoundationWF hreg).familyType_closed.instL.liftN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor₁ := hmajor₁.weakN henv W
     have hmajor₂ := hmajor₂.weakN henv W
@@ -318,7 +318,7 @@ theorem StructEq.weakN (W : Ctx.LiftN n k Γ Γ')
       hmajor₁ hmajor₂ hrebuild₁ hrebuild₂ hmajorEq hrebuildEq
       hleft hright =>
     have hparamsSpine := hparamsSpine.weakN henv W
-    rw [(henv.ordered.structEtaWF hreg).familyType_closed.instL.liftN_eq
+    rw [(henv.ordered.structEtaFoundationWF hreg).familyType_closed.instL.liftN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor₁ := hmajor₁.weakN henv W
     have hmajor₂ := hmajor₂.weakN henv W
@@ -347,7 +347,7 @@ theorem StructEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
       hmajor₁ hmajor₂ hrebuild₁ hrebuild₂ hmajorEq hrebuildEq
       hleft hright =>
     have hparamsSpine := hparamsSpine.instN henv W h₀
-    rw [(henv.ordered.structEtaWF hreg).familyType_closed.instL.instN_eq
+    rw [(henv.ordered.structEtaFoundationWF hreg).familyType_closed.instL.instN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor₁ := hmajor₁.instN henv W h₀
     have hmajor₂ := hmajor₂.instN henv W h₀
@@ -367,7 +367,7 @@ theorem StructEq.instN (W : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ)
       hmajor₁ hmajor₂ hrebuild₁ hrebuild₂ hmajorEq hrebuildEq
       hleft hright =>
     have hparamsSpine := hparamsSpine.instN henv W h₀
-    rw [(henv.ordered.structEtaWF hreg).familyType_closed.instL.instN_eq
+    rw [(henv.ordered.structEtaFoundationWF hreg).familyType_closed.instL.instN_eq
       (Nat.zero_le _)] at hparamsSpine
     have hmajor₁ := hmajor₁.instN henv W h₀
     have hmajor₂ := hmajor₂.instN henv W h₀
@@ -652,8 +652,8 @@ theorem StructEq.weakN_inv_DFC
         (hseed.defeqDFC henv W₂)
     have hΓ := hΓ₂.weakN_inv henv W
     have hmajor := h'.hasType.2
-    have hrebuild := (henv.ordered.structEtaWF hreg).rebuild_hasType
-      VEnv.LE.rfl hΓ hlevels' hlevelsLength' hparamsLength'
+    have hrebuild := (henv.structEtaWF hreg).rebuild_hasType
+      VEnv.LE.rfl henv.conversionRegular hΓ hlevels' hlevelsLength' hparamsLength'
         ⟨resultLevel', hparamsSpine'⟩ hmajor
     have heta := IsDefEq.structEta hreg hlevels' hlevelsLength'
       hparamsLength' hparamsSpine' hmajor hrebuild
@@ -679,8 +679,8 @@ theorem StructEq.weakN_inv_DFC
         (hseed.defeqDFC henv W₂)
     have hΓ := hΓ₂.weakN_inv henv W
     have hmajor := h'.hasType.2
-    have hrebuild := (henv.ordered.structEtaWF hreg).rebuild_hasType
-      VEnv.LE.rfl hΓ hlevels' hlevelsLength' hparamsLength'
+    have hrebuild := (henv.structEtaWF hreg).rebuild_hasType
+      VEnv.LE.rfl henv.conversionRegular hΓ hlevels' hlevelsLength' hparamsLength'
         ⟨resultLevel', hparamsSpine'⟩ hmajor
     have heta := IsDefEq.structEta hreg hlevels' hlevelsLength'
       hparamsLength' hparamsSpine' hmajor hrebuild
