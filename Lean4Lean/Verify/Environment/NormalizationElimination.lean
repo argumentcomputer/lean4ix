@@ -316,6 +316,29 @@ theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_wf
       apply ih
       exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
 
+/-- Every constructor accepted by a declaration fold was absent from the
+fold's input family environment.  Later name checks reflect backwards across
+the preceding fresh constructor insertions. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_fresh
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    ∀ info ∈ infos, env.constants.find? info.name = none := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact VInductDecl.checkName_constants_fresh checkName
+      · have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.ctorInfo inserted)
+          insertedFresh
+        have tailFresh := ih nextWF info member
+        change (startEnv.constants.insert inserted.name
+          (.ctorInfo inserted)).find? info.name = none at tailFresh
+        rw [wf.find?_insert] at tailFresh
+        split at tailFresh <;> simp_all
+
 /-- Constructor declaration preserves every lookup already present in its
 input map. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.preserve_map_lookup

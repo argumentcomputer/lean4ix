@@ -470,6 +470,55 @@ theorem ProjectionReady.addInductInfo
     · cases hfind
     · exact hfind
 
+/-- Projection readiness also survives staging a fresh singleton family when
+its sole constructor has not yet been declared.  This is the exact
+family-only boundary used by the ordinary inductive producer. -/
+theorem ProjectionReady.addInductInfo_of_ctor_absent
+    {env : Environment} (mapWF : env.constants.WF)
+    (info' : InductiveVal) (hfresh : env.find? info'.name = none)
+    (ctor : Name) (hctors : info'.ctors = [ctor])
+    (hctor : env.find? ctor = none)
+    {venv venv' : VEnv} (hle : venv ≤ venv')
+    (self : ProjectionReady env venv) :
+    ProjectionReady (env.add (.inductInfo info')) venv' where
+  infer name info hfind hready := by
+    by_cases heq : info'.name = name
+    · subst name
+      rw [Environment.isProjectionReadyStructure_add_inductInfo_self_of_ctor_absent
+        mapWF info' hfresh ctor hctors hctor] at hready
+      contradiction
+    · have hfind' : env.find? name = some (.inductInfo info) := by
+        rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]
+          at hfind
+        have infoName : (.inductInfo info' : ConstantInfo).name =
+            info'.name := rfl
+        simpa only [infoName, if_neg heq] using hfind
+      have hready' : env.isProjectionReadyStructure name = true := by
+        rw [← Environment.isProjectionReadyStructure_add_inductInfo
+          mapWF info' hfresh heq]
+        exact hready
+      obtain ⟨artifact⟩ := self.infer name info hfind' hready'
+      exact ⟨artifact.addInductInfo mapWF info' hfresh hle⟩
+  constructorHead name info hfind := by
+    apply (self.constructorHead name info ?_).mono hle
+    rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh] at hfind
+    split at hfind
+    · cases hfind
+    · exact hfind
+  constructorNumParams view info hview hfields hfind := by
+    apply self.constructorNumParams_mono hle view info hview hfields
+    rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh] at hfind
+    split at hfind
+    · cases hfind
+    · exact hfind
+  constructorNumParams_mono hle' view info hview hfields hfind := by
+    apply self.constructorNumParams_mono (hle.trans hle') view info hview
+      hfields
+    rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh] at hfind
+    split at hfind
+    · cases hfind
+    · exact hfind
+
 /-- Projection readiness is monotone in the abstract model. -/
 theorem ProjectionReady.mono
     {venv venv' : VEnv} (hle : venv ≤ venv')
@@ -731,6 +780,68 @@ theorem StructureEtaReady.addInductInfo
       rw [Environment.isNonRecStructure_add_inductInfo_self
         mapWF info' hfresh hctors] at hshape
       contradiction
+    · have hfamily' : env.find? familyName =
+          some (.inductInfo familyInfo) := by
+        rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]
+          at hfamily
+        have infoName : (.inductInfo info' : ConstantInfo).name =
+            info'.name := rfl
+        simpa only [infoName, if_neg heq] using hfamily
+      have hconstructor' : env.find? constructorName =
+          some (.ctorInfo constructorInfo) := by
+        rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]
+          at hconstructor
+        split at hconstructor
+        · cases hconstructor
+        · exact hconstructor
+      have hnonrec' :
+          env.isNonRecStructureConstructor familyName constructorName = true := by
+        unfold Kernel.Environment.isNonRecStructureConstructor at hnonrec ⊢
+        rw [hfamily, hconstructor] at hnonrec
+        rw [hfamily', hconstructor']
+        exact hnonrec
+      obtain ⟨artifact⟩ := self.resolve familyName familyInfo
+        constructorName constructorInfo hfamily' hconstructor' hnonrec'
+      exact ⟨artifact.addInductInfo mapWF info' hfresh hle ord'⟩
+
+/-- Structure-eta readiness survives the same singleton family-only stage.
+The newly inserted family cannot activate the runtime structure test because
+its sole constructor is absent, while all older artifacts are transported. -/
+theorem StructureEtaReady.addInductInfo_of_ctor_absent
+    {env : Environment} (mapWF : env.constants.WF)
+    (info' : InductiveVal) (hfresh : env.find? info'.name = none)
+    (ctor : Name) (hctors : info'.ctors = [ctor])
+    (hctor : env.find? ctor = none)
+    {venv venv' : VEnv} (hle : venv ≤ venv') (ord' : venv'.Ordered)
+    (self : StructureEtaReady env venv) :
+    StructureEtaReady (env.add (.inductInfo info')) venv' where
+  resolve familyName familyInfo constructorName constructorInfo
+      hfamily hconstructor hnonrec := by
+    by_cases heq : info'.name = familyName
+    · subst familyName
+      have selfFind :
+          (env.add (.inductInfo info')).find? info'.name =
+            some (.inductInfo info') := by
+        rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]
+        have infoName : (.inductInfo info' : ConstantInfo).name =
+            info'.name := rfl
+        simp only [infoName, if_pos]
+      rw [selfFind] at hfamily
+      cases hfamily
+      have shape := Kernel.Environment.isNonRecStructureConstructor_info
+        selfFind hconstructor hnonrec
+      have constructorMember : constructorName ∈ info'.ctors := by
+        rw [shape.2.1]
+        simp
+      rw [hctors] at constructorMember
+      simp only [List.mem_singleton] at constructorMember
+      subst constructorName
+      rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]
+        at hconstructor
+      split at hconstructor
+      · cases hconstructor
+      · rw [hctor] at hconstructor
+        cases hconstructor
     · have hfamily' : env.find? familyName =
           some (.inductInfo familyInfo) := by
         rw [Environment.find?_add_eq mapWF (.inductInfo info') hfresh]

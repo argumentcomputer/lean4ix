@@ -2936,6 +2936,24 @@ theorem declaredConstructorInfos_toArray
           indType.ctors := by
   simp [declaredConstructorInfos]
 
+/-- Every source constructor occurs by name in the exact metadata list
+synthesized for its family. -/
+theorem declaredConstructorInfosFor_name
+    (stats : InductiveStats) (induct : Name) (isUnsafe : Bool)
+    (context : Context) (cidx : Nat) (ctors : List Constructor)
+    {ctor : Constructor} (member : ctor ∈ ctors) :
+    ∃ info ∈ declaredConstructorInfosFor stats induct isUnsafe context cidx
+        ctors,
+      info.name = ctor.name := by
+  induction ctors generalizing cidx with
+  | nil => contradiction
+  | cons head tail ih =>
+      rcases List.mem_cons.mp member with rfl | member
+      · exact ⟨declaredConstructorInfo stats induct ctor cidx isUnsafe
+          context, .head _, rfl⟩
+      · obtain ⟨info, infoMember, nameEq⟩ := ih (cidx + 1) member
+        exact ⟨info, .tail _ infoMember, nameEq⟩
+
 /-- Every constructor metadata record synthesized by one family fold carries
 the validator's common parameter count. -/
 theorem declaredConstructorInfosFor_numParams

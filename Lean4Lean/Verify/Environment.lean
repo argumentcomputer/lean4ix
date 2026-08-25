@@ -1,5 +1,6 @@
 import Lean4Lean.Verify.Environment.Quotient
 import Lean4Lean.Verify.Environment.NormalizationElimination
+import Lean4Lean.Verify.Environment.NormalizationReadiness
 import Lean4Lean.Verify.Environment.PrimitiveRecursors
 
 namespace Lean4Lean
@@ -1401,6 +1402,113 @@ theorem
   execution.flattened.eliminationExecution.normalization
     |>.constructorValidation.sources_closed
 
+/-- Every constructor named by the retained family metadata is absent at the
+family-only host endpoint.  The proof aligns that family record back to its
+flattened source, locates the corresponding synthesized constructor record,
+and reads freshness from the later constructor-declaration trace. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.flattenedFamilyConstructorsAbsent
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (inputMapWF : env.constants.WF) :
+    ∀ info ∈
+        execution.flattened.eliminationExecution.normalization.declaredInfos,
+      ∀ ctor ∈ info.ctors,
+        execution.flattened.eliminationExecution.normalization.familyEnv.find?
+          ctor = none := by
+  let normalization :=
+    execution.flattened.eliminationExecution.normalization
+  have normalizationRun :=
+    execution.flattened.normalization_run execution.flattenedRun
+  have nindicesSize : normalization.stats.nindices.size =
+      execution.nested.types.length :=
+    normalization.validationNindicesSize_all normalizationRun
+  have metadata : List.Forall₂
+      (fun source info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo normalization.stats nparams
+          execution.nested.types.toArray source numIndices
+          execution.nested.aux2nested.size isUnsafe
+          normalization.validationContext)
+      execution.nested.types normalization.declaredInfos := by
+    simpa only [normalization,
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size
+        isUnsafe normalization.validationContext (by simpa using nindicesSize)
+  have validationMapWF : normalization.validationContext.env.constants.WF := by
+    simpa only [normalization, execution.flattenedValidationEnv_eq] using
+      inputMapWF
+  have familyMapWF := normalization.declareTrace.map_wf validationMapWF
+  have constructorFresh :=
+    execution.flattened.eliminationExecution.declareConstructorTrace
+      |>.names_fresh familyMapWF
+  intro info infoMember ctor ctorMember
+  obtain ⟨source, sourceMember, numIndices, infoEq⟩ :=
+    Lean4Lean.List.Forall₂.forall_exists_r metadata info infoMember
+  rw [infoEq] at ctorMember
+  change ctor ∈ source.ctors.map (·.name) at ctorMember
+  obtain ⟨sourceCtor, sourceCtorMember, sourceCtorName⟩ :=
+    List.mem_map.mp ctorMember
+  obtain ⟨ctorInfo, ctorInfoMember, ctorInfoName⟩ :=
+    AddInductive.declaredConstructorInfosFor_name normalization.stats
+      source.name isUnsafe
+      execution.flattened.eliminationExecution.constructorContext 0
+      source.ctors sourceCtorMember
+  have ctorInfoAllMember : ctorInfo ∈
+      execution.flattened.eliminationExecution.declaredConstructorInfos := by
+    simp only [
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+      AddInductive.declaredConstructorInfos_toArray, List.mem_flatMap]
+    exact ⟨source, sourceMember, ctorInfoMember⟩
+  have freshMap := constructorFresh ctorInfo ctorInfoAllMember
+  have freshFind : normalization.familyEnv.find? ctorInfo.name = none := by
+    change normalization.familyEnv.constants.find?' ctorInfo.name = none
+    rw [familyMapWF.find?'_eq_find?]
+    exact freshMap
+  simpa only [ctorInfoName, sourceCtorName] using freshFind
+
+/-- The exact family-only endpoint selected by outer staging inherits both
+readiness capabilities from the input model.  Multi-constructor families are
+inert by shape; singleton families are inert because the retained later
+constructor trace proves their sole constructor has not been declared yet. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedFamilySourceStagingResult.endpointReadiness
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (family : execution.FlattenedFamilySourceStagingResult ves)
+    (wf : ves.WF env) :
+    ProjectionReady
+        execution.flattened.eliminationExecution.normalization.familyEnv
+        family.staging.familyInsertion.blockEnv ∧
+      StructureEtaReady
+        execution.flattened.eliminationExecution.normalization.familyEnv
+        family.staging.familyInsertion.blockEnv := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
+  have evidence : List.Forall₂
+      (fun _ raw => raw.toVConstant.WF (ves.venv .safe))
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      family.familyDecl.types :=
+    Lean4Lean.List.Forall₂.imp
+      (h := family.staging.declarationEvidence) fun _ _ related => related.2
+  exact VInductDecl.declarationTraceConstructorAbsentReadiness
+    family.staging.familyInsertion.kernelTrace family.staging.stage evidence
+    (execution.flattenedFamilyConstructorsAbsent inputMapWF)
+    validationMapWF (wf.tr (safety := .safe)).wf.ordered
+    (by simpa only [execution.flattenedValidationEnv_eq] using
+      wf.projectionReady (safety := .safe))
+    (by simpa only [execution.flattenedValidationEnv_eq] using
+      wf.structureEtaReady (safety := .safe))
+
 /-- Enrich a family-only outer staging result with the exact retained
 constructor traversals.  Constructor closedness comes from validation; only
 readiness at the already-computed family endpoint remains explicit. -/
@@ -1423,6 +1531,24 @@ theorem
         family.staging) :=
   family.staging.enrich projectionReady structureEtaReady
     execution.flattenedConstructorSourcesClosed
+
+/-- Enrich the retained outer family stage without any caller-selected
+readiness premise.  Both capabilities are reconstructed from the same input
+well-formedness and the producer-owned family/constructor declaration traces. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedFamilySourceStagingResult.enrich_of_wf
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (family : execution.FlattenedFamilySourceStagingResult ves)
+    (wf : ves.WF env) :
+    Nonempty
+      (VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
+        family.staging) := by
+  have readiness := family.endpointReadiness wf
+  exact family.enrich readiness.1 readiness.2
 
 /-- Thread an already translated raw family list through the retained outer
 execution.  Default safe nonprimitive execution fixes the candidate root's
@@ -1513,6 +1639,28 @@ theorem
     rw [types_eq] at member
     exact (execution.inputClosed source member).1
   · exact terminals
+
+/-- In the ordinary source-preserving case, the retained outer execution now
+constructs the complete enriched pre-generation hierarchy.  The only explicit
+semantic premise left here is the source-indexed family terminal-sort fact. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.exists_flattenedEnrichedStaging_of_types_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs} (wf : ves.WF env)
+    (types_eq : execution.nested.types = types)
+    (terminals : VInductDecl.CandidateBlockFamilyTerminalSortList
+      execution.flattened.candidate.families) :
+    ∃ family : execution.FlattenedFamilySourceStagingResult ves,
+      Nonempty
+        (VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
+          family.staging) := by
+  obtain ⟨family⟩ :=
+    execution.exists_flattenedFamilySourceStaging_of_types_eq wf types_eq
+      terminals
+  exact ⟨family, family.enrich_of_wf wf⟩
 
 /-- A recognized primitive execution's exact family metadata translates to
 the canonical Theory family inventory.  The proof selects the sole retained
