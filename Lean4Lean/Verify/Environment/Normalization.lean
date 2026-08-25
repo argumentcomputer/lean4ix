@@ -784,6 +784,160 @@ theorem FamilyComparisonRhsLocal.isDefEqRun
     contextRun.context contextRun.context_eq rfl rfl rfl
     contextRun.state_wf lhsTr rhsTr step.context.fuel.recDepth rfl⟩⟩
 
+/-- Complete semantic ownership of one retained family-parameter comparison.
+
+The verified context and both Theory endpoints are selected by the exact
+validator execution.  In particular, the LHS is not supplied independently
+after the comparison has been interpreted. -/
+def FamilyComparisonSemanticRun
+    (step : AddInductive.CandidateIsDefEqStep) : Prop :=
+  ∃ (contextRun : CandidateContextRun step.context) (lhs' rhs' : VExpr),
+    Nonempty
+      (IsDefEqRun contextRun.context.venv contextRun.context.lparams
+        contextRun.context.vlctx step.lhs step.rhs lhs' rhs')
+
+/-- Package one retained WHNF observation and keep the strict Theory
+translation selected for its exact kernel result. -/
+theorem WhnfRun.exists_ofCandidateStep
+    (step : AddInductive.CandidateWhnfStep)
+    (hvalid : step.Valid)
+    (contextRun : CandidateContextRun step.context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS step.source source')
+    (recursionFuel : Nat)
+    (hdepth : step.context.fuel.recDepth = recursionFuel + 1) :
+    ∃ result', contextRun.context.TrExprS step.result result' ∧
+      Nonempty (WhnfRun contextRun.context.venv
+        contextRun.context.lparams contextRun.context.vlctx
+        step.source step.result source' result') := by
+  obtain ⟨state, run⟩ := step.innerRun recursionFuel hdepth hvalid
+  rw [← contextRun.context_eq] at run
+  obtain ⟨_, _, _, _, _, resultTranslation⟩ :=
+    (Inner.whnf'.WF source_tr
+      (Methods.withFuel recursionFuel) Methods.withFuel.WF)
+      contextRun.state_wf step.result state run
+  obtain ⟨result', result_tr, _⟩ := resultTranslation
+  exact ⟨result', result_tr, ⟨WhnfRun.ofCandidateStep step hvalid
+    contextRun.context contextRun.context_eq rfl rfl rfl
+    contextRun.state_wf source_tr result_tr
+    recursionFuel hdepth⟩⟩
+
+/-- Interpret every shared-parameter comparison in one later-family
+telescope from the strict translation of its exact validator root.
+
+At a shared parameter, the producer-owned local lookup translates both the
+stored parameter type and the free variable used to instantiate the remaining
+family body.  The retained equality execution then retargets that free
+variable to the current raw domain, so the exact retained WHNF step supplies
+the next source translation.  Once the parameter boundary is reached, the
+comparison list is empty and ordinary index binders require no interpretation
+here. -/
+theorem familyTypeParameterComparison_semanticRuns_of_later
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (paramsSize : stats.params.size = nparams)
+    (localState : FamilyParameterLocalState stats context)
+    (contextRun : CandidateContextRun context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS source source')
+    (whnfFuel : Nat)
+    (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
+    ∀ step ∈ trace.comparisons, FamilyComparisonSemanticRun step := by
+  induction trace generalizing source' with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      rw [later] at firstFamily
+      contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      let @TrExprS.forallE _ _ domain' body' _ _ _ _ _
+          domainType bodyType domain_tr body_tr := source_tr
+      have parameterMember : stats.params[i]! ∈ stats.params.toList := by
+        rw [show stats.params[i]! = stats.params[i] by
+          simp [isParameter, paramsSize]]
+        exact List.getElem_mem (by
+          simpa only [Array.length_toList, paramsSize] using isParameter)
+      obtain ⟨fv, decl, parameterEq, parameterFind⟩ :=
+        localState.parameters parameterMember
+      have parameterTypeRun' : AddInductive.getType (.fvar fv) context =
+          .ok parameterType := by
+        rw [← parameterEq]
+        exact parameterTypeRun
+      obtain ⟨fvValue, parameterType', fvFind, parameterType_tr⟩ :=
+        contextRun.getTypeTranslation parameterFind parameterTypeRun'
+      have fv_tr : contextRun.context.TrExprS (.fvar fv) fvValue :=
+        .fvar fvFind
+      let comparisonRun : IsDefEqRun contextRun.context.venv
+          contextRun.context.lparams contextRun.context.vlctx domain
+          parameterType _ _ :=
+        IsDefEqRun.ofCandidateStep ⟨context, domain, parameterType⟩ defeq
+          contextRun.context contextRun.context_eq rfl rfl rfl
+          contextRun.state_wf domain_tr parameterType_tr
+          context.fuel.recDepth rfl
+      have henv : VEnv.WF contextRun.context.venv := contextRun.context.Ewf
+      have hctx : OnCtx contextRun.context.vlctx.toCtx
+          (contextRun.context.venv.IsType
+            contextRun.context.lparams.length) :=
+        contextRun.context.Δwf.toCtx
+      obtain ⟨u, domainHasType⟩ := domainType
+      have domainDef : contextRun.context.venv.IsDefEq
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          _ _ (.sort u) :=
+        comparisonRun.isDefEqU.of_l henv hctx domainHasType
+      have fvHasParameterType : contextRun.context.venv.HasType
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          fvValue parameterType' :=
+        contextRun.context.Δwf.find?_wf contextRun.context.Ewf.ordered fvFind
+      have fvHasDomain : contextRun.context.venv.HasType
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          fvValue _ :=
+        domainDef.symm.defeq fvHasParameterType
+      have bodyInst_tr : contextRun.context.TrExprS
+          (body.instantiate1 (.fvar fv)) (body'.inst fvValue) := by
+        simpa only [Expr.instantiate1_eq] using
+          body_tr.inst contextRun.context.Ewf.ordered fvHasDomain fv_tr
+      have bodyInst_tr' : contextRun.context.TrExprS
+          (body.instantiate1 stats.params[i]!) (body'.inst fvValue) := by
+        rw [parameterEq]
+        exact bodyInst_tr
+      obtain ⟨view', view_tr, _viewRun⟩ :=
+        WhnfRun.exists_ofCandidateStep ⟨context,
+          body.instantiate1 stats.params[i]!, view⟩ whnf contextRun
+          (body'.inst fvValue) bodyInst_tr' whnfFuel whnfDepth
+      have tailRuns := ih later paramsSize localState contextRun view'
+        view_tr whnfDepth
+      intro step member
+      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+        List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨contextRun, _, _, ⟨comparisonRun⟩⟩
+      · exact tailRuns step member
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      have remaining : nparams - i = 0 := by omega
+      have comparisonLength :=
+        (AddInductive.FamilyTypeParameterComparisonTrace.index stats context
+          i nindices fuel name domain body view binderInfo notParameter whnf
+          tail).comparisons_length_of_laterFamily later
+      rw [remaining] at comparisonLength
+      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons]
+        at comparisonLength
+      have comparisonsEmpty : tail.comparisons = [] := by
+        cases hcomparisons : tail.comparisons with
+        | nil => rfl
+        | cons head rest =>
+            rw [hcomparisons] at comparisonLength
+            simp at comparisonLength
+      intro step member
+      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+        comparisonsEmpty, List.not_mem_nil] at member
+  | terminal =>
+      intro step member
+      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+        List.not_mem_nil] at member
+
 private def FamilyParameterCountInvariant (nparams i : Nat)
     (stats : AddInductive.InductiveStats) : Prop :=
   i ≤ nparams ∧
@@ -1082,32 +1236,6 @@ theorem CheckTypeRun.exists_ofCandidateStepFVars
     contextRun.context contextRun.context_eq rfl rfl rfl
     contextRun.state_wf source_tr inferred_tr
     step.context.fuel.recDepth rfl⟩⟩
-
-/-- Package one retained WHNF observation and keep the strict Theory
-translation selected for its exact kernel result. -/
-theorem WhnfRun.exists_ofCandidateStep
-    (step : AddInductive.CandidateWhnfStep)
-    (hvalid : step.Valid)
-    (contextRun : CandidateContextRun step.context)
-    (source' : VExpr)
-    (source_tr : contextRun.context.TrExprS step.source source')
-    (recursionFuel : Nat)
-    (hdepth : step.context.fuel.recDepth = recursionFuel + 1) :
-    ∃ result', contextRun.context.TrExprS step.result result' ∧
-      Nonempty (WhnfRun contextRun.context.venv
-        contextRun.context.lparams contextRun.context.vlctx
-        step.source step.result source' result') := by
-  obtain ⟨state, run⟩ := step.innerRun recursionFuel hdepth hvalid
-  rw [← contextRun.context_eq] at run
-  obtain ⟨_, _, _, _, _, resultTranslation⟩ :=
-    (Inner.whnf'.WF source_tr
-      (Methods.withFuel recursionFuel) Methods.withFuel.WF)
-      contextRun.state_wf step.result state run
-  obtain ⟨result', result_tr, _⟩ := resultTranslation
-  exact ⟨result', result_tr, ⟨WhnfRun.ofCandidateStep step hvalid
-    contextRun.context contextRun.context_eq rfl rfl rfl
-    contextRun.state_wf source_tr result_tr
-    recursionFuel hdepth⟩⟩
 
 /-- Extend a verified candidate context by precisely the raw local declaration
 used by `AddInductive.Context.pushLocalDecl`.
@@ -12089,6 +12217,40 @@ info: 'Lean4Lean.TypeChecker.FamilyComparisonRhsLocal.isDefEqRun' depends on axi
 -/
 #guard_msgs in
 #print axioms TypeChecker.FamilyComparisonRhsLocal.isDefEqRun
+
+/--
+info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticRuns_of_later' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.familyTypeParameterComparison_semanticRuns_of_later
 
 /--
 info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparisonRhsLocal' depends on axioms: [propext,

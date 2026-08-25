@@ -197,6 +197,8 @@ open Lean
 #check Lean4Lean.TypeChecker.FamilyComparisonRhsLocal
 #check Lean4Lean.TypeChecker.FamilyComparisonRhsLocal.translation
 #check Lean4Lean.TypeChecker.FamilyComparisonRhsLocal.isDefEqRun
+#check Lean4Lean.TypeChecker.FamilyComparisonSemanticRun
+#check Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticRuns_of_later
 #check Lean4Lean.AddInductive.FamilyValidationBlockRun.parameterComparisonRhsLocal
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparisonRhsLocal
 #check Lean4Lean.ElimNestedInductive.Result.types_nonempty
