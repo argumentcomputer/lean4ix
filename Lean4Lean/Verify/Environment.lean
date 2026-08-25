@@ -1700,6 +1700,244 @@ theorem
           family.staging) :=
   execution.exists_flattenedEnrichedStaging wf
 
+/-! ## Exact flattened generation transaction staging -/
+
+/-- The family extraction and constructor enrichment selected by one retained
+outer execution, packaged as a single dependent value.  Keeping the enriched
+raw declaration attached to its family-only staging owner avoids choosing a
+parallel Theory source when the analyzer and metadata phases are connected. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    (ves : VEnvs) where
+  family : execution.FlattenedFamilySourceStagingResult ves
+  enriched : VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
+    family.staging
+
+/-- The complete raw Theory block selected by exact family extraction and
+constructor enrichment. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.source
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) : VInductDecl :=
+  staged.enriched.enrichment.toRawDecl staged.family.familyDecl
+
+/-- Constructor enrichment preserves the family declaration's parameter
+count, so the selected raw block is indexed by the retained outer count. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.source_nparams_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) :
+    staged.source.nparams = nparams := by
+  simpa only [FlattenedEnrichedStagingResult.source,
+    VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+    staged.family.nparams_eq
+
+/-- The complete semantic input carried by the enriched staging owner. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.semanticInput
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) :
+    VInductDecl.NormalizationCandidateBlockSemanticInput
+      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      execution.flattened.candidate staged.source :=
+  staged.enriched.semantic.semanticInput
+
+/-- Reindex the retained ordinary recursor execution onto the enriched raw
+Theory source.  Generation shape is the only fact not already fixed by the
+outer producer and the dependent staging owner. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    VInductDecl.ProducedBlockRecursorShapeCandidate staged.source
+      execution.nested.types execution.nested.aux2nested.size false
+      (AddInductive.Context.forInductive env lparams false false {}) :=
+  VInductDecl.ProducedBlockRecursorShapeCandidate.ofExecution execution.flattened
+    execution.flattenedRun staged.source_nparams_eq shape
+
+/-- The complete family/constructor staging value reindexed to the recursor
+shape owner above.  This is proof-only transport along the parameter-count
+equality; no verifier phase is rerun. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorStaging
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    VInductDecl.NormalizationCandidateBlockStagingInput
+      (AddInductive.Context.forInductive env lparams false false {})
+      (staged.recursorShape shape).execution.eliminationExecution.normalization
+      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      staged.source := by
+  cases staged with
+  | mk family enriched =>
+      cases family with
+      | mk familyDecl nparams_eq familyStaging =>
+          cases familyDecl with
+          | mk uvars familyNparams familyTypes =>
+              simp only at nparams_eq
+              subst familyNparams
+              exact enriched.staging
+
+/-- The enriched semantic input reindexed to the same recursor-shape owner.
+As with `recursorStaging`, this eliminates only the source-header equality and
+does not repeat normalization or translation. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorSemanticInput
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    VInductDecl.NormalizationCandidateBlockSemanticInput
+      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      (staged.recursorShape shape).candidate staged.source := by
+  cases staged with
+  | mk family enriched =>
+      cases family with
+      | mk familyDecl nparams_eq familyStaging =>
+          cases familyDecl with
+          | mk uvars familyNparams familyTypes =>
+              simp only at nparams_eq
+              subst familyNparams
+              exact enriched.semantic.semanticInput
+
+/-- Package the existing existential enrichment theorem in a form whose raw
+source remains directly projectable by later dependent phases. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.exists_flattenedEnrichedStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs} (wf : ves.WF env) :
+    Nonempty (execution.FlattenedEnrichedStagingResult ves) := by
+  obtain ⟨family, ⟨enriched⟩⟩ :=
+    execution.exists_flattenedEnrichedStaging wf
+  exact ⟨{ family, enriched }⟩
+
+/-- One exact semantic generation run attached to the enriched raw source,
+the retained ordinary recursor execution, and their full declaration staging
+input.  The dependent indices prevent any later phase from substituting a
+parallel source or normalization candidate. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (generation : VInductDecl.BlockGenerationChecked staged.source)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) where
+  run : VInductDecl.ExactProducedBlockRecursorRun
+    (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+    (staged.recursorShape shape) generation
+
+/-- Close the exact semantic-generation and post-constructor alignment phases
+around the source and candidate already selected by enriched outer staging.
+The remaining hypotheses are precisely the analyzer result, semantic WF, and
+checker/elimination correspondence for that same dependent execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.exists_exactRecursorStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (generation : VInductDecl.BlockGenerationChecked staged.source)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (analysis : ∀ semantic :
+        VInductDecl.NormalizationCandidateBlockSemanticRun
+          (ves.venv .safe)
+          staged.family.staging.familyInsertion.blockEnv lparams
+          (staged.recursorShape shape).candidate staged.source,
+      semantic.normalization.checkBlock? = some generation.block)
+    (checked : generation.block.checked.WF (ves.venv .safe)
+      generation.validated.resultLevel)
+    (resultLevelWF : generation.validated.resultLevel.WF staged.source.uvars)
+    (elimination : AddInductive.CheckerBlockEliminationRun generation
+      (staged.recursorShape shape).execution.eliminationExecution) :
+    Nonempty
+      (execution.FlattenedExactRecursorStagingResult staged generation
+        shape) := by
+  let produced := staged.recursorShape shape
+  obtain ⟨block⟩ :=
+    produced.eliminationBase.base.exactBlockGenerationRun_nonempty
+      (staged.recursorSemanticInput shape) generation analysis checked
+      resultLevelWF
+  exact ⟨{
+    run := {
+      elimination := {
+        block
+        elimination
+        isUnsafe_eq := rfl
+        validation_lparams_eq :=
+          (staged.recursorStaging shape).validation_lparams_eq } } }⟩
+
+/-- Extend the exact family/constructor declaration staging through the
+actual recursor inventory retained by the outer execution.  Callers supply
+only translation and typing of those synthesized recursor records in the
+already-computed post-constructor Theory environment. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult.metadataPrefix
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (evidence : List.Forall₂
+      (fun info raw => TrConstVal .safe
+        (result.run.elimination.declarationRun
+          (staged.recursorStaging shape)).constructors.ctorEnv
+        (.recInfo info) raw)
+      (staged.recursorShape shape).execution.recursors.infos
+      generation.recursors)
+    (rawsWF : ∀ raw ∈ generation.recursors,
+      raw.toVConstant.WF
+        (result.run.elimination.declarationRun
+          (staged.recursorStaging shape)).constructors.ctorEnv) :
+    VInductDecl.ExactProducedBlockMetadataPrefixRun result.run :=
+  result.run.metadataPrefix (staged.recursorStaging shape) evidence rawsWF
+
 /-- A recognized primitive execution's exact family metadata translates to
 the canonical Theory family inventory.  The proof selects the sole retained
 metadata record through the validator's source-aligned relation; no parallel
@@ -2812,7 +3050,62 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
       | nested numNested_ne restoration restorationRun =>
           exact (numNested_ne numNested_eq).elim
 
+/-- In the ordinary branch, reindexing the retained recursor execution onto
+the enriched Theory source does not change its host-environment endpoint. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorEnv_eq_final
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (numNested_eq : execution.nested.aux2nested.size = 0) :
+    (staged.recursorShape shape).execution.recursors.env = finalEnv := by
+  cases staged with
+  | mk family enriched =>
+      cases family with
+      | mk familyDecl nparams_eq familyStaging =>
+          cases familyDecl with
+          | mk uvars familyNparams familyTypes =>
+              simp only at nparams_eq
+              subst familyNparams
+              exact execution.flattenedEnv_eq_final numNested_eq
+
 namespace AddInductive.EnvironmentInductiveExecution
+
+/-- Close the ordinary exact transaction with its deterministic generated-rule
+fold.  The trace starts at the public input constant map and ends at the public
+host environment selected by the outer execution; no rule-output environment
+remains caller chosen. -/
+noncomputable def FlattenedExactRecursorStagingResult.ordinaryAddInductBlockTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0) :
+    AddInductBlockTrace env.constants (ves.venv .safe) staged.source
+      finalEnv.constants
+      (generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  have trace := metadata.addInductBlockTrace
+    (env₂ := generation.generatedRules.foldl VEnv.addDefEq
+      metadata.recursors.recEnv) ⟨rfl⟩
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have finalEnvEq := staged.recursorEnv_eq_final shape numNested_eq
+  simpa only [initialEnvEq, AddInductive.Context.forInductive, finalEnvEq]
+    using trace
 
 /-- The retained ordinary declaration folds preserve constant-map
 well-formedness through the public final environment. -/
