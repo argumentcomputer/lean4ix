@@ -1938,6 +1938,23 @@ structure CandidateSemanticStage
   lparams_eq : contextRun.context.lparams = Us
   vlctx_eq : contextRun.context.vlctx = []
 
+/-- Construct the shared root semantic stage directly from a verified
+safety-indexed environment.  Candidate family and constructor traversals
+start with an empty local context, so no fixture-specific record assembly is
+needed at this boundary. -/
+def CandidateSemanticStage.root
+    {candidateContext : AddInductive.Context} {ves : VEnvs}
+    (wf : ves.WF candidateContext.env)
+    (lctx_eq : candidateContext.lctx = {})
+    (namePrefix_ne : candidateContext.ngen.namePrefix ≠
+      (({} : VState).ngen).namePrefix) :
+    CandidateSemanticStage candidateContext
+      (ves.venv candidateContext.safety) candidateContext.lparams where
+  contextRun := CandidateContextRun.root wf lctx_eq namePrefix_ne
+  venv_eq := rfl
+  lparams_eq := rfl
+  vlctx_eq := rfl
+
 /-- Source-position evidence interpreted in one shared candidate stage.
 
 `context_eq` prevents a verified stage for another producer position from
@@ -5247,6 +5264,385 @@ structure CandidateBlockSourceListInput
   familyTypes : CandidateBlockFamilyTypeSourceListInput preEnv Us sources raws
   constructors : CandidateBlockConstructorSourceListInput postEnv Us sources raws
 
+/-- Reindex the exact pre-family traversal at the family list retained by the
+complete ordinary execution. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familyTypesProduced
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context) :
+    AddInductive.CandidateFamilyTypeListProduced
+      { context with lctx := {} }
+      execution.candidate.families.familyTypes := by
+  rw [AddInductive.NormalizationCandidateExecution.candidate,
+    execution.families.produced.familyTypes_eq]
+  exact execution.familyTypes.produced
+
+/-- Forget only the family-type assembly index of the exact post-family
+traversal, retaining every constructor list in source order. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.constructorListsProduced
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context) :
+    AddInductive.CandidateBlockConstructorListProduced
+      { context with env := execution.familyEnv, lctx := {} }
+      execution.candidate.families := by
+  exact execution.families.produced.constructorLists
+
+/-- Family-only source staging for one retained ordinary execution.
+
+Unlike `NormalizationCandidateBlockStagingInput`, this owner does not accept
+a Theory block endpoint. The retained kernel declaration trace and exact raw
+family translations compute that endpoint below; only readiness at the
+computed endpoint remains a later input. -/
+structure NormalizationCandidateBlockFamilySourceStagingInput
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    (context : AddInductive.Context)
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context)
+    (env : VEnv) (Us : List Name) (rawDecl : VInductDecl) where
+  uvars_eq : rawDecl.uvars = Us.length
+  preFamily : TypeChecker.CandidateSemanticStage
+    { context with lctx := {} } env Us
+  familySources : CandidateBlockFamilyTypeSourceListInput env Us sources
+    rawDecl.types
+  whnfFuel : Nat
+  whnfDepth : context.fuel.recDepth = whnfFuel + 1
+  terminals : CandidateBlockFamilyTerminalSortList
+    execution.candidate.families
+  nindices_size : execution.stats.nindices.size = sources.length
+  validation_env_eq : execution.validationContext.env = context.env
+  validation_lparams_eq : execution.validationContext.lparams = Us
+  context_safety_eq : context.safety = .safe
+  isUnsafe_eq : isUnsafe = false
+  preMapWF : context.env.constants.WF
+  names_not_primitive : ∀ raw ∈ rawDecl.types,
+    raw.name ∉ VEnv.reflectedPrimitiveNames ∧
+      Environment.primitives.contains raw.name = false
+
+/-- Reindex every family source translation at the exact pre-family producer
+trace. -/
+def NormalizationCandidateBlockFamilySourceStagingInput.familyTypes
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl) :
+    CandidateBlockFamilyTypeStagedListInput input.preFamily
+      execution.candidate.families rawDecl.types :=
+  input.familySources.staged execution.candidate.families
+    execution.familyTypesProduced input.whnfFuel (by
+      simpa using input.whnfDepth)
+
+/-- Exact family metadata translations and raw-family typing derived before
+the Theory family fold is chosen. -/
+theorem
+    NormalizationCandidateBlockFamilySourceStagingInput.declarationEvidence
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl) :
+    List.Forall₂
+      (fun info raw =>
+        TrConstVal .safe env (.inductInfo info) raw.toVConstVal ∧
+          raw.toVConstant.WF env)
+      execution.declaredInfos rawDecl.types := by
+  have metadata : List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo execution.stats nparams
+          sources.toArray indType numIndices numNested isUnsafe
+            execution.validationContext)
+      sources execution.declaredInfos := by
+    simpa only [AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches execution.stats nparams
+        sources.toArray numNested isUnsafe execution.validationContext
+        (by simpa using input.nindices_size)
+  exact input.familyTypes.declarationEvidence metadata input.terminals
+    input.isUnsafe_eq input.validation_lparams_eq
+
+/-- Entry translation history at the validator context selected by the same
+retained execution. -/
+theorem NormalizationCandidateBlockFamilySourceStagingInput.preTr
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl) :
+    TrEnv' .safe execution.validationContext.env.constants
+      execution.validationContext.env.quotInit env := by
+  have base : TrEnv' context.safety context.env.constants
+      context.env.quotInit env := by
+    simpa only [TrEnv,
+      TypeChecker.CandidateContextRun.context_safety,
+      TypeChecker.CandidateContextRun.context_env,
+      input.preFamily.venv_eq] using
+      input.preFamily.contextRun.context.trenv
+  rw [input.context_safety_eq] at base
+  simpa only [input.validation_env_eq] using base
+
+/-- Replay the retained kernel family declaration against the exact raw
+family translations. Its `blockEnv` is constructed, not selected. -/
+noncomputable def
+    NormalizationCandidateBlockFamilySourceStagingInput.familyInsertion
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl) :
+    FamilyDeclarationInsertionRun
+      execution.validationContext.allowPrimitive
+      execution.validationContext.env execution.familyEnv
+      execution.declaredInfos env rawDecl.blockTypeConstants := by
+  apply familyDeclarationInsertion (safety := .safe)
+    (evidence := by
+      unfold VInductDecl.blockTypeConstants
+      rw [List.forall₂_map_right_iff]
+      exact Lean4Lean.List.Forall₂.imp (h := input.declarationEvidence)
+        fun _ _ evidence => evidence.1)
+    (pre := input.preTr.aligned)
+  simpa only [AddInductive.declareInductiveTypes,
+    AddInductive.NormalizationCandidateExecution.declaredInfos] using
+    execution.declareRun
+
+/-- The automatically interpreted family insertion is the complete Theory
+staging fold for the source-indexed family-only declaration. -/
+theorem NormalizationCandidateBlockFamilySourceStagingInput.stage
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl) :
+    env.stageInductiveTypes rawDecl.types =
+      some input.familyInsertion.blockEnv := by
+  rw [← blockTypeConstants_foldlM_eq_stageInductiveTypes]
+  exact input.familyInsertion.addTypes.to_foldlM
+
+/-- Complete the automatically chosen family stage once readiness has been
+proved at its exact kernel/Theory endpoint. -/
+noncomputable def
+    NormalizationCandidateBlockFamilySourceStagingInput.staging
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us rawDecl)
+    (projectionReady : ProjectionReady execution.familyEnv
+      input.familyInsertion.blockEnv)
+    (structureEtaReady : StructureEtaReady execution.familyEnv
+      input.familyInsertion.blockEnv) :
+    NormalizationCandidateBlockStagingInput context execution env
+      input.familyInsertion.blockEnv Us rawDecl where
+  uvars_eq := input.uvars_eq
+  preFamily := input.preFamily
+  familyTypes := input.familyTypes
+  terminals := input.terminals
+  stage := input.stage
+  nindices_size := input.nindices_size
+  validation_env_eq := input.validation_env_eq
+  validation_lparams_eq := input.validation_lparams_eq
+  context_safety_eq := input.context_safety_eq
+  isUnsafe_eq := input.isUnsafe_eq
+  preMapWF := input.preMapWF
+  names_not_primitive := input.names_not_primitive
+  projectionReady := projectionReady
+  structureEtaReady := structureEtaReady
+
+/-- Staging observes only the inherited family constant payload, so changing
+the constructor inventory of every raw family leaves the complete
+source-ordered staging fold unchanged. -/
+theorem _root_.Lean4Lean.VEnv.stageInductiveTypes_congr_familyConstants
+    : ∀ (env : VEnv) {left right : List VInductiveType},
+      List.Forall₂
+        (fun left right => left.toVConstVal = right.toVConstVal)
+        left right →
+      env.stageInductiveTypes left = env.stageInductiveTypes right
+  | _, _, _, .nil => rfl
+  | env, _, _, .cons head tail => by
+      simp only [VEnv.stageInductiveTypes, List.foldlM_cons]
+      have name_eq := congrArg VConstVal.name head
+      have constant_eq := congrArg VConstVal.toVConstant head
+      rw [name_eq, constant_eq]
+      apply Option.bind_congr
+      intro next _
+      exact VEnv.stageInductiveTypes_congr_familyConstants next tail
+
+/-- A complete translated block obtained by enriching a family-only raw list.
+The positional relation records that only constructor fields changed. -/
+structure CandidateBlockSourceListEnrichment
+    (preEnv postEnv : VEnv) (Us : List Name)
+    (sources : List InductiveType) (familyRaws : List VInductiveType) where
+  raws : List VInductiveType
+  input : CandidateBlockSourceListInput preEnv postEnv Us sources raws
+  familyConstants : List.Forall₂
+    (fun raw familyRaw => raw.toVConstVal = familyRaw.toVConstVal)
+    raws familyRaws
+
+/-- Constructor enrichment preserves the exact Theory endpoint chosen by the
+family-only staging fold. -/
+theorem CandidateBlockSourceListEnrichment.stage_eq
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType} {familyRaws : List VInductiveType}
+    (enrichment : CandidateBlockSourceListEnrichment preEnv postEnv Us
+      sources familyRaws) (env : VEnv) :
+    env.stageInductiveTypes enrichment.raws =
+      env.stageInductiveTypes familyRaws :=
+  VEnv.stageInductiveTypes_congr_familyConstants env
+    enrichment.familyConstants
+
+/-- Replace the family-only raw list of a declaration by its enriched common
+raw list while preserving the declaration header. -/
+def CandidateBlockSourceListEnrichment.toRawDecl
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType} {familyRaws : List VInductiveType}
+    (enrichment : CandidateBlockSourceListEnrichment preEnv postEnv Us
+      sources familyRaws) (familyDecl : VInductDecl) : VInductDecl :=
+  { familyDecl with types := enrichment.raws }
+
+/-- Any name-only property of the family-only raw list survives constructor
+enrichment. -/
+theorem CandidateBlockSourceListEnrichment.forall_names
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType} {familyRaws : List VInductiveType}
+    (enrichment : CandidateBlockSourceListEnrichment preEnv postEnv Us
+      sources familyRaws)
+    (P : Name → Prop)
+    (family : ∀ raw ∈ familyRaws, P raw.name) :
+    ∀ raw ∈ enrichment.raws, P raw.name := by
+  have transfer : ∀ {raws familyRaws : List VInductiveType},
+      List.Forall₂
+        (fun raw familyRaw => raw.toVConstVal = familyRaw.toVConstVal)
+        raws familyRaws →
+      (∀ familyRaw ∈ familyRaws, P familyRaw.name) →
+      ∀ raw ∈ raws, P raw.name := by
+    intro raws familyRaws relation
+    induction relation with
+    | nil => intro _ raw member; nomatch member
+    | @cons raw familyRaw raws familyRaws head tail ih =>
+        intro families raw' member
+        simp only [List.mem_cons] at member
+        rcases member with rfl | member
+        · have name_eq := congrArg VConstVal.name head
+          rw [name_eq]
+          exact families familyRaw (.head _)
+        · exact ih (fun other otherMember =>
+            families other (.tail _ otherMember)) raw' member
+  exact transfer enrichment.familyConstants family
+
+/-- Rebuild the exact block staging owner over the enriched raw declaration.
+The endpoint and readiness certificates are reused because the family
+constant fold is unchanged. -/
+noncomputable def
+    NormalizationCandidateBlockFamilySourceStagingInput.enrichedStaging
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {familyDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us familyDecl)
+    (enrichment : CandidateBlockSourceListEnrichment env
+      input.familyInsertion.blockEnv Us sources familyDecl.types)
+    (projectionReady : ProjectionReady execution.familyEnv
+      input.familyInsertion.blockEnv)
+    (structureEtaReady : StructureEtaReady execution.familyEnv
+      input.familyInsertion.blockEnv) :
+    NormalizationCandidateBlockStagingInput context execution env
+      input.familyInsertion.blockEnv Us
+      (enrichment.toRawDecl familyDecl) where
+  uvars_eq := input.uvars_eq
+  preFamily := input.preFamily
+  familyTypes := enrichment.input.familyTypes.staged
+    execution.candidate.families execution.familyTypesProduced input.whnfFuel
+      (by simpa using input.whnfDepth)
+  terminals := input.terminals
+  stage := (enrichment.stage_eq env).trans input.stage
+  nindices_size := input.nindices_size
+  validation_env_eq := input.validation_env_eq
+  validation_lparams_eq := input.validation_lparams_eq
+  context_safety_eq := input.context_safety_eq
+  isUnsafe_eq := input.isUnsafe_eq
+  preMapWF := input.preMapWF
+  names_not_primitive := by
+    simpa only [CandidateBlockSourceListEnrichment.toRawDecl] using
+      enrichment.forall_names
+        (fun name => name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains name = false)
+        input.names_not_primitive
+  projectionReady := projectionReady
+  structureEtaReady := structureEtaReady
+
+/-- Enrich the family-only raw list while retaining the positional proof that
+every staged family constant is unchanged. -/
+theorem
+    CandidateBlockFamilyTypeSourceListInput.withConstructorsEnrichment
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context}
+    {sources : List InductiveType} {familyRaws : List VInductiveType}
+    (familyInput : CandidateBlockFamilyTypeSourceListInput preEnv Us
+      sources familyRaws)
+    (postFamily : TypeChecker.CandidateSemanticStage candidateContext
+      postEnv Us)
+    (families : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources)
+    (produced : AddInductive.CandidateBlockConstructorListProduced
+      candidateContext families)
+    (closed : ∀ source ∈ sources, ∀ ctor ∈ source.ctors,
+      ctor.type.FVarsIn (fun _ => False)) :
+    Nonempty (CandidateBlockSourceListEnrichment preEnv postEnv Us
+      sources familyRaws) := by
+  induction familyInput with
+  | nil =>
+      cases families
+      exact ⟨{
+        raws := []
+        input := { familyTypes := .nil, constructors := .nil }
+        familyConstants := .nil }⟩
+  | @cons source familyRaw sources familyRaws familyHead familyTail ih =>
+      cases families with
+      | cons family families =>
+          obtain ⟨⟨ctorRaws, constructorInput⟩⟩ :=
+            CandidateConstructorSourceListInput.exists_ofProduced postFamily
+              family.constructors produced.head (fun ctor member =>
+                closed source (.head _) ctor member)
+          obtain ⟨tail⟩ := ih families produced.tail
+            (fun tail tailMember ctor ctorMember =>
+              closed tail (.tail _ tailMember) ctor ctorMember)
+          let raw : VInductiveType := { familyRaw with ctors := ctorRaws }
+          exact ⟨{
+            raws := raw :: tail.raws
+            input := {
+              familyTypes := .cons {
+                name_eq := familyHead.name_eq
+                uvars_eq := familyHead.uvars_eq
+                source_tr := familyHead.source_tr } tail.input.familyTypes
+              constructors := .cons constructorInput tail.input.constructors }
+            familyConstants := .cons rfl tail.familyConstants }⟩
+
 /-- Enrich already translated family raws with the exact constructor raws
 recovered from the retained post-family traversals.  Updating `ctors` leaves
 each family constant payload unchanged, so all pre-family translations are
@@ -5267,27 +5663,9 @@ theorem CandidateBlockFamilyTypeSourceListInput.withConstructors
       ctor.type.FVarsIn (fun _ => False)) :
     Nonempty (Σ raws,
       CandidateBlockSourceListInput preEnv postEnv Us sources raws) := by
-  induction familyInput with
-  | nil =>
-      cases families
-      exact ⟨⟨[], { familyTypes := .nil, constructors := .nil }⟩⟩
-  | @cons source familyRaw sources familyRaws familyHead familyTail ih =>
-      cases families with
-      | cons family families =>
-          obtain ⟨⟨ctorRaws, constructorInput⟩⟩ :=
-            CandidateConstructorSourceListInput.exists_ofProduced postFamily
-              family.constructors produced.head (fun ctor member =>
-                closed source (.head _) ctor member)
-          obtain ⟨⟨raws, tailInput⟩⟩ := ih families produced.tail
-            (fun tail tailMember ctor ctorMember =>
-              closed tail (.tail _ tailMember) ctor ctorMember)
-          let raw : VInductiveType := { familyRaw with ctors := ctorRaws }
-          exact ⟨⟨raw :: raws, {
-            familyTypes := .cons {
-              name_eq := familyHead.name_eq
-              uvars_eq := familyHead.uvars_eq
-              source_tr := familyHead.source_tr } tailInput.familyTypes
-            constructors := .cons constructorInput tailInput.constructors }⟩⟩
+  obtain ⟨enrichment⟩ := familyInput.withConstructorsEnrichment
+    postFamily families produced closed
+  exact ⟨⟨enrichment.raws, enrichment.input⟩⟩
 
 /-- Recover one complete raw Theory block directly from the exact two-phase
 ordinary producer.  Family translations are chosen in the entry stage and
@@ -5510,6 +5888,78 @@ structure StagedNormalizationCandidateBlockSemanticInput
       env blockEnv Us rawDecl) where
   constructors : CandidateBlockConstructorStagedListInput staging.postFamily
     execution.candidate.families rawDecl.types
+
+/-- Reindex the retained post-family constructor traversals at an already
+staged common raw block. Family translations are owned by `staging`; this
+projection contributes exactly the constructor half. -/
+def CandidateBlockSourceListInput.staged
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    {staging : NormalizationCandidateBlockStagingInput context execution
+      env blockEnv Us rawDecl}
+    (input : CandidateBlockSourceListInput env blockEnv Us sources
+      rawDecl.types)
+    (constructorsProduced :
+      AddInductive.CandidateBlockConstructorListProduced
+        { context with env := execution.familyEnv, lctx := {} }
+        execution.candidate.families)
+    (whnfFuel : Nat)
+    (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
+    StagedNormalizationCandidateBlockSemanticInput staging where
+  constructors := input.constructors.staged execution.candidate.families
+    constructorsProduced whnfFuel (by simpa using whnfDepth)
+
+/-- One dependent output containing the constructor-enriched raw declaration,
+its exact family staging, and the complete staged semantic hierarchy. -/
+structure NormalizationCandidateBlockEnrichedStagingResult
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {familyDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us familyDecl) where
+  enrichment : CandidateBlockSourceListEnrichment env
+    input.familyInsertion.blockEnv Us sources familyDecl.types
+  staging : NormalizationCandidateBlockStagingInput context execution env
+    input.familyInsertion.blockEnv Us (enrichment.toRawDecl familyDecl)
+  semantic : StagedNormalizationCandidateBlockSemanticInput staging
+
+/-- Select the final common raw block from the two exact producer phases and
+stage it at the endpoint computed by the retained family declaration trace.
+The only post-family assumptions are readiness at that exact endpoint. -/
+theorem NormalizationCandidateBlockFamilySourceStagingInput.enrich
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env : VEnv} {Us : List Name} {familyDecl : VInductDecl}
+    (input : NormalizationCandidateBlockFamilySourceStagingInput context
+      execution env Us familyDecl)
+    (projectionReady : ProjectionReady execution.familyEnv
+      input.familyInsertion.blockEnv)
+    (structureEtaReady : StructureEtaReady execution.familyEnv
+      input.familyInsertion.blockEnv)
+    (closed : ∀ source ∈ sources, ∀ ctor ∈ source.ctors,
+      ctor.type.FVarsIn (fun _ => False)) :
+    Nonempty (NormalizationCandidateBlockEnrichedStagingResult input) := by
+  let familyStaging := input.staging projectionReady structureEtaReady
+  obtain ⟨enrichment⟩ := input.familySources.withConstructorsEnrichment
+    familyStaging.postFamily execution.candidate.families
+      execution.constructorListsProduced closed
+  let staging := input.enrichedStaging enrichment projectionReady
+    structureEtaReady
+  exact ⟨{
+    enrichment
+    staging
+    semantic := enrichment.input.staged execution.constructorListsProduced
+      input.whnfFuel input.whnfDepth }⟩
 
 /-- Project the established block semantic-input hierarchy from the
 consolidated two-stage owner. -/
