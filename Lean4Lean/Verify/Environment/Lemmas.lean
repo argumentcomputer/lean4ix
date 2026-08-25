@@ -111,6 +111,44 @@ theorem AddInductConstant.preserve_map_lookup
     contradiction
   · exact hlookup
 
+/-- Every raw name inserted by a metadata fold was absent from its input map.
+Later-step freshness is reflected backwards because earlier insertions never
+remove an existing lookup. -/
+theorem AddInductConstants.map_fresh
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {raws : List VConstVal}
+    (H : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (wf : C₁.WF) {raw : VConstVal} (member : raw ∈ raws) :
+    C₁.find? raw.name = none := by
+  induction H generalizing raw with
+  | nil => contradiction
+  | @cons m₁ env₁ ci m₂ env₂ cis m₃ env₃ head rest ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · exact head.map_fresh
+      · have freshAfter := ih (head.map_wf wf) member
+        cases old : m₁.find? raw.name with
+        | none => rfl
+        | some found =>
+            have preserved := head.preserve_map_lookup wf old
+            rw [preserved] at freshAfter
+            contradiction
+
+/-- Classify a lookup after one exact metadata insertion: it is either the
+unchanged input lookup or the precise freshly inserted entry. -/
+theorem AddInductConstant.map_lookup_cases
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {raw : VConstVal} {name : Name} {found : ConstantInfo}
+    (H : AddInductConstant kind C₁ env₁ raw C₂ env₂)
+    (wf : C₁.WF) (hout : C₂.find? name = some found) :
+    C₁.find? name = some found ∨
+      (raw.name = name ∧ found = H.info) := by
+  rw [H.map_add, wf.find?_insert] at hout
+  split at hout
+  · rename_i equal
+    right
+    exact ⟨LawfulBEq.eq_of_beq equal, Option.some.inj hout |>.symm⟩
+  · exact .inl hout
+
 theorem InductConstantKind.Matches.deltaValue?_eq_none
     {kind : InductConstantKind} {ci : ConstantInfo}
     (H : InductConstantKind.Matches kind ci) : ci.deltaValue? = none := by
@@ -163,6 +201,89 @@ theorem AddInductConstants.translated_lookup
       exact hrest.preserve_map_lookup (h.map_wf wf) (h.map_lookup wf)
       exact h.tr.mono (h.le.trans hrest.le)
     · exact ih (h.map_wf wf) hmem
+
+/-- Classify any final lookup from a metadata fold by its provenance: it is
+either unchanged from the input map or its name occurs in the inserted raw
+inventory. -/
+theorem AddInductConstants.map_lookup_cases
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {raws : List VConstVal} {name : Name} {found : ConstantInfo}
+    (H : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (wf : C₁.WF) (hout : C₂.find? name = some found) :
+    C₁.find? name = some found ∨
+      ∃ raw ∈ raws, raw.name = name := by
+  induction H with
+  | nil => exact .inl hout
+  | cons head rest ih =>
+      rcases ih (head.map_wf wf) hout with
+        old | ⟨inserted, member, nameEq⟩
+      · rcases head.map_lookup_cases wf old with old | ⟨nameEq, _⟩
+        · exact .inl old
+        · exact .inr ⟨_, .head _, nameEq⟩
+      · exact .inr ⟨inserted, .tail _ member, nameEq⟩
+
+/-- The inserted branch of `map_lookup_cases` also recovers the exact role
+tag of the final host metadata. -/
+theorem AddInductConstants.map_lookup_cases_kind
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {raws : List VConstVal} {name : Name} {found : ConstantInfo}
+    (H : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (wf : C₁.WF) (hout : C₂.find? name = some found) :
+    C₁.find? name = some found ∨
+      ∃ raw ∈ raws, raw.name = name ∧ kind.Matches found := by
+  rcases H.map_lookup_cases wf hout with old | ⟨raw, member, nameEq⟩
+  · exact .inl old
+  · obtain ⟨inserted, insertedLookup, hkind, _⟩ :=
+      H.translated_lookup wf member
+    have houtRaw : C₂.find? raw.name = some found := by
+      simpa only [nameEq] using hout
+    have infoEq : inserted = found :=
+      Option.some.inj (insertedLookup.symm.trans houtRaw)
+    subst inserted
+    exact .inr ⟨raw, member, nameEq, hkind⟩
+
+/--
+info: 'Lean4Lean.AddInductConstant.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductConstant.map_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductConstants.map_fresh' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductConstants.map_fresh
+
+/--
+info: 'Lean4Lean.AddInductConstants.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductConstants.map_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductConstants.map_lookup_cases_kind' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductConstants.map_lookup_cases_kind
 
 theorem AddInductConstants.old_of_value :
     (H : AddInductConstants kind C₁ env₁ cis C₂ env₂) → C₁.WF →
@@ -326,6 +447,39 @@ theorem AddInductBlock.map_wf
   rcases H with ⟨H⟩
   exact H.addRecs.map_wf <| H.addCtors.map_wf <|
     H.addTypes.map_wf wf
+
+/-- Classify constructor metadata visible after a complete mutual-block
+insertion.  It is either an unchanged input lookup or its name occurs in the
+block's exact flattened constructor inventory. -/
+theorem AddInductBlockTrace.constructor_map_lookup_cases
+    (H : AddInductBlockTrace C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF)
+    (hout : C₂.find? name = some (.ctorInfo info)) :
+    C₁.find? name = some (.ctorInfo info) ∨
+      ∃ raw ∈ decl.blockConstructorConstants, raw.name = name := by
+  have wfTypes := H.addTypes.map_wf wf
+  have wfCtors := H.addCtors.map_wf wfTypes
+  rcases H.addRecs.map_lookup_cases_kind wfCtors hout with
+    ctorLookup | ⟨raw, member, nameEq, hkind⟩
+  · rcases H.addCtors.map_lookup_cases_kind wfTypes ctorLookup with
+      typeLookup | ⟨raw, member, nameEq, _hkind⟩
+    · rcases H.addTypes.map_lookup_cases_kind wf typeLookup with
+        old | ⟨raw, member, nameEq, hkind⟩
+      · exact .inl old
+      · simp [InductConstantKind.Matches] at hkind
+    · exact .inr ⟨raw, member, nameEq⟩
+  · simp [InductConstantKind.Matches] at hkind
+
+/--
+info: 'Lean4Lean.AddInductBlockTrace.constructor_map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductBlockTrace.constructor_map_lookup_cases
 
 theorem AddInductBlock.old_of_value
     (H : AddInductBlock C₁ env₁ decl C₂ env₂)

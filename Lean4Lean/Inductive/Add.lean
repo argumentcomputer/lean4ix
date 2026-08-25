@@ -2905,6 +2905,48 @@ theorem declaredConstructorInfos_toArray
           indType.ctors := by
   simp [declaredConstructorInfos]
 
+/-- Every constructor metadata record synthesized by one family fold carries
+the validator's common parameter count. -/
+theorem declaredConstructorInfosFor_numParams
+    (stats : InductiveStats) (induct : Name) (isUnsafe : Bool)
+    (context : Context) (cidx : Nat) (ctors : List Constructor)
+    {info : ConstructorVal}
+    (member : info ∈ declaredConstructorInfosFor stats induct isUnsafe
+      context cidx ctors) :
+    info.numParams = stats.params.size := by
+  induction ctors generalizing cidx with
+  | nil => contradiction
+  | cons ctor ctors ih =>
+      simp only [declaredConstructorInfosFor, List.mem_cons] at member
+      rcases member with rfl | member
+      · rfl
+      · exact ih (cidx + 1) member
+
+/-- The flattened constructor inventory preserves the same common parameter
+count for every synthesized metadata record. -/
+theorem declaredConstructorInfos_numParams
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (isUnsafe : Bool) (context : Context) {info : ConstructorVal}
+    (member : info ∈ declaredConstructorInfos stats indTypes isUnsafe
+      context) :
+    info.numParams = stats.params.size := by
+  simp only [declaredConstructorInfos, List.mem_flatMap] at member
+  obtain ⟨indType, _member, member⟩ := member
+  exact declaredConstructorInfosFor_numParams stats indType.name isUnsafe
+    context 0 indType.ctors member
+
+/--
+info: 'Lean4Lean.AddInductive.declaredConstructorInfosFor_numParams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.declaredConstructorInfosFor_numParams
+
+/-- info: 'Lean4Lean.AddInductive.declaredConstructorInfos_numParams' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms AddInductive.declaredConstructorInfos_numParams
+
 /-- Transparent source-ordered constructor declaration fold. -/
 def declareConstructorInfoList (allowPrimitive : Bool) :
     List ConstructorVal → Environment → Except Exception Environment

@@ -306,6 +306,93 @@ structure ConstructorDeclarationInsertionRun
   addCtors : AddInductConstants .ctor kernelEnv.constants typeEnv raws
     finalKernelEnv.constants ctorEnv
 
+/-- Constructor declaration preserves persistent-map well-formedness. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_wf
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF := by
+  induction run with
+  | nil => exact wf
+  | cons checkName tail ih =>
+      apply ih
+      exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
+
+/-- Constructor declaration preserves every lookup already present in its
+input map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.preserve_map_lookup
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF)
+    (old : env.constants.find? name = some found) :
+    finalEnv.constants.find? name = some found := by
+  induction run with
+  | nil => exact old
+  | @cons infos finalEnv env info checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      have mid : (env.add (.ctorInfo info)).constants.find? name =
+          some found := by
+        change (env.constants.insert info.name (.ctorInfo info)).find? name = _
+        rw [wf.find?_insert]
+        split
+        · rename_i equal
+          have nameEq : info.name = name := LawfulBEq.eq_of_beq equal
+          subst name
+          rw [old] at fresh
+          contradiction
+        · exact old
+      exact ih (wf.insert _ _ fresh) mid
+
+/-- Every synthesized constructor record remains at its name in the final
+constructor-declaration map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {info : ConstructorVal}
+    (member : info ∈ infos) :
+    finalEnv.constants.find? info.name = some (.ctorInfo info) := by
+  induction run with
+  | nil => contradiction
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · apply tail.preserve_map_lookup
+          (wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName))
+        change SMap.find? (SMap.insert _ info.name
+          (ConstantInfo.ctorInfo info)) info.name = _
+        rw [wf.find?_insert]
+        simp
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName)) member
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_wf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareConstructorInfoListRun.map_wf
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.preserve_map_lookup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareConstructorInfoListRun.preserve_map_lookup
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareConstructorInfoListRun.map_lookup
+
 /-- Replay the retained constructor declaration equation using only semantic
 metadata translations and the weaker `Aligned` name-domain invariant.  This
 is valid after a primitive family insertion even though `TrEnv'` is not yet
