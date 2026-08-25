@@ -47,9 +47,11 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VExpr.selectFieldMinor
 #check VExpr.selectFieldMinor_liftN
 #check VExpr.selectFieldMinor_instN
+#check VStructureView.fieldProjectionMinorType
 #check VStructureView.generatedProjectionMinorType
+#check VStructureView.projectionMinorType
 #check VStructureView.projectionIHTypes
-#check VStructureView.WF.generatedProjectionMinorType_eq
+#check VStructureView.WF.generatedProjectionMinorType_eq_field
 #check VStructureView.MinorsWF
 #check VStructureView.MinorsWFPrefix
 #check VStructureView.ProgramsWFPrefix

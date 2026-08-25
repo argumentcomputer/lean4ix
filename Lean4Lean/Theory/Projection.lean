@@ -915,9 +915,10 @@ def projectionConstructorApp (view : VStructureView)
     (params.map (VExpr.liftN fields.length) ++
       VExpr.bvarRevRange 0 fields.length)
 
-/-- The one-constructor, nonrecursive minor premise expected by the generated
-recursor after parameters and a projection motive have been supplied. -/
-def projectionMinorType (view : VStructureView)
+/-- The field-only normalization of a one-constructor projection minor.  This
+is retained as the nonrecursive compatibility shape; semantic contracts use
+the exact generated domain below. -/
+def fieldProjectionMinorType (view : VStructureView)
     (levels : List VLevel) (params fields : List VExpr)
     (typeFn : VExpr) : VExpr :=
   VExpr.forallN fields
@@ -925,9 +926,8 @@ def projectionMinorType (view : VStructureView)
       (view.projectionConstructorApp levels params fields))
 
 /-- The exact generated minor domain after specializing recursor universes,
-constructor parameters, and the projection motive.  Unlike
-`projectionMinorType`, this expression still contains the generated
-induction-hypothesis telescope when the singleton constructor is recursive. -/
+constructor parameters, and the projection motive.  This is the underlying
+definition used by the semantic `projectionMinorType` contract below. -/
 def generatedProjectionMinorType (view : VStructureView)
     (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
     (typeFn : VExpr) : VExpr :=
@@ -935,6 +935,13 @@ def generatedProjectionMinorType (view : VStructureView)
       (source := view.source) view.constructor view.generation.elimination).instL
       (view.projectionLevels fieldSort levels)).instRevAt params 1).inst
           typeFn
+
+/-- The semantic projection-minor domain is exactly the domain emitted by
+checked recursor generation, including any recursive induction hypotheses. -/
+def projectionMinorType (view : VStructureView)
+    (fieldSort : VLevel) (levels : List VLevel) (params : List VExpr)
+    (typeFn : VExpr) : VExpr :=
+  view.generatedProjectionMinorType fieldSort levels params typeFn
 
 /-- The induction-hypothesis binder types occurring after the specialized
 constructor fields in the exact generated projection minor. -/
@@ -1594,8 +1601,7 @@ def MinorsWF (view : VStructureView) (env : VEnv) : Prop :=
       params (.sort resultLevel)) →
     (view.projectionCodes levels params)[idx]? = some code →
     env.HasType U Γ code.minor
-      (view.projectionMinorType levels params
-        (view.specializedFields levels params) code.typeFn)
+      (view.projectionMinorType code.fieldSort levels params code.typeFn)
 
 /-- The selecting-minor contract restricted to projection indices below a
 source-order bound.  Keeping the bound outside the ambient typing data makes
@@ -1614,8 +1620,7 @@ def MinorsWFPrefix (view : VStructureView) (env : VEnv)
       params (.sort resultLevel)) →
     (view.projectionCodes levels params)[idx]? = some code →
     env.HasType U Γ code.minor
-      (view.projectionMinorType levels params
-        (view.specializedFields levels params) code.typeFn)
+      (view.projectionMinorType code.fieldSort levels params code.typeFn)
 
 /-- The generated-projector contract restricted to projection indices below
 a source-order bound. -/
@@ -2973,14 +2978,14 @@ private theorem _root_.Lean4Lean.VStructureView.WF.generationParamsSpine
 domain specializes to the legacy field-only projection minor.  Keeping this
 normalization separate exposes the precise equation that must be generalized
 when recursive singleton structures retain their IH telescope. -/
-theorem _root_.Lean4Lean.VStructureView.WF.generatedProjectionMinorType_eq
+theorem _root_.Lean4Lean.VStructureView.WF.generatedProjectionMinorType_eq_field
     (self : VStructureView.WF view env) (henv : env.Ordered)
     (fieldSort : VLevel) (levels : List VLevel)
     (hlevelsLength : levels.length = view.uvars)
     (params : List VExpr) (hparamsLength : params.length = view.nparams)
     (typeFn : VExpr) :
     view.generatedProjectionMinorType fieldSort levels params typeFn =
-      view.projectionMinorType levels params
+      view.fieldProjectionMinorType levels params
         (view.specializedFields levels params) typeFn := by
   let S := self.toGenerationEnv henv
   let pLevels := view.projectionLevels fieldSort levels
@@ -2996,7 +3001,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.generatedProjectionMinorType_eq
     VInductDecl.NormalizedCtor.fieldsR,
     VInductDecl.NormalizedCtor.recArgsR,
     VInductDecl.NormalizedCtor.resultIndicesR,
-    VInductDecl.ihsFromRecArgs, VStructureView.projectionMinorType,
+    VInductDecl.ihsFromRecArgs, VStructureView.fieldProjectionMinorType,
     VStructureView.projectionConstructorApp, hresultIndices,
     view.recursive_eq, VExpr.instL_forallN, VExpr.instL_appN,
     VExpr.liftTelN_instL, VExpr.instL_instL, VExpr.instN_forallN,
@@ -3073,8 +3078,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionCommonSpine
     (typeFnType : env.HasType U Γ typeFn
       (.forallE (view.structureType levels params) (.sort fieldSort)))
     (minorType : env.HasType U Γ minor
-      (view.projectionMinorType levels params
-        (view.specializedFields levels params) typeFn)) :
+      (view.projectionMinorType fieldSort levels params typeFn)) :
     env.SpineWF U Γ
       (view.generation.recType.instL
         (view.projectionLevels fieldSort levels))
@@ -3168,12 +3172,10 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionCommonSpine
     simp [view.checked_indices_eq]
   have hminorShape :
       ((VExpr.instRevAt (recRest.instL pLevels) params 1).inst typeFn) =
-        .forallE (view.projectionMinorType levels params
-            (view.specializedFields levels params) typeFn)
+        .forallE (view.projectionMinorType fieldSort levels params typeFn)
           (.forallE (view.structureType levels params).lift
             (.app (typeFn.liftN 2) (.bvar 0))) := by
-    rw [← self.generatedProjectionMinorType_eq henv fieldSort levels
-      hlevelsLength params hparamsLength typeFn]
+    simp only [VStructureView.projectionMinorType]
     simp [gen, pLevels, recRest, k, ni,
       VInductDecl.GenerationChecked.minorTypes,
       VInductDecl.GenerationChecked.minorTypesAux,
@@ -3246,8 +3248,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.projectionRuleCaptureSpine
     (typeFnType : env.HasType U Γ typeFn
       (.forallE (view.structureType levels params) (.sort fieldSort)))
     (minorType : env.HasType U Γ minor
-      (view.projectionMinorType levels params
-        (view.specializedFields levels params) typeFn)) :
+      (view.projectionMinorType fieldSort levels params typeFn)) :
     let fields := view.specializedFields levels params
     let m := fields.length
     ∃ B, env.SpineWF U (fields.reverse ++ Γ)
@@ -3437,8 +3438,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
     (typeFnType : env.HasType U Γ typeFn
       (.forallE (view.structureType levels params) (.sort fieldSort)))
     (minorType : env.HasType U Γ minor
-      (view.projectionMinorType levels params
-        (view.specializedFields levels params) typeFn))
+      (view.projectionMinorType fieldSort levels params typeFn))
     (majorType : env.HasType U Γ major
       (view.structureType levels params)) :
     env.HasType U Γ
@@ -3596,7 +3596,10 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one
     henv.hasType_defeqU_r hfieldsCtx hbeta.symm hbody
   have hminor := VEnv.HasType.lamN hfieldsOnTel hbodyExpected
   rw [hminorShape]
-  simpa [VStructureView.projectionMinorType, fields, m, q] using hminor
+  rw [VStructureView.projectionMinorType,
+    self.generatedProjectionMinorType_eq_field henv.ordered
+      code.fieldSort levels hlevelsLength params hparamsLength code.typeFn]
+  simpa [VStructureView.fieldProjectionMinorType, fields, m, q] using hminor
 
 /-- Earlier projector programs determine the generated motive function for
 the next source-order field.  This isolates the non-mutual half of the
@@ -3907,10 +3910,18 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
       simpa [hstructLift, VExpr.liftN] using h
     have hminorLift : env.HasType U
         (view.structureType levels params :: Γ) code.minor.lift
-        (view.projectionMinorType levels paramsLift
-          (view.specializedFields levels paramsLift) code.typeFn.lift) := by
+        (view.projectionMinorType code.fieldSort levels paramsLift
+          code.typeFn.lift) := by
       have h := hminor.weakN henv.ordered
         (Ctx.LiftN.one (A := view.structureType levels params))
+      rw [VStructureView.projectionMinorType,
+        self.generatedProjectionMinorType_eq_field henv.ordered
+          code.fieldSort levels hlevelsLength params hparamsLength
+            code.typeFn] at h
+      rw [VStructureView.projectionMinorType,
+        self.generatedProjectionMinorType_eq_field henv.ordered
+          code.fieldSort levels hlevelsLength paramsLift
+            hparamsLengthLift code.typeFn.lift]
       have hliftComm (e : VExpr) :
           (e.liftN (view.specializedFields levels params).length).liftN 1
               (view.specializedFields levels params).length =
@@ -3919,7 +3930,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
         simpa using VExpr.liftN_liftN_comm e
           (view.specializedFields levels params).length 1 0 0
           (Nat.le_refl 0)
-      simpa [VStructureView.projectionMinorType,
+      simpa [VStructureView.fieldProjectionMinorType,
         VStructureView.projectionConstructorApp,
         VExpr.liftN_forallN, VExpr.liftN_appN,
         VExpr.liftTelN_length, hliftComm,
@@ -4301,7 +4312,10 @@ theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ_of_constructorP
     henv.hasType_defeqU_r hfieldsCtx hmotiveEq.symm hbody
   have hminor := VEnv.HasType.lamN hfieldsOnTel hbodyExpected
   rw [hminorShape]
-  simpa [VStructureView.projectionMinorType, fields, m, q] using hminor
+  rw [VStructureView.projectionMinorType,
+    self.generatedProjectionMinorType_eq_field henv.ordered
+      code.fieldSort levels hlevelsLength params hparamsLength code.typeFn]
+  simpa [VStructureView.fieldProjectionMinorType, fields, m, q] using hminor
 
 private theorem List.Forall₂.of_getElem? {R : α → β → Prop} :
     ∀ {xs : List α} {ys : List β},

@@ -1049,11 +1049,14 @@ theorem symbolicValueProjector_hasType :
         symbolicContext)
       (.lam (.bvar 3)
         (.lam (.app (.bvar 3) (.bvar 0)) (.bvar 0)))
-      (dependentRecordView.projectionMinorType symbolicLevels
-        (symbolicMajorParams.map (VExpr.liftN 1))
-        (dependentRecordView.specializedFields symbolicLevels
-          (symbolicMajorParams.map (VExpr.liftN 1)))
+      (dependentRecordView.projectionMinorType symbolicValueCode.fieldSort
+        symbolicLevels (symbolicMajorParams.map (VExpr.liftN 1))
         symbolicValueCode.typeFn.lift)
+    rw [VStructureView.projectionMinorType,
+      dependentRecord_view_wf.generatedProjectionMinorType_eq_field
+        dependentRecordEnv_ordered symbolicValueCode.fieldSort symbolicLevels
+        rfl (symbolicMajorParams.map (VExpr.liftN 1)) rfl
+          symbolicValueCode.typeFn.lift]
     have hfields : dependentRecordView.specializedFields symbolicLevels
         (symbolicMajorParams.map (VExpr.liftN 1)) =
         [.bvar 3, .app (.bvar 3) (.bvar 0)] := rfl
