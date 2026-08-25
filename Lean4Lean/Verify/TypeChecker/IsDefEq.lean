@@ -1026,6 +1026,8 @@ theorem isDefEqUnitLike.WF_of_structureEta {c : VContext} {s : VState}
   split <;> [skip; exact .pure nofun]
   rename_i _ ctorDeclName ctorLevelParams ctorRawType ctorInduct ctorIndex
     ctorNumParams ctorUnsafe
+  split <;> [skip; exact .pure nofun]
+  rename_i hstructure
   refine (inferType.WF he₂).bind fun _ _ _
     ⟨ty₂', _bBelow, _bTerm, bType, bTyped⟩ => ?_
   refine (isDefEqCore.WF tTypeTr bType).mono fun _ _ _ h hb => ?_
@@ -1050,12 +1052,8 @@ theorem isDefEqUnitLike.WF_of_structureEta {c : VContext} {s : VState}
     numParams := ctorNumParams
     numFields := 0
     isUnsafe := ctorUnsafe }
-  have hnonrec : c.env.isNonRecStructure familyName = true := by
-    unfold Kernel.Environment.isNonRecStructure
-    rw [hfamily]
-    rfl
   obtain ⟨artifact⟩ := c.structureEtaReady.resolve familyName familyInfo ctorName
-    constructorInfo hfamily hctor hnonrec
+    constructorInfo hfamily hctor hstructure
   have ⟨head', hstack⟩ := AppStack.build <|
     normalizedType.mkAppList_getAppArgsList ▸ tTypeTr
   have hheadTr := hstack.tr

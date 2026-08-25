@@ -415,7 +415,7 @@ def StructureEtaRegistrationCoverage
   ∀ familyName familyInfo constructorName constructorInfo,
     env.find? familyName = some (.inductInfo familyInfo) →
     env.find? constructorName = some (.ctorInfo constructorInfo) →
-    env.isNonRecStructure familyName = true →
+    env.isNonRecStructureConstructor familyName constructorName = true →
     Nonempty (StructureEtaArtifact env familyName familyInfo constructorName
       constructorInfo venv) ∨
       ∃ registration : StructureEtaRegistrationArtifact env familyName

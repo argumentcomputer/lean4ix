@@ -2935,6 +2935,37 @@ theorem declaredConstructorInfos_numParams
   exact declaredConstructorInfosFor_numParams stats indType.name isUnsafe
     context 0 indType.ctors member
 
+/-- Every constructor record synthesized by one family fold retains that
+family as its owner. -/
+theorem declaredConstructorInfosFor_induct
+    (stats : InductiveStats) (induct : Name) (isUnsafe : Bool)
+    (context : Context) (cidx : Nat) (ctors : List Constructor)
+    {info : ConstructorVal}
+    (member : info ∈ declaredConstructorInfosFor stats induct isUnsafe
+      context cidx ctors) :
+    info.induct = induct := by
+  induction ctors generalizing cidx with
+  | nil => contradiction
+  | cons ctor ctors ih =>
+      simp only [declaredConstructorInfosFor, List.mem_cons] at member
+      rcases member with rfl | member
+      · rfl
+      · exact ih (cidx + 1) member
+
+/-- Every record in the flattened constructor inventory retains the name of
+one source family as its owner. -/
+theorem declaredConstructorInfos_induct
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (isUnsafe : Bool) (context : Context) {info : ConstructorVal}
+    (member : info ∈ declaredConstructorInfos stats indTypes isUnsafe
+      context) :
+    ∃ indType ∈ indTypes.toList, info.induct = indType.name := by
+  simp only [declaredConstructorInfos, List.mem_flatMap] at member
+  obtain ⟨indType, sourceMember, member⟩ := member
+  exact ⟨indType, sourceMember,
+    declaredConstructorInfosFor_induct stats indType.name isUnsafe context
+      0 indType.ctors member⟩
+
 /--
 info: 'Lean4Lean.AddInductive.declaredConstructorInfosFor_numParams' depends on axioms: [propext,
  Classical.choice,
@@ -2942,6 +2973,14 @@ info: 'Lean4Lean.AddInductive.declaredConstructorInfosFor_numParams' depends on 
 -/
 #guard_msgs in
 #print axioms AddInductive.declaredConstructorInfosFor_numParams
+
+/-- info: 'Lean4Lean.AddInductive.declaredConstructorInfosFor_induct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms AddInductive.declaredConstructorInfosFor_induct
+
+/-- info: 'Lean4Lean.AddInductive.declaredConstructorInfos_induct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms AddInductive.declaredConstructorInfos_induct
 
 /-- info: 'Lean4Lean.AddInductive.declaredConstructorInfos_numParams' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in

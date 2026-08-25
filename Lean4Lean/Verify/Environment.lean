@@ -645,6 +645,27 @@ info: 'Lean4Lean.VInductDecl.CanonicalPrimitiveConstants.constructorView_nparams
 #guard_msgs in
 #print axioms VInductDecl.CanonicalPrimitiveConstants.constructorView_nparams_eq_zero
 
+/-- Every generated recursor retains the name of the source family whose
+normalized generation record produced it. -/
+theorem VInductDecl.BlockGenerationChecked.recursor_owner
+    {source : VInductDecl} (generation : source.BlockGenerationChecked)
+    {raw : VConstVal} (member : raw ∈ generation.recursors) :
+    ∃ familyRaw ∈ source.blockTypeConstants,
+      raw.name = mkRecName familyRaw.name := by
+  simp only [VInductDecl.BlockGenerationChecked.recursors,
+    List.mem_map] at member
+  obtain ⟨family, familyMember, rfl⟩ := member
+  refine ⟨family.raw.toVConstVal, ?_, rfl⟩
+  rw [VInductDecl.blockTypeConstants]
+  apply List.mem_map.2
+  refine ⟨family.raw, ?_, rfl⟩
+  rw [← generation.families_map_raw]
+  exact List.mem_map.2 ⟨family, familyMember, rfl⟩
+
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.recursor_owner' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms VInductDecl.BlockGenerationChecked.recursor_owner
+
 /-- Primitive recognition and the retained public nested-elimination run
 jointly prove that the canonical source list is unchanged and no auxiliary
 family was generated. -/
@@ -968,6 +989,137 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDe
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredConstructor_numParams
+
+/-- Every retained constructor metadata record in a recognized primitive
+execution names the sole canonical Bool/Nat family as its owner. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredConstructor_induct
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) {info : ConstructorVal}
+    (member : info ∈
+      execution.flattened.eliminationExecution.declaredConstructorInfos) :
+    ∃ raw ∈ (VPrimitiveInductive.canonicalDecl types).blockTypeConstants,
+      info.induct = raw.name := by
+  obtain ⟨source, sourceMember, owner⟩ :=
+    AddInductive.declaredConstructorInfos_induct
+      execution.flattened.eliminationExecution.normalization.stats
+      execution.nested.types.toArray isUnsafe
+      execution.flattened.eliminationExecution.constructorContext member
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨_, _, _, shape⟩ := recognized
+  obtain ⟨type, typesEq, _, primitive⟩ := shape
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have nestedTypesEq : execution.nested.types = [type] :=
+    noop.1.trans typesEq
+  have sourceEq : source = type := by
+    simpa only [List.toList_toArray, nestedTypesEq, List.mem_singleton] using
+      sourceMember
+  subst source
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, _constructorsEq⟩ := boolShape
+      refine ⟨VPrimitiveInductive.boolType.toVConstVal, ?_, ?_⟩
+      · simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.boolDecl]
+      · simpa [VPrimitiveInductive.boolType] using owner.trans typeName
+  | inr natShape =>
+      obtain ⟨typeName, _, _, _constructorsEq⟩ := natShape
+      refine ⟨VPrimitiveInductive.natType.toVConstVal, ?_, ?_⟩
+      · simp [VPrimitiveInductive.canonicalDecl, typesEq, typeName,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.natDecl]
+      · simpa [VPrimitiveInductive.natType] using owner.trans typeName
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredConstructor_induct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredConstructor_induct
+
+/-- Every family metadata record retained by a recognized canonical primitive
+execution has exactly the two Bool/Nat constructors fixed by the recognizer.
+This fact is extracted from the validator's source-aligned metadata relation,
+not reconstructed from the final environment map. -/
+theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredInfo_ctors_length
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) {info : InductiveVal}
+    (member : info ∈
+      execution.flattened.eliminationExecution.normalization.declaredInfos) :
+    info.ctors.length = 2 := by
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨_, _, _, shape⟩ := recognized
+  obtain ⟨type, typesEq, _, primitive⟩ := shape
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have nestedTypesEq : execution.nested.types = [type] :=
+    noop.1.trans typesEq
+  have nonempty : execution.nested.types.isEmpty = false := by
+    rw [nestedTypesEq]
+    rfl
+  have normalizationRun :=
+    execution.flattened.normalization_run execution.flattenedRun
+  have nindicesSize :
+      execution.flattened.eliminationExecution.normalization.stats.nindices.size =
+        execution.nested.types.length := by
+    have sizes := execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult.sizes_of_run nonempty
+        (execution.flattened.eliminationExecution.normalization
+          |>.familyValidationResult_run normalizationRun)
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      sizes.2.1
+  have metadata : List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray indType numIndices
+          execution.nested.aux2nested.size isUnsafe
+          execution.flattened.eliminationExecution.normalization.validationContext)
+      execution.nested.types
+      execution.flattened.eliminationExecution.normalization.declaredInfos := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size
+        isUnsafe
+        execution.flattened.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  obtain ⟨source, sourceMember, numIndices, infoEq⟩ :=
+    Lean4Lean.List.Forall₂.forall_exists_r metadata info member
+  have sourceEq : source = type := by
+    rw [nestedTypesEq] at sourceMember
+    simpa using sourceMember
+  subst source
+  rw [infoEq]
+  unfold AddInductive.declaredInductiveInfo
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨_, constructorsEq⟩ := boolShape
+      simp [constructorsEq]
+  | inr natShape =>
+      obtain ⟨_, _, _, constructorsEq⟩ := natShape
+      simp [constructorsEq]
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredInfo_ctors_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveDeclaredInfo_ctors_length
 
 /-- The exact constructor metadata retained by a recognized primitive
 execution translates to the canonical Bool/Nat constructor inventory in the
@@ -1709,6 +1861,10 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
     (VPrimitiveInductive.canonicalDecl types).blockTypeConstants
     execution.flattened.eliminationExecution.normalization.familyEnv.constants
     blockEnv
+  familyEvidence : List.Forall₂
+    (fun info raw => TrConstVal .safe input (.inductInfo info) raw)
+    execution.flattened.eliminationExecution.normalization.declaredInfos
+    (VPrimitiveInductive.canonicalDecl types).blockTypeConstants
   ctorEnv : VEnv
   addCtors : AddInductConstants .ctor
     execution.flattened.eliminationExecution.normalization.familyEnv.constants
@@ -1771,6 +1927,8 @@ def ofInsertions
   generation_wf := execution.canonicalPrimitiveGenerationWF
     primitiveResult input families
   addTypes := families.addTypes
+  familyEvidence :=
+    execution.canonicalPrimitiveFamilyEvidence primitiveResult input
   ctorEnv := constructors.ctorEnv
   addCtors := constructors.addCtors
   constructorEvidence :=
@@ -1849,6 +2007,111 @@ def toTrace
     recK := by simpa only [finalEq] using replay.recK
     addRules := replay.addRules }
 
+/-- Recover the exact host record for a canonical family at the final
+transaction boundary.  Primitive recognition additionally fixes the retained
+Bool/Nat family metadata to two constructors. -/
+theorem canonicalFamilyMetadata
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input output : VEnv}
+    (replay : execution.CanonicalPrimitiveReplay input output)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (mapWF : env.constants.WF) {raw : VConstVal}
+    (member : raw ∈
+      (VPrimitiveInductive.canonicalDecl types).blockTypeConstants) :
+    ∃ info ∈
+        execution.flattened.eliminationExecution.normalization.declaredInfos,
+      finalEnv.constants.find? raw.name = some (.inductInfo info) ∧
+        info.ctors.length = 2 := by
+  let trace := replay.toTrace primitiveResult
+  have wfTypes := trace.addTypes.map_wf mapWF
+  have wfCtors := trace.addCtors.map_wf wfTypes
+  obtain ⟨info, infoMember, related⟩ :=
+    Lean4Lean.List.Forall₂.forall_exists_r replay.familyEvidence raw member
+  have initialEq := execution.flattenedValidationEnv_eq
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEq] using mapWF
+  have familyLookup :
+      execution.flattened.eliminationExecution.normalization.familyEnv.constants.find?
+          info.name = some (.inductInfo info) :=
+    execution.flattened.eliminationExecution.normalization.declareTrace.map_lookup
+      validationMapWF infoMember
+  have constructorLookup :
+      execution.flattened.eliminationExecution.constructorEnv.constants.find?
+          info.name = some (.inductInfo info) :=
+    trace.addCtors.preserve_map_lookup wfTypes familyLookup
+  have finalLookup :
+      finalEnv.constants.find? info.name = some (.inductInfo info) :=
+    trace.addRecs.preserve_map_lookup wfCtors constructorLookup
+  have nameEq : info.name = raw.name := related.2
+  exact ⟨info, infoMember, nameEq ▸ finalLookup,
+    execution.canonicalPrimitiveDeclaredInfo_ctors_length primitiveResult
+      infoMember⟩
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.canonicalFamilyMetadata' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.canonicalFamilyMetadata
+
+/-- Classify any final family record of a primitive transaction.  Old records
+retain the exact input lookup; every newly inserted Bool/Nat family has two
+constructors. -/
+theorem familyLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input output : VEnv}
+    (replay : execution.CanonicalPrimitiveReplay input output)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (mapWF : env.constants.WF) {name : Name} {info : InductiveVal}
+    (found : finalEnv.constants.find? name = some (.inductInfo info)) :
+    env.constants.find? name = some (.inductInfo info) ∨
+      info.ctors.length = 2 ∧
+        ∃ raw ∈
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants,
+          raw.name = name := by
+  let trace := replay.toTrace primitiveResult
+  rcases trace.family_map_lookup_cases mapWF found with
+    old | ⟨raw, member, nameEq⟩
+  · exact .inl old
+  · obtain ⟨hostInfo, _hostMember, hostLookup, hostLength⟩ :=
+      replay.canonicalFamilyMetadata primitiveResult mapWF member
+    have hostLookupAtName :
+        finalEnv.constants.find? name = some (.inductInfo hostInfo) := by
+      simpa only [nameEq] using hostLookup
+    have infoEq : info = hostInfo := by
+      have taggedEq : (.inductInfo info : ConstantInfo) = .inductInfo hostInfo :=
+        Option.some.inj (found.symm.trans hostLookupAtName)
+      cases taggedEq
+      rfl
+    subst info
+    exact .inr ⟨hostLength, raw, member, nameEq⟩
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.familyLookupCases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.familyLookupCases
+
 /-- Recover the exact host record for a canonical constructor at the final
 transaction boundary.  The retained source-aligned metadata pairing selects
 the record, the executable constructor fold supplies its map lookup, and
@@ -1868,7 +2131,10 @@ theorem canonicalConstructorMetadata
     ∃ info ∈
         execution.flattened.eliminationExecution.declaredConstructorInfos,
       finalEnv.constants.find? raw.name = some (.ctorInfo info) ∧
-        info.numParams = 0 := by
+        info.numParams = 0 ∧
+          ∃ familyRaw ∈
+            (VPrimitiveInductive.canonicalDecl types).blockTypeConstants,
+            info.induct = familyRaw.name := by
   let trace := replay.toTrace primitiveResult
   have wfTypes := trace.addTypes.map_wf mapWF
   have wfCtors := trace.addCtors.map_wf wfTypes
@@ -1886,6 +2152,8 @@ theorem canonicalConstructorMetadata
   have nameEq : info.name = raw.name := related.2
   exact ⟨info, infoMember, nameEq ▸ finalLookup,
     execution.canonicalPrimitiveDeclaredConstructor_numParams primitiveResult
+      infoMember,
+    execution.canonicalPrimitiveDeclaredConstructor_induct primitiveResult
       infoMember⟩
 
 /--
@@ -1916,14 +2184,17 @@ theorem constructorLookupCases
     (found : finalEnv.constants.find? name = some (.ctorInfo info)) :
     env.constants.find? name = some (.ctorInfo info) ∨
       info.numParams = 0 ∧
-        ∃ raw ∈
+        (∃ raw ∈
           (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants,
-          raw.name = name := by
+          raw.name = name) ∧
+        ∃ familyRaw ∈
+          (VPrimitiveInductive.canonicalDecl types).blockTypeConstants,
+          info.induct = familyRaw.name := by
   let trace := replay.toTrace primitiveResult
   rcases trace.constructor_map_lookup_cases mapWF found with
     old | ⟨raw, member, nameEq⟩
   · exact .inl old
-  · obtain ⟨hostInfo, _hostMember, hostLookup, hostNumParams⟩ :=
+  · obtain ⟨hostInfo, _hostMember, hostLookup, hostNumParams, hostOwner⟩ :=
       replay.canonicalConstructorMetadata primitiveResult mapWF member
     have hostLookupAtName :
         finalEnv.constants.find? name = some (.ctorInfo hostInfo) := by
@@ -1934,7 +2205,7 @@ theorem constructorLookupCases
       cases taggedEq
       rfl
     subst info
-    exact .inr ⟨hostNumParams, raw, member, nameEq⟩
+    exact .inr ⟨hostNumParams, ⟨raw, member, nameEq⟩, hostOwner⟩
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay.constructorLookupCases' depends on axioms: [propext,
@@ -2125,7 +2396,7 @@ theorem constructorHead
     change finalEnv.constants.find?' name = _ at found
     rwa [finalMapWF.find?'_eq_find?] at found
   rcases pointwise.constructorLookupCases primitiveResult inputMapWF foundMap
-      with old | ⟨_numParams, raw, member, nameEq⟩
+      with old | ⟨_numParams, ⟨raw, member, nameEq⟩, _owner⟩
   · have oldFind : env.find? name = some (.ctorInfo info) := by
       change env.constants.find?' name = _
       rw [inputMapWF.find?'_eq_find?]
@@ -2183,7 +2454,7 @@ theorem constructorNumParams_mono
     change finalEnv.constants.find?' view.constructorName = _ at found
     rwa [finalMapWF.find?'_eq_find?] at found
   rcases pointwise.constructorLookupCases primitiveResult inputMapWF foundMap
-      with old | ⟨numParamsZero, raw, member, nameEq⟩
+      with old | ⟨numParamsZero, ⟨raw, member, nameEq⟩, _owner⟩
   · have oldFind :
         env.find? view.constructorName = some (.ctorInfo info) := by
       change env.constants.find?' view.constructorName = _
@@ -2241,6 +2512,236 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPri
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorNumParams
+
+/-- Canonical primitive insertion preserves projection readiness.  A final
+ready family cannot be newly inserted because Bool and Nat each have two
+constructors.  For an old family, exact constructor and recursor provenance
+rules out activation by a newly inserted artifact, after which the original
+registered projection artifact is retargeted to the final host map. -/
+theorem projectionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (wf : input.WF env) (safety : DefinitionSafety) :
+    ProjectionReady finalEnv (replay.output.venv safety) where
+  infer name info found ready := by
+    have inputMapWF := (wf.tr (safety := safety)).map_wf
+    let pointwise := replay.replays safety
+    let trace := pointwise.toTrace primitiveResult
+    have wfTypes := trace.addTypes.map_wf inputMapWF
+    have wfCtors := trace.addCtors.map_wf wfTypes
+    have finalMapWF := trace.addRecs.map_wf wfCtors
+    have foundMap :
+        finalEnv.constants.find? name = some (.inductInfo info) := by
+      change finalEnv.constants.find?' name = _ at found
+      rwa [finalMapWF.find?'_eq_find?] at found
+    obtain ⟨ctor, ctorInfo, recInfo, ctorsEq, numIndicesEq,
+        ctorFound, recFound, ctorOwner⟩ :=
+      Kernel.Environment.isProjectionReadyStructure_info found ready
+    have ctorFoundMap :
+        finalEnv.constants.find? ctor = some (.ctorInfo ctorInfo) := by
+      change finalEnv.constants.find?' ctor = _ at ctorFound
+      rwa [finalMapWF.find?'_eq_find?] at ctorFound
+    have recFoundMap :
+        finalEnv.constants.find? (mkRecName name) = some (.recInfo recInfo) := by
+      change finalEnv.constants.find?' (mkRecName name) = _ at recFound
+      rwa [finalMapWF.find?'_eq_find?] at recFound
+    rcases pointwise.familyLookupCases primitiveResult inputMapWF foundMap with
+      oldFamily | ⟨familyLength, _familyRaw⟩
+    · rcases pointwise.constructorLookupCases primitiveResult inputMapWF
+          ctorFoundMap with
+        oldCtor | ⟨_numParams, _ctorRaw, familyRaw, familyMember, owner⟩
+      · rcases trace.recursor_map_lookup_cases inputMapWF recFoundMap with
+          oldRec | ⟨rawRec, recMember, recName⟩
+        · have oldFamilyFind :
+              env.find? name = some (.inductInfo info) := by
+            change env.constants.find?' name = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldFamily
+          have oldCtorFind :
+              env.find? ctor = some (.ctorInfo ctorInfo) := by
+            change env.constants.find?' ctor = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldCtor
+          have oldRecFind :
+              env.find? (mkRecName name) = some (.recInfo recInfo) := by
+            change env.constants.find?' (mkRecName name) = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldRec
+          have inputReady : env.isProjectionReadyStructure name = true := by
+            exact Kernel.Environment.isProjectionReadyStructure_of_info
+              oldFamilyFind ctorsEq numIndicesEq oldCtorFind oldRecFind
+              ctorOwner
+          obtain ⟨artifact⟩ :=
+            (wf.projectionReady (safety := safety)).infer name info
+              oldFamilyFind inputReady
+          have artifactOldMap :
+              env.constants.find? artifact.view.constructorName =
+                some (.ctorInfo artifact.constructorInfo) := by
+            have artifactOldFind := artifact.constructor_find
+            change env.constants.find?' artifact.view.constructorName = _ at artifactOldFind
+            rwa [inputMapWF.find?'_eq_find?] at artifactOldFind
+          have artifactTypeMap :=
+            trace.addTypes.preserve_map_lookup inputMapWF artifactOldMap
+          have artifactCtorMap :=
+            trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
+          have artifactFinalMap :=
+            trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
+          have artifactFinalFind :
+              finalEnv.find? artifact.view.constructorName =
+                some (.ctorInfo artifact.constructorInfo) := by
+            change finalEnv.constants.find?' artifact.view.constructorName = _
+            rw [finalMapWF.find?'_eq_find?]
+            exact artifactFinalMap
+          exact ⟨artifact.retarget
+            (replay.old_le primitiveResult safety) artifactFinalFind⟩
+        · obtain ⟨familyRaw, familyMember, recOwner⟩ :=
+            trace.generation.recursor_owner recMember
+          have recNames : mkRecName familyRaw.name = mkRecName name :=
+            recOwner.symm.trans recName
+          have familyNameEq : familyRaw.name = name := by
+            simpa [mkRecName] using recNames
+          have fresh := trace.addTypes.map_fresh inputMapWF familyMember
+          rw [familyNameEq, oldFamily] at fresh
+          contradiction
+      · have familyNameEq : familyRaw.name = name :=
+          owner.symm.trans ctorOwner
+        have fresh := trace.addTypes.map_fresh inputMapWF familyMember
+        rw [familyNameEq, oldFamily] at fresh
+        contradiction
+    · rw [ctorsEq] at familyLength
+      simp at familyLength
+  constructorHead name info found :=
+    replay.constructorHead primitiveResult wf safety found
+  constructorNumParams view info hview hfields found :=
+    replay.constructorNumParams primitiveResult wf safety view info hview
+      hfields found
+  constructorNumParams_mono hle view info hview hfields found :=
+    replay.constructorNumParams_mono primitiveResult wf safety hle view info
+      hview hfields found
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.projectionReady' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.projectionReady
+
+/-- Canonical primitive insertion preserves structure-eta readiness.  The
+new Bool/Nat family cannot pass the one-constructor test, while constructor
+ownership and family-name freshness prevent a new canonical constructor from
+being paired with an old family. -/
+theorem structureEtaReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv}
+    {input : VEnvs}
+    (replay : execution.CoherentCanonicalPrimitiveReplay input)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (wf : input.WF env) (safety : DefinitionSafety) :
+    StructureEtaReady finalEnv (replay.output.venv safety) where
+  resolve familyName familyInfo constructorName constructorInfo familyFound
+      constructorFound ready := by
+    have inputMapWF := (wf.tr (safety := safety)).map_wf
+    let pointwise := replay.replays safety
+    let trace := pointwise.toTrace primitiveResult
+    have wfTypes := trace.addTypes.map_wf inputMapWF
+    have wfCtors := trace.addCtors.map_wf wfTypes
+    have finalMapWF := trace.addRecs.map_wf wfCtors
+    have familyFoundMap :
+        finalEnv.constants.find? familyName =
+          some (.inductInfo familyInfo) := by
+      change finalEnv.constants.find?' familyName = _ at familyFound
+      rwa [finalMapWF.find?'_eq_find?] at familyFound
+    have constructorFoundMap :
+        finalEnv.constants.find? constructorName =
+          some (.ctorInfo constructorInfo) := by
+      change finalEnv.constants.find?' constructorName = _ at constructorFound
+      rwa [finalMapWF.find?'_eq_find?] at constructorFound
+    obtain ⟨isRecEq, ctorsEq, numIndicesEq, owner⟩ :=
+      Kernel.Environment.isNonRecStructureConstructor_info familyFound
+        constructorFound ready
+    rcases pointwise.familyLookupCases primitiveResult inputMapWF
+        familyFoundMap with
+      oldFamily | ⟨familyLength, _familyRaw⟩
+    · rcases pointwise.constructorLookupCases primitiveResult inputMapWF
+          constructorFoundMap with
+        oldConstructor |
+          ⟨_numParams, _constructorRaw, familyRaw, familyMember,
+            constructorOwner⟩
+      · have oldFamilyFind :
+            env.find? familyName = some (.inductInfo familyInfo) := by
+          change env.constants.find?' familyName = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldFamily
+        have oldConstructorFind :
+            env.find? constructorName = some (.ctorInfo constructorInfo) := by
+          change env.constants.find?' constructorName = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldConstructor
+        have inputReady :
+            env.isNonRecStructureConstructor familyName constructorName =
+              true :=
+          Kernel.Environment.isNonRecStructureConstructor_of_info
+            oldFamilyFind oldConstructorFind isRecEq ctorsEq numIndicesEq owner
+        obtain ⟨artifact⟩ :=
+          (wf.structureEtaReady (safety := safety)).resolve familyName
+            familyInfo constructorName constructorInfo oldFamilyFind
+            oldConstructorFind inputReady
+        have artifactOldMap :
+            env.constants.find? artifact.projection.view.constructorName =
+              some (.ctorInfo artifact.projection.constructorInfo) := by
+          have artifactOldFind := artifact.projection.constructor_find
+          change env.constants.find?'
+            artifact.projection.view.constructorName = _ at artifactOldFind
+          rwa [inputMapWF.find?'_eq_find?] at artifactOldFind
+        have artifactTypeMap :=
+          trace.addTypes.preserve_map_lookup inputMapWF artifactOldMap
+        have artifactCtorMap :=
+          trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
+        have artifactFinalMap :=
+          trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
+        have artifactFinalFind :
+            finalEnv.find? artifact.projection.view.constructorName =
+              some (.ctorInfo artifact.projection.constructorInfo) := by
+          change finalEnv.constants.find?'
+            artifact.projection.view.constructorName = _
+          rw [finalMapWF.find?'_eq_find?]
+          exact artifactFinalMap
+        exact ⟨artifact.retarget (replay.old_le primitiveResult safety)
+          (replay.outputWF primitiveResult wf safety).ordered
+          artifactFinalFind⟩
+      · have familyNameEq : familyRaw.name = familyName :=
+          constructorOwner.symm.trans owner
+        have fresh := trace.addTypes.map_fresh inputMapWF familyMember
+        rw [familyNameEq, oldFamily] at fresh
+        contradiction
+    · rw [ctorsEq] at familyLength
+      simp at familyLength
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.structureEtaReady' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.structureEtaReady
 
 end AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
 
@@ -2599,10 +3100,10 @@ def traces
     (extension.traces safety).generation = extension.generation :=
   rfl
 
-/-- Complete the public primitive transaction package from the staged replay
-of the retained execution.  Projection and structure-eta readiness remain
-separate because they concern the final environment rather than metadata
-alignment. -/
+/-- Low-level assembly of the primitive transaction package from a staged
+replay.  This helper keeps final-environment readiness explicit; the public
+`ofExecution` constructor below derives both readiness fields from canonical
+provenance. -/
 def ofReplay
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -2623,9 +3124,10 @@ def ofReplay
   projectionReady := projectionReady
   structureEtaReady := structureEtaReady
 
-/-- Construct the primitive transaction directly from the retained execution
-and the input environment model.  The only remaining arguments are the two
-final-environment readiness predicates; all metadata replay is derived. -/
+/-- Construct the complete primitive transaction directly from the retained
+execution and input environment model.  Final projection and structure-eta
+readiness are derived from exact canonical provenance rather than supplied by
+the caller. -/
 noncomputable def ofExecution
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe : Bool}
@@ -2634,17 +3136,13 @@ noncomputable def ofExecution
       nparams types isUnsafe true fuel finalEnv}
     {ves : VEnvs} (wf : ves.WF env)
     (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true)
-    (projectionReady : ∀ safety, ProjectionReady finalEnv
-      ((execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf).output.venv
-        safety))
-    (structureEtaReady : ∀ safety, StructureEtaReady finalEnv
-      ((execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf).output.venv
-        safety)) :
+      true) :
     execution.CanonicalPrimitiveTransactionalVEnvsExtension ves :=
-  .ofReplay primitiveResult
-    (execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf)
-    projectionReady structureEtaReady
+  let replay :=
+    execution.canonicalPrimitiveCoherentReplay primitiveResult ves wf
+  .ofReplay primitiveResult replay
+    (fun safety => replay.projectionReady primitiveResult wf safety)
+    (fun safety => replay.structureEtaReady primitiveResult wf safety)
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution' depends on axioms: [propext,
@@ -3181,9 +3679,10 @@ theorem addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions
 
 /-- Primitive-aware transaction form of the inductive branch.  Ordinary
 blocks use the readiness-completed, name-avoiding transaction path.  A
-recognizer result of `true` is isolated into its own callback together with
-the proved canonical `Bool`/`Nat` syntax certificate, so primitive reflection
-never has to be approximated by the nonprimitive name-avoidance contract. -/
+recognizer result of `true` selects the complete canonical `Bool`/`Nat`
+transaction directly from the retained execution, so callers supply no
+parallel primitive semantics and primitive reflection never has to be
+approximated by the nonprimitive name-avoidance contract. -/
 theorem addDecl.inductDecl_WF_of_split_primitive_transactions
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
@@ -3201,14 +3700,7 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
           nparams types isUnsafe false fuel finalEnv),
       Environment.checkPrimitiveInductive env lparams nparams types
           isUnsafe = .ok false →
-        execution.ReadinessCompletedNonprimitiveVEnvsExtension ves)
-    (primitiveSemantics : ∀ finalEnv
-        (execution : AddInductive.EnvironmentInductiveExecution env lparams
-          nparams types isUnsafe true fuel finalEnv),
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok true →
-      PrimitiveInductiveResult lparams nparams types isUnsafe true →
-        execution.CanonicalPrimitiveTransactionalVEnvsExtension ves) :
+        execution.ReadinessCompletedNonprimitiveVEnvsExtension ves) :
     (addDecl env (.inductDecl lparams nparams types isUnsafe)
       (check := true) (fuel := fuel)).WF fun finalEnv =>
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
@@ -3225,8 +3717,9 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
           PrimitiveInductiveResult lparams nparams types isUnsafe true :=
         checkPrimitiveInductive.WF env lparams nparams types isUnsafe
           true primitiveRun
-      exact (primitiveSemantics finalEnv execution primitiveRun
-        primitiveResult).toTransactionalVEnvsExtension wf
+      exact
+        (AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution
+            wf primitiveResult).toTransactionalVEnvsExtension wf
         |>.toVEnvsExtension wf
 
 /--
@@ -3244,10 +3737,21 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_trans
 info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ Expr.abstractRange_eq,
  Expr.abstract_eq,
  Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
  Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

@@ -672,7 +672,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let env ← getEnv
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
-  unless env.isNonRecStructure fInfo.induct do return false
+  unless env.isNonRecStructureConstructor fInfo.induct f do return false
   unless ← isDefEq (← inferType t) (← inferType s) do return false
   let args := s.getAppArgs
   -- since `t` is in WHNF, and assuming it is not a constructor application, this projection
@@ -869,6 +869,7 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return false
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
+  unless env.isNonRecStructureConstructor I c do return false
   isDefEqCore tType (← inferType s)
 
 @[inherit_doc isDefEqCore]

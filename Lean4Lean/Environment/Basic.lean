@@ -51,6 +51,69 @@ def isNonRecStructure (env : Environment) (constName : Name) : Bool :=
   | some (.inductInfo { isRec := false, ctors := [_], numIndices := 0, .. }) => true
   | _ => false
 
+/-- The exact family/constructor pair accepted by the structure-eta fast
+paths.  Besides the one-constructor, unindexed, nonrecursive family shape,
+this checks both that the selected name is that sole constructor and that the
+constructor metadata names the family as its owner.  These checks are
+redundant for kernel-produced environments but make the executable predicate
+self-contained on arbitrary `Environment` values. -/
+def isNonRecStructureConstructor (env : Environment) (family constructor : Name) : Bool :=
+  match env.find? family, env.find? constructor with
+  | some (.inductInfo {
+        isRec := false, ctors := [registered], numIndices := 0, .. }),
+      some (.ctorInfo info) =>
+    registered == constructor && info.induct == family
+  | _, _ => false
+
+/-- Decompose a successful exact family/constructor structure test into the
+metadata fields and owner equality that it observed. -/
+theorem isNonRecStructureConstructor_info
+    {env : Environment} {family constructor : Name}
+    {familyInfo : InductiveVal} {constructorInfo : ConstructorVal}
+    (hfamily : env.find? family = some (.inductInfo familyInfo))
+    (hconstructor : env.find? constructor = some (.ctorInfo constructorInfo))
+    (hready : env.isNonRecStructureConstructor family constructor = true) :
+    familyInfo.isRec = false ∧ familyInfo.ctors = [constructor] ∧
+      familyInfo.numIndices = 0 ∧ constructorInfo.induct = family := by
+  unfold isNonRecStructureConstructor at hready
+  rw [hfamily, hconstructor] at hready
+  cases familyInfo
+  rename_i constant numParams numIndices all ctors numNested isRec isUnsafe
+    isReflexive
+  cases constant
+  cases isRec <;> cases numIndices <;> cases ctors <;>
+    simp_all
+  rename_i registered rest
+  cases rest <;> simp_all
+
+/-- Reassemble the exact family/constructor structure test from its resolved
+metadata observations. -/
+theorem isNonRecStructureConstructor_of_info
+    {env : Environment} {family constructor : Name}
+    {familyInfo : InductiveVal} {constructorInfo : ConstructorVal}
+    (hfamily : env.find? family = some (.inductInfo familyInfo))
+    (hconstructor : env.find? constructor = some (.ctorInfo constructorInfo))
+    (hrec : familyInfo.isRec = false)
+    (hctors : familyInfo.ctors = [constructor])
+    (hindices : familyInfo.numIndices = 0)
+    (howner : constructorInfo.induct = family) :
+    env.isNonRecStructureConstructor family constructor = true := by
+  unfold isNonRecStructureConstructor
+  rw [hfamily, hconstructor]
+  cases familyInfo
+  rename_i constant numParams numIndices all ctors numNested isRec isUnsafe
+    isReflexive
+  cases constant
+  simp_all
+
+theorem isNonRecStructureConstructor_isNonRecStructure
+    {env : Environment} {family constructor : Name}
+    (h : env.isNonRecStructureConstructor family constructor = true) :
+    env.isNonRecStructure family = true := by
+  unfold isNonRecStructureConstructor at h
+  unfold isNonRecStructure
+  split at h <;> simp_all
+
 /-- A one-constructor, unindexed structure whose constructor and generated
 recursor have both reached the host environment.  Family metadata is staged
 before either artifact is inserted; projection verification may only demand a
@@ -58,15 +121,98 @@ registered Theory view at this later boundary.
 
 Unlike `isNonRecStructure`, projection readiness deliberately does not inspect
 `InductiveVal.isRec`: Lean emits primitive projections for recursive structures
-too (including nested-recursive structures in the Lean prelude). -/
+too (including nested-recursive structures in the Lean prelude).  The
+constructor owner check makes the predicate self-contained on arbitrary host
+environments rather than relying on an ambient metadata-integrity oracle. -/
 def isProjectionReadyStructure (env : Environment) (constName : Name) : Bool :=
   match env.constants.find?' constName with
   | some (.inductInfo { ctors := [ctor], numIndices := 0, .. }) =>
     match env.constants.find?' ctor,
         env.constants.find?' (mkRecName constName) with
-    | some (.ctorInfo _), some (.recInfo _) => true
+    | some (.ctorInfo info), some (.recInfo _) => info.induct == constName
     | _, _ => false
   | _ => false
+
+/-- Decompose a successful projection-readiness test at an already resolved
+family lookup into its exact constructor, recursor, and ownership
+observations. -/
+theorem isProjectionReadyStructure_info
+    {env : Environment} {name : Name} {info : InductiveVal}
+    (hfind : env.find? name = some (.inductInfo info))
+    (hready : env.isProjectionReadyStructure name = true) :
+    ∃ ctor ctorInfo recInfo,
+      info.ctors = [ctor] ∧ info.numIndices = 0 ∧
+      env.find? ctor = some (.ctorInfo ctorInfo) ∧
+      env.find? (mkRecName name) = some (.recInfo recInfo) ∧
+      ctorInfo.induct = name := by
+  unfold isProjectionReadyStructure at hready
+  change env.constants.find?' name = some (.inductInfo info) at hfind
+  simp only [hfind] at hready
+  cases info
+  rename_i constant numParams numIndices all ctors numNested isRec isUnsafe
+    isReflexive
+  cases constant
+  rename_i familyName levelParams type
+  cases numIndices with
+  | succ n => simp at hready
+  | zero =>
+    cases ctors with
+    | nil => simp at hready
+    | cons ctor rest =>
+      cases rest with
+      | cons next tail => simp at hready
+      | nil =>
+        cases hctor : env.constants.find?' ctor with
+        | none => simp [hctor] at hready
+        | some foundCtor =>
+          cases foundCtor with
+          | axiomInfo _ => simp [hctor] at hready
+          | defnInfo _ => simp [hctor] at hready
+          | thmInfo _ => simp [hctor] at hready
+          | opaqueInfo _ => simp [hctor] at hready
+          | quotInfo _ => simp [hctor] at hready
+          | inductInfo _ => simp [hctor] at hready
+          | recInfo _ => simp [hctor] at hready
+          | ctorInfo ctorInfo =>
+            cases hrec : env.constants.find?' (mkRecName name) with
+            | none => simp [hctor, hrec] at hready
+            | some foundRec =>
+              cases foundRec with
+              | axiomInfo _ => simp [hctor, hrec] at hready
+              | defnInfo _ => simp [hctor, hrec] at hready
+              | thmInfo _ => simp [hctor, hrec] at hready
+              | opaqueInfo _ => simp [hctor, hrec] at hready
+              | quotInfo _ => simp [hctor, hrec] at hready
+              | inductInfo _ => simp [hctor, hrec] at hready
+              | ctorInfo _ => simp [hctor, hrec] at hready
+              | recInfo recInfo =>
+                have ownerBool : (ctorInfo.induct == name) = true := by
+                  simpa [hctor, hrec] using hready
+                have owner : ctorInfo.induct = name :=
+                  LawfulBEq.eq_of_beq ownerBool
+                exact ⟨ctor, ctorInfo, recInfo, rfl, rfl, hctor, hrec, owner⟩
+
+/-- Reassemble projection readiness from the exact observations exposed by
+`isProjectionReadyStructure_info`. -/
+theorem isProjectionReadyStructure_of_info
+    {env : Environment} {name ctor : Name} {info : InductiveVal}
+    {ctorInfo : ConstructorVal} {recInfo : RecursorVal}
+    (hfind : env.find? name = some (.inductInfo info))
+    (hctors : info.ctors = [ctor]) (hindices : info.numIndices = 0)
+    (hctor : env.find? ctor = some (.ctorInfo ctorInfo))
+    (hrec : env.find? (mkRecName name) = some (.recInfo recInfo))
+    (howner : ctorInfo.induct = name) :
+    env.isProjectionReadyStructure name = true := by
+  unfold isProjectionReadyStructure
+  change env.constants.find?' name = some (.inductInfo info) at hfind
+  change env.constants.find?' ctor = some (.ctorInfo ctorInfo) at hctor
+  change env.constants.find?' (mkRecName name) = some (.recInfo recInfo) at hrec
+  rw [hfind]
+  cases info
+  rename_i constant numParams numIndices all ctors numNested isRec isUnsafe
+    isReflexive
+  cases constant
+  simp_all
 
 theorem isProjectionReadyStructure_false_of_no_ctorInfo
     {env : Environment} {name : Name} {info : InductiveVal}

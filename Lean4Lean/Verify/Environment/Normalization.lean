@@ -2938,6 +2938,89 @@ theorem declarationTraceConstantsWF
       apply ih
       exact mapWF.insert _ _ (checkName_constants_fresh check)
 
+/-- Family declaration preserves persistent-map well-formedness. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_wf
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF :=
+  VInductDecl.declarationTraceConstantsWF run wf
+
+/-- Family declaration preserves every lookup already present in its input
+map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.preserve_map_lookup
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF)
+    (old : env.constants.find? name = some found) :
+    finalEnv.constants.find? name = some found := by
+  induction run with
+  | nil => exact old
+  | @cons infos finalEnv env info checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      have mid : (env.add (.inductInfo info)).constants.find? name =
+          some found := by
+        change (env.constants.insert info.name (.inductInfo info)).find? name = _
+        rw [wf.find?_insert]
+        split
+        · rename_i equal
+          have nameEq : info.name = name := LawfulBEq.eq_of_beq equal
+          subst name
+          rw [old] at fresh
+          contradiction
+        · exact old
+      exact ih (wf.insert _ _ fresh) mid
+
+/-- Every synthesized family record remains at its name in the final
+family-declaration map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {info : InductiveVal}
+    (member : info ∈ infos) :
+    finalEnv.constants.find? info.name = some (.inductInfo info) := by
+  induction run with
+  | nil => contradiction
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · apply tail.preserve_map_lookup
+          (wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName))
+        change SMap.find? (SMap.insert _ info.name
+          (ConstantInfo.inductInfo info)) info.name = _
+        rw [wf.find?_insert]
+        simp
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName)) member
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_wf' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareInductiveInfoListRun.map_wf
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.preserve_map_lookup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareInductiveInfoListRun.preserve_map_lookup
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareInductiveInfoListRun.map_lookup
+
 /-- Family-only declaration cannot synthesize constructor metadata absent
 from the input map. -/
 theorem declarationTraceNoCtorInfo

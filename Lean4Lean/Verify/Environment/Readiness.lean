@@ -309,6 +309,30 @@ noncomputable def ProjectionArtifact.mono
   programsWF := self.programsWF_mono hle
   programsWF_mono hle' := self.programsWF_mono (hle.trans hle')
 
+/-- A projection artifact may be retargeted to an arbitrary host environment
+once its one host-dependent observation—the exact constructor lookup—is
+re-established there.  The abstract model may grow at the same time. -/
+noncomputable def ProjectionArtifact.retarget
+    (self : ProjectionArtifact env name info venv)
+    {env' : Environment} {venv' : VEnv} (hle : venv ≤ venv')
+    (constructor_find : env'.find? self.view.constructorName =
+      some (.ctorInfo self.constructorInfo)) :
+    ProjectionArtifact env' name info venv' where
+  view := self.view
+  name_eq := self.name_eq
+  viewWF := self.viewWF.mono hle
+  constructorInfo := self.constructorInfo
+  constructor_find := constructor_find
+  constructor_numParams_eq := self.constructor_numParams_eq
+  constructor_numFields_eq := self.constructor_numFields_eq
+  levelParams_length := self.levelParams_length
+  numParams_eq := self.numParams_eq
+  numIndices_eq := self.numIndices_eq
+  ctors_eq := self.ctors_eq
+  rawResult_sort := self.rawResult_sort
+  programsWF := self.programsWF_mono hle
+  programsWF_mono hle' := self.programsWF_mono (hle.trans hle')
+
 /-- A projection artifact depends only on the host constant map, not on the
 module header or the other administrative fields of the kernel environment. -/
 noncomputable def ProjectionArtifact.of_constants_eq
@@ -496,11 +520,13 @@ theorem ProjectionReady.add
           | nil =>
             change (match (env.add ci).constants.find?' ctor,
                 (env.add ci).constants.find?' (mkRecName name) with
-              | some (.ctorInfo _), some (.recInfo _) => true
+              | some (.ctorInfo ctorInfo), some (.recInfo _) =>
+                  ctorInfo.induct == name
               | _, _ => false) = true at hready
             change (match env.constants.find?' ctor,
                 env.constants.find?' (mkRecName name) with
-              | some (.ctorInfo _), some (.recInfo _) => true
+              | some (.ctorInfo ctorInfo), some (.recInfo _) =>
+                  ctorInfo.induct == name
               | _, _ => false) = true
             generalize hc : (env.add ci).constants.find?' ctor =
               ctorFound at hready
@@ -534,7 +560,8 @@ theorem ProjectionReady.add
                       some (.ctorInfo ctorInfo) at hctor
                     change env.constants.find?' (mkRecName name) =
                       some (.recInfo recInfo) at hrec
-                    simp [hctor, hrec]
+                    rw [hctor, hrec]
+                    simpa only using hready
     obtain ⟨artifact⟩ := self.infer name info hfindOld hreadyOld
     exact ⟨artifact.add mapWF hfresh htransparent hle⟩
   constructorHead name info hfind := by
@@ -602,6 +629,28 @@ noncomputable def StructureEtaArtifact.mono
     rw [← self.projection.viewWF.toStructEta_mono_eq hle self.etaOrdered ord']
     exact hle.structEtas self.etaRegistered
 
+/-- Retarget a structure-eta artifact together with its projection payload
+after re-establishing the selected constructor lookup in a new host
+environment. -/
+noncomputable def StructureEtaArtifact.retarget
+    (self : StructureEtaArtifact env familyName familyInfo
+      constructorName constructorInfo venv)
+    {env' : Environment} {venv' : VEnv} (hle : venv ≤ venv')
+    (ord' : venv'.Ordered)
+    (constructor_find : env'.find? self.projection.view.constructorName =
+      some (.ctorInfo self.projection.constructorInfo)) :
+    StructureEtaArtifact env' familyName familyInfo constructorName
+      constructorInfo venv' where
+  projection := self.projection.retarget hle constructor_find
+  constructor_name_eq := self.constructor_name_eq
+  constructor_info_eq := self.constructor_info_eq
+  etaOrdered := ord'
+  etaRegistered := by
+    change venv'.structEtas
+      ((self.projection.viewWF.mono hle).toStructEta ord')
+    rw [← self.projection.viewWF.toStructEta_mono_eq hle self.etaOrdered ord']
+    exact hle.structEtas self.etaRegistered
+
 /-- A structure-eta artifact likewise depends only on the host constant map. -/
 noncomputable def StructureEtaArtifact.of_constants_eq
     {env env' : Environment} (hconstants : env.constants = env'.constants)
@@ -631,13 +680,11 @@ theorem StructureEtaReady.of_constants_eq
       change env'.constants.find?' constructorName = _ at hconstructor
       change env.constants.find?' constructorName = _
       rwa [hconstants]
-    have hnonrec' : env.isNonRecStructure familyName = true := by
-      unfold Kernel.Environment.isNonRecStructure at hnonrec ⊢
-      change (match env'.constants.find?' familyName with
-        | some (.inductInfo {
-            isRec := false, ctors := [_], numIndices := 0, .. }) => true
-        | _ => false) = true at hnonrec
-      rw [← hconstants] at hnonrec
+    have hnonrec' :
+        env.isNonRecStructureConstructor familyName constructorName = true := by
+      unfold Kernel.Environment.isNonRecStructureConstructor at hnonrec ⊢
+      rw [hfamily, hconstructor] at hnonrec
+      rw [hfamily', hconstructor']
       exact hnonrec
     obtain ⟨artifact⟩ := self.resolve familyName familyInfo constructorName
       constructorInfo hfamily' hconstructor' hnonrec'
@@ -678,8 +725,11 @@ theorem StructureEtaReady.addInductInfo
       hfamily hconstructor hnonrec := by
     by_cases heq : info'.name = familyName
     · subst familyName
+      have hshape :=
+        Kernel.Environment.isNonRecStructureConstructor_isNonRecStructure
+          hnonrec
       rw [Environment.isNonRecStructure_add_inductInfo_self
-        mapWF info' hfresh hctors] at hnonrec
+        mapWF info' hfresh hctors] at hshape
       contradiction
     · have hfamily' : env.find? familyName =
           some (.inductInfo familyInfo) := by
@@ -695,9 +745,11 @@ theorem StructureEtaReady.addInductInfo
         split at hconstructor
         · cases hconstructor
         · exact hconstructor
-      have hnonrec' : env.isNonRecStructure familyName = true := by
-        rw [← Environment.isNonRecStructure_add_inductInfo
-          mapWF info' hfresh heq]
+      have hnonrec' :
+          env.isNonRecStructureConstructor familyName constructorName = true := by
+        unfold Kernel.Environment.isNonRecStructureConstructor at hnonrec ⊢
+        rw [hfamily, hconstructor] at hnonrec
+        rw [hfamily', hconstructor']
         exact hnonrec
       obtain ⟨artifact⟩ := self.resolve familyName familyInfo
         constructorName constructorInfo hfamily' hconstructor' hnonrec'
@@ -731,9 +783,11 @@ theorem StructureEtaReady.add
         some (.ctorInfo constructorInfo) :=
       Environment.find?_of_add_structural mapWF hfresh htransparent
         (.inr (.inl ⟨constructorInfo, rfl⟩)) hconstructor
-    have hnonrecOld : env.isNonRecStructure familyName = true := by
-      simp only [Kernel.Environment.isNonRecStructure, hfamily] at hnonrec
-      simp only [Kernel.Environment.isNonRecStructure, hfamilyOld]
+    have hnonrecOld :
+        env.isNonRecStructureConstructor familyName constructorName = true := by
+      unfold Kernel.Environment.isNonRecStructureConstructor at hnonrec ⊢
+      rw [hfamily, hconstructor] at hnonrec
+      rw [hfamilyOld, hconstructorOld]
       exact hnonrec
     obtain ⟨artifact⟩ := self.resolve familyName familyInfo constructorName constructorInfo
       hfamilyOld hconstructorOld hnonrecOld

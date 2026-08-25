@@ -470,6 +470,50 @@ theorem AddInductBlockTrace.constructor_map_lookup_cases
     · exact .inr ⟨raw, member, nameEq⟩
   · simp [InductConstantKind.Matches] at hkind
 
+/-- Classify family metadata visible after a complete mutual-block insertion.
+It is either an unchanged input lookup or its name occurs in the block's exact
+family inventory. -/
+theorem AddInductBlockTrace.family_map_lookup_cases
+    (H : AddInductBlockTrace C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF)
+    (hout : C₂.find? name = some (.inductInfo info)) :
+    C₁.find? name = some (.inductInfo info) ∨
+      ∃ raw ∈ decl.blockTypeConstants, raw.name = name := by
+  have wfTypes := H.addTypes.map_wf wf
+  have wfCtors := H.addCtors.map_wf wfTypes
+  rcases H.addRecs.map_lookup_cases_kind wfCtors hout with
+    ctorLookup | ⟨raw, member, nameEq, hkind⟩
+  · rcases H.addCtors.map_lookup_cases_kind wfTypes ctorLookup with
+      typeLookup | ⟨raw, member, nameEq, hkind⟩
+    · rcases H.addTypes.map_lookup_cases_kind wf typeLookup with
+        old | ⟨raw, member, nameEq, _hkind⟩
+      · exact .inl old
+      · exact .inr ⟨raw, member, nameEq⟩
+    · simp [InductConstantKind.Matches] at hkind
+  · simp [InductConstantKind.Matches] at hkind
+
+/-- Classify recursor metadata visible after a complete mutual-block
+insertion.  It is either an unchanged input lookup or its name occurs in the
+block's exact generated-recursor inventory. -/
+theorem AddInductBlockTrace.recursor_map_lookup_cases
+    (H : AddInductBlockTrace C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF)
+    (hout : C₂.find? name = some (.recInfo info)) :
+    C₁.find? name = some (.recInfo info) ∨
+      ∃ raw ∈ H.generation.recursors, raw.name = name := by
+  have wfTypes := H.addTypes.map_wf wf
+  have wfCtors := H.addCtors.map_wf wfTypes
+  rcases H.addRecs.map_lookup_cases_kind wfCtors hout with
+    ctorLookup | ⟨raw, member, nameEq, _hkind⟩
+  · rcases H.addCtors.map_lookup_cases_kind wfTypes ctorLookup with
+      typeLookup | ⟨raw, member, nameEq, hkind⟩
+    · rcases H.addTypes.map_lookup_cases_kind wf typeLookup with
+        old | ⟨raw, member, nameEq, hkind⟩
+      · exact .inl old
+      · simp [InductConstantKind.Matches] at hkind
+    · simp [InductConstantKind.Matches] at hkind
+  · exact .inr ⟨raw, member, nameEq⟩
+
 /--
 info: 'Lean4Lean.AddInductBlockTrace.constructor_map_lookup_cases' depends on axioms: [propext,
  Classical.choice,
@@ -480,6 +524,28 @@ info: 'Lean4Lean.AddInductBlockTrace.constructor_map_lookup_cases' depends on ax
 -/
 #guard_msgs in
 #print axioms AddInductBlockTrace.constructor_map_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductBlockTrace.family_map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductBlockTrace.family_map_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductBlockTrace.recursor_map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductBlockTrace.recursor_map_lookup_cases
 
 theorem AddInductBlock.old_of_value
     (H : AddInductBlock C₁ env₁ decl C₂ env₂)

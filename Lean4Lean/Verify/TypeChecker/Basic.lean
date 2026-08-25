@@ -191,7 +191,7 @@ structure StructureEtaReady (env : Environment) (venv : VEnv) : Prop where
   resolve : ∀ familyName familyInfo constructorName constructorInfo,
     env.find? familyName = some (.inductInfo familyInfo) →
     env.find? constructorName = some (.ctorInfo constructorInfo) →
-    env.isNonRecStructure familyName = true →
+    env.isNonRecStructureConstructor familyName constructorName = true →
     Nonempty (StructureEtaArtifact env familyName familyInfo
       constructorName constructorInfo venv)
 
@@ -200,20 +200,21 @@ runtime nonrecursive-structure test has succeeded. -/
 theorem StructureEtaReady.resolveConstructor
     (self : StructureEtaReady env venv)
     (hctor : env.find? constructorName = some (.ctorInfo constructorInfo))
-    (hnonrec : env.isNonRecStructure constructorInfo.induct = true) :
+    (hstructure : env.isNonRecStructureConstructor constructorInfo.induct
+      constructorName = true) :
     ∃ familyInfo,
       env.find? constructorInfo.induct = some (.inductInfo familyInfo) ∧
       Nonempty (StructureEtaArtifact env constructorInfo.induct familyInfo
         constructorName constructorInfo venv) := by
-  have hshape := hnonrec
-  unfold Kernel.Environment.isNonRecStructure at hshape
+  have hshape := hstructure
+  unfold Kernel.Environment.isNonRecStructureConstructor at hshape
   generalize hfamily : env.find? constructorInfo.induct = found at hshape
   cases found with
   | none => simp at hshape
   | some info => cases info with
     | inductInfo familyInfo =>
       exact ⟨familyInfo, rfl,
-        self.resolve _ _ _ _ hfamily hctor hnonrec⟩
+        self.resolve _ _ _ _ hfamily hctor hstructure⟩
     | axiomInfo _ => simp at hshape
     | defnInfo _ => simp at hshape
     | thmInfo _ => simp at hshape
@@ -288,7 +289,10 @@ where the host recognizes no eta-eligible structure family. -/
 theorem StructureEtaReady.of_no_nonRecStructure
     (hnone : ∀ name, env.isNonRecStructure name = false) :
     StructureEtaReady env venv where
-  resolve familyName _ _ _ _ _ hnonrec := by
+  resolve familyName _ constructorName _ _ _ hstructure := by
+    have hnonrec :=
+      Kernel.Environment.isNonRecStructureConstructor_isNonRecStructure
+        (constructor := constructorName) hstructure
     rw [hnone familyName] at hnonrec
     contradiction
 
