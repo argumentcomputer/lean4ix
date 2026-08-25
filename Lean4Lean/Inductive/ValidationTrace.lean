@@ -2020,8 +2020,9 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
         candidateContext = .ok execution := by
   obtain ⟨familyTypeObservers, constructorObservers⟩ :=
     observers validation validationRun familyEnv declareRun constructorRun
-  obtain ⟨familyTypes, familyTypesRun⟩ :=
-    executeCandidateFamilyTypeList_ok_of_observable familyTypeObservers
+  obtain ⟨familyTypes, familyTypesRun, familyTerminals⟩ :=
+    executeCandidateFamilyTypeList_ok_with_terminals_of_observable
+      familyTypeObservers
   unfold buildNormalizationCandidateExecution
   rw [checkInductiveTypes_factor, validationRun]
   simp only [Bind.bind, Except.bind]
@@ -2044,14 +2045,21 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
         rw [familyTypesRun] at actual
         contradiction
       next actualFamilyTypes actualFamilyTypesRun =>
-        obtain ⟨families, familiesRun⟩ :=
-          executeCandidateFamilyList_ok_of_observable
-            actualFamilyTypes.candidates constructorObservers
+        have familyTypesEq : actualFamilyTypes = familyTypes :=
+          Except.ok.inj (actualFamilyTypesRun.symm.trans familyTypesRun)
+        subst actualFamilyTypes
         split
-        next error actual =>
-          rw [familiesRun] at actual
-          contradiction
-        next actualFamilies actualFamiliesRun => exact ⟨_, rfl⟩
+        next _ =>
+          obtain ⟨families, familiesRun⟩ :=
+            executeCandidateFamilyList_ok_of_observable
+              familyTypes.candidates constructorObservers
+          split
+          next error actual =>
+            rw [familiesRun] at actual
+            contradiction
+          next actualFamilies actualFamiliesRun => exact ⟨_, rfl⟩
+        next notTerminals =>
+          exact (notTerminals familyTerminals.check_eq_true).elim
 
 /-- Terminal counters and the preserved kernel environment exposed by any
 successful nonempty arbitrary-block family-validation run. -/

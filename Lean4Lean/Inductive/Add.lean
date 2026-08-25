@@ -1845,6 +1845,53 @@ def CandidateConstructor.view
 structure CandidateFamilyType (source : InductiveType) where
   type : CandidateExpr source.type
 
+/-- Source-indexed evidence that every retained family-type candidate reaches
+a sort at the end of its main telescope.  The detailed normalization prefix
+checks this exact payload before accepting a candidate block, so downstream
+semantic staging does not need to reconstruct the validator's terminal
+observer. -/
+inductive CandidateFamilyTypeTerminalSortList :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamilyType sources → Prop where
+  | nil : CandidateFamilyTypeTerminalSortList .nil
+  | cons
+      (terminal : candidate.type.trace.terminalResult = .sort resultLevel)
+      (tail : CandidateFamilyTypeTerminalSortList candidates) :
+      CandidateFamilyTypeTerminalSortList (.cons candidate candidates)
+
+/-- Executable terminal-sort gate for an exact dependent family-type list. -/
+def CandidateFamilyTypeTerminalSortList.check :
+    {sources : List InductiveType} →
+      (candidates : CandidateList CandidateFamilyType sources) → Bool
+  | [], .nil => true
+  | _ :: _, .cons candidate candidates =>
+      match candidate.type.trace.terminalResult with
+      | .sort _ => CandidateFamilyTypeTerminalSortList.check candidates
+      | _ => false
+
+/-- A successful terminal gate reconstructs its exact source-indexed proof. -/
+theorem CandidateFamilyTypeTerminalSortList.of_check :
+    (candidates : CandidateList CandidateFamilyType sources) →
+      CandidateFamilyTypeTerminalSortList.check candidates = true →
+        CandidateFamilyTypeTerminalSortList candidates
+  | .nil, _ => .nil
+  | .cons candidate candidates, checked => by
+      cases terminal_eq : candidate.type.trace.terminalResult <;>
+        simp [CandidateFamilyTypeTerminalSortList.check, terminal_eq]
+          at checked
+      case sort resultLevel =>
+        exact .cons terminal_eq
+          (CandidateFamilyTypeTerminalSortList.of_check candidates checked)
+
+/-- Proof-carrying terminal evidence evaluates back to the successful gate. -/
+theorem CandidateFamilyTypeTerminalSortList.check_eq_true
+    (terminals : CandidateFamilyTypeTerminalSortList candidates) :
+    CandidateFamilyTypeTerminalSortList.check candidates = true := by
+  induction terminals with
+  | nil => rfl
+  | cons terminal tail ih =>
+      simp [CandidateFamilyTypeTerminalSortList.check, terminal, ih]
+
 /-- Complete candidate for one family, with constructor traces computed only
 after raw family insertion. -/
 structure CandidateFamily (source : InductiveType) where
@@ -2332,8 +2379,9 @@ def executeCandidateFamilyList (context : Context) :
 reader context. -/
 def CandidateFamilyType.Observable
     (context : Context) (source : InductiveType) : Prop :=
-  ∃ candidate : CandidateFamilyType source,
-    normalizeCandidateFamilyType source context = .ok candidate
+  ∃ (candidate : CandidateFamilyType source) (resultLevel : Level),
+    normalizeCandidateFamilyType source context = .ok candidate ∧
+      candidate.type.trace.terminalResult = .sort resultLevel
 
 /-- The recursive constructor-type observer succeeds in its exact post-family
 reader context. -/
@@ -2373,32 +2421,52 @@ inductive CandidateFamilyConstructorListsObservable (context : Context) :
       (tail : CandidateFamilyConstructorListsObservable context sources) :
       CandidateFamilyConstructorListsObservable context (source :: sources)
 
-/-- Ordered family-type observation succeeds when each underlying recursive
-expression observer succeeds. -/
-theorem executeCandidateFamilyTypeList_ok_of_observable
+/-- Ordered family observation constructs the exact traversal together with
+the terminal-sort evidence now required by the retained normalization
+prefix. -/
+theorem executeCandidateFamilyTypeList_ok_with_terminals_of_observable
     (observable : CandidateFamilyTypeListObservable context sources) :
     ∃ execution,
-      executeCandidateFamilyTypeList context sources = .ok execution := by
+      executeCandidateFamilyTypeList context sources = .ok execution ∧
+        CandidateFamilyTypeTerminalSortList execution.candidates := by
   induction sources with
-  | nil => exact ⟨_, rfl⟩
+  | nil => exact ⟨_, rfl, .nil⟩
   | cons source sources ih =>
       cases observable with
       | cons head tail =>
-          change (∃ candidate : CandidateFamilyType source,
-            normalizeCandidateFamilyType source context = .ok candidate) at head
-          obtain ⟨headCandidate, headRun⟩ := head
-          obtain ⟨tailExecution, tailRun⟩ := ih tail
+          change (∃ (candidate : CandidateFamilyType source)
+              (resultLevel : Level),
+            normalizeCandidateFamilyType source context = .ok candidate ∧
+              candidate.type.trace.terminalResult =
+                .sort resultLevel) at head
+          obtain ⟨headCandidate, resultLevel, headRun, terminal⟩ := head
+          obtain ⟨tailExecution, tailRun, terminals⟩ := ih tail
           unfold executeCandidateFamilyTypeList
           split
           next error actual =>
             rw [headRun] at actual
             contradiction
           next actualHead actual =>
+            rw [headRun] at actual
+            cases actual
             split
             next error actualTail =>
               rw [tailRun] at actualTail
               contradiction
-            next actualTail actualTailRun => exact ⟨_, rfl⟩
+            next actualTail actualTailRun =>
+              rw [tailRun] at actualTailRun
+              cases actualTailRun
+              exact ⟨_, rfl, .cons terminal terminals⟩
+
+/-- Ordered family-type observation succeeds when each underlying recursive
+expression observer succeeds. -/
+theorem executeCandidateFamilyTypeList_ok_of_observable
+    (observable : CandidateFamilyTypeListObservable context sources) :
+    ∃ execution,
+      executeCandidateFamilyTypeList context sources = .ok execution := by
+  obtain ⟨execution, run, _⟩ :=
+    executeCandidateFamilyTypeList_ok_with_terminals_of_observable observable
+  exact ⟨execution, run⟩
 
 /-- Ordered constructor observation succeeds when each underlying recursive
 expression observer succeeds. -/
@@ -2462,6 +2530,8 @@ structure NormalizationCandidateExecution
   stats : InductiveStats
   familyTypes : CandidateFamilyTypeListExecution
     { candidateContext with lctx := {} } types
+  familyTerminals : CandidateFamilyTypeTerminalSortList
+    familyTypes.candidates
   familyEnv : Environment
   declareRun : declareInductiveTypes stats nparams types.toArray
     numNested isUnsafe validationContext = .ok familyEnv
@@ -2526,20 +2596,27 @@ def buildNormalizationCandidateExecutionAfterValidation
             { candidateContext with lctx := {} } types with
         | .error error => .error error
         | .ok familyTypes =>
-          match executeCandidateFamilyList
-              { candidateContext with env := familyEnv, lctx := {} }
-              familyTypes.candidates with
-          | .error error => .error error
-          | .ok families => .ok {
-              validationContext
-              stats
-              familyTypes
-              familyEnv
-              declareRun := by simpa using hdeclare
-              declareTrace := DeclareInductiveInfoListRun.of_run (by
-                simpa only [declareInductiveTypes] using hdeclare)
-              constructorRun := by simpa using hconstructors
-              families }
+          if hterminals : CandidateFamilyTypeTerminalSortList.check
+              familyTypes.candidates then
+            match executeCandidateFamilyList
+                { candidateContext with env := familyEnv, lctx := {} }
+                familyTypes.candidates with
+            | .error error => .error error
+            | .ok families => .ok {
+                validationContext
+                stats
+                familyTypes
+                familyTerminals :=
+                  CandidateFamilyTypeTerminalSortList.of_check _ hterminals
+                familyEnv
+                declareRun := by simpa using hdeclare
+                declareTrace := DeclareInductiveInfoListRun.of_run (by
+                  simpa only [declareInductiveTypes] using hdeclare)
+                constructorRun := by simpa using hconstructors
+                families }
+          else
+            .error (.other
+              "normalization candidate family terminal is not a sort")
 
 /-- A retained successful post-validation execution exposes exactly the
 statistics and reader context supplied by the family validator. -/

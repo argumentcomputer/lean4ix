@@ -4138,6 +4138,25 @@ inductive CandidateBlockFamilyTerminalSortList :
       (tail : CandidateBlockFamilyTerminalSortList candidates) :
       CandidateBlockFamilyTerminalSortList (.cons candidate candidates)
 
+/-- Lift the terminal witnesses retained before raw family insertion onto the
+same family-type payload inside the assembled candidate list. -/
+theorem CandidateBlockFamilyTerminalSortList.of_familyTypes :
+    (candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources) →
+    AddInductive.CandidateFamilyTypeTerminalSortList candidates.familyTypes →
+      CandidateBlockFamilyTerminalSortList candidates
+  | .nil, terminals => by
+      cases terminals
+      exact .nil
+  | .cons candidate candidates, terminals => by
+      have terminals' : AddInductive.CandidateFamilyTypeTerminalSortList
+          (.cons candidate.familyType candidates.familyTypes) := by
+        simpa only [AddInductive.CandidateList.familyTypes] using terminals
+      cases terminals' with
+      | cons terminal tail =>
+          exact .cons terminal
+            (CandidateBlockFamilyTerminalSortList.of_familyTypes candidates tail)
+
 /-- Executable shape check for the terminal-sort evidence of a complete
 source-indexed family list.  The result universe remains owned by each exact
 candidate trace; the check only recognizes its terminal constructor. -/
@@ -5372,6 +5391,21 @@ theorem _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familyType
   rw [AddInductive.NormalizationCandidateExecution.candidate,
     execution.families.produced.familyTypes_eq]
   exact execution.familyTypes.produced
+
+/-- Every retained ordinary execution exports the exact terminal sort checked
+for each assembled family candidate. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familyTerminalSorts
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context) :
+    CandidateBlockFamilyTerminalSortList
+      execution.candidate.families := by
+  apply CandidateBlockFamilyTerminalSortList.of_familyTypes
+  rw [AddInductive.NormalizationCandidateExecution.candidate,
+    execution.families.produced.familyTypes_eq]
+  exact execution.familyTerminals
 
 /-- Forget only the family-type assembly index of the exact post-family
 traversal, retaining every constructor list in source order. -/

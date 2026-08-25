@@ -308,19 +308,38 @@ theorem canonicalFamilyTypeObservable
         hdepth, hinductive⟩ :=
       canonicalSingletonValidationStatsAndFuel validationRun rfl
     let observerContext : AddInductive.Context := { context with lctx := {} }
-    have observable : AddInductive.CandidateExpr.Observable observerContext
-        (.sort (.succ .zero)) := by
-      apply sortOneCandidateObservable observerContext depth inductiveFuel
-      · simpa [observerContext] using hdepth
-      · simpa [observerContext] using hinductive
-    obtain ⟨candidate, candidateRun⟩ := observable
-    refine ⟨⟨candidate⟩, ?_⟩
-    change AddInductive.normalizeCandidateFamilyType
-      { name := name, type := .sort (.succ .zero), ctors := ctors }
-        observerContext = .ok ⟨candidate⟩
-    unfold AddInductive.normalizeCandidateFamilyType
-    simp only [ReaderT.bind, Bind.bind, candidateRun, Except.bind,
-      ReaderT.pure, Pure.pure, Except.pure]
+    have observerDepth : observerContext.fuel.recDepth = depth + 1 := by
+      simpa [observerContext] using hdepth
+    have hcheck : TypeChecker.M.run observerContext.env
+        observerContext.safety observerContext.lctx observerContext.lparams
+        observerContext.fuel
+        (TypeChecker.checkType (.sort (.succ .zero))) =
+          .ok (.sort (.succ (.succ .zero))) :=
+      checkTypeSortOne observerContext depth observerDepth
+    have hwhnf : TypeChecker.M.run observerContext.env
+        observerContext.safety observerContext.lctx observerContext.lparams
+        observerContext.fuel
+        (TypeChecker.whnf (.sort (.succ .zero))) =
+          .ok (.sort (.succ .zero)) :=
+      whnfSortOne observerContext depth observerDepth
+    let candidate : AddInductive.CandidateExpr (.sort (.succ .zero)) :=
+      ⟨observerContext,
+        .terminal observerContext (.sort (.succ .zero))
+          (.sort (.succ (.succ .zero))) (.sort (.succ .zero)) hcheck hwhnf⟩
+    have candidateRun : AddInductive.buildCandidateExpr
+        (.sort (.succ .zero)) observerContext = .ok candidate := by
+      simpa [candidate] using
+        AddInductive.buildCandidateExpr_of_whnf_nonForall observerContext
+          (.sort (.succ .zero)) (.sort (.succ (.succ .zero)))
+          (.sort (.succ .zero)) (by omega) hcheck hwhnf rfl
+    refine ⟨⟨candidate⟩, .succ .zero, ?_, ?_⟩
+    · change AddInductive.normalizeCandidateFamilyType
+        { name := name, type := .sort (.succ .zero), ctors := ctors }
+          observerContext = .ok ⟨candidate⟩
+      unfold AddInductive.normalizeCandidateFamilyType
+      simp only [ReaderT.bind, Bind.bind, candidateRun, Except.bind,
+        ReaderT.pure, Pure.pure, Except.pure]
+    · rfl
 
 /-- Canonical host source selected by primitive recognition for `Bool`. -/
 def boolSource : InductiveType where
