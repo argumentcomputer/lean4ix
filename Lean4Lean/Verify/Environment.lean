@@ -381,6 +381,333 @@ theorem safePrimitivesMap
 
 end AddInductive.EnvironmentInductiveExecution.PrimitivePreservingTransaction
 
+/-! ## Replaying one exact safe transaction across all safety models -/
+
+/-- A metadata fold replayed from one Theory model into a larger aligned
+model, while retaining the same raw inventory and exact host-map endpoints.
+The output comparison is useful both for later phases and for transporting
+semantic certificates selected by the original `.safe` replay. -/
+structure AddInductConstants.Replay
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap}
+    {env₁ env₂ : VEnv} {raws : List VConstVal}
+    (original : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (safety : DefinitionSafety) (target : VEnv) where
+  output : VEnv
+  trace : AddInductConstants kind C₁ target raws C₂ output
+  le : env₂ ≤ output
+  aligned : Aligned safety C₂ output
+  nestedConstsWF : VInductDecl.NestedConstsWF env₁ raws →
+    VInductDecl.NestedConstsWF target raws
+
+/-- Replay an exact metadata fold against any larger aligned input model.
+Freshness is recovered from host/Theory name-domain alignment; translations
+are transported monotonically from the original fold. -/
+noncomputable def AddInductConstants.replay
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap}
+    {env₁ env₂ target : VEnv} {raws : List VConstVal}
+    (original : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (input_le : env₁ ≤ target) (input_aligned : Aligned safety C₁ target) :
+    original.Replay safety target := by
+  induction original generalizing target with
+  | nil =>
+      exact {
+        output := target
+        trace := .nil
+        le := input_le
+        aligned := input_aligned
+        nestedConstsWF := fun _ => trivial }
+  | @cons C₁ env₁ raw Cmid envMid raws C₂ env₂ head tail ih =>
+      have targetFresh : target.constants raw.name = none := by
+        cases found : target.constants raw.name with
+        | none => rfl
+        | some value =>
+            obtain ⟨info, hostFound, _⟩ :=
+              input_aligned.find?_iff.mpr ⟨value, found⟩
+            rw [head.map_fresh] at hostFound
+            contradiction
+      let next : VEnv := {
+        target with
+        constants := fun name =>
+          if raw.name = name then some raw.toVConstant
+          else target.constants name }
+      have added : target.addConst raw.name raw.toVConstant = some next := by
+        simp [VEnv.addConst, targetFresh, next]
+      let replayedHead : AddInductConstant kind C₁ target raw Cmid next := {
+        info := head.info
+        kind_eq := head.kind_eq
+        tr := head.tr.mono input_le
+        map_fresh := head.map_fresh
+        env_add := added
+        map_add := head.map_add }
+      have next_le : envMid ≤ next :=
+        VEnv.addConst_mono input_le head.env_add added
+      let replayedTail := ih next_le
+        (input_aligned.addInductConstant replayedHead)
+      exact {
+        output := replayedTail.output
+        trace := .cons replayedHead replayedTail.trace
+        le := replayedTail.le
+        aligned := replayedTail.aligned
+        nestedConstsWF := fun wf =>
+          ⟨wf.1.mono input_le, fun targetNext targetAdded => by
+            have targetNext_eq :=
+              Option.some.inj (targetAdded.symm.trans added)
+            subst targetNext
+            exact replayedTail.nestedConstsWF
+              (wf.2 _ head.env_add)⟩ }
+
+/-- Chained rule well-formedness is monotone when the same deterministic rule
+list is folded over a larger starting model. -/
+theorem VInductDecl.NestedRulesWF.mono
+    {env₁ env₂ : VEnv} (input_le : env₁ ≤ env₂) :
+    ∀ {rules : List VDefEq}, VInductDecl.NestedRulesWF env₁ rules →
+      VInductDecl.NestedRulesWF env₂ rules
+  | [], _ => trivial
+  | _ :: _, wf => ⟨wf.1.mono input_le,
+      VInductDecl.NestedRulesWF.mono
+        (VEnv.addDefEq_mono input_le) wf.2⟩
+
+/-- Folding one common list of Theory equations preserves an existing model
+ordering. -/
+theorem VEnv.addDefEqFold_mono (input_le : env₁ ≤ env₂) :
+    ∀ rules : List VDefEq,
+      rules.foldl VEnv.addDefEq env₁ ≤
+        rules.foldl VEnv.addDefEq env₂
+  | [] => input_le
+  | rule :: rules =>
+      VEnv.addDefEqFold_mono (VEnv.addDefEq_mono input_le) rules
+
+/-- A complete ordinary block trace replayed against a larger aligned input,
+with the generation descriptor and host-map endpoints held fixed. -/
+structure AddInductBlockTrace.Replay
+    {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {source : VInductDecl}
+    (original : AddInductBlockTrace C₁ env₁ source C₂ env₂)
+    (safety : DefinitionSafety) (target : VEnv) where
+  output : VEnv
+  trace : AddInductBlockTrace C₁ target source C₂ output
+  le : env₂ ≤ output
+  aligned : Aligned safety C₂ output
+
+/-- Replay one exact ordinary `.safe` transaction in any larger safety model.
+All three constant phases are rebuilt from the original translations, and
+the generated-rule endpoint is the deterministic fold over the replayed
+recursor environment. -/
+noncomputable def AddInductBlockTrace.replay
+    {C₁ C₂ : ConstMap} {env₁ env₂ target : VEnv}
+    {source : VInductDecl}
+    (original : AddInductBlockTrace C₁ env₁ source C₂ env₂)
+    (input_le : env₁ ≤ target) (input_aligned : Aligned safety C₁ target) :
+    original.Replay safety target := by
+  let types := original.addTypes.replay input_le input_aligned
+  have originalStage : env₁.stageInductiveTypes source.types =
+      some original.typeEnv := by
+    rw [← VInductDecl.blockTypeConstants_foldlM_eq_stageInductiveTypes]
+    exact original.addTypes.to_foldlM
+  have blockEnv_eq : original.blockEnv = original.typeEnv := by
+    exact Option.some.inj
+      (original.generation_wf.blockWF.1.1.symm.trans originalStage)
+  have targetStage : target.stageInductiveTypes source.types =
+      some types.output := by
+    rw [← VInductDecl.blockTypeConstants_foldlM_eq_stageInductiveTypes]
+    exact types.trace.to_foldlM
+  have blockEnv_le : original.blockEnv ≤ types.output := by
+    rw [blockEnv_eq]
+    exact types.le
+  let ctors := original.addCtors.replay types.le types.aligned
+  let recs := original.addRecs.replay ctors.le ctors.aligned
+  let output := original.generation.generatedRules.foldl
+    VEnv.addDefEq recs.output
+  let replayed : AddInductBlockTrace C₁ target source C₂ output := {
+    generation := original.generation
+    blockEnv := types.output
+    generation_wf := original.generation_wf.mono input_le blockEnv_le
+      targetStage
+    typeMap := original.typeMap
+    typeEnv := types.output
+    ctorMap := original.ctorMap
+    ctorEnv := ctors.output
+    recEnv := recs.output
+    addTypes := types.trace
+    addCtors := ctors.trace
+    addRecs := recs.trace
+    recK := original.recK
+    addRules := ⟨rfl⟩ }
+  have output_le : env₂ ≤ output := by
+    rw [← original.addRules.fold_eq]
+    exact VEnv.addDefEqFold_mono recs.le _
+  exact {
+    output := output
+    trace := replayed
+    le := output_le
+    aligned := recs.aligned.addDefEqFold _ }
+
+/-- A complete restored nested trace replayed against a larger aligned input,
+again retaining one shared restored artifact and exact host-map endpoints. -/
+structure AddInductNestedTrace.Replay
+    {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {source : VInductDecl}
+    (original : AddInductNestedTrace C₁ env₁ source C₂ env₂)
+    (safety : DefinitionSafety) (target : VEnv) where
+  output : VEnv
+  trace : AddInductNestedTrace C₁ target source C₂ output
+  le : env₂ ≤ output
+  aligned : Aligned safety C₂ output
+
+/-- Replay one exact restored `.safe` transaction in a larger safety model.
+The chained nested-WF package is reconstructed phase by phase from the paired
+constant folds, then the common restored-rule list is folded deterministically. -/
+noncomputable def AddInductNestedTrace.replay
+    {C₁ C₂ : ConstMap} {env₁ env₂ target : VEnv}
+    {source : VInductDecl}
+    (original : AddInductNestedTrace C₁ env₁ source C₂ env₂)
+    (input_le : env₁ ≤ target) (input_aligned : Aligned safety C₁ target) :
+    original.Replay safety target := by
+  let types := original.addTypes.replay input_le input_aligned
+  let ctors := original.addCtors.replay types.le types.aligned
+  let recs := original.addRecs.replay ctors.le ctors.aligned
+  let nested_wf : original.nested.WF target := {
+    types := types.nestedConstsWF original.nested_wf.types
+    ctors := by
+      intro targetTypeEnv targetTypes
+      have targetTypeEnv_eq : targetTypeEnv = types.output :=
+        Option.some.inj (targetTypes.symm.trans types.trace.to_foldlM)
+      subst targetTypeEnv
+      exact ctors.nestedConstsWF
+        (original.nested_wf.ctors original.addTypes.to_foldlM)
+    recs := by
+      intro targetTypeEnv targetCtorEnv targetTypes targetCtors
+      have targetTypeEnv_eq : targetTypeEnv = types.output :=
+        Option.some.inj (targetTypes.symm.trans types.trace.to_foldlM)
+      subst targetTypeEnv
+      have targetCtorEnv_eq : targetCtorEnv = ctors.output :=
+        Option.some.inj (targetCtors.symm.trans ctors.trace.to_foldlM)
+      subst targetCtorEnv
+      exact recs.nestedConstsWF
+        (original.nested_wf.recs original.addTypes.to_foldlM
+          original.addCtors.to_foldlM)
+    rules := by
+      intro targetTypeEnv targetCtorEnv targetRecEnv targetTypes targetCtors
+        targetRecs
+      have targetTypeEnv_eq : targetTypeEnv = types.output :=
+        Option.some.inj (targetTypes.symm.trans types.trace.to_foldlM)
+      subst targetTypeEnv
+      have targetCtorEnv_eq : targetCtorEnv = ctors.output :=
+        Option.some.inj (targetCtors.symm.trans ctors.trace.to_foldlM)
+      subst targetCtorEnv
+      have targetRecEnv_eq : targetRecEnv = recs.output :=
+        Option.some.inj (targetRecs.symm.trans recs.trace.to_foldlM)
+      subst targetRecEnv
+      exact (original.nested_wf.rules original.addTypes.to_foldlM
+        original.addCtors.to_foldlM original.addRecs.to_foldlM).mono recs.le }
+  let output := original.nested.generatedRules.foldl VEnv.addDefEq recs.output
+  let replayed : AddInductNestedTrace C₁ target source C₂ output := {
+    nested := original.nested
+    nested_wf := nested_wf
+    typeMap := original.typeMap
+    typeEnv := types.output
+    ctorMap := original.ctorMap
+    ctorEnv := ctors.output
+    recEnv := recs.output
+    addTypes := types.trace
+    addCtors := ctors.trace
+    addRecs := recs.trace
+    recK := original.recK
+    addRules := ⟨rfl⟩ }
+  have output_le : env₂ ≤ output := by
+    rw [← original.addRules.fold_eq]
+    exact VEnv.addDefEqFold_mono recs.le _
+  exact {
+    output := output
+    trace := replayed
+    le := output_le
+    aligned := recs.aligned.addDefEqFold _ }
+
+/-- One exact `.safe` ordinary trace completed into a safety-indexed family.
+The safe endpoint is retained definitionally, while the other two traces replay
+the same checked generation in their larger aligned input models. -/
+structure AddInductBlockTrace.CoherentReplay
+    {C₁ C₂ : ConstMap} {input : VEnvs} {source : VInductDecl}
+    {safeOutput : VEnv}
+    (original : AddInductBlockTrace C₁ (input.venv .safe) source C₂
+      safeOutput) where
+  output : VEnvs
+  traces : ∀ safety, AddInductBlockTrace C₁ (input.venv safety) source C₂
+    (output.venv safety)
+  generation_eq : ∀ safety, (traces safety).generation = original.generation
+  safe_output_eq : output.venv .safe = safeOutput
+
+/-- Replay an ordinary safe trace at `.partial` and `.unsafe`, retaining the
+original trace itself at `.safe`. -/
+noncomputable def AddInductBlockTrace.coherentReplay
+    {C₁ C₂ : ConstMap} {input : VEnvs} {source : VInductDecl}
+    {safeOutput : VEnv}
+    (original : AddInductBlockTrace C₁ (input.venv .safe) source C₂
+      safeOutput)
+    (input_le : ∀ safety, input.venv .safe ≤ input.venv safety)
+    (input_aligned : ∀ safety, Aligned safety C₁ (input.venv safety)) :
+    original.CoherentReplay := by
+  let partialReplay := original.replay (input_le .partial) (input_aligned .partial)
+  let unsafeReplay := original.replay (input_le .unsafe) (input_aligned .unsafe)
+  let output : VEnvs := ⟨fun
+    | .safe => safeOutput
+    | .partial => partialReplay.output
+    | .unsafe => unsafeReplay.output⟩
+  refine {
+    output := output
+    traces := ?_
+    generation_eq := ?_
+    safe_output_eq := rfl }
+  · intro safety
+    cases safety with
+    | safe => exact original
+    | «partial» => exact partialReplay.trace
+    | «unsafe» => exact unsafeReplay.trace
+  · intro safety
+    cases safety <;> rfl
+
+/-- One exact `.safe` nested trace completed into a safety-indexed family, with
+the restored artifact shared literally by all three traces. -/
+structure AddInductNestedTrace.CoherentReplay
+    {C₁ C₂ : ConstMap} {input : VEnvs} {source : VInductDecl}
+    {safeOutput : VEnv}
+    (original : AddInductNestedTrace C₁ (input.venv .safe) source C₂
+      safeOutput) where
+  output : VEnvs
+  traces : ∀ safety, AddInductNestedTrace C₁ (input.venv safety) source C₂
+    (output.venv safety)
+  nested_eq : ∀ safety, (traces safety).nested = original.nested
+  safe_output_eq : output.venv .safe = safeOutput
+
+/-- Replay a nested safe trace at `.partial` and `.unsafe`, retaining the
+original trace itself at `.safe`. -/
+noncomputable def AddInductNestedTrace.coherentReplay
+    {C₁ C₂ : ConstMap} {input : VEnvs} {source : VInductDecl}
+    {safeOutput : VEnv}
+    (original : AddInductNestedTrace C₁ (input.venv .safe) source C₂
+      safeOutput)
+    (input_le : ∀ safety, input.venv .safe ≤ input.venv safety)
+    (input_aligned : ∀ safety, Aligned safety C₁ (input.venv safety)) :
+    original.CoherentReplay := by
+  let partialReplay := original.replay (input_le .partial) (input_aligned .partial)
+  let unsafeReplay := original.replay (input_le .unsafe) (input_aligned .unsafe)
+  let output : VEnvs := ⟨fun
+    | .safe => safeOutput
+    | .partial => partialReplay.output
+    | .unsafe => unsafeReplay.output⟩
+  refine {
+    output := output
+    traces := ?_
+    nested_eq := ?_
+    safe_output_eq := rfl }
+  · intro safety
+    cases safety with
+    | safe => exact original
+    | «partial» => exact partialReplay.trace
+    | «unsafe» => exact unsafeReplay.trace
+  · intro safety
+    cases safety <;> rfl
+
 /-- A safety-indexed family of name-avoiding transactions which replays one
 shared ordinary generation or one shared restored nested artifact.  Sharing
 the artifact is the exact condition needed to transport the input
@@ -473,6 +800,88 @@ theorem mono
   | nested _ nestedArtifact traces nested_eq _ _ _ =>
       exact (traces safety').mono (traces safety)
         ((nested_eq safety').trans (nested_eq safety).symm) (pre hle)
+
+/-- Completion of one exact safe nonprimitive trace into a coherent
+safety-indexed transaction.  Retaining the safe endpoint explicitly lets the
+subsequent readiness layer consume certificates proved at that exact model. -/
+structure SafeReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (source : VInductDecl) (input : VEnvs) (safeOutput : VEnv) where
+  output : VEnvs
+  safe_output_eq : output.venv .safe = safeOutput
+  transactions : execution.CoherentPrimitivePreservingTransactions source
+    input output
+
+/-- An ordinary exact trace need only be constructed in the `.safe` model.
+Input coherence and alignment replay it at the other safety levels while
+preserving one shared checked generation. -/
+noncomputable def ofOrdinarySafeTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input : VEnvs} {safeOutput : VEnv}
+    (wf : input.WF env)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (safeTrace : AddInductBlockTrace env.constants (input.venv .safe) source
+      finalEnv.constants safeOutput)
+    (typeNames : ∀ ci ∈ source.blockTypeConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false)
+    (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false)
+    (recNames : ∀ ci ∈ safeTrace.generation.recursors,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false) :
+    SafeReplay execution source input safeOutput := by
+  let replay := safeTrace.coherentReplay
+    (fun safety => wf.mono (safety := safety) (safety' := .safe)
+      DefinitionSafety.le_safe)
+    (fun safety => (wf.tr (safety := safety)).aligned)
+  exact {
+    output := replay.output
+    safe_output_eq := replay.safe_output_eq
+    transactions := .ordinary numNested_eq safeTrace.generation replay.traces
+      replay.generation_eq typeNames ctorNames recNames }
+
+/-- A restored nested trace likewise replays from `.safe`; all safety levels
+retain the same checked restoration artifact and exact restored inventories. -/
+noncomputable def ofNestedSafeTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input : VEnvs} {safeOutput : VEnv}
+    (wf : input.WF env)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (safeTrace : AddInductNestedTrace env.constants (input.venv .safe) source
+      finalEnv.constants safeOutput)
+    (typeNames : ∀ ci ∈ source.blockTypeConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false)
+    (ctorNames : ∀ ci ∈ source.blockConstructorConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false)
+    (recNames : ∀ ci ∈ safeTrace.nested.recursors,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false) :
+    SafeReplay execution source input safeOutput := by
+  let replay := safeTrace.coherentReplay
+    (fun safety => wf.mono (safety := safety) (safety' := .safe)
+      DefinitionSafety.le_safe)
+    (fun safety => (wf.tr (safety := safety)).aligned)
+  exact {
+    output := replay.output
+    safe_output_eq := replay.safe_output_eq
+    transactions := .nested numNested_ne safeTrace.nested replay.traces
+      replay.nested_eq typeNames ctorNames recNames }
 
 end AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
 

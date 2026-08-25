@@ -3867,6 +3867,30 @@ theorem CheckedBlock.WF.mono {source : VInductDecl}
     checked.WF env' resultLevel :=
   checkedFamilyListsWF_mono henv _ _ _ h
 
+/-- Transport a complete mutual-generation certificate to larger pre-family
+and post-family environments.  The target staging equation is explicit:
+`VEnv.LE` preserves semantic judgments, while the deterministic raw-family
+fold identifies the post-family environment at the new starting model. -/
+theorem BlockGenerationChecked.WF.mono
+    {source : VInductDecl} {generation : source.BlockGenerationChecked}
+    {env blockEnv env' blockEnv' : VEnv}
+    (h : generation.WF env blockEnv)
+    (env_le : env ≤ env') (blockEnv_le : blockEnv ≤ blockEnv')
+    (stage : env'.stageInductiveTypes source.types = some blockEnv') :
+    generation.WF env' blockEnv' where
+  blockWF := ⟨⟨stage, by
+    exact Lean4Lean.List.Forall₂.imp (h := h.blockWF.1.2) fun _ _ family =>
+      ⟨family.1.mono env_le,
+        Lean4Lean.List.Forall₂.imp (h := family.2) fun _ _ ctor =>
+          ctor.mono blockEnv_le⟩⟩,
+    h.blockWF.2.mono env_le⟩
+  resultLevelWF := h.resultLevelWF
+  paramsTel := h.paramsTel.mono env_le
+  families := fun family member =>
+    (h.families family member).mono env_le
+  constructors := fun constructor member =>
+    (h.constructors constructor member).mono blockEnv_le
+
 /-- Transport recursive-argument evidence across definitionally equal base
 contexts. The private binder telescope is transported first, then the
 terminal family-index spine is transported beneath that same telescope. -/

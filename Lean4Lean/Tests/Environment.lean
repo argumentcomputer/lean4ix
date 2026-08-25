@@ -24,6 +24,15 @@ open Lean
 #check Lean4Lean.VPrimitiveInductive.natGeneration_wf
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
 #check Lean4Lean.VInductDecl.BlockGenerationChecked.recursor_of_family
+#check Lean4Lean.VInductDecl.BlockGenerationChecked.WF.mono
+#check Lean4Lean.AddInductConstants.replay
+#check Lean4Lean.AddInductBlockTrace.replay
+#check Lean4Lean.AddInductBlockTrace.coherentReplay
+#check Lean4Lean.AddInductNestedTrace.replay
+#check Lean4Lean.AddInductNestedTrace.coherentReplay
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.SafeReplay
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofOrdinarySafeTrace
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofNestedSafeTrace
 #check Lean4Lean.AddInductive.declaredInductiveInfos_name
 #check Lean4Lean.AddInductive.declareRecursors_info_of_family
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ordinaryFamilyLookupCases
@@ -150,6 +159,50 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNo
 -/
 #guard_msgs in
 #print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofTransaction
+
+/--
+info: 'Lean4Lean.AddInductBlockTrace.coherentReplay' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductBlockTrace.coherentReplay
+
+/--
+info: 'Lean4Lean.AddInductNestedTrace.coherentReplay' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductNestedTrace.coherentReplay
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofOrdinarySafeTrace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofOrdinarySafeTrace
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofNestedSafeTrace' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ofNestedSafeTrace
 
 run_meta
   let env ← Lean.getEnv
