@@ -1852,6 +1852,55 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
     produced.execution.eliminationExecution.normalization
     normalizationProduced context_lctx_eq
 
+/-- The exact outer producer fixes a canonical semantic view in which every
+family and constructor uses the first normalized family's parameter
+telescope syntactically.  This theorem establishes the analyzer-facing shape
+only; semantic preservation of the rewritten prefixes must still be derived
+from the retained kernel equality traces. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.semanticCanonicalParameterSurfaces
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {})
+    (familyMember : family ∈ semantic.canonicalNormalization.view.types) :
+    VExpr.telN semantic.normalization.view.nparams family.type =
+        blockParams semantic.normalization.view.nparams
+          semantic.normalization.view.types ∧
+      ∀ constructor ∈ family.ctors,
+        VExpr.telN semantic.normalization.view.nparams constructor.type =
+          blockParams semantic.normalization.view.nparams
+            semantic.normalization.view.types :=
+  semantic.canonicalParameterSurfaces
+    (produced.semanticViewParams_length semantic context_lctx_eq)
+    familyMember
+
+/-- Canonicalization retains the exact producer-selected shared parameter
+value, not merely a same-length telescope. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticCanonicalBlockParams
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {}) :
+    blockParams semantic.canonicalNormalization.view.nparams
+        semantic.canonicalNormalization.view.types =
+      blockParams semantic.normalization.view.nparams
+        semantic.normalization.view.types :=
+  semantic.canonicalBlockParams
+    (semantic.viewTypes_isEmpty_eq_sources.trans
+      produced.kernelSources_nonempty)
+    (produced.semanticViewParams_length semantic context_lctx_eq)
+
 /-- The retained first-family validation and its exact semantic root determine
 the Theory representation of the block's common result universe.  The value
 is not selected by a caller: `VLevel.ofLevel` translates the precise kernel

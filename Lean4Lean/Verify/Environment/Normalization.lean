@@ -4364,6 +4364,219 @@ def CandidateBlockFamilySemanticListRun.views :
   | .nil => []
   | .cons head tail => head.view :: tail.views
 
+/-- Replace one constructor's parameter prefix by an explicitly shared
+telescope while retaining its terminal fields/result and every declaration
+header.  This operation is syntactic only: semantic authority for replacing
+the prefix must be supplied separately by the validator's retained equality
+executions. -/
+def canonicalizeConstructorParams (nparams : Nat) (params : List VExpr)
+    (constructor : VConstVal) : VConstVal :=
+  { constructor with
+    type := VExpr.forallN params
+      (VExpr.dropN nparams constructor.type) }
+
+/-- Replace one family's and all of its constructors' parameter prefixes by
+the same explicit telescope.  Family/constructor identities, universe
+arities, and all post-parameter syntax remain unchanged. -/
+def canonicalizeFamilyParams (nparams : Nat) (params : List VExpr)
+    (family : VInductiveType) : VInductiveType :=
+  { family with
+    type := VExpr.forallN params (VExpr.dropN nparams family.type)
+    ctors := family.ctors.map
+      (canonicalizeConstructorParams nparams params) }
+
+/-- Canonicalize every family in source order against one shared parameter
+telescope. -/
+def canonicalizeFamilyParamsList (nparams : Nat) (params : List VExpr)
+    (families : List VInductiveType) : List VInductiveType :=
+  families.map (canonicalizeFamilyParams nparams params)
+
+/-- Canonical block view whose shared parameter telescope is selected from
+the first family exactly as `blockParams` selects it for analysis. -/
+def canonicalizeSharedParams (view : VInductDecl) : VInductDecl :=
+  let params := blockParams view.nparams view.types
+  { view with
+    types := canonicalizeFamilyParamsList view.nparams params view.types }
+
+private theorem canonicalTelN_forallN_length :
+    ∀ (params : List VExpr) (result : VExpr),
+      VExpr.telN params.length (VExpr.forallN params result) = params
+  | [], _ => rfl
+  | _ :: params, result => by
+      simp only [List.length_cons, VExpr.forallN, VExpr.telN,
+        canonicalTelN_forallN_length params result]
+
+private theorem canonicalDropN_forallN_length :
+    ∀ (params : List VExpr) (result : VExpr),
+      VExpr.dropN params.length (VExpr.forallN params result) = result
+  | [], _ => rfl
+  | _ :: params, result => by
+      simp only [List.length_cons, VExpr.forallN, VExpr.dropN,
+        canonicalDropN_forallN_length params result]
+
+/-- A canonical constructor has the requested parameter telescope whenever
+that telescope has the declaration's exact parameter length. -/
+theorem canonicalizeConstructorParams_telN
+    {nparams : Nat} {params : List VExpr} {constructor : VConstVal}
+    (paramsLength : params.length = nparams) :
+    VExpr.telN nparams
+        (canonicalizeConstructorParams nparams params constructor).type =
+      params := by
+  change VExpr.telN nparams
+      (VExpr.forallN params (VExpr.dropN nparams constructor.type)) = params
+  rw [← paramsLength]
+  exact canonicalTelN_forallN_length params _
+
+/-- Canonicalization retains the exact post-parameter constructor suffix. -/
+theorem canonicalizeConstructorParams_dropN
+    {nparams : Nat} {params : List VExpr} {constructor : VConstVal}
+    (paramsLength : params.length = nparams) :
+    VExpr.dropN nparams
+        (canonicalizeConstructorParams nparams params constructor).type =
+      VExpr.dropN nparams constructor.type := by
+  change VExpr.dropN nparams
+      (VExpr.forallN params (VExpr.dropN nparams constructor.type)) = _
+  rw [← paramsLength]
+  exact canonicalDropN_forallN_length params _
+
+/-- A canonical family has the requested shared parameter telescope. -/
+theorem canonicalizeFamilyParams_telN
+    {nparams : Nat} {params : List VExpr} {family : VInductiveType}
+    (paramsLength : params.length = nparams) :
+    VExpr.telN nparams
+        (canonicalizeFamilyParams nparams params family).type = params := by
+  change VExpr.telN nparams
+      (VExpr.forallN params (VExpr.dropN nparams family.type)) = params
+  rw [← paramsLength]
+  exact canonicalTelN_forallN_length params _
+
+/-- Canonicalization retains the exact post-parameter family suffix. -/
+theorem canonicalizeFamilyParams_dropN
+    {nparams : Nat} {params : List VExpr} {family : VInductiveType}
+    (paramsLength : params.length = nparams) :
+    VExpr.dropN nparams
+        (canonicalizeFamilyParams nparams params family).type =
+      VExpr.dropN nparams family.type := by
+  change VExpr.dropN nparams
+      (VExpr.forallN params (VExpr.dropN nparams family.type)) = _
+  rw [← paramsLength]
+  exact canonicalDropN_forallN_length params _
+
+/-- Replacing constructor expression payloads by canonical parameter prefixes
+does not change header comparison against any source list. -/
+theorem sameCtorHeaders_canonicalizeParams_right
+    (nparams : Nat) (params : List VExpr) :
+    ∀ (raws views : List VConstVal),
+      sameCtorHeaders raws
+          (views.map (canonicalizeConstructorParams nparams params)) =
+        sameCtorHeaders raws views
+  | [], [] => rfl
+  | [], _ :: _ => rfl
+  | _ :: _, [] => rfl
+  | raw :: raws, view :: views => by
+      simp only [List.map_cons, sameCtorHeaders,
+        canonicalizeConstructorParams]
+      rw [sameCtorHeaders_canonicalizeParams_right nparams params raws views]
+
+/-- Replacing every family/constructor parameter prefix preserves the exact
+block header comparison against any source list. -/
+theorem sameTypeHeaders_canonicalizeParams_right
+    (nparams : Nat) (params : List VExpr) :
+    ∀ (raws views : List VInductiveType),
+      sameTypeHeaders raws
+          (canonicalizeFamilyParamsList nparams params views) =
+        sameTypeHeaders raws views
+  | [], [] => rfl
+  | [], _ :: _ => rfl
+  | _ :: _, [] => rfl
+  | raw :: raws, view :: views => by
+      simp only [canonicalizeFamilyParamsList, List.map_cons,
+        sameTypeHeaders, canonicalizeFamilyParams]
+      rw [sameCtorHeaders_canonicalizeParams_right]
+      have tail :=
+        sameTypeHeaders_canonicalizeParams_right nparams params raws views
+      simp only [canonicalizeFamilyParamsList] at tail
+      rw [tail]
+
+/-- The canonical family list gives every family and every constructor the
+same exact syntactic parameter telescope. -/
+theorem canonicalizeFamilyParamsList_parameterSurfaces
+    {nparams : Nat} {params : List VExpr}
+    {families : List VInductiveType} {family : VInductiveType}
+    (paramsLength : params.length = nparams)
+    (familyMember : family ∈
+      canonicalizeFamilyParamsList nparams params families) :
+    VExpr.telN nparams family.type = params ∧
+      ∀ constructor ∈ family.ctors,
+        VExpr.telN nparams constructor.type = params := by
+  obtain ⟨original, originalMember, rfl⟩ := List.mem_map.mp familyMember
+  refine ⟨canonicalizeFamilyParams_telN paramsLength, ?_⟩
+  intro constructor constructorMember
+  simp only [canonicalizeFamilyParams] at constructorMember
+  obtain ⟨originalConstructor, originalConstructorMember, rfl⟩ :=
+    List.mem_map.mp constructorMember
+  exact canonicalizeConstructorParams_telN paramsLength
+
+/-- The block-wide canonical view has exact shared family and constructor
+parameter surfaces, conditional only on the producer-owned prefix length. -/
+theorem canonicalizeSharedParams_parameterSurfaces
+    {view : VInductDecl} {family : VInductiveType}
+    (paramsLength :
+      (blockParams view.nparams view.types).length = view.nparams)
+    (familyMember : family ∈ (canonicalizeSharedParams view).types) :
+    VExpr.telN view.nparams family.type =
+        blockParams view.nparams view.types ∧
+      ∀ constructor ∈ family.ctors,
+        VExpr.telN view.nparams constructor.type =
+          blockParams view.nparams view.types := by
+  exact canonicalizeFamilyParamsList_parameterSurfaces paramsLength
+    familyMember
+
+/-- For a nonempty block, canonicalization retains the first family's
+selected parameter list exactly. -/
+theorem canonicalizeSharedParams_blockParams
+    {view : VInductDecl}
+    (nonempty : view.types.isEmpty = false)
+    (paramsLength :
+      (blockParams view.nparams view.types).length = view.nparams) :
+    blockParams view.nparams (canonicalizeSharedParams view).types =
+      blockParams view.nparams view.types := by
+  cases view with
+  | mk uvars nparams types =>
+      cases types with
+      | nil => simp at nonempty
+      | cons family families =>
+          simpa only [canonicalizeSharedParams,
+            canonicalizeFamilyParamsList, List.map_cons, blockParams] using
+            (canonicalizeFamilyParams_telN paramsLength)
+
+/-- Canonicalizing parameter prefixes changes no family or constructor
+header, even when the left side is a distinct raw declaration. -/
+theorem canonicalizeSharedParams_sameTypeHeaders (raws : List VInductiveType)
+    (view : VInductDecl) :
+    sameTypeHeaders raws (canonicalizeSharedParams view).types =
+      sameTypeHeaders raws view.types := by
+  exact sameTypeHeaders_canonicalizeParams_right view.nparams
+    (blockParams view.nparams view.types) raws view.types
+
+/-- Retarget an existing normalization to the syntactically shared-parameter
+view.  This constructor establishes header coherence only; semantic
+`Normalization.BlockWF` for the retargeted expression payloads remains a
+separate obligation. -/
+def Normalization.canonicalizeSharedParams
+    {source : VInductDecl} (normalization : Normalization source) :
+    Normalization source where
+  view := VInductDecl.canonicalizeSharedParams normalization.view
+  shape_eq := by
+    change (source.uvars == normalization.view.uvars &&
+      source.nparams == normalization.view.nparams &&
+      sameTypeHeaders source.types
+        (canonicalizeFamilyParamsList normalization.view.nparams
+          (blockParams normalization.view.nparams normalization.view.types)
+          normalization.view.types)) = true
+    rw [sameTypeHeaders_canonicalizeParams_right]
+    exact normalization.shape_eq
+
 /-- The raw semantic family inventory is empty exactly when its source-indexed
 kernel family inventory is empty. -/
 theorem CandidateBlockFamilySemanticListRun.raws_isEmpty_eq_sources
@@ -4555,6 +4768,57 @@ def NormalizationCandidateBlockSemanticRun.normalization
       NormalizationCandidateBlockSemanticRun.viewDecl,
       beq_self_eq_true, Bool.true_and]
     exact run.families.sameHeaders
+
+/-- The canonical normalization target selected from this exact semantic
+hierarchy.  Its expression payloads are not yet claimed semantically valid:
+that later proof must consume the validator's retained family/constructor
+parameter comparisons. -/
+def NormalizationCandidateBlockSemanticRun.canonicalNormalization
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl) : Normalization rawDecl :=
+  run.normalization.canonicalizeSharedParams
+
+/-- Once the producer has established the shared-prefix length, every family
+and constructor in the canonical semantic view has that exact first-family
+parameter telescope by construction. -/
+theorem
+    NormalizationCandidateBlockSemanticRun.canonicalParameterSurfaces
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (paramsLength :
+      (blockParams run.normalization.view.nparams
+        run.normalization.view.types).length =
+          run.normalization.view.nparams)
+    (familyMember : family ∈ run.canonicalNormalization.view.types) :
+    VExpr.telN run.normalization.view.nparams family.type =
+        blockParams run.normalization.view.nparams
+          run.normalization.view.types ∧
+      ∀ constructor ∈ family.ctors,
+        VExpr.telN run.normalization.view.nparams constructor.type =
+          blockParams run.normalization.view.nparams
+            run.normalization.view.types := by
+  simpa only [NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+    Normalization.canonicalizeSharedParams] using
+    (canonicalizeSharedParams_parameterSurfaces paramsLength familyMember)
+
+/-- For a nonempty semantic family spine, canonicalization does not change
+the block parameter value selected from its head. -/
+theorem NormalizationCandidateBlockSemanticRun.canonicalBlockParams
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (nonempty : run.normalization.view.types.isEmpty = false)
+    (paramsLength :
+      (blockParams run.normalization.view.nparams
+        run.normalization.view.types).length =
+          run.normalization.view.nparams) :
+    blockParams run.canonicalNormalization.view.nparams
+        run.canonicalNormalization.view.types =
+      blockParams run.normalization.view.nparams
+        run.normalization.view.types := by
+  simpa only [NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+    Normalization.canonicalizeSharedParams,
+    VInductDecl.canonicalizeSharedParams] using
+    (canonicalizeSharedParams_blockParams nonempty paramsLength)
 
 /-- The exact normalized declaration selected by a semantic hierarchy is
 nonempty precisely when the source-indexed kernel block is nonempty. -/
@@ -12664,6 +12928,30 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticInput.exists_ofP
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateBlockSemanticInput.exists_ofProduced
+
+/--
+info: 'Lean4Lean.VInductDecl.canonicalizeConstructorParams_telN' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms canonicalizeConstructorParams_telN
+
+/--
+info: 'Lean4Lean.VInductDecl.canonicalizeFamilyParamsList_parameterSurfaces' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms canonicalizeFamilyParamsList_parameterSurfaces
+
+/--
+info: 'Lean4Lean.VInductDecl.sameTypeHeaders_canonicalizeParams_right' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms sameTypeHeaders_canonicalizeParams_right
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.canonicalizeSharedParams' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms Normalization.canonicalizeSharedParams
 
 
 end VInductDecl
