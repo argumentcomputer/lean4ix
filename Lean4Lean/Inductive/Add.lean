@@ -1845,6 +1845,46 @@ def CandidateConstructor.view
 structure CandidateFamilyType (source : InductiveType) where
   type : CandidateExpr source.type
 
+/-- Source-ordered syntactic closure retained for the flattened family types
+accepted by the detailed normalization prefix.  The two cached-expression
+equations are exactly the data later needed to reconstruct `FVarsIn False`
+without reasoning about how nested elimination produced the source list. -/
+inductive FamilySourceClosedList : List InductiveType → Prop where
+  | nil : FamilySourceClosedList []
+  | cons
+      (noMVar : source.type.hasMVar = false)
+      (noFVar : source.type.hasFVar = false)
+      (tail : FamilySourceClosedList sources) :
+      FamilySourceClosedList (source :: sources)
+
+/-- Executable syntactic-closure gate for every flattened family source. -/
+def FamilySourceClosedList.check : List InductiveType → Bool
+  | [] => true
+  | source :: sources =>
+      !source.type.hasMVar && !source.type.hasFVar &&
+        FamilySourceClosedList.check sources
+
+/-- A successful source-closure gate reconstructs its source-indexed proof. -/
+theorem FamilySourceClosedList.of_check :
+    (sources : List InductiveType) →
+      FamilySourceClosedList.check sources = true →
+        FamilySourceClosedList sources
+  | [], _ => .nil
+  | source :: sources, checked => by
+      simp only [FamilySourceClosedList.check, Bool.and_eq_true,
+        Bool.not_eq_true'] at checked
+      exact .cons checked.1.1 checked.1.2
+        (FamilySourceClosedList.of_check sources checked.2)
+
+/-- Proof-carrying source closure evaluates back to the successful gate. -/
+theorem FamilySourceClosedList.check_eq_true
+    (closed : FamilySourceClosedList sources) :
+    FamilySourceClosedList.check sources = true := by
+  induction closed with
+  | nil => rfl
+  | cons noMVar noFVar tail ih =>
+      simp [FamilySourceClosedList.check, noMVar, noFVar, ih]
+
 /-- Source-indexed evidence that every retained family-type candidate reaches
 a sort at the end of its main telescope.  The detailed normalization prefix
 checks this exact payload before accepting a candidate block, so downstream
@@ -2528,6 +2568,7 @@ structure NormalizationCandidateExecution
     (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context) where
   validationContext : Context
   stats : InductiveStats
+  familySourcesClosed : FamilySourceClosedList types
   familyTypes : CandidateFamilyTypeListExecution
     { candidateContext with lctx := {} } types
   familyTerminals : CandidateFamilyTypeTerminalSortList
@@ -2596,27 +2637,33 @@ def buildNormalizationCandidateExecutionAfterValidation
             { candidateContext with lctx := {} } types with
         | .error error => .error error
         | .ok familyTypes =>
-          if hterminals : CandidateFamilyTypeTerminalSortList.check
-              familyTypes.candidates then
-            match executeCandidateFamilyList
-                { candidateContext with env := familyEnv, lctx := {} }
-                familyTypes.candidates with
-            | .error error => .error error
-            | .ok families => .ok {
-                validationContext
-                stats
-                familyTypes
-                familyTerminals :=
-                  CandidateFamilyTypeTerminalSortList.of_check _ hterminals
-                familyEnv
-                declareRun := by simpa using hdeclare
-                declareTrace := DeclareInductiveInfoListRun.of_run (by
-                  simpa only [declareInductiveTypes] using hdeclare)
-                constructorRun := by simpa using hconstructors
-                families }
+          if hsources : FamilySourceClosedList.check types then
+            if hterminals : CandidateFamilyTypeTerminalSortList.check
+                familyTypes.candidates then
+              match executeCandidateFamilyList
+                  { candidateContext with env := familyEnv, lctx := {} }
+                  familyTypes.candidates with
+              | .error error => .error error
+              | .ok families => .ok {
+                  validationContext
+                  stats
+                  familySourcesClosed :=
+                    FamilySourceClosedList.of_check _ hsources
+                  familyTypes
+                  familyTerminals :=
+                    CandidateFamilyTypeTerminalSortList.of_check _ hterminals
+                  familyEnv
+                  declareRun := by simpa using hdeclare
+                  declareTrace := DeclareInductiveInfoListRun.of_run (by
+                    simpa only [declareInductiveTypes] using hdeclare)
+                  constructorRun := by simpa using hconstructors
+                  families }
+            else
+              .error (.other
+                "normalization candidate family terminal is not a sort")
           else
             .error (.other
-              "normalization candidate family terminal is not a sort")
+              "normalization candidate family source is not closed")
 
 /-- A retained successful post-validation execution exposes exactly the
 statistics and reader context supplied by the family validator. -/

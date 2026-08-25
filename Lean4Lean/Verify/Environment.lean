@@ -305,6 +305,26 @@ theorem AddInductive.ConstructorBlockValidationRun.sources_closed
       constructor.type.FVarsIn (fun _ => False) :=
   run.traces.sources_closed
 
+/-- The executable flattened-family closure gate reconstructs the exact
+`FVarsIn False` fact consumed by source translation. -/
+theorem AddInductive.FamilySourceClosedList.sources_closed
+    (closed : AddInductive.FamilySourceClosedList sources) :
+    ∀ source ∈ sources,
+      source.type.FVarsIn (fun _ => False) := by
+  induction closed with
+  | nil =>
+      intro source member
+      nomatch member
+  | cons noMVar noFVar tail ih =>
+      intro source member
+      rcases List.mem_cons.mp member with rfl | member
+      · apply fvarsIn_iff.2
+        refine ⟨?_, fvarsIn_iff_hasMVar.2 noMVar⟩
+        intro fv present
+        rw [fvarsList_eq_nil.2 noFVar] at present
+        contradiction
+      · exact ih source member
+
 /-- The exact public precheck stored by an outer inductive execution retains
 closedness of every original family and constructor source. -/
 theorem AddInductive.EnvironmentInductiveExecution.inputClosed
@@ -315,6 +335,20 @@ theorem AddInductive.EnvironmentInductiveExecution.inputClosed
       nparams types isUnsafe allowPrimitive fuel finalEnv) :
     EnvironmentInductiveInputClosed types :=
   Environment.checkInductiveInput.WF env types () execution.inputCheck
+
+/-- The retained ordinary normalization prefix certifies syntactic closure of
+every flattened family source, including auxiliary families introduced by
+genuine nested elimination. -/
+theorem AddInductive.EnvironmentInductiveExecution.flattenedFamilySourcesClosed
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    ∀ source ∈ execution.nested.types,
+      source.type.FVarsIn (fun _ => False) :=
+  execution.flattened.eliminationExecution.normalization.familySourcesClosed
+    |>.sources_closed
 
 /-- Semantic completion boundary for one retained inductive execution.  It
 packages the exact safety-indexed model extension required by `VEnvs.WF`. -/
@@ -1582,18 +1616,15 @@ noncomputable def
 
 /-- Recover and stage one family-only raw Theory declaration from the exact
 pre-family candidate traversal retained by a default safe nonprimitive outer
-execution.  Source closedness is the only semantic fact not yet projected here
-from that execution; terminal-sort evidence is checked and retained by the
-normalization prefix itself. -/
+execution.  Both source closedness and terminal-sort evidence are checked and
+retained by the normalization prefix itself. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.exists_flattenedFamilySourceStaging
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types false false {} finalEnv)
-    {ves : VEnvs} (wf : ves.WF env)
-    (closed : ∀ source ∈ execution.nested.types,
-      source.type.FVarsIn (fun _ => False)) :
+    {ves : VEnvs} (wf : ves.WF env) :
     Nonempty
       (execution.FlattenedFamilySourceStagingResult ves) := by
   let context := AddInductive.Context.forInductive env lparams false false {}
@@ -1606,7 +1637,8 @@ theorem
   obtain ⟨⟨familyRaws, familySources⟩⟩ :=
     VInductDecl.CandidateBlockFamilyTypeSourceListInput.exists_ofProduced
       preFamily normalization.candidate.families
-        normalization.familyTypesProduced closed
+        normalization.familyTypesProduced
+        execution.flattenedFamilySourcesClosed
   let familyDecl : VInductDecl := {
     uvars := lparams.length
     nparams := nparams
@@ -1618,8 +1650,8 @@ theorem
       familySources }⟩
 
 /-- In the ordinary no-rewrite case, exact equality between the nested pass's
-flattened sources and the public input lets the retained precheck discharge
-the remaining family-source closedness premise. -/
+flattened sources and the public input is no longer needed for staging, but
+this compatibility wrapper preserves the source-equality-indexed API. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.exists_flattenedFamilySourceStaging_of_types_eq
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -1627,37 +1659,33 @@ theorem
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types false false {} finalEnv)
     {ves : VEnvs} (wf : ves.WF env)
-    (types_eq : execution.nested.types = types) :
+    (_types_eq : execution.nested.types = types) :
     Nonempty
-      (execution.FlattenedFamilySourceStagingResult ves) := by
-  apply execution.exists_flattenedFamilySourceStaging wf
-  · intro source member
-    rw [types_eq] at member
-    exact (execution.inputClosed source member).1
+      (execution.FlattenedFamilySourceStagingResult ves) :=
+  execution.exists_flattenedFamilySourceStaging wf
 
-/-- Once flattened family-source closedness is available, a retained outer
-execution constructs the complete enriched pre-generation hierarchy without
-any separately supplied candidate or endpoint evidence. -/
+/-- A retained outer execution constructs the complete enriched
+pre-generation hierarchy without any separately supplied candidate, source,
+or endpoint evidence. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.exists_flattenedEnrichedStaging
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types false false {} finalEnv)
-    {ves : VEnvs} (wf : ves.WF env)
-    (closed : ∀ source ∈ execution.nested.types,
-      source.type.FVarsIn (fun _ => False)) :
+    {ves : VEnvs} (wf : ves.WF env) :
     ∃ family : execution.FlattenedFamilySourceStagingResult ves,
       Nonempty
         (VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
           family.staging) := by
   obtain ⟨family⟩ :=
-    execution.exists_flattenedFamilySourceStaging wf closed
+    execution.exists_flattenedFamilySourceStaging wf
   exact ⟨family, family.enrich_of_wf wf⟩
 
 /-- In the ordinary source-preserving case, the retained outer execution now
 constructs the complete enriched pre-generation hierarchy directly from input
-well-formedness and exact source equality. -/
+well-formedness.  Exact source equality is retained only as a compatibility
+index for callers that already classify the no-rewrite branch. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.exists_flattenedEnrichedStaging_of_types_eq
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -1665,15 +1693,12 @@ theorem
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types false false {} finalEnv)
     {ves : VEnvs} (wf : ves.WF env)
-    (types_eq : execution.nested.types = types) :
+    (_types_eq : execution.nested.types = types) :
     ∃ family : execution.FlattenedFamilySourceStagingResult ves,
       Nonempty
         (VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
-          family.staging) := by
-  apply execution.exists_flattenedEnrichedStaging wf
-  intro source member
-  rw [types_eq] at member
-  exact (execution.inputClosed source member).1
+          family.staging) :=
+  execution.exists_flattenedEnrichedStaging wf
 
 /-- A recognized primitive execution's exact family metadata translates to
 the canonical Theory family inventory.  The proof selects the sole retained

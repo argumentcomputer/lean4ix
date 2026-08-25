@@ -23,6 +23,7 @@ open Lean
 #check Lean4Lean.VPrimitiveInductive.boolGeneration_wf
 #check Lean4Lean.VPrimitiveInductive.natGeneration_wf
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedFamilySourcesClosed
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.FlattenedFamilySourceStagingResult
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedConstructorSourcesClosed
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedFamilyConstructorsAbsent
@@ -45,6 +46,10 @@ open Lean
 #check Lean4Lean.AddInductive.CandidateFamilyTypeTerminalSortList
 #check Lean4Lean.AddInductive.CandidateFamilyTypeTerminalSortList.check
 #check Lean4Lean.AddInductive.CandidateFamilyTypeTerminalSortList.of_check
+#check Lean4Lean.AddInductive.FamilySourceClosedList
+#check Lean4Lean.AddInductive.FamilySourceClosedList.check
+#check Lean4Lean.AddInductive.FamilySourceClosedList.of_check
+#check Lean4Lean.AddInductive.FamilySourceClosedList.check_eq_true
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.familyTypesProduced
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.familyTerminalSorts
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.constructorListsProduced

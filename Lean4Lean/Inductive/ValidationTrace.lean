@@ -1999,12 +1999,15 @@ def NormalizationCandidateExecution.CandidateObserversComplete
         CandidateFamilyConstructorListsObservable
           { candidateContext with env := familyEnv, lctx := {} } types
 
-/-- Successful pointwise candidate observers, together with the ordinary
-validation/declaration/constructor equations, reconstruct the complete
-retained normalization execution. -/
+/-- Successful pointwise candidate observers, source-closure evidence, and
+the ordinary validation/declaration/constructor equations reconstruct the
+complete retained normalization execution.  The public builder obtains the
+closure evidence from its executable gate; this theorem remains a
+compatibility bridge for callers that reconstruct a run from observers. -/
 theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
     (observers : CandidateObserversComplete nparams types numNested isUnsafe
       candidateContext)
+    (sourcesClosed : FamilySourceClosedList types)
     {validation : FamilyValidationBlockResult}
     (validationRun :
       observeFamilyValidationBlock nparams types candidateContext =
@@ -2050,16 +2053,20 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
         subst actualFamilyTypes
         split
         next _ =>
-          obtain ⟨families, familiesRun⟩ :=
-            executeCandidateFamilyList_ok_of_observable
-              familyTypes.candidates constructorObservers
           split
-          next error actual =>
-            rw [familiesRun] at actual
-            contradiction
-          next actualFamilies actualFamiliesRun => exact ⟨_, rfl⟩
-        next notTerminals =>
-          exact (notTerminals familyTerminals.check_eq_true).elim
+          next _ =>
+            obtain ⟨families, familiesRun⟩ :=
+              executeCandidateFamilyList_ok_of_observable
+                familyTypes.candidates constructorObservers
+            split
+            next error actual =>
+              rw [familiesRun] at actual
+              contradiction
+            next actualFamilies actualFamiliesRun => exact ⟨_, rfl⟩
+          next notTerminals =>
+            exact (notTerminals familyTerminals.check_eq_true).elim
+        next notSources =>
+          exact (notSources sourcesClosed.check_eq_true).elim
 
 /-- Terminal counters and the preserved kernel environment exposed by any
 successful nonempty arbitrary-block family-validation run. -/
