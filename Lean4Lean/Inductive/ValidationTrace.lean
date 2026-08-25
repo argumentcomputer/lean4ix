@@ -1422,6 +1422,25 @@ def result :
   | .terminal stats context source _ nindices _ _ _ =>
     { type := source, stats, nindices, context }
 
+/-- Traversing one family telescope never changes the already-accepted
+family-constant inventory. -/
+theorem result_indConsts_eq
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    trace.result.stats.indConsts = stats.indConsts := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      simpa only [result] using ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      simpa only [result] using ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      simpa only [result] using ih
+  | terminal => rfl
+
 /-- The exact later-family parameter comparisons, in telescope order.  Fresh
 first-family parameters and ordinary indices contribute no comparison. -/
 def comparisons :
@@ -1482,6 +1501,29 @@ theorem comparisons_length_of_laterFamily
   | terminal stats context source i nindices fuel notForall
       parametersComplete =>
       simp [comparisons, parametersComplete]
+
+/-- The first family creates shared parameters rather than comparing them,
+so its retained equality inventory is empty. -/
+theorem comparisons_eq_nil_of_firstFamily
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (firstFamily : stats.indConsts.isEmpty = true) :
+    trace.comparisons = [] := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily' whnf tail ih =>
+      simp only [comparisons]
+      apply ih
+      simpa only using firstFamily
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      rw [firstFamily] at laterFamily
+      contradiction
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      exact ih firstFamily
+  | terminal => rfl
 
 /-- Erasing a comparison trace factors the executable family telescope
 through the exact continuation payload selected by that trace. -/
@@ -1656,6 +1698,416 @@ def observeFamilyValidationBlock (nparams : Nat)
   checkInductiveTypes nparams indTypes.toArray
     (fun stats => fun validationContext =>
       .ok ⟨stats, validationContext⟩) context
+
+/-- One exact successful `ensureSort` execution at the end of a family
+telescope. -/
+structure FamilyEnsureSortStep where
+  context : Context
+  source : Expr
+  result : Expr
+
+def FamilyEnsureSortStep.Valid (step : FamilyEnsureSortStep) : Prop :=
+  TypeChecker.M.run step.context.env step.context.safety
+      step.context.lctx step.context.lparams step.context.fuel
+      (TypeChecker.ensureSort step.source) =
+    .ok step.result
+
+/-- The exact statistics value passed to the outer family-validation
+continuation.  Keeping the nested assertions in this transparent helper
+preserves even the executable's inhabited fallback behavior for an empty
+block. -/
+def familyValidationTerminalStats (nparams : Nat)
+    (indTypes : Array InductiveType) (stats : InductiveStats)
+    (context : Context) : InductiveStats :=
+  assert! stats.levels.length == context.lparams.length
+  assert! stats.nindices.size == indTypes.size
+  assert! stats.indConsts.size == indTypes.size
+  assert! stats.params.size == nparams
+  stats
+
+/-- Exact source-indexed traversal of the outer mutual-family validator.
+
+Each family node retains the source closure and ordinary checker executions,
+the complete inner parameter-comparison trace, the terminal sort check, and
+the precise first/later-family statistics update.  The tail is indexed by
+that exact update and by the reader context returned from the inner trace, so
+neither family order nor validation state can be supplied independently. -/
+inductive FamilyParameterComparisonBlockTrace (nparams : Nat)
+    (indTypes : Array InductiveType) :
+    (dIdx : Nat) → (stats : InductiveStats) → (context : Context) → Type where
+  | firstFamily
+      (dIdx : Nat) (stats : InductiveStats) (context : Context)
+      (inBounds : dIdx < indTypes.size)
+      (closed : context.env.checkNoMVarNoFVar indTypes[dIdx].name
+        indTypes[dIdx].type = .ok ())
+      (inferred root : Expr)
+      (checkType : CandidateCheckTypeStep.Valid
+        ⟨context, indTypes[dIdx].type, inferred⟩)
+      (rootWhnf : CandidateWhnfStep.Valid
+        ⟨context, indTypes[dIdx].type, root⟩)
+      (telescope : FamilyTypeParameterComparisonTrace nparams stats context
+        root 0 0 context.fuel.inductiveFuel)
+      (sorted : Expr)
+      (ensureSort : FamilyEnsureSortStep.Valid
+        ⟨telescope.result.context, telescope.result.type, sorted⟩)
+      (isFirst : telescope.result.stats.indConsts.isEmpty = true)
+      (tail : FamilyParameterComparisonBlockTrace nparams indTypes
+        (dIdx + 1)
+        { telescope.result.stats with
+          lctx := telescope.result.context.lctx
+          resultLevel := sorted.sortLevel!
+          isNotZero := sorted.sortLevel!.isNeverZero
+          nindices := telescope.result.stats.nindices.push
+            telescope.result.nindices
+          indConsts := telescope.result.stats.indConsts.push
+            (.const indTypes[dIdx].name telescope.result.stats.levels) }
+        telescope.result.context) :
+      FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context
+  | laterFamily
+      (dIdx : Nat) (stats : InductiveStats) (context : Context)
+      (inBounds : dIdx < indTypes.size)
+      (closed : context.env.checkNoMVarNoFVar indTypes[dIdx].name
+        indTypes[dIdx].type = .ok ())
+      (inferred root : Expr)
+      (checkType : CandidateCheckTypeStep.Valid
+        ⟨context, indTypes[dIdx].type, inferred⟩)
+      (rootWhnf : CandidateWhnfStep.Valid
+        ⟨context, indTypes[dIdx].type, root⟩)
+      (telescope : FamilyTypeParameterComparisonTrace nparams stats context
+        root 0 0 context.fuel.inductiveFuel)
+      (sorted : Expr)
+      (ensureSort : FamilyEnsureSortStep.Valid
+        ⟨telescope.result.context, telescope.result.type, sorted⟩)
+      (isLater : telescope.result.stats.indConsts.isEmpty = false)
+      (resultLevelCompatible :
+        (!sorted.sortLevel!.isEquiv
+          telescope.result.stats.resultLevel) = false)
+      (tail : FamilyParameterComparisonBlockTrace nparams indTypes
+        (dIdx + 1)
+        { telescope.result.stats with
+          nindices := telescope.result.stats.nindices.push
+            telescope.result.nindices
+          indConsts := telescope.result.stats.indConsts.push
+            (.const indTypes[dIdx].name telescope.result.stats.levels) }
+        telescope.result.context) :
+      FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context
+  | terminal
+      (dIdx : Nat) (stats : InductiveStats) (context : Context)
+      (outOfBounds : ¬dIdx < indTypes.size) :
+      FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context
+
+namespace FamilyParameterComparisonBlockTrace
+
+/-- Exact continuation payload reached after erasing the outer trace. -/
+def result :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      FamilyValidationBlockResult
+  | .firstFamily _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.result
+  | .laterFamily _ _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.result
+  | .terminal _ stats context _ =>
+    { stats := familyValidationTerminalStats nparams indTypes stats context
+      validationContext := context }
+
+/-- Exact kernel parameter-comparison executions, grouped in source family
+order.  The first family normally contributes an empty list; every later
+family contributes one entry for each shared parameter. -/
+def comparisons :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      List (List CandidateIsDefEqStep)
+  | .firstFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ tail =>
+    telescope.comparisons :: tail.comparisons
+  | .laterFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ tail =>
+    telescope.comparisons :: tail.comparisons
+  | .terminal .. => []
+
+/-- Every equality step exposed by the outer source-indexed trace is an exact
+successful checker execution retained by its family's inner trace. -/
+theorem comparison_valid
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (familyMember : familyComparisons ∈ trace.comparisons)
+    (comparisonMember : comparison ∈ familyComparisons) :
+    comparison.Valid := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+      simp only [comparisons, List.mem_cons] at familyMember
+      rcases familyMember with rfl | familyMember
+      · exact telescope.comparison_valid comparisonMember
+      · exact ih familyMember
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+      simp only [comparisons, List.mem_cons] at familyMember
+      rcases familyMember with rfl | familyMember
+      · exact telescope.comparison_valid comparisonMember
+      · exact ih familyMember
+  | terminal => simp only [comparisons, List.not_mem_nil] at familyMember
+
+/-- The grouped comparison inventory has exactly one entry for each
+remaining source family. -/
+theorem comparisons_length
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) :
+    trace.comparisons.length = indTypes.size - dIdx := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+      simp only [comparisons, List.length_cons]
+      rw [ih]
+      omega
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+      simp only [comparisons, List.length_cons]
+      rw [ih]
+      omega
+  | terminal dIdx stats context outOfBounds =>
+      simp only [comparisons, List.length_nil]
+      omega
+
+/-- Once a family has been accepted, every remaining source family compares
+exactly all `nparams` shared parameters. -/
+theorem comparison_lengths_of_later
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (later : stats.indConsts.isEmpty = false) :
+    trace.comparisons.map List.length =
+      List.replicate (indTypes.size - dIdx) nparams := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+      have preserved := telescope.result_indConsts_eq
+      have resultLater : telescope.result.stats.indConsts.isEmpty = false := by
+        rw [preserved, later]
+      rw [resultLater] at isFirst
+      contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+      have headLength :=
+        telescope.comparisons_length_of_laterFamily later
+      have tailLater :
+          (telescope.result.stats.indConsts.push
+            (.const indTypes[dIdx].name
+              telescope.result.stats.levels)).isEmpty = false := by
+        simp
+      simp only [comparisons, List.map_cons]
+      rw [headLength, ih tailLater]
+      simp only [Nat.sub_zero]
+      have remaining :
+          indTypes.size - dIdx =
+            (indTypes.size - (dIdx + 1)) + 1 := by
+        omega
+      rw [remaining]
+      rw [show indTypes.size - (dIdx + 1) + 1 =
+        Nat.succ (indTypes.size - (dIdx + 1)) by omega]
+      rw [List.replicate_succ]
+  | terminal dIdx stats context outOfBounds =>
+      have remaining : indTypes.size - dIdx = 0 := by omega
+      simp [comparisons, remaining]
+
+/-- From the validator's initial statistics, the first source family has no
+comparisons and every later family has exactly `nparams` comparisons. -/
+theorem comparison_lengths_of_initial
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes 0
+      (InductiveStats.initial (context.lparams.map .param)) context)
+    (nonempty : 0 < indTypes.size) :
+    trace.comparisons.map List.length =
+      0 :: List.replicate (indTypes.size - 1) nparams := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+      have headEmpty :=
+        telescope.comparisons_eq_nil_of_firstFamily (by rfl)
+      have tailLater :
+          (telescope.result.stats.indConsts.push
+            (.const indTypes[0].name
+              telescope.result.stats.levels)).isEmpty = false := by
+        simp
+      have tailLengths := tail.comparison_lengths_of_later tailLater
+      simp only [comparisons, List.map_cons, headEmpty, List.length_nil]
+      simpa using tailLengths
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible
+      tail =>
+      have preserved := telescope.result_indConsts_eq
+      have resultFirst : telescope.result.stats.indConsts.isEmpty = true := by
+        rw [preserved]
+        rfl
+      rw [resultFirst] at isLater
+      contradiction
+  | terminal dIdx stats context outOfBounds => omega
+
+/-- Erasing the outer trace factors the unchanged mutual-family validator
+through the exact terminal statistics and reader context selected by the
+trace. -/
+theorem factor
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (k : InductiveStats → M α) :
+    checkInductiveTypes.loopInd nparams indTypes k dIdx stats context =
+      k trace.result.stats trace.result.validationContext := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+      rw [checkInductiveTypes.loopInd.eq_1, dif_pos inBounds]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply,
+        readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.pure, Pure.pure, Except.pure, liftExcept_apply,
+        Except.bind]
+      rw [closed, checkType, rootWhnf]
+      simp only [Except.bind]
+      rw [telescope.factor]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [ensureSort]
+      simp only [Except.bind, isFirst, if_true, ReaderT.pure, Pure.pure,
+        Except.pure, result]
+      exact ih
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+      rw [checkInductiveTypes.loopInd.eq_1, dif_pos inBounds]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply,
+        readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.pure, Pure.pure, Except.pure, liftExcept_apply,
+        Except.bind]
+      rw [closed, checkType, rootWhnf]
+      simp only [Except.bind]
+      rw [telescope.factor]
+      simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [ensureSort]
+      simp only [Except.bind, isLater, Bool.false_eq_true, if_false,
+        resultLevelCompatible, result]
+      exact ih
+  | terminal dIdx stats context outOfBounds =>
+      rw [checkInductiveTypes.loopInd.eq_1, dif_neg outOfBounds]
+      rfl
+
+/-- One-step decomposition used to keep reconstruction of the recursive
+outer trace separate from inversion of the current executable branch. -/
+private inductive Next
+    (nparams : Nat) (indTypes : Array InductiveType)
+    (dIdx : Nat) (stats : InductiveStats) (context : Context)
+    (k : InductiveStats → M α) (output : α) : Type where
+  | terminal
+      (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx
+        stats context) :
+      Next nparams indTypes dIdx stats context k output
+  | step
+      (inBounds : dIdx < indTypes.size)
+      (nextStats : InductiveStats) (nextContext : Context)
+      (success : checkInductiveTypes.loopInd nparams indTypes k (dIdx + 1)
+        nextStats nextContext = .ok output)
+      (prepend : FamilyParameterComparisonBlockTrace nparams indTypes
+          (dIdx + 1) nextStats nextContext →
+        FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+          context) :
+      Next nparams indTypes dIdx stats context k output
+
+/-- Invert exactly one successful outer-loop branch. -/
+private theorem next_of_run
+    (success : checkInductiveTypes.loopInd nparams indTypes k dIdx stats
+      context = .ok output) :
+    Nonempty (Next nparams indTypes dIdx stats context k output) := by
+  rw [checkInductiveTypes.loopInd.eq_1] at success
+  by_cases inBounds : dIdx < indTypes.size
+  · rw [dif_pos inBounds] at success
+    simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply,
+      readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.pure, Pure.pure, Except.pure, liftExcept_apply,
+      Except.bind] at success
+    cases hclosed : context.env.checkNoMVarNoFVar indTypes[dIdx].name
+        indTypes[dIdx].type with
+    | error error =>
+        rw [hclosed] at success
+        cases success
+    | ok closedResult =>
+      cases closedResult
+      rw [hclosed] at success
+      simp only [Except.bind] at success
+      cases hcheck : TypeChecker.M.run context.env context.safety
+          context.lctx context.lparams context.fuel
+          (TypeChecker.checkType indTypes[dIdx].type) with
+      | error error =>
+          rw [hcheck] at success
+          cases success
+      | ok inferred =>
+        rw [hcheck] at success
+        simp only [Except.bind] at success
+        cases hroot : TypeChecker.M.run context.env context.safety
+            context.lctx context.lparams context.fuel
+            (TypeChecker.whnf indTypes[dIdx].type) with
+        | error error =>
+            rw [hroot] at success
+            cases success
+        | ok root =>
+          rw [hroot] at success
+          simp only [Except.bind] at success
+          obtain ⟨telescope⟩ :=
+            FamilyTypeParameterComparisonTrace.exists_of_run success
+          rw [telescope.factor] at success
+          simp only [ReaderT.bind, Bind.bind,
+            liftTypeChecker_apply] at success
+          cases hsort : TypeChecker.M.run telescope.result.context.env
+              telescope.result.context.safety
+              telescope.result.context.lctx
+              telescope.result.context.lparams
+              telescope.result.context.fuel
+              (TypeChecker.ensureSort telescope.result.type) with
+          | error error =>
+              rw [hsort] at success
+              cases success
+          | ok sorted =>
+            rw [hsort] at success
+            simp only [Except.bind] at success
+            cases isFirst : telescope.result.stats.indConsts.isEmpty with
+            | true =>
+              rw [isFirst] at success
+              simp only [if_true, ReaderT.bind, Bind.bind, ReaderT.pure,
+                Pure.pure, Except.pure, Except.bind] at success
+              exact ⟨Next.step inBounds _ _ success fun tail =>
+                .firstFamily dIdx stats context inBounds hclosed inferred
+                  root hcheck hroot telescope sorted hsort isFirst tail⟩
+            | false =>
+              rw [isFirst] at success
+              simp only [Bool.false_eq_true, if_false] at success
+              cases levelMismatch :
+                  (!sorted.sortLevel!.isEquiv
+                    telescope.result.stats.resultLevel) with
+              | true =>
+                rw [levelMismatch] at success
+                simp [ReaderT.bind, Bind.bind, liftExcept_apply,
+                  Except.bind, throw, throwThe,
+                  MonadExceptOf.throw] at success
+              | false =>
+                rw [levelMismatch] at success
+                simp only [Bool.false_eq_true, if_false] at success
+                exact ⟨Next.step inBounds _ _ success fun tail =>
+                  .laterFamily dIdx stats context inBounds hclosed inferred
+                    root hcheck hroot telescope sorted hsort isFirst
+                    levelMismatch tail⟩
+  · exact ⟨Next.terminal (.terminal dIdx stats context inBounds)⟩
+
+/-- Every successful suffix of the executable outer family loop reconstructs
+the exact source-indexed trace above.  No counter invariant is needed here:
+the terminal node records the executable assertion result itself. -/
+theorem exists_of_run
+    (success : checkInductiveTypes.loopInd nparams indTypes k dIdx stats
+      context = .ok output) :
+    Nonempty (FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) := by
+  obtain ⟨next⟩ := next_of_run success
+  cases next with
+  | terminal trace => exact ⟨trace⟩
+  | step inBounds nextStats nextContext tailSuccess prepend =>
+      obtain ⟨tail⟩ := exists_of_run tailSuccess
+      exact ⟨prepend tail⟩
+termination_by indTypes.size - dIdx
+decreasing_by
+  all_goals exact Nat.sub_lt_sub_left inBounds (Nat.lt_succ_self dIdx)
+
+end FamilyParameterComparisonBlockTrace
 
 /-- Terminal data selected by the inner family-telescope loop.  The reader
 context is part of the result because `withLocalDecl` changes the context seen
@@ -3194,6 +3646,80 @@ def resultLevel (run : FamilyValidationBlockRun nparams indTypes context) :
     Level :=
   run.result.stats.resultLevel
 
+/-- The exact outer-loop execution underlying this retained block run. -/
+theorem outerLoop_run
+    (run : FamilyValidationBlockRun nparams indTypes context) :
+    checkInductiveTypes.loopInd nparams indTypes.toArray
+        (fun stats => fun validationContext =>
+          .ok ⟨stats, validationContext⟩)
+        0 (InductiveStats.initial (context.lparams.map .param)) context =
+      .ok run.result := by
+  have hrun := run.run
+  unfold observeFamilyValidationBlock checkInductiveTypes at hrun
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+    Except.bind] at hrun
+  exact hrun
+
+/-- Producer-owned source-indexed parameter-comparison trace.  The choice is
+only the proof representation reconstructed from `run`; its executable
+statistics, contexts, and comparison steps are fixed by `outerLoop_run`. -/
+noncomputable def parameterComparisonTrace
+    (run : FamilyValidationBlockRun nparams indTypes context) :
+    FamilyParameterComparisonBlockTrace nparams indTypes.toArray 0
+      (InductiveStats.initial (context.lparams.map .param)) context :=
+  Classical.choice
+    (FamilyParameterComparisonBlockTrace.exists_of_run run.outerLoop_run)
+
+/-- The reconstructed trace reaches the exact result already retained by the
+family block run. -/
+theorem parameterComparisonTrace_result
+    (run : FamilyValidationBlockRun nparams indTypes context) :
+    run.parameterComparisonTrace.result = run.result := by
+  have factor := run.parameterComparisonTrace.factor
+    (fun stats => fun validationContext =>
+      .ok (⟨stats, validationContext⟩ : FamilyValidationBlockResult))
+  rw [run.outerLoop_run] at factor
+  exact (Except.ok.inj factor).symm
+
+/-- Grouped parameter comparisons in exact source-family order. -/
+noncomputable def parameterComparisons
+    (run : FamilyValidationBlockRun nparams indTypes context) :
+    List (List CandidateIsDefEqStep) :=
+  run.parameterComparisonTrace.comparisons
+
+/-- The retained comparison groups are indexed by every source family,
+without truncation or an independently supplied list. -/
+theorem parameterComparisons_length
+    (run : FamilyValidationBlockRun nparams indTypes context) :
+    run.parameterComparisons.length = indTypes.length := by
+  simpa [parameterComparisons] using
+    run.parameterComparisonTrace.comparisons_length
+
+/-- Exact per-family comparison counts for a nonempty retained block: zero
+for the first family and `nparams` for every later family. -/
+theorem parameterComparison_lengths_shape
+    (run : FamilyValidationBlockRun nparams indTypes context)
+    (nonempty : indTypes.isEmpty = false) :
+    run.parameterComparisons.map List.length =
+      0 :: List.replicate (indTypes.length - 1) nparams := by
+  have size_pos : 0 < indTypes.toArray.size := by
+    cases indTypes with
+    | nil => simp at nonempty
+    | cons head tail => simp
+  simpa [parameterComparisons] using
+    run.parameterComparisonTrace.comparison_lengths_of_initial size_pos
+
+/-- Every comparison exposed by a retained block run is the exact successful
+kernel execution from the corresponding family telescope. -/
+theorem parameterComparison_valid
+    (run : FamilyValidationBlockRun nparams indTypes context)
+    (familyMember : familyComparisons ∈ run.parameterComparisons)
+    (comparisonMember : comparison ∈ familyComparisons) :
+    comparison.Valid :=
+  run.parameterComparisonTrace.comparison_valid familyMember
+    comparisonMember
+
 end FamilyValidationBlockRun
 
 /-- Project the complete proof-carrying family-validation owner from the same
@@ -3207,6 +3733,42 @@ def NormalizationCandidateExecution.familyValidationBlockRun
     FamilyValidationBlockRun nparams indTypes context :=
   FamilyValidationBlockRun.of_run nonempty execution.familyValidationResult
     (execution.familyValidationResult_run produced)
+
+/-- Project the exact source-indexed family parameter-comparison trace from
+the retained detailed normalization execution. -/
+noncomputable def NormalizationCandidateExecution.familyParameterComparisonTrace
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution)
+    (nonempty : indTypes.isEmpty = false) :
+    FamilyParameterComparisonBlockTrace nparams indTypes.toArray 0
+      (InductiveStats.initial (context.lparams.map .param)) context :=
+  (execution.familyValidationBlockRun produced nonempty).parameterComparisonTrace
+
+/-- Kernel equality executions grouped by source family, projected directly
+from the normalization producer. -/
+noncomputable def NormalizationCandidateExecution.familyParameterComparisons
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution)
+    (nonempty : indTypes.isEmpty = false) :
+    List (List CandidateIsDefEqStep) :=
+  (execution.familyValidationBlockRun produced nonempty).parameterComparisons
+
+/-- The producer's grouped comparison inventory has the exact first/later
+family shape selected by validation. -/
+theorem NormalizationCandidateExecution.familyParameterComparison_lengths
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution)
+    (nonempty : indTypes.isEmpty = false) :
+    (execution.familyParameterComparisons produced nonempty).map List.length =
+      0 :: List.replicate (indTypes.length - 1) nparams :=
+  (execution.familyValidationBlockRun produced nonempty)
+    |>.parameterComparison_lengths_shape nonempty
 
 /-- Source-indexed constructor traces for every family in a block.  The
 natural index advances with the source list, so a trace for one family cannot
@@ -3526,6 +4088,70 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.exists_of_run' 
 -/
 #guard_msgs in
 #print axioms FamilyTypeParameterComparisonTrace.exists_of_run
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.comparisons_eq_nil_of_firstFamily' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.comparisons_eq_nil_of_firstFamily
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.comparison_valid' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyParameterComparisonBlockTrace.comparison_valid
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.comparison_lengths_of_initial' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyParameterComparisonBlockTrace.comparison_lengths_of_initial
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.factor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyParameterComparisonBlockTrace.factor
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.exists_of_run' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyParameterComparisonBlockTrace.exists_of_run
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyValidationBlockRun.parameterComparisonTrace_result
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyValidationBlockRun.parameterComparison_lengths_shape' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyValidationBlockRun.parameterComparison_lengths_shape
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparison_lengths' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.familyParameterComparison_lengths
 
 /--
 info: 'Lean4Lean.AddInductive.checkInductiveTypes_factor' depends on axioms: [propext, Classical.choice, Quot.sound]
