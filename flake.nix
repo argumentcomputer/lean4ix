@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Argument Computer Corporation
+# SPDX-License-Identifier: MIT OR Apache-2.0
 {
   description = "Lean4Lean: an implementation of the Lean 4 kernel in Lean 4";
 
@@ -75,6 +77,13 @@
           src = leanSrc;
           buildInputs = leanBuildInputs;
         };
+        installLicenseDocs = ''
+          mkdir -p "$out/share/doc/lean4ix"
+          install -m 0644 ${./LICENSE} "$out/share/doc/lean4ix/LICENSE"
+          install -m 0644 ${./LICENSE-MIT} "$out/share/doc/lean4ix/LICENSE-MIT"
+          install -m 0644 ${./LICENSE-APACHE} "$out/share/doc/lean4ix/LICENSE-APACHE"
+          install -m 0644 ${./NOTICE} "$out/share/doc/lean4ix/NOTICE"
+        '';
 
         # The Lake dependency artifact: the contract consumed by downstream
         # Lake packages (e.g. Ix) via
@@ -89,8 +98,10 @@
           // {
             name = "Lean4Lean";
             buildLibrary = true;
+            postInstall = installLicenseDocs;
             meta = {
               description = "Lean4Lean library artifact (oleans, exports, static/shared) for downstream Lake packages";
+              license = with pkgs.lib.licenses; [mit asl20];
             };
           }
         );
@@ -131,6 +142,7 @@
             meta = {
               description = "Lean 4 kernel typechecker CLI (lean4lean)";
               mainProgram = "lean4lean";
+              license = with pkgs.lib.licenses; [mit asl20];
             };
           }
           ''
@@ -139,6 +151,7 @@
             makeWrapper ${lean4leanCLIRaw}/bin/lean4lean $out/bin/lean4lean \
               --set LEAN_SYSROOT "${lean}" \
               --prefix LEAN_PATH : "${leanPath}"
+            ${installLicenseDocs}
           '';
 
         # A check that builds extra Lake targets over the library artifact and

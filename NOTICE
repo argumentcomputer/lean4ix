@@ -1,0 +1,37 @@
+Lean4Ix notices
+================
+
+Copyright (c) 2026 Argument Computer Corporation
+
+Lean4Ix is based on lean4lean:
+
+  https://github.com/digama0/lean4lean
+
+The lean4lean-derived portions were received under the Apache License,
+Version 2.0. Their original copyright, attribution, licensing, and
+modification-notice requirements continue to apply. The repository history
+and retained per-file notices provide the detailed provenance of those
+portions.
+
+The executable kernel model is itself derived from the Lean 4 kernel. Certain
+files also identify more specific Apache-2.0 sources in their headers:
+
+  * Main.lean contains code copied from leanprover-community/import-graph.
+  * Lean4Lean/Std/ToExpr.lean contains code from mathlib.
+  * Lean4Lean/Verify/QSort.lean is adapted from Lean 4's qsort verification.
+
+Lean 4, Batteries, import-graph, and mathlib are distributed under the Apache
+License, Version 2.0. When a Lean4Ix distribution includes their code or
+artifacts, preserve the license and notice material shipped with them.
+
+The generated lake-manifest.json dependency lock and the single-value
+lean-toolchain toolchain pin may differ from their lean4lean counterparts.
+They are mechanical package metadata governed by the licensing and
+modification notices distributed with this repository.
+
+Except where a contribution or upstream component is explicitly identified
+under different terms, contributions intentionally submitted for inclusion in
+Lean4Ix are accepted under the same MIT OR Apache-2.0 choice described in
+LICENSE, LICENSE-MIT, and LICENSE-APACHE.
+
+This NOTICE is informational and does not modify any applicable license.

@@ -1,29 +1,143 @@
-# Lean-for-Lean
+<!--
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-->
 
-This is an implementation of the Lean 4 kernel written in (mostly) pure Lean 4.
-It is derived directly from the C++ kernel implementation, and as such likely
-shares some implementation bugs with it (it's not really an independent
-implementation), although it also benefits from the same algorithmic performance
-improvements existing in the C++ Lean kernel.
+# Lean4Ix
 
-The project also houses some metatheory regarding the Lean
-system, in the same general direction as the
-[MetaCoq project](https://github.com/MetaCoq/metacoq/).
+**Lean4Ix is a formal model of the Lean 4 kernel for the Ix zkPCC platform,
+based on [lean4lean](https://github.com/digama0/lean4lean).**
+
+> [!WARNING]
+> Lean4Ix is work in progress and experimental. It is not yet a completed
+> verification, a production security boundary, or a claim that every Lean
+> kernel feature is covered. Proof obligations, trusted implementation bridges,
+> and conditional research endpoints are tracked explicitly; consult the
+> [roadmap](plans/roadmap.md) and the compiled trust audit for the status of the
+> exact revision you are using.
+
+Lean4Ix contains an implementation of the Lean 4 kernel written in mostly pure
+Lean 4, an implementation-independent Theory model of that kernel, and proofs
+relating the executable implementation to the model. The executable port is
+derived closely from Lean's C++ kernel. It therefore benefits from many of the
+same algorithms and performance choices, but it is not an independent kernel
+implementation and may share implementation bugs with Lean.
+
+## Role in Ix
+
+Lean4Ix is intended to be the formalization and verification layer between Lean
+and the more specialized kernels used by Ix. The Ix project will transport
+theorems established here into two settings:
+
+- an out-of-circuit kernel, where compatibility and performance matter and
+  proofs may need to account for implementation details such as cached metadata,
+  persistent containers, and normalization behavior; and
+- kernels represented inside cryptographic circuits for the zero-knowledge
+  proof backend, where representations and algorithms are specialized further
+  for circuit constraints and proof cost.
+
+Lean4Ix is not itself the final in-circuit kernel. Its job is to provide a
+precise semantic reference, verified executable behavior where applicable, and
+the theorem interfaces needed to justify those later specializations.
+
+## Relationship to lean4lean
+
+[lean4lean](https://github.com/digama0/lean4lean) remains the upstream project
+and the source of the general Lean kernel model. We expect work to flow from
+lean4lean into Lean4Ix more often than in the opposite direction. A general
+formal model can usually keep interfaces and metatheory more theoretically
+elegant, while Lean4Ix may need Ix-specific environment classes, operational
+details, performance contracts, or theorem shapes that would not be desirable
+upstream.
+
+That specialization is not meant to create a one-way boundary. If a proof,
+interface repair, bug fix, fixture, or tool developed here is useful to
+lean4lean, we are entirely open to it being reused or contributed upstream.
+General results should be upstreamed when doing so is useful and does not force
+Ix-specific policy into the upstream design. Durable differences are recorded
+in the [upstream divergence ledger](upstream-divergence.md) so that updates in
+either direction remain reviewable.
+
+## Architecture
+
+| Path | Role |
+|---|---|
+| `Lean4Lean/` | Executable kernel port and public library surface. |
+| `Lean4Lean/Inductive/` | Inductive validation, generation, recursors, and iota reduction. |
+| `Lean4Lean/Theory/` | Implementation-independent syntax, environments, typing, definitional equality, and metatheory. |
+| `Lean4Lean/Verify/` | Refinement proofs connecting Lean kernel data and executable checker paths to Theory. |
+| `Lean4Lean/Experimental/` | Active semantic and metatheoretic research. These modules are not part of the supported default surface and may expose conditional endpoints. |
+| `Lean4Lean/Audit/` | Machine-checked sorry and axiom-frontier policy. |
+| `Lean4Lean/Tests/` | Regression, consumer-surface, replay, and differential fixtures. |
+| `Main.lean` | Differential replay and kernel-checking command-line application. |
+| `plans/roadmap.md` | Authoritative current milestones, proof frontier, and release gates. |
+| `upstream-divergence.md` | Durable differences between Lean4Ix and lean4lean, including removal conditions. |
+
+The central proof boundary is:
+
+```text
+Lean kernel data and execution
+              |
+              v
+    Lean4Lean/Verify
+              |
+              v
+     Lean4Lean/Theory
+              |
+              v
+  Ix-specific theorem transport
+```
+
+## Design emphasis
+
+Compared with the general upstream project, Lean4Ix currently puts additional
+emphasis on:
+
+- proof-carrying reconstruction of inductive declarations, generated recursors,
+  registered reductions, projections, and structure eta from actual kernel
+  execution and metadata;
+- explicit environment capabilities and readiness conditions rather than
+  silently assuming that every well-formed abstract environment corresponds to
+  one accepted by the executable checker;
+- exact accounting for opaque operations, caches, container behavior, and other
+  runtime contracts that can matter to the out-of-circuit Ix kernel;
+- differential fixtures that compare accepted and rejected Lean declarations,
+  normalized metadata, generated rules, and nested restoration; and
+- theorem interfaces designed to be transported into still more specialized
+  out-of-circuit and in-circuit kernels.
+
+This is only an overview. The divergence ledger is the authoritative record of
+intentional differences, and the roadmap is the authoritative status document.
+
+### Naming during the migration
+
+The repository identity is Lean4Ix, but the Lean namespace, Lake package,
+library targets, and command-line executable currently retain the historical
+`Lean4Lean` / `lean4lean` names. This compatibility window is intentional while
+the main theorem work and the downstream Ix consumer are stabilized.
 
 ## Building
 
-To compile the code, you will need [Lean](https://lean-lang.org/lean4/doc/quickstart.html), or more specifically `elan`, the Lean version manager, which will make sure you have the right version of lean as specified in the [lean-toolchain](lean-toolchain) file. Assuming you have elan, the project can be compiled with:
+To compile the code, install
+[elan](https://lean-lang.org/lean4/doc/quickstart.html), the Lean version
+manager. It will select the version pinned in [lean-toolchain](lean-toolchain).
+The default supported targets can then be built with:
 
 ```
 lake build
 ```
 
-This builds all components but you can also build them separately:
+Individual targets include:
 
-* `lake build Lean4Lean` builds the `Lean4Lean` library interface, and does not include any of the proofs.
-* `lake build lean4lean` (note the capitalization!) builds the `lean4lean` command line tool, again without building proofs.
-* `lake build Lean4Lean.Theory` contains the Lean metatheory and properties.
-* `lake build Lean4Lean.Verify` is the proof that the `Lean4Lean` implementation satisfies the `Lean4Lean.Theory` abstract specification.
+- `lake build Lean4Lean` builds the executable library interface without the
+  proof libraries.
+- `lake build lean4lean` builds the compatibility-named command-line tool.
+- `lake build Lean4Lean.Theory` builds the abstract model and metatheory.
+- `lake build Lean4Lean.Verify` builds the implementation-to-Theory refinement
+  proofs.
+- `lake build Lean4Lean.Tests` builds the supported regression modules.
+- `lake build Lean4Lean.Experimental` builds the off-default research surface.
 
 ### Building with Nix
 
@@ -41,11 +155,11 @@ pins its own Lean sysroot and prepends this package's search path to
 `LEAN_PATH`, so it works standalone while still honoring the target project's
 paths under `lake env` (see below). Other outputs:
 
-* `nix build .#lake-dependency` builds the `Lean4Lean` library artifact
+- `nix build .#lake-dependency` builds the `Lean4Lean` library artifact
   (oleans, `.export` files, static/shared libraries — no CLI or proofs) that
   downstream Lake packages can consume via lean4-nix's
   `depOverrideDeriv.lean4lean`.
-* `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
+- `nix flake check` builds the `Lean4Lean.Theory` and `Lean4Lean.Verify`
   proof libraries plus the sorry audit
   ([Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean),
   which fails if any `Theory`/`Verify` declaration gains, loses, or renames
@@ -57,15 +171,29 @@ paths under `lake env` (see below). Other outputs:
   `Lean4Lean.Tests` regression modules (`checks.tests`), and builds and
   runs a minimal downstream consumer of the library artifact
   (`checks.downstream-consumer`).
-* `nix develop` provides a shell with the pinned `lean`/`lake` toolchain, and
+- `nix develop` provides a shell with the pinned `lean`/`lake` toolchain, and
   the checked-in [.envrc](.envrc) loads it automatically for
   [direnv](https://direnv.net/) users (run `direnv allow` once).
 
 ## Running
 
-After `lake build lean4lean`, the executable will be in `.lake/build/bin/lean4lean`. Because it requires some environment variables to be set for search paths which are provided by lake, you should evaluate it like `lake env .lake/build/bin/lean4lean`.
+After `lake build lean4lean`, the executable is at
+`.lake/build/bin/lean4lean`. Run it through `lake env` so that Lean search paths
+are configured:
 
-If you run this as is (with no additional arguments), it will check every olean in the `lean4lean` package itself, which is probably not what you want. To check a different Lean package you should navigate the directory of the target project, then use `lake env path/to/lean4lean/.lake/build/bin/lean4lean <args>` to run `lean4lean` in the context of the target project. The command line arguments are:
+```sh
+lake env .lake/build/bin/lean4lean
+```
+
+With no arguments, the executable checks every `.olean` on the package search
+path. To check another Lean package, change to that package and run the Lean4Ix
+binary in the target package's Lake environment, for example:
+
+```sh
+lake env /path/to/lean4ix/.lake/build/bin/lean4lean <args>
+```
+
+The command-line interface is:
 
 > `lean4lean [--fresh] [-v|--verbose] [--compare] [--decl=DECL [--json] | --case=FILE] [MOD]`
 
@@ -82,62 +210,42 @@ standalone `.lean` source. The accepted module continues through the same
 translation/generation comparison; the type-incorrect source is retained as
 an expected rejection at the `elaboration` phase.
 
-## More documentation
+## Documentation and project status
 
-* [bugs-found.md](bugs-found.md): A list of kernel bugs that the lean4lean project has uncovered.
-* [divergences.md](divergences.md): A list of deliberate divergences between lean's kernel and the lean4lean kernel.
+- [plans/roadmap.md](plans/roadmap.md) is the authoritative statement of open
+  milestones, proof obligations, and release gates.
+- [upstream-divergence.md](upstream-divergence.md) records intentional Lean4Ix
+  differences from lean4lean and the conditions under which they can disappear.
+- [Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean)
+  machine-checks the admitted-proof and axiom frontier.
+- [bugs-found.md](bugs-found.md) records Lean kernel bugs uncovered by the
+  original lean4lean development.
+- [divergences.md](divergences.md) records deliberate differences between the
+  executable kernel port and Lean's kernel.
 
-## (Selected) file breakdown
+Do not infer support or trust from a module merely compiling. In particular,
+`Lean4Lean.Experimental` may contain conditional results whose premises are the
+subject of current research. Use the roadmap and audit output to interpret a
+specific revision.
 
-* `Main.lean`: command line app
-* `Lean4Lean`: source files
-  * `Environment.lean`: library entry point
-  * `TypeChecker.lean`: main recursive function
-  * `Inductive`
-    * `Add.lean`: constructing inductive recursors
-    * `Reduce.lean`: inductive iota rules
-  * `Quot.lean`: quotient types handling
-  * `Primitive.lean`: checking correctness of built-ins
-  * `Std`: stuff that should exist upstream
-  * `Theory`: lean metatheory
-    * `VLevel.lean`: level expressions
-    * `VExpr.lean`: expressions (boring de Bruijn variable theorems are here)
-    * `VDecl.lean`: declarations
-    * `VEnv.lean`: environment
-    * `Meta.lean`: elaborator producing `VExpr`s
-    * `Inductive.lean`: inductive types
-    * `Quot.lean`: quotient types
-    * `Typing`
-      * `Basic.lean`: The typing relation itself
-      * `Lemmas.lean`: theorems about the typing relation
-      * `Meta.lean`: tactic for proving typing judgments
-      * `Strong.lean`: proof that you can have all the inductive hypotheses
-      * `UniqueTyping.lean`: conjectures about the typing relation
-      * `Env.lean`: typing for environments
-  * `Verify`: relation between the metatheory and the kernel
-    * `Axioms.lean`: theorems about upstream opaques that shouldn't be opaque
-    * `Expr.lean`: correctness of basics on `Expr`
-    * `Level.lean`: correctness of basics on `Level`
-    * `Level/Std.lean`: soundness of the standard-library level operations
-    * `VLCtx.lean`: a "translation context" suitable for translating expressions
-    * `LocalContext.lean`: properties of lean's `LocalContext` type
-    * `NameGenerator.lean`: properties of the fresh name generator
-    * `Typing`
-      * `Expr.lean`: translating expressions (`TrExpr` is here)
-      * `Lemmas.lean`: properties of `TrExpr`
-      * `ConditionallyTyped.lean`: properties of expressions in caches that may be out of scope
-    * `Environment`
-      * `Basic.lean`: translating environments
-      * `Lemmas.lean`: properties of `TrEnv`
-    * `TypeChecker`
-      * `Basic.lean`: typechecker invariants
-      * `EquivManager.lean`: invariants for the union-find defeq cache
-      * `InferType.lean`: correctness of `inferType`
-      * `WHNF.lean`: correctness of `whnf`
-      * `IsDefEq.lean`: correctness of `isDefEq`
-    * `TypeChecker.lean`: top-level typechecker correctness
-  * `Experimental`: work in progress formalizations and ideas
-      * `Stratified.lean`: stratified typing judgment
-      * `StratifiedUntyped.lean` another stratified typing judgment
-      * `ParallelReduction.lean`: stuff related to church-rosser
-      * `Stronger.lean`: a more heavily annotated typing judgment
+## License
+
+Copyright (c) 2026 Argument Computer Corporation.
+
+Except for separately identified third-party or upstream material,
+Lean4Ix is dual-licensed under either of the following, at your option:
+
+- the [MIT License](LICENSE-MIT); or
+- the [Apache License, Version 2.0](LICENSE-APACHE).
+
+The corresponding SPDX expression is `MIT OR Apache-2.0`. Work derived from
+lean4lean or other upstream projects may retain its original licensing and
+notice requirements. To the maximum extent those licenses allow, we intend to
+incorporate, distribute, and, where permitted, sublicense that work as part of
+this unified dual-licensed package. We preserve all required copyright,
+attribution, notice, and modification statements and comply with every
+applicable condition necessary to do so. Where unified dual licensing is not
+permitted, the upstream terms continue to control the affected material. See
+[LICENSE](LICENSE) for the complete license notice, [NOTICE](NOTICE) for
+upstream and third-party provenance, and [CONTRIBUTING.md](CONTRIBUTING.md) for
+the inbound-equals-outbound contribution policy.

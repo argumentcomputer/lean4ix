@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Batteries.Data.UnionFind.Lemmas
 import Lean4Lean.Verify.Environment.Lemmas
 import Lean4Lean.EquivManager

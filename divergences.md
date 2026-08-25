@@ -1,3 +1,9 @@
+<!--
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-->
+
 # Divergences from the Lean Kernel
 
 This is a list of places where lean4lean deliberately has different behavior from the kernel. Unless specified here, any divergence between lean4lean and [lean4](https://github.com/leanprover/lean4/tree/master/src/kernel) is a bug.

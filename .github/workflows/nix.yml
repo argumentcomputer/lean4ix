@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Argument Computer Corporation
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
 name: Nix
 
 on:
@@ -34,7 +37,16 @@ jobs:
       - name: Check formatting
         run: nix fmt --accept-flake-config -- --check flake.nix
       # Shipped outputs: the CLI and the downstream Lake-dependency artifact.
-      - run: nix build --print-build-logs --accept-flake-config .#lean4lean .#lake-dependency
+      - name: Build shipped outputs and verify license payloads
+        run: |
+          outputs="$(nix build --no-link --print-out-paths --print-build-logs \
+            --accept-flake-config .#lean4lean .#lake-dependency)"
+          for output in $outputs; do
+            test -f "$output/share/doc/lean4ix/LICENSE"
+            test -f "$output/share/doc/lean4ix/LICENSE-MIT"
+            test -f "$output/share/doc/lean4ix/LICENSE-APACHE"
+            test -f "$output/share/doc/lean4ix/NOTICE"
+          done
       # Builds every check (proofs + sorry frontier, tests, consumer fixture,
       # CLI regressions) and evaluates the rest of the flake.
       - run: nix flake check --print-build-logs --accept-flake-config

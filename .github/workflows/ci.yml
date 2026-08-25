@@ -1,3 +1,7 @@
+# This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+# Modifications Copyright (c) 2026 Argument Computer Corporation.
+# SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+
 name: CI
 
 on:
@@ -20,6 +24,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check license compliance
+        run: |
+          git fetch --no-tags https://github.com/digama0/lean4lean.git \
+            +master:refs/remotes/lean4lean/master
+          bash .github/scripts/check-license-compliance.sh \
+            refs/remotes/lean4lean/master
 
       # Installs the toolchain pinned in `lean-toolchain` and runs `lake build`,
       # i.e. the `defaultTargets`: the `Lean4Lean` library, the `lean4lean` exe,

@@ -1,36 +1,3 @@
-Lean4Ix licensing
-=================
-
-Copyright (c) 2026 Argument Computer Corporation
-
-This file is derived from lean4lean and has been modified by Argument Computer Corporation.
-The Apache License, Version 2.0 text reproduced below is unchanged.
-
-Except for third-party or upstream material that is separately identified,
-Lean4Ix is licensed, at your option, under either:
-
-  * the MIT License, as published in LICENSE-MIT; or
-  * the Apache License, Version 2.0, published in LICENSE-APACHE and
-    reproduced below.
-
-SPDX-License-Identifier: MIT OR Apache-2.0
-
-This grant covers material copyrighted by Argument Computer Corporation and
-any upstream material that its applicable license permits Argument Computer
-Corporation to sublicense under these terms. Work derived from lean4lean or
-other upstream projects may retain its original licensing, copyright,
-attribution, notice, and modification requirements.
-
-To the maximum extent permitted by those upstream licenses, our intent is to
-incorporate, distribute, and, where permitted, sublicense that work as part of
-the unified Lean4Ix package under the MIT OR Apache-2.0 licensing choice. We
-preserve all notices required by the applicable upstream licenses and comply
-with every condition necessary to incorporate and redistribute that work.
-Where an upstream license does not permit this unified dual licensing, its
-terms continue to control the
-affected material. Nothing in this notice grants rights beyond those provided
-by the applicable upstream licenses.
-
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
