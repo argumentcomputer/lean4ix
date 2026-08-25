@@ -6170,6 +6170,60 @@ noncomputable def ofSafeReplay
   ofTransaction wf source replay.output replay.transactions (by
     simpa only [replay.safe_output_eq] using projectionReadySafe)
 
+/-- Complete an exact ordinary flattened transaction at its named rule-fold
+endpoint.  Exact replay owns the common transaction family, so the remaining
+consumer-facing premise is precisely projection readiness of that endpoint. -/
+noncomputable def ofExactOrdinary
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env)
+    (projectionReadySafe : ProjectionReady finalEnv
+      (generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv)) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
+  ofSafeReplay wf (result.ordinarySafeReplay metadata numNested_eq wf)
+    projectionReadySafe
+
+/-- Complete an exact genuinely nested transaction at its restored Theory
+endpoint.  The aligned artifact, restoration, metadata, and cross-safety
+replay are retained by the dependent transaction itself. -/
+noncomputable def ofExactNested
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    (projectionReadySafe : ProjectionReady finalEnv after) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
+  ofSafeReplay wf (transaction.safeReplay wf) projectionReadySafe
+
 /-- Assemble the complete semantic extension.  Exact replay supplies the
 host-facing translation and primitive invariants; checked eta registration
 then preserves those facts and provides the larger readiness-complete model. -/
