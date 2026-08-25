@@ -929,7 +929,7 @@ theorem evidence_of_build
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure] at run
   cases hloop : AddInductive.buildCandidateExpr.loop context source
-      context.fuel.inductiveFuel with
+      context.fuel.recDepth with
   | error error => simp [hloop] at run
   | ok trace =>
       simp [hloop] at run

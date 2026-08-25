@@ -6512,16 +6512,16 @@ private theorem annotatedPiOuterBodyCandidateTrace_loop (fuel : Nat) :
 
 private theorem annotatedPiInnerCandidateTrace_loop :
     AddInductive.buildCandidateExpr.loop
-        annotatedPiCtorCandidateContext annotatedPiInnerKernel 999 =
+        annotatedPiCtorCandidateContext annotatedPiInnerKernel 9999 =
       .ok annotatedPiInnerCandidateTrace := by
-  rw [show 999 = 998 + 1 by rfl]
+  rw [show 9999 = 9998 + 1 by rfl]
   simpa only [annotatedPiInnerCandidateTrace,
     annotatedPiInnerBodyCandidateContext] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := annotatedPiCtorCandidateContext)
       (e := annotatedPiInnerKernel)
       (inferred := .sort (.succ .zero))
-      (fuel := 998)
+      (fuel := 9998)
       (name := `p)
       (domain := annotatedPiRawDomainKernel)
       (body := .const ``AnnotatedPi [])
@@ -6535,26 +6535,26 @@ private theorem annotatedPiInnerCandidateTrace_loop :
       (domainCandidate := annotatedPiDomainCandidateTrace)
       (bodyCandidate := annotatedPiInnerBodyCandidateTrace)
       (hdomain := by
-        simpa using annotatedPiDomainCandidateTrace_loop 997)
+        simpa using annotatedPiDomainCandidateTrace_loop 9997)
       (hbody := by
         simpa [annotatedPiInnerBodyCandidateContext] using
-          annotatedPiInnerBodyCandidateTrace_loop 997))
+          annotatedPiInnerBodyCandidateTrace_loop 9997))
 
 private theorem annotatedPiCtorCandidateTrace_loop :
     AddInductive.buildCandidateExpr.loop
         annotatedPiCtorCandidateContext annotatedPiMkInfo.type
-        annotatedPiCtorCandidateContext.fuel.inductiveFuel =
+        annotatedPiCtorCandidateContext.fuel.recDepth =
       .ok annotatedPiCtorCandidateTrace := by
   change AddInductive.buildCandidateExpr.loop
       annotatedPiCtorCandidateContext annotatedPiMkInfo.type
-      (999 + 1) = _
+      (9999 + 1) = _
   simpa only [annotatedPiCtorCandidateTrace,
     annotatedPiOuterBodyCandidateContext] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := annotatedPiCtorCandidateContext)
       (e := annotatedPiMkInfo.type)
       (inferred := .sort (.succ .zero))
-      (fuel := 999)
+      (fuel := 9999)
       (name := annotatedPiOuterName)
       (domain := annotatedPiInnerKernel)
       (body := .const ``AnnotatedPi [])
@@ -6570,7 +6570,7 @@ private theorem annotatedPiCtorCandidateTrace_loop :
       (hdomain := annotatedPiInnerCandidateTrace_loop)
       (hbody := by
         simpa [annotatedPiOuterBodyCandidateContext] using
-          annotatedPiOuterBodyCandidateTrace_loop 998))
+          annotatedPiOuterBodyCandidateTrace_loop 9998))
 
 /-- The executable candidate traversal returns the exact nested-forall
 AnnotatedPi constructor trace, including both annotation boundaries and the

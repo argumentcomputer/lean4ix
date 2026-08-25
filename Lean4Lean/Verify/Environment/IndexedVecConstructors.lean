@@ -1232,16 +1232,16 @@ theorem nilBodyCandidateTraceLoop (fuel : Nat) :
 
 theorem nilCandidateTraceLoop :
     AddInductive.buildCandidateExpr.loop nilCandidateContext
-      indexedVecNilInfo.type nilCandidateContext.fuel.inductiveFuel =
+      indexedVecNilInfo.type nilCandidateContext.fuel.recDepth =
         .ok nilCandidateTrace := by
   change AddInductive.buildCandidateExpr.loop nilCandidateContext
-    indexedVecNilInfo.type (999 + 1) = _
+    indexedVecNilInfo.type (9999 + 1) = _
   simpa only [nilCandidateTrace, nilCandidateBodyContext] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := nilCandidateContext)
       (e := indexedVecNilInfo.type)
       (inferred := .sort nilCtorInferredLevel)
-      (fuel := 999) (name := `α)
+      (fuel := 9999) (name := `α)
       (domain := .sort (.succ (.param `u)))
       (body := nilCtorBodyRaw) (binderInfo := .implicit)
       (hfresh := nilCandidateContextFresh)
@@ -1254,10 +1254,10 @@ theorem nilCandidateTraceLoop :
       (domainCandidate := nilDomainCandidateTrace)
       (bodyCandidate := nilBodyCandidateTrace)
       (hdomain := by
-        simpa using nilDomainCandidateTraceLoop 998)
+        simpa using nilDomainCandidateTraceLoop 9998)
       (hbody := by
         simpa [nilCandidateBodyContext, nilDomainAnnotations] using
-          nilBodyCandidateTraceLoop 998))
+          nilBodyCandidateTraceLoop 9998))
 
 theorem nilCandidateProduced :
     AddInductive.buildCandidateExpr indexedVecNilInfo.type

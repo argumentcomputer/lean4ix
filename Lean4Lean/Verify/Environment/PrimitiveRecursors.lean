@@ -1365,7 +1365,7 @@ theorem natSuccCandidateObservable
     (familyType : familyInfo.type = .sort (.succ .zero))
     (depthEq : context.fuel.recDepth = 10000)
     (whnfEq : context.fuel.whnf = 100000)
-    (inductiveEq : context.fuel.inductiveFuel = 1000)
+    (_inductiveEq : context.fuel.inductiveFuel = 1000)
     (emptyLctx : context.lctx = {}) :
     AddInductive.CandidateExpr.Observable context
       (.forallE binderName (.const ``Nat []) (.const ``Nat [])
@@ -1394,7 +1394,7 @@ theorem natSuccCandidateObservable
     exact AddInductive.candidateIsDefEqRefl context (.const ``Nat [])
   obtain ⟨domainTrace, domainRun⟩ :=
     inductiveConstCandidateLoop context ``Nat familyInfo
-      (.sort (.succ .zero)) 9999 99999 998
+      (.sort (.succ .zero)) 9999 99999 9998
       (by omega) (by omega) familyLookup familyLevels familySafe familyType
   let bodyContext := context.pushLocalDecl binderName binderInfo
     annotations.consumed
@@ -1403,7 +1403,7 @@ theorem natSuccCandidateObservable
     simpa [bodyContext, AddInductive.Context.pushLocalDecl] using familyLookup
   obtain ⟨bodyTrace, bodyRun⟩ :=
     inductiveConstCandidateLoop bodyContext ``Nat familyInfo
-      (.sort (.succ .zero)) 9999 99999 998
+      (.sort (.succ .zero)) 9999 99999 9998
       (by simpa [bodyContext, AddInductive.Context.pushLocalDecl] using depthEq)
       (by simpa [bodyContext, AddInductive.Context.pushLocalDecl] using whnfEq)
       bodyLookup familyLevels familySafe familyType
@@ -1417,7 +1417,7 @@ theorem natSuccCandidateObservable
           ((Expr.const ``Nat []).instantiate1 context.freshExpr),
         AddInductive.buildCandidateExpr.loop
             (context.pushLocalDecl binderName binderInfo annotations.consumed)
-            ((Expr.const ``Nat []).instantiate1 context.freshExpr) (998 + 1) =
+            ((Expr.const ``Nat []).instantiate1 context.freshExpr) (9998 + 1) =
           .ok bodyTrace' := by
     rw [bodySourceEq]
     exact ⟨bodyTrace, by simpa only [bodyContext] using bodyRun⟩
@@ -1432,11 +1432,11 @@ theorem natSuccCandidateObservable
       fresh annotations annotationsEq rootCheck rootWhnf domainTrace bodyTrace'
   have outerRun : AddInductive.buildCandidateExpr.loop context
       (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo)
-      (999 + 1) = .ok outerTrace := by
+      (9999 + 1) = .ok outerTrace := by
     exact AddInductive.buildCandidateExpr_loop_of_whnf_forall
       context
       (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo)
-      inferred 999 binderName (.const ``Nat []) (.const ``Nat []) binderInfo
+      inferred 9999 binderName (.const ``Nat []) (.const ``Nat []) binderInfo
       fresh annotations annotationsRun annotationsEq rootCheck rootWhnf
       domainTrace bodyTrace' domainRun bodyRun'
   refine ⟨⟨context, outerTrace⟩, ?_⟩
@@ -1444,7 +1444,7 @@ theorem natSuccCandidateObservable
   simp only [readThe, MonadReaderOf.read, ReaderT.read,
     ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
     Except.bind, Except.pure]
-  rw [show context.fuel.inductiveFuel = 999 + 1 by omega]
+  rw [show context.fuel.recDepth = 9999 + 1 by omega]
   rw [outerRun]
   rfl
 

@@ -1856,7 +1856,13 @@ Three checker sorries remain:
   constructor validation, and the input constant-map invariant; a nested-run-
   aware completeness bridge removes the primitive observer callback entirely
   at default fuel. The corresponding nonprimitive recursive observers are the
-  only operational facts still absent from the public run. Generic
+  only operational facts still absent from the public run. Candidate traversal
+  now uses the same configured recursion-depth budget as the checker runs it
+  records, rather than the smaller inductive-analysis budget. The executable
+  1100-binder-domain regression in `plans/probes/deep_candidate_gap.lean`
+  proves that public acceptance and candidate construction agree at the
+  previously exposed boundary; this repairs a false hidden acceptance gate but
+  does not itself supply the remaining nonprimitive observers. Generic
   ordinary/nested semantic transactions
   preserve quotient initialization and supply translation plus model
   extension to a decomposed `VEnvs.WF` assembler. On the non-primitive path,

@@ -1546,9 +1546,9 @@ analysis. Each node is fully checked and then exposed with the ordinary
 checker `whnf`; Pi domains retain their raw syntax, while bodies are traversed
 under the structurally certified annotation-consumed local declarations used
 by kernel checking. Every raw/consumed domain pair is also checked by an exact
-successful ordinary-checker `isDefEq` run. The recursion budget is the
-configured inductive fuel, while every checker run uses the configured
-transparency/fuel.
+successful ordinary-checker `isDefEq` run. The traversal uses the checker's
+configured recursion depth so that candidate observation does not impose a
+stricter hidden depth bound than the checker runs it records.
 
 The returned trace is only a candidate analysis view and operational
 provenance. It is not stored in the kernel environment and acquires semantic
@@ -1556,7 +1556,7 @@ authority only after Verify reconstructs and refines every retained checker
 run. -/
 def buildCandidateExpr (e : Expr) : M (CandidateExpr e) := do
   let context ← readThe Context
-  return ⟨context, ← loop context e context.fuel.inductiveFuel⟩
+  return ⟨context, ← loop context e context.fuel.recDepth⟩
 where
   loop (context : Context) (e : Expr) :
       Nat → Except Exception (CandidateExprTrace context e)
@@ -1728,7 +1728,7 @@ used by Verify without duplicating the `ReaderT`/checker lift plumbing in
 every certificate. -/
 theorem buildCandidateExpr_of_whnf_nonForall
     (context : Context) (e inferred view : Expr)
-    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hfuel : 0 < context.fuel.recDepth)
     (hcheck :
       TypeChecker.M.run context.env context.safety context.lctx
           context.lparams context.fuel (TypeChecker.checkType e) =
@@ -1740,7 +1740,7 @@ theorem buildCandidateExpr_of_whnf_nonForall
     (hview : view.isForall = false) :
     buildCandidateExpr e context =
       .ok ⟨context, .terminal context e inferred view hcheck hrun⟩ := by
-  cases hf : context.fuel.inductiveFuel with
+  cases hf : context.fuel.recDepth with
   | zero => omega
   | succ fuel =>
     cases hresult :
@@ -1761,7 +1761,7 @@ theorem buildCandidateExpr_of_whnf_nonForall
 
 theorem normalizeCandidateExpr_of_whnf_nonForall
     (context : Context) (e inferred view : Expr)
-    (hfuel : 0 < context.fuel.inductiveFuel)
+    (hfuel : 0 < context.fuel.recDepth)
     (hcheck :
       TypeChecker.M.run context.env context.safety context.lctx
           context.lparams context.fuel (TypeChecker.checkType e) =

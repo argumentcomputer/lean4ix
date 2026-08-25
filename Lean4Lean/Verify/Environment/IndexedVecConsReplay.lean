@@ -2641,15 +2641,15 @@ theorem consTerminalCandidateTraceLoop (fuel : Nat) :
 
 theorem consAfterHeadCandidateTraceLoop :
     AddInductive.buildCandidateExpr.loop consHeadContext
-      (consAfterN.bindingBody!.instantiate1 consNContext.freshExpr) 997 =
+      (consAfterN.bindingBody!.instantiate1 consNContext.freshExpr) 9997 =
         .ok consAfterHeadCandidateTrace := by
-  rw [show 997 = 996 + 1 by rfl]
+  rw [show 9997 = 9996 + 1 by rfl]
   simpa only [consAfterHeadCandidateTrace, consTailContext,
     consTailAnnotations] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consHeadContext)
       (e := consAfterN.bindingBody!.instantiate1 consNContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 996)
+      (inferred := .sort (.succ (.param `u))) (fuel := 9996)
       (name := consTailName) (domain := consTailDomain)
       (body := consAfterHead.bindingBody!) (binderInfo := .default)
       (hfresh := consHeadContextFresh)
@@ -2669,24 +2669,24 @@ theorem consAfterHeadCandidateTraceLoop :
       (domainCandidate := consTailDomainCandidateTrace)
       (bodyCandidate := consTerminalCandidateTrace)
       (hdomain := by
-        simpa using consTailDomainCandidateTraceLoop 995)
+        simpa using consTailDomainCandidateTraceLoop 9995)
       (hbody := by
         simpa [consTailContext, consTailAnnotations] using
-          consTerminalCandidateTraceLoop 995))
+          consTerminalCandidateTraceLoop 9995))
 
 theorem consAfterNCandidateTraceLoop :
     AddInductive.buildCandidateExpr.loop consNContext
       (consAfterAlpha.bindingBody!.instantiate1
-        consAlphaContext.freshExpr) 998 =
+        consAlphaContext.freshExpr) 9998 =
         .ok consAfterNCandidateTrace := by
-  rw [show 998 = 997 + 1 by rfl]
+  rw [show 9998 = 9997 + 1 by rfl]
   simpa only [consAfterNCandidateTrace, consHeadContext,
     consHeadAnnotations] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consNContext)
       (e := consAfterAlpha.bindingBody!.instantiate1
         consAlphaContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 997)
+      (inferred := .sort (.succ (.param `u))) (fuel := 9997)
       (name := consHeadName) (domain := consAlphaExpr)
       (body := consAfterN.bindingBody!) (binderInfo := .default)
       (hfresh := consNContextFresh)
@@ -2706,22 +2706,22 @@ theorem consAfterNCandidateTraceLoop :
       (domainCandidate := consHeadDomainCandidateTrace)
       (bodyCandidate := consAfterHeadCandidateTrace)
       (hdomain := by
-        simpa using consHeadDomainCandidateTraceLoop 996)
+        simpa using consHeadDomainCandidateTraceLoop 9996)
       (hbody := by
         simpa [consHeadContext, consHeadAnnotations] using
           consAfterHeadCandidateTraceLoop))
 
 theorem consAfterAlphaCandidateTraceLoop :
     AddInductive.buildCandidateExpr.loop consAlphaContext
-      (consNTypeRaw.instantiate1 consRootContext.freshExpr) 999 =
+      (consNTypeRaw.instantiate1 consRootContext.freshExpr) 9999 =
         .ok consAfterAlphaCandidateTrace := by
-  rw [show 999 = 998 + 1 by rfl]
+  rw [show 9999 = 9998 + 1 by rfl]
   simpa only [consAfterAlphaCandidateTrace, consNContext,
     consNatAnnotations] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consAlphaContext)
       (e := consNTypeRaw.instantiate1 consRootContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 998)
+      (inferred := .sort (.succ (.param `u))) (fuel := 9998)
       (name := consNName) (domain := .const ``Nat [])
       (body := consAfterAlpha.bindingBody!) (binderInfo := .implicit)
       (hfresh := consAlphaContextFresh)
@@ -2740,22 +2740,22 @@ theorem consAfterAlphaCandidateTraceLoop :
       (domainCandidate := consNatDomainCandidateTrace)
       (bodyCandidate := consAfterNCandidateTrace)
       (hdomain := by
-        simpa using consNatDomainCandidateTraceLoop 997)
+        simpa using consNatDomainCandidateTraceLoop 9997)
       (hbody := by
         simpa [consNContext, consNatAnnotations] using
           consAfterNCandidateTraceLoop))
 
 theorem consCandidateTraceLoop :
     AddInductive.buildCandidateExpr.loop consRootContext
-      indexedVecConsInfo.type consRootContext.fuel.inductiveFuel =
+      indexedVecConsInfo.type consRootContext.fuel.recDepth =
         .ok consCandidateTrace := by
   change AddInductive.buildCandidateExpr.loop consRootContext
-    indexedVecConsInfo.type (999 + 1) = _
+    indexedVecConsInfo.type (9999 + 1) = _
   simpa only [consCandidateTrace, consAlphaContext,
     consAlphaAnnotations] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consRootContext) (e := indexedVecConsInfo.type)
-      (inferred := .sort (.succ (.succ (.param `u)))) (fuel := 999)
+      (inferred := .sort (.succ (.succ (.param `u)))) (fuel := 9999)
       (name := consAlphaName)
       (domain := .sort (.succ (.param `u)))
       (body := consNTypeRaw) (binderInfo := .implicit)
@@ -2769,7 +2769,7 @@ theorem consCandidateTraceLoop :
       (domainCandidate := consAlphaDomainCandidateTrace)
       (bodyCandidate := consAfterAlphaCandidateTrace)
       (hdomain := by
-        simpa using consAlphaDomainCandidateTraceLoop 998)
+        simpa using consAlphaDomainCandidateTraceLoop 9998)
       (hbody := by
         simpa [consAlphaContext, consAlphaAnnotations] using
           consAfterAlphaCandidateTraceLoop))

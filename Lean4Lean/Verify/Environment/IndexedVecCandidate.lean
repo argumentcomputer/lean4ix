@@ -1400,9 +1400,9 @@ private theorem indexedVecInnerCandidateTrace_loop :
     Lean4Lean.AddInductive.buildCandidateExpr.loop
       indexedVecParamCandidateContext
       (indexedVecInnerKernel.instantiate1
-        indexedVecFamilyCandidateContext.freshExpr) 999 =
+        indexedVecFamilyCandidateContext.freshExpr) 9999 =
         .ok indexedVecInnerCandidateTrace := by
-  rw [show 999 = 998 + 1 by rfl]
+  rw [show 9999 = 9998 + 1 by rfl]
   simpa only [indexedVecInnerCandidateTrace,
     indexedVecIndexCandidateContext] using
     (Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_forall
@@ -1410,7 +1410,7 @@ private theorem indexedVecInnerCandidateTrace_loop :
       (e := indexedVecInnerKernel.instantiate1
         indexedVecFamilyCandidateContext.freshExpr)
       (inferred := .sort indexedVecInnerInferredLevel)
-      (fuel := 998) (name := indexedVecIndexName)
+      (fuel := 9998) (name := indexedVecIndexName)
       (domain := .const ``Nat []) (body := indexedVecTerminalKernel)
       (binderInfo := .default) (hfresh := indexedVecParamCandidateFresh)
       (annotations := indexedVecIndexAnnotations)
@@ -1421,26 +1421,26 @@ private theorem indexedVecInnerCandidateTrace_loop :
       (domainCandidate := indexedVecIndexDomainCandidateTrace)
       (bodyCandidate := indexedVecTerminalCandidateTrace)
       (hdomain := by
-        simpa using indexedVecIndexDomainCandidateTrace_loop 997)
+        simpa using indexedVecIndexDomainCandidateTrace_loop 9997)
       (hbody := by
         simpa [indexedVecIndexCandidateContext,
           indexedVecIndexAnnotations] using
-          indexedVecTerminalCandidateTrace_loop 997))
+          indexedVecTerminalCandidateTrace_loop 9997))
 
 private theorem indexedVecFamilyCandidateTrace_loop :
     Lean4Lean.AddInductive.buildCandidateExpr.loop
       indexedVecFamilyCandidateContext indexedVecInfo.type
-      indexedVecFamilyCandidateContext.fuel.inductiveFuel =
+      indexedVecFamilyCandidateContext.fuel.recDepth =
         .ok indexedVecFamilyCandidateTrace := by
   change Lean4Lean.AddInductive.buildCandidateExpr.loop
-    indexedVecFamilyCandidateContext indexedVecInfo.type (999 + 1) = _
+    indexedVecFamilyCandidateContext indexedVecInfo.type (9999 + 1) = _
   simpa only [indexedVecFamilyCandidateTrace,
     indexedVecParamCandidateContext] using
     (Lean4Lean.AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := indexedVecFamilyCandidateContext)
       (e := indexedVecInfo.type)
       (inferred := .sort indexedVecFamilyInferredLevel)
-      (fuel := 999) (name := indexedVecParamName)
+      (fuel := 9999) (name := indexedVecParamName)
       (domain := indexedVecTerminalKernel) (body := indexedVecInnerKernel)
       (binderInfo := .default) (hfresh := indexedVecFamilyCandidateFresh)
       (annotations := indexedVecParamAnnotations)
@@ -1451,7 +1451,7 @@ private theorem indexedVecFamilyCandidateTrace_loop :
       (domainCandidate := indexedVecParamDomainCandidateTrace)
       (bodyCandidate := indexedVecInnerCandidateTrace)
       (hdomain := by
-        simpa using indexedVecParamDomainCandidateTrace_loop 998)
+        simpa using indexedVecParamDomainCandidateTrace_loop 9998)
       (hbody := by
         simpa [indexedVecParamCandidateContext,
           indexedVecParamAnnotations, indexedVecTerminalKernel] using
