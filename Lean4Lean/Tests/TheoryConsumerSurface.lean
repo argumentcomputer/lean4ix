@@ -44,6 +44,9 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.NormalEq.parRed
 #check VInductDecl.ElimMode.ofBool
 #check VStructureView.etaRebuild
+#check VExpr.selectFieldMinor
+#check VExpr.selectFieldMinor_liftN
+#check VExpr.selectFieldMinor_instN
 #check VStructureView.MinorsWF
 #check VStructureView.MinorsWFPrefix
 #check VStructureView.ProgramsWFPrefix

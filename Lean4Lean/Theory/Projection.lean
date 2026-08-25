@@ -127,6 +127,51 @@ private theorem VExpr.instN_lamN_projection (a : VExpr) :
       rw [VExpr.instN_lamN_projection a As e (k + 1)]
       rw [show k + 1 + As.length = k + (As.length + 1) by omega]
 
+/-- A recursor minor which ignores its induction hypotheses and returns the
+`i`-th constructor field.  The induction-hypothesis telescope is explicit:
+recursive singleton structures bind it after the constructor fields, while
+the existing nonrecursive program is the `ihs = []` specialization. -/
+def VExpr.selectFieldMinor (fields ihs : List VExpr) (i : Nat) : VExpr :=
+  VExpr.lamN fields <| VExpr.lamN ihs <|
+    .bvar (ihs.length + fields.length - 1 - i)
+
+@[simp] theorem VExpr.selectFieldMinor_nil
+    (fields : List VExpr) (i : Nat) :
+    VExpr.selectFieldMinor fields [] i =
+      VExpr.lamN fields (.bvar (fields.length - 1 - i)) := by
+  simp [VExpr.selectFieldMinor, VExpr.lamN]
+
+@[simp] theorem VExpr.selectFieldMinor_instL
+    (fields ihs : List VExpr) (i : Nat) (ls : List VLevel) :
+    (VExpr.selectFieldMinor fields ihs i).instL ls =
+      VExpr.selectFieldMinor (fields.map (VExpr.instL ls))
+        (ihs.map (VExpr.instL ls)) i := by
+  simp [VExpr.selectFieldMinor, VExpr.instL_lamN_projection,
+    VExpr.instL]
+
+theorem VExpr.selectFieldMinor_liftN
+    (fields ihs : List VExpr) (i n k : Nat)
+    (hi : i < fields.length) :
+    (VExpr.selectFieldMinor fields ihs i).liftN n k =
+      VExpr.selectFieldMinor (VExpr.liftTelN n fields k)
+        (VExpr.liftTelN n ihs (k + fields.length)) i := by
+  simp only [VExpr.selectFieldMinor, VExpr.liftN_lamN_projection,
+    VExpr.liftN, VExpr.liftTelN_length]
+  rw [liftVar_lt]
+  omega
+
+theorem VExpr.selectFieldMinor_instN
+    (fields ihs : List VExpr) (i k : Nat) (a : VExpr)
+    (hi : i < fields.length) :
+    (VExpr.selectFieldMinor fields ihs i).inst a k =
+      VExpr.selectFieldMinor (VExpr.instTelN a fields k)
+        (VExpr.instTelN a ihs (k + fields.length)) i := by
+  simp only [VExpr.selectFieldMinor, VExpr.instN_lamN_projection,
+    VExpr.inst, VExpr.instTelN_length]
+  simp [VExpr.instVar, show
+    ihs.length + fields.length - 1 - i <
+      k + fields.length + ihs.length by omega]
+
 private theorem VExpr.liftN_lift_projection (e : VExpr) (n k : Nat) :
     e.lift.liftN n (k + 1) = (e.liftN n k).lift :=
   (VExpr.lift_liftN' e k).symm
@@ -924,8 +969,7 @@ private def projectionCode (view : VStructureView)
   let motiveBody := VExpr.instRevAt
     (field.liftN 1 i) previousAtMajor 0
   let typeFn := .lam structType motiveBody
-  let minor := VExpr.lamN allFields
-    (.bvar (allFields.length - 1 - i))
+  let minor := VExpr.selectFieldMinor allFields [] i
   let recursor := .const view.recursorName
     (view.projectionLevels fieldSort levels)
   let projector := .lam structType <| VExpr.appN recursor <|
