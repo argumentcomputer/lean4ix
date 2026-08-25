@@ -658,6 +658,31 @@ def CandidateContextRun.root
   have h := congrArg (fun c : TypeChecker.Context => c.fuel) run.context_eq
   simpa only [AddInductive.Context.toTypeChecker] using h
 
+/-- Reuse a strict translation established at the empty producer root in any
+verified candidate context with the same Theory environment and level
+parameters.
+
+Candidate validation contexts contain only free-variable declarations.  The
+translated root is well typed, hence closed, so free-variable weakening leaves
+its Theory syntax definitionally unchanged. -/
+theorem CandidateContextRun.rootTranslation
+    (run : CandidateContextRun candidateContext)
+    (venv_eq : run.context.venv = env)
+    (lparams_eq : run.context.lparams = Us)
+    (source_tr : TrExprS env Us [] source source') :
+    run.context.TrExprS source source' := by
+  have henv : VEnv.WF env := by
+    simpa only [venv_eq] using run.context.Ewf
+  have sourceClosed : source'.Closed :=
+    (source_tr.wf henv.ordered (by trivial)).closedN henv.ordered
+      (by trivial)
+  have targetWF : run.context.vlctx.WF env Us.length := by
+    simpa only [venv_eq, lparams_eq] using run.context.Δwf
+  have lifted := source_tr.weakFV henv.ordered
+    (.from_nil run.context.mlctx.noBV) targetWF
+  rw [sourceClosed.liftN_eq (Nat.zero_le _)] at lifted
+  simpa only [VContext.TrExprS, venv_eq, lparams_eq] using lifted
+
 /-- Translate the exact type returned by `AddInductive.getType` for a known
 candidate-local declaration.
 
@@ -4959,6 +4984,35 @@ def CandidateBlockFamilySemanticListRun.views :
       List VInductiveType
   | .nil => []
   | .cons head tail => head.view :: tail.views
+
+/-- Translate every stored family source at one arbitrary verified validation
+context with the same Theory environment and level parameters.
+
+The dependent semantic list fixes source and raw-family order.  Root
+translations were originally certified at the producer's empty local context;
+`CandidateContextRun.rootTranslation` weakens each closed Theory root into the
+validator's accumulated free-variable context without changing its syntax. -/
+theorem CandidateBlockFamilySemanticListRun.sourceTranslations
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    (contextRun : TypeChecker.CandidateContextRun context)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us) :
+    List.Forall₂
+      (fun source raw =>
+        contextRun.context.TrExprS source.type raw.type)
+      kernelSources raws := by
+  induction run with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons
+        (contextRun.rootTranslation venv_eq lparams_eq
+          head.type.source_tr)
+        ih
 
 /-- Replace one constructor's parameter prefix by an explicitly shared
 telescope while retaining its terminal fields/result and every declaration
@@ -12197,6 +12251,17 @@ info: 'Lean4Lean.TypeChecker.CandidateLocalContextRun.push' depends on axioms: [
 #print axioms TypeChecker.CandidateLocalContextRun.push
 
 /--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.rootTranslation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.rootTranslation
+
+/--
 info: 'Lean4Lean.TypeChecker.CandidateContextRun.getTypeTranslation' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -13424,6 +13489,17 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.sameHeaders' de
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilySemanticListRun.sameHeaders
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.sourceTranslations' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.sourceTranslations
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.headResultLevel' depends on axioms: [propext,

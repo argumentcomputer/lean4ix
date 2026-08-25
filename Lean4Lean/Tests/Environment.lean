@@ -192,6 +192,7 @@ open Lean
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparisons
 #check Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparison_lengths
 #check Lean4Lean.TypeChecker.CandidateLocalContextRun
+#check Lean4Lean.TypeChecker.CandidateContextRun.rootTranslation
 #check Lean4Lean.TypeChecker.CandidateContextRun.getTypeTranslation
 #check Lean4Lean.TypeChecker.FamilyParameterLocalState
 #check Lean4Lean.TypeChecker.FamilyComparisonRhsLocal
@@ -206,6 +207,7 @@ open Lean
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.inputTypes_nonempty
 #check Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.raws_isEmpty_eq_sources
 #check Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.views_isEmpty_eq_sources
+#check Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.sourceTranslations
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.viewTypes_isEmpty_eq_sources
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput.familyInsertion
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput.stage
