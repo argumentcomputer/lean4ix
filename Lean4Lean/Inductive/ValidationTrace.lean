@@ -1480,6 +1480,7 @@ private theorem familyValidationTelescope_sizes_of_run
     result.stats.nindices = stats.nindices ∧
       result.stats.indConsts = stats.indConsts ∧
     result.stats.levels = stats.levels ∧
+      result.stats.resultLevel = stats.resultLevel ∧
       result.stats.params.size = nparams ∧
       result.context.lparams = context.lparams ∧
       result.context.env = context.env ∧
@@ -1609,7 +1610,7 @@ private theorem familyValidationTelescope_sizes_of_run
           simp [ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
             MonadExceptOf.throw] at success
           subst result
-          refine ⟨rfl, rfl, rfl, ?_, rfl, rfl, rfl⟩
+          refine ⟨rfl, rfl, rfl, rfl, ?_, rfl, rfl, rfl⟩
           unfold familyValidationTelescopeStatsInvariant at invariant
           simpa using invariant.2
         · simp [hi, ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
@@ -1831,8 +1832,8 @@ private theorem familyValidationOuter_sizes_of_run
                               exact absurd (Array.isEmpty_iff.mp h) hempty
                         simp only [hempty', Bool.false_eq_true, if_false,
                           hparams]
-                    obtain ⟨hnindices, hindConsts, hlevels, hparams,
-                        hlparams, henv, hallowPrimitive⟩ :=
+                    obtain ⟨hnindices, hindConsts, hlevels, _hresultLevel,
+                        hparams, hlparams, henv, hallowPrimitive⟩ :=
                       familyValidationTelescope_sizes_of_run nparams stats
                         root 0 0 context.fuel.inductiveFuel context
                         telescopeResult telescopeInvariant htelescope
@@ -1948,6 +1949,167 @@ private theorem familyValidationOuter_sizes_of_run
     simp [hlevels, hnindices, hindConsts, hparams] at success
     subst result
     exact ⟨hnindices, hindConsts, hparams, rfl, rfl, rfl⟩
+termination_by indTypes.size - dIdx
+decreasing_by
+  all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
+
+/-- Once at least one family has been accepted, the outer mutual-family loop
+never replaces the common result level selected by that first family.  Every
+later family may only pass the executable `isEquiv` comparison against it.
+The counter invariant is retained so the terminal `assert!` values are known
+to be the actual statistics rather than their inhabited fallbacks. -/
+private theorem familyValidationOuter_resultLevel_of_run
+    (nparams : Nat) (indTypes : Array InductiveType)
+    (dIdx : Nat) (stats : InductiveStats) (context : Context)
+    (result : FamilyValidationBlockResult)
+    (dIdx_ne : dIdx ≠ 0)
+    (invariant : familyValidationOuterStatsInvariant nparams indTypes dIdx
+      stats context)
+    (success : observeFamilyValidationOuterLoop nparams indTypes dIdx stats
+      context = .ok result) :
+    result.stats.resultLevel = stats.resultLevel := by
+  unfold observeFamilyValidationOuterLoop at success
+  rw [checkInductiveTypes.loopInd.eq_1] at success
+  by_cases hdIdx : dIdx < indTypes.size
+  · rw [dif_pos hdIdx] at success
+    simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply,
+      readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.pure, Pure.pure, Except.pure, liftExcept_apply,
+      Except.bind] at success
+    cases hclosed : context.env.checkNoMVarNoFVar indTypes[dIdx].name
+        indTypes[dIdx].type with
+    | error error =>
+        rw [hclosed] at success
+        cases success
+    | ok _ =>
+        rw [hclosed] at success
+        simp only [Except.bind] at success
+        cases hcheck : TypeChecker.M.run context.env context.safety
+            context.lctx context.lparams context.fuel
+            (TypeChecker.checkType indTypes[dIdx].type) with
+        | error error =>
+            rw [hcheck] at success
+            cases success
+        | ok _ =>
+            rw [hcheck] at success
+            simp only [Except.bind] at success
+            cases hwhnf : TypeChecker.M.run context.env context.safety
+                context.lctx context.lparams context.fuel
+                (TypeChecker.whnf indTypes[dIdx].type) with
+            | error error =>
+                rw [hwhnf] at success
+                cases success
+            | ok root =>
+                rw [hwhnf] at success
+                simp only [Except.bind] at success
+                rw [checkInductiveTypes_telescope_factor] at success
+                cases htelescope : observeFamilyValidationTelescope nparams
+                    stats root 0 0 context.fuel.inductiveFuel context with
+                | error error =>
+                    rw [htelescope] at success
+                    cases success
+                | ok telescopeResult =>
+                    rw [htelescope] at success
+                    simp only [Bind.bind, Except.bind] at success
+                    have statsEmpty : stats.indConsts.isEmpty = false := by
+                      cases hempty : stats.indConsts.isEmpty with
+                      | false => rfl
+                      | true =>
+                          have empty := Array.isEmpty_iff.mp hempty
+                          have size : stats.indConsts.size = dIdx :=
+                            invariant.2.2.1
+                          rw [empty] at size
+                          simp only [Array.size_empty] at size
+                          omega
+                    have paramsSize : stats.params.size = nparams := by
+                      simpa only [dIdx_ne, if_false] using
+                        invariant.2.2.2.2
+                    have telescopeInvariant :
+                        familyValidationTelescopeStatsInvariant nparams 0
+                          stats := by
+                      unfold familyValidationTelescopeStatsInvariant
+                      simp only [Nat.zero_le, statsEmpty, Bool.false_eq_true,
+                        if_false, paramsSize, and_self]
+                    obtain ⟨hnindices, hindConsts, hlevels, hresultLevel,
+                        hparams, hlparams, henv, hallowPrimitive⟩ :=
+                      familyValidationTelescope_sizes_of_run nparams stats
+                        root 0 0 context.fuel.inductiveFuel context
+                        telescopeResult telescopeInvariant htelescope
+                    simp only [ReaderT.bind, Bind.bind,
+                      liftTypeChecker_apply] at success
+                    cases hsort : TypeChecker.M.run telescopeResult.context.env
+                        telescopeResult.context.safety
+                        telescopeResult.context.lctx
+                        telescopeResult.context.lparams
+                        telescopeResult.context.fuel
+                        (TypeChecker.ensureSort telescopeResult.type) with
+                    | error error =>
+                        rw [hsort] at success
+                        cases success
+                    | ok sorted =>
+                        rw [hsort] at success
+                        simp only [Except.bind] at success
+                        have telescopeNotEmpty :
+                            telescopeResult.stats.indConsts.isEmpty = false := by
+                          rw [hindConsts, statsEmpty]
+                        rw [telescopeNotEmpty] at success
+                        simp only [Bool.false_eq_true, if_false] at success
+                        by_cases hlevel :
+                            (!sorted.sortLevel!.isEquiv
+                              telescopeResult.stats.resultLevel) = true
+                        · simp [hlevel, ReaderT.bind, Bind.bind,
+                            liftExcept_apply, Except.bind, throw, throwThe,
+                            MonadExceptOf.throw] at success
+                        · simp only [hlevel, Bool.false_eq_true,
+                            if_false] at success
+                          let nextStats : InductiveStats :=
+                            { telescopeResult.stats with
+                              nindices :=
+                                telescopeResult.stats.nindices.push
+                                  telescopeResult.nindices
+                              indConsts :=
+                                telescopeResult.stats.indConsts.push
+                                  (.const indTypes[dIdx].name
+                                    telescopeResult.stats.levels) }
+                          have nextInvariant :
+                              familyValidationOuterStatsInvariant nparams
+                                indTypes (dIdx + 1) nextStats
+                                telescopeResult.context := by
+                            unfold familyValidationOuterStatsInvariant
+                              at invariant ⊢
+                            refine ⟨by omega, ?_, ?_, ?_, ?_⟩
+                            · simp only [nextStats, Array.size_push]
+                              rw [hnindices, invariant.2.1]
+                            · simp only [nextStats, Array.size_push]
+                              rw [hindConsts, invariant.2.2.1]
+                            · simp only [nextStats]
+                              rw [hlevels, hlparams]
+                              exact invariant.2.2.2.1
+                            · simp only [show dIdx + 1 ≠ 0 by omega,
+                                if_false, nextStats]
+                              exact hparams
+                          have tail := familyValidationOuter_resultLevel_of_run
+                            nparams indTypes (dIdx + 1) nextStats
+                            telescopeResult.context result (by omega)
+                            nextInvariant (by
+                              simpa only [observeFamilyValidationOuterLoop,
+                                nextStats] using success)
+                          exact tail.trans hresultLevel
+  · rw [dif_neg hdIdx] at success
+    unfold familyValidationOuterStatsInvariant at invariant
+    have hdIdx_eq : dIdx = indTypes.size := by omega
+    have hparams : stats.params.size = nparams := by
+      simpa only [dIdx_ne, if_false] using invariant.2.2.2.2
+    have hnindices : stats.nindices.size = indTypes.size := by omega
+    have hindConsts : stats.indConsts.size = indTypes.size := by omega
+    have hlevels : stats.levels.length = context.lparams.length :=
+      invariant.2.2.2.1
+    simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+      Except.bind] at success
+    simp [hlevels, hnindices, hindConsts, hparams] at success
+    subst result
+    rfl
 termination_by indTypes.size - dIdx
 decreasing_by
   all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
@@ -2411,6 +2573,240 @@ theorem NormalizationCandidateExecution.firstFamilyType_nparams_le_spineLength
           change nparams ≤ candidate.type.trace.spineLength
           exact bound
 
+/-- The first family candidate retained by a successful normalization run
+also fits strictly inside the family validator's own telescope-fuel budget.
+Candidate construction may use the larger recursion-depth budget, so this
+bound is recovered from the real validation success rather than inferred from
+the candidate producer. -/
+theorem
+    NormalizationCandidateExecution.firstFamilyType_spineLength_lt_inductiveFuel
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {}) :
+    execution.familyTypes.candidates.head.type.trace.spineLength <
+      context.fuel.inductiveFuel := by
+  have candidateContext_eq : { context with lctx := {} } = context := by
+    cases context
+    simp_all
+  have validation : checkInductiveTypes nparams
+      (source :: sources).toArray (fun _ => pure ()) context = .ok () := by
+    simpa [ReaderT.pure, Pure.pure, Except.pure] using
+      execution.familyValidation produced (fun _ => pure ())
+  cases hCandidates : execution.familyTypes.candidates with
+  | cons candidate candidates =>
+      have producedFamilies := execution.familyTypes.produced
+      rw [hCandidates] at producedFamilies
+      have candidateRun := producedFamilies.head
+      rw [candidateContext_eq] at candidateRun
+      have annotations :=
+        candidate.validationAnnotations_of_normalize candidateRun
+      have candidate_context :=
+        candidate.context_eq_of_normalize candidateRun
+      subst context
+      change candidate.type.trace.spineLength <
+        candidate.type.context.fuel.inductiveFuel
+      apply Classical.byContradiction
+      intro hbound
+      have fuel_le : candidate.type.context.fuel.inductiveFuel ≤
+          candidate.type.trace.spineLength := by omega
+      have hcheck := candidate.type.trace.rootCheck.valid
+      have hwhnf := candidate.type.trace.rootWhnf_valid
+      change TypeChecker.M.run candidate.type.context.env
+          candidate.type.context.safety candidate.type.context.lctx
+          candidate.type.context.lparams candidate.type.context.fuel
+          (TypeChecker.checkType source.type) =
+        .ok candidate.type.trace.rootCheck.inferred at hcheck
+      change TypeChecker.M.run candidate.type.context.env
+          candidate.type.context.safety candidate.type.context.lctx
+          candidate.type.context.lparams candidate.type.context.fuel
+          (TypeChecker.whnf source.type) =
+        .ok candidate.type.trace.rootWhnf at hwhnf
+      unfold checkInductiveTypes at validation
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
+        at validation
+      rw [checkInductiveTypes.loopInd.eq_1] at validation
+      have hsize : 0 < (source :: sources).toArray.size := by simp
+      rw [dif_pos hsize] at validation
+      rw [show (source :: sources).toArray[0] = source by rfl] at validation
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind,
+        liftExcept_apply, liftTypeChecker_apply] at validation
+      cases hclosed : candidate.type.context.env.checkNoMVarNoFVar
+          source.name source.type with
+      | error error =>
+          rw [hclosed] at validation
+          contradiction
+      | ok _ =>
+          rw [hclosed, hcheck, hwhnf] at validation
+          exact candidate.type.trace
+            |>.checkInductiveTypes_loop_not_ok_of_candidate_fuel
+              (stats := InductiveStats.initial
+                (candidate.type.context.lparams.map .param))
+              (nparams := nparams) (i := 0) (nindices := 0)
+              (fuel := candidate.type.context.fuel.inductiveFuel) _ fuel_le
+              rfl annotations () validation
+
+/-- The common result universe retained by a successful nonempty block is
+exactly the terminal sort selected by its first source-indexed family
+candidate.  Later families only compare their levels against this value and
+the outer validation loop preserves it to the final statistics record. -/
+theorem NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {})
+    (resultLevel : Level)
+    (terminal : execution.familyTypes.candidates.head.type.trace.terminalResult =
+      .sort resultLevel) :
+    execution.stats.resultLevel = resultLevel := by
+  have hcount := execution.firstFamilyType_nparams_le_spineLength produced
+    context_lctx_eq
+  have hfuel :=
+    execution.firstFamilyType_spineLength_lt_inductiveFuel produced
+      context_lctx_eq
+  have validation := execution.familyValidationResult_run produced
+  have candidateContext_eq : { context with lctx := {} } = context := by
+    cases context
+    simp_all
+  cases hCandidates : execution.familyTypes.candidates with
+  | cons candidate candidates =>
+      rw [hCandidates] at hcount hfuel terminal
+      change nparams ≤ candidate.type.trace.spineLength at hcount
+      change candidate.type.trace.spineLength < context.fuel.inductiveFuel
+        at hfuel
+      change candidate.type.trace.terminalResult = .sort resultLevel
+        at terminal
+      have producedFamilies := execution.familyTypes.produced
+      rw [hCandidates] at producedFamilies
+      have candidateRun := producedFamilies.head
+      rw [candidateContext_eq] at candidateRun
+      have annotations :=
+        candidate.validationAnnotations_of_normalize candidateRun
+      have candidate_context :=
+        candidate.context_eq_of_normalize candidateRun
+      subst context
+      have hcheck := candidate.type.trace.rootCheck.valid
+      have hwhnf := candidate.type.trace.rootWhnf_valid
+      change TypeChecker.M.run candidate.type.context.env
+          candidate.type.context.safety candidate.type.context.lctx
+          candidate.type.context.lparams candidate.type.context.fuel
+          (TypeChecker.checkType source.type) =
+        .ok candidate.type.trace.rootCheck.inferred at hcheck
+      change TypeChecker.M.run candidate.type.context.env
+          candidate.type.context.safety candidate.type.context.lctx
+          candidate.type.context.lparams candidate.type.context.fuel
+          (TypeChecker.whnf source.type) =
+        .ok candidate.type.trace.rootWhnf at hwhnf
+      have terminalForall :
+          candidate.type.trace.terminalResult.isForall = false := by
+        rw [terminal]
+        rfl
+      unfold observeFamilyValidationBlock checkInductiveTypes at validation
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+        Except.bind] at validation
+      rw [checkInductiveTypes.loopInd.eq_1] at validation
+      have hsize : 0 < (source :: sources).toArray.size := by simp
+      rw [dif_pos hsize] at validation
+      rw [show (source :: sources).toArray[0] = source by rfl] at validation
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+        Except.bind, liftExcept_apply, liftTypeChecker_apply] at validation
+      cases hclosed : candidate.type.context.env.checkNoMVarNoFVar
+          source.name source.type with
+      | error error =>
+          rw [hclosed] at validation
+          contradiction
+      | ok _ =>
+          rw [hclosed, hcheck, hwhnf] at validation
+          simp only [Except.bind] at validation
+          rw [candidate.type.trace.checkInductiveTypes_loop_of_candidate
+            (stats := InductiveStats.initial
+              (candidate.type.context.lparams.map .param))
+            (nparams := nparams) (i := 0) (nindices := 0)
+            (fuel := candidate.type.context.fuel.inductiveFuel)
+            (remaining := nparams) (hi := Nat.zero_add nparams)
+            (hcount := hcount) (hfuel := hfuel) (hempty := rfl)
+            (hannotations := annotations) (hterminal := terminalForall)]
+            at validation
+          rw [terminal] at validation
+          have hensure : TypeChecker.M.run
+              candidate.type.trace.terminalContext.env
+              candidate.type.trace.terminalContext.safety
+              candidate.type.trace.terminalContext.lctx
+              candidate.type.trace.terminalContext.lparams
+              candidate.type.trace.terminalContext.fuel
+              (TypeChecker.ensureSort (.sort resultLevel)) =
+            .ok (.sort resultLevel) := by rfl
+          simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+            at validation
+          rw [hensure] at validation
+          simp only [Except.bind] at validation
+          rw [if_pos (show ((InductiveStats.initial
+              (candidate.type.context.lparams.map .param)).indConsts).isEmpty =
+                true from rfl)] at validation
+          simp only [Expr.sortLevel!, InductiveStats.initial, Nat.zero_add,
+            ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+            Except.bind] at validation
+          let firstStats : InductiveStats := {
+            lctx := candidate.type.trace.terminalContext.lctx
+            levels := candidate.type.context.lparams.map .param
+            resultLevel
+            nindices := #[candidate.type.trace.spineLength - nparams]
+            indConsts := #[.const source.name
+              (candidate.type.context.lparams.map .param)]
+            params := (candidate.type.trace.parameterList nparams).toArray
+            isNotZero := resultLevel.isNeverZero }
+          have validation' : observeFamilyValidationOuterLoop nparams
+              (source :: sources).toArray 1 firstStats
+              candidate.type.trace.terminalContext =
+            .ok execution.familyValidationResult := by
+            simpa [observeFamilyValidationOuterLoop, firstStats] using
+              validation
+          have terminalLparams :=
+            candidate.type.trace.terminalContext_lparams
+          have parameterLength :=
+            candidate.type.trace.parameterList_length hcount
+          have firstInvariant :
+              familyValidationOuterStatsInvariant nparams
+                (source :: sources).toArray 1 firstStats
+                candidate.type.trace.terminalContext := by
+            unfold familyValidationOuterStatsInvariant
+            simp [firstStats, terminalLparams, parameterLength]
+          have finalLevel := familyValidationOuter_resultLevel_of_run
+            nparams (source :: sources).toArray 1 firstStats
+            candidate.type.trace.terminalContext
+            execution.familyValidationResult (by omega) firstInvariant
+            validation'
+          simpa only [NormalizationCandidateExecution.familyValidationResult,
+            firstStats] using finalLevel
+
+/-- Reindex the first-family result-level theorem onto the complete assembled
+candidate stored by the detailed execution. -/
+theorem NormalizationCandidateExecution.firstFamily_resultLevel_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {})
+    (resultLevel : Level)
+    (terminal : execution.candidate.families.head.familyType.type.trace.terminalResult =
+      .sort resultLevel) :
+    execution.stats.resultLevel = resultLevel := by
+  apply execution.firstFamilyType_resultLevel_eq produced context_lctx_eq
+    resultLevel
+  change execution.families.candidates.head.familyType.type.trace.terminalResult =
+    .sort resultLevel at terminal
+  rw [execution.families.produced.head_familyType] at terminal
+  exact terminal
+
 /-- Erase a successful detailed execution back to the ordinary candidate
 producer without rerunning or independently selecting family validation. -/
 theorem NormalizationCandidateExecution.producesFromBuildExecution
@@ -2843,6 +3239,30 @@ info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamilyType_np
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateExecution.firstFamilyType_nparams_le_spineLength
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamilyType_spineLength_lt_inductiveFuel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.firstFamilyType_spineLength_lt_inductiveFuel
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamilyType_resultLevel_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamily_resultLevel_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.firstFamily_resultLevel_eq
 
 /--
 info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.producesFromBuildExecution' depends on axioms: [propext,

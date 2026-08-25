@@ -1468,6 +1468,71 @@ theorem checkInductiveTypes_loop_not_ok_of_candidate_tooFew
             hbodyTooFew (by simpa using hempty) hbodyAnnotations hterminal
             output success
 
+/-- Exhausting the family validator's telescope fuel before the retained
+candidate reaches its terminal node cannot produce a successful continuation.
+This is the fuel counterpart of
+`checkInductiveTypes_loop_not_ok_of_candidate_tooFew`; it is restricted to
+the first family, whose shared-parameter accumulator is still empty. -/
+theorem checkInductiveTypes_loop_not_ok_of_candidate_fuel
+    (candidate : CandidateExprTrace context source)
+    (stats : InductiveStats) (nparams i nindices fuel : Nat)
+    (k : Expr → InductiveStats → Nat → M α)
+    (hfuel : fuel ≤ candidate.spineLength)
+    (hempty : stats.indConsts.isEmpty = true)
+    (hannotations : candidate.validationAnnotations) :
+    ∀ result,
+      checkInductiveTypes.loopInd.loop nparams stats candidate.rootWhnf
+          i nindices fuel k context ≠ .ok result := by
+  induction candidate generalizing i nindices fuel stats with
+  | terminal context source inferred terminal checked valid =>
+      intro output success
+      simp only [spineLength] at hfuel
+      have hfuel_zero : fuel = 0 := by omega
+      subst fuel
+      simp [checkInductiveTypes.loopInd.loop, throw, throwThe,
+        MonadExceptOf.throw] at success
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+      rcases hannotations with ⟨hmatch, hbodyAnnotations⟩
+      intro output success
+      cases fuel with
+      | zero =>
+          simp [checkInductiveTypes.loopInd.loop, throw, throwThe,
+            MonadExceptOf.throw] at success
+      | succ fuel =>
+          have hbodyFuel : fuel ≤ bodyCandidate.spineLength := by
+            simp only [spineLength] at hfuel
+            omega
+          have hvalid := bodyCandidate.rootWhnf_valid
+          change TypeChecker.M.run _ _ _ _ _
+              (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+            .ok bodyCandidate.rootWhnf at hvalid
+          by_cases hil : i < nparams
+          · simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil,
+              if_true, hempty, withLocalDecl_apply] at success
+            rw [← hmatch] at success
+            simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+              at success
+            rw [hvalid] at success
+            simp only [Except.bind] at success
+            exact body_ih
+              (stats := { stats with
+                params := stats.params.push context.freshExpr })
+              (i := i + 1) (nindices := nindices) (fuel := fuel)
+              hbodyFuel (by simpa using hempty) hbodyAnnotations output
+              success
+          · simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil,
+              if_false, withLocalDecl_apply] at success
+            rw [← hmatch] at success
+            simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+              at success
+            rw [hvalid] at success
+            simp only [Except.bind] at success
+            exact body_ih (stats := stats) (i := i)
+              (nindices := nindices + 1) (fuel := fuel) hbodyFuel hempty
+              hbodyAnnotations output success
+
 /-- A successful nonempty family-validation block contains at least the
 declared number of parameter binders in its first exact candidate spine.  The
 proof uses the validator's real first-family call and the candidate builder's
@@ -3291,6 +3356,14 @@ info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_not_ok
 -/
 #guard_msgs in
 #print axioms CandidateExprTrace.checkInductiveTypes_loop_not_ok_of_candidate_tooFew
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_not_ok_of_candidate_fuel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_loop_not_ok_of_candidate_fuel
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExprTrace.nparams_le_spineLength_of_firstFamilyValidation' depends on axioms: [propext,

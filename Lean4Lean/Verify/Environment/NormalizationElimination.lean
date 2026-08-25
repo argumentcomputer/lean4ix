@@ -1852,13 +1852,60 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
     produced.execution.eliminationExecution.normalization
     normalizationProduced context_lctx_eq
 
-/-- Construct the semantic analyzer block while sourcing its global name
-field from the actual ordinary declaration transaction.  The normalized
-family inventory's nonemptiness is transported from the source-indexed kernel
-block, while its parameter-prefix length is derived from the retained family
-validation and complete-spine gate. Callers cannot smuggle in an independently
-asserted length, name list, nonemptiness fact, or view-list witness. -/
-def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
+/-- The retained first-family validation and its exact semantic root determine
+the Theory representation of the block's common result universe.  The value
+is not selected by a caller: `VLevel.ofLevel` translates the precise kernel
+level stored in the producer's final family statistics. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticCommonResultLevel
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ resultLevel,
+      VLevel.ofLevel Us
+        produced.execution.eliminationExecution.normalization.stats.resultLevel =
+          some resultLevel := by
+  have normalizationProduced := produced.execution.normalization_run
+    produced.producedExecution
+  obtain ⟨kernelSource, remainingSources, sources_eq⟩ :=
+    list_eq_cons_of_isEmpty_false kernelSources
+      produced.kernelSources_nonempty
+  subst kernelSources
+  have terminals := produced.execution.eliminationExecution.normalization
+    |>.familyTerminalSorts
+  obtain ⟨kernelLevel, resultLevel, terminal, level_tr⟩ :=
+    semantic.families.headResultLevel terminals
+  have common_eq := produced.execution.eliminationExecution.normalization
+    |>.firstFamily_resultLevel_eq normalizationProduced
+      context_lctx_eq kernelLevel terminal
+  rw [common_eq]
+  exact ⟨resultLevel, level_tr⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticCommonResultLevel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms ProducedBlockRecursorShapeCandidate.semanticCommonResultLevel
+
+/-- Analyze the exact semantic family spine selected by the retained ordinary
+producer and, on success, construct its complete checked block.  In
+particular, callers do not select a dependent `CheckedFamilies` witness: the
+Theory analyzer computes that witness from the producer's normalized view.
+
+The remaining `Option` boundary is intentional.  Kernel validation compares
+later-family parameter domains by definitional equality, whereas
+`CheckedFamily.params_eq` requires syntactic equality with the first
+normalized parameter telescope.  A later producer theorem must either prove
+that exact equality or construct a semantically equivalent canonical view;
+this function does not silently strengthen the kernel check. -/
+def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock?
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
     {context : AddInductive.Context}
@@ -1869,23 +1916,49 @@ def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
       produced.candidate source)
     (validationMapWF : produced.execution.eliminationExecution.normalization
       |>.validationContext.env.constants.WF)
-    (families : CheckedFamilies semantic.normalization.view
-      (blockParams semantic.normalization.view.nparams
-        semantic.normalization.view.types)
-      0 semantic.normalization.view.types)
     (context_lctx_eq : context.lctx = {}) :
-    semantic.normalization.view.CheckedBlock where
-  params := blockParams semantic.normalization.view.nparams
-    semantic.normalization.view.types
-  params_eq := rfl
-  params_length := produced.semanticViewParams_length semantic context_lctx_eq
-  families := families
-  nonempty := semantic.viewTypes_isEmpty_eq_sources.trans
-    produced.kernelSources_nonempty
-  names := blockGeneratedNames semantic.normalization.view.types
-  names_eq := rfl
-  names_nodup :=
-    produced.semanticViewGeneratedNames_nodup semantic validationMapWF
+    Option semantic.normalization.view.CheckedBlock :=
+  let view := semantic.normalization.view
+  let params := blockParams view.nparams view.types
+  match VInductDecl.checkedFamilies? view params 0 view.types with
+  | none => none
+  | some families => some {
+      params
+      params_eq := rfl
+      params_length :=
+        produced.semanticViewParams_length semantic context_lctx_eq
+      families
+      nonempty := semantic.viewTypes_isEmpty_eq_sources.trans
+        produced.kernelSources_nonempty
+      names := blockGeneratedNames view.types
+      names_eq := rfl
+      names_nodup :=
+        produced.semanticViewGeneratedNames_nodup semantic validationMapWF }
+
+/-- Compute the analyzer block and the validator-owned common result universe
+as one semantic validation value.  Both data fields are fixed by the retained
+ordinary execution: family analysis runs on its exact normalized view and the
+level is the strict Theory translation of its stored kernel statistic. -/
+def ProducedBlockRecursorShapeCandidate.semanticValidatedBlock?
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (validationMapWF : produced.execution.eliminationExecution.normalization
+      |>.validationContext.env.constants.WF)
+    (context_lctx_eq : context.lctx = {}) :
+    Option (ValidatedBlock source) := do
+  let checked ← produced.semanticCheckedBlock? semantic validationMapWF
+    context_lctx_eq
+  let resultLevel ← VLevel.ofLevel Us
+    produced.execution.eliminationExecution.normalization.stats.resultLevel
+  return {
+    block := semantic.normalizedCheckedBlock checked
+    resultLevel }
 
 /-- Run the retained ordinary producer through recursor synthesis/declaration
 and the unchanged complete generation-shape gate. -/

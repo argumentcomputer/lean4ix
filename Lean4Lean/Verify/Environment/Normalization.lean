@@ -3112,6 +3112,39 @@ theorem CandidateExprRun.view_isType_of_terminalSort
       exact bodyViewTypeStored.defeqDFC henv.ordered bodyContextEq
     exact domainViewType.forallE bodyViewType
 
+/-- The exact terminal sort retained by family validation is also the final
+result of the recursively reconstructed Theory view.  Besides typing, this
+keeps the concrete `VLevel.ofLevel` equation needed to identify the
+validator-owned common block universe. -/
+theorem CandidateExprRun.viewResult_of_terminalSort
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (terminal : trace.terminalResult = .sort resultLevel) :
+    ∃ viewLevel,
+      VLevel.ofLevel Us resultLevel = some viewLevel ∧
+        VExpr.dropN trace.spineLength view' = .sort viewLevel := by
+  induction run with
+  | terminal node =>
+      simp only [AddInductive.CandidateExprTrace.terminalResult] at terminal
+      rw [terminal] at node
+      cases node.whnf.rhs_tr with
+      | sort level_tr =>
+          exact ⟨_, level_tr, rfl⟩
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
+      simp only [AddInductive.CandidateExprTrace.terminalResult] at terminal
+      obtain ⟨viewLevel, level_tr, result_eq⟩ := bodyIH terminal
+      exact ⟨viewLevel, level_tr, by
+        simpa only [AddInductive.CandidateExprTrace.spineLength,
+          VExpr.dropN, Nat.add_comm 1] using result_eq⟩
+
 /-- Family validation types the checker-selected view first; the retained
 candidate equality then transports that fact back to the exact raw Theory
 source. This is the declaration-WF fact needed before raw-family insertion. -/
@@ -3126,6 +3159,18 @@ theorem CandidateExprSemanticRootRun.source_isType_of_terminalSort
   have henv : VEnv.WF env := by
     simpa only [run.venv_eq] using run.contextRun.context.Ewf
   exact hview.defeqU_l henv trivial recursive.evidence.isDefEq.toU.symm
+
+/-- Root-level projection of the exact terminal-sort translation. -/
+theorem CandidateExprSemanticRootRun.viewResult_of_terminalSort
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (terminal : candidate.trace.terminalResult = .sort resultLevel) :
+    ∃ viewLevel,
+      VLevel.ofLevel Us resultLevel = some viewLevel ∧
+        VExpr.dropN candidate.trace.spineLength run.view = .sort viewLevel := by
+  obtain ⟨_, recursive⟩ := run.recursive
+  exact recursive.viewResult_of_terminalSort terminal
 
 /-- Candidate-view parameter binders selected by an exact singleton family
 validation run. The split is computed from the retained candidate spine. -/
@@ -4833,6 +4878,31 @@ theorem CandidateBlockFamilyTerminalSortList.of_familyTypes :
       | cons terminal tail =>
           exact .cons terminal
             (CandidateBlockFamilyTerminalSortList.of_familyTypes candidates tail)
+
+/-- The first semantic family root translates the exact terminal level
+retained at the same source-indexed candidate position.  Abstracting the
+dependent candidate list here lets downstream block producers consume the
+head fact without an unchecked `head!` or a parallel list equation. -/
+theorem CandidateBlockFamilySemanticListRun.headResultLevel
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType} {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (kernelSource :: kernelSources)}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    (terminals : CandidateBlockFamilyTerminalSortList candidates) :
+    ∃ kernelLevel viewLevel,
+      candidates.head.familyType.type.trace.terminalResult =
+          .sort kernelLevel ∧
+        VLevel.ofLevel Us kernelLevel = some viewLevel := by
+  cases run with
+  | cons head tail =>
+      cases terminals with
+      | cons terminal terminalTail =>
+          obtain ⟨viewLevel, level_tr, _viewResult⟩ :=
+            head.type.viewResult_of_terminalSort terminal
+          exact ⟨_, viewLevel, terminal, level_tr⟩
 
 /-- Executable shape check for the terminal-sort evidence of a complete
 source-indexed family list.  The result universe remains owned by each exact
@@ -10578,6 +10648,22 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.source_isType_of_termi
 #print axioms TypeChecker.CandidateExprSemanticRootRun.source_isType_of_terminalSort
 
 /--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.viewResult_of_terminalSort' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.viewResult_of_terminalSort
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewResult_of_terminalSort' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprSemanticRootRun.viewResult_of_terminalSort
+
+/--
 info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.viewParameters' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -12400,6 +12486,14 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.sameHeaders' de
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilySemanticListRun.sameHeaders
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.headResultLevel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.headResultLevel
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.evidence' depends on axioms: [propext,
