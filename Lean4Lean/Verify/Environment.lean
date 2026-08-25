@@ -1777,6 +1777,26 @@ noncomputable def
   VInductDecl.ProducedBlockRecursorShapeCandidate.ofExecution execution.flattened
     execution.flattenedRun staged.source_nparams_eq shape
 
+/-- The reindexed recursor producer retains the nonprimitive validation mode
+of the safe outer execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape_validationAllowPrimitive_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.allowPrimitive =
+      false := by
+  have run := (staged.recursorShape shape).execution.normalization_run
+    (staged.recursorShape shape).producedExecution
+  simpa only [AddInductive.Context.forInductive] using
+    (staged.recursorShape shape).execution.eliminationExecution.normalization
+      |>.validationContext_allowPrimitive_all run
+
 /-- The complete family/constructor staging value reindexed to the recursor
 shape owner above.  This is proof-only transport along the parameter-count
 equality; no verifier phase is rerun. -/
@@ -3612,14 +3632,175 @@ noncomputable def FlattenedExactRecursorStagingResult.ordinaryAddInductBlockTrac
       finalEnv.constants
       (generation.generatedRules.foldl VEnv.addDefEq
         metadata.recursors.recEnv) := by
-  have trace := metadata.addInductBlockTrace
+  let trace := metadata.addInductBlockTrace
     (env₂ := generation.generatedRules.foldl VEnv.addDefEq
       metadata.recursors.recEnv) ⟨rfl⟩
   have initialEnvEq :=
     (staged.recursorStaging shape).validation_env_eq
   have finalEnvEq := staged.recursorEnv_eq_final shape numNested_eq
-  simpa only [initialEnvEq, AddInductive.Context.forInductive, finalEnvEq]
-    using trace
+  have traceGenerationEq : trace.generation = generation := by
+    rfl
+  exact {
+    generation := generation
+    blockEnv := trace.blockEnv
+    generation_wf := by
+      simpa only [traceGenerationEq] using trace.generation_wf
+    typeMap := trace.typeMap
+    typeEnv := trace.typeEnv
+    ctorMap := trace.ctorMap
+    ctorEnv := trace.ctorEnv
+    recEnv := trace.recEnv
+    addTypes := by
+      simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+        trace.addTypes
+    addCtors := trace.addCtors
+    addRecs := by
+      simpa only [finalEnvEq, traceGenerationEq] using trace.addRecs
+    recK := by
+      simpa only [finalEnvEq, traceGenerationEq] using trace.recK
+    addRules := by
+      simpa only [traceGenerationEq] using trace.addRules }
+
+/-- Every family name in the exact ordinary Theory source inherits the
+nonprimitive name checks performed by the retained host family declaration
+trace. -/
+theorem FlattenedExactRecursorStagingResult.ordinaryTypeNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ staged.source.blockTypeConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.allowPrimitive =
+        false := staged.recursorShape_validationAllowPrimitive_eq shape
+  exact metadata.declarations.families.raw_names_not_primitive
+    allowPrimitiveEq validationMapWF
+
+/-- Every constructor name in the exact ordinary Theory source inherits the
+nonprimitive name checks performed by the retained host constructor trace. -/
+theorem FlattenedExactRecursorStagingResult.ordinaryCtorNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ staged.source.blockConstructorConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have familyMapWF :=
+    metadata.declarations.families.kernelTrace.map_wf validationMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.eliminationExecution.constructorContext.allowPrimitive =
+        false := by
+    simpa only [AddInductive.NormalizationEliminationExecution.constructorContext]
+      using staged.recursorShape_validationAllowPrimitive_eq shape
+  exact metadata.declarations.constructors.raw_names_not_primitive
+    allowPrimitiveEq familyMapWF
+
+/-- Every generated recursor name in the exact ordinary transaction inherits
+the nonprimitive name checks performed by the retained host recursor trace. -/
+theorem FlattenedExactRecursorStagingResult.ordinaryRecNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ generation.recursors,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have familyMapWF :=
+    metadata.declarations.families.kernelTrace.map_wf validationMapWF
+  have constructorMapWF :=
+    metadata.declarations.constructors.kernelTrace.map_wf familyMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.recursors.allowPrimitive =
+        false := by
+    exact (staged.recursorShape shape).execution.recursor_allowPrimitive_eq.trans
+      (staged.recursorShape_validationAllowPrimitive_eq shape)
+  have recursorInitialMapWF :
+      (staged.recursorShape shape).execution.recursors.initialEnv.constants.WF := by
+    rw [(staged.recursorShape shape).execution.recursor_initialEnv_eq]
+    exact constructorMapWF
+  exact metadata.recursors.raw_names_not_primitive allowPrimitiveEq
+    recursorInitialMapWF
+
+/-- Replay the exact ordinary safe transaction coherently at every safety
+level.  The retained host declaration traces now supply every primitive-name
+condition, so input `VEnvs.WF` is the only replay premise. -/
+noncomputable def FlattenedExactRecursorStagingResult.ordinarySafeReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged generation
+      shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) :
+    CoherentPrimitivePreservingTransactions.SafeReplay execution
+      staged.source ves
+      (generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  let trace := result.ordinaryAddInductBlockTrace metadata numNested_eq
+  apply CoherentPrimitivePreservingTransactions.ofOrdinarySafeTrace wf
+    numNested_eq trace (result.ordinaryTypeNames metadata wf)
+      (result.ordinaryCtorNames metadata wf)
+  intro ci member
+  apply result.ordinaryRecNames metadata wf ci
+  exact member
 
 /-- The retained ordinary declaration folds preserve constant-map
 well-formedness through the public final environment. -/

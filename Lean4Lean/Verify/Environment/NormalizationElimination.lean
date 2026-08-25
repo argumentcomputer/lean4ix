@@ -339,6 +339,24 @@ theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_fresh
         rw [wf.find?_insert] at tailFresh
         split at tailFresh <;> simp_all
 
+/-- Every constructor accepted by a nonprimitive declaration fold avoids
+both the kernel primitive inventory and its reflected Theory subset. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_not_primitive
+    (run : AddInductive.DeclareConstructorInfoListRun false env infos
+      finalEnv) :
+    ∀ info ∈ infos,
+      info.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains info.name = false := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | cons checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · have fresh := VInductDecl.checkName_primitives_fresh checkName
+        exact ⟨VInductDecl.not_reflectedPrimitive_of_primitives_fresh fresh,
+          fresh⟩
+      · exact ih info member
+
 /-- Constructor declaration preserves every lookup already present in its
 input map. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.preserve_map_lookup
@@ -799,6 +817,23 @@ theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_wf
       apply ih
       exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
 
+/-- Every generated recursor accepted by a nonprimitive declaration fold
+avoids both the kernel primitive inventory and its reflected Theory subset. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.names_not_primitive
+    (run : AddInductive.DeclareRecursorInfoListRun false env infos finalEnv) :
+    ∀ info ∈ infos,
+      info.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains info.name = false := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | cons checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · have fresh := VInductDecl.checkName_primitives_fresh checkName
+        exact ⟨VInductDecl.not_reflectedPrimitive_of_primitives_fresh fresh,
+          fresh⟩
+      · exact ih info member
+
 /-- Generated-recursor declaration preserves every lookup already present in
 its input map. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.preserve_map_lookup
@@ -1257,6 +1292,83 @@ noncomputable def recursorDeclarationStaging
     addRecs := insertion.addRecs
     recK := insertion.recK
     trenv := insertion.addRecs.trEnvStaging rawsWF pre }
+
+/-! ## Primitive-name provenance for exact metadata staging -/
+
+/-- In an exact nonprimitive family staging run, every raw Theory family name
+inherits the primitive-name checks of its corresponding host insertion. -/
+theorem FamilyDeclarationStagingRun.raw_names_not_primitive
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (allowPrimitive_eq : allowPrimitive = false)
+    (mapWF : kernelEnv.constants.WF) :
+    ∀ raw ∈ raws,
+      raw.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains raw.name = false := by
+  subst allowPrimitive
+  intro raw member
+  obtain ⟨found, lookup, _, _⟩ :=
+    run.addTypes.translated_lookup mapWF member
+  rcases run.kernelTrace.constant_lookup_cases mapWF lookup with
+    old | ⟨info, infoMember, _, nameEq⟩
+  · have fresh := run.addTypes.map_fresh mapWF member
+    rw [old] at fresh
+    contradiction
+  · have names := run.kernelTrace.names_not_primitive info infoMember
+    simpa only [nameEq] using names
+
+/-- In an exact nonprimitive constructor staging run, every raw Theory
+constructor name inherits the primitive-name checks of its host insertion. -/
+theorem ConstructorDeclarationStagingRun.raw_names_not_primitive
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : ConstructorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws Q)
+    (allowPrimitive_eq : allowPrimitive = false)
+    (mapWF : kernelEnv.constants.WF) :
+    ∀ raw ∈ raws,
+      raw.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains raw.name = false := by
+  subst allowPrimitive
+  intro raw member
+  obtain ⟨found, lookup, _, _⟩ :=
+    run.addCtors.translated_lookup mapWF member
+  rcases run.kernelTrace.constant_lookup_cases mapWF lookup with
+    old | ⟨info, infoMember, _, nameEq⟩
+  · have fresh := run.addCtors.map_fresh mapWF member
+    rw [old] at fresh
+    contradiction
+  · have names := run.kernelTrace.names_not_primitive info infoMember
+    simpa only [nameEq] using names
+
+/-- In an exact nonprimitive recursor staging run, every raw Theory recursor
+name inherits the primitive-name checks of its host insertion. -/
+theorem RecursorDeclarationStagingRun.raw_names_not_primitive
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List RecursorVal} {ctorEnv : VEnv}
+    {raws : List VConstVal} {kTarget Q : Bool}
+    (run : RecursorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos ctorEnv raws kTarget Q)
+    (allowPrimitive_eq : allowPrimitive = false)
+    (mapWF : kernelEnv.constants.WF) :
+    ∀ raw ∈ raws,
+      raw.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains raw.name = false := by
+  subst allowPrimitive
+  intro raw member
+  obtain ⟨found, lookup, _, _⟩ :=
+    run.addRecs.translated_lookup mapWF member
+  rcases run.kernelTrace.constant_lookup_cases mapWF lookup with
+    old | ⟨info, infoMember, _, nameEq⟩
+  · have fresh := run.addRecs.map_fresh mapWF member
+    rw [old] at fresh
+    contradiction
+  · have names := run.kernelTrace.names_not_primitive info infoMember
+    simpa only [nameEq] using names
 
 /-- Every raw constructor constant selected by a complete block-generation
 run is well formed in the shared post-family Theory environment. -/
