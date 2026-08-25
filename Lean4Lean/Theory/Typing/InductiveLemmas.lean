@@ -422,6 +422,55 @@ theorem instRev_forallN_projection
       congr 2
       rw [Nat.add_comm]
 
+/-- Splitting the final argument from an outermost-first substitution list
+turns it into one ordinary instantiation below the preceding arguments. -/
+theorem instRevAt_append_singleton (e : VExpr) (args : List VExpr)
+    (a : VExpr) (k : Nat) :
+    e.instRevAt (args ++ [a]) k =
+      (e.instRevAt args (k + 1)).inst a k := by
+  induction args generalizing e with
+  | nil => rfl
+  | cons arg args ih =>
+      simp only [List.cons_append, VExpr.instRevAt,
+        List.length_append, List.length_cons, List.length_nil,
+        Nat.zero_add]
+      rw [show k + (args.length + 1) = k + 1 + args.length by omega]
+      exact ih (e := e.inst arg (k + 1 + args.length))
+
+/-- A final substituted argument cancels one lift at the same fixed binder
+offset, even after an arbitrary preceding substitution prefix. -/
+theorem instRevAt_liftN_one_append_singleton
+    (e : VExpr) (args : List VExpr) (a : VExpr) (k : Nat) :
+    (e.liftN 1 k).instRevAt (args ++ [a]) k =
+      e.instRevAt args k := by
+  rw [VExpr.instRevAt_append_singleton]
+  induction args generalizing e with
+  | nil => exact VExpr.inst_liftN1 e a k
+  | cons arg args ih =>
+      simp only [VExpr.instRevAt]
+      rw [show k + 1 + args.length = args.length + 1 + k by omega,
+        show args.length + 1 + k = 1 + (args.length + k) by omega,
+        ← VExpr.liftN_instN_lo 1 e arg (args.length + k) k (by omega)]
+      simpa only [Nat.add_comm] using
+        ih (e := e.inst arg (args.length + k))
+
+/-- Pointwise substitution of a telescope by a prefix plus one final
+argument cancels one uniform telescope lift. -/
+theorem map_instRevAt_liftTelN_one_append_singleton
+    (fields : List VExpr) (args : List VExpr) (a : VExpr)
+    (start : Nat) :
+    ((VExpr.liftTelN 1 fields start).zipIdx start |>.map
+        fun x => x.1.instRevAt (args ++ [a]) x.2) =
+      (fields.zipIdx start |>.map
+        fun x => x.1.instRevAt args x.2) := by
+  induction fields generalizing start with
+  | nil => rfl
+  | cons field fields ih =>
+      simp only [VExpr.liftTelN, List.zipIdx, List.map_cons]
+      rw [VExpr.instRevAt_liftN_one_append_singleton]
+      congr 1
+      exact ih (start + 1)
+
 /-- Substituting exactly the variables opened by a lift at a fixed offset
 cancels that lift, independently of the substitution values. -/
 theorem instRevAt_liftN_gap (args : List VExpr) (e : VExpr) (k : Nat) :

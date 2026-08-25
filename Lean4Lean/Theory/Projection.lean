@@ -2893,7 +2893,11 @@ private theorem _root_.Lean4Lean.VStructureView.WF.generationParamsSpine
   rw [hparamsTel]
   exact hparamsGeneration
 
-theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
+/-- The parameters, projection motive, and selecting minor form the complete
+common prefix of the generated recursor.  The remaining cursor is the major
+premise; exposing this spine lets generated iota rules reuse exactly the same
+checked-generation normalization as projector typing. -/
+theorem _root_.Lean4Lean.VStructureView.WF.projectionCommonSpine
     (self : VStructureView.WF view env) (henv : env.Ordered)
     {U : Nat} {Γ : List VExpr} (levels : List VLevel)
     (hlevels : ∀ level ∈ levels, level.WF U)
@@ -2903,25 +2907,21 @@ theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
       env.SpineWF U Γ (view.familyType.instL levels)
         params (.sort resultLevel))
     (fieldSort : VLevel)
-    (hfieldSort : fieldSort.WF U)
     (hmotiveLevel :
       view.generation.motiveLevel.inst
           (view.projectionLevels fieldSort levels) = fieldSort)
-    (_structIsType : env.IsType U Γ
-      (view.structureType levels params))
-    {typeFn minor major : VExpr}
+    {typeFn minor : VExpr}
     (typeFnType : env.HasType U Γ typeFn
       (.forallE (view.structureType levels params) (.sort fieldSort)))
     (minorType : env.HasType U Γ minor
       (view.projectionMinorType levels params
-        (view.specializedFields levels params) typeFn))
-    (majorType : env.HasType U Γ major
-      (view.structureType levels params)) :
-    env.HasType U Γ
-      (VExpr.appN (.const view.recursorName
+        (view.specializedFields levels params) typeFn)) :
+    env.SpineWF U Γ
+      (view.generation.recType.instL
         (view.projectionLevels fieldSort levels))
-        (params ++ [typeFn, minor, major]))
-      (.app typeFn major) := by
+      (params ++ [typeFn, minor])
+      (.forallE (view.structureType levels params)
+        (.app typeFn.lift (.bvar 0))) := by
   let gen := view.generation
   let S := self.toGenerationEnv henv
   let pLevels := view.projectionLevels fieldSort levels
@@ -2939,18 +2939,6 @@ theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
               (VExpr.bvarRevRange 1 ni))
             (.bvar 0))
   let recTail : VExpr := .forallE gen.motiveType recRest
-  have hrec : env.HasType U Γ
-      (.const view.recursorName pLevels)
-      ((VExpr.forallN gen.paramsTel recTail).instL pLevels) := by
-    have hout := VEnv.HasType.const (Γ := Γ) self.recursor
-      (VStructureView.projectionLevels_wf view fieldSort levels
-        hfieldSort hlevels)
-      (VStructureView.projectionLevels_length view fieldSort levels
-        hlevelsLength)
-    simpa [gen, pLevels, recTail, recRest, k, ni,
-      VStructureView.recursorName,
-      VInductDecl.GenerationChecked.recursor,
-      VInductDecl.GenerationChecked.recType] using hout
   have hparams := self.generationParamsSpine henv levels hlevels
     hlevelsLength params hparamsLength paramsSpine fieldSort
   have hparamsTelLength : params.length =
@@ -3096,31 +3084,264 @@ theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
         (VExpr.projectionMajorTail_shape view.name levels params typeFn)
   rw [hminorShape] at hwithMotive
   have hwithMinor := hwithMotive.snoc minorType
-  have hwithMajor : env.SpineWF U Γ
-      ((VExpr.forallN gen.paramsTel recTail).instL pLevels)
+  have htypeFnMinor :
+      (typeFn.liftN 2).inst minor 1 = typeFn.lift := by
+    rw [← VExpr.liftN_liftN typeFn 1 1,
+      VExpr.instN_liftAt_projection, VExpr.inst_lift]
+  have hminorVar : VExpr.instVar 0 minor 1 = .bvar 0 := by
+    simp [VExpr.instVar]
+  have htail :
+      (VExpr.forallE (view.structureType levels params).lift
+        (.app (typeFn.liftN 2) (.bvar 0))).inst minor =
+        VExpr.forallE (view.structureType levels params)
+          (.app typeFn.lift (.bvar 0)) := by
+    simp only [VExpr.inst]
+    rw [VExpr.inst_lift, htypeFnMinor, hminorVar]
+  rw [htail] at hwithMinor
+  simpa [gen, pLevels, recTail, recRest, k, ni,
+    VInductDecl.GenerationChecked.recType, List.append_assoc] using hwithMinor
+
+/-- The exact parameters, projection motive, selecting minor, and canonical
+field variables form a saturated capture spine for the constructor's
+generated iota rule. -/
+theorem _root_.Lean4Lean.VStructureView.WF.projectionRuleCaptureSpine
+    (self : VStructureView.WF view env) (henv : env.WF)
+    {U : Nat} {Γ : List VExpr} (levels : List VLevel)
+    (hlevels : ∀ level ∈ levels, level.WF U)
+    (hlevelsLength : levels.length = view.uvars)
+    (params : List VExpr) (hparamsLength : params.length = view.nparams)
+    (paramsSpine : ∃ resultLevel,
+      env.SpineWF U Γ (view.familyType.instL levels)
+        params (.sort resultLevel))
+    (fieldSort : VLevel)
+    (hmotiveLevel :
+      view.generation.motiveLevel.inst
+          (view.projectionLevels fieldSort levels) = fieldSort)
+    {typeFn minor : VExpr}
+    (typeFnType : env.HasType U Γ typeFn
+      (.forallE (view.structureType levels params) (.sort fieldSort)))
+    (minorType : env.HasType U Γ minor
+      (view.projectionMinorType levels params
+        (view.specializedFields levels params) typeFn)) :
+    let fields := view.specializedFields levels params
+    let m := fields.length
+    ∃ B, env.SpineWF U (fields.reverse ++ Γ)
+      ((view.generation.rule 0 view.constructor).type.instL
+        (view.projectionLevels fieldSort levels))
+      (params.map (VExpr.liftN m) ++
+        [typeFn.liftN m, minor.liftN m] ++
+          VExpr.bvarRevRange 0 m) B := by
+  let gen := view.generation
+  let S := self.toGenerationEnv henv.ordered
+  let fields := view.specializedFields levels params
+  let m := fields.length
+  let pLevels := view.projectionLevels fieldSort levels
+  let common := gen.paramsTel ++ gen.motiveType :: gen.minorTypes
+  let k := gen.block.ctorPairs.length
+  let ni := gen.idxTel.length
+  let recAfterCommon : VExpr :=
+    VExpr.forallN (VExpr.liftTelN (k + 1) gen.idxTel 0) <|
+      .forallE
+        (VExpr.appN (.const gen.block.sourceType.name gen.sourceLevels)
+          (VExpr.bvarRevRange (ni + k + 1) view.nparams ++
+            VExpr.bvarRevRange 0 ni))
+        (.app
+          (VExpr.appN (.bvar (ni + k + 1))
+            (VExpr.bvarRevRange 1 ni))
+          (.bvar 0))
+  let Bs := view.constructor.fieldsR view.source.uvars view.source.nparams
+    gen.elimination
+  let rawFields := view.constructor.rawFields view.source.nparams
+  let fieldBinders := VExpr.liftTelN (k + 1) Bs 0
+  let idxR := view.constructor.resultIndicesR view.source.uvars
+      gen.elimination |>.map fun e => e.liftN (k + 1) Bs.length
+  let ctorApp := VExpr.appN
+    (.const view.constructor.raw.name gen.sourceLevels)
+    (VExpr.bvarRevRange (Bs.length + k + 1) view.source.nparams ++
+      VExpr.bvarRevRange 0 Bs.length)
+  let ruleResult := VExpr.appN (.bvar (k + Bs.length))
+    (idxR ++ [ctorApp])
+  let ruleTail := VExpr.forallN fieldBinders ruleResult
+  have hcommon := self.projectionCommonSpine henv.ordered
+    levels hlevels hlevelsLength params hparamsLength paramsSpine
+    fieldSort hmotiveLevel typeFnType minorType
+  have hcommonWeak := hcommon.weakN henv.ordered
+    (Ctx.LiftN.zero (n := m) (Γ := Γ) fields.reverse
+      (h := by simp [m]))
+  have hrecClosed :
+      (gen.recType.instL pLevels).ClosedN 0 :=
+    S.recType_closedN.instL
+  rw [hrecClosed.liftN_eq (Nat.zero_le _)] at hcommonWeak
+  have hctorCount : gen.block.ctorPairs.length = 1 := by
+    simp [gen, view.constructor_eq]
+  have hminorCount : gen.minorTypes.length = 1 := by
+    rw [gen.minorTypes_length, hctorCount]
+  have hcommonLength :
+      (params.map (VExpr.liftN m) ++
+        [typeFn.liftN m, minor.liftN m]).length =
+        (common.map (VExpr.instL pLevels)).length := by
+    simp [common, gen, VInductDecl.GenerationChecked.paramsTel,
+      S.generationParams_length, hparamsLength, hminorCount]
+  have hrecShapeRaw : gen.recType =
+      VExpr.forallN common recAfterCommon := by
+    simp [gen, common, recAfterCommon, k, ni,
+      VInductDecl.GenerationChecked.recType,
+      VExpr.forallN_append, VExpr.forallN]
+  have hrecShape : gen.recType.instL pLevels =
+      VExpr.forallN (common.map (VExpr.instL pLevels))
+        (recAfterCommon.instL pLevels) := by
+    rw [hrecShapeRaw, VExpr.instL_forallN]
+  rw [hrecShape] at hcommonWeak
+  simp only [List.map_append, List.map_cons, List.map_nil] at hcommonWeak
+  change env.SpineWF U (fields.reverse ++ Γ)
+    (VExpr.forallN (common.map (VExpr.instL pLevels))
+      (recAfterCommon.instL pLevels))
+    (params.map (VExpr.liftN m) ++
+      [typeFn.liftN m, minor.liftN m]) _ at hcommonWeak
+  have hrulePrefix := hcommonWeak.retarget hcommonLength
+    (ruleTail.instL pLevels)
+  let commonArgs := params.map (VExpr.liftN m) ++
+    [typeFn.liftN m, minor.liftN m]
+  have hsourceLevels :=
+    VStructureView.sourceLevels_projectionLevels view fieldSort levels
+      hlevelsLength
+  change
+    (VLevel.params' view.source.uvars
+        view.generation.elimination.offset).map
+          (VLevel.inst pLevels) = levels at hsourceLevels
+  have hfieldBindersShape :
+      fieldBinders.map (VExpr.instL pLevels) =
+        VExpr.liftTelN 2 (rawFields.map (VExpr.instL levels)) 0 := by
+    simp [fieldBinders, Bs, rawFields, k, gen,
+      VInductDecl.NormalizedCtor.fieldsR, VExpr.liftTelN_instL,
+      List.map_map, Function.comp_def, VExpr.instL_instL,
+      hsourceLevels, hctorCount]
+  have hfieldDomains :
+      ((fieldBinders.map (VExpr.instL pLevels)).zipIdx.map fun x =>
+        x.1.instRevAt commonArgs x.2) =
+        VExpr.liftTelN m fields 0 := by
+    rw [hfieldBindersShape]
+    have hcancelMinor :=
+      VExpr.map_instRevAt_liftTelN_one_append_singleton
+        (VExpr.liftTelN 1 (rawFields.map (VExpr.instL levels)) 0)
+        (params.map (VExpr.liftN m) ++ [typeFn.liftN m])
+        (minor.liftN m) 0
+    have hcancelTypeFn :=
+      VExpr.map_instRevAt_liftTelN_one_append_singleton
+        (rawFields.map (VExpr.instL levels))
+        (params.map (VExpr.liftN m)) (typeFn.liftN m) 0
+    calc
+      _ = ((VExpr.liftTelN 1
+              (rawFields.map (VExpr.instL levels)) 0).zipIdx.map fun x =>
+            x.1.instRevAt
+              (params.map (VExpr.liftN m) ++ [typeFn.liftN m]) x.2) := by
+          have hdouble : VExpr.liftTelN 2
+                (rawFields.map (VExpr.instL levels)) 0 =
+              VExpr.liftTelN 1
+                (VExpr.liftTelN 1
+                  (rawFields.map (VExpr.instL levels)) 0) 0 := by
+            simpa using (VExpr.liftTelN_liftTelN 1 1
+              (rawFields.map (VExpr.instL levels)) 0).symm
+          rw [hdouble]
+          simpa [commonArgs, List.append_assoc] using hcancelMinor
+      _ = ((rawFields.map (VExpr.instL levels)).zipIdx.map fun x =>
+            x.1.instRevAt (params.map (VExpr.liftN m)) x.2) :=
+        hcancelTypeFn
+      _ = view.specializedFields levels
+          (params.map (VExpr.liftN m)) := by
+        simpa [rawFields, VStructureView.specializedFields,
+          VStructureView.fields] using
+          VExpr.instRevAt_map_instL_zipIdx rawFields levels
+            (params.map (VExpr.liftN m)) 0
+      _ = VExpr.liftTelN m fields 0 := by
+        simpa [fields] using self.specializedFields_liftN
+          henv.ordered levels params hparamsLength m 0
+  simp only [ruleTail, VExpr.instL_forallN] at hrulePrefix
+  rw [VExpr.instRev_forallN_projection, hfieldDomains] at hrulePrefix
+  obtain ⟨resultLevel, hparamsSpine₀⟩ := paramsSpine
+  have hsortTel := self.specializedFields_onSortTel henv.ordered
+    levels hlevels hlevelsLength params hparamsLength
+    ⟨resultLevel, hparamsSpine₀⟩
+  have hfieldsOnTel : env.OnTel U Γ fields := by
+    simpa [fields] using hsortTel.toOnTel
+  have hfieldBase := hfieldsOnTel.selfSpineWF
+    (B := .sort .zero) (Δ := ([] : List VExpr))
+  have hfieldBase' : env.SpineWF U (fields.reverse ++ Γ)
+      (VExpr.forallN (VExpr.liftTelN m fields 0) (.sort .zero))
+      (VExpr.bvarRevRange 0 m) (.sort .zero) := by
+    simpa [m, VExpr.liftN_forallN, VExpr.liftN] using hfieldBase
+  let residualResult := (ruleResult.instL pLevels).instRevAt
+    commonArgs fieldBinders.length
+  have hfieldBindersLength :
+      (fieldBinders.map (VExpr.instL pLevels)).length =
+        fieldBinders.length := by simp
+  rw [hfieldBindersLength] at hrulePrefix
+  change env.SpineWF U (fields.reverse ++ Γ) _ commonArgs
+    (VExpr.forallN (VExpr.liftTelN m fields 0) residualResult) at hrulePrefix
+  have hfieldLength : (VExpr.bvarRevRange 0 m).length =
+      (VExpr.liftTelN m fields 0).length := by
+    rw [VExpr.bvarRevRange_length, VExpr.liftTelN_length]
+  have hfieldSpine := hfieldBase'.retarget hfieldLength residualResult
+  have hfull := hrulePrefix.append hfieldSpine
+  refine ⟨residualResult.instRev (VExpr.bvarRevRange 0 m), ?_⟩
+  have hruleShapeRaw : (gen.rule 0 view.constructor).type =
+      VExpr.forallN common ruleTail := by
+    simp [gen, common, ruleTail, ruleResult, fieldBinders, idxR,
+      ctorApp, Bs, k, VInductDecl.GenerationChecked.rule,
+      VExpr.forallN_append, VExpr.forallN, List.append_assoc]
+  rw [hruleShapeRaw, VExpr.instL_forallN, VExpr.instL_forallN]
+  simpa [commonArgs, List.append_assoc] using hfull
+
+theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
+    (self : VStructureView.WF view env) (henv : env.Ordered)
+    {U : Nat} {Γ : List VExpr} (levels : List VLevel)
+    (hlevels : ∀ level ∈ levels, level.WF U)
+    (hlevelsLength : levels.length = view.uvars)
+    (params : List VExpr) (hparamsLength : params.length = view.nparams)
+    (paramsSpine : ∃ resultLevel,
+      env.SpineWF U Γ (view.familyType.instL levels)
+        params (.sort resultLevel))
+    (fieldSort : VLevel)
+    (hfieldSort : fieldSort.WF U)
+    (hmotiveLevel :
+      view.generation.motiveLevel.inst
+          (view.projectionLevels fieldSort levels) = fieldSort)
+    (_structIsType : env.IsType U Γ
+      (view.structureType levels params))
+    {typeFn minor major : VExpr}
+    (typeFnType : env.HasType U Γ typeFn
+      (.forallE (view.structureType levels params) (.sort fieldSort)))
+    (minorType : env.HasType U Γ minor
+      (view.projectionMinorType levels params
+        (view.specializedFields levels params) typeFn))
+    (majorType : env.HasType U Γ major
+      (view.structureType levels params)) :
+    env.HasType U Γ
+      (VExpr.appN (.const view.recursorName
+        (view.projectionLevels fieldSort levels))
+        (params ++ [typeFn, minor, major]))
+      (.app typeFn major) := by
+  let pLevels := view.projectionLevels fieldSort levels
+  have hrec : env.HasType U Γ
+      (.const view.recursorName pLevels)
+      (view.generation.recType.instL pLevels) := by
+    have hout := VEnv.HasType.const (Γ := Γ) self.recursor
+      (VStructureView.projectionLevels_wf view fieldSort levels
+        hfieldSort hlevels)
+      (VStructureView.projectionLevels_length view fieldSort levels
+        hlevelsLength)
+    simpa [pLevels, VStructureView.recursorName,
+      VInductDecl.GenerationChecked.recursor] using hout
+  have hprefix := self.projectionCommonSpine henv
+    levels hlevels hlevelsLength params hparamsLength paramsSpine
+    fieldSort hmotiveLevel typeFnType minorType
+  have hfull := hprefix.snoc majorType
+  have hfull' : env.SpineWF U Γ
+      (view.generation.recType.instL pLevels)
       (params ++ [typeFn, minor, major]) (.app typeFn major) := by
-    have majorType' : env.HasType U Γ major
-        ((view.structureType levels params).lift.inst minor) := by
-      rw [VExpr.inst_lift]
-      exact majorType
-    have hout := hwithMinor.snoc majorType'
-    have htypeFnMinor :
-        (typeFn.liftN 2).inst minor 1 = typeFn.lift := by
-      rw [← VExpr.liftN_liftN typeFn 1 1,
-        VExpr.instN_liftAt_projection, VExpr.inst_lift]
-    have hminorVar : VExpr.instVar 0 minor 1 = .bvar 0 := by
-      simp [VExpr.instVar]
-    have hresult :
-        (((typeFn.liftN 2).app (.bvar 0)).inst minor 1).inst major =
-          typeFn.app major := by
-      simp only [VExpr.inst]
-      rw [htypeFnMinor, VExpr.inst_lift]
-      rw [hminorVar]
-      simp only [VExpr.inst]
-      rw [VExpr.instVar_zero]
-    rw [hresult] at hout
-    simpa [List.append_assoc] using hout
-  exact hwithMajor.hasType_appN hrec
+    simpa [pLevels, List.append_assoc, VExpr.inst,
+      VExpr.inst_lift, VExpr.instVar_zero] using hfull
+  exact hfull'.hasType_appN hrec
 
 /-- The first selecting minor is well typed directly from the checked field
 telescope.  No projector iota equation is needed at index zero: its motive is
@@ -3596,6 +3817,41 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
     rw [hprojectorShape]
     apply hstruct.lam
     simpa [paramsLift, VExpr.liftN] using hbody
+
+/-- Checked selecting minors determine the exact canonical capture spines
+for every generated iota rule in the same source-order prefix. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toConstructorRuleCapturesPrefix_of_minorsWFPrefix
+    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (minors : view.MinorsWFPrefix env limit) :
+    view.ConstructorRuleCapturesPrefix env limit := by
+  intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
+    hparamsLength hparamsSpine hcode
+  obtain ⟨fieldSort, hfieldSort, hcodeSort, -, -⟩ :=
+    view.projectionCodes_get?_program_shape levels params hcode
+  have minorsBefore : view.MinorsWFPrefix env idx := by
+    intro U' Γ' levels' params' j prior hj
+    exact minors (Nat.lt_trans hj hlimit)
+  have programsBefore : view.ProgramsWFPrefix env idx :=
+    self.toProgramsWFPrefix_of_minorsWFPrefix henv
+      (limit := idx) minorsBefore
+  have htypeFn := self.projectionTypeFn_hasType_of_programsPrefix henv
+    programsBefore hΓ hlevels hlevelsLength hparamsLength
+      hparamsSpine hcode
+  have hminor := minors hlimit hΓ hlevels hlevelsLength hparamsLength
+    hparamsSpine hcode
+  have hmotiveLevel :
+      view.generation.motiveLevel.inst
+        (view.projectionLevels code.fieldSort levels) = code.fieldSort := by
+    rw [hcodeSort]
+    rw [List.getElem?_map] at hfieldSort
+    obtain ⟨rawSort, hrawSort, rfl⟩ := Option.map_eq_some_iff.1 hfieldSort
+    have hrawSortMem : rawSort ∈ view.fieldSorts :=
+      List.mem_iff_getElem?.2 ⟨idx, hrawSort⟩
+    exact self.motiveLevel_projectionLevels rawSort hrawSortMem levels
+  have hcaptures := self.projectionRuleCaptureSpine henv
+    levels hlevels hlevelsLength params hparamsLength hparamsSpine
+    code.fieldSort hmotiveLevel htypeFn hminor
+  simpa [VStructureView.ProjectionCode.liftN] using hcaptures
 
 /-- Extend a source-ordered selecting-minor prefix by one field once the
 already-generated projectors compute exactly on the canonical constructor.
@@ -4587,6 +4843,57 @@ theorem _root_.Lean4Lean.VStructureView.WF.toConstructorProjectorsExactPrefix_of
   exact .inr (by
     simpa [VStructureView.ProjectionCode.liftN,
       VStructureView.projectionConstructorApp, paramsLift] using hiota)
+
+/-- Advance the selecting-minor prefix using only its already established
+source-order segment.  Canonical rule captures and exact earlier-projector
+iota are now derived internally from checked generation. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ
+    (self : VStructureView.WF view env) (henv : env.WF) {limit : Nat}
+    (minors : view.MinorsWFPrefix env limit) :
+    view.MinorsWFPrefix env (limit + 1) := by
+  have captures : view.ConstructorRuleCapturesPrefix env limit :=
+    self.toConstructorRuleCapturesPrefix_of_minorsWFPrefix henv
+      (limit := limit) minors
+  have exact : view.ConstructorProjectorsExactPrefix env limit :=
+    self.toConstructorProjectorsExactPrefix_of_ruleCaptures
+      henv (limit := limit) minors captures
+  apply self.toMinorsWFPrefix_succ_of_constructorProjectorsExactPrefix
+    henv (limit := limit)
+  · exact minors
+  · exact exact
+
+/-- Every generated selecting minor is well typed.  The proof iterates the
+source-order prefix step, so each dependent field uses only projectors whose
+minors have already been established. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWF
+    (self : VStructureView.WF view env) (henv : env.WF) :
+    view.MinorsWF env := by
+  have prefixes : ∀ limit, view.MinorsWFPrefix env limit := by
+    intro limit
+    induction limit with
+    | zero =>
+        intro U Γ levels params idx code hidx
+        omega
+    | succ limit ih =>
+        exact self.toMinorsWFPrefix_succ henv (limit := limit) ih
+  intro U Γ levels params idx code hΓ hlevels hlevelsLength
+    hparamsLength hparamsSpine hcode
+  exact prefixes (idx + 1) (Nat.lt_succ_self idx) hΓ hlevels
+    hlevelsLength hparamsLength hparamsSpine hcode
+
+/-- Checked structure generation determines every generated projector
+program; selecting-minor typing is no longer an external premise. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF
+    (self : VStructureView.WF view env) (henv : env.WF) :
+    view.ProgramsWF env :=
+  self.toProgramsWF_of_minors henv (self.toMinorsWF henv)
+
+/-- Checked structure generation determines the canonical reconstruction
+typing in the current Theory environment. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toRebuildWF
+    (self : VStructureView.WF view env) (henv : env.WF) :
+    view.RebuildWF env :=
+  self.toRebuildWF_of_programs henv (self.toProgramsWF henv)
 
 /-- Environment-indexed projection semantics.
 
