@@ -683,6 +683,62 @@ theorem AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
   apply execution.nested.canonicalPrimitive_noop recognized.2.2.2
   simpa only [recognized.2.1, recognized.2.2.1] using execution.nestedRun
 
+/-- Primitive recognition plus the exact public nested-elimination equation
+selects the canonical Bool/Nat candidate observers.  The input translation
+supplies the host constant-map invariant needed to follow the real family
+declaration fold. -/
+theorem primitiveCandidateObserversOfNestedRun
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    {lparams : List Name} {nparams : Nat} {types : List InductiveType}
+    {isUnsafe : Bool}
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types
+      isUnsafe true)
+    (nested : ElimNestedInductive.Result)
+    (nestedRun : ElimNestedInductive.runAt env
+      ({} : FuelConfig).inductiveFuel nparams lparams types = .ok nested) :
+    AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+      nparams nested.types nested.aux2nested.size isUnsafe
+        (AddInductive.Context.forInductive env lparams isUnsafe true {}) := by
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨safe, lparamsEq, nparamsEq, shape⟩ := recognized
+  have noop := nested.canonicalPrimitive_noop shape (by
+    simpa only [lparamsEq, nparamsEq] using nestedRun)
+  obtain ⟨type, typesEq, typeType, primitive⟩ := shape
+  have mapWF : env.constants.WF :=
+    (wf.tr (safety := .safe)).map_wf
+  subst isUnsafe
+  subst lparams
+  subst nparams
+  rw [noop.1, noop.2, typesEq]
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, constructorsEq⟩ := boolShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.boolSource := by
+        cases type
+        simp only at typeType typeName constructorsEq ⊢
+        subst typeType
+        subst typeName
+        subst constructorsEq
+        rfl
+      rw [typeEq]
+      exact AddInductive.PrimitiveRecursorReplay.boolCandidateObserversComplete
+        env mapWF
+  | inr natShape =>
+      obtain ⟨typeName, binderName, binderInfo, constructorsEq⟩ := natShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo := by
+        cases type
+        simp only at typeType typeName constructorsEq ⊢
+        subst typeType
+        subst typeName
+        subst constructorsEq
+        rfl
+      rw [typeEq]
+      exact AddInductive.PrimitiveRecursorReplay.natCandidateObserversComplete
+        env mapWF binderName binderInfo
+
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop' depends on axioms: [propext,
  Classical.choice,
@@ -691,6 +747,29 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_n
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitive_noop
+
+/--
+info: 'Lean4Lean.primitiveCandidateObserversOfNestedRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms primitiveCandidateObserversOfNestedRun
 
 /-- The normalization prefix retained by an outer execution still starts from
 the outer input environment.  Naming this equality lets semantic replay use the
@@ -3722,6 +3801,67 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
             wf primitiveResult).toTransactionalVEnvsExtension wf
         |>.toVEnvsExtension wf
 
+/-- Default-fuel primitive split with no primitive observer callback.  The
+false recognizer branch retains the remaining general observer/semantic
+contracts; the true branch derives its Bool/Nat observers from recognition,
+the actual nested run, and input well-formedness. -/
+theorem addDecl.inductDecl_WF_of_split_primitive_transactions_default
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (lparams : List Name) (nparams : Nat) (types : List InductiveType)
+    (isUnsafe : Bool)
+    (candidateObservers :
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok false →
+        ∀ nested : ElimNestedInductive.Result,
+          ElimNestedInductive.runAt env ({} : FuelConfig).inductiveFuel
+              nparams lparams types = .ok nested →
+          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+            nparams nested.types nested.aux2nested.size isUnsafe
+              (AddInductive.Context.forInductive env lparams isUnsafe
+                false {}))
+    (nonprimitiveSemantics : ∀ finalEnv
+        (execution : AddInductive.EnvironmentInductiveExecution env lparams
+          nparams types isUnsafe false {} finalEnv),
+      Environment.checkPrimitiveInductive env lparams nparams types
+          isUnsafe = .ok false →
+        execution.ReadinessCompletedNonprimitiveVEnvsExtension ves) :
+    (addDecl env (.inductDecl lparams nparams types isUnsafe)
+      (check := true) (fuel := {})).WF fun finalEnv =>
+      ∃ ves' : VEnvs, ves'.WF finalEnv ∧
+        ∀ safety, ves.venv safety ≤ ves'.venv safety := by
+  apply addDecl.inductDecl_WF_of_execution wf lparams nparams types
+    isUnsafe {}
+  · intro allowPrimitive primitiveRun
+    cases allowPrimitive with
+    | false =>
+        exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers_of_nestedRun
+          (candidateObservers primitiveRun)
+    | true =>
+        have primitiveResult :
+            PrimitiveInductiveResult lparams nparams types isUnsafe true :=
+          checkPrimitiveInductive.WF env lparams nparams types isUnsafe
+            true primitiveRun
+        exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers_of_nestedRun
+          fun nested nestedRun =>
+            primitiveCandidateObserversOfNestedRun wf primitiveResult
+              nested nestedRun
+  · intro allowPrimitive finalEnv execution primitiveRun
+    cases allowPrimitive with
+    | false =>
+        exact (nonprimitiveSemantics finalEnv execution primitiveRun)
+          |>.toVEnvsExtension wf
+          |>.toPreservesVEnvs
+    | true =>
+        have primitiveResult :
+            PrimitiveInductiveResult lparams nparams types isUnsafe true :=
+          checkPrimitiveInductive.WF env lparams nparams types isUnsafe
+            true primitiveRun
+        exact
+          (AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution
+              wf primitiveResult).toTransactionalVEnvsExtension wf
+          |>.toVEnvsExtension wf
+          |>.toPreservesVEnvs
+
 /--
 info: 'Lean4Lean.addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions' depends on axioms: [propext,
  Classical.choice,
@@ -3757,6 +3897,32 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions' depends 
 -/
 #guard_msgs in
 #print axioms addDecl.inductDecl_WF_of_split_primitive_transactions
+
+/--
+info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions_default' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms addDecl.inductDecl_WF_of_split_primitive_transactions_default
 
 set_option warn.sorry false in
 /-- Successful checked addition preserves well-formedness and extends every safety-indexed

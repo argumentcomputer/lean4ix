@@ -788,8 +788,9 @@ def NormalizationCandidateExecution.CompleteForRun
 
 /-- The pointwise recursive candidate observers are the whole residual of
 normalization completeness.  Every validation, raw-family declaration, and
-constructor-validation equation is recovered from the successful public run;
-the observer contract contributes only calls absent from that public path. -/
+constructor-validation equation is recovered from the successful public run
+and supplied as an antecedent; the observer contract contributes only calls
+absent from that public path. -/
 theorem NormalizationCandidateExecution.completeForRun_of_candidateObservers
     (isUnsafeEq : isUnsafe = (candidateContext.safety != .safe))
     (observers : CandidateObserversComplete nparams types numNested isUnsafe
@@ -1381,11 +1382,13 @@ def buildExecution (env : Environment) (lparams : List Name) (nparams : Nat)
               completion := .nested hzero restoration hrestore }⟩
 
 /-- Completeness of the full outer pipeline reduces to completeness of the
-flattened ordinary producer.  All surrounding phases are exact public calls,
-so their successful equations and the restoration branch can be retained by
-case analysis. -/
-theorem complete_of_flattened
+flattened ordinary producer at the exact successful nested-elimination
+result.  Retaining that equation lets source-specific observers use facts
+proved by the public nesting phase. -/
+theorem complete_of_flattened_of_nestedRun
     (flattenedComplete : ∀ (nested : ElimNestedInductive.Result),
+      ElimNestedInductive.runAt env fuel.inductiveFuel nparams lparams types =
+          .ok nested →
       NormalizationRecursorExecution.Complete nparams nested.types
         nested.aux2nested.size isUnsafe
           (Context.forInductive env lparams isUnsafe allowPrimitive fuel)) :
@@ -1419,7 +1422,7 @@ theorem complete_of_flattened
               rw [hflattened] at success
               simp only at success
               obtain ⟨flattened, flattenedRun, flatEnvEq⟩ :=
-                flattenedComplete nested flatEnv (by
+                flattenedComplete nested hnested flatEnv (by
                   simpa only [context] using hflattened)
               subst flatEnv
               by_cases hzero : nested.aux2nested.size = 0
@@ -1455,6 +1458,49 @@ theorem complete_of_flattened
                       flattenedRun := by
                         simpa only [context] using flattenedRun
                       completion := .nested hzero restoration hrestore }⟩
+
+/-- Compatibility form when flattened completeness does not need the actual
+nested-elimination equation. -/
+theorem complete_of_flattened
+    (flattenedComplete : ∀ (nested : ElimNestedInductive.Result),
+      NormalizationRecursorExecution.Complete nparams nested.types
+        nested.aux2nested.size isUnsafe
+          (Context.forInductive env lparams isUnsafe allowPrimitive fuel)) :
+    EnvironmentInductiveExecution.Complete env lparams nparams types
+      isUnsafe allowPrimitive fuel :=
+  complete_of_flattened_of_nestedRun fun nested _ =>
+    flattenedComplete nested
+
+/-- Nested-run-aware normalization completeness.  This is the narrow form
+used when the public nested phase proves the flattened source is unchanged. -/
+theorem complete_of_normalization_of_nestedRun
+    (normalizationComplete : ∀ (nested : ElimNestedInductive.Result),
+      ElimNestedInductive.runAt env fuel.inductiveFuel nparams lparams types =
+          .ok nested →
+      NormalizationCandidateExecution.CompleteForRun nparams nested.types
+        nested.aux2nested.size isUnsafe
+          (Context.forInductive env lparams isUnsafe allowPrimitive fuel)) :
+    EnvironmentInductiveExecution.Complete env lparams nparams types
+      isUnsafe allowPrimitive fuel :=
+  complete_of_flattened_of_nestedRun fun nested nestedRun =>
+    NormalizationRecursorExecution.complete_of_normalization
+      (by cases isUnsafe <;> rfl)
+      (normalizationComplete nested nestedRun)
+
+/-- Full operational completeness from candidate observers specialized to
+the exact successful nested-elimination result. -/
+theorem complete_of_candidateObservers_of_nestedRun
+    (candidateObservers : ∀ (nested : ElimNestedInductive.Result),
+      ElimNestedInductive.runAt env fuel.inductiveFuel nparams lparams types =
+          .ok nested →
+      NormalizationCandidateExecution.CandidateObserversComplete nparams
+        nested.types nested.aux2nested.size isUnsafe
+          (Context.forInductive env lparams isUnsafe allowPrimitive fuel)) :
+    EnvironmentInductiveExecution.Complete env lparams nparams types
+      isUnsafe allowPrimitive fuel :=
+  complete_of_normalization_of_nestedRun fun nested nestedRun =>
+    NormalizationCandidateExecution.completeForRun_of_candidateObservers
+      (by cases isUnsafe <;> rfl) (candidateObservers nested nestedRun)
 
 /-- Full nested-aware operational completeness now has a single observer
 boundary: retaining the normalization prefix of each successful flattened

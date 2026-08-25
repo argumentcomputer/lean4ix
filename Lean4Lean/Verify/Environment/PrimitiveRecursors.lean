@@ -1,4 +1,5 @@
 import Lean4Lean.Verify.Environment.CandidateIdentityReplay
+import Lean4Lean.Verify.Environment.ConstructorValidation
 import Lean4Lean.Verify.Environment.NormalizationElimination
 import Lean4Lean.Verify.Environment.Extension
 
@@ -88,7 +89,10 @@ private theorem sortOne_data_hasFVar_false :
   change (Expr.sort (.succ .zero)).hasFVar = false
   rw [Expr.hasFVar_eq]
   rfl
-private theorem checkTypeSortOne (context : AddInductive.Context) (n : Nat)
+
+/-- Full checking of the canonical primitive family sort at every positive
+recursive depth. -/
+theorem checkTypeSortOne (context : AddInductive.Context) (n : Nat)
     (hdepth : context.fuel.recDepth = n + 1) :
     TypeChecker.M.run context.env context.safety context.lctx
       context.lparams context.fuel
@@ -132,27 +136,31 @@ theorem whnfSortOne (context : AddInductive.Context) (n : Nat)
       context.toTypeChecker ({} : TypeChecker.State)) = _
   rw [hdepth]
   rfl
-/-- A successful canonical singleton normalization run fixes its statistics,
-terminal reader context, and the two fuel witnesses needed by recursor
-synthesis. -/
-theorem canonicalSingletonStatsAndFuel
+
+/-- A successful canonical singleton family-validation observer already fixes
+its statistics, terminal reader context, and the two fuel witnesses needed by
+the recursive candidate pass.  No successful candidate execution is needed
+to recover these facts. -/
+theorem canonicalSingletonValidationStatsAndFuel
     {context : AddInductive.Context} {indType : InductiveType}
-    {numNested : Nat} {isUnsafe : Bool}
-    {execution : AddInductive.NormalizationCandidateExecution 0 [indType]
-      numNested isUnsafe context}
-    (produced : AddInductive.buildNormalizationCandidateExecution 0 [indType]
-      numNested isUnsafe context = .ok execution)
+    {validation : AddInductive.FamilyValidationBlockResult}
+    (validationRun : AddInductive.observeFamilyValidationBlock 0 [indType]
+      context = .ok validation)
     (type_eq : indType.type = .sort (.succ .zero)) :
-    execution.stats =
+    validation.stats =
         AddInductive.singletonInductiveStats context indType (.succ .zero) ∧
-      execution.validationContext = context ∧
+      validation.validationContext = context ∧
       ∃ depth inductiveFuel,
         context.fuel.recDepth = depth + 1 ∧
           context.fuel.inductiveFuel = inductiveFuel + 1 := by
   let capture : AddInductive.InductiveStats →
       AddInductive.M (AddInductive.InductiveStats × AddInductive.Context) :=
     fun stats => fun selectedContext => .ok (stats, selectedContext)
-  have actual := execution.familyValidation produced capture
+  have actual :
+      AddInductive.checkInductiveTypes 0 #[indType] capture context =
+        .ok (validation.stats, validation.validationContext) := by
+    rw [AddInductive.checkInductiveTypes_factor, validationRun]
+    rfl
   cases depth_eq : context.fuel.recDepth with
   | zero =>
       simp [capture, AddInductive.checkInductiveTypes,
@@ -238,6 +246,81 @@ theorem canonicalSingletonStatsAndFuel
           have pairEq := Except.ok.inj actual.symm
           exact ⟨congrArg Prod.fst pairEq, congrArg Prod.snd pairEq,
             ⟨depth, inductiveFuel, rfl, rfl⟩⟩
+
+/-- A successful canonical singleton normalization run specializes the
+validation-only result above. -/
+theorem canonicalSingletonStatsAndFuel
+    {context : AddInductive.Context} {indType : InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {execution : AddInductive.NormalizationCandidateExecution 0 [indType]
+      numNested isUnsafe context}
+    (produced : AddInductive.buildNormalizationCandidateExecution 0 [indType]
+      numNested isUnsafe context = .ok execution)
+    (type_eq : indType.type = .sort (.succ .zero)) :
+    execution.stats =
+        AddInductive.singletonInductiveStats context indType (.succ .zero) ∧
+      execution.validationContext = context ∧
+      ∃ depth inductiveFuel,
+        context.fuel.recDepth = depth + 1 ∧
+          context.fuel.inductiveFuel = inductiveFuel + 1 := by
+  simpa only [AddInductive.NormalizationCandidateExecution.familyValidationResult]
+    using canonicalSingletonValidationStatsAndFuel
+      (execution.familyValidationResult_run produced) type_eq
+
+/-- The recursive candidate observer for the canonical family sort succeeds
+at every positive family-validation fuel pair. -/
+theorem sortOneCandidateObservable
+    (context : AddInductive.Context) (depth inductiveFuel : Nat)
+    (hdepth : context.fuel.recDepth = depth + 1)
+    (hinductive : context.fuel.inductiveFuel = inductiveFuel + 1) :
+    AddInductive.CandidateExpr.Observable context
+      (.sort (.succ .zero)) := by
+  have hcheck : TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel
+      (TypeChecker.checkType (.sort (.succ .zero))) =
+        .ok (.sort (.succ (.succ .zero))) :=
+    checkTypeSortOne context depth hdepth
+  have hwhnf : TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel
+      (TypeChecker.whnf (.sort (.succ .zero))) =
+        .ok (.sort (.succ .zero)) :=
+    whnfSortOne context depth hdepth
+  refine ⟨_, AddInductive.buildCandidateExpr_of_whnf_nonForall
+    context (.sort (.succ .zero)) (.sort (.succ (.succ .zero)))
+      (.sort (.succ .zero)) ?_ hcheck hwhnf rfl⟩
+  omega
+
+/-- Canonical singleton validation discharges its previously external family
+candidate observer directly from the retained validation equation. -/
+theorem canonicalFamilyTypeObservable
+    {context : AddInductive.Context} {indType : InductiveType}
+    {validation : AddInductive.FamilyValidationBlockResult}
+    (validationRun : AddInductive.observeFamilyValidationBlock 0 [indType]
+      context = .ok validation)
+    (type_eq : indType.type = .sort (.succ .zero)) :
+    AddInductive.CandidateFamilyType.Observable
+      { context with lctx := {} } indType := by
+  cases indType with
+  | mk name type ctors =>
+    simp only at type_eq
+    subst type
+    obtain ⟨_stats, _validationContext, depth, inductiveFuel,
+        hdepth, hinductive⟩ :=
+      canonicalSingletonValidationStatsAndFuel validationRun rfl
+    let observerContext : AddInductive.Context := { context with lctx := {} }
+    have observable : AddInductive.CandidateExpr.Observable observerContext
+        (.sort (.succ .zero)) := by
+      apply sortOneCandidateObservable observerContext depth inductiveFuel
+      · simpa [observerContext] using hdepth
+      · simpa [observerContext] using hinductive
+    obtain ⟨candidate, candidateRun⟩ := observable
+    refine ⟨⟨candidate⟩, ?_⟩
+    change AddInductive.normalizeCandidateFamilyType
+      { name := name, type := .sort (.succ .zero), ctors := ctors }
+        observerContext = .ok ⟨candidate⟩
+    unfold AddInductive.normalizeCandidateFamilyType
+    simp only [ReaderT.bind, Bind.bind, candidateRun, Except.bind,
+      ReaderT.pure, Pure.pure, Except.pure]
 
 /-- Canonical host source selected by primitive recognition for `Bool`. -/
 def boolSource : InductiveType where
@@ -1152,6 +1235,421 @@ theorem whnfInductiveConst
     (TypeChecker.Methods.withFuel recursionFuel) ({} : TypeChecker.State)
     whnfFuel hfind]
   rfl
+
+/-- Full type checking of a closed, universe-monomorphic inductive constant
+is determined by its exact post-declaration lookup. -/
+theorem checkTypeInductiveConst
+    (context : AddInductive.Context) (constName : Name)
+    (info : InductiveVal) (result : Expr) (depth : Nat)
+    (hdepth : context.fuel.recDepth = depth + 1)
+    (hfind : context.env.find? constName = some (.inductInfo info))
+    (hlevels : info.levelParams = [])
+    (hunsafe : info.isUnsafe = false)
+    (htype : info.type = result) :
+    TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel
+      (TypeChecker.checkType (.const constName [])) = .ok result := by
+  have hinfer : TypeChecker.Inner.inferConstant context.toTypeChecker
+      constName [] false = .ok result := by
+    unfold TypeChecker.Inner.inferConstant
+    rw [show context.toTypeChecker.env.get constName =
+        .ok (.inductInfo info) by
+      unfold Kernel.Environment.get
+      simp only [AddInductive.Context.toTypeChecker, hfind]
+      rfl]
+    simp [AddInductive.Context.toTypeChecker, hlevels, hunsafe, htype,
+      ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+      ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
+      ConstantVal.instantiateTypeLevelParams,
+      Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore_id,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+  unfold TypeChecker.M.run TypeChecker.checkType TypeChecker.RecM.run
+  simp [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+    StateT.pure, Except.pure, Pure.pure,
+    StateT.run', Functor.map, Except.map]
+  rw [hdepth]
+  change Except.map (fun x : Expr × TypeChecker.State => x.1)
+    (TypeChecker.Inner.inferType' (.const constName []) false
+      (TypeChecker.Methods.withFuel depth) context.toTypeChecker
+      ({} : TypeChecker.State)) = .ok result
+  unfold TypeChecker.Inner.inferType'
+  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
+    Expr.looseBVarRange']
+  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+  rw [show (get : TypeChecker.RecM TypeChecker.State)
+      (TypeChecker.Methods.withFuel depth) context.toTypeChecker
+        ({} : TypeChecker.State) =
+      .ok (({} : TypeChecker.State), ({} : TypeChecker.State)) by rfl]
+  simp only [Std.HashMap.getElem?_empty]
+  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+  rw [show (readThe TypeChecker.Context : TypeChecker.RecM
+      TypeChecker.Context) (TypeChecker.Methods.withFuel depth)
+        context.toTypeChecker ({} : TypeChecker.State) =
+      .ok (context.toTypeChecker, ({} : TypeChecker.State)) by rfl]
+  simp only
+  rw [show TypeChecker.Inner.inferConstant context.toTypeChecker
+      constName [] false = .ok result from hinfer]
+  rfl
+
+/-- The post-family lookup, together with positive checker and candidate
+fuel, supplies the complete observer for a primitive family constant. -/
+theorem inductiveConstCandidateObservable
+    (context : AddInductive.Context) (constName : Name)
+    (info : InductiveVal) (result : Expr)
+    (depth whnfFuel inductiveFuel : Nat)
+    (hdepth : context.fuel.recDepth = depth + 1)
+    (hwhnfFuel : context.fuel.whnf = whnfFuel + 1)
+    (hinductive : context.fuel.inductiveFuel = inductiveFuel + 1)
+    (hfind : context.env.find? constName = some (.inductInfo info))
+    (hlevels : info.levelParams = [])
+    (hunsafe : info.isUnsafe = false)
+    (htype : info.type = result) :
+    AddInductive.CandidateExpr.Observable context (.const constName []) := by
+  have hcheck := checkTypeInductiveConst context constName info result depth
+    hdepth hfind hlevels hunsafe htype
+  have hwhnf := whnfInductiveConst context constName info depth whnfFuel
+    hdepth hwhnfFuel hfind
+  refine ⟨_, AddInductive.buildCandidateExpr_of_whnf_nonForall
+    context (.const constName []) result (.const constName []) ?_
+      hcheck hwhnf rfl⟩
+  omega
+
+/-- Lift a successful type candidate to its one-constructor wrapper. -/
+theorem candidateConstructorObservable_of_expr
+    {context : AddInductive.Context} {source : Constructor}
+    (observable : AddInductive.CandidateExpr.Observable context source.type) :
+    AddInductive.CandidateConstructor.Observable context source := by
+  obtain ⟨candidate, run⟩ := observable
+  refine ⟨⟨candidate⟩, ?_⟩
+  unfold AddInductive.normalizeCandidateConstructor
+  simp only [ReaderT.bind, Bind.bind, run, Except.bind,
+    ReaderT.pure, Pure.pure, Except.pure]
+
+/-- Loop-level form of `inductiveConstCandidateObservable`, used by each
+recursive child of the canonical `Nat.succ` Pi candidate. -/
+theorem inductiveConstCandidateLoop
+    (context : AddInductive.Context) (constName : Name)
+    (info : InductiveVal) (result : Expr)
+    (depth whnfFuel candidateFuel : Nat)
+    (hdepth : context.fuel.recDepth = depth + 1)
+    (hwhnfFuel : context.fuel.whnf = whnfFuel + 1)
+    (hfind : context.env.find? constName = some (.inductInfo info))
+    (hlevels : info.levelParams = [])
+    (hunsafe : info.isUnsafe = false)
+    (htype : info.type = result) :
+    ∃ trace : AddInductive.CandidateExprTrace context (.const constName []),
+      AddInductive.buildCandidateExpr.loop context (.const constName [])
+        (candidateFuel + 1) = .ok trace := by
+  have hcheck := checkTypeInductiveConst context constName info result depth
+    hdepth hfind hlevels hunsafe htype
+  have hwhnf := whnfInductiveConst context constName info depth whnfFuel
+    hdepth hwhnfFuel hfind
+  exact ⟨_, AddInductive.buildCandidateExpr_loop_of_whnf_nonForall
+    context (.const constName []) result (.const constName []) candidateFuel
+      hcheck hwhnf rfl⟩
+
+/-- Reconstruct the canonical recursive `Nat.succ` candidate from its real
+constructor root check and the declared `Nat` family lookup. -/
+theorem natSuccCandidateObservable
+    (context : AddInductive.Context) (familyInfo : InductiveVal)
+    (binderName : Name) (binderInfo : BinderInfo) (inferred : Expr)
+    (familyLookup : context.env.find? ``Nat =
+      some (.inductInfo familyInfo))
+    (rootCheck : AddInductive.CandidateCheckTypeStep.Valid
+      ⟨context,
+        .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo,
+        inferred⟩)
+    (familyLevels : familyInfo.levelParams = [])
+    (familySafe : familyInfo.isUnsafe = false)
+    (familyType : familyInfo.type = .sort (.succ .zero))
+    (depthEq : context.fuel.recDepth = 10000)
+    (whnfEq : context.fuel.whnf = 100000)
+    (inductiveEq : context.fuel.inductiveFuel = 1000)
+    (emptyLctx : context.lctx = {}) :
+    AddInductive.CandidateExpr.Observable context
+      (.forallE binderName (.const ``Nat []) (.const ``Nat [])
+        binderInfo) := by
+  have rootWhnf : AddInductive.CandidateWhnfStep.Valid
+      ⟨context,
+        .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo,
+        .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo⟩ := by
+    apply TypeChecker.CandidateExprIdentityReplay.Shaped.candidateWhnfForallSource_refl
+      context _ 9999
+    · omega
+    · rfl
+  let annotations := AddInductive.builtCandidateTypeAnnotations
+    (.const ``Nat [])
+  have annotationsRun : AddInductive.buildCandidateTypeAnnotations
+      (.const ``Nat []) = .ok annotations :=
+    AddInductive.buildCandidateTypeAnnotations_built _
+  have annotationsConsumed : annotations.consumed = .const ``Nat [] := by
+    have hmatches := AddInductive.CandidateTypeAnnotations.matches_of_build
+      annotations annotationsRun
+    simpa [AddInductive.CandidateTypeAnnotations.Matches,
+      AddInductive.consumeTypeAnnotations] using hmatches
+  have annotationsEq : AddInductive.CandidateIsDefEqStep.Valid
+      ⟨context, .const ``Nat [], annotations.consumed⟩ := by
+    rw [annotationsConsumed]
+    exact AddInductive.candidateIsDefEqRefl context (.const ``Nat [])
+  obtain ⟨domainTrace, domainRun⟩ :=
+    inductiveConstCandidateLoop context ``Nat familyInfo
+      (.sort (.succ .zero)) 9999 99999 998
+      (by omega) (by omega) familyLookup familyLevels familySafe familyType
+  let bodyContext := context.pushLocalDecl binderName binderInfo
+    annotations.consumed
+  have bodyLookup : bodyContext.env.find? ``Nat =
+      some (.inductInfo familyInfo) := by
+    simpa [bodyContext, AddInductive.Context.pushLocalDecl] using familyLookup
+  obtain ⟨bodyTrace, bodyRun⟩ :=
+    inductiveConstCandidateLoop bodyContext ``Nat familyInfo
+      (.sort (.succ .zero)) 9999 99999 998
+      (by simpa [bodyContext, AddInductive.Context.pushLocalDecl] using depthEq)
+      (by simpa [bodyContext, AddInductive.Context.pushLocalDecl] using whnfEq)
+      bodyLookup familyLevels familySafe familyType
+  have bodySourceEq :
+      (Expr.const ``Nat []).instantiate1 context.freshExpr =
+        Expr.const ``Nat [] := by
+    simp [Expr.instantiate1_eq, Expr.instantiate1']
+  obtain ⟨bodyTrace', bodyRun'⟩ :
+      ∃ bodyTrace' : AddInductive.CandidateExprTrace
+          (context.pushLocalDecl binderName binderInfo annotations.consumed)
+          ((Expr.const ``Nat []).instantiate1 context.freshExpr),
+        AddInductive.buildCandidateExpr.loop
+            (context.pushLocalDecl binderName binderInfo annotations.consumed)
+            ((Expr.const ``Nat []).instantiate1 context.freshExpr) (998 + 1) =
+          .ok bodyTrace' := by
+    rw [bodySourceEq]
+    exact ⟨bodyTrace, by simpa only [bodyContext] using bodyRun⟩
+  have fresh : context.lctx.find? context.freshFVarId = none := by
+    rw [emptyLctx]
+    exact TypeChecker.emptyLocalContextFindNone _
+  let outerTrace : AddInductive.CandidateExprTrace context
+      (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo) :=
+    .forallE context
+      (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo)
+      inferred binderName (.const ``Nat []) (.const ``Nat []) binderInfo
+      fresh annotations annotationsEq rootCheck rootWhnf domainTrace bodyTrace'
+  have outerRun : AddInductive.buildCandidateExpr.loop context
+      (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo)
+      (999 + 1) = .ok outerTrace := by
+    exact AddInductive.buildCandidateExpr_loop_of_whnf_forall
+      context
+      (.forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo)
+      inferred 999 binderName (.const ``Nat []) (.const ``Nat []) binderInfo
+      fresh annotations annotationsRun annotationsEq rootCheck rootWhnf
+      domainTrace bodyTrace' domainRun bodyRun'
+  refine ⟨⟨context, outerTrace⟩, ?_⟩
+  unfold AddInductive.buildCandidateExpr
+  simp only [readThe, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  rw [show context.fuel.inductiveFuel = 999 + 1 by omega]
+  rw [outerRun]
+  rfl
+
+/-- The second root observation in a successful canonical `Nat` constructor
+validation run is precisely the full check needed by `Nat.succ`. -/
+theorem natSuccRootCheckOfConstructorRun
+    (stats : AddInductive.InductiveStats) (context : AddInductive.Context)
+    (binderName : Name) (binderInfo : BinderInfo)
+    (run : AddInductive.checkConstructors
+      #[natSource binderName binderInfo] stats false context = .ok ()) :
+    ∃ inferred, AddInductive.CandidateCheckTypeStep.Valid
+      ⟨context.withEmptyLocalContext,
+        .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo,
+        inferred⟩ := by
+  let validation := AddInductive.ConstructorBlockValidationRun.of_run run
+  cases validation.traces with
+  | cons constructors families =>
+    cases families
+    cases constructors with
+    | cons seen zero tail fresh closed zeroRoot zeroType rest =>
+      cases rest with
+      | cons seen succ tail fresh closed succRoot succType done =>
+        cases done
+        exact ⟨succRoot.inferred, succRoot.valid⟩
+
+/-- Canonical `Bool` validation and declaration discharge every recursive
+normalization observer needed to build the retained candidate execution. -/
+theorem boolCandidateObserversComplete
+    (env : Environment) (mapWF : env.constants.WF) :
+    AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+      0 [boolSource] 0 false
+        (AddInductive.Context.forInductive env [] false true {}) := by
+  let candidateContext :=
+    AddInductive.Context.forInductive env [] false true ({} : FuelConfig)
+  intro validation validationRun familyEnv declareRun _constructorRun
+  have familyObservable : AddInductive.CandidateFamilyType.Observable
+      { candidateContext with lctx := {} } boolSource :=
+    canonicalFamilyTypeObservable validationRun rfl
+  obtain ⟨statsEq, validationEq, _depth, _inductiveFuel,
+      _hdepth, _hinductive⟩ :=
+    canonicalSingletonValidationStatsAndFuel validationRun rfl
+  have boolStatsEq :
+      AddInductive.singletonInductiveStats candidateContext boolSource
+        (.succ .zero) = boolStats := by
+    rfl
+  have statsEq' : validation.stats = boolStats :=
+    statsEq.trans boolStatsEq
+  have declareRun' : AddInductive.declareInductiveTypes boolStats 0
+      #[boolSource] 0 false candidateContext = .ok familyEnv := by
+    simpa only [statsEq', validationEq] using declareRun
+  have declareTrace := AddInductive.DeclareInductiveInfoListRun.of_run (by
+    simpa only [AddInductive.declareInductiveTypes] using declareRun')
+  let familyInfo := AddInductive.singletonDeclaredInfo boolStats 0 0
+    boolSource 0 false candidateContext
+  have infosEq :
+      (AddInductive.declaredInductiveInfos boolStats 0 #[boolSource] 0 false
+        candidateContext).toList = [familyInfo] := by
+    exact AddInductive.declaredInductiveInfos_singleton boolStats 0 0
+      boolSource 0 false candidateContext rfl
+  have familyMember : familyInfo ∈
+      (AddInductive.declaredInductiveInfos boolStats 0 #[boolSource] 0 false
+        candidateContext).toList := by
+    rw [infosEq]
+    simp
+  have familyMapWF : familyEnv.constants.WF :=
+    declareTrace.map_wf mapWF
+  have familyLookupMap : familyEnv.constants.find? familyInfo.name =
+      some (.inductInfo familyInfo) :=
+    declareTrace.map_lookup mapWF familyMember
+  have familyLookup : familyEnv.find? ``Bool =
+      some (.inductInfo familyInfo) := by
+    change familyEnv.constants.find?' ``Bool = _
+    rw [familyMapWF.find?'_eq_find?]
+    simpa [familyInfo, AddInductive.singletonDeclaredInfo, boolSource] using
+      familyLookupMap
+  let constructorContext : AddInductive.Context :=
+    { candidateContext with env := familyEnv, lctx := {} }
+  have constObservable : AddInductive.CandidateExpr.Observable
+      constructorContext (.const ``Bool []) := by
+    apply inductiveConstCandidateObservable constructorContext ``Bool
+      familyInfo (.sort (.succ .zero)) 9999 99999 999
+    · rfl
+    · rfl
+    · rfl
+    · simpa [constructorContext] using familyLookup
+    · rfl
+    · rfl
+    · rfl
+  have falseObservable : AddInductive.CandidateConstructor.Observable
+      constructorContext ⟨``Bool.false, .const ``Bool []⟩ :=
+    candidateConstructorObservable_of_expr constObservable
+  have trueObservable : AddInductive.CandidateConstructor.Observable
+      constructorContext ⟨``Bool.true, .const ``Bool []⟩ :=
+    candidateConstructorObservable_of_expr constObservable
+  exact ⟨.cons familyObservable .nil,
+    .cons (.cons falseObservable (.cons trueObservable .nil)) .nil⟩
+
+/-- Canonical `Nat` validation and declaration discharge every recursive
+normalization observer, including both children of the `Nat.succ` Pi. -/
+theorem natCandidateObserversComplete
+    (env : Environment) (mapWF : env.constants.WF)
+    (binderName : Name) (binderInfo : BinderInfo) :
+    AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
+      0 [natSource binderName binderInfo] 0 false
+        (AddInductive.Context.forInductive env [] false true {}) := by
+  let candidateContext :=
+    AddInductive.Context.forInductive env [] false true ({} : FuelConfig)
+  intro validation validationRun familyEnv declareRun constructorRun
+  have familyObservable : AddInductive.CandidateFamilyType.Observable
+      { candidateContext with lctx := {} }
+        (natSource binderName binderInfo) :=
+    canonicalFamilyTypeObservable validationRun rfl
+  obtain ⟨statsEq, validationEq, _depth, _inductiveFuel,
+      _hdepth, _hinductive⟩ :=
+    canonicalSingletonValidationStatsAndFuel validationRun rfl
+  have natStatsEq :
+      AddInductive.singletonInductiveStats candidateContext
+        (natSource binderName binderInfo) (.succ .zero) = natStats := by
+    rfl
+  have statsEq' : validation.stats = natStats :=
+    statsEq.trans natStatsEq
+  have declareRun' : AddInductive.declareInductiveTypes natStats 0
+      #[natSource binderName binderInfo] 0 false candidateContext =
+        .ok familyEnv := by
+    simpa only [statsEq', validationEq] using declareRun
+  have declareTrace := AddInductive.DeclareInductiveInfoListRun.of_run (by
+    simpa only [AddInductive.declareInductiveTypes] using declareRun')
+  let familyInfo := AddInductive.singletonDeclaredInfo natStats 0 0
+    (natSource binderName binderInfo) 0 false candidateContext
+  have infosEq :
+      (AddInductive.declaredInductiveInfos natStats 0
+        #[natSource binderName binderInfo] 0 false
+          candidateContext).toList = [familyInfo] := by
+    exact AddInductive.declaredInductiveInfos_singleton natStats 0 0
+      (natSource binderName binderInfo) 0 false candidateContext rfl
+  have familyMember : familyInfo ∈
+      (AddInductive.declaredInductiveInfos natStats 0
+        #[natSource binderName binderInfo] 0 false
+          candidateContext).toList := by
+    rw [infosEq]
+    simp
+  have familyMapWF : familyEnv.constants.WF :=
+    declareTrace.map_wf mapWF
+  have familyLookupMap : familyEnv.constants.find? familyInfo.name =
+      some (.inductInfo familyInfo) :=
+    declareTrace.map_lookup mapWF familyMember
+  have familyLookup : familyEnv.find? ``Nat =
+      some (.inductInfo familyInfo) := by
+    change familyEnv.constants.find?' ``Nat = _
+    rw [familyMapWF.find?'_eq_find?]
+    simpa [familyInfo, AddInductive.singletonDeclaredInfo, natSource] using
+      familyLookupMap
+  let constructorBase : AddInductive.Context :=
+    { candidateContext with env := familyEnv }
+  let constructorContext : AddInductive.Context :=
+    { candidateContext with env := familyEnv, lctx := {} }
+  have constructorRun' : AddInductive.checkConstructors
+      #[natSource binderName binderInfo] natStats false constructorBase =
+        .ok () := by
+    simpa only [statsEq', validationEq, constructorBase] using constructorRun
+  obtain ⟨inferred, rootCheckBase⟩ :=
+    natSuccRootCheckOfConstructorRun natStats constructorBase
+      binderName binderInfo constructorRun'
+  have rootCheck : AddInductive.CandidateCheckTypeStep.Valid
+      ⟨constructorContext,
+        .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo,
+        inferred⟩ := by
+    simpa [constructorBase, constructorContext,
+      AddInductive.Context.withEmptyLocalContext] using rootCheckBase
+  have constObservable : AddInductive.CandidateExpr.Observable
+      constructorContext (.const ``Nat []) := by
+    apply inductiveConstCandidateObservable constructorContext ``Nat
+      familyInfo (.sort (.succ .zero)) 9999 99999 999
+    · rfl
+    · rfl
+    · rfl
+    · simpa [constructorContext] using familyLookup
+    · rfl
+    · rfl
+    · rfl
+  have zeroObservable : AddInductive.CandidateConstructor.Observable
+      constructorContext ⟨``Nat.zero, .const ``Nat []⟩ :=
+    candidateConstructorObservable_of_expr constObservable
+  have succExprObservable : AddInductive.CandidateExpr.Observable
+      constructorContext
+        (.forallE binderName (.const ``Nat []) (.const ``Nat [])
+          binderInfo) := by
+    apply natSuccCandidateObservable constructorContext familyInfo
+      binderName binderInfo inferred
+    · simpa [constructorContext] using familyLookup
+    · exact rootCheck
+    · rfl
+    · rfl
+    · rfl
+    · rfl
+    · rfl
+    · rfl
+    · rfl
+  have succObservable : AddInductive.CandidateConstructor.Observable
+      constructorContext
+        ⟨``Nat.succ,
+          .forallE binderName (.const ``Nat []) (.const ``Nat []) binderInfo⟩ :=
+    candidateConstructorObservable_of_expr succExprObservable
+  exact ⟨.cons familyObservable .nil,
+    .cons (.cons zeroObservable (.cons succObservable .nil)) .nil⟩
 
 /-- A constant cannot be normalized with an exhausted non-eager WHNF
 counter, even when the mutual checker recursion has positive depth. -/

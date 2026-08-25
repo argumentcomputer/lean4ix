@@ -1967,11 +1967,16 @@ theorem checkInductiveTypes_factor
     checkInductiveTypes_outerLoop_factor nparams indTypes.toArray 0
       (InductiveStats.initial (context.lparams.map .param)) k context
 
-/-- The exact residual observer contract after ordinary family validation and
-raw family declaration have succeeded.  It asks only for the recursive
-candidate-expression traversals that `AddInductive.run` does not itself
-perform: family types in the input environment and constructor types in the
-post-family environment. -/
+/-- The exact residual observer contract after ordinary family validation,
+raw family declaration, and constructor validation have succeeded.  It asks
+only for the recursive candidate-expression traversals that
+`AddInductive.run` does not itself perform: family types in the input
+environment and constructor types in the post-family environment.
+
+The constructor equation is intentionally part of the antecedent.  Besides
+being available from every successful public run, it carries the structural
+fuel information needed to replay recursive constructor types (for example
+the field of `Nat.succ`). -/
 def NormalizationCandidateExecution.CandidateObserversComplete
     (nparams : Nat) (types : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool)
@@ -1982,6 +1987,8 @@ def NormalizationCandidateExecution.CandidateObserversComplete
     ∀ (familyEnv : Environment),
       declareInductiveTypes validation.stats nparams types.toArray
           numNested isUnsafe validation.validationContext = .ok familyEnv →
+      checkConstructors types.toArray validation.stats isUnsafe
+          { validation.validationContext with env := familyEnv } = .ok () →
       CandidateFamilyTypeListObservable
           { candidateContext with lctx := {} } types ∧
         CandidateFamilyConstructorListsObservable
@@ -2007,7 +2014,7 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
       buildNormalizationCandidateExecution nparams types numNested isUnsafe
         candidateContext = .ok execution := by
   obtain ⟨familyTypeObservers, constructorObservers⟩ :=
-    observers validation validationRun familyEnv declareRun
+    observers validation validationRun familyEnv declareRun constructorRun
   obtain ⟨familyTypes, familyTypesRun⟩ :=
     executeCandidateFamilyTypeList_ok_of_observable familyTypeObservers
   unfold buildNormalizationCandidateExecution
