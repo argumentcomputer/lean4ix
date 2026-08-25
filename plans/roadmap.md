@@ -1888,11 +1888,13 @@ Three checker sorries remain:
   family, constructor, and recursor interpreters now construct those exact folds
   from the retained declaration equations, semantic list translations, and the
   weaker `Aligned` name-domain invariant; a primitive assembler connects their
-  endpoints directly to the public replay. The family and constructor
-  translation lists and the complete Bool/Nat generation `WF` are now derived
-  from the retained family fold, so the assembler has no separate semantic-WF
-  input. Next derive generated-recursor translation/insertion and the rule fold,
-  supply primitive readiness, derive
+  endpoints directly to the public replay. The family, constructor, and
+  generated-recursor translation lists, complete Bool/Nat generation `WF`,
+  exact recursor K target, and generated-rule fold are now derived from the
+  retained execution. A safety-indexed assembler constructs the coherent
+  canonical replay directly from the input `VEnvs.WF`, so the primitive
+  transaction boundary has no separate metadata, semantic-WF, or replay input.
+  Next supply primitive readiness, derive
   selecting-minor and persistent eta-rule
   certificates, and discharge the remaining recursive candidate observers
   before closing `addDecl.WF`.

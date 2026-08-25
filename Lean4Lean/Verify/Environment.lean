@@ -1,5 +1,6 @@
 import Lean4Lean.Verify.Environment.Quotient
 import Lean4Lean.Verify.Environment.NormalizationElimination
+import Lean4Lean.Verify.Environment.PrimitiveRecursors
 
 namespace Lean4Lean
 open Lean4Lean
@@ -1020,6 +1021,534 @@ noncomputable def AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveC
       simpa only [initialEq] using pre
     exact initialAligned.addInductConstants families.addTypes
 
+namespace AddInductive.EnvironmentInductiveExecution
+
+private theorem canonicalSingletonStatsAndFuelOfEq
+    {context : AddInductive.Context} {indType : InductiveType}
+    {types : List InductiveType} {numNested : Nat} {isUnsafe : Bool}
+    {candidate : AddInductive.NormalizationCandidateExecution 0 types
+      numNested isUnsafe context}
+    (types_eq : types = [indType])
+    (produced : AddInductive.buildNormalizationCandidateExecution 0 types
+      numNested isUnsafe context = .ok candidate)
+    (type_eq : indType.type = .sort (.succ .zero)) :
+    candidate.stats =
+        AddInductive.singletonInductiveStats context indType (.succ .zero) ∧
+      candidate.validationContext = context ∧
+      ∃ depth inductiveFuel,
+        context.fuel.recDepth = depth + 1 ∧
+          context.fuel.inductiveFuel = inductiveFuel + 1 := by
+  subst types
+  exact AddInductive.PrimitiveRecursorReplay.canonicalSingletonStatsAndFuel
+    produced type_eq
+
+private theorem boolLargeResultOfRun
+    {stats : AddInductive.InductiveStats}
+    {indTypes : List InductiveType} {context : AddInductive.Context}
+    {result : Bool}
+    (stats_eq : stats = AddInductive.PrimitiveRecursorReplay.boolStats)
+    (types_eq : indTypes =
+      [AddInductive.PrimitiveRecursorReplay.boolSource])
+    (run : AddInductive.isLargeEliminator stats indTypes.toArray context =
+      .ok result) : result = true := by
+  subst stats
+  subst indTypes
+  simp [AddInductive.isLargeEliminator,
+    AddInductive.PrimitiveRecursorReplay.boolStats,
+    ReaderT.pure, Pure.pure, Except.pure] at run
+  exact run
+
+private theorem boolKTargetResultOfRun
+    {stats : AddInductive.InductiveStats}
+    {indTypes : List InductiveType} {context : AddInductive.Context}
+    {result : Bool}
+    (stats_eq : stats = AddInductive.PrimitiveRecursorReplay.boolStats)
+    (types_eq : indTypes =
+      [AddInductive.PrimitiveRecursorReplay.boolSource])
+    (run : AddInductive.isKTarget stats indTypes.toArray context = .ok result) :
+    result = false := by
+  subst stats
+  subst indTypes
+  have expected : AddInductive.isKTarget
+      AddInductive.PrimitiveRecursorReplay.boolStats
+      #[AddInductive.PrimitiveRecursorReplay.boolSource] context =
+      .ok false := by
+    rfl
+  exact Except.ok.inj (run.symm.trans expected)
+
+private theorem natLargeResultOfRun
+    {stats : AddInductive.InductiveStats}
+    {indTypes : List InductiveType} {context : AddInductive.Context}
+    {result : Bool} (binderName : Name) (binderInfo : BinderInfo)
+    (stats_eq : stats = AddInductive.PrimitiveRecursorReplay.natStats)
+    (types_eq : indTypes =
+      [AddInductive.PrimitiveRecursorReplay.natSource binderName binderInfo])
+    (run : AddInductive.isLargeEliminator stats indTypes.toArray context =
+      .ok result) : result = true := by
+  subst stats
+  subst indTypes
+  simp [AddInductive.isLargeEliminator,
+    AddInductive.PrimitiveRecursorReplay.natStats,
+    ReaderT.pure, Pure.pure, Except.pure] at run
+  exact run
+
+private theorem natKTargetResultOfRun
+    {stats : AddInductive.InductiveStats}
+    {indTypes : List InductiveType} {context : AddInductive.Context}
+    {result : Bool} (binderName : Name) (binderInfo : BinderInfo)
+    (stats_eq : stats = AddInductive.PrimitiveRecursorReplay.natStats)
+    (types_eq : indTypes =
+      [AddInductive.PrimitiveRecursorReplay.natSource binderName binderInfo])
+    (run : AddInductive.isKTarget stats indTypes.toArray context = .ok result) :
+    result = false := by
+  subst stats
+  subst indTypes
+  have expected : AddInductive.isKTarget
+      AddInductive.PrimitiveRecursorReplay.natStats
+      #[AddInductive.PrimitiveRecursorReplay.natSource binderName binderInfo]
+      context = .ok false := by
+    rfl
+  exact Except.ok.inj (run.symm.trans expected)
+
+/-- Reconstruct the exact translation of every recursor record emitted by a
+recognized primitive execution.  All operational choices are recovered from
+the retained normalization/elimination run; alignment is used only to recover
+the implementation family lookup needed by recursive Nat synthesis. -/
+theorem canonicalPrimitiveRecursorEvidence
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv) (inputOrdered : input.Ordered)
+    (pre : Aligned safety env.constants input)
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants)
+    (constructors : VInductDecl.ConstructorDeclarationInsertionRun
+      execution.flattened.eliminationExecution.constructorContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.constructorEnv
+      execution.flattened.eliminationExecution.declaredConstructorInfos
+      families.blockEnv
+      (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants) :
+    List.Forall₂
+      (fun info raw => TrConstVal .safe constructors.ctorEnv
+        (.recInfo info) raw)
+      execution.flattened.recursors.infos
+      (VPrimitiveInductive.canonicalGeneration types).recursors := by
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have generationWF := execution.canonicalPrimitiveGenerationWF
+    primitiveResult input families
+  have generationEnv :=
+    AddInductive.PrimitiveRecursorReplay.generationEnv_of_insertion
+      inputOrdered generationWF families.addTypes constructors.addCtors
+  have initialAligned : Aligned safety
+      execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+      input := by
+    simpa only [execution.flattenedValidationEnv_eq] using pre
+  have familyMapWF := families.addTypes.map_wf initialAligned.map_wf
+  have constructorMapWF := constructors.addCtors.map_wf familyMapWF
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨safe, lparamsEq, nparamsEq, shape⟩ := recognized
+  obtain ⟨type, typesEq, typeType, primitive⟩ := shape
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, constructorsEq⟩ := boolShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.boolSource := by
+        cases type
+        subst typeName
+        subst typeType
+        subst constructorsEq
+        rfl
+      subst type
+      subst types
+      subst lparams
+      subst nparams
+      subst isUnsafe
+      have nestedTypesEq : execution.nested.types =
+          [AddInductive.PrimitiveRecursorReplay.boolSource] := noop.1
+      have normalizationRun :=
+        execution.flattened.normalization_run execution.flattenedRun
+      obtain ⟨statsEq, validationEq, depth, inductiveFuel, depthEq,
+          inductiveEq⟩ :=
+        canonicalSingletonStatsAndFuelOfEq nestedTypesEq
+          normalizationRun (by rfl)
+      have boolStatsEq :
+          execution.flattened.eliminationExecution.normalization.stats =
+            AddInductive.PrimitiveRecursorReplay.boolStats := by
+        rw [statsEq]
+        rfl
+      have validationEq' :
+          execution.flattened.eliminationExecution.normalization.validationContext =
+            AddInductive.Context.forInductive env [] false true fuel :=
+        validationEq
+      have largeResult :
+          execution.flattened.eliminationExecution.elimination.large.result =
+            true := by
+        apply boolLargeResultOfRun boolStatsEq
+        · exact nestedTypesEq
+        · exact execution.flattened.eliminationExecution.elimination.large.run_eq
+      have elimLevel :
+          execution.flattened.eliminationExecution.elimination.level =
+            .param `u := by
+        rw [execution.flattened.eliminationExecution.elimination.level_eq_param
+          largeResult]
+        simp [validationEq', AddInductive.Context.forInductive,
+          AddInductive.getFreshElimParam,
+          AddInductive.getFreshElimParam.loop]
+      have kTarget :
+          execution.flattened.eliminationExecution.kTarget.result = false := by
+        apply boolKTargetResultOfRun boolStatsEq
+        · exact nestedTypesEq
+        · exact execution.flattened.eliminationExecution.kTarget.run_eq
+      let root : AddInductive.Context := {
+        execution.flattened.eliminationExecution.normalization.validationContext with
+        env := execution.flattened.eliminationExecution.constructorEnv }
+      have rootEq : root = {
+          AddInductive.Context.forInductive env [] false true fuel with
+          env := execution.flattened.eliminationExecution.constructorEnv } := by
+        simp only [root, validationEq']
+      have rootRun : TypeChecker.CandidateLocalContextRun root := by
+        apply TypeChecker.CandidateLocalContextRun.empty root
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootLparams : root.lparams = [] := by
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootSafety : root.safety = .safe := by
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootDepth : root.fuel.recDepth = depth + 1 := by
+        simpa [rootEq, AddInductive.Context.forInductive] using depthEq
+      have rootInductive : root.fuel.inductiveFuel = inductiveFuel + 1 := by
+        simpa [rootEq, AddInductive.Context.forInductive] using inductiveEq
+      have rootWhnf : TypeChecker.M.run root.env root.safety root.lctx
+          root.lparams root.fuel
+          (TypeChecker.whnf
+            AddInductive.PrimitiveRecursorReplay.boolSource.type) =
+            .ok (.sort (.succ .zero)) := by
+        simpa [AddInductive.PrimitiveRecursorReplay.boolSource] using
+          AddInductive.PrimitiveRecursorReplay.whnfSortOne root depth rootDepth
+      have recursorsRun : AddInductive.declareRecursors
+          AddInductive.PrimitiveRecursorReplay.boolStats
+          #[AddInductive.PrimitiveRecursorReplay.boolSource]
+          (.param `u) false root = .ok execution.flattened.recursors := by
+        simpa only [root, boolStatsEq, nestedTypesEq, elimLevel, kTarget] using
+          execution.flattened.recursorsRun
+      have expected :=
+        AddInductive.PrimitiveRecursorReplay.boolExpectedRecursorTranslation
+          generationEnv
+      have evidence :=
+        AddInductive.PrimitiveRecursorReplay.declareRecursors_bool_evidence
+          root rootRun rootLparams rootSafety rootWhnf rootInductive
+          recursorsRun expected
+      change List.Forall₂
+        (fun info raw => TrConstVal .safe constructors.ctorEnv
+          (.recInfo info) raw)
+        execution.flattened.recursors.infos
+        VPrimitiveInductive.boolGeneration.recursors
+      rw [show VPrimitiveInductive.boolGeneration.recursors =
+        [VPrimitiveInductive.boolGeneration.recursors[0]] by rfl]
+      exact evidence
+  | inr natShape =>
+      obtain ⟨typeName, binderName, binderInfo, constructorsEq⟩ := natShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo := by
+        cases type
+        subst typeName
+        subst typeType
+        subst constructorsEq
+        rfl
+      subst type
+      subst types
+      subst lparams
+      subst nparams
+      subst isUnsafe
+      have nestedTypesEq : execution.nested.types =
+          [AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo] := noop.1
+      have normalizationRun :=
+        execution.flattened.normalization_run execution.flattenedRun
+      obtain ⟨statsEq, validationEq, depth, inductiveFuel, depthEq,
+          inductiveEq⟩ :=
+        canonicalSingletonStatsAndFuelOfEq nestedTypesEq
+          normalizationRun (by rfl)
+      have natStatsEq :
+          execution.flattened.eliminationExecution.normalization.stats =
+            AddInductive.PrimitiveRecursorReplay.natStats := by
+        rw [statsEq]
+        rfl
+      have validationEq' :
+          execution.flattened.eliminationExecution.normalization.validationContext =
+            AddInductive.Context.forInductive env [] false true fuel :=
+        validationEq
+      have largeResult :
+          execution.flattened.eliminationExecution.elimination.large.result =
+            true := by
+        apply natLargeResultOfRun binderName binderInfo natStatsEq
+        · exact nestedTypesEq
+        · exact execution.flattened.eliminationExecution.elimination.large.run_eq
+      have elimLevel :
+          execution.flattened.eliminationExecution.elimination.level =
+            .param `u := by
+        rw [execution.flattened.eliminationExecution.elimination.level_eq_param
+          largeResult]
+        simp [validationEq', AddInductive.Context.forInductive,
+          AddInductive.getFreshElimParam,
+          AddInductive.getFreshElimParam.loop]
+      have kTarget :
+          execution.flattened.eliminationExecution.kTarget.result = false := by
+        apply natKTargetResultOfRun binderName binderInfo natStatsEq
+        · exact nestedTypesEq
+        · exact execution.flattened.eliminationExecution.kTarget.run_eq
+      let root : AddInductive.Context := {
+        execution.flattened.eliminationExecution.normalization.validationContext with
+        env := execution.flattened.eliminationExecution.constructorEnv }
+      have rootEq : root = {
+          AddInductive.Context.forInductive env [] false true fuel with
+          env := execution.flattened.eliminationExecution.constructorEnv } := by
+        simp only [root, validationEq']
+      have rootRun : TypeChecker.CandidateLocalContextRun root := by
+        apply TypeChecker.CandidateLocalContextRun.empty root
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootLparams : root.lparams = [] := by
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootSafety : root.safety = .safe := by
+        simp [rootEq, AddInductive.Context.forInductive]
+      have rootDepth : root.fuel.recDepth = depth + 1 := by
+        simpa [rootEq, AddInductive.Context.forInductive] using depthEq
+      have rootWhnf : TypeChecker.M.run root.env root.safety root.lctx
+          root.lparams root.fuel
+          (TypeChecker.whnf
+            (AddInductive.PrimitiveRecursorReplay.natSource
+              binderName binderInfo).type) =
+            .ok (.sort (.succ .zero)) := by
+        simpa [AddInductive.PrimitiveRecursorReplay.natSource] using
+          AddInductive.PrimitiveRecursorReplay.whnfSortOne root depth rootDepth
+      have recursorsRun : AddInductive.declareRecursors
+          AddInductive.PrimitiveRecursorReplay.natStats
+          #[AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo]
+          (.param `u) false root = .ok execution.flattened.recursors := by
+        simpa only [root, natStatsEq, nestedTypesEq, elimLevel, kTarget] using
+          execution.flattened.recursorsRun
+      have rootInductivePositive : root.fuel.inductiveFuel =
+          inductiveFuel + 1 := by
+        simpa [rootEq, AddInductive.Context.forInductive] using inductiveEq
+      obtain ⟨rootWhnfFuel, rootInductive⟩ :=
+        AddInductive.PrimitiveRecursorReplay.declareRecursors_nat_fuel
+          root binderName binderInfo depth rootDepth inductiveFuel
+          rootInductivePositive rootWhnf recursorsRun
+      have natFamilyMember : VPrimitiveInductive.natType.toVConstVal ∈
+          (VPrimitiveInductive.canonicalDecl
+            [AddInductive.PrimitiveRecursorReplay.natSource
+              binderName binderInfo]).blockTypeConstants := by
+        simp [VPrimitiveInductive.canonicalDecl,
+          VInductDecl.blockTypeConstants, VPrimitiveInductive.natDecl,
+          VPrimitiveInductive.natType,
+          AddInductive.PrimitiveRecursorReplay.natSource]
+      obtain ⟨familyConstant, familyLookup, familyKind, _familyTranslation⟩ :=
+        families.addTypes.translated_lookup initialAligned.map_wf
+          natFamilyMember
+      have familyLookup' := constructors.addCtors.preserve_map_lookup
+        familyMapWF familyLookup
+      have rootMapWF : root.env.constants.WF := by
+        simpa only [root] using constructorMapWF
+      have rootFindConstant : root.env.find? ``Nat = some familyConstant := by
+        change root.env.constants.find?' ``Nat = some familyConstant
+        rw [rootMapWF.find?'_eq_find?]
+        simpa [root, VPrimitiveInductive.natType] using familyLookup'
+      have familyLookupFinal : ∃ familyInfo,
+          root.env.find? ``Nat = some (.inductInfo familyInfo) := by
+        cases familyConstant <;>
+          simp_all [InductConstantKind.Matches]
+      obtain ⟨familyInfo, rootFind⟩ := familyLookupFinal
+      obtain ⟨whnfFuel, rootWhnfFuel⟩ := rootWhnfFuel
+      obtain ⟨recFuel, rootInductive⟩ := rootInductive
+      have expected :=
+        AddInductive.PrimitiveRecursorReplay.natExpectedRecursorTranslation
+          generationEnv
+      have evidence :=
+        AddInductive.PrimitiveRecursorReplay.declareRecursors_nat_evidence
+          root binderName binderInfo rootRun rootLparams rootSafety familyInfo
+          rootFind rootWhnf rootDepth rootWhnfFuel rootInductive
+          recursorsRun expected
+      change List.Forall₂
+        (fun info raw => TrConstVal .safe constructors.ctorEnv
+          (.recInfo info) raw)
+        execution.flattened.recursors.infos
+        VPrimitiveInductive.natGeneration.recursors
+      rw [show VPrimitiveInductive.natGeneration.recursors =
+        [VPrimitiveInductive.natGeneration.recursors[0]] by rfl]
+      exact evidence
+
+/-- The K-like flag retained by primitive recursor declaration is the flag of
+the recognizer-selected canonical generation. -/
+theorem canonicalPrimitiveKTarget_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) :
+    execution.flattened.recursors.kTarget =
+      (VPrimitiveInductive.canonicalGeneration types).kTarget := by
+  have noop := execution.canonicalPrimitive_noop primitiveResult
+  have recognized := primitiveResult.recognized rfl
+  obtain ⟨safe, lparamsEq, nparamsEq, shape⟩ := recognized
+  obtain ⟨type, typesEq, typeType, primitive⟩ := shape
+  cases primitive with
+  | inl boolShape =>
+      obtain ⟨typeName, constructorsEq⟩ := boolShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.boolSource := by
+        cases type
+        subst typeName
+        subst typeType
+        subst constructorsEq
+        rfl
+      subst type
+      subst types
+      subst lparams
+      subst nparams
+      subst isUnsafe
+      have nestedTypesEq : execution.nested.types =
+          [AddInductive.PrimitiveRecursorReplay.boolSource] := noop.1
+      have normalizationRun :=
+        execution.flattened.normalization_run execution.flattenedRun
+      have normalized := canonicalSingletonStatsAndFuelOfEq
+        nestedTypesEq normalizationRun (by rfl)
+      have statsEq :
+          execution.flattened.eliminationExecution.normalization.stats =
+            AddInductive.PrimitiveRecursorReplay.boolStats := by
+        rw [normalized.1]
+        rfl
+      have resultFalse :
+          execution.flattened.eliminationExecution.kTarget.result = false := by
+        exact boolKTargetResultOfRun statsEq nestedTypesEq
+          execution.flattened.eliminationExecution.kTarget.run_eq
+      calc
+        execution.flattened.recursors.kTarget =
+            execution.flattened.eliminationExecution.kTarget.result :=
+          AddInductive.declareRecursors_kTarget_eq
+            execution.flattened.recursorsRun
+        _ = false := resultFalse
+        _ = (VPrimitiveInductive.canonicalGeneration
+            [AddInductive.PrimitiveRecursorReplay.boolSource]).kTarget := by
+          rfl
+  | inr natShape =>
+      obtain ⟨typeName, binderName, binderInfo, constructorsEq⟩ := natShape
+      have typeEq : type =
+          AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo := by
+        cases type
+        subst typeName
+        subst typeType
+        subst constructorsEq
+        rfl
+      subst type
+      subst types
+      subst lparams
+      subst nparams
+      subst isUnsafe
+      have nestedTypesEq : execution.nested.types =
+          [AddInductive.PrimitiveRecursorReplay.natSource
+            binderName binderInfo] := noop.1
+      have normalizationRun :=
+        execution.flattened.normalization_run execution.flattenedRun
+      have normalized := canonicalSingletonStatsAndFuelOfEq
+        nestedTypesEq normalizationRun (by rfl)
+      have statsEq :
+          execution.flattened.eliminationExecution.normalization.stats =
+            AddInductive.PrimitiveRecursorReplay.natStats := by
+        rw [normalized.1]
+        rfl
+      have resultFalse :
+          execution.flattened.eliminationExecution.kTarget.result = false := by
+        exact natKTargetResultOfRun binderName binderInfo statsEq nestedTypesEq
+          execution.flattened.eliminationExecution.kTarget.run_eq
+      calc
+        execution.flattened.recursors.kTarget =
+            execution.flattened.eliminationExecution.kTarget.result :=
+          AddInductive.declareRecursors_kTarget_eq
+            execution.flattened.recursorsRun
+        _ = false := resultFalse
+        _ = (VPrimitiveInductive.canonicalGeneration
+            [AddInductive.PrimitiveRecursorReplay.natSource
+              binderName binderInfo]).kTarget := by
+          rfl
+
+/-- Interpret the retained primitive recursor declaration directly after the
+canonical constructor insertion. -/
+noncomputable def canonicalPrimitiveRecursorInsertion
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv) (inputOrdered : input.Ordered)
+    (pre : Aligned safety env.constants input)
+    (families : VInductDecl.FamilyDeclarationInsertionRun
+      execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.validationContext.env
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.normalization.declaredInfos
+      input (VPrimitiveInductive.canonicalDecl types).blockTypeConstants)
+    (constructors : VInductDecl.ConstructorDeclarationInsertionRun
+      execution.flattened.eliminationExecution.constructorContext.allowPrimitive
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      execution.flattened.eliminationExecution.constructorEnv
+      execution.flattened.eliminationExecution.declaredConstructorInfos
+      families.blockEnv
+      (VPrimitiveInductive.canonicalDecl types).blockConstructorConstants) :
+    VInductDecl.RecursorDeclarationInsertionRun
+      execution.flattened.recursors.allowPrimitive
+      execution.flattened.recursors.initialEnv
+      execution.flattened.recursors.env execution.flattened.recursors.infos
+      constructors.ctorEnv
+      (VPrimitiveInductive.canonicalGeneration types).recursors
+      (VPrimitiveInductive.canonicalGeneration types).kTarget := by
+  apply VInductDecl.recursorDeclarationInsertion
+  · exact execution.flattened.recursors.trace.run
+  · exact execution.canonicalPrimitiveRecursorEvidence primitiveResult
+      input inputOrdered pre families constructors
+  · intro info member
+    rw [← execution.canonicalPrimitiveKTarget_eq primitiveResult]
+    exact execution.flattened.recursors.infos_kTarget info member
+  · have initialAligned : Aligned safety
+        execution.flattened.eliminationExecution.normalization.validationContext.env.constants
+        input := by
+      simpa only [execution.flattenedValidationEnv_eq] using pre
+    have constructorAligned :=
+      (initialAligned.addInductConstants families.addTypes).addInductConstants
+        constructors.addCtors
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      constructorAligned
+
+/-- The canonical Theory environment after registering every generated
+reduction rule.  Host rule metadata is already carried by the recursor record;
+the Theory-side transaction is the deterministic `addDefEq` fold. -/
+def canonicalPrimitiveRuleOutput (types : List InductiveType)
+    (recEnv : VEnv) : VEnv :=
+  (VPrimitiveInductive.canonicalGeneration types).generatedRules.foldl
+    VEnv.addDefEq recEnv
+
+/-- Witness the exact generated-rule tail of a canonical primitive
+transaction. -/
+theorem canonicalPrimitiveRuleInsertion
+    (types : List InductiveType) (recEnv : VEnv) : AddDefEqs recEnv
+      (VPrimitiveInductive.canonicalGeneration types).generatedRules
+      (canonicalPrimitiveRuleOutput types recEnv) :=
+  ⟨rfl⟩
+
+end AddInductive.EnvironmentInductiveExecution
+
 /-- In the ordinary branch, the environment produced by the retained recursor
 declaration is definitionally the outer execution's final environment. -/
 theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
@@ -1199,6 +1728,58 @@ def toTrace
 
 end AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveReplay
 
+/-- The pointwise output selected by replaying the retained family,
+constructor, and recursor declarations and then folding the canonical
+generated rules. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.canonicalPrimitivePointwiseOutput
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv) (inputOrdered : input.Ordered)
+    (pre : Aligned safety env.constants input) : VEnv :=
+  let families :=
+    execution.canonicalPrimitiveFamilyInsertion primitiveResult input pre
+  let constructors :=
+    execution.canonicalPrimitiveConstructorInsertion primitiveResult input pre
+      families
+  let recursors :=
+    execution.canonicalPrimitiveRecursorInsertion primitiveResult input
+      inputOrdered pre families constructors
+  AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRuleOutput
+    types recursors.recEnv
+
+/-- Construct the complete canonical primitive replay at one safety-indexed
+input model directly from the retained outer execution. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (input : VEnv) (inputOrdered : input.Ordered)
+    (pre : Aligned safety env.constants input) :
+    execution.CanonicalPrimitiveReplay input
+      (execution.canonicalPrimitivePointwiseOutput primitiveResult input
+        inputOrdered pre) := by
+  let families :=
+    execution.canonicalPrimitiveFamilyInsertion primitiveResult input pre
+  let constructors :=
+    execution.canonicalPrimitiveConstructorInsertion primitiveResult input pre
+      families
+  let recursors :=
+    execution.canonicalPrimitiveRecursorInsertion primitiveResult input
+      inputOrdered pre families constructors
+  exact CanonicalPrimitiveReplay.ofInsertions families primitiveResult
+    constructors recursors
+    (AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRuleInsertion
+      types recursors.recEnv)
+
 /-- The fixed canonical generation replayed against every safety-indexed input
 model.  Coherence is structural: every pointwise trace below is assembled from
 that generation and the same retained kernel execution. -/
@@ -1246,6 +1827,26 @@ def trace
   rfl
 
 end AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay
+
+/-- Assemble the safety-indexed canonical primitive replay from an input
+environment model.  Ordering and alignment at each safety level are projected
+from the existing translation history. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveCoherentReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe true fuel finalEnv)
+    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
+      true) (ves : VEnvs) (wf : ves.WF env) :
+    execution.CoherentCanonicalPrimitiveReplay ves where
+  output := ⟨fun safety =>
+    execution.canonicalPrimitivePointwiseOutput primitiveResult
+      (ves.venv safety) (wf.tr.wf.ordered) (wf.tr.aligned)⟩
+  replays safety :=
+    execution.canonicalPrimitiveReplay primitiveResult (ves.venv safety)
+      (wf.tr.wf.ordered) (wf.tr.aligned)
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationEnv_eq' depends on axioms: [propext,
@@ -1312,6 +1913,131 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveCo
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveConstructorInsertion
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRecursorEvidence' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRecursorEvidence
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveKTarget_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.looseBVarRange_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveKTarget_eq
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRecursorInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRecursorInsertion
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRuleInsertion' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRuleInsertion
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveReplay' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveReplay
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveCoherentReplay' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.looseBVarRange_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveCoherentReplay
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final' depends on axioms: [propext,

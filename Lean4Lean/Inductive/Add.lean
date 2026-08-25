@@ -96,6 +96,10 @@ instance (priority := low+1) : MonadWithReaderOf LocalContext M where
 instance : MonadLCtx M where
   getLCtx := return (← read).lctx
 
+@[simp] theorem getLCtx_apply (context : Context) :
+    (getLCtx : M LocalContext) context = .ok context.lctx := by
+  rfl
+
 @[simp] theorem withLocalDecl_apply
     (name : Name) (binderInfo : BinderInfo) (type : Expr)
     (k : Expr → M α) (context : Context) :
@@ -3278,7 +3282,11 @@ structure RecursorDeclarationResult where
   env : Environment
   trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
 
-private structure RecursorDeclarationTail
+/-- The source-ordered result of the transparent recursor worker before it is
+repackaged with its reader-context provenance.  This is public so downstream
+verification can reason from the retained producer equation without
+reimplementing recursor synthesis. -/
+structure RecursorDeclarationTail
     (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool) where
   infos : List RecursorVal
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
@@ -3286,6 +3294,54 @@ private structure RecursorDeclarationTail
   trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
 
 namespace declareRecursors
+
+/-- The inferred-implicit recursor type assembled from the local declarations
+created by `mkRecInfos`. -/
+def generatedRecursorType (stats : InductiveStats)
+    (motives minors : Array Expr) (lctx : LocalContext) (info : RecInfo) : Expr :=
+  (lctx.mkForall stats.params <|
+    lctx.mkForall motives <|
+    lctx.mkForall minors <|
+    lctx.mkForall info.indices <|
+    lctx.mkForall #[info.major] <|
+    .app (mkAppN info.motive info.indices) info.major).inferImplicit 1000 false
+
+/-- Pure assembly of one generated recursor record once its rules have been
+synthesized.  Its translation-visible header does not depend on `rules`. -/
+def generatedRecursorVal (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
+    (motives minors : Array Expr) (lctx : LocalContext)
+    (lparams : List Name) (isUnsafe : Bool) (dIdx : Nat)
+    (indType : InductiveType) (info : RecInfo)
+    (rules : List RecursorRule) : RecursorVal := {
+  name := mkRecName indType.name
+  levelParams := getRecLevelParams elimLevel lparams
+  type := generatedRecursorType stats motives minors lctx info
+  all := indTypes.map (·.name) |>.toList
+  numParams := stats.params.size
+  numIndices := stats.nindices[dIdx]!
+  numMotives := motives.size
+  numMinors := minors.size
+  rules, k, isUnsafe }
+
+/-- Data-level wrapper for the successful name-check equation retained by the
+recursor declaration worker. -/
+structure NameCheckCertificate (env : Environment) (name : Name)
+    (allowPrimitive : Bool) : Type where
+  run : env.checkName name allowPrimitive = .ok ()
+
+/-- Check one generated recursor name while retaining the successful kernel
+equation needed by the declaration trace.  Keeping the certificate in an
+ordinary `Except` result avoids making the remainder of recursor synthesis
+depend on the equation compiler's match proof. -/
+def checkNameCertificate (env : Environment) (name : Name)
+    (allowPrimitive : Bool) :
+    Except Exception (NameCheckCertificate env name allowPrimitive) :=
+  match hcheck : env.checkName name allowPrimitive with
+  | .error error => .error error
+  | .ok value =>
+      have value_eq : value = () := Subsingleton.elim _ _
+      .ok { run := hcheck.trans (congrArg Except.ok value_eq) }
 
 /-- Generate and install one recursor per family.  The rule-state counter is
 threaded across the whole block, and each name is checked immediately after
@@ -3301,39 +3357,23 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
       if h : dIdx < indTypes.size then
         let indType := indTypes[dIdx]
         let info := recInfos[dIdx]!
-        let ty :=
-          lctx.mkForall stats.params <|
-          lctx.mkForall motives <|
-          lctx.mkForall minors <|
-          lctx.mkForall info.indices <|
-          lctx.mkForall #[info.major] <|
-          .app (mkAppN info.motive info.indices) info.major
         let rules ← mkRecRules indTypes elimLevel stats dIdx motives minors
         let name := mkRecName indType.name
-        let recursor : RecursorVal := {
-          levelParams := getRecLevelParams elimLevel lparams
-          type := ty.inferImplicit 1000 false
-          numParams := stats.params.size
-          numIndices := stats.nindices[dIdx]!
-          name, all := indTypes.map (·.name) |>.toList
-          numMotives := motives.size
-          numMinors := minors.size
-          rules, k, isUnsafe }
-        match hcheck : env.checkName name allowPrimitive with
-        | .error error => throw error
-        | .ok () =>
-          let tail ← loop stats indTypes elimLevel k recInfos motives minors lctx
-            lparams isUnsafe allowPrimitive (dIdx + 1)
-              (env.add (.recInfo recursor))
-          pure {
-            infos := recursor :: tail.infos
-            infos_kTarget := by
-              intro other member
-              rcases List.mem_cons.mp member with rfl | member
-              · rfl
-              · exact tail.infos_kTarget other member
-            env := tail.env
-            trace := .cons hcheck tail.trace }
+        let recursor := generatedRecursorVal stats indTypes elimLevel k motives
+          minors lctx lparams isUnsafe dIdx indType info rules
+        let hcheck ← checkNameCertificate env name allowPrimitive
+        let tail ← loop stats indTypes elimLevel k recInfos motives minors lctx
+          lparams isUnsafe allowPrimitive (dIdx + 1)
+            (env.add (.recInfo recursor))
+        pure {
+          infos := recursor :: tail.infos
+          infos_kTarget := by
+            intro other member
+            rcases List.mem_cons.mp member with rfl | member
+            · rfl
+            · exact tail.infos_kTarget other member
+          env := tail.env
+          trace := .cons hcheck.run tail.trace }
       else
         pure {
           infos := []
@@ -3342,9 +3382,61 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
           trace := .nil }
 termination_by dIdx _ => indTypes.size - dIdx
 
+/-- A successful singleton-family worker emits exactly the recursor assembled
+from its first family and `RecInfo`.  Only the generated rule payload remains
+existential, so consumers of the translation-visible header need not evaluate
+`mkRecRules`. -/
+theorem loop_singleton_infos_eq
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {k : Bool} {recInfos : Array RecInfo}
+    {motives minors : Array Expr} {lctx : LocalContext}
+    {lparams : List Name} {isUnsafe allowPrimitive : Bool}
+    {env : Environment} {state : Nat} {context : Context}
+    {tail : RecursorDeclarationTail allowPrimitive env k}
+    (hindex : 0 < indTypes.size)
+    (size_eq : indTypes.size = 1)
+    (run : StateT.run'
+      (loop stats indTypes elimLevel k recInfos motives minors lctx lparams
+        isUnsafe allowPrimitive 0 env) state context = .ok tail) :
+    ∃ rules, tail.infos =
+      [generatedRecursorVal stats indTypes elimLevel k motives minors lctx
+        lparams isUnsafe 0 indTypes[0] recInfos[0]! rules] := by
+  rw [loop.eq_1] at run
+  rw [dif_pos hindex] at run
+  dsimp only at run
+  simp only [StateT.run', StateT.bind, ReaderT.bind, Bind.bind,
+    Functor.map, Except.map] at run
+  cases hrules : mkRecRules indTypes elimLevel stats 0 motives minors state
+      context with
+  | error error =>
+      rw [hrules] at run
+      contradiction
+  | ok rulesState =>
+      rw [hrules] at run
+      simp only [Except.bind] at run
+      cases hcheck : checkNameCertificate env
+          (mkRecName indTypes[0].name) allowPrimitive with
+      | error error =>
+          rw [hcheck] at run
+          contradiction
+      | ok certificate =>
+          rw [hcheck] at run
+          dsimp [liftM, monadLift, MonadLift.monadLift, StateT.lift] at run
+          rw [loop.eq_1] at run
+          have hdone : ¬ 0 + 1 < indTypes.size := by omega
+          rw [dif_neg hdone] at run
+          simp only [Pure.pure, ReaderT.pure, StateT.pure, Except.pure] at run
+          have tail_eq := Except.ok.inj run
+          refine ⟨rulesState.fst, ?_⟩
+          rw [← tail_eq]
+
 end declareRecursors
 
-private def declareRecursorsAt (stats : InductiveStats)
+/-- Transparent recursor synthesis/declaration worker at an explicit reader
+context.  Exposing this worker lets verification recover generated metadata
+from a successful `declareRecursors` equation while keeping the public result
+record focused on replay data. -/
+def declareRecursorsAt (stats : InductiveStats)
     (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
     (context : Context) :
     Except Exception
