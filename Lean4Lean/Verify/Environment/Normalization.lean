@@ -2275,6 +2275,118 @@ private def CandidateTerminal : VExpr → Prop
   | .forallE _ _ => False
   | _ => True
 
+/-- The terminal fragment admitted by the executable generation-spine gate
+has a non-Pi strict Theory translation.  This is structural: let and metadata
+translation recurse to their bodies, while context-selected roots were
+excluded by the gate in `AddInductive`. -/
+private theorem candidateTerminal_of_generationSource
+    (run : TrExprS env Us Δ source source')
+    (terminal :
+      AddInductive.CandidateExprTrace.generationTerminalSource source = true) :
+    CandidateTerminal source' := by
+  induction run <;>
+    simp_all [AddInductive.CandidateExprTrace.generationTerminalSource,
+      CandidateTerminal]
+
+/-- A fresh kernel local is absent from the corresponding explicit local
+inventory. -/
+private theorem localContextFresh_not_mem_fvars
+    {lctx : LocalContext} {fv : FVarId}
+    (wf : lctx.WF) (fresh : lctx.find? fv = none) :
+    fv ∉ lctx.fvars := by
+  rw [wf.find?_eq_find?_toList, List.find?_eq_none] at fresh
+  intro member
+  obtain ⟨decl, declMember, idEq⟩ := List.mem_map.mp member
+  have absent := fresh decl declMember
+  rw [idEq] at absent
+  simp at absent
+
+/-- Strict source translation and the complete syntactic generation gate
+determine the full Theory Pi-telescope length without interpreting WHNF or
+definitional equality.
+
+The kernel local context is tracked only through its free-variable inventory.
+At a stored Pi, annotation peeling cannot introduce free variables, so the
+raw Theory domain can be used to extend the translation context even when the
+candidate checker stored a definitionally equal annotation-consumed domain. -/
+private theorem candidateGenerationSpineLengthAux
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    {rawΔ : VLCtx} {rawSource' : VExpr}
+    (henv : VEnv.WF env)
+    (rawWF : VLCtx.WF env Us.length rawΔ)
+    (lctxWF : candidateContext.lctx.WF)
+    (lctxFVars : candidateContext.lctx.fvars = rawΔ.fvars)
+    (rawSource_tr : TrExprS env Us rawΔ source rawSource')
+    (generation : trace.generationSpine = true) :
+    trace.spineLength = (VInductDecl.ctorFields rawSource').length := by
+  induction trace generalizing rawΔ rawSource' with
+  | @terminal context terminalSourceExpr inferred result checked normalized =>
+      have terminalSource :
+          AddInductive.CandidateExprTrace.generationTerminalSource
+              terminalSourceExpr = true := by
+        simpa only [AddInductive.CandidateExprTrace.generationSpine] using
+          generation
+      have terminal := candidateTerminal_of_generationSource rawSource_tr
+        terminalSource
+      cases rawSource' <;>
+        simp_all [AddInductive.CandidateExprTrace.spineLength,
+          CandidateTerminal, VInductDecl.ctorFields]
+  | @forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.generationSpine,
+      Bool.and_eq_true] at generation
+    obtain ⟨sourceEq, bodyGeneration⟩ := generation
+    have alignedSource_tr : TrExprS env Us rawΔ
+        (.forallE name domain body binderInfo) rawSource' :=
+      rawSource_tr.eqv (Expr.structuralEq_eqv sourceEq)
+    let @TrExprS.forallE _ _ rawDomain rawBody _ _ _ _ _
+        rawDomainType rawBodyType rawDomain_tr rawBody_tr := alignedSource_tr
+    have freshRaw : context.freshFVarId ∉ rawΔ.fvars := by
+      rw [← lctxFVars]
+      exact localContextFresh_not_mem_fvars lctxWF fresh
+    have consumedFVars :
+        annotations.consumed.fvarsList ⊆ rawΔ.fvars :=
+      (fvarsIn_iff.mp
+        (candidateTypeAnnotation_fvarsIn annotations.trace
+          rawDomain_tr.fvarsIn)).1
+    have rawFresh :
+        ∀ fv deps,
+          some (context.freshFVarId, annotations.consumed.fvarsList) =
+              some (fv, deps) →
+            fv ∉ rawΔ.fvars ∧ deps ⊆ rawΔ.fvars := by
+      intro fv deps heq
+      cases heq
+      exact ⟨freshRaw, consumedFVars⟩
+    let rawBodyΔ : VLCtx :=
+      (some (context.freshFVarId, annotations.consumed.fvarsList),
+        .vlam rawDomain) :: rawΔ
+    have rawBodyWF : VLCtx.WF env Us.length rawBodyΔ :=
+      ⟨rawWF, rawFresh, rawDomainType⟩
+    have nextLctxWF :
+        (context.pushLocalDecl name binderInfo annotations.consumed).lctx.WF := by
+      simpa only [AddInductive.Context.pushLocalDecl] using
+        LocalContext.WF.mkLocalDecl lctxWF fresh
+    have nextLctxFVars :
+        (context.pushLocalDecl name binderInfo
+            annotations.consumed).lctx.fvars = rawBodyΔ.fvars := by
+      simpa only [AddInductive.Context.pushLocalDecl, LocalContext.fvars,
+        LocalContext.mkLocalDecl_toList, List.map_cons,
+        LocalDecl.fvarId, rawBodyΔ, VLCtx.fvars_cons_some] using
+        congrArg (List.cons context.freshFVarId) lctxFVars
+    have rawBodyInst_tr : TrExprS env Us rawBodyΔ
+        (body.instantiate1 context.freshExpr) rawBody := by
+      simpa only [AddInductive.Context.freshExpr,
+        Expr.instantiate1_eq] using
+        rawBody_tr.inst_fvar henv.ordered rawBodyWF
+    have tailLength := bodyIH rawBodyWF nextLctxWF nextLctxFVars
+      rawBodyInst_tr bodyGeneration
+    simpa only [AddInductive.CandidateExprTrace.spineLength,
+      VInductDecl.ctorFields, List.length_cons, Nat.succ.injEq] using
+      tailLength
+
 /-- If dropping `n` binders from a telescope reaches its non-forall terminal,
 then taking `n` binders recovers the entire telescope. -/
 private theorem candidateTelN_of_dropN_terminal
@@ -2468,6 +2580,174 @@ theorem CandidateExprRun.spineEvidence
     exact candidateDropN_forallN_length viewBinders viewResult
   simpa only [rawTel, viewTel, rawResultEq, viewResultEq] using
     ⟨resultType, evidence⟩
+
+/-- Splitting a Theory expression after any prefix partitions its complete
+stored Pi telescope. -/
+private theorem candidateCtorFields_split :
+    ∀ (count : Nat) (source : VExpr),
+      VInductDecl.ctorFields source =
+        VExpr.telN count source ++
+          VInductDecl.ctorFields (VExpr.dropN count source)
+  | 0, _ => rfl
+  | _ + 1, .forallE domain body => by
+      simp only [VInductDecl.ctorFields, VExpr.telN, VExpr.dropN,
+        List.cons_append, List.cons.injEq, true_and]
+      exact candidateCtorFields_split _ body
+  | _ + 1, .bvar _ | _ + 1, .sort _ | _ + 1, .const _ _ |
+      _ + 1, .app _ _ | _ + 1, .lam _ _ => rfl
+
+/-- Structural worker for complete-spine length.
+
+The translated context may replace local declaration types while retaining
+the same free-variable inventory.  No definitional-equality uniqueness is
+needed: strict translation of each stored Pi exposes one Theory Pi directly,
+and the terminal gate excludes a final translated Pi syntactically. -/
+private theorem CandidateExprRun.generationSpineLengthAux
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    {rawΔ : VLCtx} {rawSource' : VExpr}
+    (rawWF : VLCtx.WF env Us.length rawΔ)
+    (rawFVars : rawΔ.fvars = Δ.fvars)
+    (rawSource_tr : TrExprS env Us rawΔ source rawSource')
+    (generation : trace.generationSpine = true) :
+    trace.spineLength = (VInductDecl.ctorFields rawSource').length := by
+  induction run generalizing rawΔ rawSource' with
+  | @terminal Δ context terminalSourceExpr inferred result source' result'
+      inferred' checked normalized node =>
+      have terminalSource :
+          AddInductive.CandidateExprTrace.generationTerminalSource
+              terminalSourceExpr = true := by
+        simpa only [AddInductive.CandidateExprTrace.generationSpine] using
+          generation
+      have terminal := candidateTerminal_of_generationSource rawSource_tr
+        terminalSource
+      cases rawSource' <;>
+        simp_all [AddInductive.CandidateExprTrace.spineLength,
+          CandidateTerminal, VInductDecl.ctorFields]
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.generationSpine,
+      Bool.and_eq_true] at generation
+    obtain ⟨sourceEq, bodyGeneration⟩ := generation
+    have alignedSource_tr : TrExprS env Us rawΔ
+        (.forallE name domain body binderInfo) rawSource' :=
+      rawSource_tr.eqv (Expr.structuralEq_eqv sourceEq)
+    let @TrExprS.forallE _ _ rawDomain rawBody _ _ _ _ _
+        rawDomainType rawBodyType rawDomain_tr rawBody_tr := alignedSource_tr
+    have henv : VEnv.WF env := by
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    have bodyWF := bodyRun.context_wf
+    rw [bodyContext] at bodyWF
+    have rawFresh :
+        ∀ fv deps,
+          some (context.freshFVarId, annotations.consumed.fvarsList) =
+              some (fv, deps) →
+            fv ∉ rawΔ.fvars ∧ deps ⊆ rawΔ.fvars := by
+      intro fv deps heq
+      cases heq
+      have hfresh := bodyWF.2.1 _ _ rfl
+      simpa only [rawFVars] using hfresh
+    let rawBodyΔ : VLCtx :=
+      (some (context.freshFVarId, annotations.consumed.fvarsList),
+        .vlam rawDomain) :: rawΔ
+    have rawBodyWF : VLCtx.WF env Us.length rawBodyΔ :=
+      ⟨rawWF, rawFresh, rawDomainType⟩
+    have rawBodyFVars : rawBodyΔ.fvars = bodyΔ.fvars := by
+      rw [bodyContext]
+      simp only [rawBodyΔ, VLCtx.fvars_cons_some, rawFVars]
+    have rawBodyInst_tr : TrExprS env Us rawBodyΔ
+        (body.instantiate1 context.freshExpr) rawBody := by
+      simpa only [AddInductive.Context.freshExpr,
+        Expr.instantiate1_eq] using
+        rawBody_tr.inst_fvar henv.ordered rawBodyWF
+    have tailLength := bodyIH rawBodyWF rawBodyFVars rawBodyInst_tr
+      bodyGeneration
+    simpa only [AddInductive.CandidateExprTrace.spineLength,
+      VInductDecl.ctorFields, List.length_cons, Nat.succ.injEq] using
+      tailLength
+
+/-- The complete generation-spine gate fixes the candidate count to the full
+stored Pi telescope of its strict Theory source. -/
+theorem CandidateExprRun.generationSpineLength
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (generation : trace.generationSpine = true) :
+    trace.spineLength = (VInductDecl.ctorFields source').length := by
+  exact run.generationSpineLengthAux run.context_wf rfl run.source_tr
+    generation
+
+/-- The same count is generation's parameter-prefix/remaining-field length
+at every requested parameter split. -/
+theorem CandidateExprRun.generationSpineLengthAt
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (generation : trace.generationSpine = true) (count : Nat) :
+    trace.spineLength =
+      (VExpr.telN count source' ++
+        VInductDecl.ctorFields (VExpr.dropN count source')).length := by
+  rw [← candidateCtorFields_split count source']
+  exact run.generationSpineLength generation
+
+/-- The pre-run root input already contains enough strict source and context
+translation evidence to determine the complete generation-spine length.  In
+particular, this route does not construct the checker-selected semantic view. -/
+theorem CandidateExprSemanticRootInput.generationSpineLength
+    {env : VEnv} {Us : List Name}
+    {source : Expr} {candidate : AddInductive.CandidateExpr source}
+    {source' : VExpr}
+    (input : CandidateExprSemanticRootInput env Us candidate source')
+    (generation : candidate.trace.generationSpine = true) :
+    candidate.trace.spineLength =
+      (VInductDecl.ctorFields source').length := by
+  have contextTr : TrLCtx env Us candidate.context.lctx [] := by
+    simpa only [input.venv_eq, input.lparams_eq, input.vlctx_eq,
+      input.contextRun.context_lctx,
+      input.contextRun.context.lctx_eq] using
+      input.contextRun.context.trlctx
+  exact candidateGenerationSpineLengthAux candidate.trace
+    (by simpa only [input.venv_eq] using input.contextRun.context.Ewf)
+    contextTr.wf contextTr.1 contextTr.fvars_eq input.source_tr generation
+
+/-- The source-input form of complete-spine length at an arbitrary parameter
+split. -/
+theorem CandidateExprSemanticRootInput.generationSpineLengthAt
+    {env : VEnv} {Us : List Name}
+    {source : Expr} {candidate : AddInductive.CandidateExpr source}
+    {source' : VExpr}
+    (input : CandidateExprSemanticRootInput env Us candidate source')
+    (generation : candidate.trace.generationSpine = true) (count : Nat) :
+    candidate.trace.spineLength =
+      (VExpr.telN count source' ++
+        VInductDecl.ctorFields (VExpr.dropN count source')).length := by
+  rw [← candidateCtorFields_split count source']
+  exact input.generationSpineLength generation
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootInput.generationSpineLengthAt' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.instantiate1_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateExprSemanticRootInput.generationSpineLengthAt
 
 /-- Replace only the terminal typing index of a combined certificate. The
 telescope and both result endpoints remain definitionally unchanged. -/
@@ -6014,7 +6294,9 @@ structure StagedNormalizationCandidateBlockSemanticInput
     {env blockEnv : VEnv} {Us : List Name} {rawDecl : VInductDecl}
     (staging : NormalizationCandidateBlockStagingInput context execution
       env blockEnv Us rawDecl) where
-  constructors : CandidateBlockConstructorStagedListInput staging.postFamily
+  postFamily : TypeChecker.CandidateSemanticStage
+    { context with env := execution.familyEnv, lctx := {} } blockEnv Us
+  constructors : CandidateBlockConstructorStagedListInput postFamily
     execution.candidate.families rawDecl.types
 
 /-- Reindex the retained post-family constructor traversals at an already
@@ -6038,6 +6320,7 @@ def CandidateBlockSourceListInput.staged
     (whnfFuel : Nat)
     (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
     StagedNormalizationCandidateBlockSemanticInput staging where
+  postFamily := staging.postFamily
   constructors := input.constructors.staged execution.candidate.families
     constructorsProduced whnfFuel (by simpa using whnfDepth)
 
@@ -6052,10 +6335,11 @@ structure NormalizationCandidateBlockEnrichedStagingResult
     {env : VEnv} {Us : List Name} {familyDecl : VInductDecl}
     (input : NormalizationCandidateBlockFamilySourceStagingInput context
       execution env Us familyDecl) where
-  enrichment : CandidateBlockSourceListEnrichment env
-    input.familyInsertion.blockEnv Us sources familyDecl.types
+  blockEnv : VEnv
+  enrichment : CandidateBlockSourceListEnrichment env blockEnv Us sources
+    familyDecl.types
   staging : NormalizationCandidateBlockStagingInput context execution env
-    input.familyInsertion.blockEnv Us (enrichment.toRawDecl familyDecl)
+    blockEnv Us (enrichment.toRawDecl familyDecl)
   semantic : StagedNormalizationCandidateBlockSemanticInput staging
 
 /-- Select the final common raw block from the two exact producer phases and
@@ -6084,6 +6368,7 @@ theorem NormalizationCandidateBlockFamilySourceStagingInput.enrich
   let staging := input.enrichedStaging enrichment projectionReady
     structureEtaReady
   exact ⟨{
+    blockEnv := input.familyInsertion.blockEnv
     enrichment
     staging
     semantic := enrichment.input.staged execution.constructorListsProduced
@@ -7130,6 +7415,141 @@ def normalizationCandidateBlockGenerationShape
     (candidate : AddInductive.NormalizationCandidate kernelSources) : Bool :=
   candidateBlockFamilySemanticGenerationShape source candidate.families
     source.types
+
+/-- Complete generation-spine evidence determines the executable constructor
+shape check directly from the retained pre-run semantic inputs. -/
+theorem CandidateConstructorSemanticListInput.generationShape_of_generationSpines
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal} :
+    (roots : CandidateConstructorSemanticListInput env Us candidates raws) →
+      AddInductive.CandidateConstructorGenerationSpineList candidates →
+        candidateConstructorSemanticGenerationShape source candidates raws =
+          true
+  | .nil, .nil => rfl
+  | .cons head tail, .cons generation generations => by
+      simp only [candidateConstructorSemanticGenerationShape,
+        Bool.and_eq_true, beq_iff_eq]
+      exact ⟨⟨
+          AddInductive.CandidateExprTrace.generationSpine_storedSpine _
+            generation,
+          head.type.generationSpineLengthAt generation source.nparams⟩,
+        tail.generationShape_of_generationSpines generations⟩
+
+/-- Complete family and constructor generation-spine evidence determines the
+block shape check directly from the exact pre-run family hierarchy. -/
+theorem CandidateBlockFamilySemanticListInput.generationShape_of_generationSpines
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType} :
+    (roots : CandidateBlockFamilySemanticListInput env blockEnv Us candidates
+      raws) →
+      AddInductive.CandidateFamilyGenerationSpineList candidates →
+        candidateBlockFamilySemanticGenerationShape source candidates raws =
+          true
+  | .nil, .nil => rfl
+  | .cons head tail, .cons family constructors families => by
+      simp only [candidateBlockFamilySemanticGenerationShape,
+        Bool.and_eq_true, beq_iff_eq]
+      exact ⟨⟨⟨
+            AddInductive.CandidateExprTrace.generationSpine_storedSpine _
+              family,
+            head.type.generationSpineLengthAt family source.nparams⟩,
+          head.constructors.generationShape_of_generationSpines constructors⟩,
+        tail.generationShape_of_generationSpines families⟩
+
+/-- The accepted producer's structural spine certificate discharges the
+complete block shape check without constructing any semantic run. -/
+theorem NormalizationCandidateBlockSemanticInput.generationShape_of_generationSpines
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType} {rawDecl : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate kernelSources}
+    (input : NormalizationCandidateBlockSemanticInput env blockEnv Us
+      candidate rawDecl)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      candidate.families) :
+    normalizationCandidateBlockGenerationShape rawDecl candidate = true := by
+  exact input.families.generationShape_of_generationSpines spines
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticInput.generationShape_of_generationSpines' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.instantiate1_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateBlockSemanticInput.generationShape_of_generationSpines
+
+/-- Complete generation-spine evidence determines the executable shape check
+for every constructor retained by the exact semantic hierarchy. -/
+theorem CandidateConstructorSemanticListRun.generationShape_of_generationSpines
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal} :
+    (roots : CandidateConstructorSemanticListRun env Us candidates raws) →
+      AddInductive.CandidateConstructorGenerationSpineList candidates →
+        candidateConstructorSemanticGenerationShape source candidates raws =
+          true
+  | .nil, .nil => rfl
+  | .cons head tail, .cons generation generations => by
+      obtain ⟨_, semantic⟩ := head.type.recursive
+      simp only [candidateConstructorSemanticGenerationShape,
+        Bool.and_eq_true, beq_iff_eq]
+      exact ⟨⟨
+          AddInductive.CandidateExprTrace.generationSpine_storedSpine _
+            generation,
+          semantic.generationSpineLengthAt generation source.nparams⟩,
+        tail.generationShape_of_generationSpines generations⟩
+
+/-- Complete family and constructor generation-spine evidence determines the
+executable shape check for the exact raw block owned by semantic staging. -/
+theorem CandidateBlockFamilySemanticListRun.generationShape_of_generationSpines
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType} :
+    (roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws) →
+      AddInductive.CandidateFamilyGenerationSpineList candidates →
+        candidateBlockFamilySemanticGenerationShape source candidates raws =
+          true
+  | .nil, .nil => rfl
+  | .cons head tail, .cons family constructors families => by
+      obtain ⟨_, semantic⟩ := head.type.recursive
+      simp only [candidateBlockFamilySemanticGenerationShape,
+        Bool.and_eq_true, beq_iff_eq]
+      exact ⟨⟨⟨
+            AddInductive.CandidateExprTrace.generationSpine_storedSpine _
+              family,
+            semantic.generationSpineLengthAt family source.nparams⟩,
+          head.constructors.generationShape_of_generationSpines constructors⟩,
+        tail.generationShape_of_generationSpines families⟩
+
+/-- The structural gate retained by the accepted normalization producer
+discharges the complete executable generation-shape check on its exact
+semantic raw block. -/
+theorem NormalizationCandidateBlockSemanticRun.generationShape_of_generationSpines
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType} {rawDecl : VInductDecl}
+    {candidate : AddInductive.NormalizationCandidate kernelSources}
+    (normalization : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      candidate.families) :
+    normalizationCandidateBlockGenerationShape rawDecl candidate = true := by
+  exact normalization.families.generationShape_of_generationSpines spines
 
 /-- Per-family structural generation evidence projected from the block gate.
 The constructor evidence remains indexed by the exact semantic roots owned by

@@ -1999,11 +1999,12 @@ def NormalizationCandidateExecution.CandidateObserversComplete
         CandidateFamilyConstructorListsObservable
           { candidateContext with env := familyEnv, lctx := {} } types
 
-/-- Successful pointwise candidate observers, source-closure evidence, and
-the ordinary validation/declaration/constructor equations reconstruct the
-complete retained normalization execution.  The public builder obtains the
-closure evidence from its executable gate; this theorem remains a
-compatibility bridge for callers that reconstruct a run from observers. -/
+/-- Successful pointwise candidate observers, source closure, stored-spine
+evidence, and the ordinary validation/declaration/constructor equations
+reconstruct the complete retained normalization execution.  The public
+builder obtains both structural facts from executable gates; this theorem
+remains a compatibility bridge for callers that reconstruct a run from the
+weaker legacy observer contract. -/
 theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
     (observers : CandidateObserversComplete nparams types numNested isUnsafe
       candidateContext)
@@ -2016,7 +2017,19 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
     (declareRun : declareInductiveTypes validation.stats nparams types.toArray
       numNested isUnsafe validation.validationContext = .ok familyEnv)
     (constructorRun : checkConstructors types.toArray validation.stats isUnsafe
-      { validation.validationContext with env := familyEnv } = .ok ()) :
+      { validation.validationContext with env := familyEnv } = .ok ())
+    (generationSpines :
+      ∀ (familyTypes : CandidateFamilyTypeListExecution
+          { candidateContext with lctx := {} } types)
+        (families : CandidateFamilyListExecution
+          { candidateContext with env := familyEnv, lctx := {} }
+          familyTypes.candidates),
+        executeCandidateFamilyTypeList
+            { candidateContext with lctx := {} } types = .ok familyTypes →
+          executeCandidateFamilyList
+              { candidateContext with env := familyEnv, lctx := {} }
+              familyTypes.candidates = .ok families →
+            CandidateFamilyGenerationSpineList families.candidates) :
     ∃ execution : NormalizationCandidateExecution nparams types numNested
         isUnsafe candidateContext,
       buildNormalizationCandidateExecution nparams types numNested isUnsafe
@@ -2062,7 +2075,16 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
             next error actual =>
               rw [familiesRun] at actual
               contradiction
-            next actualFamilies actualFamiliesRun => exact ⟨_, rfl⟩
+            next actualFamilies actualFamiliesRun =>
+              have familiesEq : actualFamilies = families :=
+                Except.ok.inj (actualFamiliesRun.symm.trans familiesRun)
+              subst actualFamilies
+              split
+              next _ => exact ⟨_, rfl⟩
+              next notSpines =>
+                exact (notSpines
+                  (generationSpines familyTypes families familyTypesRun
+                    familiesRun).check_eq_true).elim
           next notTerminals =>
             exact (notTerminals familyTerminals.check_eq_true).elim
         next notSources =>

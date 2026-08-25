@@ -2908,6 +2908,7 @@ def roseFlatStagedCandidateSemantic09
     (readiness : RoseFlatCandidateReadiness09) :
     StagedNormalizationCandidateBlockSemanticInput
       (roseFlatCandidateStaging09 readiness) where
+  postFamily := (roseFlatCandidateStaging09 readiness).postFamily
   constructors := roseFlatCandidateConstructors09 readiness
 
 /-- All retained family and constructor traces normalize by recursive

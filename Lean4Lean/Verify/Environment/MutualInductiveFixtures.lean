@@ -2688,6 +2688,7 @@ def treeCandidateConstructors : CandidateBlockConstructorStagedListInput
 /-- Complete pre/post-family staged owner for the ordinary mutual candidate. -/
 def treeStagedCandidateSemantic :
     StagedNormalizationCandidateBlockSemanticInput treeCandidateStaging where
+  postFamily := treeCandidateStaging.postFamily
   constructors := treeCandidateConstructors
 
 /-- Identity-specialized semantic interpretation of the exact ordinary
@@ -3898,6 +3899,7 @@ def indexedTreeCandidateConstructors :
 def indexedTreeStagedCandidateSemantic :
     StagedNormalizationCandidateBlockSemanticInput
       indexedTreeCandidateStaging where
+  postFamily := indexedTreeCandidateStaging.postFamily
   constructors := indexedTreeCandidateConstructors
 
 /-- Identity-specialized interpretation of the exact indexed candidate

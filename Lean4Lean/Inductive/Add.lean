@@ -1105,6 +1105,53 @@ def storedSpine :
     Expr.structuralEq source (.forallE name domain body binderInfo) &&
       storedSpine bodyCandidate
 
+/-- Kernel expressions whose strict Theory translation cannot have a Pi at
+the root.  Let and metadata wrappers are transparent to strict translation;
+free-variable and projection roots are deliberately excluded because their
+Theory shape is selected by contextual evidence rather than syntax alone. -/
+def generationTerminalSource : Expr → Bool
+  | .sort _ | .const _ _ | .app _ _ | .lam _ _ _ _ => true
+  | .letE _ _ _ body _ => generationTerminalSource body
+  | .mdata _ body => generationTerminalSource body
+  | _ => false
+
+/-- Complete stored-spine gate used by mixed Theory generation.
+
+Every Pi visited by candidate WHNF must occur in the stored kernel syntax,
+and the final stored source must belong to the syntax fragment whose strict
+Theory translation is known not to expose another Pi.  This strengthens
+`storedSpine` only at its terminal node and still permits normalization inside
+binder domains and at non-Pi terminal results. -/
+def generationSpine :
+    {context : Context} → {source : Expr} →
+      CandidateExprTrace context source → Bool
+  | _, _, .terminal _ source _ _ _ _ => generationTerminalSource source
+  | _, _, .forallE _ source _ name domain body binderInfo _ _ _ _ _ _
+      bodyCandidate =>
+    Expr.structuralEq source (.forallE name domain body binderInfo) &&
+      generationSpine bodyCandidate
+
+/-- The complete generation gate in particular preserves every visited Pi. -/
+theorem generationSpine_storedSpine
+    (trace : CandidateExprTrace context source)
+    (generation : trace.generationSpine = true) :
+    trace.storedSpine = true := by
+  induction trace with
+  | terminal => rfl
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domainIH bodyIH =>
+    simp only [generationSpine, Bool.and_eq_true] at generation
+    simp [storedSpine, generation.1, bodyIH generation.2]
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.generationSpine_storedSpine' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.generationSpine_storedSpine
+
 /-- Number of stored Pi binders on the main (body) path of a candidate. -/
 def spineLength :
     {context : Context} → {source : Expr} →
@@ -1945,6 +1992,100 @@ structure CandidateFamily (source : InductiveType) where
   constructors :
     CandidateList CandidateConstructor source.ctors
 
+/-- Source-indexed evidence that every retained constructor candidate keeps
+its complete Pi spine in the stored source syntax and ends in a terminal
+whose strict Theory translation is syntactically non-Pi.  Mixed Theory
+generation may normalize binder domains and terminal results, but it cannot
+accept binders invented only by WHNF. -/
+inductive CandidateConstructorGenerationSpineList :
+    {sources : List Constructor} →
+      CandidateList CandidateConstructor sources → Prop where
+  | nil : CandidateConstructorGenerationSpineList .nil
+  | cons
+      (head : candidate.type.trace.generationSpine = true)
+      (tail : CandidateConstructorGenerationSpineList candidates) :
+      CandidateConstructorGenerationSpineList (.cons candidate candidates)
+
+/-- Executable generation-spine gate for an exact dependent constructor
+list. -/
+def CandidateConstructorGenerationSpineList.check :
+    {sources : List Constructor} →
+      CandidateList CandidateConstructor sources → Bool
+  | [], .nil => true
+  | _ :: _, .cons candidate candidates =>
+      candidate.type.trace.generationSpine &&
+        CandidateConstructorGenerationSpineList.check candidates
+
+/-- A successful constructor gate reconstructs its source-indexed proof. -/
+theorem CandidateConstructorGenerationSpineList.of_check :
+    (candidates : CandidateList CandidateConstructor sources) →
+      CandidateConstructorGenerationSpineList.check candidates = true →
+        CandidateConstructorGenerationSpineList candidates
+  | .nil, _ => .nil
+  | .cons candidate candidates, checked => by
+      simp only [CandidateConstructorGenerationSpineList.check,
+        Bool.and_eq_true] at checked
+      exact .cons checked.1
+        (CandidateConstructorGenerationSpineList.of_check candidates checked.2)
+
+/-- Proof-carrying constructor spine evidence evaluates back to its gate. -/
+theorem CandidateConstructorGenerationSpineList.check_eq_true
+    (spines : CandidateConstructorGenerationSpineList candidates) :
+    CandidateConstructorGenerationSpineList.check candidates = true := by
+  induction spines with
+  | nil => rfl
+  | cons head tail ih =>
+      simp [CandidateConstructorGenerationSpineList.check, head, ih]
+
+/-- Source-indexed complete generation-spine evidence for every family type
+and every one of its constructors in an accepted normalization candidate
+block. -/
+inductive CandidateFamilyGenerationSpineList :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Prop where
+  | nil : CandidateFamilyGenerationSpineList .nil
+  | cons
+      (family : candidate.familyType.type.trace.generationSpine = true)
+      (constructors : CandidateConstructorGenerationSpineList
+        candidate.constructors)
+      (tail : CandidateFamilyGenerationSpineList candidates) :
+      CandidateFamilyGenerationSpineList (.cons candidate candidates)
+
+/-- Executable generation-spine gate for an exact dependent family block. -/
+def CandidateFamilyGenerationSpineList.check :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Bool
+  | [], .nil => true
+  | _ :: _, .cons candidate candidates =>
+      (candidate.familyType.type.trace.generationSpine &&
+        CandidateConstructorGenerationSpineList.check
+          candidate.constructors) &&
+          CandidateFamilyGenerationSpineList.check candidates
+
+/-- A successful family-block gate reconstructs its source-indexed proof. -/
+theorem CandidateFamilyGenerationSpineList.of_check :
+    (candidates : CandidateList CandidateFamily sources) →
+      CandidateFamilyGenerationSpineList.check candidates = true →
+        CandidateFamilyGenerationSpineList candidates
+  | .nil, _ => .nil
+  | .cons candidate candidates, checked => by
+      simp only [CandidateFamilyGenerationSpineList.check, Bool.and_eq_true]
+        at checked
+      exact .cons checked.1.1
+        (CandidateConstructorGenerationSpineList.of_check
+          candidate.constructors checked.1.2)
+        (CandidateFamilyGenerationSpineList.of_check candidates checked.2)
+
+/-- Proof-carrying family-block spine evidence evaluates back to its gate. -/
+theorem CandidateFamilyGenerationSpineList.check_eq_true
+    (spines : CandidateFamilyGenerationSpineList candidates) :
+    CandidateFamilyGenerationSpineList.check candidates = true := by
+  induction spines with
+  | nil => rfl
+  | cons family constructors tail ih =>
+      simp [CandidateFamilyGenerationSpineList.check, family,
+        constructors.check_eq_true, ih]
+
 /-- Project the pre-family candidate spine from a complete dependent family
 candidate list without erasing source indices or using a parallel list. -/
 def CandidateList.familyTypes :
@@ -2591,6 +2732,7 @@ structure NormalizationCandidateExecution
   families : CandidateFamilyListExecution
     { candidateContext with env := familyEnv, lctx := {} }
     familyTypes.candidates
+  generationSpines : CandidateFamilyGenerationSpineList families.candidates
 
 def NormalizationCandidateExecution.candidate
     (execution : NormalizationCandidateExecution nparams types numNested
@@ -2650,20 +2792,28 @@ def buildNormalizationCandidateExecutionAfterValidation
                   { candidateContext with env := familyEnv, lctx := {} }
                   familyTypes.candidates with
               | .error error => .error error
-              | .ok families => .ok {
-                  validationContext
-                  stats
-                  familySourcesClosed :=
-                    FamilySourceClosedList.of_check _ hsources
-                  familyTypes
-                  familyTerminals :=
-                    CandidateFamilyTypeTerminalSortList.of_check _ hterminals
-                  familyEnv
-                  declareRun := by simpa using hdeclare
-                  declareTrace := DeclareInductiveInfoListRun.of_run (by
-                    simpa only [declareInductiveTypes] using hdeclare)
-                  constructorRun := by simpa using hconstructors
-                  families }
+              | .ok families =>
+                if hspines : CandidateFamilyGenerationSpineList.check
+                    families.candidates then
+                  .ok {
+                    validationContext
+                    stats
+                    familySourcesClosed :=
+                      FamilySourceClosedList.of_check _ hsources
+                    familyTypes
+                    familyTerminals :=
+                      CandidateFamilyTypeTerminalSortList.of_check _ hterminals
+                    familyEnv
+                    declareRun := by simpa using hdeclare
+                    declareTrace := DeclareInductiveInfoListRun.of_run (by
+                      simpa only [declareInductiveTypes] using hdeclare)
+                    constructorRun := by simpa using hconstructors
+                    families
+                    generationSpines :=
+                      CandidateFamilyGenerationSpineList.of_check _ hspines }
+                else
+                  .error (.other
+                    "normalization candidate generation spine is not complete")
             else
               .error (.other
                 "normalization candidate family terminal is not a sort")

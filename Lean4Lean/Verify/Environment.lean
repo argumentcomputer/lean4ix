@@ -1760,13 +1760,44 @@ noncomputable def
     {ves : VEnvs}
     (staged : execution.FlattenedEnrichedStagingResult ves) :
     VInductDecl.NormalizationCandidateBlockSemanticInput
-      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      (ves.venv .safe) staged.enriched.blockEnv lparams
       execution.flattened.candidate staged.source :=
   staged.enriched.semantic.semanticInput
 
+/-- Enriched outer staging owns the exact raw semantic block, while the
+accepted normalization prefix owns complete generation-spine evidence for
+the same dependent candidate.  Together they discharge generation's
+executable layout check without an additional caller premise. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.generationShape
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) :
+    VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true := by
+  exact staged.semanticInput.generationShape_of_generationSpines
+    execution.flattened.eliminationExecution.normalization.generationSpines
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.generationShape' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.instantiate1_eq,
+ Level.instLawfulBEqLevel,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.generationShape
+
 /-- Reindex the retained ordinary recursor execution onto the enriched raw
-Theory source.  Generation shape is the only fact not already fixed by the
-outer producer and the dependent staging owner. -/
+Theory source.  The preceding theorem derives the required generation shape
+from the outer producer and dependent staging owner. -/
 noncomputable def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -1819,7 +1850,7 @@ noncomputable def
     VInductDecl.NormalizationCandidateBlockStagingInput
       (AddInductive.Context.forInductive env lparams false false {})
       (staged.recursorShape shape).execution.eliminationExecution.normalization
-      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      (ves.venv .safe) staged.enriched.blockEnv lparams
       staged.source := by
   cases staged with
   | mk family enriched =>
@@ -1845,7 +1876,7 @@ noncomputable def
     (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
       execution.flattened.candidate = true) :
     VInductDecl.NormalizationCandidateBlockSemanticInput
-      (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+      (ves.venv .safe) staged.enriched.blockEnv lparams
       (staged.recursorShape shape).candidate staged.source := by
   cases staged with
   | mk family enriched =>
@@ -1887,7 +1918,7 @@ structure
     (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
       execution.flattened.candidate = true) where
   run : VInductDecl.ExactProducedBlockRecursorRun
-    (ves.venv .safe) staged.family.staging.familyInsertion.blockEnv lparams
+    (ves.venv .safe) staged.enriched.blockEnv lparams
     (staged.recursorShape shape) generation
 
 /-- Close the exact semantic-generation and post-constructor alignment phases
@@ -1908,7 +1939,7 @@ theorem
     (analysis : ∀ semantic :
         VInductDecl.NormalizationCandidateBlockSemanticRun
           (ves.venv .safe)
-          staged.family.staging.familyInsertion.blockEnv lparams
+          staged.enriched.blockEnv lparams
           (staged.recursorShape shape).candidate staged.source,
       semantic.normalization.checkBlock? = some generation.block)
     (checked : generation.block.checked.WF (ves.venv .safe)
