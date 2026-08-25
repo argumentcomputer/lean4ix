@@ -1882,7 +1882,13 @@ Three checker sorries remain:
   an exact artifact in that shared list and derives `StructureEtaReady`; no
   final readiness oracle remains in the completion package. Checked generation
   derives constructor-prefix typing, projector programs from source-ordered
-  selecting-minor typing, and current-model rebuild typing. The primitive
+  selecting-minor typing, and current-model rebuild typing. The projector
+  derivation now exposes its induction-facing core explicitly: any bounded
+  source-order minor certificate produces exactly the matching bounded
+  projector-program certificate, without assuming later minors. Checked field
+  and constructor-prefix typing also derive the first selecting minor
+  unconditionally; the remaining selecting-minor work therefore starts at the
+  first dependent field whose motive mentions an earlier projector. The primitive
   recognizer itself is proved and the declaration bridge splits its canonical
   Bool/Nat branch from nonprimitive replay. The recognizer's concrete host
   syntax now selects the complete canonical Theory declaration directly, so
@@ -1915,9 +1921,9 @@ Three checker sorries remain:
   completed Theory constructor heads, both current and future-model cached
   parameter-count agreement, and final projection/structure-eta readiness.
   Primitive candidate normalization is likewise closed. Operational
-  completeness is now unconditional; next derive the nonprimitive
-  selecting-minor and persistent eta-rule certificates before closing
-  `addDecl.WF`.
+  completeness is now unconditional; next extend the bounded minor/program
+  induction across dependent fields using exact earlier-projector iota, then
+  derive the persistent eta-rule certificate before closing `addDecl.WF`.
 - **V4 — `checkPrimitiveDef.WF`.** Recheck upstream PR #32 before editing its
   file surface. If it is not merged by the next CR checkpoint, prove the
   recognizer locally with an `M.WF`-style run certificate.

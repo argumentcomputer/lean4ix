@@ -1500,6 +1500,44 @@ def MinorsWF (view : VStructureView) (env : VEnv) : Prop :=
       (view.projectionMinorType levels params
         (view.specializedFields levels params) code.typeFn)
 
+/-- The selecting-minor contract restricted to projection indices below a
+source-order bound.  Keeping the bound outside the ambient typing data makes
+this the induction-friendly form of `MinorsWF`: recursive projector proofs
+may use exactly the already-established minor prefix. -/
+def MinorsWFPrefix (view : VStructureView) (env : VEnv)
+    (limit : Nat) : Prop :=
+  ∀ {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+      {params : List VExpr} {idx : Nat} {code : ProjectionCode},
+    idx < limit →
+    OnCtx Γ (env.IsType U) →
+    (∀ level ∈ levels, level.WF U) →
+    levels.length = view.uvars →
+    params.length = view.nparams →
+    (∃ resultLevel, env.SpineWF U Γ (view.familyType.instL levels)
+      params (.sort resultLevel)) →
+    (view.projectionCodes levels params)[idx]? = some code →
+    env.HasType U Γ code.minor
+      (view.projectionMinorType levels params
+        (view.specializedFields levels params) code.typeFn)
+
+/-- The generated-projector contract restricted to projection indices below
+a source-order bound. -/
+def ProgramsWFPrefix (view : VStructureView) (env : VEnv)
+    (limit : Nat) : Prop :=
+  ∀ {U : Nat} {Γ : List VExpr} {levels : List VLevel}
+      {params : List VExpr} {idx : Nat} {code : ProjectionCode},
+    idx < limit →
+    OnCtx Γ (env.IsType U) →
+    (∀ level ∈ levels, level.WF U) →
+    levels.length = view.uvars →
+    params.length = view.nparams →
+    (∃ resultLevel, env.SpineWF U Γ (view.familyType.instL levels)
+      params (.sort resultLevel)) →
+    (view.projectionCodes levels params)[idx]? = some code →
+    env.HasType U Γ code.projector
+      (.forallE (view.structureType levels params)
+        (.app code.typeFn.lift (.bvar 0)))
+
 /-- Rule-independent subject reduction for rebuilding one well-typed
 structure value from the canonical generated projections.  This is the
 single-model core of `VStructEta.WF`; the latter additionally requires this
@@ -3011,14 +3049,145 @@ theorem _root_.Lean4Lean.VStructureView.WF.recursorProjection_hasType
     simpa [List.append_assoc] using hout
   exact hwithMajor.hasType_appN hrec
 
-/-- Checked generation turns source-ordered selecting-minor typing into the
-complete generated projector-program certificate.  Motive functions and
-recursor applications are reconstructed here; consumers need not certify
-those deterministic pieces separately. -/
-theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
+/-- The first selecting minor is well typed directly from the checked field
+telescope.  No projector iota equation is needed at index zero: its motive is
+the first field type with an empty projection prefix, and the generated minor
+selects the corresponding constructor argument. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one
+    (self : VStructureView.WF view env) (henv : env.WF) :
+    view.MinorsWFPrefix env 1 := by
+  intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
+    hparamsLength hparamsSpine hcode
+  have hidx : idx = 0 := by omega
+  subst idx
+  obtain ⟨resultLevel, hparamsSpine₀⟩ := hparamsSpine
+  let fields := view.specializedFields levels params
+  let m := fields.length
+  have hcodeLength : 0 < fields.length := by
+    have : 0 < (view.projectionCodes levels params).length :=
+      (List.getElem?_eq_some_iff.1 hcode).1
+    simpa [fields] using this
+  obtain ⟨fieldSort, hfieldSort, hcodeSort, hminorShape, -⟩ :=
+    view.projectionCodes_get?_program_shape levels params hcode
+  obtain ⟨field, hfield, htypeFnShape⟩ :=
+    view.projectionCodes_get?_typeFn levels params hcode
+  have hsortTel := self.specializedFields_onSortTel henv.ordered
+    levels hlevels hlevelsLength params hparamsLength
+    ⟨resultLevel, hparamsSpine₀⟩
+  have hfieldType : env.HasType U Γ field (.sort code.fieldSort) := by
+    cases hfields : view.specializedFields levels params with
+    | nil => simp [hfields] at hfield
+    | cons first rest =>
+        have hfirst : first = field := by simpa [hfields] using hfield
+        subst first
+        cases hsorts : view.fieldSorts.map (VLevel.inst levels) with
+        | nil =>
+            rw [hfields, hsorts] at hsortTel
+            cases hsortTel
+        | cons firstSort restSorts =>
+            have hfirstSort : firstSort = code.fieldSort := by
+              have : firstSort = fieldSort := by
+                simpa [hsorts] using hfieldSort
+              exact this.trans hcodeSort.symm
+            subst firstSort
+            rw [hfields, hsorts] at hsortTel
+            cases hsortTel with
+            | cons hfirst _ => exact hfirst
+  have htypeFnShape₀ : code.typeFn =
+      .lam (view.structureType levels params) field.lift := by
+    simpa [VExpr.instRevAt] using htypeFnShape
+  have hfieldsOnTel : env.OnTel U Γ fields := by
+    simpa [fields] using hsortTel.toOnTel
+  have hfieldsCtx : OnCtx (fields.reverse ++ Γ) (env.IsType U) :=
+    hfieldsOnTel.toOnCtx hΓ
+  have hprefix := self.constructorPrefix_hasType henv.ordered levels hlevels
+    hlevelsLength params hparamsLength ⟨resultLevel, hparamsSpine₀⟩
+  have hprefixWeak := hprefix.weakN henv.ordered
+    (Ctx.LiftN.zero (n := m) (Γ := Γ) fields.reverse
+      (h := by simp [m]))
+  have hprefixWeak' : env.HasType U (fields.reverse ++ Γ)
+      ((VExpr.appN (.const view.constructorName levels) params).liftN m)
+      ((VExpr.forallN fields
+        ((view.structureType levels params).liftN m)).liftN m) := by
+    simpa [fields, m] using hprefixWeak
+  have hprefixSelf : env.HasType U
+      (([] : List VExpr) ++ fields.reverse ++ Γ)
+      ((VExpr.appN (.const view.constructorName levels) params).liftN m)
+      ((VExpr.forallN fields
+        ((view.structureType levels params).liftN m)).liftN
+          (([] : List VExpr).length + fields.length)) := by
+    simpa [m] using hprefixWeak'
+  have hmajor₀ := VEnv.HasType.appN_selfSpine
+    (env := env) (U := U) (As := fields)
+    (B := (view.structureType levels params).liftN m)
+    (Δ := []) (Γ := Γ)
+    (f := (VExpr.appN (.const view.constructorName levels) params).liftN m)
+    hprefixSelf
+  have hmajor : env.HasType U (fields.reverse ++ Γ)
+      (view.projectionConstructorApp levels params fields)
+      ((view.structureType levels params).liftN m) := by
+    simpa [fields, m, VStructureView.projectionConstructorApp,
+      VExpr.liftN, VExpr.liftN_appN, VExpr.appN_append, List.map_map,
+      Function.comp_def] using hmajor₀
+  have hfieldInner : env.HasType U (fields.reverse ++ Γ)
+      (field.liftN m) (.sort code.fieldSort) := by
+    exact hfieldType.weakN henv.ordered
+      (Ctx.LiftN.zero (n := m) (Γ := Γ) fields.reverse
+        (h := by simp [m]))
+  have hfieldUnderMajor : env.HasType U
+      ((view.structureType levels params).liftN m :: fields.reverse ++ Γ)
+      (field.liftN m).lift (.sort code.fieldSort) := by
+    exact hfieldInner.weakN henv.ordered
+      (Ctx.LiftN.one (A := (view.structureType levels params).liftN m))
+  rw [VExpr.lift_liftN'] at hfieldUnderMajor
+  have hbeta₀ := VEnv.IsDefEq.beta hfieldUnderMajor hmajor
+  have hbodyInst : (field.lift.liftN m 1).inst
+      (view.projectionConstructorApp levels params fields) =
+      field.liftN m := by
+    rw [← VExpr.lift_liftN', VExpr.inst_lift]
+  have hbeta : env.IsDefEqU U (fields.reverse ++ Γ)
+      (.app (code.typeFn.liftN m)
+        (view.projectionConstructorApp levels params fields))
+      (field.liftN m) := by
+    refine ⟨.sort code.fieldSort, ?_⟩
+    simpa [htypeFnShape₀, VExpr.liftN, VExpr.inst,
+      VExpr.inst_lift, hbodyInst] using hbeta₀
+  let q := fields.length - 1
+  have hqLt : q < fields.length := by
+    dsimp only [q]
+    omega
+  have hfieldReverse : fields.reverse[q]? = some field := by
+    rw [List.getElem?_reverse hqLt,
+      show fields.length - 1 - q = 0 by simp [q], show
+        fields[0]? = some field by simpa [fields] using hfield]
+  have hfieldCtx : (fields.reverse ++ Γ)[q]? = some field := by
+    rw [List.getElem?_append_left (by simpa using hqLt), hfieldReverse]
+  have hbody : env.HasType U (fields.reverse ++ Γ) (.bvar q)
+      (field.liftN m) := by
+    have hlookup := VEnv.HasType.bvar (env := env) (U := U)
+      (Lookup.of_getElem? hfieldCtx)
+    have hqSucc : q + 1 = m := by
+      dsimp only [q, m]
+      omega
+    rw [hqSucc] at hlookup
+    exact hlookup
+  have hbodyExpected : env.HasType U (fields.reverse ++ Γ) (.bvar q)
+      (.app (code.typeFn.liftN m)
+        (view.projectionConstructorApp levels params fields)) :=
+    hbody.defeqU_r henv hfieldsCtx hbeta.symm
+  have hminor := VEnv.HasType.lamN hfieldsOnTel hbodyExpected
+  rw [hminorShape]
+  simpa [VStructureView.projectionMinorType, fields, m, q] using hminor
+
+/-- A checked structure turns any source-ordered selecting-minor prefix into
+the matching projector-program prefix.  This is the induction-facing core of
+`toProgramsWF_of_minors`: no proof about a later minor is available while an
+earlier projector is reconstructed. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
     (self : VStructureView.WF view env) (henv : env.WF)
-    (minors : view.MinorsWF env) : view.ProgramsWF env := by
-  intro U Γ levels params idx code hΓ hlevels hlevelsLength
+    {limit : Nat} (minors : view.MinorsWFPrefix env limit) :
+    view.ProgramsWFPrefix env limit := by
+  intro U Γ levels params idx code hlimit hΓ hlevels hlevelsLength
     hparamsLength hparamsSpine hcode
   induction idx using Nat.strongRecOn generalizing U Γ levels params code with
   | _ idx ih =>
@@ -3091,8 +3260,9 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
           (.forallE (view.structureType levels paramsLift)
             (.app prior.typeFn.lift (.bvar 0))) := by
       intro j prior hj hpriorCode
-      exact ih j hj hΓLift hlevels hlevelsLength hparamsLengthLift
-        ⟨resultLevel, hparamsSpineLift⟩ hpriorCode
+      exact ih j hj (Nat.lt_trans hj hlimit) hΓLift hlevels
+        hlevelsLength hparamsLengthLift ⟨resultLevel, hparamsSpineLift⟩
+        hpriorCode
     obtain ⟨cursor, hconsume, hprefix⟩ :=
       VStructureView.projectionArgsSpineAux_of_prefix henv hΓLift
         hmajorLift hprior
@@ -3156,7 +3326,7 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
           (.sort code.fieldSort)) := by
       rw [htypeFnShape]
       exact hstruct.lam htypeBody
-    have hminor := minors hΓ hlevels hlevelsLength hparamsLength
+    have hminor := minors hlimit hΓ hlevels hlevelsLength hparamsLength
       ⟨resultLevel, hparamsSpine₀⟩ hcode
     have hmotiveLevel :
         view.generation.motiveLevel.inst
@@ -3211,6 +3381,22 @@ theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
     rw [hprojectorShape]
     apply hstruct.lam
     simpa [paramsLift, VExpr.liftN] using hbody
+
+/-- Checked generation turns source-ordered selecting-minor typing into the
+complete generated projector-program certificate.  Motive functions and
+recursor applications are reconstructed here; consumers need not certify
+those deterministic pieces separately. -/
+theorem _root_.Lean4Lean.VStructureView.WF.toProgramsWF_of_minors
+    (self : VStructureView.WF view env) (henv : env.WF)
+    (minors : view.MinorsWF env) : view.ProgramsWF env := by
+  intro U Γ levels params idx code hΓ hlevels hlevelsLength
+    hparamsLength hparamsSpine hcode
+  exact self.toProgramsWFPrefix_of_minorsWFPrefix henv
+    (limit := idx + 1)
+    (fun _ hΓ hlevels hlevelsLength hparamsLength hparamsSpine hcode =>
+      minors hΓ hlevels hlevelsLength hparamsLength hparamsSpine hcode)
+    (Nat.lt_succ_self idx) hΓ hlevels hlevelsLength hparamsLength
+    hparamsSpine hcode
 
 /-- Checked constructor generation and certified projector programs derive
 the rule-independent, single-model reconstruction typing obligation. -/

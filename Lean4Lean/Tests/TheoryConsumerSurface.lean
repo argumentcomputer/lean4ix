@@ -36,10 +36,14 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VInductDecl.ElimMode.ofBool
 #check VStructureView.etaRebuild
 #check VStructureView.MinorsWF
+#check VStructureView.MinorsWFPrefix
+#check VStructureView.ProgramsWFPrefix
 #check VStructureView.RebuildWF
 #check VStructureView.projector_hasType_field_of_type
 #check VStructureView.WF.checkedParamsSpine
 #check VStructureView.WF.constructorPrefix_hasType
+#check VStructureView.WF.toMinorsWFPrefix_one
+#check VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
 #check VStructureView.WF.toProgramsWF_of_minors
 #check VStructureView.WF.toRebuildWF_of_programs
 #check VStructureView.WF.toStructEtaWF_of_rebuilds
@@ -138,6 +142,21 @@ info: 'Lean4Lean.VStructureView.WF.constructorPrefix_hasType' depends on axioms:
 -/
 #guard_msgs in
 #print axioms VStructureView.WF.constructorPrefix_hasType
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toMinorsWFPrefix_one
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
 
 /--
 info: 'Lean4Lean.VStructureView.WF.toProgramsWF_of_minors' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
