@@ -1824,6 +1824,56 @@ theorem Normalization.generation?_normalization
     exact hnorm
   · contradiction
 
+/-- A retained checked family replays through the structural family analyzer.
+All data fields computed by `checkedFamily?` are already fixed by the
+dependent witness; the remaining differences are proof irrelevant. -/
+theorem CheckedFamily.checkedFamily?
+    {source : VInductDecl} {params : List VExpr} {ordinal : Nat}
+    {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type) :
+    VInductDecl.checkedFamily? source params ordinal type = some family := by
+  cases family with
+  | mk params_eq indices indices_eq resultLevel result_eq constructors
+      constructors_eq accepted =>
+      subst indices
+      subst constructors
+      unfold VInductDecl.checkedFamily?
+      split
+      next actualLevel actualResult_eq =>
+        have actualLevel_eq : actualLevel = resultLevel :=
+          VExpr.sort.inj (actualResult_eq.symm.trans result_eq)
+        subst actualLevel
+        simp [params_eq, accepted]
+      next actualResult_eq =>
+        exact (actualResult_eq resultLevel result_eq).elim
+
+/-- A retained dependent family spine replays through the source-ordered
+family-list analyzer at its exact starting ordinal. -/
+theorem CheckedFamilies.checkedFamilies?
+    {source : VInductDecl} {params : List VExpr} {ordinal : Nat}
+    {types : List VInductiveType}
+    (families : CheckedFamilies source params ordinal types) :
+    VInductDecl.checkedFamilies? source params ordinal types = some families := by
+  induction families with
+  | nil => rfl
+  | cons head tail ih =>
+      simp [VInductDecl.checkedFamilies?, head.checkedFamily?, ih]
+
+/-- A retained checked block replays through the complete structural block
+analyzer.  This is the construction-facing counterpart of analyzer
+provenance: clients can supply the dependent checked spine itself instead of
+an independently stated `Option` equation. -/
+theorem CheckedBlock.checkedBlock?
+    {source : VInductDecl} (checked : CheckedBlock source) :
+    source.checkedBlock? = some checked := by
+  cases checked with
+  | mk params params_eq params_length families nonempty names names_eq
+      names_nodup =>
+      subst params
+      subst names
+      simp [VInductDecl.checkedBlock?, nonempty, params_length, names_nodup,
+        families.checkedFamilies?]
+
 /-- A successful arbitrary-block analysis retains the exact normalization
 whose dependent checked-family spine it analyzed. -/
 theorem Normalization.checkBlock?_normalization
@@ -1933,6 +1983,24 @@ info: 'Lean4Lean.VInductDecl.Normalization.generation?_normalization' depends on
 -/
 #guard_msgs in
 #print axioms Normalization.generation?_normalization
+
+/--
+info: 'Lean4Lean.VInductDecl.CheckedFamily.checkedFamily?' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CheckedFamily.checkedFamily?
+
+/--
+info: 'Lean4Lean.VInductDecl.CheckedFamilies.checkedFamilies?' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CheckedFamilies.checkedFamilies?
+
+/--
+info: 'Lean4Lean.VInductDecl.CheckedBlock.checkedBlock?' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CheckedBlock.checkedBlock?
 
 /--
 info: 'Lean4Lean.VInductDecl.NormalizedCheckedBlock.checkBlock?' depends on axioms: [propext, Quot.sound]

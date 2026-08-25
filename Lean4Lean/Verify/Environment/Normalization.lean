@@ -4257,6 +4257,69 @@ theorem NormalizationCandidateBlockSemanticRun.normalizationRun
       NormalizationCandidateBlockSemanticRun.viewDecl] using
       run.families.evidence
 
+/-- Construct the exact analyzer-owned block at a retained semantic
+normalization.  The checked dependent spine is the only structural input;
+its replay theorem supplies the inner analyzer equation without selecting a
+parallel normalization or restating an `Option` result. -/
+def NormalizationCandidateBlockSemanticRun.normalizedCheckedBlock
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (checked : run.normalization.view.CheckedBlock) :
+    NormalizedCheckedBlock rawDecl where
+  normalization := run.normalization
+  checked := checked
+  checked_eq := checked.checkedBlock?
+
+/-- The semantic block constructed from a checked view has exactly the
+normalization selected by the retained recursive checker hierarchy. -/
+@[simp] theorem
+    NormalizationCandidateBlockSemanticRun.normalizedCheckedBlock_normalization
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (checked : run.normalization.view.CheckedBlock) :
+    (run.normalizedCheckedBlock checked).normalization = run.normalization :=
+  rfl
+
+/-- Analyzer replay for the semantic block is now constructional: no
+normalization-identification premise or semantic choice is required. -/
+theorem
+    NormalizationCandidateBlockSemanticRun.normalizedCheckedBlock_checkBlock?
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (checked : run.normalization.view.CheckedBlock) :
+    run.normalization.checkBlock? =
+      some (run.normalizedCheckedBlock checked) :=
+  (run.normalizedCheckedBlock checked).checkBlock?
+
+/-- Package a semantic analyzer result for block generation once the
+validator-owned common result level and the mixed raw/view layout proof are
+available.  In particular, this constructor cannot be pointed at an
+independently normalized block. -/
+def NormalizationCandidateBlockSemanticRun.blockGenerationChecked
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (checked : run.normalization.view.CheckedBlock)
+    (resultLevel : VLevel)
+    (shape : (run.normalizedCheckedBlock checked).blockGenerationShape = true) :
+    BlockGenerationChecked rawDecl where
+  validated := {
+    block := run.normalizedCheckedBlock checked
+    resultLevel := resultLevel }
+  shape_eq := shape
+
+/-- The generation package constructed from a semantic analyzer result
+replays through that same semantic normalization exactly. -/
+theorem
+    NormalizationCandidateBlockSemanticRun.blockGenerationChecked_analysis
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl)
+    (checked : run.normalization.view.CheckedBlock)
+    (resultLevel : VLevel)
+    (shape : (run.normalizedCheckedBlock checked).blockGenerationShape = true) :
+    run.normalization.checkBlock? =
+      some (run.blockGenerationChecked checked resultLevel shape).block :=
+  run.normalizedCheckedBlock_checkBlock? checked
+
 /-- A singleton-family semantic hierarchy spanning the pre-family candidate,
 the exact raw-family insertion, and every post-family constructor candidate.
 The normalized expression payloads are selected by retained recursive checker
