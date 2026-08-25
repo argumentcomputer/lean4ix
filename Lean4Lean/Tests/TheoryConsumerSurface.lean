@@ -25,6 +25,10 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VEnv.SpineWF.weak'
 #check VEnv.SpineWF.weakN_inv
 #check VEnv.SpineWF.weak'_inv
+#check VExpr.instRev_liftN_bvarRevRange
+#check VEnv.OnTel.selfSpineWF
+#check VEnv.OnTel.instRev_defeq_of_spines
+#check VEnv.OnSortTel.prefix_getElem?
 #check VEnv.ConstructorHead
 #check VEnv.ConstructorHead.mono
 #check VEnv.Params.PatternArgumentNonFunction
@@ -38,12 +42,18 @@ namespace Lean4Lean.Tests.TheoryConsumerSurface
 #check VStructureView.MinorsWF
 #check VStructureView.MinorsWFPrefix
 #check VStructureView.ProgramsWFPrefix
+#check VStructureView.ConstructorProjectorsExactPrefix
+#check VStructureView.ConstructorRuleCapturesPrefix
 #check VStructureView.RebuildWF
+#check VStructureView.projectionArgsSpineAux_of_prefix
 #check VStructureView.projector_hasType_field_of_type
 #check VStructureView.WF.checkedParamsSpine
 #check VStructureView.WF.constructorPrefix_hasType
 #check VStructureView.WF.toMinorsWFPrefix_one
 #check VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
+#check VStructureView.WF.projectionTypeFn_hasType_of_programsPrefix
+#check VStructureView.WF.toMinorsWFPrefix_succ_of_constructorProjectorsExactPrefix
+#check VStructureView.WF.toConstructorProjectorsExactPrefix_of_ruleCaptures
 #check VStructureView.WF.toProgramsWF_of_minors
 #check VStructureView.WF.toRebuildWF_of_programs
 #check VStructureView.WF.toStructEtaWF_of_rebuilds
@@ -111,6 +121,30 @@ info: 'Lean4Lean.VEnv.SpineWF.weak'_inv' depends on axioms: [propext, sorryAx, C
 #print axioms VEnv.SpineWF.weak'_inv
 
 /--
+info: 'Lean4Lean.VExpr.instRev_liftN_bvarRevRange' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VExpr.instRev_liftN_bvarRevRange
+
+/--
+info: 'Lean4Lean.VEnv.OnTel.selfSpineWF' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VEnv.OnTel.selfSpineWF
+
+/--
+info: 'Lean4Lean.VEnv.OnTel.instRev_defeq_of_spines' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms VEnv.OnTel.instRev_defeq_of_spines
+
+/--
+info: 'Lean4Lean.VEnv.OnSortTel.prefix_getElem?' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms VEnv.OnSortTel.prefix_getElem?
+
+/--
 info: 'Lean4Lean.VInductDecl.ElimMode.ofBool' does not depend on any axioms
 -/
 #guard_msgs in
@@ -144,6 +178,15 @@ info: 'Lean4Lean.VStructureView.WF.constructorPrefix_hasType' depends on axioms:
 #print axioms VStructureView.WF.constructorPrefix_hasType
 
 /--
+info: 'Lean4Lean.VStructureView.projectionArgsSpineAux_of_prefix' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.projectionArgsSpineAux_of_prefix
+
+/--
 info: 'Lean4Lean.VStructureView.WF.toMinorsWFPrefix_one' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
@@ -157,6 +200,33 @@ info: 'Lean4Lean.VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix' depends
 -/
 #guard_msgs in
 #print axioms VStructureView.WF.toProgramsWFPrefix_of_minorsWFPrefix
+
+/--
+info: 'Lean4Lean.VStructureView.WF.projectionTypeFn_hasType_of_programsPrefix' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.projectionTypeFn_hasType_of_programsPrefix
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toMinorsWFPrefix_succ_of_constructorProjectorsExactPrefix' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toMinorsWFPrefix_succ_of_constructorProjectorsExactPrefix
+
+/--
+info: 'Lean4Lean.VStructureView.WF.toConstructorProjectorsExactPrefix_of_ruleCaptures' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms VStructureView.WF.toConstructorProjectorsExactPrefix_of_ruleCaptures
 
 /--
 info: 'Lean4Lean.VStructureView.WF.toProgramsWF_of_minors' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]

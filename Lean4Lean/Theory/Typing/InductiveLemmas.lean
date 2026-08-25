@@ -2303,6 +2303,57 @@ theorem _root_.Lean4Lean.VExpr.liftN_succ_inst_bvar (e : VExpr) :
   | lam A b ihA ihb | forallE A b ihA ihb =>
     simp [VExpr.liftN, VExpr.inst, ihA s k, ihb s (k+1)]
 
+/-- Substituting the source-ordered variables from a surrounding context
+through a lift at the telescope boundary leaves exactly the unconsumed
+context lift. -/
+theorem _root_.Lean4Lean.VExpr.instRev_liftN_bvarRevRange (e : VExpr) :
+    ∀ (m i : Nat), i ≤ m →
+      (e.liftN m i).instRev (VExpr.bvarRevRange (m - i) i) =
+        e.liftN (m - i)
+  | _, 0, _ => rfl
+  | 0, i + 1, hi => by omega
+  | m + 1, i + 1, hi => by
+      have hrangeLength : ∀ (off n : Nat),
+          (VExpr.bvarRevRange off n).length = n := by
+        intro off n
+        induction n with
+        | zero => rfl
+        | succ n ih => simp [VExpr.bvarRevRange, ih]
+      simp only [VExpr.bvarRevRange, VExpr.instRev, hrangeLength]
+      rw [show m + 1 - (i + 1) + i = m by omega,
+        VExpr.liftN_succ_inst_bvar]
+      simpa using VExpr.instRev_liftN_bvarRevRange e m i (by omega)
+
+/-- The variables referring to a telescope's own binders form a well-typed
+spine when an arbitrary context segment sits immediately above them. -/
+theorem OnTel.selfSpineWF {env : VEnv} {U : Nat} :
+    ∀ {As : List VExpr} {B : VExpr} {Δ Γ : List VExpr},
+      env.OnTel U Γ As →
+      env.SpineWF U (Δ ++ As.reverse ++ Γ)
+        ((VExpr.forallN As B).liftN (Δ.length + As.length))
+        (VExpr.bvarRevRange Δ.length As.length) (B.liftN Δ.length)
+  | [], _, _, _, _ => .nil
+  | A :: As, B, Δ, Γ, htel => by
+      have harg : env.HasType U (Δ ++ (A :: As).reverse ++ Γ)
+          (.bvar (Δ.length + As.length))
+          (A.liftN (Δ.length + As.length + 1)) := by
+        have hlookup := Lookup.append (A := A) (Δ ++ As.reverse) (Γ := Γ)
+        simp only [List.length_append, List.length_reverse] at hlookup
+        exact .bvar (by simpa [List.append_assoc, Nat.add_assoc] using hlookup)
+      refine .cons ?_ ?_
+      · have htotal : Δ.length + As.length + 1 =
+            Δ.length + (As.length + 1) := by omega
+        simp only [List.length_cons]
+        rw [← htotal]
+        exact harg
+      have hrest := OnTel.selfSpineWF
+        (As := As) (B := B) (Δ := Δ) (Γ := A :: Γ) htel.2
+      simp only [List.length_cons, Nat.zero_add]
+      rw [show Δ.length + (As.length + 1) =
+        (Δ.length + As.length) + 1 by omega,
+        VExpr.liftN_succ_inst_bvar]
+      simpa [List.append_assoc] using hrest
+
 /-- Applying `f : (∀ As, B).liftN Δ.length` to the spine of variables
 referring to its own binders, sitting in the context right below `Δ`.
 The lift on the type in the hypothesis is what makes the invariant close

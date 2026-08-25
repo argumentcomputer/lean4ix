@@ -508,6 +508,35 @@ theorem VEnv.SpineWF.defEq_of_pointwise {env : VEnv} (henv : env.WF)
     · exact he
     · exact VEnv.IsDefEqU.of_l henv hΓ hd he
 
+/-- Pointwise equal saturated spines instantiate a well-typed dependent
+body to definitionally equal results.  The shared telescope controls the
+dependent argument types; no syntactic substitution congruence is assumed. -/
+theorem VEnv.OnTel.instRev_defeq_of_spines
+    {env : VEnv} (henv : env.WF) {U : Nat} {Γ : List VExpr}
+    (hΓ : OnCtx Γ (env.IsType U))
+    {As : List VExpr} (hAs : env.OnTel U Γ As)
+    {body : VExpr} {u : VLevel}
+    (hbody : env.HasType U (As.reverse ++ Γ) body (.sort u))
+    {left right : List VExpr}
+    (hleft : env.SpineWF U Γ
+      (VExpr.forallN As (.sort u)) left (.sort u))
+    (hright : env.SpineWF U Γ
+      (VExpr.forallN As (.sort u)) right (.sort u))
+    (hlen : left.length = As.length)
+    (hpoint : List.Forall₂
+      (fun a a' => a = a' ∨ env.IsDefEqU U Γ a a') left right) :
+    env.IsDefEqU U Γ (body.instRev left) (body.instRev right) := by
+  have hspine := hleft.defEq_of_pointwise henv hΓ hpoint
+  have hlam := VEnv.HasType.lamN hAs hbody
+  have happ := VEnv.IsDefEq.appN_defEq hlam hspine
+  have hleftBeta := VEnv.IsDefEq.appN_lamN henv.ordered
+    hAs hbody hleft hlen
+  have hrightLen : right.length = As.length := by
+    rw [← Lean4Lean.List.Forall₂.length_eq hpoint, hlen]
+  have hrightBeta := VEnv.IsDefEq.appN_lamN henv.ordered
+    hAs hbody hright hrightLen
+  exact ⟨.sort u, hleftBeta.symm.trans (happ.trans hrightBeta)⟩
+
 /-- Unfold the `OK` predicate through a folded list of defeq checks. -/
 theorem Pattern.Check.OK.of_foldr {p : Pattern} {α : Type _}
     {df : VExpr → VExpr → Prop} {m1 : List VLevel} {m2 : p.Path → VExpr}
