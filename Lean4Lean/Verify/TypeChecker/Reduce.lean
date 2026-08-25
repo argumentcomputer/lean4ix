@@ -757,7 +757,7 @@ info: 'Lean4Lean.TypeChecker.Inner.inductiveReduceRec.WF_of_k_false_of_not_struc
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1097,7 +1097,7 @@ info: 'Lean4Lean.TypeChecker.Inner.quotLift_result_trExpr' depends on axioms: [p
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1339,7 +1339,7 @@ info: 'Lean4Lean.TypeChecker.Inner.quotInd_result_trExpr' depends on axioms: [pr
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1417,7 +1417,7 @@ info: 'Lean4Lean.TypeChecker.Inner.quotReduceRec.WF_of_quotLift' depends on axio
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1495,7 +1495,7 @@ info: 'Lean4Lean.TypeChecker.Inner.quotReduceRec.WF_of_quotInd' depends on axiom
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1535,7 +1535,7 @@ info: 'Lean4Lean.TypeChecker.Inner.quotReduceRec.WF' depends on axioms: [propext
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1668,7 +1668,7 @@ info: 'Lean4Lean.TypeChecker.Inner.reduceRecursor.WF_of_quotInit_false_of_k_fals
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1732,7 +1732,7 @@ info: 'Lean4Lean.TypeChecker.Inner.reduceRecursor.WF_of_quotInit_true_of_inducti
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1768,7 +1768,7 @@ info: 'Lean4Lean.TypeChecker.Inner.reduceRecursor.WF_of_quotLift' depends on axi
  sorryAx,
  Classical.choice,
  Quot.sound,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

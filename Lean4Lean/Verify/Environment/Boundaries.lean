@@ -101,7 +101,7 @@ private theorem arrayFoldl_empty' {α β} (f : β → α → β) (init : β) :
   exact Array.foldl_empty
 
 private theorem exprAbstract_empty (e : Expr) : e.abstract #[] = e := by
-  simpa using (Expr.abstract_eq e [])
+  simpa using (Expr.abstract_eq e [] (.inl rfl) .nil)
 
 private theorem localContextMkForall_empty (lctx : LocalContext) (e : Expr) :
     lctx.mkForall #[] e = e := by

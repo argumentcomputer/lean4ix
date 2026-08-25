@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean.Expr
 import Lean.LocalContext
 import Lean.Util.InstantiateLevelParams
@@ -16,7 +22,10 @@ def cheapBetaReduce (e : Expr) : Expr := Id.run do
   let args := e.getAppArgs
   let rec cont i fn :=
     if !fn.hasLooseBVars then
-      mkAppRange fn i args.size args
+      -- Do not let a possibly corrupt packed loose-bvar cache suppress a
+      -- substitution. On cache-correct terms this range instantiation is the
+      -- identity and retains the runtime fast path.
+      mkAppRange (fn.instantiateRevRange 0 i args) i args.size args
     else if let .bvar n := fn then
       assert! n < i
       mkAppRange args[i - n - 1]! i args.size args

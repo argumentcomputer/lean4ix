@@ -12,6 +12,10 @@ execution and expose only translation-visible headers; generated rule
 payloads remain owned by `mkRecRules`.
 -/
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean
 open Lean hiding Environment Exception
 open Kernel
@@ -75,20 +79,18 @@ theorem generationEnv_of_insertion
 private theorem sortOne_data_hasExprMVar_false :
     (Expr.sort (.succ .zero)).data.hasExprMVar = false := by
   change (Expr.sort (.succ .zero)).hasExprMVar = false
-  rw [Expr.hasExprMVar_eq]
-  rfl
+  exact Expr.sort_hasExprMVar _
 
 private theorem sortOne_data_hasLevelMVar_false :
     (Expr.sort (.succ .zero)).data.hasLevelMVar = false := by
   change (Expr.sort (.succ .zero)).hasLevelMVar = false
-  rw [Expr.hasLevelMVar_eq]
-  simp [Expr.hasLevelMVar', Level.hasMVar_eq, Level.hasMVar']
+  rw [Expr.sort_hasLevelMVar, Level.hasMVar_eq]
+  rfl
 
 private theorem sortOne_data_hasFVar_false :
     (Expr.sort (.succ .zero)).data.hasFVar = false := by
   change (Expr.sort (.succ .zero)).hasFVar = false
-  rw [Expr.hasFVar_eq]
-  rfl
+  exact Expr.sort_hasFVar _
 
 /-- Full checking of the canonical primitive family sort at every positive
 recursive depth. -/
@@ -272,7 +274,7 @@ at every positive family-validation fuel pair. -/
 theorem sortOneCandidateObservable
     (context : AddInductive.Context) (depth inductiveFuel : Nat)
     (hdepth : context.fuel.recDepth = depth + 1)
-    (hinductive : context.fuel.inductiveFuel = inductiveFuel + 1) :
+    (_hinductive : context.fuel.inductiveFuel = inductiveFuel + 1) :
     AddInductive.CandidateExpr.Observable context
       (.sort (.succ .zero)) := by
   have hcheck : TypeChecker.M.run context.env context.safety context.lctx
@@ -386,7 +388,7 @@ private def boolInitialRecInfos (root : AddInductive.Context) :
       indices := #[]
       major := root.freshExpr }]
 
-private def boolMinorType (root : AddInductive.Context)
+private def boolMinorType (_root : AddInductive.Context)
     (context : AddInductive.Context) (recInfos : Array AddInductive.RecInfo)
     (ctorName : Name) : Expr :=
   let t := Expr.const ``Bool []
@@ -516,7 +518,7 @@ private theorem localContextMkForall_empty (lctx : LocalContext) (e : Expr) :
     lctx.mkForall #[] e = e := by
   unfold LocalContext.mkForall LocalContext.mkBinding
   change e.abstract #[] = e
-  simpa using (Expr.abstract_eq e [])
+  simpa using (Expr.abstract_eq e [] (.inl rfl) .nil)
 
 private theorem inferImplicit_eqv (e : Expr) (numParams : Nat)
     (considerRange : Bool) :
@@ -550,19 +552,29 @@ private theorem forallE_eqv
 private theorem exprAbstractList_empty (e : Expr) :
     e.abstractList [] = e := by
   have abstractArray : e.abstract #[] = e := by
-    simpa using (Expr.abstract_eq e [])
-  exact (Expr.abstract_eq e []).symm.trans abstractArray
+    simpa using (Expr.abstract_eq e [] (.inl rfl) .nil)
+  exact (Expr.abstract_eq e [] (.inl rfl) .nil).symm.trans abstractArray
 
 private theorem localContextMkForall_singleton
     {lctx : LocalContext} {id : FVarId} {index : Nat} {name : Name}
     {type body : Expr} {binderInfo : BinderInfo} {kind : LocalDeclKind}
-    (find : lctx.find? id = some (.cdecl index id name type binderInfo kind)) :
+    (find : lctx.find? id = some (.cdecl index id name type binderInfo kind))
+    (bodyClosed : body.looseBVarRange' = 0)
+    (typeClosed : type.looseBVarRange' = 0) :
     lctx.mkForall #[.fvar id] body =
       .forallE name type (body.abstract1 id) binderInfo := by
   rw [LocalContext.mkForall]
   change LocalContext.mkBinding false lctx
     ⟨[id].map Expr.fvar⟩ body = _
-  rw [LocalContext.mkBinding_eq,
+  rw [LocalContext.mkBinding_eq bodyClosed (by simp) (by
+      intro x member d found
+      simp only [List.mem_singleton] at member
+      subst x
+      rw [find] at found
+      cases found
+      exact ⟨typeClosed, by
+        intro value present
+        simp [LocalDecl.value?] at present⟩),
     LocalContext.mkBindingList_eq_fold (by
       intro x member
       simp only [List.mem_singleton] at member
@@ -583,7 +595,10 @@ private theorem localContextMkForall_pair
       (.cdecl firstIndex first firstName firstType firstBinderInfo firstKind))
     (secondFind : lctx.find? second = some
       (.cdecl secondIndex second secondName secondType secondBinderInfo
-        secondKind)) :
+        secondKind))
+    (bodyClosed : body.looseBVarRange' = 0)
+    (firstTypeClosed : firstType.looseBVarRange' = 0)
+    (secondTypeClosed : secondType.looseBVarRange' = 0) :
     lctx.mkForall #[.fvar first, .fvar second] body =
       Expr.forallE firstName firstType
         ((Expr.forallE secondName secondType (body.abstract1 second)
@@ -592,7 +607,20 @@ private theorem localContextMkForall_pair
   rw [LocalContext.mkForall]
   change LocalContext.mkBinding false lctx
     ⟨[first, second].map Expr.fvar⟩ body = _
-  rw [LocalContext.mkBinding_eq,
+  rw [LocalContext.mkBinding_eq bodyClosed (by simp [first_ne_second]) (by
+      intro x member d found
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with rfl | rfl
+      · rw [firstFind] at found
+        cases found
+        exact ⟨firstTypeClosed, by
+          intro value present
+          simp [LocalDecl.value?] at present⟩
+      · rw [secondFind] at found
+        cases found
+        exact ⟨secondTypeClosed, by
+          intro value present
+          simp [LocalDecl.value?] at present⟩),
     LocalContext.mkBindingList_eq_fold (by
       intro x member
       simp only [List.mem_cons, List.not_mem_nil, or_false] at member
@@ -613,20 +641,13 @@ private theorem boolMotiveType_eq
         root.freshFVarId `t boolMajorType .default .default) := by
     simpa [boolMajorContext] using majorFind
   unfold boolMotiveType
-  rw [localContextMkForall_empty]
-  rw [LocalContext.mkForall]
-  change LocalContext.mkBinding false (boolMajorContext root).lctx
-    ⟨[root.freshFVarId].map Expr.fvar⟩ (.sort (.param `u)) = _
-  rw [LocalContext.mkBinding_eq,
-    LocalContext.mkBindingList_eq_fold (by
-      intro x member
-      simp only [List.mem_singleton] at member
-      subst x
-      exact ⟨_, majorFind⟩) (by simp)]
-  simp only [List.foldr, Expr.abstract1, Expr.abstract_eq,
-    LocalContext.mkBindingList1]
-  rw [majorFind']
-  simp [exprAbstractList_empty]
+  simp only [AddInductive.Context.freshExpr]
+  rw [localContextMkForall_empty,
+    localContextMkForall_singleton majorFind'
+      (by simp [Expr.looseBVarRange'])
+      (by simp [boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations, Expr.looseBVarRange'])]
+  rfl
 
 private theorem boolFinalRecInfos_eq (root : AddInductive.Context) :
     boolFinalRecInfos root =
@@ -890,11 +911,38 @@ private theorem boolGeneratedRecursorRaw_eq
         rw [boolFinalRecInfos_eq]
         rfl]
   simp only [AddInductive.Context.freshExpr]
-  rw [localContextMkForall_empty,
-    localContextMkForall_singleton motiveFind,
-    localContextMkForall_pair false_ne_true falseFind trueFind',
-    localContextMkForall_empty,
-    localContextMkForall_singleton tFind]
+  simp only [localContextMkForall_empty]
+  rw [localContextMkForall_singleton tFind
+      (by simp [boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.looseBVarRange'])
+      (by simp [boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations, Expr.looseBVarRange']),
+    localContextMkForall_pair false_ne_true falseFind trueFind'
+      (by simp [boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        t_ne_motive, false_bne_motive, true_bne_motive,
+        false_ne_true, Expr.looseBVarRange'])
+      (by simp [boolFalseMinorType_eq root,
+        boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.looseBVarRange'])
+      (by simp [boolTrueMinorType_eq root,
+        boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.looseBVarRange']),
+    localContextMkForall_singleton motiveFind
+      (by simp [boolFalseMinorType_eq root, boolTrueMinorType_eq root,
+        boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        t_ne_motive, false_bne_motive, true_bne_motive,
+        false_ne_true, Expr.looseBVarRange'])
+      (by simp [boolMotiveType_eq root rootRun,
+        boolMajorType, boolStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.looseBVarRange'])]
   rw [boolMotiveType_eq root rootRun, boolFalseMinorType_eq root,
     boolTrueMinorType_eq root]
   simp [boolRawExpectedRecursorType, boolMajorType, boolStats, mkAppN,
@@ -1319,7 +1367,7 @@ theorem inductiveConstCandidateObservable
     (depth whnfFuel inductiveFuel : Nat)
     (hdepth : context.fuel.recDepth = depth + 1)
     (hwhnfFuel : context.fuel.whnf = whnfFuel + 1)
-    (hinductive : context.fuel.inductiveFuel = inductiveFuel + 1)
+    (_hinductive : context.fuel.inductiveFuel = inductiveFuel + 1)
     (hfind : context.env.find? constName = some (.inductInfo info))
     (hlevels : info.levelParams = [])
     (hunsafe : info.isUnsafe = false)
@@ -1744,7 +1792,7 @@ private theorem natLocalContextMkForall_empty
     (lctx : LocalContext) (e : Expr) : lctx.mkForall #[] e = e := by
   unfold LocalContext.mkForall LocalContext.mkBinding
   change e.abstract #[] = e
-  simpa using (Expr.abstract_eq e [])
+  simpa using (Expr.abstract_eq e [] (.inl rfl) .nil)
 
 private def natMajorContext (root : AddInductive.Context) :
     AddInductive.Context :=
@@ -2120,20 +2168,13 @@ private theorem natMotiveType_eq
         root.freshFVarId `t natMajorType .default .default) := by
     simpa [natMajorContext] using majorFind
   unfold natMotiveType
-  rw [natLocalContextMkForall_empty]
-  rw [LocalContext.mkForall]
-  change LocalContext.mkBinding false (natMajorContext root).lctx
-    ⟨[root.freshFVarId].map Expr.fvar⟩ (.sort (.param `u)) = _
-  rw [LocalContext.mkBinding_eq,
-    LocalContext.mkBindingList_eq_fold (by
-      intro x member
-      simp only [List.mem_singleton] at member
-      subst x
-      exact ⟨_, majorFind⟩) (by simp)]
-  simp only [List.foldr, Expr.abstract1, Expr.abstract_eq,
-    LocalContext.mkBindingList1]
-  rw [majorFind']
-  simp [exprAbstractList_empty]
+  simp only [AddInductive.Context.freshExpr]
+  rw [natLocalContextMkForall_empty,
+    localContextMkForall_singleton majorFind'
+      (by simp [Expr.looseBVarRange'])
+      (by simp [natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations, Expr.looseBVarRange'])]
+  rfl
 
 private theorem natFinalRecInfos_eq (root : AddInductive.Context)
     (binderName : Name) (binderInfo : BinderInfo) :
@@ -2283,8 +2324,21 @@ private theorem natSuccMinorType_eq
         (.app (natMajorContext root).freshExpr
           (.app (.const ``Nat.succ [])
             (.fvar (natZeroContext root).freshFVarId)))) = _
-  rw [localContextMkForall_singleton ihFind',
-    localContextMkForall_singleton nFind]
+  rw [localContextMkForall_singleton ihFind'
+      (by simp [AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange'])
+      (by simp [natSuccIHType_eq, AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange']),
+    localContextMkForall_singleton nFind
+      (by
+        have ih_ne_motive := motive_ne_ih.symm
+        have ih_ne_n := n_ne_ih.symm
+        simp [natSuccIHType_eq, AddInductive.consumeTypeAnnotations,
+          AddInductive.Context.freshExpr, Expr.abstract1,
+          ih_ne_motive, ih_ne_n, Expr.looseBVarRange'])
+      (by simp [AddInductive.consumeTypeAnnotations,
+        Expr.looseBVarRange'])]
   rw [natSuccIHType_eq]
   have ih_bne_motive :
       ((natSuccArgContext root binderName binderInfo).freshFVarId ==
@@ -2553,11 +2607,45 @@ private theorem natGeneratedRecursorRaw_eq
         rw [natFinalRecInfos_eq]
         rfl]
   simp only [AddInductive.Context.freshExpr]
-  rw [localContextMkForall_empty,
-    localContextMkForall_singleton motiveFind,
-    localContextMkForall_pair zero_ne_succ zeroFind succFind,
-    localContextMkForall_empty,
-    localContextMkForall_singleton tFind]
+  simp only [localContextMkForall_empty]
+  rw [localContextMkForall_singleton tFind
+      (by simp [natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange'])
+      (by simp [natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations, Expr.looseBVarRange']),
+    localContextMkForall_pair zero_ne_succ zeroFind succFind
+      (by simp [natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        t_ne_motive, zero_bne_motive, succ_bne_motive,
+        zero_ne_succ,
+        Expr.looseBVarRange'])
+      (by simp [natZeroMinorType_eq root,
+        natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange'])
+      (by simp [natSuccMinorType_eq root binderName binderInfo rootRun,
+        natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange']),
+    localContextMkForall_singleton motiveFind
+      (by simp [natZeroMinorType_eq root,
+        natSuccMinorType_eq root binderName binderInfo rootRun,
+        natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        t_ne_motive, zero_bne_motive, succ_bne_motive,
+        zero_ne_succ,
+        Expr.looseBVarRange'])
+      (by simp [natMotiveType_eq root rootRun,
+        natMajorType, natStats, mkAppN,
+        AddInductive.consumeTypeAnnotations,
+        AddInductive.Context.freshExpr, Expr.abstract1,
+        Expr.looseBVarRange'])]
   rw [natMotiveType_eq root rootRun, natZeroMinorType_eq root,
     natSuccMinorType_eq root binderName binderInfo rootRun]
   simp [natRawExpectedRecursorType, natMajorType, natStats, mkAppN,

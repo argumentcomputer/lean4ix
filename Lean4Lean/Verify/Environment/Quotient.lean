@@ -40,7 +40,8 @@ private theorem checkedEqType_build (u : Name) :
   have lctx'WF : lctx'.WF := lctxWF.mkLocalDecl fresh
   have idFind : lctx'.find? id = some (.cdecl lctx.decls.size id `α
       (.sort (.param u)) .implicit .default) := by
-    rw [lctx'WF.find?_eq_find?_toList, LocalContext.mkLocalDecl_toList]
+    rw [lctx'WF.find?_eq_find?_toList,
+      LocalContext.mkLocalDecl_toList lctxWF.decls_wf]
     simp [LocalDecl.fvarId]
   have hx : ∀ x ∈ [id], ∃ decl, lctx'.find? x = some decl := by
     intro x hx
@@ -50,7 +51,14 @@ private theorem checkedEqType_build (u : Name) :
   rw [LocalContext.mkForall]
   change LocalContext.mkBinding false lctx' ⟨[id].map Expr.fvar⟩
     ((Expr.fvar id).arrow ((Expr.fvar id).arrow Expr.prop)) = checkedEqType u
-  rw [LocalContext.mkBinding_eq, LocalContext.mkBindingList_eq_fold hx (by simp)]
+  rw [LocalContext.mkBinding_eq (by rfl) (by simp) (by
+      intro x hx d hd
+      simp only [List.mem_singleton] at hx
+      subst x
+      rw [idFind] at hd
+      cases hd
+      exact ⟨rfl, by simp [LocalDecl.value?]⟩),
+    LocalContext.mkBindingList_eq_fold hx (by simp)]
   simp [LocalContext.mkBindingList1, idFind, checkedEqType, lctx, id, ngen]
   rfl
 

@@ -45,7 +45,7 @@ set_option allowUnsafeReducibility true
 attribute [local reducible] Data
 
 theorem mkData_depth (H : d < 2 ^ 24) : (mkData h d hmv hp).depth.toNat = d := by
-  rw [mkData_eq, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H)), Data.depth]
+  rw [mkData_eq H, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H)), Data.depth]
   have : d.toUInt64.toUInt32.toNat = d := by simp; omega
   refine .trans ?_ this; congr 2
   rw [← UInt64.toBitVec_inj]
@@ -62,7 +62,7 @@ theorem mkData_depth (H : d < 2 ^ 24) : (mkData h d hmv hp).depth.toNat = d := b
   bv_decide
 
 theorem mkData_hasParam (H : d < 2 ^ 24) : (mkData h d hmv hp).hasParam = hp := by
-  rw [mkData_eq, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H))]
+  rw [mkData_eq H, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H))]
   simp [Data.hasParam, (· == ·), ← UInt64.toBitVec_inj]
   have : h.toUInt32.toUInt64.toBitVec ≤ 0xffffffff#64 := Nat.le_of_lt_succ h.toUInt32.1.1.2
   have hb : ∀ (b : Bool), b.toUInt64.toBitVec ≤ 1#64 := by decide
@@ -77,7 +77,7 @@ theorem mkData_hasParam (H : d < 2 ^ 24) : (mkData h d hmv hp).hasParam = hp := 
   cases hp <;> decide
 
 theorem mkData_hasMVar (H : d < 2 ^ 24) : (mkData h d hmv hp).hasMVar = hmv := by
-  rw [mkData_eq, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H))]
+  rw [mkData_eq H, mkData', if_neg (Nat.not_lt.2 (Nat.le_sub_one_of_lt H))]
   simp [Data.hasMVar, (· == ·), ← UInt64.toBitVec_inj]
   have : h.toUInt32.toUInt64.toBitVec ≤ 0xffffffff#64 := Nat.le_of_lt_succ h.toUInt32.1.1.2
   have hb : ∀ (b : Bool), b.toUInt64.toBitVec ≤ 1#64 := by decide

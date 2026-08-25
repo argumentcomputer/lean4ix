@@ -18,15 +18,27 @@ open scoped _root_.List
 theorem fvarsIn_iff : FVarsIn P e ↔ (∀ fv ∈ e.fvarsList, P fv) ∧ FVarsIn (fun _ => True) e := by
   induction e <;> simp [FVarsIn, Expr.fvarsList, *] <;> grind
 
-theorem fvarsIn_iff_hasMVar : FVarsIn (fun _ => True) e ↔ e.hasMVar = false := by
-  rw [Expr.hasMVar, ← Expr.hasExprMVar, ← Expr.hasLevelMVar]; simp
+/-- Purely structural characterization of metavariable freedom. -/
+theorem fvarsIn_iff_hasMVar' :
+    FVarsIn (fun _ => True) e ↔ (e.hasExprMVar' = false ∧ e.hasLevelMVar' = false) := by
   induction e <;>
     simp [FVarsIn, Expr.hasExprMVar', Expr.hasLevelMVar', Level.hasMVar_eq, and_assoc,
       and_left_comm, *]
 
-theorem fvarsList_eq_nil {e : Expr} : e.fvarsList = [] ↔ e.hasFVar = false := by
-  rw [Expr.hasFVar_eq]
+/-- A cache-negative result implies the structural metavariable property; the
+unsupported converse is intentionally absent. -/
+theorem fvarsIn_iff_hasMVar (h : e.hasMVar = false) : FVarsIn (fun _ => True) e := by
+  rw [Expr.hasMVar, ← Expr.hasExprMVar, ← Expr.hasLevelMVar, Bool.or_eq_false_iff] at h
+  exact fvarsIn_iff_hasMVar'.2
+    ⟨Expr.hasExprMVar_eq_false h.1, Expr.hasLevelMVar_eq_false h.2⟩
+
+/-- Purely structural characterization of free-variable absence. -/
+theorem fvarsList_eq_nil' {e : Expr} : e.fvarsList = [] ↔ e.hasFVar' = false := by
   induction e <;> simp [Expr.fvarsList, Expr.hasFVar', and_assoc, *]
+
+/-- A cache-negative result implies the structural free-variable property. -/
+theorem fvarsList_eq_nil {e : Expr} (h : e.hasFVar = false) : e.fvarsList = [] :=
+  fvarsList_eq_nil'.2 (Expr.hasFVar_eq_false h)
 
 theorem FVarsIn.mp (H : ∀ fv, P fv → Q fv → R fv) :
     ∀ {e}, FVarsIn P e → FVarsIn Q e → FVarsIn R e
@@ -2631,10 +2643,21 @@ theorem BetaReduce.cheapBetaReduce (hc : e.Closed) : BetaReduce e e.cheapBetaRed
     have := eqr ▸ hc.getAppArgsList; simp [or_imp, forall_and] at this
     exact this.1
   unfold Expr.cheapBetaReduce.cont; split <;> rename_i h3
-  · simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq] at h3
-    rw [Expr.mkAppRange_eq (l₂ := l₂) (l₃ := []) (by simp [eq]) rfl (by simp [← eq])]
+  · -- The cached 20-bit loose-bvar range is only a performance hint. The executable
+    -- fallback substitutes even when that cache says the body is closed, so this remains a
+    -- beta reduction without trusting the cached value.
+    clear h3
+    have hinst : fn.instantiateRevRange 0 l₁.length e.getAppArgsList.toArray
+        = fn.instantiateList l₁.reverse := by
+      rw [Expr.instantiateRevRange_eq _ _ (Nat.zero_le _) (by simp [eq]),
+        Expr.instantiateRev_eq,
+        Expr.instantiate_eq _ _ (Or.inr (by
+          simpa [eq] using fun x hx => (hl₁ x hx).looseBVarRange_zero))]
+      congr 1
+      simp [eq]
+    rw [hinst, Expr.mkAppRange_eq (l₂ := l₂) (l₃ := []) (by simp [eq]) rfl (by simp [← eq])]
     rw [← e.mkAppList_getAppArgsList, eqr]; simp
-    refine .mkAppList <| .inst_reduce hl₁ [] h1 (Expr.instantiateList_eq_self h3)
+    exact .mkAppList <| .inst_reduce hl₁ [] h1 (by simp)
   split <;> [rename_i n; exact .refl]
   have hc := h1.closed hc.getAppFn
   simp [Closed] at hc; rw [if_pos hc]

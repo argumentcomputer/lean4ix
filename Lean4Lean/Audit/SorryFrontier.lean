@@ -328,6 +328,8 @@ def projectAxiomManifest : Array ProjectAxiom := #[
   .platform "L4L-EXPR-013" `Lean.Expr.mkData_eq
     "Pinned expression-cache bit layout used by metadata proofs.",
   .bridge "L4L-EXPR-014" `Lean.Expr.replace_eq opaqueOperation,
+  .bridge "L4L-EXPR-015" `Lean.Expr.abstract_fvars_shape
+    "Opaque free-variable abstraction preserves the recursive expression skeleton.",
 
   .bridge "L4L-LEVEL-001" `Lean.Level.hasMVar_eq cachedMetadata,
   .bridge "L4L-LEVEL-002" `Lean.Level.hasParam_eq cachedMetadata,
@@ -340,13 +342,99 @@ def projectAxiomManifest : Array ProjectAxiom := #[
   .bridge "L4L-LEVEL-006" `Lean.Level.normalize_eq
     "Bridge from partial level normalization to its total copy.",
 
-  .bridge "L4L-PARRAY-001" `Lean.PersistentArray.toList'_push persistentContract,
+  .bridge "L4L-PARRAY-001" `Lean.PersistentArray.WF.toList'_push
+    persistentContract,
   .bridge "L4L-PHMAP-001" `Lean.PersistentHashMap.findAux_isSome persistentContract,
   .bridge "L4L-PHMAP-002" `Lean.PersistentHashMap.WF.find?_eq persistentContract,
   .bridge "L4L-PHMAP-003" `Lean.PersistentHashMap.WF.toList'_insert
     persistentContract,
   .bridge "L4L-SYNTAX-001" `Lean.Syntax.structEq_eq
     "Bridge from partial syntax equality to structural recursion."]
+
+/-! ## Repaired contract signatures
+
+These guards pin the exact domains of every contract implicated by the
+upstream trust audit.  The name-based manifest would not notice a same-name
+axiom being widened again; these checks do.  The new shape-only abstraction
+bridge is pinned alongside the ten repaired assumptions because it is the
+replacement used by callers outside `abstract_eq`'s honest equality domain.
+-/
+
+/--
+info: @PersistentArray.WF.toList'_push : ∀ {α : Type u_1} {arr : PersistentArray α},
+  arr.WF → ∀ (x : α), (arr.push x).toList' = arr.toList' ++ [x]
+-/
+#guard_msgs in
+#check @Lean.PersistentArray.WF.toList'_push
+
+/--
+info: @Level.mkData_eq : ∀ {h : UInt64} {d : Nat} {mv hp : Bool},
+  d < 2 ^ 24 → Level.mkData h d mv hp = Level.mkData' h d mv hp
+-/
+#guard_msgs in
+#check @Lean.Level.mkData_eq
+
+/--
+info: Level.hasParam_eq : ∀ (l : Level), l.hasParam = l.hasParam'
+-/
+#guard_msgs in
+#check @Lean.Level.hasParam_eq
+
+/--
+info: Level.hasMVar_eq : ∀ (l : Level), l.hasMVar = l.hasMVar'
+-/
+#guard_msgs in
+#check @Lean.Level.hasMVar_eq
+
+/--
+info: @Expr.mkData_eq : ∀ {h : UInt64} {br : Nat} {d : UInt32} {fv ev lv lp : Bool},
+  br ≤ 2 ^ 20 - 1 → Expr.mkData h br d fv ev lv lp = Expr.mkData' h br d fv ev lv lp
+-/
+#guard_msgs in
+#check @Lean.Expr.mkData_eq
+
+/--
+info: Expr.looseBVarRange_eq : ∀ (e : Expr), e.BVarBounded → e.looseBVarRange = e.looseBVarRange'
+-/
+#guard_msgs in
+#check @Lean.Expr.looseBVarRange_eq
+
+/--
+info: Expr.instantiate_eq : ∀ (e : Expr) (subst : Array Expr),
+  (e.looseBVarRange' = 0 ∨ ∀ (a : Expr), a ∈ subst → a.looseBVarRange' = 0) →
+    e.instantiate subst = e.instantiateList subst.toList
+-/
+#guard_msgs in
+#check @Lean.Expr.instantiate_eq
+
+/--
+info: @Expr.instantiateRange_eq : ∀ {start stop : Nat} (e : Expr) (subst : Array Expr),
+  start ≤ stop → stop ≤ subst.size → e.instantiateRange start stop subst = e.instantiate (subst.extract start stop)
+-/
+#guard_msgs in
+#check @Lean.Expr.instantiateRange_eq
+
+/--
+info: @Expr.instantiateRevRange_eq : ∀ {start stop : Nat} (e : Expr) (subst : Array Expr),
+  start ≤ stop →
+    stop ≤ subst.size → e.instantiateRevRange start stop subst = e.instantiateRev (subst.extract start stop)
+-/
+#guard_msgs in
+#check @Lean.Expr.instantiateRevRange_eq
+
+/--
+info: Expr.abstract_eq : ∀ (e : Expr) (xs : List FVarId),
+  xs = [] ∨ e.looseBVarRange' = 0 → xs.Nodup → e.abstract { toList := List.map Expr.fvar xs } = e.abstractList xs
+-/
+#guard_msgs in
+#check @Lean.Expr.abstract_eq
+
+/--
+info: Expr.abstract_fvars_shape : ∀ (e : Expr) (xs : List FVarId),
+  (e.abstract { toList := List.map Expr.fvar xs }).AbstractFVarShape e
+-/
+#guard_msgs in
+#check @Lean.Expr.abstract_fvars_shape
 
 /-! ## Exact release-root axiom policy
 

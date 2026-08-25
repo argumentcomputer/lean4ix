@@ -953,9 +953,11 @@ theorem MLCtx.WF.decls_size {c : MLCtx} (wf : c.WF env Us) :
   induction c with
   | nil => rfl
   | vlam _ _ _ _ _ _ ih =>
-    simp [lctx, LocalContext.mkLocalDecl, Lean.PersistentArray.toList'_push, ih wf.1]
+    simp [lctx, LocalContext.mkLocalDecl, ih wf.1,
+      wf.1.tr.1.decls_wf.toList'_push]
   | vlet _ _ _ _ _ _ _ ih =>
-    simp [lctx, LocalContext.mkLetDecl, Lean.PersistentArray.toList'_push, ih wf.1]
+    simp [lctx, LocalContext.mkLetDecl, ih wf.1,
+      wf.1.tr.1.decls_wf.toList'_push]
 
 theorem MLCtx.WF.toList_eq {c : MLCtx} (wf : c.WF env Us) :
     c.lctx.toList = c.decls := by
@@ -963,11 +965,11 @@ theorem MLCtx.WF.toList_eq {c : MLCtx} (wf : c.WF env Us) :
   induction c with
   | nil => rfl
   | vlam _ _ _ _ _ _ ih =>
-    simp [lctx, LocalContext.mkLocalDecl, decls, Lean.PersistentArray.toList'_push, ih wf.1,
-      wf.1.decls_size]
+    simp [lctx, LocalContext.mkLocalDecl, decls, ih wf.1, wf.1.decls_size,
+      wf.1.tr.1.decls_wf.toList'_push]
   | vlet _ _ _ _ _ _ _ ih =>
-    simp [lctx, LocalContext.mkLetDecl, decls, Lean.PersistentArray.toList'_push, ih wf.1,
-      wf.1.decls_size]
+    simp [lctx, LocalContext.mkLetDecl, decls, ih wf.1, wf.1.decls_size,
+      wf.1.tr.1.decls_wf.toList'_push]
 
 theorem MLCtx.WF.find?_eq {c : MLCtx} (wf : c.WF env Us) :
     c.lctx.find? x = c.decls.find? (x == ·.fvarId) := by
@@ -998,12 +1000,16 @@ theorem MLCtx.PartialForall.sublist (H : MLCtx.PartialForall c n l e) : l <+ c.v
   | skip _ _ _ _ ih => exact ih.trans (List.sublist_cons_self ..)
 
 theorem MLCtx.WF.mkForall_partial {c : MLCtx} (wf : c.WF env Us) (n hn)
+    (he : e.looseBVarRange' = 0)
     (harr : arr.toList.reverse = l.map .fvar) (hp : MLCtx.PartialForall c n l e) :
     c.lctx.mkForall arr e = c.mkForall n hn e := by
   have := congrArg (Array.mk ·.reverse) harr; simp at this
-  rw [LocalContext.mkForall, this, ← List.map_reverse, LocalContext.mkBinding_eq,
+  rw [LocalContext.mkForall, this, ← List.map_reverse,
+    LocalContext.mkBinding_eq he
+      (List.nodup_reverse.2 (hp.sublist.nodup wf.fvars_nodup))
+      (fun _ _ _ h => wf.tr.closed_of_find? h),
     LocalContext.mkBindingList_eq_fold, List.foldr_reverse]
-  · clear harr this
+  · clear harr this he
     induction hp with
     | nil => simp
     | vlam hp ih | vlet hp ih =>
@@ -1030,16 +1036,22 @@ theorem MLCtx.WF.mkForall_partial {c : MLCtx} (wf : c.WF env Us) (n hn)
   · exact List.nodup_reverse.2 (hp.sublist.nodup wf.fvars_nodup)
 
 theorem MLCtx.WF.mkForall_eq {c : MLCtx} (wf : c.WF env Us) (n hn)
+    (he : e.looseBVarRange' = 0)
     (harr : arr.toList.reverse = (c.fvarRevList n hn).map .fvar) :
-    c.lctx.mkForall arr e = c.mkForall n hn e := mkForall_partial wf n hn harr .full
+    c.lctx.mkForall arr e = c.mkForall n hn e :=
+  mkForall_partial wf n hn he harr .full
 
 theorem MLCtx.WF.mkLambda_eq {c : MLCtx} (wf : c.WF env Us) (n hn)
+    (he : e.looseBVarRange' = 0)
     (harr : arr.toList.reverse = (c.fvarRevList n hn).map .fvar) :
     c.lctx.mkLambda arr e = c.mkLambda n hn e := by
   have := congrArg (Array.mk ·.reverse) harr; simp at this
-  rw [LocalContext.mkLambda, this, ← List.map_reverse, LocalContext.mkBinding_eq,
+  rw [LocalContext.mkLambda, this, ← List.map_reverse,
+    LocalContext.mkBinding_eq he
+      (List.nodup_reverse.2 (wf.fvarRevList_nodup ..))
+      (fun _ _ _ h => wf.tr.closed_of_find? h),
     LocalContext.mkBindingList_eq_fold, List.foldr_reverse]
-  · clear harr this
+  · clear harr this he
     induction n generalizing c e with
     | zero => simp
     | succ n ih =>

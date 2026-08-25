@@ -14,6 +14,10 @@ kernel declarations. This module closes the next bridge: it quotes the actual
 intermediate Theory environment, constructs `AddInduct`, and drives the live
 `TrEnv'.induct` case. -/
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta Elab Term
 open Lean4Lean.InductiveFixtures
@@ -2994,6 +2998,18 @@ private theorem annotatedPiExceptPure
     (u arg) :
     (Expr.sort u).instantiate1' arg = .sort u := rfl
 
+@[simp] private theorem annotatedPiConst_instantiateFVar
+    (id : FVarId) :
+    (Expr.const ``AnnotatedPi []).instantiate #[.fvar id] =
+      .const ``AnnotatedPi [] := by
+  simp [Expr.instantiate_eq, Expr.instantiate1',
+    Expr.looseBVarRange']
+
+@[simp] private theorem annotatedPiBvarZero_instantiateSortZero :
+    (Expr.bvar 0).instantiate #[.sort .zero] = .sort .zero := by
+  simp [Expr.instantiate_eq, Expr.instantiate1',
+    Expr.looseBVarRange']
+
 @[simp] private theorem annotatedPiConst_beq_sort
     (name levels u) :
     ((.const name levels : Expr) == .sort u) = false := by
@@ -3102,6 +3118,46 @@ private def annotatedPiOuterName : Name :=
       (.mkStr (.mkStr (.mkStr .anonymous "a") "_@") "_internal")
       "_hyg")
     0
+
+/- These concrete fixture expressions are structurally within the packed
+loose-bvar range.  Keeping their cache facts local avoids routing the replay
+through the generic bit-arithmetic proofs, whose `bv_decide` implementation
+would otherwise become a new native trust dependency of the certificates. -/
+@[simp] private theorem annotatedPiRawDomain_looseBVarRange :
+    ((Expr.const ``outParam [.succ .zero]).app
+      (.sort .zero)).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem annotatedPiRawInner_looseBVarRange :
+    (Expr.forallE `p
+      ((Expr.const ``outParam [.succ .zero]).app (.sort .zero))
+      (.const ``AnnotatedPi []) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem annotatedPiRawCtor_looseBVarRange :
+    (Expr.forallE annotatedPiOuterName
+      (.forallE `p
+        ((Expr.const ``outParam [.succ .zero]).app (.sort .zero))
+        (.const ``AnnotatedPi []) .default)
+      (.const ``AnnotatedPi []) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem annotatedPiViewInner_looseBVarRange :
+    (Expr.forallE `p (.sort .zero)
+      (.const ``AnnotatedPi []) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem annotatedPiViewCtor_looseBVarRange :
+    (Expr.forallE annotatedPiOuterName
+      (.forallE `p (.sort .zero)
+        (.const ``AnnotatedPi []) .default)
+      (.const ``AnnotatedPi []) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
 
 @[simp] private theorem annotatedPiFamilyType_noLooseBVars :
     annotatedPiInfo.type.hasLooseBVars = false := by
@@ -3357,7 +3413,8 @@ private theorem annotatedPiCtor_checkTypeM :
       .ok (.sort (.succ .zero))
   unfold TypeChecker.Inner.inferType'
   simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
-    Expr.instantiateRev_eq, Expr.instantiate_eq, TypeChecker.Inner.inferType',
+    Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
+    TypeChecker.Inner.inferType',
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
   rw [annotatedPiIsDefEqSort 9997]
@@ -3747,7 +3804,9 @@ private theorem normalizationExceptPure
     (Expr.app
       (.const ``RecAlias [.succ .zero])
       (.const ``AliasRec [])).hasLooseBVars = false := by
-  simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange']
+  unfold Expr.hasLooseBVars
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
 
 @[simp] private theorem emptyCheckTypeCache_typeFamilyAlias :
     (({} : TypeChecker.State).inferTypeC)[
@@ -4779,7 +4838,8 @@ private theorem annotatedPiInferAppDomainOnly
   simp only [normalizationRecMBind]
   rw [annotatedPiInferTypeOutParamOnly fuel]
   simp [TypeChecker.Inner.inferApp.loop, annotatedPiOutParamFnType,
-    Expr.instantiateRevRange_eq, Expr.instantiateRev_eq, Expr.instantiate_eq]
+    Expr.instantiateRevRange_eq, Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiate1', Expr.looseBVarRange']
 
 private def annotatedPiDomainInferOnlyState
     (m : EquivManager) : TypeChecker.State :=
@@ -5167,8 +5227,7 @@ private theorem annotatedPiLazyDeltaLoopDomain
         !(.sort .zero : Expr).hasFVar ||
       annotatedPiCtorCandidateContext.toTypeChecker.eagerReduce) = true
     by
-      simp [Expr.hasFVar_eq, Expr.hasFVar',
-        annotatedPiRawDomainKernel]]
+      simp [annotatedPiRawDomainKernel]]
   simp only [if_true]
   rw [normalizationRecMBind]
   rw [annotatedPiReduceNatDomain]
@@ -5801,20 +5860,17 @@ private def annotatedPiInductiveStats : AddInductive.InductiveStats where
 private theorem annotatedPiSortOne_data_hasExprMVar_false :
     (Expr.sort (.succ .zero)).data.hasExprMVar = false := by
   change (Expr.sort (.succ .zero)).hasExprMVar = false
-  rw [Expr.hasExprMVar_eq]
-  rfl
+  exact Expr.sort_hasExprMVar _
 
 private theorem annotatedPiSortOne_data_hasLevelMVar_false :
     (Expr.sort (.succ .zero)).data.hasLevelMVar = false := by
   change (Expr.sort (.succ .zero)).hasLevelMVar = false
-  rw [Expr.hasLevelMVar_eq]
-  simp [Expr.hasLevelMVar', Level.hasMVar_eq, Level.hasMVar']
+  simp [Level.hasMVar_eq, Level.hasMVar']
 
 private theorem annotatedPiSortOne_data_hasFVar_false :
     (Expr.sort (.succ .zero)).data.hasFVar = false := by
   change (Expr.sort (.succ .zero)).hasFVar = false
-  rw [Expr.hasFVar_eq]
-  rfl
+  exact Expr.sort_hasFVar _
 
 private theorem annotatedPi_checkInductiveTypes
     (k : AddInductive.InductiveStats → AddInductive.M α) :
@@ -5881,22 +5937,19 @@ private theorem annotatedPi_declareInductiveTypes :
 private theorem annotatedPiCtor_data_hasExprMVar_false :
     annotatedPiMkInfo.type.data.hasExprMVar = false := by
   change annotatedPiMkInfo.type.hasExprMVar = false
-  rw [Expr.hasExprMVar_eq]
-  rfl
+  simp [annotatedPiMkInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
 
 private theorem annotatedPiCtor_data_hasLevelMVar_false :
     annotatedPiMkInfo.type.data.hasLevelMVar = false := by
   change annotatedPiMkInfo.type.hasLevelMVar = false
-  rw [Expr.hasLevelMVar_eq]
   simp [annotatedPiMkInfo, ConstantInfo.type,
-    ConstantInfo.toConstantVal, Expr.hasLevelMVar',
+    ConstantInfo.toConstantVal,
     Level.hasMVar_eq, Level.hasMVar']
 
 private theorem annotatedPiCtor_data_hasFVar_false :
     annotatedPiMkInfo.type.data.hasFVar = false := by
   change annotatedPiMkInfo.type.hasFVar = false
-  rw [Expr.hasFVar_eq]
-  rfl
+  simp [annotatedPiMkInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
 
 private theorem annotatedPiCtor_noMVarNoFVar :
     annotatedPiTypeKernelEnv.checkNoMVarNoFVar
@@ -6055,12 +6108,13 @@ private theorem annotatedPiInner_inferTypeInner :
   unfold annotatedPiInnerKernel TypeChecker.Inner.inferType'
   simp [annotatedPiRawDomainKernel,
     Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
-    Expr.instantiateRev_eq, Expr.instantiate_eq,
+    Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiInferTypeDomainOnly998]
   simp only [TypeChecker.Inner.ensureSortCore, Expr.isSort, ↓reduceIte, annotatedPiWithLocalDecl,
-    annotatedPiRecMPure, Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
+    annotatedPiConst_instantiateFVar, annotatedPiRecMPure, Bind.bind,
+    ReaderT.bind, StateT.bind, Except.bind]
   rw [annotatedPiInferTypeFamilyAfterDomainOnly_literal]
   simp [Expr.sortLevel!, annotatedPiInnerInferOnlyFinalState,
     annotatedPiInnerKernel, annotatedPiRawDomainKernel]
@@ -6807,20 +6861,17 @@ private def aliasFormerInductiveStats : AddInductive.InductiveStats where
 private theorem constNil_data_hasExprMVar_false (n : Name) :
     (Expr.const n []).data.hasExprMVar = false := by
   change (Expr.const n []).hasExprMVar = false
-  rw [Expr.hasExprMVar_eq]
-  rfl
+  exact Expr.const_hasExprMVar _ _
 
 private theorem constNil_data_hasLevelMVar_false (n : Name) :
     (Expr.const n []).data.hasLevelMVar = false := by
   change (Expr.const n []).hasLevelMVar = false
-  rw [Expr.hasLevelMVar_eq]
-  rfl
+  exact Expr.const_hasLevelMVar _ _
 
 private theorem constNil_data_hasFVar_false (n : Name) :
     (Expr.const n []).data.hasFVar = false := by
   change (Expr.const n []).hasFVar = false
-  rw [Expr.hasFVar_eq]
-  rfl
+  exact Expr.const_hasFVar _ _
 
 private theorem aliasFormer_checkInductiveTypes
     (k : AddInductive.InductiveStats → AddInductive.M α) :
@@ -8907,7 +8958,8 @@ private def annotatedPiAlignedViewCtorKernel : Expr :=
       .const ``AnnotatedPi [] := by
   rw [show #[context.freshExpr] =
     ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
-  simp only [Expr.abstract_eq, Expr.abstractList, Expr.abstract1]
+  rw [Expr.abstract_eq _ _ (by simp [Expr.looseBVarRange']) (by simp)]
+  rfl
 
 private theorem annotatedPiAlignedViewInnerKernel_eq :
     annotatedPiAlignedViewInnerKernel = annotatedPiViewInnerKernel := by
@@ -8948,8 +9000,9 @@ private theorem annotatedPiInnerView_isDefEqForall
       annotatedPiCtorCandidateContext.toTypeChecker
       ({ eqvManager := initial } : TypeChecker.State) =
         .ok (true, state) := by
-    simpa [Expr.instantiateRev_eq, Expr.instantiate_eq] using domainRun
-  refine ⟨state, ?_⟩
+    simpa [Expr.instantiateRev_eq, Expr.instantiate_eq,
+      Expr.instantiate1', Expr.looseBVarRange'] using domainRun
+  refine ⟨{ state with ngen := state.ngen.next }, ?_⟩
   unfold annotatedPiInnerKernel annotatedPiViewInnerKernel
     TypeChecker.Inner.isDefEqForall
   rw [show
@@ -8960,7 +9013,7 @@ private theorem annotatedPiInnerView_isDefEqForall
   rw [domainRun']
   simp [TypeChecker.Inner.isDefEqForall, TypeChecker.Inner.isDefEq, Expr.hasLooseBVars,
     Expr.looseBVarRange_eq, Expr.looseBVarRange', Expr.instantiateRev_eq,
-    Expr.instantiate_eq]
+    Expr.instantiate_eq, Expr.instantiate1', annotatedPiWithLocalDecl]
 
 private theorem annotatedPiInnerView_quickIsDefEq
     (initial : EquivManager) :
@@ -9117,7 +9170,8 @@ private theorem annotatedPiViewInnerCheckTypeStep_valid :
       .ok (.sort (.succ .zero))
   unfold annotatedPiViewInnerKernel TypeChecker.Inner.inferType'
   simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
-    Expr.instantiateRev_eq, Expr.instantiate_eq, TypeChecker.Inner.inferType',
+    Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
+    TypeChecker.Inner.inferType',
     TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Expr.instantiate1',
     annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -9145,7 +9199,8 @@ private theorem annotatedPiViewInnerInferType_exists (n : Nat) :
   refine ⟨annotatedPiViewInnerFinalState, ?_, ?_⟩
   · unfold annotatedPiViewInnerKernel TypeChecker.Inner.inferType'
     simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq, Expr.looseBVarRange',
-      Expr.instantiateRev_eq, Expr.instantiate_eq, TypeChecker.Inner.inferType',
+      Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
+      TypeChecker.Inner.inferType',
       TypeChecker.Inner.inferForall, TypeChecker.Inner.inferForall.loop, Expr.instantiate1',
       annotatedPiWithLocalDecl, annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
       Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
@@ -9503,6 +9558,10 @@ private def annotatedPiStagedPostFamilyInput :
                             simp [annotatedPiInnerKernel,
                               annotatedPiRawDomainKernel, FVarsIn,
                               Level.hasMVar'])
+                            (by
+                              simp [annotatedPiInnerKernel,
+                                annotatedPiRawDomainKernel,
+                                Level.hasMVar_eq, Level.hasMVar'])
                             annotatedPiInnerCheckTypeStep_valid
                         let viewInnerChecked : AddInductive.ConstructorCheckedExpr
                             annotatedPiCtorCandidateContext
@@ -9510,6 +9569,9 @@ private def annotatedPiStagedPostFamilyInput :
                           .ofRun (by
                             simp [annotatedPiViewInnerKernel, FVarsIn,
                               Level.hasMVar'])
+                            (by
+                              simp [annotatedPiViewInnerKernel,
+                                Level.hasMVar_eq, Level.hasMVar'])
                             annotatedPiViewInnerCheckTypeStep_valid
                         let domainChecked : AddInductive.ConstructorCheckedExpr
                             annotatedPiCtorCandidateContext
@@ -9517,22 +9579,30 @@ private def annotatedPiStagedPostFamilyInput :
                           .ofRun (by
                             simp [annotatedPiRawDomainKernel, FVarsIn,
                               Level.hasMVar'])
+                            (by
+                              simp [annotatedPiRawDomainKernel,
+                                Level.hasMVar_eq, Level.hasMVar'])
                             annotatedPiDomainCheckTypeStep_valid
                         let sortChecked : AddInductive.ConstructorCheckedExpr
                             annotatedPiCtorCandidateContext (.sort .zero) :=
                           .ofRun (by simp [FVarsIn, Level.hasMVar'])
+                            (by
+                              simp [Level.hasMVar_eq,
+                                Level.hasMVar'])
                             annotatedPiSortZeroCheckTypeStep_valid
                         let innerBodyChecked :
                             AddInductive.ConstructorCheckedExpr
                               annotatedPiInnerBodyCandidateContext
                               (.const ``AnnotatedPi []) :=
                           .ofRun (by simp [FVarsIn])
+                            (by simp)
                             annotatedPiInnerBodyCheckTypeStep_valid
                         let outerBodyChecked :
                             AddInductive.ConstructorCheckedExpr
                               annotatedPiOuterBodyCandidateContext
                               (.const ``AnnotatedPi []) :=
                           .ofRun (by simp [FVarsIn])
+                            (by simp)
                             annotatedPiOuterBodyCheckTypeStep_valid
                         let innerChecked' := annotatedPiAlignChecked
                           annotatedPiConstructorValidationContext_def_eq rfl
@@ -9845,20 +9915,24 @@ private theorem annotatedPiPreFamilySafetyRun :
   let rootSortZero : AddInductive.ConstructorCheckedExpr
       annotatedPiFamilyCandidateContext (.sort .zero) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Level.hasMVar_eq, Level.hasMVar'])
       (annotatedPiPreFamilySortZeroCheckTypeStep_valid
         annotatedPiFamilyCandidateContext rfl)
   let rootSortOne : AddInductive.ConstructorCheckedExpr
       annotatedPiFamilyCandidateContext (.sort (.succ .zero)) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Level.hasMVar_eq, Level.hasMVar'])
       (annotatedPiPreFamilySortOneCheckTypeStep_valid
         annotatedPiFamilyCandidateContext rfl)
   let nestedSortOne : AddInductive.ConstructorCheckedExpr
       nestedContext (.sort (.succ .zero)) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Level.hasMVar_eq, Level.hasMVar'])
       (annotatedPiPreFamilySortOneCheckTypeStep_valid nestedContext rfl)
   let resultSortOne : AddInductive.ConstructorCheckedExpr
       resultContext (.sort (.succ .zero)) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Level.hasMVar_eq, Level.hasMVar'])
       (annotatedPiPreFamilySortOneCheckTypeStep_valid resultContext rfl)
   let rootEnsure : AddInductive.ConstructorEnsureTypeObservation
       annotatedPiFamilyCandidateContext (.sort .zero) :=
@@ -10923,9 +10997,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateRun_exists' 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -10972,9 +11046,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_candidateView_tr' dep
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11006,9 +11080,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalizationCandidateRun' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11040,9 +11114,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCandidateNormalization_eq' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11100,9 +11174,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRecField_hasType_checked' depends 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11210,9 +11284,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerFamily_isType_checked' depen
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11244,9 +11318,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerCtor_isType_checked' depends
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11278,9 +11352,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalization_wf_checked' de
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11312,9 +11386,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRecNormalization_wf_checked' depen
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11346,9 +11420,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerBlock_wf_checked' depends on
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11380,9 +11454,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedSemanticHierarchy_ex
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11415,9 +11489,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedPostFamilySemantic_e
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11450,9 +11524,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedPreFamilySemantic_ex
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11468,6 +11542,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateSemanticR
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11485,9 +11560,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateSemanticR
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11503,6 +11578,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depe
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11520,9 +11596,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidateRun' depe
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11538,6 +11614,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidatePackage' 
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11555,9 +11632,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationCandidatePackage' 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11570,7 +11647,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerNormalizationCandidate_produ
  Quot.sound,
  Expr.eqv_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,
@@ -11587,7 +11663,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationShapeCandidate_pro
  Quot.sound,
  Expr.eqv_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,
@@ -11607,6 +11682,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerExactProducedGenerationCandi
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11624,9 +11700,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerExactProducedGenerationCandi
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11642,6 +11718,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedGenerationCandidateP
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11659,9 +11736,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerProducedGenerationCandidateP
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11677,6 +11754,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormer_addInductCertified_checked'
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11694,9 +11772,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormer_addInductCertified_checked'
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11712,6 +11790,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationChecked_wf_checked
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11729,9 +11808,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerGenerationChecked_wf_checked
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11763,9 +11842,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRecBlock_wf_checked' depends on ax
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11797,9 +11876,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRecGenerationChecked_wf_checked' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11815,6 +11894,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerAddInductTraceChecked' depen
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11832,9 +11912,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormerAddInductTraceChecked' depen
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11850,6 +11930,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormer_trEnv'_checked' depends on 
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -11867,9 +11948,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasFormer_trEnv'_checked' depends on 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11901,9 +11982,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRecAddInductTraceChecked' depends 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -11935,9 +12016,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.aliasRec_trEnv'_checked' depends on axi
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12039,9 +12120,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedSemanticHierarchy_ex
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12074,9 +12155,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedPostFamilySemantic_e
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12109,9 +12190,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedPreFamilySemantic_ex
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12144,9 +12225,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidateRun' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12162,6 +12243,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateSemanticR
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12179,9 +12261,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateSemanticR
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12197,6 +12279,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateRun' depe
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12214,9 +12297,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidateRun' depe
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12232,6 +12315,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidatePackage' 
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12249,9 +12333,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationCandidatePackage' 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12274,9 +12358,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiCtor_candidateTrace' depends
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12313,9 +12397,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiNormalizationCandidate_produ
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12339,9 +12423,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationShapeCandidate_pro
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12357,6 +12441,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiExactProducedGenerationCandi
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12374,9 +12459,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiExactProducedGenerationCandi
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12392,6 +12477,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedGenerationCandidateP
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12409,9 +12495,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiProducedGenerationCandidateP
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12427,6 +12513,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_addInductCertified' depends
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12444,9 +12531,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_addInductCertified' depends
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12462,6 +12549,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationChecked_wf_checked
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12479,9 +12567,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiGenerationChecked_wf_checked
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12497,6 +12585,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiAddInductTraceChecked' depen
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12514,9 +12603,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPiAddInductTraceChecked' depen
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -12532,6 +12621,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_trEnv'_checked' depends on 
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -12549,9 +12639,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.annotatedPi_trEnv'_checked' depends on 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

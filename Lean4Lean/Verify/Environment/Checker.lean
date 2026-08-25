@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean4Lean.Verify.Environment.Boundaries
 
 namespace Lean4Lean
@@ -39,7 +45,9 @@ private theorem checkNoMVar.WF (env : Environment) (name : Name) (e : Expr) :
   intro _ h
   cases hmv : e.hasMVar
   · rfl
-  · simp [Environment.checkNoMVar, hmv] at h
+  · rw [Expr.hasMVar_eq_cache] at hmv
+    simp only [Bool.or_eq_true] at hmv
+    simp [Environment.checkNoMVar, hmv] at h
 
 private theorem checkNoFVar.WF (env : Environment) (name : Name) (e : Expr) :
     (Environment.checkNoFVar env name e).WF fun _ => e.hasFVar = false := by
@@ -54,9 +62,9 @@ theorem checkNoMVarNoFVar.WF (env : Environment) (name : Name) (e : Expr) :
   refine (checkNoMVar.WF env name e).bind fun _ hm =>
     (checkNoFVar.WF env name e).mono fun _ hf => ?_
   apply fvarsIn_iff.2
-  refine ⟨?_, fvarsIn_iff_hasMVar.2 hm⟩
+  refine ⟨?_, fvarsIn_iff_hasMVar hm⟩
   intro fv hmem
-  rw [fvarsList_eq_nil.2 hf] at hmem
+  rw [fvarsList_eq_nil hf] at hmem
   simp at hmem
 
 private theorem Except.WF.trivial (x : Except ε α) : x.WF fun _ => True :=

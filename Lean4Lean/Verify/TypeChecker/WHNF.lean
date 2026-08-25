@@ -83,8 +83,7 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
       simp [Expr.getAppRevArgs_eq] at h4 ⊢
       obtain ⟨l₁, l₂, h5, rfl⟩ : ∃ l₁ l₂, e.getAppArgsRevList = l₁ ++ l₂ ∧ l₂.length = i :=
         ⟨_, _, (List.take_append_drop (e.getAppArgsRevList.length - i) ..).symm, by simp; omega⟩
-      simp [loop.cont, h5, List.take_of_length_le, Expr.instantiateRange_eq,
-        Expr.instantiate_eq]
+      simp [loop.cont, h5, List.take_of_length_le, Expr.instantiateRange_eq]
       rw [Expr.mkAppRevRange_eq_rev (l₁ := []) (l₂ := l₁) (l₃ := l₂) (by simp) (by rfl) (by rfl)]
       have br := BetaReduce.inst_reduce (l₁ := l₂.reverse)
         [] (by simpa using h3) (Expr.instantiateList_append ..) (h := by
@@ -92,6 +91,10 @@ theorem whnfCore'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
           simp [or_imp, forall_and] at this ⊢
           exact this.2) |>.mkAppRevList (es := l₁)
       simp [← Expr.mkAppRevList_reverse, ← Expr.mkAppRevList_append, ← h5] at br
+      have hl₂ : ∀ x ∈ l₂, x.looseBVarRange' = 0 := fun x hx =>
+        ((c.mlctx.noBV ▸ he.closed).getAppArgsRevList
+          (h5 ▸ List.mem_append_right _ hx)).looseBVarRange_zero
+      rw [Expr.instantiate_eq _ _ (Or.inr (by simpa using hl₂))]
       have := h2.rebuild_mkAppRevList c.Ewf c.Δwf stk.tr <|
         e.mkAppRevList_getAppArgsRevList ▸ he
       have ⟨_, a1, a2⟩ := this.beta c.Ewf c.Δwf br

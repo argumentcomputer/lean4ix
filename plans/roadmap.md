@@ -92,8 +92,8 @@ must be updated whenever a proof enters or leaves the frontier.
 | Supported builds | Current Theory + Verify build: 169 jobs green. Current default build/tests: 239 jobs green. |
 | Proof frontier | 9 supported proof declarations: 6 metatheory and 3 checker verification. The compiled allowlist has 15 entries after adding 6 deliberately rejected fixtures. Lane V removed 7 proof sorries from the previous 16-entry proof frontier. |
 | Experimental surface | Zero source `sorry` tokens and no `stop`-hidden admissions, but endpoints remain conditional. The concrete five-rule `D2RegisteredBodyStep` discharge compiles. Both inherited D2 Nat sites are now replayed internally, so `D2BlockStepExact` contains only the Tree check, a paired five-rule Tree replay, and the discharged registered-body field. D2 also has generic conversion-aware prefix/collapse replay, an exact eight-common-arguments-plus-fields capture inventory, and a named `D2TreeLevelAlignmentStep`; the Tree suffix/body share the NORM-DI-dependent local head-argument/source-level alignment boundary rather than being pure engineering. The current full `Lean4Lean.Experimental` gate is green at 152 jobs (its pre-existing lint warnings are not promoted to errors). |
-| Project axioms | 27 declarations: 25 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 324 exact union leaves. |
-| Upstream intake audit | Refreshed 2026-08-25 against upstream `e0e3f6bc`, which is still the fork's merge base: upstream `master` itself has no unabsorbed delta, but the PR and topic refs contain useful work. The read-only audit found a release-blocking trust defect in the current Verify surface: unconditional `Expr.looseBVarRange_eq` proves `False` together with only the standard logical baseline. PR #45 supplies the first signature/model repairs; PR #44 supplies the loose-bound-variable repair and a safe checker path; PR #46 supplies the audit evidence. PR #32 remains useful but does **not** prove generic `checkPrimitiveDef.WF`: it instead gives the final definition path per-primitive certificates that bypass that theorem. PR #43 and PR #27 remain explicit non-imports. The staged intake plan is in **UPSTREAM** below. |
+| Project axioms | 28 declarations: 26 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory and all 11 high-risk repaired signatures, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 325 exact union leaves. |
+| Upstream intake audit | Refreshed and implemented 2026-08-25 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. The formerly unconditional `Expr.looseBVarRange_eq` is now hereditary-bounded, all ten suspect contracts have exact repaired dispositions, adversarial regressions retain every counterexample family, and the four-root audit is green with zero project axioms reachable from Theory. PR #32 remains useful but does **not** prove generic `checkPrimitiveDef.WF`; PR #43 and PR #27 remain explicit non-imports. UP5-UP7 remain below. |
 
 ### Delivered foundation
 
@@ -247,7 +247,7 @@ research tiers.
 | **ENV — checker environments** | Prove the `inductDecl` case of `addDecl.WF`; operational candidate retention is closed, so derive the remaining generated readiness certificates and the nonprimitive semantic transaction (the primitive branch's canonical metadata staging and readiness are proved) | committed integration checkpoint; generated certificate/replay surface | V3/V4 closed and full environment translation theorem stated |
 | **REC — recursor verification** | Supply NORM-DI's explicit inductive-head injectivity result to discharge the exhaustive live `SelectedBranchWF` contracts for the main/node and auxiliary/nil/cons Rose consumers, then prove K, structure-expansion, and remaining literal/failure-path semantics while repairing or justifying the sole open-world `constructorNumParams_mono` premise. Exact selected-WHNF premises have been removed from the live contracts; the complete Quot consumer is landed conditional on NORM-M6's `QuotAppInj` producer. | open-world constructor-parameter repair; NORM-DI/SST for final clean closure | V5 closed for Quot, singleton, mutual, and nested rules |
 | **PROMOTE — stable semantic API** | Move the retained SExpr/shape development out of Experimental, regenerate the audit surface, resolve names, and pin root axioms | stable API decision; conditional endpoints are allowed | supported roots import the stable modules and the audit cannot miss them |
-| **TRUST / UP0-UP4 — upstream trust repair** | Adapt PR #46's evidence, PR #45's truthful domains/models, and PR #44's bounded loose-bvar path; then regenerate the four-root policy | committed ENV baseline; local bridge consumers | no known-false project axiom is reachable; all ten suspect contracts have an exact repaired disposition; Theory remains project-axiom-free |
+| **TRUST / UP0-UP4 — upstream trust repair** | **Complete 2026-08-25:** adapted PR #46's evidence, PR #45's truthful domains/models, and PR #44's bounded loose-bvar path; regenerated the four-root policy and adversarial regressions | committed ENV baseline; local bridge consumers | **Met:** no known-false project axiom is reachable; all ten suspect contracts and the shape-only replacement have pinned repaired signatures; Theory remains project-axiom-free |
 | **DIFF — differential corpus** | Broaden the landed source/ordinary/nested positive and phase-specific negative goldens | current harness | supported positive and negative corpus runs in CI |
 | **RELEASE / UP5-UP7 — upstream intake and series** | Land the two small differential fixes, decide the cache-sensitive level change, extract PR #32 in bounded slices, and publish reproducible upstreamable branches | UP4; stable ENV checkpoint for PR #32; all theorem-closure streams for final publication | final revision green; every reviewed upstream ref has a land/defer/reject disposition and every fork delta is upstreamed or explicitly owned |
 | **RENAME — Lean4Ix identity migration** | Rename the public project for its role as the Lean 4 formalization and verifier used by Ix, with a staged compatibility window | a committed green main-theorem checkpoint and a pinned `~/projects/ix` consumer revision | canonical Lean4Ix repository/package/CLI identity is live, Ix consumes it, compatibility policy is fulfilled, and all release gates are green |
@@ -258,12 +258,10 @@ research tiers.
    Lane V proof closures, the completed five-rule D2 registered-body
    discharge, the generic D2 prefix/collapse replay slice, and the exact
    trust manifests while advancing the open streams below.
-2. **Repair the Verify trust boundary.** Execute UP0-UP4 below before treating
-   a green Verify build as release evidence. In particular, narrow the nine
-   false or overgeneral PR #45 contracts, remove unconditional
-   `Expr.looseBVarRange_eq` trust through PR #44's bounded/safe design, and
-   regenerate the four-root audit. This is independent of whether the active
-   Theory theorem work is on its downslope.
+2. **Preserve the repaired Verify trust boundary.** UP0-UP4 are complete.
+   Keep the exact signature pins, adversarial regressions, and four-root audit
+   green while retiring the remaining honest bridges independently of the
+   active Theory theorem work.
 3. **Use the repaired metatheory truthfulness boundaries.** The false
    projection-head statement is repaired: its constructor fields now require a genuine
    completed-inductive `ConstructorHead`, and Verify derives that certificate
@@ -2162,24 +2160,23 @@ only when its actual proof lands.
 **Axiom reachability.** `Audit/SorryFrontier.lean` now generates the complete
 transitive closure for every declaration in four release surfaces: Theory,
 Verify, the shipped `Lean4Lean` library, and `Main` (the CLI). The exact union
-contains 324 leaves: 3 logical-baseline axioms, `sorryAx`, 6 rejected-fixture
-declarations, 27 custom project contracts, and 287 compiler-generated
+contains 325 leaves: 3 logical-baseline axioms, `sorryAx`, 6 rejected-fixture
+declarations, 28 custom project contracts, and 287 compiler-generated
 `native_decide`/`bv_decide` certificates. The current per-root closures are
-Theory 10, Verify 239, library 5, and CLI 3.
+Theory 10, Verify 319, library 5, and CLI 3.
 The audit pins each root's membership separately and rejects any new, removed,
 moved, multiply classified, or root-forbidden leaf; compiler certificates are
 Verify-only, and admitted proofs cannot enter the library or CLI. Transitional
 bridges are now Verify-only; the library root admits only the logical baseline
 and its two pointer contracts, while the CLI admits only the logical baseline.
 
-**Trust qualification (2026-08-25):** exact reachability is not yet exact
-validity. The UPSTREAM audit below independently reproduces a contradiction
-from `L4L-EXPR-010` (`Expr.looseBVarRange_eq`), which is reachable from the
-aggregate Verify surface. Therefore the manifest remains useful as an exact
-dependency inventory, but the Verify trust gate is on hold until UP2-UP4
-repair the suspect contracts and regenerate the classifications. Theory,
-library, and CLI exclusions remain meaningful because they do not reach this
-bridge.
+**Trust qualification (2026-08-25):** UP0-UP4 are complete. The ten suspect
+runtime contracts now carry their actual bounds and invariants, the weaker
+shape-only abstraction bridge is separately classified, and their exact
+signatures are compiled pins. The resulting boundary is consistent with every
+known falsification probe, but it is not axiom-free: 28 explicit project
+contracts remain to be proved, replaced, or specialized. See
+`docs/axiom-audit.md` for the full validity review and removal conditions.
 
 The project manifest separately assigns stable ID, disposition, reason, and
 owner to every custom axiom; pins the source inventory exactly; proves Theory
@@ -2274,21 +2271,19 @@ upstream asks otherwise.
 
 #### UPSTREAM — selective intake and trust repair
 
-**Status:** read-only inventory complete 2026-08-25; implementation queued.
-No upstream patch was applied during the inventory. This work package is the
-authoritative plan for deciding what to adapt from upstream refs and in what
-order. It is deliberately a manual-port plan, not a merge plan.
+**Status:** inventory and UP0-UP4 trust repair complete 2026-08-25. The
+repairs were manually adapted rather than merged wholesale. UP5-UP7 remain as
+the selective intake, checker-closure, and upstream-reconciliation follow-up.
 
-**Priority:** UP0-UP4 are release-blocking trust repair and precede any claim
-that a green Verify build is a trustworthy refinement result. UP5 is a small,
+**Priority:** the release-blocking UP0-UP4 repair is complete. UP5 is a small,
 low-risk differential follow-up. UP6 is a larger checker-closure project and
-starts only after the active ENV checkpoint is committed and stable.
+starts only from a stable ENV checkpoint.
 
-##### Finding that changes the priority
+##### Finding that changed the priority
 
-The current unconditional axiom `Lean.Expr.looseBVarRange_eq`
-(`L4L-EXPR-010`) in `Verify/Axioms.lean` is independently inconsistent. The
-machine-checked witness from upstream PR #46 derives
+The pre-repair unconditional axiom `Lean.Expr.looseBVarRange_eq`
+(`L4L-EXPR-010`) in `Verify/Axioms.lean` was independently inconsistent. The
+machine-checked witness from upstream PR #46 derived
 `False` using only that axiom plus the standard logical baseline; its printed
 dependency set is:
 
@@ -2303,11 +2298,12 @@ the unconditional equation nevertheless assigns it an ordinary result.
 
 This does **not** falsify Lean's kernel or the abstract Lean4Lean/Lean4Ix
 Theory development. Theory release roots do not reach this bridge. It does
-mean that any Verify theorem whose transitive closure reaches the bridge is
-currently justified in an inconsistent context. The compiled axiom manifest
-correctly records reachability, but its current `bridge` classification must
-not be mistaken for a soundness certificate. Until UP3 and UP4 close, Verify
-is proof-building progress rather than a releasable trust claim.
+meant that a Verify theorem whose transitive closure reached the bridge was
+justified in an inconsistent context. UP3 replaced that statement with a
+hereditary-bounded contract and removed packed-cache authority from executable
+control flow; UP4 pins its repaired signature and exact reachability. A
+`bridge` classification still records an honest proof obligation, not a proof
+of the opaque host implementation.
 
 ##### Scope and hard rules
 
@@ -2347,7 +2343,7 @@ ordinary `master` delta to pull. The useful material is on PR and topic refs.
 |---|---|---|
 | [PR #45](https://github.com/digama0/lean4lean/pull/45), “Five frozen axioms describe functions that don't run” | `3bcfe75`; 6 commits, 10 files, +411/-156 | **Adapt first.** Repair partial-runtime domains, substitution/abstraction models, persistent-array WF, and one-way cached-bit consumers. |
 | [PR #44](https://github.com/digama0/lean4lean/pull/44), “Two frozen axioms prove False” | `1eb66c6`; 3 commits, 7 files, +142/-103 | **Adapt second.** Port the loose-bvar bound and checker repair. Skip its `mkLevelIMaxCore_eq` change because the fork already proved/deleted the false bridge independently. |
-| [PR #46](https://github.com/digama0/lean4lean/pull/46), axiom audit | `d666dd6`; 2 documentation commits | **Adapt evidence, not counts verbatim.** It audited 32 axioms; the fork currently has 27 and already retired five. Recompute every classification and dependency against the current tree. |
+| [PR #46](https://github.com/digama0/lean4lean/pull/46), axiom audit | `d666dd6`; 2 documentation commits | **Adapted evidence, not counts verbatim.** It audited 32 axioms; the fork's pre-repair baseline had 27 after retiring five, and the repaired surface has 28 because it adds the weaker shape-only abstraction bridge. Every classification and dependency was recomputed against the current tree. |
 | `differential` topic | `4feb2a9`; 10 commits | **Select two small fixes now**, investigate one cache-relevant level-substitution change separately, defer instrumentation, and reject the primitive bypass. |
 | [PR #32](https://github.com/digama0/lean4lean/pull/32), primitive conservation | `6cfd43a`; 8 unique commits from the reviewed base, 33 files, +24,247/-1,264 | **Manual staged extraction after ENV stabilizes.** Valuable per-primitive certificates and final dispatch, but no generic `checkPrimitiveDef.WF` proof. |
 | [PR #43](https://github.com/digama0/lean4lean/pull/43), competing pattern/iota registry | `eddf009`; 14 unique commits and broad overlap | **Do not merge.** It introduces new iota soundness obligations already avoided or strengthened locally. Mine an isolated helper only when a named local proof needs it and its closure is axiom/sorry-free. |
@@ -2358,8 +2354,8 @@ ordinary `master` delta to pull. The useful material is on PR and topic refs.
 | PR #5, fvar reuse | executable TypeChecker-only optimization | **Defer.** It has no matching verification changes and breaks current checker invariants as-is. |
 | PR #10, arena/import tooling, old version branches | stale or unrelated | **Out of scope.** Revisit only for a concrete Ix integration need. |
 
-The ten current assumptions identified by PR #46 as invalid, inconsistent, or
-missing essential hypotheses are:
+The ten baseline assumptions identified by PR #46 as invalid, inconsistent,
+or missing essential hypotheses were:
 
 1. `PersistentArray.toList'_push`;
 2. `Level.mkData_eq`;
@@ -2372,7 +2368,7 @@ missing essential hypotheses are:
 9. `Expr.instantiateRevRange_eq`; and
 10. `Expr.abstract_eq`.
 
-UP2 repairs nine of these; UP3 repairs `Expr.looseBVarRange_eq` and the
+UP2 repaired nine of these; UP3 repaired `Expr.looseBVarRange_eq` and the
 executable paths that had treated the packed range as semantic evidence.
 
 ##### Milestone ledger
@@ -2380,11 +2376,11 @@ executable paths that had treated the packed range as semantic evidence.
 | ID | Deliverable | Entry gate | Exit evidence |
 |---|---|---|---|
 | UP-A | Read-only upstream inventory and falsification | upstream refs fetched | **Complete:** source ledger, overlap analysis, and independent `False` witness reproduced against the fork |
-| UP0 | Freeze an isolated intake baseline | active ENV/normalization checkpoint committed green | exact local/upstream hashes, clean child revision, baseline build/audit transcript, no unrelated files in the intake diff |
-| UP1 | Adapt the semantic audit | UP0 | fork-specific audit document and probes classify all current project axioms; the known contradiction is recorded without exporting a `False` theorem from a release root |
-| UP2 | Repair PR #45 contracts and consumers | UP1 | all nine affected assumptions have truthful signatures/models; their consumer proof fallout is green; no host abort path is assigned a value |
-| UP3 | Repair loose-bvar trust and checker behavior from PR #44 | UP2 | the unconditional inconsistent axiom is gone; cache-sensitive executable paths are sound on arbitrary `Expr`; valid-input differentials remain stable |
-| UP4 | Regenerate and enforce the exact trust boundary | UP3 | all four root closures and the project manifest are exact; no known-false project axiom is reachable; Theory remains project-axiom-free |
+| UP0 | Freeze an isolated intake baseline | active ENV/normalization checkpoint committed green | **Complete:** parent `65de52f`; upstream base `e0e3f6bc`; reviewed PR heads `3bcfe75`, `1eb66c6`, and `d666dd6` |
+| UP1 | Adapt the semantic audit | UP0 | **Complete:** `docs/axiom-audit.md` and `Tests/TrustRepair.lean` classify the complete surface and retain the falsification families without exporting `False` |
+| UP2 | Repair PR #45 contracts and consumers | UP1 | **Complete:** all nine contracts have truthful domains/models, every consumer migrated, and the aggregate Verify build is green |
+| UP3 | Repair loose-bvar trust and checker behavior from PR #44 | UP2 | **Complete:** the inconsistent equation is hereditary-bounded, cache-sensitive execution uses the sound path, and boundary/ordinary regressions pass |
+| UP4 | Regenerate and enforce the exact trust boundary | UP3 | **Complete:** 28 contracts and all four closures are exact; 11 repaired signatures are pinned; Theory reaches no project axiom |
 | UP5 | Land low-risk differential fixes | UP4 | exact `--fresh` module selection and app-head comparison order are tested; cache-relevant level substitution has an explicit land/defer decision |
 | UP6 | Extract PR #32 primitive certificates | stable ENV checkpoint plus UP4 | per-primitive slices and final dispatch are green; generic V4 is separately proved or remains explicitly open, never silently counted complete |
 | UP7 | Reconcile, document, and upstream useful repairs | UP5 and each accepted UP6 slice | divergence ledger, license/provenance audit, publication hashes, and upstreamable review branches are current |

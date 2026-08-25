@@ -12,6 +12,10 @@ same producer-selected package rather than an independently supplied
 well-formedness proof.
 -/
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta
 open Lean4Lean.InductiveFixtures
@@ -739,8 +743,13 @@ private theorem indexedVecValidationZeroCheckTypeM
         ({} : TypeChecker.State) (validationFirstAppState alphaId)
         (indexedVecValidationZeroState alphaId) (.fvar alphaId)
         (.const ``Nat.zero [])
-        (by simp [ctorIndexedVecApp, Expr.hasLooseBVars,
-          Expr.looseBVarRange_eq, Expr.looseBVarRange'])
+        (by
+          have hrange : (ctorIndexedVecApp (.fvar alphaId)
+              (.const ``Nat.zero [])).looseBVarRange = 0 := by
+            rw [Expr.looseBVarRange_eq _ (by
+              simp [ctorIndexedVecApp])]
+            simp [ctorIndexedVecApp, Expr.looseBVarRange']
+          simp [Expr.hasLooseBVars, hrange])
         (by simp [ctorIndexedVecApp])
         hfirst hzero (by rfl))
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -864,6 +873,10 @@ private theorem indexedVecValidationHeadContextFresh :
     LocalContext.mkLocalDecl_toList]
   rw [show ({} : LocalContext).toList = [] by rfl]
   simp +decide
+  exact LocalContext.WF.nil.decls_wf
+  exact indexedVecValidationParamContextWF.decls_wf
+  exact indexedVecValidationFamilyContextWF.decls_wf
+  exact indexedVecValidationNContextWF.decls_wf
 
 private theorem indexedVecValidationAlphaFindInTail :
     indexedVecValidationTailContext.lctx.find?
@@ -1010,22 +1023,25 @@ private def indexedVecCheckedOfValid
     (context : AddInductive.Context) (source inferred : Expr)
     (fvars : source.FVarsIn
       (fun fv => (context.lctx.find? fv).isSome = true))
+    (noMVar : source.hasMVar = false)
     (valid : AddInductive.CandidateCheckTypeStep.Valid
       ⟨context, source, inferred⟩) :
     AddInductive.ConstructorCheckedExpr context source :=
-  .ofRun fvars valid
+  .ofRun fvars noMVar valid
 
 private def indexedVecValidationSortChecked :
     AddInductive.ConstructorCheckedExpr indexedVecCtorValidationContext
       (.sort (.succ (.param `u))) :=
   indexedVecCheckedOfValid _ _ _ (by
     simp [FVarsIn, Level.hasMVar'])
+    (by simp [Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
     indexedVecValidationSortCheckValid
 
 private def indexedVecValidationNatChecked :
     AddInductive.ConstructorCheckedExpr indexedVecCtorValidationContext
       (.const ``Nat []) :=
   indexedVecCheckedOfValid _ _ _ (by simp [FVarsIn])
+    (by simp [Expr.hasMVar_eq_cache])
     indexedVecValidationNatCheckValid
 
 private def indexedVecValidationAlphaChecked :
@@ -1036,6 +1052,9 @@ private def indexedVecValidationAlphaChecked :
       indexedVecValidationAlphaId).isSome = true
     rw [indexedVecValidationAlphaFindInN]
     rfl)
+    (by
+      simp [indexedVecValidationAlpha,
+        AddInductive.Context.freshExpr, Expr.hasMVar_eq_cache])
     indexedVecValidationAlphaCheckValid
 
 private def indexedVecValidationTailChecked :
@@ -1055,6 +1074,10 @@ private def indexedVecValidationTailChecked :
         indexedVecValidationNId).isSome = true
       rw [indexedVecValidationNFindInHead]
       rfl)
+    (by
+      simp [ctorIndexedVecApp, indexedVecValidationAlpha,
+        indexedVecValidationNExpr, AddInductive.Context.freshExpr,
+        Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
     indexedVecValidationTailCheckValid
 
 private def indexedVecValidationNilResultChecked :
@@ -1068,6 +1091,10 @@ private def indexedVecValidationNilResultChecked :
       indexedVecValidationAlphaId).isSome = true
     rw [indexedVecValidationAlphaFind]
     rfl)
+    (by
+      simp [indexedVecValidationNilResult, ctorIndexedVecApp,
+        indexedVecValidationAlpha, AddInductive.Context.freshExpr,
+        Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
     indexedVecValidationNilResultCheckValid
 
 private def indexedVecValidationConsResultChecked :
@@ -1087,6 +1114,11 @@ private def indexedVecValidationConsResultChecked :
         indexedVecValidationNId).isSome = true
       rw [indexedVecValidationNFindInTail]
       rfl)
+    (by
+      simp [indexedVecValidationConsResult, ctorIndexedVecApp,
+        replaySuccApp, indexedVecValidationAlpha,
+        indexedVecValidationNExpr, AddInductive.Context.freshExpr,
+        Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
     indexedVecValidationConsResultCheckValid
 
 private theorem indexedVecStagedStats_eq :
@@ -2201,6 +2233,9 @@ private theorem indexedVecPreFamilySafetyRun :
     .ofRun (by
       simp [indexedVecPreFamilyIndexTelescope, FVarsIn,
         Level.hasMVar'])
+      (by
+        simp [indexedVecPreFamilyIndexTelescope,
+          Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilyTelescopeCheckValid
         indexedVecPreFamilyContext rfl rfl rfl rfl)
   let headTelescope : AddInductive.ConstructorCheckedExpr
@@ -2208,6 +2243,9 @@ private theorem indexedVecPreFamilySafetyRun :
     .ofRun (by
       simp [indexedVecPreFamilyIndexTelescope, FVarsIn,
         Level.hasMVar'])
+      (by
+        simp [indexedVecPreFamilyIndexTelescope,
+          Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilyTelescopeCheckValid
         indexedVecPreFamilyHeadContext rfl rfl rfl rfl)
   let resultTelescope : AddInductive.ConstructorCheckedExpr
@@ -2215,41 +2253,51 @@ private theorem indexedVecPreFamilySafetyRun :
     .ofRun (by
       simp [indexedVecPreFamilyIndexTelescope, FVarsIn,
         Level.hasMVar'])
+      (by
+        simp [indexedVecPreFamilyIndexTelescope,
+          Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilyTelescopeCheckValid
         indexedVecPreFamilyResultContext rfl rfl rfl rfl)
   let baseSort : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyContext (.sort (.succ (.param `u))) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilySortCheckValid
         indexedVecPreFamilyContext rfl rfl rfl rfl)
   let headSort : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyHeadContext (.sort (.succ (.param `u))) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilySortCheckValid
         indexedVecPreFamilyHeadContext rfl rfl rfl rfl)
   let resultSort : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyResultContext (.sort (.succ (.param `u))) :=
     .ofRun (by simp [FVarsIn, Level.hasMVar'])
+      (by simp [Expr.hasMVar_eq_cache, Level.hasMVar_eq, Level.hasMVar'])
       (indexedVecPreFamilySortCheckValid
         indexedVecPreFamilyResultContext rfl rfl rfl rfl)
   let baseNat : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyContext (.const ``Nat []) :=
     .ofRun (by simp [FVarsIn])
+      (by simp [Expr.hasMVar_eq_cache])
       (indexedVecPreFamilyNatCheckValid
         indexedVecPreFamilyContext rfl rfl rfl rfl)
   let headNat : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyHeadContext (.const ``Nat []) :=
     .ofRun (by simp [FVarsIn])
+      (by simp [Expr.hasMVar_eq_cache])
       (indexedVecPreFamilyNatCheckValid
         indexedVecPreFamilyHeadContext rfl rfl rfl rfl)
   let resultNat : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyResultContext (.const ``Nat []) :=
     .ofRun (by simp [FVarsIn])
+      (by simp [Expr.hasMVar_eq_cache])
       (indexedVecPreFamilyNatCheckValid
         indexedVecPreFamilyResultContext rfl rfl rfl rfl)
   let zeroChecked : AddInductive.ConstructorCheckedExpr
       indexedVecPreFamilyContext (.const ``Nat.zero []) :=
     .ofRun (by simp [FVarsIn])
+      (by simp [Expr.hasMVar_eq_cache])
       (indexedVecPreFamilyZeroCheckValid
         indexedVecPreFamilyContext rfl rfl rfl rfl)
   let nChecked : AddInductive.ConstructorCheckedExpr
@@ -2259,7 +2307,8 @@ private theorem indexedVecPreFamilySafetyRun :
       change (indexedVecPreFamilyHeadContext.lctx.find?
         indexedVecValidationNId).isSome = true
       rw [nFindHead]
-      rfl) (indexedVecPreFamilyFVarCheckValid
+      rfl) (by simp [Expr.hasMVar_eq_cache])
+      (indexedVecPreFamilyFVarCheckValid
         indexedVecPreFamilyHeadContext indexedVecValidationNId
         (.const ``Nat []) nFindHead rfl rfl rfl rfl)
   let succChecked : AddInductive.ConstructorCheckedExpr
@@ -2271,7 +2320,8 @@ private theorem indexedVecPreFamilySafetyRun :
       change (indexedVecPreFamilyResultContext.lctx.find?
         indexedVecValidationNId).isSome = true
       rw [nFindResult]
-      rfl) (indexedVecPreFamilySuccCheckValid
+      rfl) (by simp [replaySuccApp, Expr.hasMVar_eq_cache])
+      (indexedVecPreFamilySuccCheckValid
         indexedVecPreFamilyResultContext indexedVecValidationNId
         nFindResult rfl rfl rfl rfl)
   let zeroComparison : AddInductive.CandidateIsDefEqObservation
@@ -2459,7 +2509,8 @@ private theorem indexedVecPreFamilySafetyRun :
       change (indexedVecPreFamilyNContext.lctx.find?
         indexedVecValidationAlphaId).isSome = true
       rw [alphaFindN]
-      rfl) (indexedVecPreFamilyFVarCheckValid
+      rfl) (by simp [Expr.hasMVar_eq_cache])
+      (indexedVecPreFamilyFVarCheckValid
         indexedVecPreFamilyNContext indexedVecValidationAlphaId
         (.sort (.succ (.param `u))) alphaFindN rfl rfl rfl rfl)
   let alphaEnsure : AddInductive.ConstructorEnsureTypeObservation
@@ -3405,9 +3456,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_exi
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3440,9 +3491,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPostFamilySemantic_ex
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3458,6 +3509,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPreFamilySemantic_exi
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -3475,9 +3527,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedPreFamilySemantic_exi
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3510,9 +3562,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecProducedSemanticHierarchy_con
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3539,9 +3591,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticCandidate_missingRawS
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3572,9 +3624,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationShapeCandid
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3590,6 +3642,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticExactProducedGenerati
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -3607,9 +3660,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticExactProducedGenerati
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3625,6 +3678,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -3642,9 +3696,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticGenerationCandidateSe
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3660,6 +3714,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -3677,9 +3732,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemanticProducedGenerationCan
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -3695,6 +3750,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -3712,9 +3768,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecSemantic_trEnv'_checked' depe
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

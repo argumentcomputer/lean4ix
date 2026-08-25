@@ -10,6 +10,10 @@ the complete `buildNormalizationCandidate` call and retains the ordered
 `nil`/`cons` candidate package produced in the staged kernel environments.
 -/
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta
 open Lean4Lean.InductiveFixtures
@@ -179,6 +183,7 @@ theorem indexedVecValidationFamilyContextFresh :
   injection heq with hname
   injection hname with hidx
   omega
+  exact LocalContext.WF.nil.decls_wf
 
 theorem indexedVecValidationFamilyContextWF :
     indexedVecValidationFamilyContext.lctx.WF := by
@@ -196,16 +201,20 @@ theorem indexedVecValidationAlphaFind :
   change indexedVecValidationFamilyContext.lctx.find?
       indexedVecValidationAlphaId = _
   rw [indexedVecValidationFamilyContextWF.find?_eq_find?_toList]
-  simp [indexedVecValidationFamilyContext,
+  simp only [indexedVecValidationFamilyContext,
     indexedVecValidationParamContext,
-    indexedVecValidationAlphaId,
     indexedVecFamilyCandidateContext,
-    AddInductive.Context.pushLocalDecl,
+    AddInductive.Context.pushLocalDecl]
+  rw [LocalContext.mkLocalDecl_toList,
+    LocalContext.mkLocalDecl_toList]
+  rw [show ({} : LocalContext).toList = [] by rfl]
+  simp [indexedVecFamilyCandidateContext,
+    indexedVecValidationAlphaId,
     AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl,
-    LocalContext.toList, PersistentArray.toList'_push,
     LocalDecl.fvarId,
     NameGenerator.next, NameGenerator.curr]
+  exact LocalContext.WF.nil.decls_wf
+  exact indexedVecValidationParamContextWF.decls_wf
 
 @[simp] theorem indexedVecValidationAlphaShape : indexedVecValidationAlpha =
     .fvar indexedVecValidationAlphaId := by rfl
@@ -219,7 +228,7 @@ theorem localContextFindNew
   have hwf' := LocalContext.WF.mkLocalDecl
     (name := name) (ty := type) (bi := bi) (kind := kind) hwf hfresh
   rw [hwf'.find?_eq_find?_toList]
-  rw [LocalContext.mkLocalDecl_toList]
+  rw [LocalContext.mkLocalDecl_toList hwf.decls_wf]
   simp [LocalDecl.fvarId]
 
 theorem localContextFindOld
@@ -234,7 +243,7 @@ theorem localContextFindOld
     (name := newName) (ty := newType) (bi := newBi)
     (kind := newKind) hwf hfresh
   rw [hwf'.find?_eq_find?_toList]
-  rw [LocalContext.mkLocalDecl_toList]
+  rw [LocalContext.mkLocalDecl_toList hwf.decls_wf]
   simp only [List.find?_cons, LocalDecl.fvarId]
   rw [show (oldId == newId) = false by
     exact beq_eq_false_iff_ne.mpr hne]
@@ -506,6 +515,8 @@ theorem indexedVecCtorValidationContextFresh :
   · injection heq with hname
     injection hname with hidx
     omega
+  exact LocalContext.WF.nil.decls_wf
+  exact indexedVecValidationParamContextWF.decls_wf
 
 theorem indexedVecValidationNContextWF :
     indexedVecValidationNContext.lctx.WF := by
@@ -546,6 +557,9 @@ theorem indexedVecValidationNContextFresh :
     · injection heq with hname
       injection hname with hidx
       omega
+  exact LocalContext.WF.nil.decls_wf
+  exact indexedVecValidationParamContextWF.decls_wf
+  exact indexedVecCtorValidationContextWF.decls_wf
 
 theorem indexedVecValidationHeadContextWF :
     indexedVecValidationHeadContext.lctx.WF := by
@@ -706,18 +720,19 @@ theorem indexedVecNilNoMVarNoFVar :
         indexedVecKernelNil.type = .ok () := by
   have hexpr : indexedVecKernelNil.type.data.hasExprMVar = false := by
     change indexedVecNilInfo.type.hasExprMVar = false
-    rw [Expr.hasExprMVar_eq]
-    rfl
+    simp [indexedVecNilInfo, ConstantInfo.type,
+      ConstantInfo.toConstantVal,
+      Expr.bvar_hasExprMVar_of_le]
   have hlevel : indexedVecKernelNil.type.data.hasLevelMVar = false := by
     change indexedVecNilInfo.type.hasLevelMVar = false
-    rw [Expr.hasLevelMVar_eq]
     simp [indexedVecNilInfo, ConstantInfo.type,
-      ConstantInfo.toConstantVal, Expr.hasLevelMVar',
-      Level.hasMVar_eq, Level.hasMVar']
+      ConstantInfo.toConstantVal, Level.hasMVar_eq, Level.hasMVar',
+      Expr.bvar_hasLevelMVar_of_le]
   have hfvar : indexedVecKernelNil.type.data.hasFVar = false := by
     change indexedVecNilInfo.type.hasFVar = false
-    rw [Expr.hasFVar_eq]
-    rfl
+    simp [indexedVecNilInfo, ConstantInfo.type,
+      ConstantInfo.toConstantVal,
+      Expr.bvar_hasFVar_of_le]
   unfold Kernel.Environment.checkNoMVarNoFVar
     Kernel.Environment.checkNoMVar Kernel.Environment.checkNoFVar
   rw [show indexedVecKernelNil.type.hasMVar = false by
@@ -734,18 +749,19 @@ theorem indexedVecConsNoMVarNoFVar :
         indexedVecKernelCons.type = .ok () := by
   have hexpr : indexedVecKernelCons.type.data.hasExprMVar = false := by
     change indexedVecConsInfo.type.hasExprMVar = false
-    rw [Expr.hasExprMVar_eq]
-    rfl
+    simp [indexedVecConsInfo, ConstantInfo.type,
+      ConstantInfo.toConstantVal,
+      Expr.bvar_hasExprMVar_of_le]
   have hlevel : indexedVecKernelCons.type.data.hasLevelMVar = false := by
     change indexedVecConsInfo.type.hasLevelMVar = false
-    rw [Expr.hasLevelMVar_eq]
     simp [indexedVecConsInfo, ConstantInfo.type,
-      ConstantInfo.toConstantVal, Expr.hasLevelMVar',
-      Level.hasMVar_eq, Level.hasMVar']
+      ConstantInfo.toConstantVal, Level.hasMVar_eq, Level.hasMVar',
+      Expr.bvar_hasLevelMVar_of_le]
   have hfvar : indexedVecKernelCons.type.data.hasFVar = false := by
     change indexedVecConsInfo.type.hasFVar = false
-    rw [Expr.hasFVar_eq]
-    rfl
+    simp [indexedVecConsInfo, ConstantInfo.type,
+      ConstantInfo.toConstantVal,
+      Expr.bvar_hasFVar_of_le]
   unfold Kernel.Environment.checkNoMVarNoFVar
     Kernel.Environment.checkNoMVar Kernel.Environment.checkNoFVar
   rw [show indexedVecKernelCons.type.hasMVar = false by
@@ -903,7 +919,8 @@ theorem inferTypeIndexedVecOnlyCore
     inferTypeFamilyOnlyCore,
     indexedVecInfoTypeShape, vecFamilyTail,
     Expr.instantiateRevRange_eq, Expr.instantiateRev_eq,
-    Expr.instantiate_eq,
+    Expr.instantiate_eq, Expr.instantiate_eq_self,
+    Expr.looseBVarRange',
     Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
 
 theorem ensureTypeMOfInferOnly
@@ -1766,9 +1783,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecNormalizationCandidateProduce
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

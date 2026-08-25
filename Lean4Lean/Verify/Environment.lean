@@ -325,9 +325,9 @@ theorem AddInductive.FamilySourceClosedList.sources_closed
       intro source member
       rcases List.mem_cons.mp member with rfl | member
       · apply fvarsIn_iff.2
-        refine ⟨?_, fvarsIn_iff_hasMVar.2 noMVar⟩
+        refine ⟨?_, fvarsIn_iff_hasMVar noMVar⟩
         intro fv present
-        rw [fvarsList_eq_nil.2 noFVar] at present
+        rw [fvarsList_eq_nil noFVar] at present
         contradiction
       · exact ih source member
 
@@ -633,7 +633,7 @@ theorem VEnv.addDefEqFold_mono (input_le : env₁ ≤ env₂) :
       rules.foldl VEnv.addDefEq env₁ ≤
         rules.foldl VEnv.addDefEq env₂
   | [] => input_le
-  | rule :: rules =>
+  | _rule :: rules =>
       VEnv.addDefEqFold_mono (VEnv.addDefEq_mono input_le) rules
 
 /-- A complete ordinary block trace replayed against a larger aligned input,
@@ -1356,9 +1356,9 @@ info: 'Lean4Lean.primitiveCandidateObserversOfNestedRun' depends on axioms: [pro
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1788,7 +1788,7 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedSta
  Expr.eqv_eq,
  Expr.instantiate1_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5236,14 +5236,13 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRe
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5257,7 +5256,6 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveKT
  Expr.abstract_eq,
  Expr.eqv_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
@@ -5278,14 +5276,13 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRe
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5311,14 +5308,13 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveRe
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5336,14 +5332,13 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveCo
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -5549,14 +5544,13 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTr
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6619,14 +6613,13 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions' depends 
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -6644,14 +6637,13 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions_default' 
  Expr.instantiate1_eq,
  Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

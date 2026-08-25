@@ -31,7 +31,8 @@ theorem CandidateExprIdentity.view_eq_source
     (identity : CandidateExprIdentity trace)
     (localRun : CandidateLocalContextRun context)
     (scope : source.FVarsIn
-      (fun fv => (context.lctx.find? fv).isSome = true)) :
+      (fun fv => (context.lctx.find? fv).isSome = true))
+    (closed : source.looseBVarRange' = 0) :
     trace.view = source := by
   induction identity with
   | terminal result_eq =>
@@ -40,9 +41,21 @@ theorem CandidateExprIdentity.view_eq_source
       domainIdentity bodyIdentity domainIH bodyIH =>
       rename_i traceContext domain name binderInfo traceSource inferred body
         fresh annotations annotationsEq checked normalized
-      rw [source_eq] at scope
+      rw [source_eq] at scope closed
       simp only [FVarsIn] at scope
-      have domainEq := domainIH localRun scope.1
+      change max domain.looseBVarRange' (body.looseBVarRange' - 1) = 0 at closed
+      have ⟨domainClosed, bodySub⟩ := Nat.max_eq_zero_iff.mp closed
+      have bodyLe : body.looseBVarRange' ≤ 1 :=
+        Nat.sub_eq_zero_iff_le.mp bodySub
+      have instantiatedClosed :
+          (body.instantiate1 traceContext.freshExpr).looseBVarRange' = 0 := by
+        rw [Expr.instantiate1_eq]
+        have hle := Expr.instantiate1'_looseBVarRange
+          (n := 0) (k := 0) bodyLe
+          (show traceContext.freshExpr.looseBVarRange' ≤ 0 by
+            exact Nat.le_refl _)
+        omega
+      have domainEq := domainIH localRun scope.1 domainClosed
       let pushedRun := localRun.push name binderInfo annotations.consumed
       have oldScope : body.FVarsIn (fun fv =>
           ((traceContext.pushLocalDecl name binderInfo
@@ -64,7 +77,7 @@ theorem CandidateExprIdentity.view_eq_source
           (fun fv => ((traceContext.pushLocalDecl name binderInfo
             annotations.consumed).lctx.find? fv).isSome = true) := by
         simpa only [Expr.instantiate1_eq] using bodyScope
-      have bodyEq := bodyIH pushedRun bodyScope'
+      have bodyEq := bodyIH pushedRun bodyScope' instantiatedClosed
       have bodyAvoid : body.FVarsIn (· ≠ traceContext.freshFVarId) := by
         apply scope.2.mono
         intro fv present equal
@@ -83,7 +96,7 @@ theorem CandidateExprIdentity.view_eq_source
           congr 1
           rw [show #[traceContext.freshExpr] =
             ⟨[traceContext.freshFVarId].map Expr.fvar⟩ by rfl]
-          rw [Expr.abstract_eq]
+          rw [Expr.abstract_eq _ _ (.inr instantiatedClosed) (by simp)]
           change (body.instantiate1 traceContext.freshExpr).abstract1
             traceContext.freshFVarId = body
           simpa only [Expr.instantiate1_eq,
@@ -100,7 +113,7 @@ info: 'Lean4Lean.TypeChecker.CandidateExprIdentity.view_eq_source' depends on ax
  Quot.sound,
  Expr.abstract_eq,
  Expr.instantiate1_eq,
- PersistentArray.toList'_push,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

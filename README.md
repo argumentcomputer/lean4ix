@@ -218,6 +218,8 @@ an expected rejection at the `elaboration` phase.
   differences from lean4lean and the conditions under which they can disappear.
 - [Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean)
   machine-checks the admitted-proof and axiom frontier.
+- [docs/axiom-audit.md](docs/axiom-audit.md) explains the validity review,
+  repaired runtime domains, and removal condition for every custom contract.
 - [bugs-found.md](bugs-found.md) records Lean kernel bugs uncovered by the
   original lean4lean development.
 - [divergences.md](divergences.md) records deliberate differences between the

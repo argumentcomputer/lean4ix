@@ -8269,7 +8269,7 @@ private theorem roseProducedMainSelectedRuleFVars09 :
   · rw [show roseProducedMainSelectedRule09.rhs.fvarsList = [] by
       native_decide]
     simp
-  · rw [fvarsIn_iff_hasMVar]
+  · apply fvarsIn_iff_hasMVar
     native_decide
 
 private theorem roseProducedNilSelectedRuleFVars09 :
@@ -8279,7 +8279,7 @@ private theorem roseProducedNilSelectedRuleFVars09 :
   · rw [show roseProducedNilSelectedRule09.rhs.fvarsList = [] by
       native_decide]
     simp
-  · rw [fvarsIn_iff_hasMVar]
+  · apply fvarsIn_iff_hasMVar
     native_decide
 
 private theorem roseProducedConsSelectedRuleFVars09 :
@@ -8289,7 +8289,7 @@ private theorem roseProducedConsSelectedRuleFVars09 :
   · rw [show roseProducedConsSelectedRule09.rhs.fvarsList = [] by
       native_decide]
     simp
-  · rw [fvarsIn_iff_hasMVar]
+  · apply fvarsIn_iff_hasMVar
     native_decide
 
 /-- The selected main Rose rule is syntactically free-variable closed after

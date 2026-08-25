@@ -78,8 +78,14 @@ noncomputable def toList' (arr : PersistentArray α) : List α :=
 
 @[simp] theorem toList'_empty : (.empty : PersistentArray α).toList' = [] := rfl
 
-/-- We cannot prove this because `insertNewLeaf` is partial -/
-axiom toList'_push {α} (arr : PersistentArray α) (x : α) :
+/--
+We cannot prove this because `insertNewLeaf` is partial.
+
+The `WF` hypothesis is essential. Without it, a malformed array whose root is
+a leaf and whose tail is full reaches `insertNewLeaf`'s unreachable branch;
+`mkNewTail` then drops the old tail instead of implementing list append.
+See `docs/axiom-audit.md`. -/
+axiom WF.toList'_push {α} {arr : PersistentArray α} (h : WF arr) (x : α) :
     (arr.push x).toList' = arr.toList' ++ [x]
 
 @[simp] theorem size_empty : (.empty : PersistentArray α).size = 0 := rfl
@@ -89,7 +95,9 @@ axiom toList'_push {α} (arr : PersistentArray α) (x : α) :
   simp [push]; split <;> [rfl; (simp [mkNewTail]; split <;> rfl)]
 
 @[simp] theorem WF.toList'_length (h : WF arr) : arr.toList'.length = arr.size := by
-  induction h <;> simp [*, toList'_push]
+  induction h with
+  | empty => simp
+  | push h ih => simp [h.toList'_push, ih]
 
 end PersistentArray
 
@@ -412,9 +420,13 @@ def mkData' (h : UInt64) (depth : Nat := 0) (hasMVar hasParam : Bool := false) :
     hasParam.toUInt64.shiftLeft 33 +
     depth.toUInt64.shiftLeft 40
 
-/-- This exists only for the bit-twiddling proofs, it shouldn't appear
-in the main results, which use the functions below instead -/
-axiom mkData_eq : @mkData = @mkData'
+/-- This exists only for the bit-twiddling proofs, it should not appear in the
+main results, which use the functions below instead.
+
+The bound is essential: for greater depths the C implementation aborts rather
+than returning the `default` value produced by the Lean-side `panic!` model. -/
+axiom mkData_eq {h : UInt64} {d : Nat} {mv hp : Bool} (H : d < 2 ^ 24) :
+    mkData h d mv hp = mkData' h d mv hp
 
 def hasParam' : Level → Bool
   | .param .. => true
@@ -457,9 +469,14 @@ def mkData'
   hasLevelParam.toUInt64.shiftLeft 43 +
   looseBVarRange.toUInt64.shiftLeft 44
 
-/-- This exists only for the bit-twiddling proofs, it shouldn't appear
-in the main results, which use the functions below instead -/
-axiom mkData_eq : @mkData = @mkData'
+/-- This exists only for the bit-twiddling proofs, it should not appear in the
+main results, which use the functions below instead.
+
+The bound is essential: for larger ranges the C implementation aborts rather
+than returning the `default` value produced by the Lean-side `assert!` model. -/
+axiom mkData_eq {h : UInt64} {br : Nat} {d : UInt32} {fv ev lv lp : Bool}
+    (H : br ≤ 2 ^ 20 - 1) :
+    mkData h br d fv ev lv lp = mkData' h br d fv ev lv lp
 
 @[inline] def mkAppData' (fData : Data) (aData : Data) : Data :=
   let depth          := max fData.approxDepth.toUInt16 aData.approxDepth.toUInt16 + 1
@@ -492,9 +509,54 @@ def looseBVarRange' : Expr → Nat
   | .forallE _ e1 e2 _ => max e1.looseBVarRange' (e2.looseBVarRange' - 1)
   | .letE _ e1 e2 e3 _ => max (max e1.looseBVarRange' e2.looseBVarRange') (e3.looseBVarRange' - 1)
 
-/-- This was false prior to the fix of lean4#8554; it should now be provable
-using `mkData_eq` and friends, but this has not been done yet -/
-axiom looseBVarRange_eq (e : Expr) : e.looseBVarRange = e.looseBVarRange'
+/-- Every bvar index in `e` fits the packed 20-bit loose-bvar-range field. The
+property is hereditary because expression metadata is computed bottom-up. -/
+def BVarBounded : Expr → Prop
+  | .bvar i => i + 1 ≤ 2 ^ 20 - 1
+  | .mdata _ b
+  | .proj _ _ b => b.BVarBounded
+  | .app f a => f.BVarBounded ∧ a.BVarBounded
+  | .lam _ t b _
+  | .forallE _ t b _ => t.BVarBounded ∧ b.BVarBounded
+  | .letE _ t v b _ => t.BVarBounded ∧ v.BVarBounded ∧ b.BVarBounded
+  | _ => True
+
+attribute [simp] BVarBounded
+
+/-- The cached range agrees with structural traversal on the domain accepted
+by the runtime constructors. The former unconditional statement proved
+`False` at `.bvar (2^20 - 1)`. -/
+axiom looseBVarRange_eq (e : Expr) (h : e.BVarBounded) :
+    e.looseBVarRange = e.looseBVarRange'
+
+/-- The hereditary side condition excludes the old packed-range
+counterexample. -/
+theorem BVarBounded.looseBVarRange'_le :
+    ∀ {e : Expr}, e.BVarBounded → e.looseBVarRange' ≤ 2 ^ 20 - 1 := by
+  intro e
+  induction e with
+  | bvar _ => exact fun h => h
+  | mdata _ _ ih | proj _ _ _ ih => exact ih
+  | app _ _ ih1 ih2 =>
+    intro h
+    have h1 := ih1 h.1
+    have h2 := ih2 h.2
+    simp only [looseBVarRange']
+    omega
+  | lam _ _ _ _ ih1 ih2 | forallE _ _ _ _ ih1 ih2 =>
+    intro h
+    have h1 := ih1 h.1
+    have h2 := ih2 h.2
+    simp only [looseBVarRange']
+    omega
+  | letE _ _ _ _ _ ih1 ih2 ih3 =>
+    intro h
+    have h1 := ih1 h.1
+    have h2 := ih2 h.2.1
+    have h3 := ih3 h.2.2
+    simp only [looseBVarRange']
+    omega
+  | _ => exact fun _ => Nat.zero_le _
 
 /-- This could be an `@[implemented_by]` -/
 axiom replace_eq (e : Expr) (f) : e.replace f = e.replaceNoCache f
@@ -558,20 +620,29 @@ axiom instantiate1_eq (e : Expr) (subst) : e.instantiate1 subst = e.instantiate1
   | e, [], _ => e
   | e, a :: as, k => instantiateList (instantiate1' e a k) as k
 
-/-- This could be an `@[implemented_by]` -/
-axiom instantiate_eq (e : Expr) (subst) :
+/-- The runtime operation is simultaneous while `instantiateList` is
+sequential. They agree when the source is closed (both sides are no-ops), or
+when every substituend is closed. Without either condition, `.bvar 0` and
+`#[.bvar 0, .sort .zero]` are a counterexample. -/
+axiom instantiate_eq (e : Expr) (subst : Array Expr)
+    (h : e.looseBVarRange' = 0 ∨
+      ∀ a ∈ subst, a.looseBVarRange' = 0) :
     e.instantiate subst = e.instantiateList subst.toList
 
 /-- This could be an `@[implemented_by]` -/
 axiom instantiateRev_eq (e : Expr) (subst) :
     e.instantiateRev subst = e.instantiate subst.reverse
 
-/-- This could be an `@[implemented_by]` -/
-axiom instantiateRange_eq (e : Expr) (subst) :
+/-- The range hypotheses are the domain checked by the runtime implementation,
+which aborts rather than returning a value outside that domain. -/
+axiom instantiateRange_eq (e : Expr) (subst)
+    (h₁ : start ≤ stop) (h₂ : stop ≤ subst.size) :
     e.instantiateRange start stop subst = e.instantiate (subst.extract start stop)
 
-/-- This could be an `@[implemented_by]` -/
-axiom instantiateRevRange_eq (e : Expr) (subst) :
+/-- The range hypotheses are the domain checked by the runtime implementation,
+which aborts rather than returning a value outside that domain. -/
+axiom instantiateRevRange_eq (e : Expr) (subst)
+    (h₁ : start ≤ stop) (h₂ : stop ≤ subst.size) :
     e.instantiateRevRange start stop subst = e.instantiateRev (subst.extract start stop)
 
 def abstract1 (v : FVarId) : Expr → (k :_:= 0) → Expr
@@ -593,9 +664,68 @@ def abstract1 (v : FVarId) : Expr → (k :_:= 0) → Expr
   | e, [], _ => e
   | e, a :: as, k => abstractList (abstract1 a e k) as k
 
-/-- This could be an `@[implemented_by]` -/
-axiom abstract_eq (e : Expr) (xs : List FVarId) :
+/-- The runtime operation leaves loose bvars untouched and selects the last
+duplicate match, while `abstractList` shifts loose bvars and is sequential.
+The two models agree for the empty no-op case, or for a loose-bvar-free
+expression and a duplicate-free fvar list. Duplicate-freedom is retained as a
+uniform premise (and is trivial for the no-op case). -/
+axiom abstract_eq (e : Expr) (xs : List FVarId)
+    (he : xs = [] ∨ e.looseBVarRange' = 0) (hx : xs.Nodup) :
     e.abstract ⟨xs.map .fvar⟩ = e.abstractList xs
+
+/--
+The part of `Expr.abstract` that is valid without closure or duplicate-freedom:
+abstracting free variables preserves the recursive expression skeleton and may
+only replace a free-variable leaf by a bound-variable leaf.  In particular,
+this relation intentionally forgets bound-variable indices, so neither of the
+counterexamples to `abstract_eq` can strengthen it into a false equality.
+-/
+inductive AbstractFVarShape : Expr → Expr → Prop where
+  | bvar (index : Nat) : AbstractFVarShape (.bvar index) (.bvar index)
+  | fvar (id : FVarId) : AbstractFVarShape (.fvar id) (.fvar id)
+  | abstract (id : FVarId) (index : Nat) :
+      AbstractFVarShape (.bvar index) (.fvar id)
+  | sort (level : Level) : AbstractFVarShape (.sort level) (.sort level)
+  | const (name : Name) (levels : List Level) :
+      AbstractFVarShape (.const name levels) (.const name levels)
+  | mvar (id : MVarId) : AbstractFVarShape (.mvar id) (.mvar id)
+  | lit (literal : Literal) : AbstractFVarShape (.lit literal) (.lit literal)
+  | app (function argument function' argument' : Expr)
+      (functionShape : AbstractFVarShape function' function)
+      (argumentShape : AbstractFVarShape argument' argument) :
+      AbstractFVarShape (.app function' argument') (.app function argument)
+  | lam (name : Name) (domain body domain' body' : Expr)
+      (binderInfo : BinderInfo)
+      (domainShape : AbstractFVarShape domain' domain)
+      (bodyShape : AbstractFVarShape body' body) :
+      AbstractFVarShape (.lam name domain' body' binderInfo)
+        (.lam name domain body binderInfo)
+  | forallE (name : Name) (domain body domain' body' : Expr)
+      (binderInfo : BinderInfo)
+      (domainShape : AbstractFVarShape domain' domain)
+      (bodyShape : AbstractFVarShape body' body) :
+      AbstractFVarShape (.forallE name domain' body' binderInfo)
+        (.forallE name domain body binderInfo)
+  | letE (name : Name) (type value body type' value' body' : Expr)
+      (nondep : Bool)
+      (typeShape : AbstractFVarShape type' type)
+      (valueShape : AbstractFVarShape value' value)
+      (bodyShape : AbstractFVarShape body' body) :
+      AbstractFVarShape (.letE name type' value' body' nondep)
+        (.letE name type value body nondep)
+  | proj (typeName : Name) (index : Nat) (expression expression' : Expr)
+      (expressionShape : AbstractFVarShape expression' expression) :
+      AbstractFVarShape (.proj typeName index expression')
+        (.proj typeName index expression)
+  | mdata (data : MData) (expression expression' : Expr)
+      (expressionShape : AbstractFVarShape expression' expression) :
+      AbstractFVarShape (.mdata data expression') (.mdata data expression)
+
+/-- Opaque-runtime bridge exposing only the skeleton-preservation contract of
+free-variable abstraction.  Unlike `abstract_eq`, this statement is valid for
+expressions with loose bound variables and for duplicate abstraction targets. -/
+axiom abstract_fvars_shape (e : Expr) (xs : List FVarId) :
+    AbstractFVarShape (e.abstract ⟨xs.map .fvar⟩) e
 
 /-- This could be an `@[implemented_by]` -/
 axiom abstractRange_eq (e : Expr) (n : Nat) (xs : Array Expr) :

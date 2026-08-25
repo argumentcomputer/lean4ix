@@ -10,3 +10,4 @@ import Lean4Lean.Tests.LevelStd
 import Lean4Lean.Tests.LiteralReadiness
 import Lean4Lean.Tests.NotationPreludeReplay
 import Lean4Lean.Tests.ProjectionExpressibility
+import Lean4Lean.Tests.TrustRepair

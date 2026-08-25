@@ -134,8 +134,8 @@ info: 'Lean4Lean.TypeChecker.Inner.tryEtaStructCore.WF' depends on axioms: [prop
  Quot.sound,
  Lean.Expr.eqv_eq,
  Lean.Level.instLawfulBEqLevel,
- Lean.PersistentArray.toList'_push,
  Lean.Syntax.structEq_eq,
+ Lean.PersistentArray.WF.toList'_push,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/
@@ -147,7 +147,7 @@ info: 'Lean4Lean.TypeChecker.Inner.isDefEqUnitLike.WF' depends on axioms: [prope
  sorryAx,
  Classical.choice,
  Quot.sound,
- Lean.PersistentArray.toList'_push,
+ Lean.PersistentArray.WF.toList'_push,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/

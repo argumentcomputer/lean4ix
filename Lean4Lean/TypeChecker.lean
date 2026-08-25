@@ -304,7 +304,10 @@ def inferType' (e : Expr) (inferOnly : Bool) : RecM Expr := do
     | .proj s idx e => inferProj s idx e (← inferType' e inferOnly)
     | .fvar n => inferFVar (← readThe Context) n
     | .mvar _ => throw <| .other "kernel type checker does not support meta variables"
-    | .bvar _ => unreachable!
+    | .bvar _ =>
+      throw <| .other
+        s!"type checker does not support loose bound variables, \
+           replace them with free variables before invoking it"
     | .sort l =>
       if !inferOnly then
         checkLevel (← readThe Context) l
@@ -578,12 +581,10 @@ def isDefEqLambda (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       let tType := tDom.instantiateRev subst
       if !(← isDefEq tType sType) then return false
       pure (some sType)
-    if tBody.hasLooseBVars || sBody.hasLooseBVars then
-      let sType := sType.getD (sDom.instantiateRev subst)
-      withLocalDecl name bi sType fun fv => do
-        isDefEqLambda tBody sBody (subst.push fv)
-    else
-      isDefEqLambda tBody sBody (subst.push default)
+    -- A real local keeps semantics independent of the packed loose-bvar cache.
+    let sType := sType.getD (sDom.instantiateRev subst)
+    withLocalDecl name bi sType fun fv => do
+      isDefEqLambda tBody sBody (subst.push fv)
   | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
 
 /-- If `t` and `s` are for-all expressions, checks that their domains are defeq and recurses on the
@@ -597,12 +598,10 @@ def isDefEqForall (t s : Expr) (subst : Array Expr := #[]) : RecM Bool :=
       let tType := tDom.instantiateRev subst
       if !(← isDefEq tType sType) then return false
       pure (some sType)
-    if tBody.hasLooseBVars || sBody.hasLooseBVars then
-      let sType := sType.getD (sDom.instantiateRev subst)
-      withLocalDecl name bi sType fun fv =>
-        isDefEqForall tBody sBody (subst.push fv)
-    else
-      isDefEqForall tBody sBody (subst.push default)
+    -- A real local keeps semantics independent of the packed loose-bvar cache.
+    let sType := sType.getD (sDom.instantiateRev subst)
+    withLocalDecl name bi sType fun fv =>
+      isDefEqForall tBody sBody (subst.push fv)
   | t, s => isDefEq (t.instantiateRev subst) (s.instantiateRev subst)
 
 /-- Decides definitional equality of `t` and `s` in the cases that can be settled without

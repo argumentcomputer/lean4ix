@@ -10,6 +10,10 @@ This module extends the family-validation seam proved in
 certified inductive-generation path.
 -/
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta
 open Lean4Lean.InductiveFixtures
@@ -268,6 +272,7 @@ theorem nilAlphaFind :
     else none) = _
   rw [beq_self_eq_true]
   rfl
+  exact LocalContext.WF.nil.decls_wf
 
 example :
     TypeChecker.Inner.inferFVar (tcContext nilAlphaLctx) nilAlphaId =
@@ -435,6 +440,19 @@ def nilAlphaState : TypeChecker.State :=
 def nilFirstApp : Expr :=
   .app (.const ``IndexedVec [.param `u]) (.fvar nilAlphaId)
 
+/- These concrete terms satisfy the bounded-domain premise of the repaired
+cached loose-bvar contract. -/
+@[simp] theorem nilFirstApp_looseBVarRange :
+    ((Expr.const ``IndexedVec [.param `u]).app
+      (.fvar nilAlphaId)).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp [nilFirstApp])]
+  rfl
+
+@[simp] theorem nilBodyExpr_looseBVarRange :
+    (nilFirstApp.app (.const ``Nat.zero [])).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp [nilFirstApp])]
+  rfl
+
 def nilFirstAppState : TypeChecker.State :=
   { nilAlphaState with inferTypeC :=
       (nilAlphaState.inferTypeC.insert nilFirstApp vecFamilyTail) }
@@ -474,9 +492,7 @@ theorem inferNilFirstApp :
     nilBodyInitialState nilFamilyState nilAlphaState
     (.const ``IndexedVec [.param `u]) (.fvar nilAlphaId)
     (.sort (.succ (.param `u))) vecFamilyTail `α .default
-    (by
-      simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
-        Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars])
     (by
       simp [nilBodyInitialState, nilRootSortState])
     (by simpa [indexedVecInfoTypeShape] using inferNilFamily)
@@ -509,8 +525,7 @@ theorem inferNilBodyExists : ∃ finalState,
     nilBodyInitialState nilFirstAppState nilZeroState
     nilFirstApp (.const ``Nat.zero []) (.const ``Nat [])
     (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilFirstApp, Expr.hasLooseBVars,
-      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars])
     (by simp [nilBodyInitialState, nilRootSortState])
     (by simpa [vecFamilyTail] using inferNilFirstApp)
     inferNilZero (by rfl)
@@ -556,6 +571,13 @@ def nilCtorBodyRaw : Expr :=
 def nilCtorTypeRaw : Expr :=
   .forallE `α (.sort (.succ (.param `u))) nilCtorBodyRaw .implicit
 
+@[simp] theorem nilCtorTypeRaw_looseBVarRange :
+    (Expr.forallE `α (.sort (.succ (.param `u)))
+      nilCtorBodyRaw .implicit).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by
+    simp [nilCtorTypeRaw, nilCtorBodyRaw])]
+  rfl
+
 def nilCtorInferredLevel : Level :=
   mkLevelIMax' (.succ (.succ (.param `u))) (.succ (.param `u))
 
@@ -595,7 +617,7 @@ theorem nilRootInferForallExists : ∃ finalState,
         (.const ``Nat.zero [])).instantiateRev
       (#[] |>.push (.fvar nilAlphaId)) = nilBodyExpr by
     simp [nilBodyExpr, nilAlphaId, Expr.instantiateRev_eq, Expr.instantiate_eq, Expr.instantiate1',
-      Expr.liftLooseBVars_zero]]
+      Expr.looseBVarRange', Expr.liftLooseBVars_zero]]
   simp only [Bind.bind, ReaderT.bind, StateT.bind, Except.bind]
   rw [hbody]
   simp only
@@ -620,8 +642,7 @@ theorem inferNilRootExists : ∃ finalState,
     ({} : TypeChecker.State) state `α
     (.sort (.succ (.param `u))) nilCtorBodyRaw
     (.sort nilCtorInferredLevel) .implicit
-    (by simp [nilCtorBodyRaw, Expr.hasLooseBVars,
-      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars])
     (by simp) hforall
 
 theorem nilRootCheckTypeM :
@@ -738,12 +759,26 @@ theorem nilCandidateAlphaFind :
     else none) = _
   rw [beq_self_eq_true]
   rfl
+  exact LocalContext.WF.nil.decls_wf
 
 def nilCandidateFirstApp : Expr :=
   .app (.const ``IndexedVec [.param `u]) (.fvar nilCandidateAlphaId)
 
 def nilCandidateBodyExpr : Expr :=
   .app nilCandidateFirstApp (.const ``Nat.zero [])
+
+@[simp] theorem nilCandidateFirstApp_looseBVarRange :
+    ((Expr.const ``IndexedVec [.param `u]).app
+      (.fvar nilCandidateAlphaId)).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp [nilCandidateFirstApp])]
+  rfl
+
+@[simp] theorem nilCandidateBodyExpr_looseBVarRange :
+    (nilCandidateFirstApp.app
+      (.const ``Nat.zero [])).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp [nilCandidateBodyExpr,
+    nilCandidateFirstApp])]
+  rfl
 
 theorem nilCandidateBodyShape :
     nilCandidateBody = nilCandidateBodyExpr := by
@@ -803,8 +838,7 @@ theorem inferNilCandidateFirstApp :
     nilCandidateAlphaState (.const ``IndexedVec [.param `u])
     (.fvar nilCandidateAlphaId) (.sort (.succ (.param `u)))
     vecFamilyTail `α .default
-    (by simp [Expr.hasLooseBVars, Expr.looseBVarRange_eq,
-      Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars])
     (by simp) inferNilCandidateFamily
     (by simpa [indexedVecInfoTypeShape] using inferNilCandidateAlpha)
     (by rfl)
@@ -839,8 +873,7 @@ theorem inferNilCandidateBodyExists : ∃ finalState,
     ({} : TypeChecker.State) nilCandidateFirstAppState
     nilCandidateZeroState nilCandidateFirstApp (.const ``Nat.zero [])
     (.const ``Nat []) (.sort (.succ (.param `u))) vecIndexName .default
-    (by simp [nilCandidateFirstApp, Expr.hasLooseBVars,
-      Expr.looseBVarRange_eq, Expr.looseBVarRange'])
+    (by simp [Expr.hasLooseBVars])
     (by simp) inferNilCandidateFirstApp
     inferNilCandidateZero (by rfl)
   simpa [nilCandidateBodyExpr, nilCandidateFirstApp,
@@ -1177,15 +1210,21 @@ def nilCandidate : AddInductive.CandidateExpr indexedVecNilInfo.type :=
 theorem nilCandidate_view_eq :
     nilCandidate.view = indexedVecNilInfo.type := by
   have habstract (context : AddInductive.Context) (e : Expr) :
+      e.looseBVarRange' = 0 →
       e.abstract #[context.freshExpr] =
         Expr.abstract1 context.freshFVarId e := by
+    intro closed
     rw [show #[context.freshExpr] =
       ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
-    simp only [Expr.abstract_eq, Expr.abstractList]
+    rw [Expr.abstract_eq _ _ (Or.inr closed) (by simp)]
+    rfl
   simp only [nilCandidate, AddInductive.CandidateExpr.view,
     nilCandidateTrace, nilDomainCandidateTrace, nilBodyCandidateTrace,
     AddInductive.CandidateExprTrace.view]
-  rw [habstract]
+  rw [habstract _ _ (by
+    change nilCandidateBody.looseBVarRange' = 0
+    rw [nilCandidateBodyShape]
+    rfl)]
   rw [nilInfoTypeShape]
   simp [nilCandidateBody, nilCtorTypeRaw, nilCtorBodyRaw,
     Expr.instantiate1_eq, Expr.instantiate1', Expr.abstract1,
@@ -1460,6 +1499,7 @@ theorem consAlphaContextFresh :
   injection heq with hname
   injection hname with hidx
   omega
+  exact LocalContext.WF.nil.decls_wf
 
 theorem consNContextWF : consNContext.lctx.WF := by
   simpa [consNContext, AddInductive.Context.pushLocalDecl] using
@@ -1483,6 +1523,8 @@ theorem consNContextFresh :
   · injection heq with hname
     injection hname with hidx
     omega
+  exact LocalContext.WF.nil.decls_wf
+  exact consAlphaContextWF.decls_wf
 
 theorem consHeadContextWF : consHeadContext.lctx.WF := by
   simpa [consHeadContext, AddInductive.Context.pushLocalDecl] using
@@ -1512,63 +1554,117 @@ theorem consHeadContextFresh :
     · injection heq with hname
       injection hname with hidx
       omega
+  exact LocalContext.WF.nil.decls_wf
+  exact consAlphaContextWF.decls_wf
+  exact consNContextWF.decls_wf
 
 theorem consTailContextWF : consTailContext.lctx.WF := by
   simpa [consTailContext, AddInductive.Context.pushLocalDecl] using
     (LocalContext.WF.mkLocalDecl consHeadContextWF consHeadContextFresh)
 
+private theorem consAlphaFindInAlpha :
+    consAlphaContext.lctx.find? consAlphaId =
+      some (.cdecl 0 consAlphaId consAlphaName
+        (.sort (.succ (.param `u))) .implicit .default) := by
+  have rootWF : consRootContext.lctx.WF := by
+    change ({} : LocalContext).WF
+    exact LocalContext.WF.nil
+  have h := Lean4Lean.TypeChecker.localContextFindNew
+    consRootContext.lctx consAlphaId consAlphaName
+    (.sort (.succ (.param `u))) .implicit .default
+    rootWF consRootFresh
+  simpa [consAlphaContext, consAlphaId, consRootContext, ctorContext,
+    AddInductive.Context.pushLocalDecl] using h
+
+private theorem consNFindInN :
+    consNContext.lctx.find? consNId =
+      some (.cdecl 1 consNId consNName (.const ``Nat [])
+        .implicit .default) := by
+  have h := Lean4Lean.TypeChecker.localContextFindNew
+    consAlphaContext.lctx consNId consNName (.const ``Nat [])
+    .implicit .default consAlphaContextWF consAlphaContextFresh
+  simpa [consNContext, consNId, consAlphaContext, consAlphaId,
+    consRootContext, ctorContext, AddInductive.Context.pushLocalDecl,
+    LocalContext.mkLocalDecl] using h
+
 theorem consAlphaFindInHead :
     consHeadContext.lctx.find? consAlphaId =
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
-  rw [consHeadContextWF.find?_eq_find?_toList]
-  simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
-    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
-    LocalContext.toList, PersistentArray.toList'_push,
-    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
+  have alphaInN := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consAlphaContext.lctx) (oldId := consAlphaId)
+    (newId := consNId) (name := consNName) (type := .const ``Nat [])
+    (bi := .implicit) (kind := .default)
+    (decl := .cdecl 0 consAlphaId consAlphaName
+      (.sort (.succ (.param `u))) .implicit .default)
+    consAlphaContextWF consAlphaContextFresh consAlphaFindInAlpha
+  have alphaInHead := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consNContext.lctx) (oldId := consAlphaId)
+    (newId := consHeadId) (name := consHeadName) (type := consAlphaExpr)
+    (bi := .default) (kind := .default)
+    (decl := .cdecl 0 consAlphaId consAlphaName
+      (.sort (.succ (.param `u))) .implicit .default)
+    consNContextWF consNContextFresh (by
+      simpa [consNContext, consNId,
+        AddInductive.Context.pushLocalDecl] using alphaInN)
+  simpa [consHeadContext, consHeadId, consAlphaExpr,
+    AddInductive.Context.pushLocalDecl] using alphaInHead
 
 theorem consAlphaFindInN :
     consNContext.lctx.find? consAlphaId =
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
-  rw [consNContextWF.find?_eq_find?_toList]
-  simp [consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
-    AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
-    LocalContext.toList, PersistentArray.toList'_push,
-    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
+  have h := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consAlphaContext.lctx) (oldId := consAlphaId)
+    (newId := consNId) (name := consNName) (type := .const ``Nat [])
+    (bi := .implicit) (kind := .default)
+    (decl := .cdecl 0 consAlphaId consAlphaName
+      (.sort (.succ (.param `u))) .implicit .default)
+    consAlphaContextWF consAlphaContextFresh consAlphaFindInAlpha
+  simpa [consNContext, consNId,
+    AddInductive.Context.pushLocalDecl] using h
 
 theorem consNFindInHead :
     consHeadContext.lctx.find? consNId =
       some (.cdecl 1 consNId consNName (.const ``Nat [])
         .implicit .default) := by
-  rw [consHeadContextWF.find?_eq_find?_toList]
-  simp [consHeadContext, consNContext, consAlphaContext, consRootContext, ctorContext, consAlphaId,
-    consNId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl, LocalContext.toList,
-    PersistentArray.toList'_push, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  have h := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consNContext.lctx) (oldId := consNId)
+    (newId := consHeadId) (name := consHeadName) (type := consAlphaExpr)
+    (bi := .default) (kind := .default)
+    (decl := .cdecl 1 consNId consNName (.const ``Nat [])
+      .implicit .default)
+    consNContextWF consNContextFresh consNFindInN
+  simpa [consHeadContext, consHeadId, consAlphaExpr,
+    AddInductive.Context.pushLocalDecl] using h
 
 theorem consAlphaFindInTail :
     consTailContext.lctx.find? consAlphaId =
       some (.cdecl 0 consAlphaId consAlphaName
         (.sort (.succ (.param `u))) .implicit .default) := by
-  rw [consTailContextWF.find?_eq_find?_toList]
-  simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
-    ctorContext, consAlphaId, AddInductive.Context.pushLocalDecl, AddInductive.Context.freshFVarId,
-    LocalContext.mkLocalDecl, LocalContext.toList,
-    PersistentArray.toList'_push, LocalDecl.fvarId,
-    NameGenerator.next, NameGenerator.curr]
+  have h := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consHeadContext.lctx) (oldId := consAlphaId)
+    (newId := consTailId) (name := consTailName) (type := consTailDomain)
+    (bi := .default) (kind := .default)
+    (decl := .cdecl 0 consAlphaId consAlphaName
+      (.sort (.succ (.param `u))) .implicit .default)
+    consHeadContextWF consHeadContextFresh consAlphaFindInHead
+  simpa [consTailContext, consTailId,
+    AddInductive.Context.pushLocalDecl] using h
 
 theorem consNFindInTail :
     consTailContext.lctx.find? consNId =
       some (.cdecl 1 consNId consNName (.const ``Nat [])
         .implicit .default) := by
-  rw [consTailContextWF.find?_eq_find?_toList]
-  simp [consTailContext, consHeadContext, consNContext, consAlphaContext, consRootContext,
-    ctorContext, consAlphaId, consNId, AddInductive.Context.pushLocalDecl,
-    AddInductive.Context.freshFVarId, LocalContext.mkLocalDecl,
-    LocalContext.toList, PersistentArray.toList'_push,
-    LocalDecl.fvarId, NameGenerator.next, NameGenerator.curr]
+  have h := Lean4Lean.TypeChecker.localContextFindOld
+    (lctx := consHeadContext.lctx) (oldId := consNId)
+    (newId := consTailId) (name := consTailName) (type := consTailDomain)
+    (bi := .default) (kind := .default)
+    (decl := .cdecl 1 consNId consNName (.const ``Nat [])
+      .implicit .default)
+    consHeadContextWF consHeadContextFresh consNFindInHead
+  simpa [consTailContext, consTailId,
+    AddInductive.Context.pushLocalDecl] using h
 
 /-! ## Reusable post-family atom observations -/
 

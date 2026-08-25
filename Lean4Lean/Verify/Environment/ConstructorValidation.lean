@@ -397,6 +397,7 @@ names or from a parallel telescope. -/
 structure ConstructorCheckedExpr (context : Context) (source : Expr) where
   fvars : source.FVarsIn
     (fun fv => (context.lctx.find? fv).isSome = true)
+  noMVar : source.hasMVar = false
   observation : CandidateCheckTypeObservation context source
 
 /-- Retain an already verified full-check execution together with a structural
@@ -404,9 +405,10 @@ scope proof for its exact source expression. -/
 def ConstructorCheckedExpr.ofRun
     (fvars : source.FVarsIn
       (fun fv => (context.lctx.find? fv).isSome = true))
+    (noMVar : source.hasMVar = false)
     (run : CandidateCheckTypeStep.Valid ⟨context, source, inferred⟩) :
     ConstructorCheckedExpr context source :=
-  ⟨fvars, ⟨inferred, run⟩⟩
+  ⟨fvars, noMVar, ⟨inferred, run⟩⟩
 
 private theorem constructorClosed_hasMVar_false
     {env : Kernel.Environment} {name : Name} {source : Expr}
@@ -414,20 +416,24 @@ private theorem constructorClosed_hasMVar_false
     source.hasMVar = false := by
   unfold Kernel.Environment.checkNoMVarNoFVar
     Kernel.Environment.checkNoMVar Kernel.Environment.checkNoFVar at closed
-  cases hmvars : source.hasMVar
-  · rfl
-  · simp [hmvars, Bind.bind, Except.bind] at closed
+  change (source.hasExprMVar || source.hasLevelMVar) = false
+  cases hexpr : source.hasExprMVar <;>
+    cases hlevel : source.hasLevelMVar <;>
+    simp [hexpr, hlevel, Bind.bind, Except.bind] at closed ⊢
 
 private theorem constructorClosed_hasFVar_false
     {env : Kernel.Environment} {name : Name} {source : Expr}
     (closed : env.checkNoMVarNoFVar name source = .ok ()) :
     source.hasFVar = false := by
   have hmvars := constructorClosed_hasMVar_false closed
+  have hmvarBits :
+      source.hasExprMVar = false ∧ source.hasLevelMVar = false := by
+    simpa only [Expr.hasMVar_eq_cache, Bool.or_eq_false_iff] using hmvars
   unfold Kernel.Environment.checkNoMVarNoFVar
     Kernel.Environment.checkNoMVar Kernel.Environment.checkNoFVar at closed
   cases hfvars : source.hasFVar
   · rfl
-  · simp [hmvars, hfvars, Bind.bind, Except.bind, Pure.pure,
+  · simp [hmvarBits.1, hmvarBits.2, hfvars, Bind.bind, Except.bind, Pure.pure,
       Except.pure] at closed
 
 /-- Constructor metadata accepted by the validator is closed, so its retained
@@ -440,11 +446,12 @@ def ConstructorCheckedExpr.ofClosedRoot
     ConstructorCheckedExpr context.withEmptyLocalContext source where
   fvars := fvarsIn_iff.2 ⟨by
     intro fv present
-    have empty := fvarsList_eq_nil.mpr
+    have empty := fvarsList_eq_nil
       (constructorClosed_hasFVar_false closed)
     rw [empty] at present
     contradiction,
-    fvarsIn_iff_hasMVar.2 (constructorClosed_hasMVar_false closed)⟩
+    fvarsIn_iff_hasMVar (constructorClosed_hasMVar_false closed)⟩
+  noMVar := constructorClosed_hasMVar_false closed
   observation := observation
 
 /-- Execute a full check only after confirming that every free variable of
@@ -460,9 +467,9 @@ def checkConstructorAlignedExpr (context : Context) (source : Expr) :
           intro fv hfv
           have h := List.all_eq_true.mp hfvars fv hfv
           exact h,
-        fvarsIn_iff_hasMVar.2 hmvars⟩
+        fvarsIn_iff_hasMVar hmvars⟩
       let observation ← observeCandidateCheckType context source
-      pure ⟨fvars, observation⟩
+      pure ⟨fvars, hmvars, observation⟩
     else
       throw <| .other "constructor alignment source contains a metavariable"
   else
@@ -494,8 +501,7 @@ theorem ConstructorCheckedExpr.check_eq
     apply List.all_eq_true.mpr
     intro fv present
     exact (fvarsIn_iff.mp checked.fvars).1 fv present
-  have hmvars : source.hasMVar = false :=
-    fvarsIn_iff_hasMVar.mp (fvarsIn_iff.mp checked.fvars).2
+  have hmvars : source.hasMVar = false := checked.noMVar
   unfold checkConstructorAlignedExpr
   rw [dif_pos hfvars, dif_pos hmvars]
   rw [observeCandidateCheckType_of_run context source
@@ -596,7 +602,7 @@ def ConstructorCheckedExpr.withObservation
     (scope : ConstructorCheckedExpr context source)
     (observation : CandidateCheckTypeObservation context source) :
     ConstructorCheckedExpr context source :=
-  ⟨scope.fvars, observation⟩
+  ⟨scope.fvars, scope.noMVar, observation⟩
 
 /-- Interpret one retained equality observation at the exact Theory
 translations selected by the two aligned full checks. -/
@@ -2195,13 +2201,19 @@ theorem theoryTranslationUnique_abstractList
 
 /-- Array-form abstraction over an explicit list of free variables preserves
 the projection-free fragment. -/
+private theorem theoryTranslationUnique_eq_of_abstractFVarShape
+    {result source : Expr}
+    (shape : Expr.AbstractFVarShape result source) :
+    theoryTranslationUnique result = theoryTranslationUnique source := by
+  induction shape <;> simp_all [theoryTranslationUnique]
+
 theorem theoryTranslationUnique_abstractFVars
     (expression : Expr) (ids : List FVarId) :
     theoryTranslationUnique
         (expression.abstract ⟨ids.map Expr.fvar⟩) =
       theoryTranslationUnique expression := by
-  rw [Expr.abstract_eq]
-  exact theoryTranslationUnique_abstractList expression ids 0
+  exact theoryTranslationUnique_eq_of_abstractFVarShape
+    (Expr.abstract_fvars_shape expression ids)
 
 /-- Every syntax fragment contributing to a recursively reconstructed
 candidate view has a unique strict Theory endpoint.  Checking recursive body
@@ -3695,12 +3707,18 @@ private theorem candidateForallDepth_abstractList
   | cons id ids ih =>
       simp only [Expr.abstractList, ih, candidateForallDepth_abstract1]
 
+private theorem candidateForallDepth_eq_of_abstractFVarShape
+    {result source : Expr}
+    (shape : Expr.AbstractFVarShape result source) :
+    candidateForallDepth result = candidateForallDepth source := by
+  induction shape <;> simp_all [candidateForallDepth]
+
 private theorem candidateForallDepth_abstract
     (expression : Expr) (ids : List FVarId) :
     candidateForallDepth (expression.abstract ⟨ids.map Expr.fvar⟩) =
       candidateForallDepth expression := by
-  rw [Expr.abstract_eq]
-  exact candidateForallDepth_abstractList expression ids 0
+  apply candidateForallDepth_eq_of_abstractFVarShape
+  exact Expr.abstract_fvars_shape expression ids
 
 private theorem candidateView_forallDepth
     (trace : CandidateExprTrace context source) :
@@ -4075,7 +4093,8 @@ private theorem abstract_instantiate_self
     (expression.abstract #[.fvar id]).instantiate1 (.fvar id) =
       expression := by
   rw [show #[Expr.fvar id] = ⟨[id].map Expr.fvar⟩ by rfl]
-  simp only [Expr.abstract_eq, Expr.abstractList, Expr.instantiate1_eq]
+  rw [Expr.abstract_eq _ _ (.inr closed.looseBVarRange_zero) (by simp)]
+  simp only [Expr.abstractList, Expr.instantiate1_eq]
   exact abstract1_instantiate_self expression id 0 closed
 
 /-- A source-ordered list of kernel parameter FVars builds an exact verified
@@ -8797,6 +8816,7 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8804,7 +8824,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8813,9 +8832,9 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.checkedW
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8831,6 +8850,7 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8838,7 +8858,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8847,9 +8866,9 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.viewDecl
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8865,6 +8884,7 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8872,7 +8892,6 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8881,9 +8900,9 @@ info: 'Lean4Lean.VInductDecl.GenerationCandidateSemanticRun.ofGenerationShape' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8899,6 +8918,7 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8906,7 +8926,6 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8915,9 +8934,9 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateSemanticRun.producedPackageOf
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8933,6 +8952,7 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8940,7 +8960,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8949,9 +8968,9 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.producedPackage' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -8967,6 +8986,7 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -8974,7 +8994,6 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -8983,9 +9002,9 @@ info: 'Lean4Lean.VInductDecl.ProducedGenerationShapeCandidate.exactProducedPacka
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9008,7 +9027,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -9017,9 +9035,9 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePreFamilyInput.exists' 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9042,7 +9060,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -9051,9 +9068,9 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidatePostFamilyInput.exists'
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -9095,7 +9112,6 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  Expr.instantiateRevRange_eq,
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
- Expr.looseBVarRange_eq,
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
@@ -9104,9 +9120,9 @@ info: 'Lean4Lean.VInductDecl.StagedNormalizationCandidateUniverseInput.exists' d
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

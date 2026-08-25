@@ -2796,6 +2796,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonNormalizationReplays' depends 
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -2813,9 +2814,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonNormalizationReplays' depends 
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -2831,6 +2832,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonReplayMatrix' depends on axiom
  Quot.sound,
  Expr.abstractRange_eq,
  Expr.abstract_eq,
+ Expr.abstract_fvars_shape,
  Expr.eqv_eq,
  Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
@@ -2848,9 +2850,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.singletonReplayMatrix' depends on axiom
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
  Level.normalize_eq,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/

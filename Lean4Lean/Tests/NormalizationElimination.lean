@@ -308,7 +308,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockRecursorRun.metadataPrefix' depen
  Lean.Expr.instantiateRevRange_eq,
  Lean.Expr.instantiateRev_eq,
  Lean.Expr.instantiate_eq,
- Lean.Expr.looseBVarRange_eq,
  Lean.Expr.lowerLooseBVars_eq,
  Lean.Expr.mkAppData_eq,
  Lean.Expr.mkData_eq,
@@ -317,9 +316,9 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockRecursorRun.metadataPrefix' depen
  Lean.Level.instLawfulBEqLevel,
  Lean.Level.isExplicitSubsumedAux_eq,
  Lean.Level.normalize_eq,
- Lean.PersistentArray.toList'_push,
  Lean.PersistentHashMap.findAux_isSome,
  Lean.Syntax.structEq_eq,
+ Lean.PersistentArray.WF.toList'_push,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/
@@ -342,7 +341,6 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockMetadataPrefixRun.addInductBlockT
  Lean.Expr.instantiateRevRange_eq,
  Lean.Expr.instantiateRev_eq,
  Lean.Expr.instantiate_eq,
- Lean.Expr.looseBVarRange_eq,
  Lean.Expr.lowerLooseBVars_eq,
  Lean.Expr.mkAppData_eq,
  Lean.Expr.mkData_eq,
@@ -351,9 +349,9 @@ info: 'Lean4Lean.VInductDecl.ExactProducedBlockMetadataPrefixRun.addInductBlockT
  Lean.Level.instLawfulBEqLevel,
  Lean.Level.isExplicitSubsumedAux_eq,
  Lean.Level.normalize_eq,
- Lean.PersistentArray.toList'_push,
  Lean.PersistentHashMap.findAux_isSome,
  Lean.Syntax.structEq_eq,
+ Lean.PersistentArray.WF.toList'_push,
  Lean.PersistentHashMap.WF.find?_eq,
  Lean.PersistentHashMap.WF.toList'_insert]
 -/

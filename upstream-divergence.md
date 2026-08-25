@@ -1331,6 +1331,40 @@ to the replacement.
 - **Removal condition:** upstream proves `reduceProjCore.WF` (theirs or a
   ported version of this proof) and the fork rebases onto it.
 
+## D023 — honest opaque-runtime domains and cache-independent fallbacks
+
+- **Status:** implemented in the 2026-08-25 trust-repair checkpoint;
+  upstream-contribution and reconciliation candidate.
+- **Source:** manually adapted from lean4lean PRs #44 (`1eb66c6`), #45
+  (`3bcfe75`), and #46 (`d666dd6`); no wholesale PR merge and no unrelated
+  co-author trailers.
+- **Delta:** narrow the level/expression `mkData` equations to the runtime bit
+  ranges, range-instantiation equations to checked slices, simultaneous
+  instantiation to the source-closed/all-substituends-closed domain,
+  abstraction equality to closed/no-duplicate inputs, persistent-array push
+  to generated `WF` arrays, and loose-bvar cache equality to hereditary
+  `BVarBounded` expressions. A weaker `AbstractFVarShape` bridge serves callers
+  that need only abstraction skeleton preservation. Cached `false` bits imply
+  structural absence where needed; unsupported structural-to-cache converses
+  are not retained.
+- **Executable delta:** `cheapBetaReduce` performs its no-op instantiation;
+  lambda/forall comparison always introduces a real fresh fvar; and a reached
+  loose bvar is rejected explicitly. These differ from Lean only on malformed
+  or cache-corrupt expressions and preserve ordinary valid-input results.
+- **Ix impact:** this is release-blocking trust hardening. Ix may later regain
+  the cache fast paths only behind a certificate preserved by every expression
+  ingress and a proof of observational equivalence with the simple path.
+- **Tests:** `Lean4Lean.Tests.TrustRepair`, the full Verify environment replay
+  surface, exact repaired-signature guards, and the four-root axiom policy.
+- **Axiom note:** the formerly inconsistent unconditional
+  `Expr.looseBVarRange_eq` no longer exists. The manifest now has 28 honest
+  custom contracts (including the shape-only replacement), none reachable
+  from Theory; exact rationale is in `docs/axiom-audit.md`.
+- **Removal condition:** upstream adopts equivalent truthful domains and
+  checker behavior, or Lean/Ix supplies verified implementations that allow
+  the corresponding bridges to be deleted. Do not remove this row by
+  reinstating unconditional cache equations.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

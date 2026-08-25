@@ -1,5 +1,9 @@
 import Lean4Lean.Verify.Environment.InductiveFixtures
 
+-- These executable replay proofs intentionally retain explicit reduction
+-- inventories; narrowed trust contracts can make individual entries redundant.
+set_option linter.unusedSimpArgs false
+
 namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta
 open Lean4Lean.InductiveFixtures
@@ -70,6 +74,40 @@ private def indexedVecInnerKernel : Expr :=
 
 private def indexedVecTerminalKernel : Expr :=
   .sort (.succ (.param `u))
+
+/- Concrete family expressions stay within the packed loose-bvar range. These
+local facts deliberately use the repaired bounded cache contract instead of
+the generic native bit-arithmetic theorem. -/
+@[simp] private theorem indexedVecInnerExpr_looseBVarRange :
+    (Expr.forallE indexedVecIndexName (.const ``Nat [])
+      (.sort (.succ (.param `u))) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem indexedVecFamilyExpr_looseBVarRange :
+    (Expr.forallE indexedVecParamName (.sort (.succ (.param `u)))
+      (.forallE indexedVecIndexName (.const ``Nat [])
+        (.sort (.succ (.param `u))) .default) .default).looseBVarRange = 0 := by
+  rw [Expr.looseBVarRange_eq _ (by simp)]
+  rfl
+
+@[simp] private theorem indexedVecNat_instantiateFVar (id : FVarId) :
+    (Expr.const ``Nat []).instantiate #[.fvar id] = .const ``Nat [] := by
+  simp [Expr.instantiate_eq, Expr.instantiate1',
+    Expr.looseBVarRange']
+
+@[simp] private theorem indexedVecSort_instantiateFVar (id : FVarId) :
+    (Expr.sort (.succ (.param `u))).instantiate #[.fvar id] =
+      .sort (.succ (.param `u)) := by
+  simp [Expr.instantiate_eq, Expr.instantiate1',
+    Expr.looseBVarRange']
+
+@[simp] private theorem indexedVecSort_instantiateFVarPair
+    (first second : FVarId) :
+    (Expr.sort (.succ (.param `u))).instantiate
+      #[.fvar first, .fvar second] = .sort (.succ (.param `u)) := by
+  simp [Expr.instantiate_eq, Expr.instantiate1',
+    Expr.looseBVarRange']
 
 @[simp] private theorem indexedVecInnerKernel_instantiate1 (arg : Expr) :
     indexedVecInnerKernel.instantiate1 arg = indexedVecInnerKernel := by
@@ -1095,6 +1133,7 @@ private theorem indexedVecParamCandidateFresh :
   injection heq with hname
   injection hname with hidx
   omega
+  exact LocalContext.WF.nil.decls_wf
 
 private theorem indexedVecFamily_checkTypeM :
     Lean4Lean.TypeChecker.M.run
@@ -1307,19 +1346,31 @@ def indexedVecFamilyCandidate :
 
 theorem indexedVecFamilyCandidate_view_eq :
     indexedVecFamilyCandidate.view = indexedVecInfo.type := by
-  have habstract (context : Lean4Lean.AddInductive.Context) (e : Expr) :
-      e.abstract #[context.freshExpr] =
-        Expr.abstract1 context.freshFVarId e := by
+  have sortAbstract (context : Lean4Lean.AddInductive.Context) :
+      (Expr.sort (.succ (.param `u))).abstract #[context.freshExpr] =
+        .sort (.succ (.param `u)) := by
     rw [show #[context.freshExpr] =
       ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
-    simp only [Expr.abstract_eq, Expr.abstractList]
+    rw [Expr.abstract_eq _ _ (Or.inr (by rfl)) (by simp)]
+    rfl
+  have habstract (context : Lean4Lean.AddInductive.Context) (e : Expr) :
+      e.looseBVarRange' = 0 →
+      e.abstract #[context.freshExpr] =
+        Expr.abstract1 context.freshFVarId e := by
+    intro closed
+    rw [show #[context.freshExpr] =
+      ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
+    rw [Expr.abstract_eq _ _ (Or.inr closed) (by simp)]
+    rfl
   simp only [indexedVecFamilyCandidate,
     Lean4Lean.AddInductive.CandidateExpr.view,
     indexedVecFamilyCandidateTrace,
     indexedVecInnerCandidateTrace, indexedVecParamDomainCandidateTrace,
     indexedVecIndexDomainCandidateTrace, indexedVecTerminalCandidateTrace,
     Lean4Lean.AddInductive.CandidateExprTrace.view]
-  rw [habstract, habstract]
+  rw [habstract _ _ (by
+      simp [sortAbstract, indexedVecTerminalKernel, Expr.looseBVarRange']),
+    habstract _ _ (by simp [indexedVecTerminalKernel, Expr.looseBVarRange'])]
   simp [Expr.abstract1, indexedVecTerminalKernel,
     indexedVecFamilyCandidateContext,
     Lean4Lean.AddInductive.Context.pushLocalDecl,
@@ -1507,21 +1558,18 @@ def indexedVecCandidateInductiveStats :
 private theorem indexedVecFamily_data_hasExprMVar_false :
     indexedVecInfo.type.data.hasExprMVar = false := by
   change indexedVecInfo.type.hasExprMVar = false
-  rw [Expr.hasExprMVar_eq]
-  rfl
+  simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
 
 private theorem indexedVecFamily_data_hasLevelMVar_false :
     indexedVecInfo.type.data.hasLevelMVar = false := by
   change indexedVecInfo.type.hasLevelMVar = false
-  rw [Expr.hasLevelMVar_eq]
   simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal,
-    Expr.hasLevelMVar', Level.hasMVar_eq, Level.hasMVar']
+    Level.hasMVar_eq, Level.hasMVar']
 
 private theorem indexedVecFamily_data_hasFVar_false :
     indexedVecInfo.type.data.hasFVar = false := by
   change indexedVecInfo.type.hasFVar = false
-  rw [Expr.hasFVar_eq]
-  rfl
+  simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal]
 
 private theorem indexedVecFamily_hasMVar_false :
     indexedVecInfo.type.hasMVar = false := by
@@ -1625,9 +1673,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecFamily_candidateTrace' depend
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1649,9 +1697,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVec_checkInductiveTypes' depends
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1672,9 +1720,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_nindi
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
@@ -1695,9 +1743,9 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_param
  Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
- PersistentArray.toList'_push,
  PersistentHashMap.findAux_isSome,
  Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
  PersistentHashMap.WF.find?_eq,
  PersistentHashMap.WF.toList'_insert]
 -/
