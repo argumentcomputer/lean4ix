@@ -197,6 +197,60 @@ theorem addMutual.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
   · obtain ⟨v, -, h⟩ := this.forall_exists_r ci hc; exact h.2.1
   · obtain ⟨v, -, h⟩ := hbody.forall_exists_r ci hc; exact h.2
 
+/-! ## Retained inductive-input closedness -/
+
+private theorem Except.WF.any (x : Except ε α) :
+    x.WF fun _ => True := by
+  intro _ _
+  trivial
+
+/-- A successful, yield-only `forIn` certifies a pointwise property of every
+source element.  This is the small loop rule needed to project the family and
+constructor closedness checks retained by `Environment.checkInductiveInput`. -/
+private theorem Except.WF.forInYieldAll
+    {xs : List α} {f : α → PUnit → Except ε (ForInStep PUnit)}
+    {P : α → Prop}
+    (body : ∀ x, (f x PUnit.unit).WF fun step =>
+      P x ∧ step = .yield PUnit.unit) :
+    (forIn xs PUnit.unit f).WF fun _ => ∀ x ∈ xs, P x := by
+  induction xs with
+  | nil => exact .pure (by simp)
+  | cons head tail ih =>
+      rw [List.forIn_cons]
+      refine (body head).bind fun step hstep => ?_
+      obtain ⟨headP, rfl⟩ := hstep
+      exact ih.mono fun _ tailP x member => by
+        rcases List.mem_cons.mp member with rfl | member
+        · exact headP
+        · exact tailP x member
+
+/-- Closed family and constructor sources established by the public
+inductive entry precheck, in their original source order. -/
+def EnvironmentInductiveInputClosed (types : List InductiveType) : Prop :=
+  ∀ indType ∈ types,
+    indType.type.FVarsIn (fun _ => False) ∧
+      ∀ ctor ∈ indType.ctors, ctor.type.FVarsIn (fun _ => False)
+
+/-- The retained public precheck supplies the syntactic free-variable premise
+needed by the candidate interpreter, rather than leaving source translations
+as a parallel semantic input. -/
+theorem Environment.checkInductiveInput.WF
+    (env : Environment) (types : List InductiveType) :
+    (Environment.checkInductiveInput env types).WF fun _ =>
+      EnvironmentInductiveInputClosed types := by
+  unfold Environment.checkInductiveInput
+  refine (Except.WF.forInYieldAll fun indType => ?_).bind fun _ closed =>
+    .pure closed
+  refine (checkNoMVarNoFVar.WF env indType.name indType.type).bind
+    fun _ familyClosed => ?_
+  refine (Except.WF.forInYieldAll fun ctor => ?_).bind
+    fun _ constructorsClosed =>
+      .pure ⟨⟨familyClosed, constructorsClosed⟩, rfl⟩
+  refine (checkNoMVarNoFVar.WF env ctor.name ctor.type).bind
+    fun _ constructorClosed => ?_
+  refine (Except.WF.any (checkNoNestedAux ctor.name ctor.type)).bind
+    fun _ _ => .pure ⟨constructorClosed, rfl⟩
+
 /-- Semantic completion boundary for one retained inductive execution.  It
 packages the exact safety-indexed model extension required by `VEnvs.WF`. -/
 def AddInductive.EnvironmentInductiveExecution.PreservesVEnvs
@@ -4698,6 +4752,26 @@ noncomputable def ofTransaction
   · exact ofNestedTransaction wf source transactionOutput transaction
       projectionReadySafe numNested_eq
 
+/-- Feed the endpoint retained by one exact safe replay directly into the
+readiness-completion layer.  The replay owns the common safety-indexed
+transaction family; callers only prove projection readiness at its named
+`.safe` endpoint. -/
+noncomputable def ofSafeReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {ves : VEnvs} {source : VInductDecl} {safeOutput : VEnv}
+    (wf : ves.WF env)
+    (replay :
+      AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.SafeReplay
+        execution source ves safeOutput)
+    (projectionReadySafe : ProjectionReady finalEnv safeOutput) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
+  ofTransaction wf source replay.output replay.transactions (by
+    simpa only [replay.safe_output_eq] using projectionReadySafe)
+
 /-- Assemble the complete semantic extension.  Exact replay supplies the
 host-facing translation and primitive invariants; checked eta registration
 then preserves those facts and provides the larger readiness-complete model. -/
@@ -5084,11 +5158,20 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions_default' 
 #guard_msgs in
 #print axioms addDecl.inductDecl_WF_of_split_primitive_transactions_default
 
+/-- The supported declaration class excludes unsafe inductive blocks while
+leaving every other declaration form unchanged.  This matches the Theory
+coverage contract: translated histories deliberately maintain the invariant
+that every inductive metadata record is safe. -/
+def DeclarationInductiveSafe : Declaration → Prop
+  | .inductDecl _ _ _ isUnsafe => isUnsafe = false
+  | _ => True
+
 set_option warn.sorry false in
 /-- Successful checked addition preserves well-formedness and extends every safety-indexed
-abstract environment. The only declaration form still outstanding is inductives, which need a
-constructive `AddInduct` model. -/
-theorem addDecl.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (decl : Declaration) :
+abstract environment for the supported declaration class. The only declaration form still
+outstanding is safe inductives, which need a constructive `AddInduct` model. -/
+theorem addDecl.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (decl : Declaration) (_inductiveSafe : DeclarationInductiveSafe decl) :
     (addDecl env decl (check := true) (fuel := {})).WF fun env' =>
       ∃ ves' : VEnvs, ves'.WF env' ∧ ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   cases decl with

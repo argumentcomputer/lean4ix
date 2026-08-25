@@ -4219,6 +4219,60 @@ inductive CandidateBlockFamilyTypeSourceListInput
       CandidateBlockFamilyTypeSourceListInput env Us
         (source :: sources) (raw :: raws)
 
+/-- Recover candidate-independent raw family types from the exact successful
+ordinary family traversal.  Closed source types can be translated in the
+retained root candidate context, whose semantic stage discharges the empty
+local-context transport. -/
+theorem CandidateBlockFamilyTypeSourceListInput.exists_ofProduced
+    {familyContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {sources : List InductiveType}
+    (stage : TypeChecker.CandidateSemanticStage familyContext env Us)
+    (families : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources)
+    (produced : AddInductive.CandidateFamilyTypeListProduced familyContext
+      families.familyTypes)
+    (closed : ∀ source ∈ sources,
+      source.type.FVarsIn (fun _ => False)) :
+    Nonempty (Σ raws,
+      CandidateBlockFamilyTypeSourceListInput env Us sources raws) := by
+  induction families with
+  | nil => exact ⟨⟨[], .nil⟩⟩
+  | @cons source sources family families ih =>
+      have contextEq : family.familyType.type.context = familyContext :=
+        AddInductive.CandidateFamilyType.context_eq_of_normalize produced.head
+      cases contextEq
+      let candidateRun : TypeChecker.CandidateContextRun
+          family.familyType.type.context := stage.contextRun
+      have sourceFVars : source.type.FVarsIn
+          (· ∈ candidateRun.context.vlctx.fvars) :=
+        (closed source (.head _)).mono fun _ impossible => impossible.elim
+      obtain ⟨sourceType, contextualTr⟩ :=
+        TypeChecker.candidateExprTrace_exists_source_translation
+          family.familyType.type.trace candidateRun sourceFVars
+      have candidateVenv : candidateRun.context.venv = env := by
+        simpa only [candidateRun] using stage.venv_eq
+      have candidateLparams : candidateRun.context.lparams = Us := by
+        simpa only [candidateRun] using stage.lparams_eq
+      have candidateVlctx : candidateRun.context.vlctx = [] := by
+        simpa only [candidateRun] using stage.vlctx_eq
+      have sourceTr : TrExprS env Us [] source.type sourceType := by
+        change TrExprS candidateRun.context.venv
+          candidateRun.context.lparams candidateRun.context.vlctx
+          source.type sourceType at contextualTr
+        simpa only [candidateVenv, candidateLparams, candidateVlctx] using
+          contextualTr
+      obtain ⟨⟨raws, tailInput⟩⟩ := ih produced.tail (fun tail member =>
+        closed tail (.tail _ member))
+      let raw : VInductiveType := {
+        uvars := Us.length
+        type := sourceType
+        name := source.name
+        ctors := [] }
+      exact ⟨⟨raw :: raws, .cons {
+        name_eq := rfl
+        uvars_eq := rfl
+        source_tr := sourceTr } tailInput⟩⟩
+
 /-- Reindex source translations at the exact family candidate list retained
 by the ordinary producer.  Recursion is over that data list; the
 proposition-valued producer trace supplies only the root-context equations. -/
@@ -4957,6 +5011,59 @@ inductive CandidateConstructorSourceListInput (env : VEnv) (Us : List Name) :
       CandidateConstructorSourceListInput env Us
         (source :: sources) (raw :: raws)
 
+/-- Recover candidate-independent raw constructors from one exact successful
+constructor traversal.  Closed source types translate in the retained shared
+post-family context, and the semantic stage transports that context back to
+the empty Theory local context. -/
+theorem CandidateConstructorSourceListInput.exists_ofProduced
+    {candidateContext : AddInductive.Context} {env : VEnv} {Us : List Name}
+    {sources : List Constructor}
+    (stage : TypeChecker.CandidateSemanticStage candidateContext env Us)
+    (candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources)
+    (produced : AddInductive.CandidateConstructorListProduced candidateContext
+      candidates)
+    (closed : ∀ source ∈ sources,
+      source.type.FVarsIn (fun _ => False)) :
+    Nonempty (Σ raws,
+      CandidateConstructorSourceListInput env Us sources raws) := by
+  induction candidates with
+  | nil => exact ⟨⟨[], .nil⟩⟩
+  | @cons source sources candidate candidates ih =>
+      have contextEq : candidate.type.context = candidateContext :=
+        AddInductive.CandidateConstructor.context_eq_of_normalize produced.head
+      cases contextEq
+      let candidateRun : TypeChecker.CandidateContextRun
+          candidate.type.context := stage.contextRun
+      have sourceFVars : source.type.FVarsIn
+          (· ∈ candidateRun.context.vlctx.fvars) :=
+        (closed source (.head _)).mono fun _ impossible => impossible.elim
+      obtain ⟨sourceType, contextualTr⟩ :=
+        TypeChecker.candidateExprTrace_exists_source_translation
+          candidate.type.trace candidateRun sourceFVars
+      have candidateVenv : candidateRun.context.venv = env := by
+        simpa only [candidateRun] using stage.venv_eq
+      have candidateLparams : candidateRun.context.lparams = Us := by
+        simpa only [candidateRun] using stage.lparams_eq
+      have candidateVlctx : candidateRun.context.vlctx = [] := by
+        simpa only [candidateRun] using stage.vlctx_eq
+      have sourceTr : TrExprS env Us [] source.type sourceType := by
+        change TrExprS candidateRun.context.venv
+          candidateRun.context.lparams candidateRun.context.vlctx
+          source.type sourceType at contextualTr
+        simpa only [candidateVenv, candidateLparams, candidateVlctx] using
+          contextualTr
+      obtain ⟨⟨raws, tailInput⟩⟩ := ih produced.tail (fun tail member =>
+        closed tail (.tail _ member))
+      let raw : VConstVal := {
+        uvars := Us.length
+        type := sourceType
+        name := source.name }
+      exact ⟨⟨raw :: raws, .cons {
+        name_eq := rfl
+        uvars_eq := rfl
+        source_tr := sourceTr } tailInput⟩⟩
+
 /-- Reindex constructor source translations at the exact candidate list
 retained by the ordinary producer. -/
 def CandidateConstructorSourceListInput.staged
@@ -5130,6 +5237,88 @@ inductive CandidateBlockConstructorSourceListInput
       (tail : CandidateBlockConstructorSourceListInput env Us sources raws) :
       CandidateBlockConstructorSourceListInput env Us
         (source :: sources) (raw :: raws)
+
+/-- Candidate-independent translations for both phases of one raw block.
+Family types live in the entry Theory environment; constructor types live in
+the shared environment obtained after staging all raw families. -/
+structure CandidateBlockSourceListInput
+    (preEnv postEnv : VEnv) (Us : List Name)
+    (sources : List InductiveType) (raws : List VInductiveType) where
+  familyTypes : CandidateBlockFamilyTypeSourceListInput preEnv Us sources raws
+  constructors : CandidateBlockConstructorSourceListInput postEnv Us sources raws
+
+/-- Enrich already translated family raws with the exact constructor raws
+recovered from the retained post-family traversals.  Updating `ctors` leaves
+each family constant payload unchanged, so all pre-family translations are
+preserved while the two source-indexed phases acquire one common raw list. -/
+theorem CandidateBlockFamilyTypeSourceListInput.withConstructors
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context}
+    {sources : List InductiveType} {familyRaws : List VInductiveType}
+    (familyInput : CandidateBlockFamilyTypeSourceListInput preEnv Us
+      sources familyRaws)
+    (postFamily : TypeChecker.CandidateSemanticStage candidateContext
+      postEnv Us)
+    (families : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources)
+    (produced : AddInductive.CandidateBlockConstructorListProduced
+      candidateContext families)
+    (closed : ∀ source ∈ sources, ∀ ctor ∈ source.ctors,
+      ctor.type.FVarsIn (fun _ => False)) :
+    Nonempty (Σ raws,
+      CandidateBlockSourceListInput preEnv postEnv Us sources raws) := by
+  induction familyInput with
+  | nil =>
+      cases families
+      exact ⟨⟨[], { familyTypes := .nil, constructors := .nil }⟩⟩
+  | @cons source familyRaw sources familyRaws familyHead familyTail ih =>
+      cases families with
+      | cons family families =>
+          obtain ⟨⟨ctorRaws, constructorInput⟩⟩ :=
+            CandidateConstructorSourceListInput.exists_ofProduced postFamily
+              family.constructors produced.head (fun ctor member =>
+                closed source (.head _) ctor member)
+          obtain ⟨⟨raws, tailInput⟩⟩ := ih families produced.tail
+            (fun tail tailMember ctor ctorMember =>
+              closed tail (.tail _ tailMember) ctor ctorMember)
+          let raw : VInductiveType := { familyRaw with ctors := ctorRaws }
+          exact ⟨⟨raw :: raws, {
+            familyTypes := .cons {
+              name_eq := familyHead.name_eq
+              uvars_eq := familyHead.uvars_eq
+              source_tr := familyHead.source_tr } tailInput.familyTypes
+            constructors := .cons constructorInput tailInput.constructors }⟩⟩
+
+/-- Recover one complete raw Theory block directly from the exact two-phase
+ordinary producer.  Family translations are chosen in the entry stage and
+then enriched, without changing their constant payloads, by constructor
+translations chosen in the shared post-family stage. -/
+theorem CandidateBlockSourceListInput.exists_ofProduced
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {familyContext constructorContext : AddInductive.Context}
+    {sources : List InductiveType}
+    (preFamily : TypeChecker.CandidateSemanticStage familyContext preEnv Us)
+    (postFamily : TypeChecker.CandidateSemanticStage constructorContext
+      postEnv Us)
+    (families : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources)
+    (familyTypesProduced : AddInductive.CandidateFamilyTypeListProduced
+      familyContext families.familyTypes)
+    (constructorsProduced :
+      AddInductive.CandidateBlockConstructorListProduced constructorContext
+        families)
+    (closed : ∀ source ∈ sources,
+      source.type.FVarsIn (fun _ => False) ∧
+        ∀ ctor ∈ source.ctors,
+          ctor.type.FVarsIn (fun _ => False)) :
+    Nonempty (Σ raws,
+      CandidateBlockSourceListInput preEnv postEnv Us sources raws) := by
+  obtain ⟨⟨familyRaws, familyInput⟩⟩ :=
+    CandidateBlockFamilyTypeSourceListInput.exists_ofProduced preFamily
+      families familyTypesProduced (fun source member =>
+        (closed source member).1)
+  exact familyInput.withConstructors postFamily families constructorsProduced
+    (fun source member => (closed source member).2)
 
 /-- Reindex all block constructor translations at the exact nested candidate
 lists and constructor traversal traces retained by one ordinary execution. -/

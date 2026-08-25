@@ -173,8 +173,9 @@ private def allowlist : Array Lean.Name := #[
   -- the v4.33 reconciliation then absorbed upstream's stronger level
   -- verification.)
   -- After upstream #28 (v4.33 reconciliation), `addDecl.WF` is proved for
-  -- every declaration kind except `inductDecl`, whose case is the remaining
-  -- sorry (L4L-19B territory).
+  -- every declaration kind except safe `inductDecl`, whose case is the
+  -- remaining sorry (L4L-19B territory). Unsafe inductives are explicitly
+  -- outside the supported declaration class.
   `Lean4Lean.addDecl.WF,
   -- Upstream's front-end trust boundary for the syntactic primitive-definition
   -- recognizer (Verify/Environment/Boundaries.lean), added by #28 at the

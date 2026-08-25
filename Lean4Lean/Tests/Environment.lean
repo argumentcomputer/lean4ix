@@ -23,6 +23,13 @@ open Lean
 #check Lean4Lean.VPrimitiveInductive.boolGeneration_wf
 #check Lean4Lean.VPrimitiveInductive.natGeneration_wf
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
+#check Lean4Lean.EnvironmentInductiveInputClosed
+#check Lean4Lean.Environment.checkInductiveInput.WF
+#check Lean4Lean.VInductDecl.CandidateBlockFamilyTypeSourceListInput.exists_ofProduced
+#check Lean4Lean.VInductDecl.CandidateConstructorSourceListInput.exists_ofProduced
+#check Lean4Lean.VInductDecl.CandidateBlockSourceListInput
+#check Lean4Lean.VInductDecl.CandidateBlockFamilyTypeSourceListInput.withConstructors
+#check Lean4Lean.VInductDecl.CandidateBlockSourceListInput.exists_ofProduced
 #check Lean4Lean.VInductDecl.BlockGenerationChecked.recursor_of_family
 #check Lean4Lean.VInductDecl.BlockGenerationChecked.WF.mono
 #check Lean4Lean.AddInductConstants.replay
@@ -75,6 +82,9 @@ open Lean
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofOrdinaryTransaction
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofNestedTransaction
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofTransaction
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeReplay
+#check Lean4Lean.DeclarationInductiveSafe
+#check Lean4Lean.addDecl.WF
 
 /-- info: 'Lean4Lean.AddInductive.declareRecursors_info_of_family' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
