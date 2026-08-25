@@ -1739,15 +1739,16 @@ structure ProducedBlockRecursorShapeCandidate
         kernelSources numNested isUnsafe context = .ok execution
   shape : normalizationCandidateBlockGenerationShape source
     execution.candidate = true
+  kernelSources_nonempty : kernelSources.isEmpty = false
 
 theorem ProducedBlockRecursorShapeCandidate.eq_of_execution_eq
     (left right : ProducedBlockRecursorShapeCandidate source kernelSources
       numNested isUnsafe context)
     (execution_eq : left.execution = right.execution) : left = right := by
   cases left with
-  | mk leftExecution leftProduced leftShape =>
+  | mk leftExecution leftProduced leftShape leftNonempty =>
       cases right with
-      | mk rightExecution rightProduced rightShape =>
+      | mk rightExecution rightProduced rightShape rightNonempty =>
           simp only at execution_eq
           subst rightExecution
           rfl
@@ -1837,7 +1838,6 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
     {env blockEnv : VEnv} {Us : List Name}
     (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source)
-    (sourceNonempty : kernelSources.isEmpty = false)
     (context_lctx_eq : context.lctx = {}) :
     (blockParams semantic.normalization.view.nparams
       semantic.normalization.view.types).length =
@@ -1845,7 +1845,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
   have normalizationProduced := produced.execution.normalization_run
     produced.producedExecution
   obtain ⟨kernelSource, remainingSources, sources_eq⟩ :=
-    list_eq_cons_of_isEmpty_false kernelSources sourceNonempty
+    list_eq_cons_of_isEmpty_false kernelSources
+      produced.kernelSources_nonempty
   subst kernelSources
   exact semantic.viewParams_length_of_execution
     produced.execution.eliminationExecution.normalization
@@ -1855,8 +1856,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
 field from the actual ordinary declaration transaction.  The normalized
 family inventory's nonemptiness is transported from the source-indexed kernel
 block, while its parameter-prefix length is derived from the retained family
-validation and complete-spine gate. Callers cannot smuggle in either an
-independently asserted length, name list, or view-list witness. -/
+validation and complete-spine gate. Callers cannot smuggle in an independently
+asserted length, name list, nonemptiness fact, or view-list witness. -/
 def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -1868,22 +1869,19 @@ def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
       produced.candidate source)
     (validationMapWF : produced.execution.eliminationExecution.normalization
       |>.validationContext.env.constants.WF)
-    (params : List VExpr)
-    (params_eq : params = blockParams semantic.normalization.view.nparams
-      semantic.normalization.view.types)
-    (families : CheckedFamilies semantic.normalization.view params 0
-      semantic.normalization.view.types)
-    (sourceNonempty : kernelSources.isEmpty = false)
+    (families : CheckedFamilies semantic.normalization.view
+      (blockParams semantic.normalization.view.nparams
+        semantic.normalization.view.types)
+      0 semantic.normalization.view.types)
     (context_lctx_eq : context.lctx = {}) :
     semantic.normalization.view.CheckedBlock where
-  params := params
-  params_eq := params_eq
-  params_length := by
-    rw [params_eq]
-    exact produced.semanticViewParams_length semantic sourceNonempty
-      context_lctx_eq
+  params := blockParams semantic.normalization.view.nparams
+    semantic.normalization.view.types
+  params_eq := rfl
+  params_length := produced.semanticViewParams_length semantic context_lctx_eq
   families := families
-  nonempty := semantic.viewTypes_isEmpty_eq_sources.trans sourceNonempty
+  nonempty := semantic.viewTypes_isEmpty_eq_sources.trans
+    produced.kernelSources_nonempty
   names := blockGeneratedNames semantic.normalization.view.types
   names_eq := rfl
   names_nodup :=
@@ -1894,7 +1892,8 @@ and the unchanged complete generation-shape gate. -/
 def produceBlockRecursorShapeCandidate
     (source : VInductDecl) (kernelSources : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool)
-    (context : AddInductive.Context) :
+    (context : AddInductive.Context)
+    (kernelSources_nonempty : kernelSources.isEmpty = false) :
     Except Exception (ProducedBlockRecursorShapeCandidate source kernelSources
       numNested isUnsafe context) :=
   match producedExecution :
@@ -1904,7 +1903,7 @@ def produceBlockRecursorShapeCandidate
   | .ok execution =>
       if shape : normalizationCandidateBlockGenerationShape source
           execution.candidate then
-        .ok { execution, producedExecution, shape }
+        .ok { execution, producedExecution, shape, kernelSources_nonempty }
       else
         .error (.other
           "recursor candidate block does not preserve the generation spine")
@@ -1923,7 +1922,8 @@ private theorem produceBlockRecursorShapeCandidate_match_ok
       kernelSources numNested isUnsafe context}
     (result_ok : result = .ok execution)
     (shape : normalizationCandidateBlockGenerationShape source
-      execution.candidate = true) :
+      execution.candidate = true)
+    (kernelSources_nonempty : kernelSources.isEmpty = false) :
     (match result_eq : result with
     | .error error => Except.error error
     | .ok actual =>
@@ -1933,7 +1933,8 @@ private theorem produceBlockRecursorShapeCandidate_match_ok
             kernelSources numNested isUnsafe context from {
           execution := actual
           producedExecution := toProducedExecution actual result_eq
-          shape := actualShape })
+          shape := actualShape
+          kernelSources_nonempty })
       else
         Except.error (.other
           "recursor candidate block does not preserve the generation spine")) =
@@ -1941,7 +1942,8 @@ private theorem produceBlockRecursorShapeCandidate_match_ok
           numNested isUnsafe context from {
         execution
         producedExecution := toProducedExecution execution result_ok
-        shape }) := by
+        shape
+        kernelSources_nonempty }) := by
   subst result
   simp [shape]
 
@@ -1955,15 +1957,17 @@ theorem produceBlockRecursorShapeCandidate_eq_ok
       AddInductive.NormalizationRecursorExecution.buildExecution source.nparams
           kernelSources numNested isUnsafe context = .ok execution)
     (shape : normalizationCandidateBlockGenerationShape source
-      execution.candidate = true) :
+      execution.candidate = true)
+    (kernelSources_nonempty : kernelSources.isEmpty = false) :
     produceBlockRecursorShapeCandidate source kernelSources numNested isUnsafe
-        context = .ok { execution, producedExecution, shape } := by
+        context kernelSources_nonempty =
+      .ok { execution, producedExecution, shape, kernelSources_nonempty } := by
   unfold produceBlockRecursorShapeCandidate
   exact produceBlockRecursorShapeCandidate_match_ok
     (result := AddInductive.NormalizationRecursorExecution.buildExecution
       source.nparams kernelSources numNested isUnsafe context)
     (toProducedExecution := fun _ result_eq => result_eq)
-    producedExecution shape
+    producedExecution shape kernelSources_nonempty
 
 /-- Reindex an already-retained ordinary recursor execution onto the exact
 Theory source whose generation shape it satisfies.  The only transport is
@@ -1979,6 +1983,7 @@ def ProducedBlockRecursorShapeCandidate.ofExecution
     (producedExecution :
       AddInductive.NormalizationRecursorExecution.buildExecution nparams
         kernelSources numNested isUnsafe context = .ok execution)
+    (kernelSources_nonempty : kernelSources.isEmpty = false)
     (nparams_eq : source.nparams = nparams)
     (shape : normalizationCandidateBlockGenerationShape source
       execution.candidate = true) :
@@ -1988,7 +1993,7 @@ def ProducedBlockRecursorShapeCandidate.ofExecution
   | mk uvars sourceNparams types =>
       simp only at nparams_eq ⊢
       subst nparams
-      exact { execution, producedExecution, shape }
+      exact { execution, producedExecution, shape, kernelSources_nonempty }
 
 /-- Exact semantic generation plus the post-constructor decisions that drove
 the same ordinary kernel execution. -/

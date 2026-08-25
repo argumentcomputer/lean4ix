@@ -1812,7 +1812,8 @@ noncomputable def
       execution.nested.types execution.nested.aux2nested.size false
       (AddInductive.Context.forInductive env lparams false false {}) :=
   VInductDecl.ProducedBlockRecursorShapeCandidate.ofExecution execution.flattened
-    execution.flattenedRun staged.source_nparams_eq shape
+    execution.flattenedRun execution.nested.types_nonempty
+      staged.source_nparams_eq shape
 
 /-- The reindexed recursor producer retains the nonprimitive validation mode
 of the safe outer execution. -/

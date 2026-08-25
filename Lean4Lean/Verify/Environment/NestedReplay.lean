@@ -143,6 +143,7 @@ def roseFlatRecursorShapeCandidate :
   ProducedBlockRecursorShapeCandidate.ofExecution
     roseEnvironmentInductiveExecution.2.flattened
     roseEnvironmentInductiveExecution.2.flattenedRun
+    roseEnvironmentInductiveExecution.2.nested.types_nonempty
     roseFlatNparams roseFlatGenerationShape
 
 /-- The retained post-constructor decisions agree with the Theory flattened

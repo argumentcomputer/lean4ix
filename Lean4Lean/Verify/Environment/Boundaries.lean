@@ -123,6 +123,7 @@ private def canonicalBoolNestedResult : ElimNestedInductive.Result where
   params := #[]
   aux2nested := {}
   types := canonicalBoolTypes
+  types_nonempty := rfl
 
 private theorem canonicalBoolNestedRun_succSucc (env : Environment)
     (fuel : Nat) :
@@ -201,6 +202,7 @@ private def canonicalNatNestedResult (binderName : Name)
   params := #[]
   aux2nested := {}
   types := canonicalNatTypes binderName binderInfo
+  types_nonempty := rfl
 
 private theorem canonicalNatNestedRun_succSucc (env : Environment)
     (fuel : Nat) (binderName : Name) (binderInfo : BinderInfo) :

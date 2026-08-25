@@ -4279,6 +4279,7 @@ structure Result where
   params : Array Expr -- the fvars declared in `lctx`
   aux2nested : NameMap Expr -- exprs are open over `params`, like the C++ `m_aux2nested`
   types : List InductiveType
+  types_nonempty : types.isEmpty = false
 
 instance [MonadStateOf NameGenerator m] : MonadNameGenerator m where
   getNGen := get
@@ -4337,8 +4338,53 @@ structure State where
   nestedAux : Array (Expr × Name) := {}
   lvls : List Level
   newTypes : Array InductiveType
+  newTypes_nonempty : newTypes.isEmpty = false
   nextIdx : Nat := 1
-  deriving Inhabited
+
+instance : Inhabited State where
+  default := {
+    lvls := []
+    newTypes := #[default]
+    newTypes_nonempty := rfl }
+
+namespace State
+
+/-- Appending an auxiliary family preserves the nonempty flattened block. -/
+@[simp] def pushNewType (state : State) (newType : InductiveType) : State := {
+  state with
+  newTypes := state.newTypes.push newType
+  newTypes_nonempty := by
+    simp [Array.isEmpty] }
+
+/-- Replacing one processed family preserves the nonempty flattened block. -/
+@[simp] def setNewType (state : State) (index : Nat)
+    (newType : InductiveType) : State := {
+  state with
+  newTypes := state.newTypes.set! index newType
+  newTypes_nonempty := by
+    rw [Array.isEmpty]
+    simpa using state.newTypes_nonempty }
+
+/-- The state's flattened family list is nonempty. -/
+theorem newTypes_toList_nonempty (state : State) :
+    state.newTypes.toList.isEmpty = false := by
+  apply List.isEmpty_eq_false_iff.mpr
+  intro empty
+  have sizeZero : state.newTypes.size = 0 := by
+    rw [← Array.length_toList, empty]
+    rfl
+  have emptyArray : state.newTypes.isEmpty = true := by
+    simp [Array.isEmpty, sizeZero]
+  rw [state.newTypes_nonempty] at emptyArray
+  contradiction
+
+end State
+
+/--
+info: 'Lean4Lean.ElimNestedInductive.State.newTypes_toList_nonempty' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms State.newTypes_toList_nonempty
 
 abbrev M := ReaderT Environment <| StateT State <| Except Exception
 
@@ -4437,7 +4483,7 @@ def replaceIfNested (lctx : LocalContext) (params : Array Expr) (As : Array Expr
       let auxJ_ctor_type ← instantiateForallParams auxJ_ctor_type I_nparams args
       return { name := auxJ_ctor_name, type := lctx.mkForall As auxJ_ctor_type }
     let newType := { name := auxJ_name, type := auxJ_type, ctors := auxJ_ctors }
-    modify fun st => { st with newTypes := st.newTypes.push newType }
+    modify fun st => st.pushNewType newType
   assert! result.isSome
   return result
 
@@ -4471,7 +4517,7 @@ def run (fuel nparams : Nat) (types : List InductiveType) : M Result := do
         withParams ctor.type nparams fun lctx ctorType As => do
         assert! As.size == nparams
         return { ctor with type := lctx.mkForall As (← replaceAllNested lctx params As ctorType) }
-      modify fun s => { s with newTypes := s.newTypes.set! i { indType with ctors } }
+      modify fun s => s.setNewType i { indType with ctors }
       loop (i+1) fuel
     else
       let aux2nested := s.nestedAux.foldl (fun m (e, n) => m.insert n e) {}
@@ -4481,7 +4527,8 @@ def run (fuel nparams : Nat) (types : List InductiveType) : M Result := do
         lctx := lctx
         params := params
         aux2nested := aux2nested
-        types := s.newTypes.toList }
+        types := s.newTypes.toList
+        types_nonempty := s.newTypes_toList_nonempty }
   loop 0 fuel
 end ElimNestedInductive
 
@@ -4524,17 +4571,24 @@ def Environment.checkInductiveInput (env : Environment)
 
 /-- Exact initial state used by nested elimination. -/
 def ElimNestedInductive.initialState (lparams : List Name)
-    (types : List InductiveType) : ElimNestedInductive.State where
+    (head : InductiveType) (tail : List InductiveType) :
+    ElimNestedInductive.State where
   lvls := lparams.map .param
-  newTypes := types.toArray
+  newTypes := (head :: tail).toArray
+  newTypes_nonempty := rfl
 
 /-- Run nested elimination at the exact reader/state boundary used by
 `Environment.addInductive`. -/
 def ElimNestedInductive.runAt (env : Environment) (fuel nparams : Nat)
     (lparams : List Name) (types : List InductiveType) :
     Except Exception ElimNestedInductive.Result :=
-  ElimNestedInductive.run fuel nparams types env
-    |>.run' (ElimNestedInductive.initialState lparams types)
+  match types with
+  | [] =>
+      .error <| .other s!"invalid empty (mutual) inductive datatype declaration, \
+        it must contain at least one inductive type."
+  | head :: tail =>
+      ElimNestedInductive.run fuel nparams (head :: tail) env
+        |>.run' (ElimNestedInductive.initialState lparams head tail)
 
 /-- Reader context passed to the ordinary flattened-block checker. -/
 def AddInductive.Context.forInductive (env : Environment)

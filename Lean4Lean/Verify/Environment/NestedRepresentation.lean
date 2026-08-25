@@ -336,8 +336,8 @@ open ElimNestedInductive in
 def runElim09A (env : Kernel.Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) :
     Except Kernel.Exception (List InductiveType × List (Name × Expr)) := do
-  let res : ElimNestedInductive.Result ← ElimNestedInductive.run 1000 nparams types env
-    |>.run' { lvls := lparams.map .param, newTypes := types.toArray }
+  let res : ElimNestedInductive.Result ←
+    ElimNestedInductive.runAt env 1000 nparams lparams types
   return (res.types, res.aux2nested.toList.map fun (n, e) => (n, e.abstract res.params))
 
 /-- Field-for-field stored/ported agreement for the constant kinds a nested

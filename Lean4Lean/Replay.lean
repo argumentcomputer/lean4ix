@@ -1149,9 +1149,8 @@ private def analyzeInductiveBlock (ctx : Context) (initial : Environment)
           phase := .normalization
           diagnostic := s!"Theory nested elimination rejected the block containing {selected.name}"
         }
-    let portNested ←
-      ElimNestedInductive.run ctx.fuel.inductiveFuel selected.numParams types initial
-      |>.run' { lvls := selected.levelParams.map .param, newTypes := types.toArray }
+    let portNested ← ElimNestedInductive.runAt initial ctx.fuel.inductiveFuel
+      selected.numParams selected.levelParams types
       |>.mapError fun error => {
         phase := .normalization
         diagnostic := s!"kernel-port nested elimination failed for {selected.name}: {

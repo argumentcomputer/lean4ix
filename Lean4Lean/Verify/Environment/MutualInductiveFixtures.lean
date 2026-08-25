@@ -299,7 +299,7 @@ def treeBlockEliminationAlignment :
 synthesis and declaration. -/
 def treeBlockRecursorShapeResult :=
   produceBlockRecursorShapeCandidate treeDecl treeKernelTypes 0 false
-    treeKernelContext
+    treeKernelContext rfl
 
 theorem treeBlockRecursorShapeResult_isOk :
     treeBlockRecursorShapeResult.isOk = true := by
@@ -633,7 +633,7 @@ def indexedTreeBlockEliminationAlignment :
 
 def indexedTreeBlockRecursorShapeResult :=
   produceBlockRecursorShapeCandidate indexedTreeDecl indexedTreeKernelTypes
-    0 false indexedTreeKernelContext
+    0 false indexedTreeKernelContext rfl
 
 theorem indexedTreeBlockRecursorShapeResult_isOk :
     indexedTreeBlockRecursorShapeResult.isOk = true := by
