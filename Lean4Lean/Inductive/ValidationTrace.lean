@@ -1331,6 +1331,315 @@ end ConstructorListValidationTrace
 
 /-! ## Arbitrary mutual-block validation owners -/
 
+/-- Exact successful traversal of one family-type telescope, retaining the
+definitional-equality checks by which every later mutual family reuses the
+first family's parameter declarations.
+
+The trace deliberately records kernel equality executions rather than
+syntactic domain equalities.  Its indices pin every comparison to the actual
+source expression, statistics, reader context, counters, and remaining fuel
+seen by `checkInductiveTypes.loopInd.loop`; a later semantic canonicalizer can
+therefore translate these checks without strengthening what the kernel
+accepted. -/
+inductive FamilyTypeParameterComparisonTrace (nparams : Nat) :
+    (stats : InductiveStats) → (context : Context) → (source : Expr) →
+      (i nindices fuel : Nat) → Type where
+  | freshParameter
+      (stats : InductiveStats) (context : Context)
+      (i nindices fuel : Nat)
+      (name : Name) (domain body view : Expr) (binderInfo : BinderInfo)
+      (isParameter : i < nparams)
+      (firstFamily : stats.indConsts.isEmpty = true)
+      (whnf : CandidateWhnfStep.Valid
+        ⟨context.pushLocalDecl name binderInfo
+            (consumeTypeAnnotations domain),
+          body.instantiate1 context.freshExpr, view⟩)
+      (tail : FamilyTypeParameterComparisonTrace nparams
+        { stats with params := stats.params.push context.freshExpr }
+        (context.pushLocalDecl name binderInfo
+          (consumeTypeAnnotations domain))
+        view (i + 1) nindices fuel) :
+      FamilyTypeParameterComparisonTrace nparams stats context
+        (.forallE name domain body binderInfo) i nindices (fuel + 1)
+  | sharedParameter
+      (stats : InductiveStats) (context : Context)
+      (i nindices fuel : Nat)
+      (name : Name) (domain body parameterType view : Expr)
+      (binderInfo : BinderInfo)
+      (isParameter : i < nparams)
+      (laterFamily : stats.indConsts.isEmpty = false)
+      (parameterTypeRun : getType stats.params[i]! context =
+        .ok parameterType)
+      (defeq : CandidateIsDefEqStep.Valid
+        ⟨context, domain, parameterType⟩)
+      (whnf : CandidateWhnfStep.Valid
+        ⟨context, body.instantiate1 stats.params[i]!, view⟩)
+      (tail : FamilyTypeParameterComparisonTrace nparams stats context
+        view (i + 1) nindices fuel) :
+      FamilyTypeParameterComparisonTrace nparams stats context
+        (.forallE name domain body binderInfo) i nindices (fuel + 1)
+  | index
+      (stats : InductiveStats) (context : Context)
+      (i nindices fuel : Nat)
+      (name : Name) (domain body view : Expr) (binderInfo : BinderInfo)
+      (notParameter : ¬i < nparams)
+      (whnf : CandidateWhnfStep.Valid
+        ⟨context.pushLocalDecl name binderInfo
+            (consumeTypeAnnotations domain),
+          body.instantiate1 context.freshExpr, view⟩)
+      (tail : FamilyTypeParameterComparisonTrace nparams stats
+        (context.pushLocalDecl name binderInfo
+          (consumeTypeAnnotations domain))
+        view i (nindices + 1) fuel) :
+      FamilyTypeParameterComparisonTrace nparams stats context
+        (.forallE name domain body binderInfo) i nindices (fuel + 1)
+  | terminal
+      (stats : InductiveStats) (context : Context) (source : Expr)
+      (i nindices fuel : Nat)
+      (notForall : source.isForall = false)
+      (parametersComplete : i = nparams) :
+      FamilyTypeParameterComparisonTrace nparams stats context source
+        i nindices (fuel + 1)
+
+namespace FamilyTypeParameterComparisonTrace
+
+/-- Exact continuation payload reached after erasing a family telescope
+comparison trace. -/
+structure Result where
+  type : Expr
+  stats : InductiveStats
+  nindices : Nat
+  context : Context
+
+/-- Follow the retained telescope path to its exact continuation payload. -/
+def result :
+    FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel → Result
+  | .freshParameter _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.result
+  | .sharedParameter _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ tail =>
+    tail.result
+  | .index _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.result
+  | .terminal stats context source _ nindices _ _ _ =>
+    { type := source, stats, nindices, context }
+
+/-- The exact later-family parameter comparisons, in telescope order.  Fresh
+first-family parameters and ordinary indices contribute no comparison. -/
+def comparisons :
+    FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel → List CandidateIsDefEqStep
+  | .freshParameter _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.comparisons
+  | .sharedParameter _ context _ _ _ _ domain _ parameterType _ _ _ _ _ _
+      _ tail =>
+    { context, lhs := domain, rhs := parameterType } :: tail.comparisons
+  | .index _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.comparisons
+  | .terminal .. => []
+
+/-- Every comparison exposed by the family telescope trace is the exact
+successful `TypeChecker.isDefEq` execution retained at that node. -/
+theorem comparison_valid
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (member : step ∈ trace.comparisons) : step.Valid := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      exact ih member
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      simp only [comparisons, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact defeq
+      · exact ih member
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      exact ih member
+  | terminal => simp only [comparisons, List.not_mem_nil] at member
+
+/-- A later mutual family contributes exactly one retained comparison for
+each still-unconsumed shared parameter.  Once `i` reaches `nparams`, all
+remaining binders are indices and contribute no comparison. -/
+theorem comparisons_length_of_laterFamily
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (laterFamily : stats.indConsts.isEmpty = false) :
+    trace.comparisons.length = nparams - i := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      rw [laterFamily] at firstFamily
+      contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily'
+      parameterTypeRun defeq whnf tail ih =>
+      simp only [comparisons, List.length_cons]
+      rw [ih laterFamily]
+      omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      simp only [comparisons]
+      rw [ih laterFamily]
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+      simp [comparisons, parametersComplete]
+
+/-- Erasing a comparison trace factors the executable family telescope
+through the exact continuation payload selected by that trace. -/
+theorem factor
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (k : Expr → InductiveStats → Nat → M α) :
+    checkInductiveTypes.loopInd.loop nparams stats source i nindices fuel k
+        context =
+      k trace.result.type trace.result.stats trace.result.nindices
+        trace.result.context := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      simp only [checkInductiveTypes.loopInd.loop, isParameter, if_true,
+        firstFamily, withLocalDecl_apply, ReaderT.bind, Bind.bind,
+        liftTypeChecker_apply]
+      rw [whnf]
+      simp only [Except.bind, result]
+      exact ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      simp only [checkInductiveTypes.loopInd.loop, isParameter, if_true,
+        laterFamily, Bool.false_eq_true, if_false, ReaderT.bind, Bind.bind,
+        liftTypeChecker_apply]
+      rw [parameterTypeRun]
+      simp only [Except.bind]
+      rw [defeq]
+      simp only [if_true, ReaderT.pure, Pure.pure, Except.pure,
+        ReaderT.bind, Bind.bind, Except.bind, liftTypeChecker_apply]
+      rw [whnf]
+      simp only [Except.bind, result]
+      exact ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      simp only [checkInductiveTypes.loopInd.loop, notParameter, if_false,
+        withLocalDecl_apply, ReaderT.bind, Bind.bind, liftTypeChecker_apply]
+      rw [whnf]
+      simp only [Except.bind, result]
+      exact ih
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+      cases source <;> cases notForall <;>
+        simp_all [checkInductiveTypes.loopInd.loop, result, Expr.isForall,
+          ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
+          MonadExceptOf.throw]
+
+/-- Every successful executable family-telescope traversal determines the
+source-indexed comparison trace above.  The continuation result is used only
+to rule out failed branches; it is not stored as an independently selectable
+premise. -/
+theorem exists_of_run
+    (success : checkInductiveTypes.loopInd.loop nparams stats source
+      i nindices fuel k context = .ok output) :
+    Nonempty (FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) := by
+  induction fuel generalizing stats context source i nindices with
+  | zero =>
+      simp [checkInductiveTypes.loopInd.loop] at success
+  | succ fuel ih =>
+      cases source
+      case forallE name domain body binderInfo =>
+        simp only [checkInductiveTypes.loopInd.loop] at success
+        by_cases isParameter : i < nparams
+        · simp only [isParameter, if_true] at success
+          cases firstFamily : stats.indConsts.isEmpty with
+          | true =>
+              simp only [firstFamily, if_true, withLocalDecl_apply,
+                ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+              let nextContext := context.pushLocalDecl name binderInfo
+                (consumeTypeAnnotations domain)
+              cases hwhnf : TypeChecker.M.run nextContext.env
+                  nextContext.safety nextContext.lctx nextContext.lparams
+                  nextContext.fuel
+                  (TypeChecker.whnf
+                    (body.instantiate1 context.freshExpr)) with
+              | error error =>
+                  rw [hwhnf] at success
+                  cases success
+              | ok view =>
+                  rw [hwhnf] at success
+                  simp only [Except.bind] at success
+                  obtain ⟨tail⟩ := ih success
+                  exact ⟨.freshParameter stats context i nindices fuel name
+                    domain body view binderInfo isParameter firstFamily
+                    hwhnf tail⟩
+          | false =>
+              simp only [firstFamily, Bool.false_eq_true, if_false,
+                ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+              cases parameterTypeRun : getType stats.params[i]! context with
+              | error error =>
+                  rw [parameterTypeRun] at success
+                  cases success
+              | ok parameterType =>
+                  rw [parameterTypeRun] at success
+                  simp only [Except.bind] at success
+                  cases defeq : TypeChecker.M.run context.env context.safety
+                      context.lctx context.lparams context.fuel
+                      (TypeChecker.isDefEq domain parameterType) with
+                  | error error =>
+                      rw [defeq] at success
+                      cases success
+                  | ok equal =>
+                      rw [defeq] at success
+                      simp only [Except.bind] at success
+                      cases equal
+                      · simp [ReaderT.bind, Bind.bind, liftExcept_apply,
+                          Except.bind, throw, throwThe,
+                          MonadExceptOf.throw] at success
+                      · simp only [if_true] at success
+                        cases hwhnf : TypeChecker.M.run context.env
+                            context.safety context.lctx context.lparams
+                            context.fuel
+                            (TypeChecker.whnf
+                              (body.instantiate1 stats.params[i]!)) with
+                        | error error =>
+                            simp only [ReaderT.bind, Bind.bind,
+                              liftTypeChecker_apply] at success
+                            rw [hwhnf] at success
+                            cases success
+                        | ok view =>
+                            simp only [ReaderT.bind, Bind.bind,
+                              liftTypeChecker_apply] at success
+                            rw [hwhnf] at success
+                            simp only [Except.bind] at success
+                            obtain ⟨tail⟩ := ih success
+                            exact ⟨.sharedParameter stats context i nindices
+                              fuel name domain body parameterType view
+                              binderInfo isParameter firstFamily
+                              parameterTypeRun defeq hwhnf tail⟩
+        · simp only [isParameter, if_false, withLocalDecl_apply,
+            ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+          let nextContext := context.pushLocalDecl name binderInfo
+            (consumeTypeAnnotations domain)
+          cases hwhnf : TypeChecker.M.run nextContext.env nextContext.safety
+              nextContext.lctx nextContext.lparams nextContext.fuel
+              (TypeChecker.whnf
+                (body.instantiate1 context.freshExpr)) with
+          | error error =>
+              rw [hwhnf] at success
+              cases success
+          | ok view =>
+              rw [hwhnf] at success
+              simp only [Except.bind] at success
+              obtain ⟨tail⟩ := ih success
+              exact ⟨.index stats context i nindices fuel name domain body
+                view binderInfo isParameter hwhnf tail⟩
+      all_goals
+        simp only [checkInductiveTypes.loopInd.loop] at success
+        by_cases parametersComplete : i = nparams
+        · exact ⟨.terminal stats context _ i nindices fuel rfl
+            parametersComplete⟩
+        · simp [parametersComplete, ReaderT.bind, Bind.bind, Except.bind,
+            throw, throwThe, MonadExceptOf.throw] at success
+
+end FamilyTypeParameterComparisonTrace
+
 /-- The exact result selected when the ordinary family validator reaches its
 continuation.  Retaining the reader context matters: later constructor
 validation uses the shared parameters and local declarations installed by
@@ -3185,6 +3494,38 @@ theorem not_nonempty_of_error
   contradiction
 
 end ConstructorValidationRun
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.comparison_valid' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.comparison_valid
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.comparisons_length_of_laterFamily' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.comparisons_length_of_laterFamily
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.factor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.factor
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.exists_of_run' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.exists_of_run
 
 /--
 info: 'Lean4Lean.AddInductive.checkInductiveTypes_factor' depends on axioms: [propext, Classical.choice, Quot.sound]
