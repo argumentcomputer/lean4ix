@@ -23,6 +23,19 @@ open Lean
 #check Lean4Lean.VPrimitiveInductive.boolGeneration_wf
 #check Lean4Lean.VPrimitiveInductive.natGeneration_wf
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
+#check Lean4Lean.VInductDecl.BlockGenerationChecked.recursor_of_family
+#check Lean4Lean.AddInductive.declaredInductiveInfos_name
+#check Lean4Lean.AddInductive.declareRecursors_info_of_family
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ordinaryFamilyLookupCases
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ordinaryConstructorLookupCases
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ordinaryRecursorLookupCases
+#check Lean4Lean.DeclareRestoredInfoListRun.map_wf
+#check Lean4Lean.DeclareRestoredInfoListRun.map_fresh
+#check Lean4Lean.DeclareRestoredInfoListRun.map_lookup_cases
+#check Lean4Lean.DeclareRestoredInfoListRun.family_map_lookup_cases
+#check Lean4Lean.DeclareRestoredInfoListRun.constructor_map_lookup_cases
+#check Lean4Lean.DeclareRestoredInfoListRun.recursor_map_lookup_cases
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ordinaryStructureEtaRegistrationCoverage
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyEvidence
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveFamilyInsertion
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.canonicalPrimitiveGenerationWF
@@ -38,6 +51,69 @@ open Lean
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofReplay
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.ofExecution
 #check Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransactionalVEnvsExtension.toTransactionalVEnvsExtension
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofRules
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeRules
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafePlan
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeFamilyNames
+#check Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofOrdinaryTransaction
+
+/-- info: 'Lean4Lean.AddInductive.declareRecursors_info_of_family' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.declareRecursors_info_of_family
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ordinaryStructureEtaRegistrationCoverage' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.ordinaryStructureEtaRegistrationCoverage
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofRules' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofRules
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeRules' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeRules
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafePlan' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafePlan
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeFamilyNames' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofSafeFamilyNames
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofOrdinaryTransaction' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimitiveVEnvsExtension.ofOrdinaryTransaction
 
 run_meta
   let env ← Lean.getEnv

@@ -360,6 +360,64 @@ theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup
       · exact ih (wf.insert _ _
           (VInductDecl.checkName_constants_fresh checkName)) member
 
+/-- Classify an arbitrary constant lookup after the constructor declaration
+fold. The inserted branch retains both the exact constructor record and the
+queried key. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.constant_lookup_cases
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {found : ConstantInfo}
+    (lookup : finalEnv.constants.find? name = some found) :
+    env.constants.find? name = some found ∨
+      ∃ info ∈ infos, found = .ctorInfo info ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl lookup
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) lookup with mid |
+          ⟨info, member, tagged_eq, name_eq⟩
+      · change (startEnv.constants.insert inserted.name
+          (.ctorInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          exact .inr ⟨inserted, List.mem_cons_self,
+            (Option.some.inj mid).symm, LawfulBEq.eq_of_beq name_equal⟩
+        · exact .inl mid
+      · exact .inr ⟨info, List.mem_cons_of_mem inserted member,
+          tagged_eq, name_eq⟩
+
+/-- Every constructor lookup in the output of the declaration fold is either
+an unchanged input lookup or one of the records inserted by that fold. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup_cases
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : ConstructorVal}
+    (found : finalEnv.constants.find? name = some (.ctorInfo info)) :
+    env.constants.find? name = some (.ctorInfo info) ∨
+      info ∈ infos ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl found
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) found with mid | member
+      · change (startEnv.constants.insert inserted.name
+          (.ctorInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          have inserted_name_eq : inserted.name = name :=
+            LawfulBEq.eq_of_beq name_equal
+          have tagged_eq :
+              (.ctorInfo inserted : ConstantInfo) = .ctorInfo info :=
+            Option.some.inj mid
+          have info_eq : inserted = info :=
+            ConstantInfo.ctorInfo.inj tagged_eq
+          exact .inr ⟨info_eq ▸ List.mem_cons_self,
+            info_eq ▸ inserted_name_eq⟩
+        · exact .inl mid
+      · exact .inr ⟨List.mem_cons_of_mem inserted member.1, member.2⟩
+
 /--
 info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_wf' depends on axioms: [propext,
  Classical.choice,
@@ -392,6 +450,28 @@ info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup' depends 
 -/
 #guard_msgs in
 #print axioms AddInductive.DeclareConstructorInfoListRun.map_lookup
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.constant_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareConstructorInfoListRun.constant_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareConstructorInfoListRun.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareConstructorInfoListRun.map_lookup_cases
 
 /-- Replay the retained constructor declaration equation using only semantic
 metadata translations and the weaker `Aligned` name-domain invariant.  This
@@ -684,6 +764,292 @@ theorem recursorInfoTranslationList_of_option_beq
           simp only [List.map, List.beq, Bool.and_eq_true] at parity
           exact .cons (recursorInfoTranslation_of_beq parity.1 head)
             (ih parity.2)
+
+/-- Generated-recursor declaration preserves persistent-map
+well-formedness. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_wf
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF := by
+  induction run with
+  | nil => exact wf
+  | cons checkName tail ih =>
+      apply ih
+      exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
+
+/-- Generated-recursor declaration preserves every lookup already present in
+its input map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.preserve_map_lookup
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF)
+    (old : env.constants.find? name = some found) :
+    finalEnv.constants.find? name = some found := by
+  induction run with
+  | nil => exact old
+  | @cons infos finalEnv env info checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      have mid : (env.add (.recInfo info)).constants.find? name =
+          some found := by
+        change (env.constants.insert info.name (.recInfo info)).find? name = _
+        rw [wf.find?_insert]
+        split
+        · rename_i equal
+          have nameEq : info.name = name := LawfulBEq.eq_of_beq equal
+          subst name
+          rw [old] at fresh
+          contradiction
+        · exact old
+      exact ih (wf.insert _ _ fresh) mid
+
+/-- Every generated recursor remains at its name in the final declaration
+map. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_lookup
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {info : RecursorVal}
+    (member : info ∈ infos) :
+    finalEnv.constants.find? info.name = some (.recInfo info) := by
+  induction run with
+  | nil => contradiction
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · apply tail.preserve_map_lookup
+          (wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName))
+        change SMap.find? (SMap.insert _ info.name
+          (ConstantInfo.recInfo info)) info.name = _
+        rw [wf.find?_insert]
+        simp
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName)) member
+
+/-- Classify an arbitrary constant lookup after the generated-recursor
+declaration fold. The inserted branch retains both the exact recursor record
+and the queried key. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.constant_lookup_cases
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {found : ConstantInfo}
+    (lookup : finalEnv.constants.find? name = some found) :
+    env.constants.find? name = some found ∨
+      ∃ info ∈ infos, found = .recInfo info ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl lookup
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) lookup with mid |
+          ⟨info, member, tagged_eq, name_eq⟩
+      · change (startEnv.constants.insert inserted.name
+          (.recInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          exact .inr ⟨inserted, List.mem_cons_self,
+            (Option.some.inj mid).symm, LawfulBEq.eq_of_beq name_equal⟩
+        · exact .inl mid
+      · exact .inr ⟨info, List.mem_cons_of_mem inserted member,
+          tagged_eq, name_eq⟩
+
+/-- Every recursor lookup in the output of the declaration fold is either an
+unchanged input lookup or one of the records inserted by that fold. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_lookup_cases
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : RecursorVal}
+    (found : finalEnv.constants.find? name = some (.recInfo info)) :
+    env.constants.find? name = some (.recInfo info) ∨
+      info ∈ infos ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl found
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) found with mid | member
+      · change (startEnv.constants.insert inserted.name
+          (.recInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          have inserted_name_eq : inserted.name = name :=
+            LawfulBEq.eq_of_beq name_equal
+          have tagged_eq :
+              (.recInfo inserted : ConstantInfo) = .recInfo info :=
+            Option.some.inj mid
+          have info_eq : inserted = info :=
+            ConstantInfo.recInfo.inj tagged_eq
+          exact .inr ⟨info_eq ▸ List.mem_cons_self,
+            info_eq ▸ inserted_name_eq⟩
+        · exact .inl mid
+      · exact .inr ⟨List.mem_cons_of_mem inserted member.1, member.2⟩
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareRecursorInfoListRun.map_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareRecursorInfoListRun.constant_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareRecursorInfoListRun.constant_lookup_cases
+
+/-! ## Nested-restoration declaration provenance -/
+
+/-- The mixed metadata fold used by nested restoration preserves
+persistent-map well-formedness. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.map_wf
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF := by
+  induction run with
+  | nil => exact wf
+  | cons checkName tail ih =>
+      apply ih
+      exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
+
+/-- Nested restoration preserves every lookup already present in its input
+map. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.preserve_map_lookup
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF)
+    (old : env.constants.find? name = some found) :
+    finalEnv.constants.find? name = some found := by
+  induction run with
+  | nil => exact old
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      have mid : (startEnv.add inserted).constants.find? name =
+          some found := by
+        change (startEnv.constants.insert inserted.name inserted).find? name = _
+        rw [wf.find?_insert]
+        split
+        · rename_i equal
+          have nameEq : inserted.name = name := LawfulBEq.eq_of_beq equal
+          subst name
+          rw [old] at fresh
+          contradiction
+        · exact old
+      exact ih (wf.insert _ _ fresh) mid
+
+/-- Every restored metadata record remains at its own name after the complete
+mixed declaration fold. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.map_lookup
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {info : ConstantInfo}
+    (member : info ∈ infos) :
+    finalEnv.constants.find? info.name = some info := by
+  induction run with
+  | nil => contradiction
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · apply tail.preserve_map_lookup
+          (wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName))
+        change (startEnv.constants.insert info.name info).find? info.name = _
+        rw [wf.find?_insert]
+        simp
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName)) member
+
+/-- Every record restored by the mixed declaration fold was absent from the
+input map at its own name. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.map_fresh
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos finalEnv)
+    (wf : env.constants.WF) {info : ConstantInfo}
+    (member : info ∈ infos) :
+    env.constants.find? info.name = none := by
+  induction run with
+  | nil => contradiction
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rcases List.mem_cons.1 member with rfl | member
+      · exact VInductDecl.checkName_constants_fresh checkName
+      · have freshAfter := ih
+          (wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName))
+          member
+        change (startEnv.constants.insert inserted.name inserted).find?
+          info.name = none at freshAfter
+        rw [wf.find?_insert] at freshAfter
+        split at freshAfter
+        · contradiction
+        · exact freshAfter
+
+/-- Classify any final lookup after nested restoration as either unchanged
+input metadata or the exact record selected from the retained restored
+inventory. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.map_lookup_cases
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {found : ConstantInfo}
+    (lookup : finalEnv.constants.find? name = some found) :
+    env.constants.find? name = some found ∨
+      found ∈ infos ∧ found.name = name := by
+  induction run with
+  | nil => exact .inl lookup
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) lookup with mid | member
+      · change (startEnv.constants.insert inserted.name inserted).find? name = _
+          at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          have inserted_eq : inserted = found := Option.some.inj mid
+          exact .inr ⟨inserted_eq ▸ List.mem_cons_self,
+            inserted_eq ▸ LawfulBEq.eq_of_beq name_equal⟩
+        · exact .inl mid
+      · exact .inr ⟨List.mem_cons_of_mem inserted member.1, member.2⟩
+
+/-- A final restored family lookup is old or is the exact tagged family
+record in the restoration inventory. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.family_map_lookup_cases
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : InductiveVal}
+    (lookup : finalEnv.constants.find? name = some (.inductInfo info)) :
+    env.constants.find? name = some (.inductInfo info) ∨
+      (.inductInfo info : ConstantInfo) ∈ infos ∧ info.name = name := by
+  simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using
+    run.map_lookup_cases wf lookup
+
+/-- A final restored constructor lookup is old or is the exact tagged
+constructor record in the restoration inventory. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.constructor_map_lookup_cases
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : ConstructorVal}
+    (lookup : finalEnv.constants.find? name = some (.ctorInfo info)) :
+    env.constants.find? name = some (.ctorInfo info) ∨
+      (.ctorInfo info : ConstantInfo) ∈ infos ∧ info.name = name := by
+  simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using
+    run.map_lookup_cases wf lookup
+
+/-- A final restored recursor lookup is old or is the exact tagged recursor
+record in the restoration inventory. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.recursor_map_lookup_cases
+    (run : DeclareRestoredInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : RecursorVal}
+    (lookup : finalEnv.constants.find? name = some (.recInfo info)) :
+    env.constants.find? name = some (.recInfo info) ∨
+      (.recInfo info : ConstantInfo) ∈ infos ∧ info.name = name := by
+  simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using
+    run.map_lookup_cases wf lookup
+
+/--
+info: 'Lean4Lean.DeclareRestoredInfoListRun.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms DeclareRestoredInfoListRun.map_lookup_cases
 
 /-- The generated-recursor declaration trace replayed as an exact Theory
 insertion fold, including the implementation K-flag inventory but no

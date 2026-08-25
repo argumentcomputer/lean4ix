@@ -367,6 +367,32 @@ theorem declaredInductiveInfos_matches
   apply forall₂_zipWith_exists_right
   simpa using size_eq.symm
 
+/-- Every emitted family record retains the name of a source family.  This
+direction does not require the validation-size invariant: membership in the
+truncated `zipWith` already supplies a valid source index. -/
+theorem declaredInductiveInfos_name
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) {info : InductiveVal}
+    (member : info ∈
+      (declaredInductiveInfos stats numParams indTypes numNested isUnsafe
+        context).toList) :
+    ∃ indType ∈ indTypes.toList, info.name = indType.name := by
+  rw [Array.mem_toList_iff, Array.mem_iff_getElem] at member
+  obtain ⟨i, outputUpper, getEq⟩ := member
+  have sourceUpper : i < indTypes.size := by
+    have zippedUpper : i < min indTypes.size stats.nindices.size := by
+      simpa [declaredInductiveInfos] using outputUpper
+    exact Nat.lt_of_lt_of_le zippedUpper (Nat.min_le_left _ _)
+  refine ⟨indTypes[i], Array.mem_toList_iff.mpr
+    (Array.getElem_mem sourceUpper), ?_⟩
+  change (indTypes.zipWith (bs := stats.nindices) fun indType numIndices =>
+    declaredInductiveInfo stats numParams indTypes indType numIndices
+      numNested isUnsafe context)[i] = info at getEq
+  rw [Array.getElem_zipWith outputUpper] at getEq
+  rw [← getEq]
+  rfl
+
 /-- Transparent list form of the family-declaration fold. -/
 def declareInductiveInfoList (allowPrimitive : Bool) :
     List InductiveVal → Environment → Except Exception Environment
@@ -3363,8 +3389,11 @@ structure RecursorDeclarationResult where
   initialEnv : Environment
   allowPrimitive : Bool
   kTarget : Bool
+  sourceTypes : Array InductiveType
   infos : List RecursorVal
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  info_of_source_index : ∀ (i : Nat) (_upper : i < sourceTypes.size),
+    ∃ info ∈ infos, info.name = mkRecName sourceTypes[i].name
   env : Environment
   trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
 
@@ -3373,9 +3402,13 @@ repackaged with its reader-context provenance.  This is public so downstream
 verification can reason from the retained producer equation without
 reimplementing recursor synthesis. -/
 structure RecursorDeclarationTail
-    (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool) where
+    (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool)
+    (sourceTypes : Array InductiveType) (startIndex : Nat) where
   infos : List RecursorVal
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  info_of_source_index : ∀ (i : Nat) (_lower : startIndex ≤ i)
+    (_upper : i < sourceTypes.size),
+    ∃ info ∈ infos, info.name = mkRecName sourceTypes[i].name
   env : Environment
   trace : DeclareRecursorInfoListRun allowPrimitive initialEnv infos env
 
@@ -3438,7 +3471,8 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
     (motives minors : Array Expr) (lctx : LocalContext)
     (lparams : List Name) (isUnsafe allowPrimitive : Bool) :
     (dIdx : Nat) → (env : Environment) →
-      StateT Nat M (RecursorDeclarationTail allowPrimitive env k)
+      StateT Nat M
+        (RecursorDeclarationTail allowPrimitive env k indTypes dIdx)
   | dIdx, env => do
       if h : dIdx < indTypes.size then
         let indType := indTypes[dIdx]
@@ -3458,12 +3492,23 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
             rcases List.mem_cons.mp member with rfl | member
             · rfl
             · exact tail.infos_kTarget other member
+          info_of_source_index := by
+            intro i lower upper
+            by_cases equal : i = dIdx
+            · subst i
+              exact ⟨recursor, List.mem_cons_self, rfl⟩
+            · obtain ⟨other, member, name_eq⟩ :=
+                tail.info_of_source_index i (by omega) upper
+              exact ⟨other, List.mem_cons_of_mem recursor member, name_eq⟩
           env := tail.env
           trace := .cons hcheck.run tail.trace }
       else
         pure {
           infos := []
           infos_kTarget := by simp
+          info_of_source_index := by
+            intro i lower upper
+            exact (h (by omega)).elim
           env
           trace := .nil }
 termination_by dIdx _ => indTypes.size - dIdx
@@ -3478,7 +3523,7 @@ theorem loop_singleton_infos_eq
     {motives minors : Array Expr} {lctx : LocalContext}
     {lparams : List Name} {isUnsafe allowPrimitive : Bool}
     {env : Environment} {state : Nat} {context : Context}
-    {tail : RecursorDeclarationTail allowPrimitive env k}
+    {tail : RecursorDeclarationTail allowPrimitive env k indTypes 0}
     (hindex : 0 < indTypes.size)
     (size_eq : indTypes.size = 1)
     (run : StateT.run'
@@ -3526,7 +3571,8 @@ def declareRecursorsAt (stats : InductiveStats)
     (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
     (context : Context) :
     Except Exception
-      (RecursorDeclarationTail context.allowPrimitive context.env k) :=
+      (RecursorDeclarationTail context.allowPrimitive context.env k
+        indTypes 0) :=
   (mkRecInfos stats indTypes elimLevel fun recInfos => do
     let motives := recInfos.map (·.motive)
     let minors := recInfos.flatMap (·.minors)
@@ -3546,8 +3592,12 @@ def declareRecursors (stats : InductiveStats)
     initialEnv := context.env
     allowPrimitive := context.allowPrimitive
     kTarget := k
+    sourceTypes := indTypes
     infos := result.infos
     infos_kTarget := result.infos_kTarget
+    info_of_source_index := by
+      intro i upper
+      exact result.info_of_source_index i (Nat.zero_le i) upper
     env := result.env
     trace := result.trace }
 
@@ -3577,6 +3627,49 @@ theorem declareRecursors_kTarget_eq
       simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
       cases run
       rfl
+
+/-- A successful recursor phase retains the exact source-family array supplied
+to the producer. -/
+theorem declareRecursors_sourceTypes_eq
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.sourceTypes = indTypes := by
+  unfold declareRecursors at run
+  cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
+  | error error => simp_all [Bind.bind, Except.bind]
+  | ok tail =>
+      simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
+      cases run
+      rfl
+
+/-- Every source-family index contributes a generated recursor with the
+kernel's canonical recursor name. -/
+theorem declareRecursors_info_of_index
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result)
+    {i : Nat} (upper : i < indTypes.size) :
+    ∃ info ∈ result.infos,
+      info.name = mkRecName indTypes[i].name := by
+  have sourceTypesEq := declareRecursors_sourceTypes_eq run
+  have resultUpper : i < result.sourceTypes.size := by
+    simpa only [sourceTypesEq] using upper
+  obtain ⟨info, member, nameEq⟩ :=
+    result.info_of_source_index i resultUpper
+  refine ⟨info, member, ?_⟩
+  simpa only [sourceTypesEq] using nameEq
+
+/-- Every source family contributes a generated recursor with the kernel's
+canonical recursor name. -/
+theorem declareRecursors_info_of_family
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result)
+    {indType : InductiveType} (member : indType ∈ indTypes.toList) :
+    ∃ info ∈ result.infos,
+      info.name = mkRecName indType.name := by
+  obtain ⟨i, upper, getEq⟩ := List.mem_iff_getElem.mp member
+  have arrayUpper : i < indTypes.size := by simpa using upper
+  obtain ⟨info, infoMember, nameEq⟩ :=
+    declareRecursors_info_of_index run arrayUpper
+  refine ⟨info, infoMember, ?_⟩
+  have arrayGetEq : indTypes[i] = indType := by simpa using getEq
+  simpa only [arrayGetEq] using nameEq
 
 /-- Every recursor emitted by one successful phase carries the exact K-like
 flag computed for that phase. -/

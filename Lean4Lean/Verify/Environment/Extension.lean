@@ -193,22 +193,28 @@ theorem registered (trace : AddStructEtas env rules env')
       · exact tail.le.structEtas VEnv.addStructEta_self
       · exact ih member
 
-/-- Pointwise certificates in the input environment can be assembled into a
-source-ordered registration trace.  Certificates for the unprocessed suffix
+/-- Pointwise certificates in the input environment assemble into the exact
+source-ordered registration fold.  Certificates for the unprocessed suffix
 are transported across each preceding registration. -/
-theorem exists_of_forallWF
+theorem of_forallWF
     (rulesWF : ∀ rule ∈ rules, rule.WF env) :
-    ∃ env', AddStructEtas env rules env' := by
+    AddStructEtas env rules (rules.foldl VEnv.addStructEta env) := by
   induction rules generalizing env with
-  | nil => exact ⟨env, .nil⟩
+  | nil => exact .nil
   | cons rule rules ih =>
     have ruleWF : rule.WF env := rulesWF rule (by simp)
     have tailWF : ∀ tailRule ∈ rules,
         tailRule.WF (env.addStructEta rule) := by
       intro tailRule member
       exact (rulesWF tailRule (by simp [member])).mono VEnv.addStructEta_le
-    obtain ⟨env', tail⟩ := ih tailWF
-    exact ⟨env', .cons ruleWF tail⟩
+    exact .cons ruleWF (ih tailWF)
+
+/-- Existential form of `of_forallWF` retained for callers which do not need
+the deterministic endpoint. -/
+theorem exists_of_forallWF
+    (rulesWF : ∀ rule ∈ rules, rule.WF env) :
+    ∃ env', AddStructEtas env rules env' :=
+  ⟨rules.foldl VEnv.addStructEta env, of_forallWF rulesWF⟩
 
 /-- Registration does not alter the Theory constant lookup function. -/
 theorem constants_eq : AddStructEtas env rules env' →
@@ -322,6 +328,49 @@ noncomputable def ofProjection
   baseWF := baseWF
   ruleWF := projection.viewWF.toStructEtaWF baseWF
 
+/-- Projection readiness plus the exact host family, constructor, and
+recursor observations construct the registration artifact selected by the
+runtime structure test.  The singleton-family equation identifies the
+projection view's constructor with the tested constructor; lookup uniqueness
+then identifies its metadata record. -/
+theorem ofProjectionReady
+    (projectionReady : ProjectionReady env venv)
+    (baseWF : venv.WF)
+    (family_find : env.find? familyName = some (.inductInfo familyInfo))
+    (constructor_find : env.find? constructorName =
+      some (.ctorInfo constructorInfo))
+    (structure_test : env.isNonRecStructureConstructor familyName constructorName =
+      true)
+    (recursor_find : env.find? (mkRecName familyName) =
+      some (.recInfo recursorInfo)) :
+    Nonempty (StructureEtaRegistrationArtifact env familyName familyInfo
+      constructorName constructorInfo venv) := by
+  obtain ⟨_isRec, constructors_eq, indices_eq, owner_eq⟩ :=
+    Kernel.Environment.isNonRecStructureConstructor_info family_find
+      constructor_find structure_test
+  have projection_ready : env.isProjectionReadyStructure familyName = true :=
+    Kernel.Environment.isProjectionReadyStructure_of_info family_find
+      constructors_eq indices_eq constructor_find recursor_find owner_eq
+  obtain ⟨projection⟩ := projectionReady.infer familyName familyInfo
+    family_find projection_ready
+  have constructor_name_eq :
+      projection.view.constructorName = constructorName := by
+    have singleton_eq : [projection.view.constructorName] =
+        [constructorName] := projection.ctors_eq.symm.trans constructors_eq
+    simpa using singleton_eq
+  have constructor_info_eq :
+      projection.constructorInfo = constructorInfo := by
+    have projection_find := projection.constructor_find
+    rw [constructor_name_eq] at projection_find
+    have tagged_eq :
+        (.ctorInfo projection.constructorInfo : ConstantInfo) =
+          .ctorInfo constructorInfo :=
+      Option.some.inj (projection_find.symm.trans constructor_find)
+    cases tagged_eq
+    rfl
+  exact ⟨ofProjection projection constructor_name_eq constructor_info_eq
+    baseWF⟩
+
 /-- The deterministic Theory descriptor owned by a registration artifact. -/
 noncomputable def rule
     (self : StructureEtaRegistrationArtifact env familyName familyInfo
@@ -421,6 +470,113 @@ noncomputable def toStructureEtaArtifact_of_completion
 
 end StructureEtaRegistrationArtifact
 
+/-- One existentially packaged registration artifact.  Erasing the dependent
+host metadata indices this way lets a finite source-indexed inventory own the
+shared Theory rule list without accepting that list independently. -/
+structure StructureEtaRegistrationEntry
+    (env : Environment) (venv : VEnv) where
+  familyName : Name
+  familyInfo : InductiveVal
+  constructorName : Name
+  constructorInfo : ConstructorVal
+  artifact : StructureEtaRegistrationArtifact env familyName familyInfo
+    constructorName constructorInfo venv
+
+namespace StructureEtaRegistrationEntry
+
+/-- The exact Theory descriptor contributed by one packaged artifact. -/
+noncomputable def rule
+    (entry : StructureEtaRegistrationEntry env venv) : VStructEta :=
+  entry.artifact.rule
+
+/-- Each packaged descriptor carries its persistent WF certificate. -/
+theorem ruleWF (entry : StructureEtaRegistrationEntry env venv) :
+    entry.rule.WF venv := by
+  change (entry.artifact.projection.viewWF.toStructEta
+    entry.artifact.baseWF.ordered).WF venv
+  exact entry.artifact.ruleWF
+
+end StructureEtaRegistrationEntry
+
+/-- Complete host observations for one family selected by the nonrecursive
+structure test.  The family name is the external index so a finite list of
+names can be scanned without separately choosing metadata inventories. -/
+structure StructureEtaRegistrationObservation
+    (env : Environment) (familyName : Name) where
+  familyInfo : InductiveVal
+  constructorName : Name
+  constructorInfo : ConstructorVal
+  recursorInfo : RecursorVal
+  family_find : env.find? familyName = some (.inductInfo familyInfo)
+  constructor_find : env.find? constructorName =
+    some (.ctorInfo constructorInfo)
+  structure_test : env.isNonRecStructureConstructor familyName
+    constructorName = true
+  recursor_find : env.find? (mkRecName familyName) =
+    some (.recInfo recursorInfo)
+
+namespace StructureEtaRegistrationObservation
+
+/-- Complete host observations and projection readiness synthesize the exact
+entry contributed by this family. -/
+noncomputable def toEntry
+    (observation : StructureEtaRegistrationObservation env familyName)
+    (projectionReady : ProjectionReady env venv) (baseWF : venv.WF) :
+    StructureEtaRegistrationEntry env venv where
+  familyName := familyName
+  familyInfo := observation.familyInfo
+  constructorName := observation.constructorName
+  constructorInfo := observation.constructorInfo
+  artifact := Classical.choice <|
+    StructureEtaRegistrationArtifact.ofProjectionReady projectionReady baseWF
+      observation.family_find observation.constructor_find
+      observation.structure_test observation.recursor_find
+
+/-- The family record selected by complete observations at a fixed name is
+unique. -/
+theorem familyInfo_eq
+    (left right : StructureEtaRegistrationObservation env familyName) :
+    left.familyInfo = right.familyInfo := by
+  have tagged_eq :
+      (.inductInfo left.familyInfo : ConstantInfo) =
+        .inductInfo right.familyInfo :=
+    Option.some.inj (left.family_find.symm.trans right.family_find)
+  exact ConstantInfo.inductInfo.inj tagged_eq
+
+/-- The singleton constructor selected by complete observations at a fixed
+family name is unique. -/
+theorem constructorName_eq
+    (left right : StructureEtaRegistrationObservation env familyName) :
+    left.constructorName = right.constructorName := by
+  obtain ⟨_left_rec, left_ctors, _left_indices, _left_owner⟩ :=
+    Kernel.Environment.isNonRecStructureConstructor_info left.family_find
+      left.constructor_find left.structure_test
+  obtain ⟨_right_rec, right_ctors, _right_indices, _right_owner⟩ :=
+    Kernel.Environment.isNonRecStructureConstructor_info right.family_find
+      right.constructor_find right.structure_test
+  have family_info_eq := left.familyInfo_eq right
+  rw [family_info_eq] at left_ctors
+  have singleton_eq : [left.constructorName] = [right.constructorName] :=
+    left_ctors.symm.trans right_ctors
+  simpa using singleton_eq
+
+/-- Constructor metadata selected by complete observations at a fixed family
+name is unique. -/
+theorem constructorInfo_eq
+    (left right : StructureEtaRegistrationObservation env familyName) :
+    left.constructorInfo = right.constructorInfo := by
+  have constructor_name_eq := left.constructorName_eq right
+  have left_constructor_find := left.constructor_find
+  rw [constructor_name_eq] at left_constructor_find
+  have tagged_eq :
+      (.ctorInfo left.constructorInfo : ConstantInfo) =
+        .ctorInfo right.constructorInfo :=
+    Option.some.inj
+      (left_constructor_find.symm.trans right.constructor_find)
+  exact ConstantInfo.ctorInfo.inj tagged_eq
+
+end StructureEtaRegistrationObservation
+
 /-- Global classification of every host family accepted by the
 nonrecursive-structure heuristic.  A family is either already ready in the
 transaction model or is backed by an exact registration artifact whose rule
@@ -436,6 +592,151 @@ def StructureEtaRegistrationCoverage
       ∃ registration : StructureEtaRegistrationArtifact env familyName
           familyInfo constructorName constructorInfo venv,
         registration.rule ∈ rules
+
+/-- A finite artifact inventory together with the exact classification that
+every host nonrecursive structure is old or represented by one of its
+entries.  The shared rule list is derived from this inventory. -/
+structure StructureEtaRegistrationPlan
+    (env : Environment) (venv : VEnv) where
+  entries : List (StructureEtaRegistrationEntry env venv)
+  coverage : ∀ familyName familyInfo constructorName constructorInfo,
+    env.find? familyName = some (.inductInfo familyInfo) →
+    env.find? constructorName = some (.ctorInfo constructorInfo) →
+    env.isNonRecStructureConstructor familyName constructorName = true →
+    Nonempty (StructureEtaArtifact env familyName familyInfo constructorName
+      constructorInfo venv) ∨
+      ∃ entry ∈ entries,
+        entry.familyName = familyName ∧
+        entry.familyInfo = familyInfo ∧
+        entry.constructorName = constructorName ∧
+        entry.constructorInfo = constructorInfo
+
+namespace StructureEtaRegistrationPlan
+
+/-- Select a registration entry exactly when a family name has complete host
+structure and recursor observations. -/
+noncomputable def entryForFamily?
+    (projectionReady : ProjectionReady env venv) (baseWF : venv.WF)
+    (familyName : Name) : Option (StructureEtaRegistrationEntry env venv) := by
+  classical
+  exact if observations : Nonempty
+      (StructureEtaRegistrationObservation env familyName) then
+    some ((Classical.choice observations).toEntry projectionReady baseWF)
+  else
+    none
+
+/-- Deterministic artifact inventory selected from a finite family-name
+inventory. -/
+noncomputable def entriesForFamilies
+    (projectionReady : ProjectionReady env venv) (baseWF : venv.WF)
+    (familyNames : List Name) :
+    List (StructureEtaRegistrationEntry env venv) :=
+  familyNames.filterMap (entryForFamily? projectionReady baseWF)
+
+/-- The deterministic common rule list owned by a registration plan. -/
+noncomputable def rules
+    (plan : StructureEtaRegistrationPlan env venv) : List VStructEta :=
+  plan.entries.map StructureEtaRegistrationEntry.rule
+
+/-- All rules derived from a registration plan are persistently well formed
+in its base model. -/
+theorem rulesWF (plan : StructureEtaRegistrationPlan env venv) :
+    ∀ rule ∈ plan.rules, rule.WF venv := by
+  intro rule member
+  obtain ⟨entry, _entry_member, rfl⟩ := List.mem_map.mp member
+  exact entry.ruleWF
+
+/-- Forget the finite entry packaging to the coverage relation consumed by
+the generic completion theorem. -/
+theorem toCoverage (plan : StructureEtaRegistrationPlan env venv) :
+    StructureEtaRegistrationCoverage env venv plan.rules := by
+  intro familyName familyInfo constructorName constructorInfo family_find
+    constructor_find structure_test
+  rcases plan.coverage familyName familyInfo constructorName constructorInfo
+      family_find constructor_find structure_test with
+    existing |
+      ⟨entry, entry_member, family_name_eq, family_info_eq,
+        constructor_name_eq, constructor_info_eq⟩
+  · exact .inl existing
+  · subst familyName
+    subst familyInfo
+    subst constructorName
+    subst constructorInfo
+    exact .inr ⟨entry.artifact,
+      List.mem_map.mpr ⟨entry, entry_member, rfl⟩⟩
+
+/-- Build the finite registration plan by scanning a family-name inventory.
+The only classification premise left to callers says that every accepted
+host structure is either already ready or its family name occurs in the
+inventory and its generated recursor is present. -/
+noncomputable def ofFamilyNames
+    (projectionReady : ProjectionReady env venv) (baseWF : venv.WF)
+    (familyNames : List Name)
+    (coverage : ∀ familyName familyInfo constructorName constructorInfo,
+      env.find? familyName = some (.inductInfo familyInfo) →
+      env.find? constructorName = some (.ctorInfo constructorInfo) →
+      env.isNonRecStructureConstructor familyName constructorName = true →
+      Nonempty (StructureEtaArtifact env familyName familyInfo constructorName
+        constructorInfo venv) ∨
+        familyName ∈ familyNames ∧
+          ∃ recursorInfo, env.find? (mkRecName familyName) =
+            some (.recInfo recursorInfo)) :
+    StructureEtaRegistrationPlan env venv where
+  entries := entriesForFamilies projectionReady baseWF familyNames
+  coverage := by
+    intro familyName familyInfo constructorName constructorInfo family_find
+      constructor_find structure_test
+    rcases coverage familyName familyInfo constructorName constructorInfo
+        family_find constructor_find structure_test with
+      existing | ⟨family_member, recursorInfo, recursor_find⟩
+    · exact .inl existing
+    · let observation : StructureEtaRegistrationObservation env familyName := {
+        familyInfo := familyInfo
+        constructorName := constructorName
+        constructorInfo := constructorInfo
+        recursorInfo := recursorInfo
+        family_find := family_find
+        constructor_find := constructor_find
+        structure_test := structure_test
+        recursor_find := recursor_find }
+      have observations : Nonempty
+          (StructureEtaRegistrationObservation env familyName) :=
+        ⟨observation⟩
+      let selected := Classical.choice observations
+      let entry := selected.toEntry projectionReady baseWF
+      have entry_member : entry ∈
+          entriesForFamilies projectionReady baseWF familyNames := by
+        apply List.mem_filterMap.mpr
+        refine ⟨familyName, family_member, ?_⟩
+        simp only [entryForFamily?, dif_pos observations, entry, selected]
+      refine .inr ⟨entry, entry_member, rfl, ?_, ?_, ?_⟩
+      · exact selected.familyInfo_eq observation
+      · exact selected.constructorName_eq observation
+      · exact selected.constructorInfo_eq observation
+
+end StructureEtaRegistrationPlan
+
+/-- Coverage by one fixed rule list persists through a well-formed Theory
+model extension.  Existing final artifacts are transported directly; a
+pending registration keeps the same proof-irrelevant rule value. -/
+theorem StructureEtaRegistrationCoverage.mono
+    (coverage : StructureEtaRegistrationCoverage env venv rules)
+    (hle : venv ≤ venv') (wf' : venv'.WF) :
+    StructureEtaRegistrationCoverage env venv' rules := by
+  intro familyName familyInfo constructorName constructorInfo
+    family_find constructor_find structure_test
+  rcases coverage familyName familyInfo constructorName constructorInfo
+      family_find constructor_find structure_test with
+    existing | ⟨registration, member⟩
+  · obtain ⟨artifact⟩ := existing
+    exact .inl ⟨artifact.mono hle wf'.ordered⟩
+  · let transported := registration.mono hle wf'
+    refine .inr ⟨transported, ?_⟩
+    have rule_eq : registration.rule = transported.rule := by
+      simpa only [transported, StructureEtaRegistrationArtifact.rule,
+        StructureEtaRegistrationArtifact.mono] using
+        registration.rule_mono_eq hle wf'
+    rwa [← rule_eq]
 
 /-- Checked registration plus complete host-family classification constructs
 the final global structure-eta readiness invariant. -/

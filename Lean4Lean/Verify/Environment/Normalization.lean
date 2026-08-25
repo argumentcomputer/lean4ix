@@ -2988,6 +2988,65 @@ theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup
       · exact ih (wf.insert _ _
           (VInductDecl.checkName_constants_fresh checkName)) member
 
+/-- Classify an arbitrary constant lookup after the family declaration fold.
+The inserted branch retains the exact family record and queried key, so
+consumers can eliminate impossible constant kinds without an ambient map
+integrity assumption. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.constant_lookup_cases
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {found : ConstantInfo}
+    (lookup : finalEnv.constants.find? name = some found) :
+    env.constants.find? name = some found ∨
+      ∃ info ∈ infos, found = .inductInfo info ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl lookup
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) lookup with mid |
+          ⟨info, member, tagged_eq, name_eq⟩
+      · change (startEnv.constants.insert inserted.name
+          (.inductInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          exact .inr ⟨inserted, List.mem_cons_self,
+            (Option.some.inj mid).symm, LawfulBEq.eq_of_beq name_equal⟩
+        · exact .inl mid
+      · exact .inr ⟨info, List.mem_cons_of_mem inserted member,
+          tagged_eq, name_eq⟩
+
+/-- Every family lookup in the output of the declaration fold is either an
+unchanged input lookup or one of the records inserted by that fold. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup_cases
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) {name : Name}
+    {info : InductiveVal}
+    (found : finalEnv.constants.find? name = some (.inductInfo info)) :
+    env.constants.find? name = some (.inductInfo info) ∨
+      info ∈ infos ∧ info.name = name := by
+  induction run with
+  | nil => exact .inl found
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      have fresh := VInductDecl.checkName_constants_fresh checkName
+      rcases ih (wf.insert _ _ fresh) found with mid | member
+      · change (startEnv.constants.insert inserted.name
+          (.inductInfo inserted)).find? name = _ at mid
+        rw [wf.find?_insert] at mid
+        split at mid
+        · rename_i name_equal
+          have inserted_name_eq : inserted.name = name :=
+            LawfulBEq.eq_of_beq name_equal
+          have tagged_eq :
+              (.inductInfo inserted : ConstantInfo) = .inductInfo info :=
+            Option.some.inj mid
+          have info_eq : inserted = info :=
+            ConstantInfo.inductInfo.inj tagged_eq
+          exact .inr ⟨info_eq ▸ List.mem_cons_self,
+            info_eq ▸ inserted_name_eq⟩
+        · exact .inl mid
+      · exact .inr ⟨List.mem_cons_of_mem inserted member.1, member.2⟩
+
 /--
 info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_wf' depends on axioms: [propext,
  Classical.choice,
@@ -3020,6 +3079,28 @@ info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup' depends on
 -/
 #guard_msgs in
 #print axioms AddInductive.DeclareInductiveInfoListRun.map_lookup
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.constant_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareInductiveInfoListRun.constant_lookup_cases
+
+/--
+info: 'Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_lookup_cases' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.DeclareInductiveInfoListRun.map_lookup_cases
 
 /-- Family-only declaration cannot synthesize constructor metadata absent
 from the input map. -/
