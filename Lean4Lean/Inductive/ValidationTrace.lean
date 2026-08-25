@@ -2375,6 +2375,42 @@ theorem NormalizationCandidateExecution.familyValidation
     execution.familyValidationResult_run produced]
   rfl
 
+/-- The first family-type candidate retained by a successful nonempty
+normalization execution contains the complete validator-selected parameter
+prefix.  The public producer runs candidate observation from an empty local
+context; the explicit context equality records that this is also the actual
+family-validation entry context. -/
+theorem NormalizationCandidateExecution.firstFamilyType_nparams_le_spineLength
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {}) :
+    nparams ≤ execution.familyTypes.candidates.head.type.trace.spineLength := by
+  have candidateContext_eq : { context with lctx := {} } = context := by
+    cases context
+    simp_all
+  have validation : checkInductiveTypes nparams
+      (source :: sources).toArray (fun _ => pure ()) context = .ok () := by
+    simpa [ReaderT.pure, Pure.pure, Except.pure] using
+      execution.familyValidation produced (fun _ => pure ())
+  cases hCandidates : execution.familyTypes.candidates with
+  | cons candidate candidates =>
+      have producedFamilies := execution.familyTypes.produced
+      rw [hCandidates] at producedFamilies
+      have candidateRun := producedFamilies.head
+      rw [candidateContext_eq] at candidateRun
+      have terminals := execution.familyTerminals
+      rw [hCandidates] at terminals
+      cases terminals with
+      | cons terminal tail =>
+          have bound :=
+            candidate.nparams_le_spineLength_of_firstFamilyValidation
+              candidateRun terminal validation
+          change nparams ≤ candidate.type.trace.spineLength
+          exact bound
+
 /-- Erase a successful detailed execution back to the ordinary candidate
 producer without rerunning or independently selecting family validation. -/
 theorem NormalizationCandidateExecution.producesFromBuildExecution
@@ -2799,6 +2835,14 @@ info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyValidation' 
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateExecution.familyValidation
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamilyType_nparams_le_spineLength' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.firstFamilyType_nparams_le_spineLength
 
 /--
 info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.producesFromBuildExecution' depends on axioms: [propext,

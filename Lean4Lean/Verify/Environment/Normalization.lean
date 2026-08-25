@@ -2269,6 +2269,22 @@ private theorem candidateDropN_forallN_length :
     simp only [List.length_cons, VExpr.forallN, VExpr.dropN,
       candidateDropN_forallN_length As B]
 
+/-- Any prefix of a syntactically complete telescope has the requested
+length. -/
+private theorem candidateTelN_prefix_length
+    (source : VExpr) {count total : Nat}
+    (count_le : count ≤ total)
+    (full : (VExpr.telN total source).length = total) :
+    (VExpr.telN count source).length = count := by
+  induction count generalizing total source with
+  | zero => rfl
+  | succ count ih =>
+      cases total with
+      | zero => omega
+      | succ total =>
+          cases source <;> simp_all [VExpr.telN]
+          exact ih _ count_le full
+
 /-- Syntactic terminal marker used only to recover a telescope from a known
 `dropN` endpoint. -/
 private def CandidateTerminal : VExpr → Prop
@@ -2580,6 +2596,50 @@ theorem CandidateExprRun.spineEvidence
     exact candidateDropN_forallN_length viewBinders viewResult
   simpa only [rawTel, viewTel, rawResultEq, viewResultEq] using
     ⟨resultType, evidence⟩
+
+/-- A stored candidate spine fixes the exact number of raw and reconstructed
+view binders, independently of the terminal result typing witness. -/
+theorem CandidateExprRun.spineLengths
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true) :
+    (VExpr.telN trace.spineLength source').length = trace.spineLength ∧
+      (VExpr.telN trace.spineLength view').length = trace.spineLength := by
+  have henv : VEnv.WF env := by
+    cases run with
+    | terminal node =>
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    | forallE _ _ _ _ node =>
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+  obtain ⟨rawBinders, viewBinders, rawResult, viewResult,
+      resultType, rawEq, viewEq, evidence, rawLength⟩ :=
+    run.spineEvidenceAux aligned
+      (.refl henv run.context_wf) run.source_tr
+  have viewLength : viewBinders.length = trace.spineLength :=
+    evidence.length_eq ▸ rawLength
+  have rawTel : VExpr.telN trace.spineLength source' = rawBinders := by
+    rw [rawEq, ← rawLength]
+    exact candidateTelN_forallN_length rawBinders rawResult
+  have viewTel : VExpr.telN trace.spineLength view' = viewBinders := by
+    rw [viewEq, ← viewLength]
+    exact candidateTelN_forallN_length viewBinders viewResult
+  exact ⟨by rw [rawTel, rawLength], by rw [viewTel, viewLength]⟩
+
+/-- Every validator-selected prefix of a stored candidate view contains
+exactly the requested number of binders. -/
+theorem CandidateExprRun.viewTelN_length_of_le
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true)
+    (count_le : count ≤ trace.spineLength) :
+    (VExpr.telN count view').length = count :=
+  candidateTelN_prefix_length view' count_le (run.spineLengths aligned).2
 
 /-- Splitting a Theory expression after any prefix partitions its complete
 stored Pi telescope. -/
@@ -4259,6 +4319,64 @@ def CandidateBlockFamilySemanticListRun.views :
   | .nil => []
   | .cons head tail => head.view :: tail.views
 
+/-- The raw semantic family inventory is empty exactly when its source-indexed
+kernel family inventory is empty. -/
+theorem CandidateBlockFamilySemanticListRun.raws_isEmpty_eq_sources
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws) :
+    raws.isEmpty = kernelSources.isEmpty := by
+  cases run <;> rfl
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.raws_isEmpty_eq_sources' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.raws_isEmpty_eq_sources
+
+/-- Replacing family expression payloads preserves emptiness as well as the
+complete source order. -/
+theorem CandidateBlockFamilySemanticListRun.views_isEmpty_eq_sources
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws) :
+    run.views.isEmpty = kernelSources.isEmpty := by
+  cases run <;> rfl
+
+/-- A complete stored family spine and the validator-selected head-prefix
+bound determine the exact shared-parameter length in the semantic view. -/
+theorem CandidateBlockFamilySemanticListRun.blockParams_length
+    {source : InductiveType} {sources : List InductiveType}
+    {nparams : Nat}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: sources)}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    (bound : nparams ≤
+      candidates.head.familyType.type.trace.spineLength)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList candidates) :
+    (blockParams nparams run.views).length = nparams := by
+  cases run with
+  | cons head tail =>
+      cases spines with
+      | cons familySpine constructorSpines tailSpines =>
+          obtain ⟨inferred, recursive⟩ := head.type.recursive
+          have length := recursive.viewTelN_length_of_le
+            (AddInductive.CandidateExprTrace.generationSpine_storedSpine
+              _ familySpine)
+            bound
+          simpa only [CandidateBlockFamilySemanticListRun.views,
+            CandidateBlockFamilySemanticRun.view, blockParams] using length
+
 /-- A complete block semantic hierarchy preserves both family names and the
 family-major constructor-name inventory of its kernel sources. -/
 theorem CandidateBlockFamilySemanticListRun.rawHeaderNames
@@ -4392,6 +4510,50 @@ def NormalizationCandidateBlockSemanticRun.normalization
       NormalizationCandidateBlockSemanticRun.viewDecl,
       beq_self_eq_true, Bool.true_and]
     exact run.families.sameHeaders
+
+/-- The exact normalized declaration selected by a semantic hierarchy is
+nonempty precisely when the source-indexed kernel block is nonempty. -/
+theorem NormalizationCandidateBlockSemanticRun.viewTypes_isEmpty_eq_sources
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl) :
+    run.normalization.view.types.isEmpty = sources.isEmpty := by
+  simpa only [NormalizationCandidateBlockSemanticRun.normalization,
+    NormalizationCandidateBlockSemanticRun.viewDecl] using
+    run.families.views_isEmpty_eq_sources
+
+/-- For a nonempty ordinary normalization execution, the semantic view's
+first-family parameter telescope has exactly the validator-selected length.
+Both the lower bound and the complete stored spine come from the retained
+producer execution. -/
+theorem NormalizationCandidateBlockSemanticRun.viewParams_length_of_execution
+    {source : InductiveType} {sources : List InductiveType}
+    {nparams numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : AddInductive.buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    {env blockEnv : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      execution.candidate rawDecl)
+    (context_lctx_eq : context.lctx = {}) :
+    (blockParams nparams semantic.normalization.view.types).length =
+      nparams := by
+  have bound := execution.firstFamilyType_nparams_le_spineLength produced
+    context_lctx_eq
+  have candidateBound : nparams ≤
+      execution.candidate.families.head.familyType.type.trace.spineLength := by
+    change nparams ≤
+      execution.families.candidates.head.familyType.type.trace.spineLength
+    rw [execution.families.produced.head_familyType]
+    exact bound
+  have length := semantic.families.blockParams_length candidateBound
+    execution.generationSpines
+  simpa only [NormalizationCandidateBlockSemanticRun.normalization,
+    NormalizationCandidateBlockSemanticRun.viewDecl] using length
 
 /-- The exact normalized view has the same source-derived generated-name
 inventory as the raw semantic block. -/

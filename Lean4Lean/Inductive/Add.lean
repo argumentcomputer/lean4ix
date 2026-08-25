@@ -1405,6 +1405,119 @@ theorem checkInductiveTypes_loop_of_candidate
         hterminal]
       simp [terminalResult, terminalContext, parameterList, spineLength]
 
+/-- A candidate main spine which ends before the declared parameter boundary
+cannot be the first-family telescope of a successful validator run.  This is
+the converse failure seam to `checkInductiveTypes_loop_of_candidate`: it does
+not assume enough inductive fuel, because exhausting that fuel is itself a
+failure. -/
+theorem checkInductiveTypes_loop_not_ok_of_candidate_tooFew
+    (candidate : CandidateExprTrace context source)
+    (stats : InductiveStats) (nparams i nindices fuel : Nat)
+    (k : Expr → InductiveStats → Nat → M α)
+    (hi : i + candidate.spineLength < nparams)
+    (hempty : stats.indConsts.isEmpty = true)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult.isForall = false) :
+    ∀ result,
+      checkInductiveTypes.loopInd.loop nparams stats candidate.rootWhnf
+          i nindices fuel k context ≠ .ok result := by
+  induction candidate generalizing i nindices fuel stats with
+  | terminal context source inferred terminal checked valid =>
+      intro output success
+      cases fuel with
+      | zero =>
+          simp [checkInductiveTypes.loopInd.loop, throw, throwThe,
+            MonadExceptOf.throw] at success
+      | succ fuel =>
+          have hne : i ≠ nparams := by omega
+          cases terminal <;>
+            simp_all [rootWhnf, terminalResult, spineLength,
+              checkInductiveTypes.loopInd.loop, Expr.isForall, ReaderT.bind,
+              Bind.bind, Except.bind, throw, throwThe, MonadExceptOf.throw]
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked valid domainCandidate bodyCandidate
+      domain_ih body_ih =>
+      rcases hannotations with ⟨hmatch, hbodyAnnotations⟩
+      intro output success
+      cases fuel with
+      | zero =>
+          simp [checkInductiveTypes.loopInd.loop, throw, throwThe,
+            MonadExceptOf.throw] at success
+      | succ fuel =>
+          have hil : i < nparams := by
+            simp only [spineLength] at hi
+            omega
+          have hbodyTooFew :
+              i + 1 + bodyCandidate.spineLength < nparams := by
+            simp only [spineLength] at hi
+            omega
+          have hvalid := bodyCandidate.rootWhnf_valid
+          change TypeChecker.M.run _ _ _ _ _
+              (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
+            .ok bodyCandidate.rootWhnf at hvalid
+          simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil,
+            if_true, hempty, withLocalDecl_apply] at success
+          rw [← hmatch] at success
+          simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply] at success
+          rw [hvalid] at success
+          simp only [Except.bind] at success
+          exact body_ih
+            (stats :=
+              { stats with params := stats.params.push context.freshExpr })
+            (i := i + 1) (nindices := nindices) (fuel := fuel)
+            hbodyTooFew (by simpa using hempty) hbodyAnnotations hterminal
+            output success
+
+/-- A successful nonempty family-validation block contains at least the
+declared number of parameter binders in its first exact candidate spine.  The
+proof uses the validator's real first-family call and the candidate builder's
+annotation provenance; no terminal counter assertion is read backwards. -/
+theorem nparams_le_spineLength_of_firstFamilyValidation
+    (indType : InductiveType) (indTypes : List InductiveType)
+    (candidate : CandidateExprTrace context indType.type)
+    (nparams : Nat) (k : InductiveStats → M α) (output : α)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult = .sort resultLevel)
+    (success : checkInductiveTypes nparams (indType :: indTypes).toArray
+      k context = .ok output) :
+    nparams ≤ candidate.spineLength := by
+  apply Classical.byContradiction
+  intro hcount
+  have tooFew : candidate.spineLength < nparams := by omega
+  have hterminalForall : candidate.terminalResult.isForall = false := by
+    rw [hterminal]
+    rfl
+  have hcheck := candidate.rootCheck.valid
+  have hwhnf := candidate.rootWhnf_valid
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.checkType indType.type) =
+    .ok candidate.rootCheck.inferred at hcheck
+  change TypeChecker.M.run context.env context.safety context.lctx
+      context.lparams context.fuel (TypeChecker.whnf indType.type) =
+    .ok candidate.rootWhnf at hwhnf
+  unfold checkInductiveTypes at success
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind] at success
+  rw [checkInductiveTypes.loopInd.eq_1] at success
+  have hsize : 0 < (indType :: indTypes).toArray.size := by simp
+  rw [dif_pos hsize] at success
+  rw [show (indType :: indTypes).toArray[0] = indType by rfl] at success
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind,
+    liftExcept_apply, liftTypeChecker_apply]
+    at success
+  cases hclosed : context.env.checkNoMVarNoFVar indType.name indType.type with
+  | error error =>
+      rw [hclosed] at success
+      contradiction
+  | ok _ =>
+      rw [hclosed, hcheck, hwhnf] at success
+      exact candidate.checkInductiveTypes_loop_not_ok_of_candidate_tooFew
+        (stats := InductiveStats.initial (context.lparams.map .param))
+        (nparams := nparams) (i := 0) (nindices := 0)
+        (fuel := context.fuel.inductiveFuel) _ (by simpa using tooFew) rfl
+        hannotations hterminalForall output success
+
 /-- Exact singleton statistics selected by a candidate family spine with an
 arbitrary parameter/index split. -/
 def singletonCandidateInductiveStats
@@ -1897,6 +2010,11 @@ def toList (f : (a : α) → F a → β) :
   | .nil => []
   | .cons head tail => f _ head :: tail.toList f
 
+/-- Total first-position projection for a source-indexed nonempty candidate
+list. -/
+def head : CandidateList F (source :: sources) → F source
+  | .cons head _ => head
+
 /-- Eliminate a source-indexed singleton without a partial list operation. -/
 def singleton : CandidateList F [source] → F source
   | .cons head .nil => head
@@ -2188,6 +2306,32 @@ theorem CandidateFamilyType.context_eq_of_normalize
       subst candidate
       exact CandidateExpr.context_eq_of_build hbuild
 
+/-- The exact first-family candidate produced in the validator's reader
+context contains at least the parameter prefix accepted by that validator.
+The candidate's executable build equation supplies both its root-context
+identity and annotation provenance. -/
+theorem CandidateFamilyType.nparams_le_spineLength_of_firstFamilyValidation
+    {context : Context} {indType : InductiveType}
+    {candidate : CandidateFamilyType indType}
+    (candidateRun : normalizeCandidateFamilyType indType context =
+      .ok candidate)
+    (terminal : candidate.type.trace.terminalResult = .sort resultLevel)
+    (validation : checkInductiveTypes nparams
+      (indType :: indTypes).toArray k context = .ok output) :
+    nparams ≤ candidate.type.trace.spineLength := by
+  have contextEq : candidate.type.context = context :=
+    CandidateFamilyType.context_eq_of_normalize candidateRun
+  have annotations : candidate.type.trace.validationAnnotations :=
+    CandidateFamilyType.validationAnnotations_of_normalize candidateRun
+  cases candidate with
+  | mk candidateType =>
+      cases candidateType with
+      | mk candidateContext trace =>
+          change candidateContext = context at contextEq
+          subst candidateContext
+          exact trace.nparams_le_spineLength_of_firstFamilyValidation
+            indType indTypes nparams k output annotations terminal validation
+
 def normalizeCandidateConstructorList :
     (ctors : List Constructor) →
       M (CandidateList CandidateConstructor ctors)
@@ -2441,6 +2585,17 @@ theorem CandidateFamilyListProduced.familyTypes_eq
   induction run with
   | nil => rfl
   | cons _ _ ih => simp only [CandidateList.familyTypes, ih]
+
+/-- The head family assembled for a nonempty block retains the exact
+pre-family type candidate selected by the source-indexed traversal. -/
+theorem CandidateFamilyListProduced.head_familyType
+    {source : InductiveType} {sources : List InductiveType}
+    {familyTypes : CandidateList CandidateFamilyType (source :: sources)}
+    {families : CandidateList CandidateFamily (source :: sources)}
+    (run : CandidateFamilyListProduced context familyTypes families) :
+    families.head.familyType = familyTypes.head := by
+  cases run
+  rfl
 
 /-- Reindex an arbitrary-length family-production witness by the family-type
 payload stored in its own assembled result. -/
@@ -3128,6 +3283,38 @@ info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_of_can
 -/
 #guard_msgs in
 #print axioms CandidateExprTrace.checkInductiveTypes_loop_of_candidate
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_not_ok_of_candidate_tooFew' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.checkInductiveTypes_loop_not_ok_of_candidate_tooFew
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.nparams_le_spineLength_of_firstFamilyValidation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.nparams_le_spineLength_of_firstFamilyValidation
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyType.nparams_le_spineLength_of_firstFamilyValidation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyType.nparams_le_spineLength_of_firstFamilyValidation
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyListProduced.head_familyType' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyListProduced.head_familyType
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_singleton_of_candidate' depends on axioms: [propext,

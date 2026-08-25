@@ -1281,6 +1281,23 @@ def EnvironmentInductiveExecution.Complete
 
 namespace EnvironmentInductiveExecution
 
+/-- A retained public execution can only exist for a nonempty source family
+list.  This is the exact rejection performed before nested elimination reads
+or mutates its private state. -/
+theorem inputTypes_nonempty
+    (execution : EnvironmentInductiveExecution env lparams nparams types
+      isUnsafe allowPrimitive fuel finalEnv) :
+    types.isEmpty = false := by
+  cases types with
+  | nil =>
+      have run := execution.nestedRun
+      simp [ElimNestedInductive.runAt, ElimNestedInductive.run,
+        StateT.run', Functor.map, Except.map, throw, throwThe,
+        MonadExceptOf.throw] at run
+      change Except.error _ = Except.ok execution.nested at run
+      contradiction
+  | cons => rfl
+
 /-- Execute the instrumented outer pipeline, retaining every successful phase
 and the exact final branch. -/
 def buildExecution (env : Environment) (lparams : List Name) (nparams : Nat)
@@ -1547,6 +1564,14 @@ theorem restoration_of_numNested_ne
         exact ⟨restoration, restorationRun, rfl⟩
 
 end EnvironmentInductiveExecution
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.inputTypes_nonempty' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms EnvironmentInductiveExecution.inputTypes_nonempty
 
 /--
 info: 'Lean4Lean.AddInductive.KTargetCtorTrace.run' depends on axioms: [propext]

@@ -1819,10 +1819,44 @@ theorem ProducedBlockRecursorShapeCandidate.semanticViewGeneratedNames_nodup
     produced.producedExecution]
   exact produced.execution.declaredNames_nodup validationMapWF
 
+private theorem list_eq_cons_of_isEmpty_false
+    (sources : List α) (nonempty : sources.isEmpty = false) :
+    ∃ source tail, sources = source :: tail := by
+  cases sources with
+  | nil => simp at nonempty
+  | cons source tail => exact ⟨source, tail, rfl⟩
+
+/-- The retained ordinary validator and generation-spine gate determine the
+exact parameter-prefix length of the semantic normalized view. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticViewParams_length
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (sourceNonempty : kernelSources.isEmpty = false)
+    (context_lctx_eq : context.lctx = {}) :
+    (blockParams semantic.normalization.view.nparams
+      semantic.normalization.view.types).length =
+        semantic.normalization.view.nparams := by
+  have normalizationProduced := produced.execution.normalization_run
+    produced.producedExecution
+  obtain ⟨kernelSource, remainingSources, sources_eq⟩ :=
+    list_eq_cons_of_isEmpty_false kernelSources sourceNonempty
+  subst kernelSources
+  exact semantic.viewParams_length_of_execution
+    produced.execution.eliminationExecution.normalization
+    normalizationProduced context_lctx_eq
+
 /-- Construct the semantic analyzer block while sourcing its global name
-field from the actual ordinary declaration transaction.  Callers now provide
-only the retained parameter/family spine and nonemptiness facts; they cannot
-smuggle in an independently asserted generated-name inventory. -/
+field from the actual ordinary declaration transaction.  The normalized
+family inventory's nonemptiness is transported from the source-indexed kernel
+block, while its parameter-prefix length is derived from the retained family
+validation and complete-spine gate. Callers cannot smuggle in either an
+independently asserted length, name list, or view-list witness. -/
 def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -1837,16 +1871,19 @@ def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
     (params : List VExpr)
     (params_eq : params = blockParams semantic.normalization.view.nparams
       semantic.normalization.view.types)
-    (params_length : params.length = semantic.normalization.view.nparams)
     (families : CheckedFamilies semantic.normalization.view params 0
       semantic.normalization.view.types)
-    (nonempty : semantic.normalization.view.types.isEmpty = false) :
+    (sourceNonempty : kernelSources.isEmpty = false)
+    (context_lctx_eq : context.lctx = {}) :
     semantic.normalization.view.CheckedBlock where
   params := params
   params_eq := params_eq
-  params_length := params_length
+  params_length := by
+    rw [params_eq]
+    exact produced.semanticViewParams_length semantic sourceNonempty
+      context_lctx_eq
   families := families
-  nonempty := nonempty
+  nonempty := semantic.viewTypes_isEmpty_eq_sources.trans sourceNonempty
   names := blockGeneratedNames semantic.normalization.view.types
   names_eq := rfl
   names_nodup :=
