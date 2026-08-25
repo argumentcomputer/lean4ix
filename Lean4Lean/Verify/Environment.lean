@@ -1923,8 +1923,10 @@ structure
 
 /-- Close the exact semantic-generation and post-constructor alignment phases
 around the source and candidate already selected by enriched outer staging.
-The remaining hypotheses are precisely the analyzer result, semantic WF, and
-checker/elimination correspondence for that same dependent execution. -/
+Identifying the generation block's normalization with each checker-selected
+semantic owner derives the exact analyzer result internally.  Semantic WF and
+checker/elimination correspondence remain indexed by the same dependent
+execution. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.exists_exactRecursorStagingResult
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -1936,12 +1938,12 @@ theorem
     (generation : VInductDecl.BlockGenerationChecked staged.source)
     (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
       execution.flattened.candidate = true)
-    (analysis : ∀ semantic :
+    (normalization_eq : ∀ semantic :
         VInductDecl.NormalizationCandidateBlockSemanticRun
           (ves.venv .safe)
           staged.enriched.blockEnv lparams
           (staged.recursorShape shape).candidate staged.source,
-      semantic.normalization.checkBlock? = some generation.block)
+      generation.block.normalization = semantic.normalization)
     (checked : generation.block.checked.WF (ves.venv .safe)
       generation.validated.resultLevel)
     (resultLevelWF : generation.validated.resultLevel.WF staged.source.uvars)
@@ -1951,6 +1953,14 @@ theorem
       (execution.FlattenedExactRecursorStagingResult staged generation
         shape) := by
   let produced := staged.recursorShape shape
+  have analysis : ∀ semantic :
+      VInductDecl.NormalizationCandidateBlockSemanticRun
+        (ves.venv .safe) staged.enriched.blockEnv lparams
+        produced.candidate staged.source,
+      semantic.normalization.checkBlock? = some generation.block := by
+    intro semantic
+    exact VInductDecl.Normalization.checkBlock?_eq_some_iff.mpr
+      (normalization_eq semantic)
   obtain ⟨block⟩ :=
     produced.eliminationBase.base.exactBlockGenerationRun_nonempty
       (staged.recursorSemanticInput shape) generation analysis checked

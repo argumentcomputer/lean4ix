@@ -1837,6 +1837,38 @@ theorem Normalization.checkBlock?_normalization
     rfl
   · contradiction
 
+/-- A retained normalized block replays through the analyzer to itself.  Its
+`checked_eq` field is exactly the successful inner dependent-family analysis;
+`checkBlock?` adds no further choice or validation. -/
+theorem NormalizedCheckedBlock.checkBlock?
+    {source : VInductDecl} (block : NormalizedCheckedBlock source) :
+    block.normalization.checkBlock? = some block := by
+  cases block with
+  | mk normalization checked checked_eq =>
+      unfold Normalization.checkBlock?
+      split
+      next actual actual_eq =>
+        have actual_eq_checked : actual = checked :=
+          Option.some.inj (actual_eq.symm.trans checked_eq)
+        subst actual
+        rfl
+      next none_eq =>
+        rw [checked_eq] at none_eq
+        contradiction
+
+/-- Exact arbitrary-block analysis is equivalent to identifying the retained
+normalization.  The forward direction is analyzer provenance; the reverse
+direction replays the dependent checked block already stored by `block`. -/
+theorem Normalization.checkBlock?_eq_some_iff
+    {source : VInductDecl} {norm : Normalization source}
+    {block : NormalizedCheckedBlock source} :
+    norm.checkBlock? = some block ↔ block.normalization = norm := by
+  constructor
+  · exact Normalization.checkBlock?_normalization
+  · intro normalization_eq
+    rw [← normalization_eq]
+    exact block.checkBlock?
+
 theorem identityChecked?_isSome (source : VInductDecl) :
     (identityChecked? source).isSome = source.checked?.isSome := by
   obtain ⟨U, np, types⟩ := source
@@ -1901,6 +1933,18 @@ info: 'Lean4Lean.VInductDecl.Normalization.generation?_normalization' depends on
 -/
 #guard_msgs in
 #print axioms Normalization.generation?_normalization
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizedCheckedBlock.checkBlock?' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizedCheckedBlock.checkBlock?
+
+/--
+info: 'Lean4Lean.VInductDecl.Normalization.checkBlock?_eq_some_iff' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Normalization.checkBlock?_eq_some_iff
 
 /--
 info: 'Lean4Lean.VInductDecl.identityChecked?_isSome' depends on axioms: [propext, Classical.choice, Quot.sound]

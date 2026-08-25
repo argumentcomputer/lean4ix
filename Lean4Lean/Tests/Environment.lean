@@ -118,6 +118,8 @@ open Lean
 #check Lean4Lean.StructureEtaReady.addInductInfo_of_ctor_absent
 #check Lean4Lean.VInductDecl.declarationTraceConstructorAbsentReadiness
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput
+#check Lean4Lean.VInductDecl.NormalizedCheckedBlock.checkBlock?
+#check Lean4Lean.VInductDecl.Normalization.checkBlock?_eq_some_iff
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput.familyInsertion
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput.stage
 #check Lean4Lean.VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput.staging
