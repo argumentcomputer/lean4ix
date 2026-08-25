@@ -1938,6 +1938,139 @@ noncomputable def
     VInductDecl.ExactProducedBlockMetadataPrefixRun result.run :=
   result.run.metadataPrefix (staged.recursorStaging shape) evidence rawsWF
 
+/-- An original Theory declaration and checked nested artifact whose
+flattened block is exactly the enriched source selected by the retained outer
+execution.  The auxiliary-count equation ties the Theory transformation to
+the genuine nested branch of that same host execution. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) where
+  source : VInductDecl
+  nested : source.NestedBlockChecked
+  flat_eq : nested.elim.flat = staged.source
+  numNested_eq : nested.elim.numNested = execution.nested.aux2nested.size
+
+/-- The exact flattened generation is determined by the aligned nested
+artifact; it is not another analyzer output supplied beside that artifact. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.generation
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged) :
+    VInductDecl.BlockGenerationChecked staged.source :=
+  artifact.flat_eq ▸ artifact.nested.generation
+
+/-- A definitionally aligned presentation of the checked nested artifact.
+Only its stored flat field is re-presented; `flat_eq` proves that this value is
+equal to the original artifact while making the exact flattened source and
+generation reduce without casts in downstream dependent APIs. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.alignedNested
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged) :
+    artifact.source.NestedBlockChecked where
+  elim := {
+    flat := staged.source
+    specs := artifact.nested.elim.specs }
+  generation := artifact.generation
+
+/-- The aligned presentation is propositionally the exact checked artifact
+supplied by the Theory nested analyzer. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.alignedNested_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged) :
+    artifact.alignedNested = artifact.nested := by
+  cases artifact with
+  | mk source nested flat_eq numNested_eq =>
+      cases nested with
+      | mk elim generation =>
+          cases elim with
+          | mk flat specs =>
+              simp only at flat_eq
+              subst flat
+              rfl
+
+/-- Exact Theory-side semantic restoration for the nested artifact attached
+to one flattened staging owner.  Its deterministic transaction endpoint is
+kept explicit so it can later be aligned with the host restoration map. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestorationResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged)
+    (after : VEnv) where
+  nested_wf : artifact.alignedNested.WF (ves.venv .safe)
+  success : (ves.venv .safe).addInductNested artifact.alignedNested = some after
+  before_wf : (ves.venv .safe).WF
+
+/-- Erase the execution-owned wrapper to the generic completed nested
+certificate consumed by restored-rule transport. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestorationResult.certificate
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after) :
+    artifact.source.NestedBlockCertificate (ves.venv .safe) after where
+  nested := artifact.alignedNested
+  semantic := restoration.nested_wf
+  success := restoration.success
+  beforeWF := restoration.before_wf
+
+/-- Pair the exact execution-owned flattened transaction with its exact
+Theory nested restoration.  The flat rule endpoint is deterministic, and the
+flat declaration and generation are both inherited from `artifact`; no
+alignment equality is exposed to downstream certificate consumers. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult.nestedStagedCertificate
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after) :
+    artifact.source.NestedStagedCertificate (ves.venv .safe)
+      (artifact.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) after := by
+  exact metadata.nestedStagedCertificate restoration.certificate ⟨rfl⟩
+
 /-- A recognized primitive execution's exact family metadata translates to
 the canonical Theory family inventory.  The proof selects the sole retained
 metadata record through the validator's source-aligned relation; no parallel
@@ -3049,6 +3182,387 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
       | ordinary _ => rfl
       | nested numNested_ne restoration restorationRun =>
           exact (numNested_ne numNested_eq).elim
+
+/-- Select the exact host restoration object already retained by a genuinely
+nested outer execution.  This removes restoration choice from all later
+semantic staging interfaces. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.selectedNestedRestoration
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
+    NestedRestorationResult execution.nested
+      execution.flattened.recursors.env env types false .safe lparams {} :=
+  Classical.choose (execution.restoration_of_numNested_ne numNested_ne)
+
+/-- The selected restoration is the result of the actual restoration
+program, not merely an extensionally matching inventory. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.selectedNestedRestoration_run
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
+    restoreNestedEnvironment execution.nested
+        execution.flattened.recursors.env env types false .safe lparams {} =
+      .ok (execution.selectedNestedRestoration numNested_ne) :=
+  (Classical.choose_spec
+    (execution.restoration_of_numNested_ne numNested_ne)).1
+
+/-- The selected restoration's host endpoint is exactly the public final
+environment of the retained outer execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.selectedNestedRestoration_finalEnv_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
+    finalEnv = (execution.selectedNestedRestoration numNested_ne).env :=
+  (Classical.choose_spec
+    (execution.restoration_of_numNested_ne numNested_ne)).2
+
+/-- A lookup that is fresh in the input but present after nonprimitive nested
+restoration must come from the restoration inventory, whose declaration trace
+has already checked both primitive-name side conditions. -/
+theorem NestedRestorationResult.name_not_primitive_of_fresh_lookup
+    {res : ElimNestedInductive.Result}
+    {flatEnv initialEnv : Environment} {types : List InductiveType}
+    {safety : DefinitionSafety} {lparams : List Name} {fuel : FuelConfig}
+    (restoration : NestedRestorationResult res flatEnv initialEnv types false
+      safety lparams fuel)
+    (inputMapWF : initialEnv.constants.WF)
+    {name : Name} {info : ConstantInfo}
+    (inputFresh : initialEnv.constants.find? name = none)
+    (restoredLookup : restoration.env.constants.find? name = some info) :
+    name ∉ VEnv.reflectedPrimitiveNames ∧
+      Environment.primitives.contains name = false := by
+  rcases restoration.trace.map_lookup_cases inputMapWF restoredLookup with
+    old | inserted
+  · rw [inputFresh] at old
+    contradiction
+  · have names := restoration.trace.names_not_primitive info inserted.1
+    simpa only [inserted.2] using names
+
+/-- Restored family, constructor, and recursor metadata staging against the
+actual host restoration object selected by a genuinely nested outer
+execution.  This is the nested analogue of the exact flattened metadata
+prefix: only the restored constant translations and K correspondence remain;
+the restored rule endpoint is deterministic. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestoredMetadataPrefixRun
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0) where
+  typeMap : ConstMap
+  typeEnv : VEnv
+  ctorMap : ConstMap
+  ctorEnv : VEnv
+  recEnv : VEnv
+  addTypes : AddInductConstants .induct env.constants (ves.venv .safe)
+    artifact.source.blockTypeConstants typeMap typeEnv
+  addCtors : AddInductConstants .ctor typeMap typeEnv
+    artifact.source.blockConstructorConstants ctorMap ctorEnv
+  addRecs : AddInductConstants .recursor ctorMap ctorEnv
+    artifact.alignedNested.recursors
+    (execution.selectedNestedRestoration numNested_ne).env.constants recEnv
+  recK : RecursorMapKMatches
+    (execution.selectedNestedRestoration numNested_ne).env.constants
+    artifact.alignedNested.recursors artifact.generation.kTarget
+
+/-- Complete the actual restored metadata prefix with its deterministic rule
+fold.  Uniqueness of `addInductNested` identifies that fold with the semantic
+restoration endpoint, while the retained outer completion identifies the host
+map with `finalEnv.constants`. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestoredMetadataPrefixRun.addInductNestedTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    (restoredMetadata : execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+      numNested_ne) :
+    AddInductNestedTrace env.constants (ves.venv .safe) artifact.source
+      finalEnv.constants after := by
+  let deterministic := artifact.alignedNested.generatedRules.foldl
+    VEnv.addDefEq restoredMetadata.recEnv
+  let hostTrace : AddInductNestedTrace env.constants (ves.venv .safe)
+      artifact.source
+      (execution.selectedNestedRestoration numNested_ne).env.constants
+      deterministic := {
+    nested := artifact.alignedNested
+    nested_wf := restoration.nested_wf
+    typeMap := restoredMetadata.typeMap
+    typeEnv := restoredMetadata.typeEnv
+    ctorMap := restoredMetadata.ctorMap
+    ctorEnv := restoredMetadata.ctorEnv
+    recEnv := restoredMetadata.recEnv
+    addTypes := restoredMetadata.addTypes
+    addCtors := restoredMetadata.addCtors
+    addRecs := restoredMetadata.addRecs
+    recK := restoredMetadata.recK
+    addRules := ⟨rfl⟩ }
+  have after_eq : after = deterministic := Option.some.inj
+    (restoration.success.symm.trans hostTrace.to_addInductNested)
+  rw [after_eq]
+  have finalEnv_eq :=
+    execution.selectedNestedRestoration_finalEnv_eq numNested_ne
+  simpa only [finalEnv_eq] using hostTrace
+
+/-- Complete dependent owner for both sides of a genuine nested transaction:
+the exact flattened generation is retained beside the paired Theory
+restoration certificate, while the restored metadata prefix produces a trace
+whose host endpoint is the actual public restoration map. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run)
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne) where
+  stagedCertificate : artifact.source.NestedStagedCertificate
+    (ves.venv .safe)
+    (artifact.generation.generatedRules.foldl VEnv.addDefEq
+      metadata.recursors.recEnv) after
+  safeTrace : AddInductNestedTrace env.constants (ves.venv .safe)
+    artifact.source finalEnv.constants after
+
+/-- Assemble the paired flat/restored certificate and the exact safe nested
+trace from their two execution-indexed metadata prefixes. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult.nestedTransaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run)
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne) :
+    execution.FlattenedExactNestedTransactionResult flat metadata restoration
+      numNested_ne restoredMetadata where
+  stagedCertificate := flat.nestedStagedCertificate metadata restoration
+  safeTrace := restoredMetadata.addInductNestedTrace
+
+/-- The exact family fold and the actual nonprimitive restoration trace imply
+the primitive-name side conditions for every restored source family. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.typeNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ∀ ci ∈ artifact.source.blockTypeConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  intro ci member
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have typeMapWF := transaction.safeTrace.addTypes.map_wf inputMapWF
+  have ctorMapWF := transaction.safeTrace.addCtors.map_wf typeMapWF
+  obtain ⟨info, typeLookup, _, _⟩ :=
+    transaction.safeTrace.addTypes.translated_lookup inputMapWF member
+  have constructorLookup := transaction.safeTrace.addCtors.preserve_map_lookup
+    typeMapWF typeLookup
+  have finalLookup := transaction.safeTrace.addRecs.preserve_map_lookup
+    ctorMapWF constructorLookup
+  have restoredLookup :
+      (execution.selectedNestedRestoration numNested_ne).env.constants.find?
+        ci.name = some info := by
+    simpa only [execution.selectedNestedRestoration_finalEnv_eq numNested_ne]
+      using finalLookup
+  exact (execution.selectedNestedRestoration numNested_ne)
+    |>.name_not_primitive_of_fresh_lookup inputMapWF
+      (transaction.safeTrace.addTypes.map_fresh inputMapWF member)
+      restoredLookup
+
+/-- Constructor-name avoidance is likewise forced by the constructor fold;
+lookup preservation transports its evidence through the recursor fold and
+backward freshness transports absence to the original host map. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.ctorNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ∀ ci ∈ artifact.source.blockConstructorConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  intro ci member
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have typeMapWF := transaction.safeTrace.addTypes.map_wf inputMapWF
+  have ctorMapWF := transaction.safeTrace.addCtors.map_wf typeMapWF
+  obtain ⟨info, constructorLookup, _, _⟩ :=
+    transaction.safeTrace.addCtors.translated_lookup typeMapWF member
+  have finalLookup := transaction.safeTrace.addRecs.preserve_map_lookup
+    ctorMapWF constructorLookup
+  have typeMapFresh := transaction.safeTrace.addCtors.map_fresh
+    typeMapWF member
+  have inputFresh :=
+    transaction.safeTrace.addTypes.input_map_none_of_output_none inputMapWF
+      typeMapFresh
+  have restoredLookup :
+      (execution.selectedNestedRestoration numNested_ne).env.constants.find?
+        ci.name = some info := by
+    simpa only [execution.selectedNestedRestoration_finalEnv_eq numNested_ne]
+      using finalLookup
+  exact (execution.selectedNestedRestoration numNested_ne)
+    |>.name_not_primitive_of_fresh_lookup inputMapWF inputFresh restoredLookup
+
+/-- Recursor-name avoidance is forced by the final exact metadata fold and
+transported back through both earlier folds before consulting the actual
+nonprimitive restoration trace. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.recNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ∀ ci ∈ transaction.safeTrace.nested.recursors,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  intro ci member
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have typeMapWF := transaction.safeTrace.addTypes.map_wf inputMapWF
+  have ctorMapWF := transaction.safeTrace.addCtors.map_wf typeMapWF
+  obtain ⟨info, finalLookup, _, _⟩ :=
+    transaction.safeTrace.addRecs.translated_lookup ctorMapWF member
+  have ctorMapFresh := transaction.safeTrace.addRecs.map_fresh
+    ctorMapWF member
+  have typeMapFresh :=
+    transaction.safeTrace.addCtors.input_map_none_of_output_none typeMapWF
+      ctorMapFresh
+  have inputFresh :=
+    transaction.safeTrace.addTypes.input_map_none_of_output_none inputMapWF
+      typeMapFresh
+  have restoredLookup :
+      (execution.selectedNestedRestoration numNested_ne).env.constants.find?
+        ci.name = some info := by
+    simpa only [execution.selectedNestedRestoration_finalEnv_eq numNested_ne]
+      using finalLookup
+  exact (execution.selectedNestedRestoration numNested_ne)
+    |>.name_not_primitive_of_fresh_lookup inputMapWF inputFresh restoredLookup
+
+/-- Replay the exact safe nested trace coherently at every safety level.  The
+source, restoration artifact, endpoints, rule fold, and all primitive-name
+side conditions are fixed by the dependent transaction above. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.safeReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    CoherentPrimitivePreservingTransactions.SafeReplay execution
+      artifact.source ves after :=
+  CoherentPrimitivePreservingTransactions.ofNestedSafeTrace wf numNested_ne
+    transaction.safeTrace (transaction.typeNames wf)
+      (transaction.ctorNames wf) (transaction.recNames wf)
 
 /-- In the ordinary branch, reindexing the retained recursor execution onto
 the enriched Theory source does not change its host-environment endpoint. -/

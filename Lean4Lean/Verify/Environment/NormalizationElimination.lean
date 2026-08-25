@@ -1001,6 +1001,23 @@ theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.map_fresh
         · contradiction
         · exact freshAfter
 
+/-- Every record accepted by a nonprimitive mixed restoration fold avoids
+both the kernel primitive inventory and its reflected Theory subset. -/
+theorem _root_.Lean4Lean.DeclareRestoredInfoListRun.names_not_primitive
+    (run : DeclareRestoredInfoListRun false env infos finalEnv) :
+    ∀ info ∈ infos,
+      info.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains info.name = false := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | cons checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · have fresh := VInductDecl.checkName_primitives_fresh checkName
+        exact ⟨VInductDecl.not_reflectedPrimitive_of_primitives_fresh fresh,
+          fresh⟩
+      · exact ih info member
+
 /-- Classify any final lookup after nested restoration as either unchanged
 input metadata or the exact record selected from the retained restored
 inventory. -/

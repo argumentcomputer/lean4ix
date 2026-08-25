@@ -185,6 +185,20 @@ theorem AddInductConstants.preserve_map_lookup
   | cons h hrest ih =>
     exact ih (h.map_wf wf) (h.preserve_map_lookup wf hlookup)
 
+/-- If a name is absent after an exact metadata fold, it was already absent
+before the fold.  This is the contrapositive form of lookup preservation used
+when later phases establish freshness. -/
+theorem AddInductConstants.input_map_none_of_output_none
+    (H : AddInductConstants kind C₁ env₁ cis C₂ env₂)
+    (wf : C₁.WF) (output_none : C₂.find? name = none) :
+    C₁.find? name = none := by
+  cases input_found : C₁.find? name with
+  | none => rfl
+  | some info =>
+      have preserved := H.preserve_map_lookup wf input_found
+      rw [preserved] at output_none
+      contradiction
+
 /-- Final-map evidence for any member of an inductive metadata fold.  The
 result retains the exact implementation object, its role tag, and its
 translation against the final Theory environment. -/
