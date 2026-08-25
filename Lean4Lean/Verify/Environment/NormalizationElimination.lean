@@ -339,6 +339,31 @@ theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_fresh
         rw [wf.find?_insert] at tailFresh
         split at tailFresh <;> simp_all
 
+/-- Sequential constructor name checks make the exact declaration inventory
+pairwise distinct. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_nodup
+    (run : AddInductive.DeclareConstructorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    (infos.map (·.name)).Nodup := by
+  induction run with
+  | nil => simp
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rw [List.map_cons, List.nodup_cons]
+      constructor
+      · intro member
+        obtain ⟨other, otherMember, nameEq⟩ := List.mem_map.1 member
+        have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.ctorInfo inserted)
+          insertedFresh
+        have fresh := tail.names_fresh nextWF other otherMember
+        change (startEnv.constants.insert inserted.name
+          (.ctorInfo inserted)).find? other.name = none at fresh
+        rw [nameEq, wf.find?_insert] at fresh
+        simp at fresh
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName))
+
 /-- Every constructor accepted by a nonprimitive declaration fold avoids
 both the kernel primitive inventory and its reflected Theory subset. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareConstructorInfoListRun.names_not_primitive
@@ -817,6 +842,53 @@ theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.map_wf
       apply ih
       exact wf.insert _ _ (VInductDecl.checkName_constants_fresh checkName)
 
+/-- Every generated recursor accepted by a declaration fold was absent from
+the fold's complete input environment. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.names_fresh
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    ∀ info ∈ infos, env.constants.find? info.name = none := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact VInductDecl.checkName_constants_fresh checkName
+      · have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.recInfo inserted)
+          insertedFresh
+        have tailFresh := ih nextWF info member
+        change (startEnv.constants.insert inserted.name
+          (.recInfo inserted)).find? info.name = none at tailFresh
+        rw [wf.find?_insert] at tailFresh
+        split at tailFresh <;> simp_all
+
+/-- Sequential recursor name checks make the exact generated inventory
+pairwise distinct. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.names_nodup
+    (run : AddInductive.DeclareRecursorInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    (infos.map (·.name)).Nodup := by
+  induction run with
+  | nil => simp
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rw [List.map_cons, List.nodup_cons]
+      constructor
+      · intro member
+        obtain ⟨other, otherMember, nameEq⟩ := List.mem_map.1 member
+        have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.recInfo inserted)
+          insertedFresh
+        have fresh := tail.names_fresh nextWF other otherMember
+        change (startEnv.constants.insert inserted.name
+          (.recInfo inserted)).find? other.name = none at fresh
+        rw [nameEq, wf.find?_insert] at fresh
+        simp at fresh
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName))
+
 /-- Every generated recursor accepted by a nonprimitive declaration fold
 avoids both the kernel primitive inventory and its reflected Theory subset. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareRecursorInfoListRun.names_not_primitive
@@ -957,6 +1029,150 @@ info: 'Lean4Lean.AddInductive.DeclareRecursorInfoListRun.constant_lookup_cases' 
 -/
 #guard_msgs in
 #print axioms AddInductive.DeclareRecursorInfoListRun.constant_lookup_cases
+
+/-- The three declaration phases of one retained ordinary execution reserve a
+single collision-free family/constructor/recursor name inventory.  The proof
+uses the real phase boundaries: each later trace checks freshness against the
+environment containing every earlier phase. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationRecursorExecution.declaredNames_nodup
+    {nparams : Nat} {types : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationRecursorExecution nparams types
+      numNested isUnsafe context)
+    (validationMapWF : execution.eliminationExecution.normalization
+      |>.validationContext.env.constants.WF) :
+    (execution.eliminationExecution.normalization.declaredInfos.map
+        (·.name) ++
+      execution.eliminationExecution.declaredConstructorInfos.map
+        (·.name) ++
+      execution.recursors.infos.map (·.name)).Nodup := by
+  let familyTrace :=
+    execution.eliminationExecution.normalization.declareTrace
+  let constructorTrace :=
+    execution.eliminationExecution.declareConstructorTrace
+  let recursorTrace := execution.recursors.trace
+  have familyMapWF := familyTrace.map_wf validationMapWF
+  have constructorMapWF := constructorTrace.map_wf familyMapWF
+  have recursorInitialMapWF :
+      execution.recursors.initialEnv.constants.WF := by
+    rw [execution.recursor_initialEnv_eq]
+    exact constructorMapWF
+  have familyNodup := familyTrace.names_nodup validationMapWF
+  have constructorNodup := constructorTrace.names_nodup familyMapWF
+  have recursorNodup := recursorTrace.names_nodup recursorInitialMapWF
+  rw [List.nodup_append]
+  refine ⟨?_, recursorNodup, ?_⟩
+  · rw [List.nodup_append]
+    refine ⟨familyNodup, constructorNodup, ?_⟩
+    intro familyName familyMember constructorName constructorMember equal
+    obtain ⟨familyInfo, familyInfoMember, rfl⟩ :=
+      List.mem_map.1 familyMember
+    obtain ⟨constructorInfo, constructorInfoMember, rfl⟩ :=
+      List.mem_map.1 constructorMember
+    have present := familyTrace.map_lookup validationMapWF familyInfoMember
+    have fresh := constructorTrace.names_fresh familyMapWF constructorInfo
+      constructorInfoMember
+    rw [← equal, present] at fresh
+    contradiction
+  · intro oldName oldMember recursorName recursorMember equal
+    obtain ⟨recursorInfo, recursorInfoMember, rfl⟩ :=
+      List.mem_map.1 recursorMember
+    have fresh := recursorTrace.names_fresh recursorInitialMapWF recursorInfo
+      recursorInfoMember
+    rcases List.mem_append.1 oldMember with familyMember | constructorMember
+    · obtain ⟨familyInfo, familyInfoMember, rfl⟩ :=
+        List.mem_map.1 familyMember
+      have familyPresent := familyTrace.map_lookup validationMapWF
+        familyInfoMember
+      have constructorPresent := constructorTrace.preserve_map_lookup
+        familyMapWF familyPresent
+      have present : execution.recursors.initialEnv.constants.find?
+          familyInfo.name = some (.inductInfo familyInfo) := by
+        rw [execution.recursor_initialEnv_eq]
+        exact constructorPresent
+      rw [← equal, present] at fresh
+      contradiction
+    · obtain ⟨constructorInfo, constructorInfoMember, rfl⟩ :=
+        List.mem_map.1 constructorMember
+      have constructorPresent := constructorTrace.map_lookup familyMapWF
+        constructorInfoMember
+      have present : execution.recursors.initialEnv.constants.find?
+          constructorInfo.name = some (.ctorInfo constructorInfo) := by
+        rw [execution.recursor_initialEnv_eq]
+        exact constructorPresent
+      rw [← equal, present] at fresh
+      contradiction
+
+/-- The retained declaration inventory is not merely collision-free: its
+three phases are exactly the family, family-major constructor, and canonical
+recursor names of the ordinary source block. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationRecursorExecution.declaredNames_eq_sources
+    {nparams : Nat} {types : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationRecursorExecution nparams types
+      numNested isUnsafe context)
+    (producedExecution :
+      AddInductive.NormalizationRecursorExecution.buildExecution nparams
+        types numNested isUnsafe context = .ok execution) :
+    execution.eliminationExecution.normalization.declaredInfos.map
+        (·.name) ++
+      execution.eliminationExecution.declaredConstructorInfos.map
+        (·.name) ++
+      execution.recursors.infos.map (·.name) =
+      types.map (·.name) ++
+        types.flatMap (fun source => source.ctors.map (·.name)) ++
+        types.map (fun source => (.str source.name "rec" : Name)) := by
+  have normalizationProduced :=
+    execution.normalization_run producedExecution
+  have nindicesSize :=
+    execution.eliminationExecution.normalization.validationNindicesSize_all
+      normalizationProduced
+  have familyNames :
+      execution.eliminationExecution.normalization.declaredInfos.map
+          (·.name) = types.map (·.name) := by
+    simpa only [AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_names
+        execution.eliminationExecution.normalization.stats nparams
+        types.toArray numNested isUnsafe
+        execution.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  have constructorNames :
+      execution.eliminationExecution.declaredConstructorInfos.map
+          (·.name) =
+        types.flatMap (fun source => source.ctors.map (·.name)) := by
+    simpa only [
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+      List.toList_toArray] using
+      AddInductive.declaredConstructorInfos_names
+        execution.eliminationExecution.normalization.stats types.toArray
+        isUnsafe execution.eliminationExecution.constructorContext
+  have recursorNames : execution.recursors.infos.map (·.name) =
+      types.map (fun source => (.str source.name "rec" : Name)) := by
+    simpa only [List.toList_toArray, mkRecName] using
+      AddInductive.declareRecursors_infos_names execution.recursorsRun
+  rw [familyNames, constructorNames, recursorNames]
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationRecursorExecution.declaredNames_nodup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.NormalizationRecursorExecution.declaredNames_nodup
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationRecursorExecution.declaredNames_eq_sources' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.NormalizationRecursorExecution.declaredNames_eq_sources
 
 /-! ## Nested-restoration declaration provenance -/
 
@@ -1552,6 +1768,89 @@ def ProducedBlockRecursorShapeCandidate.candidate
       numNested isUnsafe context) :
     AddInductive.NormalizationCandidate kernelSources :=
   produced.execution.candidate
+
+/-- The real declaration traces discharge the raw Theory block's generated-
+name collision check.  Source-order equations on both sides ensure this is the
+same inventory as the semantic hierarchy, not merely a setwise coincidence. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticGeneratedNames_nodup
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (validationMapWF : produced.execution.eliminationExecution.normalization
+      |>.validationContext.env.constants.WF) :
+    (blockGeneratedNames source.types).Nodup := by
+  rw [semantic.blockGeneratedNames_eq_sources]
+  rw [← produced.execution.declaredNames_eq_sources
+    produced.producedExecution]
+  exact produced.execution.declaredNames_nodup validationMapWF
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticGeneratedNames_nodup' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentHashMap.findAux_isSome,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms ProducedBlockRecursorShapeCandidate.semanticGeneratedNames_nodup
+
+/-- Header preservation transports the producer-derived collision proof to
+the exact normalized view consumed by `CheckedBlock`. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticViewGeneratedNames_nodup
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (validationMapWF : produced.execution.eliminationExecution.normalization
+      |>.validationContext.env.constants.WF) :
+    (blockGeneratedNames semantic.families.views).Nodup := by
+  rw [semantic.viewBlockGeneratedNames_eq_sources]
+  rw [← produced.execution.declaredNames_eq_sources
+    produced.producedExecution]
+  exact produced.execution.declaredNames_nodup validationMapWF
+
+/-- Construct the semantic analyzer block while sourcing its global name
+field from the actual ordinary declaration transaction.  Callers now provide
+only the retained parameter/family spine and nonemptiness facts; they cannot
+smuggle in an independently asserted generated-name inventory. -/
+def ProducedBlockRecursorShapeCandidate.semanticCheckedBlock
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (validationMapWF : produced.execution.eliminationExecution.normalization
+      |>.validationContext.env.constants.WF)
+    (params : List VExpr)
+    (params_eq : params = blockParams semantic.normalization.view.nparams
+      semantic.normalization.view.types)
+    (params_length : params.length = semantic.normalization.view.nparams)
+    (families : CheckedFamilies semantic.normalization.view params 0
+      semantic.normalization.view.types)
+    (nonempty : semantic.normalization.view.types.isEmpty = false) :
+    semantic.normalization.view.CheckedBlock where
+  params := params
+  params_eq := params_eq
+  params_length := params_length
+  families := families
+  nonempty := nonempty
+  names := blockGeneratedNames semantic.normalization.view.types
+  names_eq := rfl
+  names_nodup :=
+    produced.semanticViewGeneratedNames_nodup semantic validationMapWF
 
 /-- Run the retained ordinary producer through recursor synthesis/declaration
 and the unchanged complete generation-shape gate. -/

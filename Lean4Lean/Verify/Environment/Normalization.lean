@@ -3289,6 +3289,54 @@ theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_wf
       finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF :=
   VInductDecl.declarationTraceConstantsWF run wf
 
+/-- Every family accepted by a declaration fold was absent from the fold's
+input environment.  Freshness of later records reflects backwards across all
+earlier successful insertions. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.names_fresh
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    ∀ info ∈ infos, env.constants.find? info.name = none := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact VInductDecl.checkName_constants_fresh checkName
+      · have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.inductInfo inserted)
+          insertedFresh
+        have tailFresh := ih nextWF info member
+        change (startEnv.constants.insert inserted.name
+          (.inductInfo inserted)).find? info.name = none at tailFresh
+        rw [wf.find?_insert] at tailFresh
+        split at tailFresh <;> simp_all
+
+/-- Sequential family name checks make the exact declaration inventory
+pairwise distinct. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.names_nodup
+    (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
+      finalEnv) (wf : env.constants.WF) :
+    (infos.map (·.name)).Nodup := by
+  induction run with
+  | nil => simp
+  | @cons infosTail finalEnvTail startEnv inserted checkName tail ih =>
+      rw [List.map_cons, List.nodup_cons]
+      constructor
+      · intro member
+        obtain ⟨other, otherMember, nameEq⟩ := List.mem_map.1 member
+        have insertedFresh :=
+          VInductDecl.checkName_constants_fresh checkName
+        have nextWF := wf.insert inserted.name (.inductInfo inserted)
+          insertedFresh
+        have fresh := tail.names_fresh nextWF other otherMember
+        change (startEnv.constants.insert inserted.name
+          (.inductInfo inserted)).find? other.name = none at fresh
+        rw [nameEq, wf.find?_insert] at fresh
+        simp at fresh
+      · exact ih (wf.insert _ _
+          (VInductDecl.checkName_constants_fresh checkName))
+
 /-- Every family name accepted by a nonprimitive declaration trace avoids
 both the kernel and Theory primitive inventories. -/
 theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.names_not_primitive
@@ -4132,6 +4180,37 @@ def CandidateConstructorSemanticListRun.roots :
   | .nil => .nil
   | .cons head tail => .cons head.root tail.roots
 
+/-- The raw Theory constructor inventory carried by a semantic list preserves
+the complete kernel source-name order. -/
+theorem CandidateConstructorSemanticListRun.rawNames
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    (run : CandidateConstructorSemanticListRun env Us candidates raws) :
+    raws.map (·.name) = kernelSources.map (·.name) := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+      simp only [List.map_cons, ← head.name_eq, ih]
+
+/-- Replacing constructor expression payloads leaves the exact source-order
+name inventory unchanged. -/
+theorem CandidateConstructorSemanticListRun.viewNames
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    (run : CandidateConstructorSemanticListRun env Us candidates raws) :
+    run.roots.views.map (·.name) = kernelSources.map (·.name) := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+      simp only [CandidateConstructorSemanticListRun.roots,
+        CandidateConstructorListRun.views, List.map_cons,
+        CandidateConstructorSemanticRun.root, CandidateConstructorRun.view,
+        ← head.name_eq, ih]
+
 /-- One family in a mutual normalization candidate.  Its type is interpreted
 in the common pre-family environment, while every constructor is interpreted
 in the single environment obtained after staging the complete raw family
@@ -4180,6 +4259,46 @@ def CandidateBlockFamilySemanticListRun.views :
   | .nil => []
   | .cons head tail => head.view :: tail.views
 
+/-- A complete block semantic hierarchy preserves both family names and the
+family-major constructor-name inventory of its kernel sources. -/
+theorem CandidateBlockFamilySemanticListRun.rawHeaderNames
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) :
+    raws.map (·.name) = kernelSources.map (·.name) ∧
+      raws.flatMap (fun raw => raw.ctors.map (·.name)) =
+        kernelSources.flatMap (fun source => source.ctors.map (·.name)) := by
+  induction run with
+  | nil => exact ⟨rfl, rfl⟩
+  | cons head tail ih =>
+      exact ⟨by simp only [List.map_cons, ← head.name_eq, ih.1], by
+        simp only [List.flatMap_cons, head.constructors.rawNames, ih.2]⟩
+
+/-- The normalized semantic views preserve the source family's and every
+source constructor's exact name order. -/
+theorem CandidateBlockFamilySemanticListRun.viewHeaderNames
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) :
+    run.views.map (·.name) = kernelSources.map (·.name) ∧
+      run.views.flatMap (fun view => view.ctors.map (·.name)) =
+        kernelSources.flatMap (fun source => source.ctors.map (·.name)) := by
+  induction run with
+  | nil => exact ⟨rfl, rfl⟩
+  | cons head tail ih =>
+      exact ⟨by
+        simp only [CandidateBlockFamilySemanticListRun.views, List.map_cons,
+          CandidateBlockFamilySemanticRun.view, ← head.name_eq, ih.1], by
+        simp only [CandidateBlockFamilySemanticListRun.views,
+          List.flatMap_cons, CandidateBlockFamilySemanticRun.view,
+          head.constructors.viewNames, ih.2]⟩
+
 /-- Block semantic runs preserve every family and constructor header. -/
 theorem CandidateBlockFamilySemanticListRun.sameHeaders
     (run : CandidateBlockFamilySemanticListRun env blockEnv Us
@@ -4226,6 +4345,36 @@ structure NormalizationCandidateBlockSemanticRun
   families : CandidateBlockFamilySemanticListRun env blockEnv Us
     candidate.families rawDecl.types
 
+/-- The raw Theory block carried by a semantic hierarchy has exactly the
+family, constructor, and canonical recursor names of its kernel source list. -/
+theorem NormalizationCandidateBlockSemanticRun.blockGeneratedNames_eq_sources
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl) :
+    blockGeneratedNames rawDecl.types =
+      sources.map (·.name) ++
+        sources.flatMap (fun source => source.ctors.map (·.name)) ++
+        sources.map (fun source => (.str source.name "rec" : Name)) := by
+  obtain ⟨familyNames, constructorNames⟩ := run.families.rawHeaderNames
+  have recursorNames := congrArg
+    (List.map (fun name => (.str name "rec" : Name))) familyNames
+  have recursorNames' :
+      rawDecl.types.map (fun raw => (.str raw.name "rec" : Name)) =
+        sources.map (fun source => (.str source.name "rec" : Name)) := by
+    simpa only [List.map_map, Function.comp_def] using recursorNames
+  simp only [blockGeneratedNames, familyNames, constructorNames,
+    recursorNames']
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.blockGeneratedNames_eq_sources' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateBlockSemanticRun.blockGeneratedNames_eq_sources
+
 /-- Theory declaration selected by the exact block semantic hierarchy. -/
 def NormalizationCandidateBlockSemanticRun.viewDecl
     (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
@@ -4243,6 +4392,29 @@ def NormalizationCandidateBlockSemanticRun.normalization
       NormalizationCandidateBlockSemanticRun.viewDecl,
       beq_self_eq_true, Bool.true_and]
     exact run.families.sameHeaders
+
+/-- The exact normalized view has the same source-derived generated-name
+inventory as the raw semantic block. -/
+theorem
+    NormalizationCandidateBlockSemanticRun.viewBlockGeneratedNames_eq_sources
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl) :
+    blockGeneratedNames run.families.views =
+      sources.map (·.name) ++
+        sources.flatMap (fun source => source.ctors.map (·.name)) ++
+        sources.map (fun source => (.str source.name "rec" : Name)) := by
+  obtain ⟨familyNames, constructorNames⟩ := run.families.viewHeaderNames
+  have recursorNames := congrArg
+    (List.map (fun name => (.str name "rec" : Name))) familyNames
+  have recursorNames' :
+      run.families.views.map (fun view => (.str view.name "rec" : Name)) =
+        sources.map (fun source => (.str source.name "rec" : Name)) := by
+    simpa only [List.map_map, Function.comp_def] using recursorNames
+  simp only [blockGeneratedNames, familyNames, constructorNames,
+    recursorNames']
 
 /-- Project the generic verified normalization run for the same raw block and
 shared staged environment. -/

@@ -352,6 +352,16 @@ private theorem forall₂_zipWith_exists_right
       exact .cons ⟨y, rfl⟩
         (forall₂_zipWith_exists_right f xs ys length_eq)
 
+private theorem map_eq_map_of_forall₂
+    {R : α → β → Prop} {f : α → γ} {g : β → γ}
+    {xs : List α} {ys : List β}
+    (relation : List.Forall₂ R xs ys)
+    (aligned : ∀ x y, R x y → f x = g y) :
+    xs.map f = ys.map g := by
+  induction relation with
+  | nil => rfl
+  | cons head _ ih => simp only [List.map_cons, aligned _ _ head, ih]
+
 /-- The executable metadata array has one exact full-block record for every
 source family whenever validation has established the index-count invariant.
 The dependent relation preserves source order and exposes the selected index
@@ -372,6 +382,24 @@ theorem declaredInductiveInfos_matches
   rw [Array.toList_zipWith]
   apply forall₂_zipWith_exists_right
   simpa using size_eq.symm
+
+/-- Once family validation has fixed one index count per source family, the
+metadata declaration inventory preserves the complete source name order. -/
+theorem declaredInductiveInfos_names
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context)
+    (size_eq : stats.nindices.size = indTypes.size) :
+    (declaredInductiveInfos stats numParams indTypes numNested isUnsafe
+      context).toList.map (·.name) = indTypes.toList.map (·.name) := by
+  have relation := declaredInductiveInfos_matches stats numParams indTypes
+    numNested isUnsafe context size_eq
+  apply Eq.symm
+  apply map_eq_map_of_forall₂ relation
+  intro source info alignment
+  show source.name = info.name
+  obtain ⟨numIndices, rfl⟩ := alignment
+  rfl
 
 /-- Every emitted family record retains the name of a source family.  This
 direction does not require the validation-size invariant: membership in the
@@ -3216,6 +3244,30 @@ theorem declaredConstructorInfos_toArray
           indType.ctors := by
   simp [declaredConstructorInfos]
 
+/-- Constructor metadata for one family preserves every source constructor
+name and its declaration order. -/
+theorem declaredConstructorInfosFor_names
+    (stats : InductiveStats) (induct : Name) (isUnsafe : Bool)
+    (context : Context) (cidx : Nat) (ctors : List Constructor) :
+    (declaredConstructorInfosFor stats induct isUnsafe context cidx ctors).map
+      (·.name) = ctors.map (·.name) := by
+  induction ctors generalizing cidx with
+  | nil => rfl
+  | cons ctor ctors ih =>
+      simp only [declaredConstructorInfosFor, List.map_cons,
+        declaredConstructorInfo, ih]
+
+/-- The family-major constructor metadata inventory preserves the flattened
+source constructor-name order. -/
+theorem declaredConstructorInfos_names
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (isUnsafe : Bool) (context : Context) :
+    (declaredConstructorInfos stats indTypes isUnsafe context).map (·.name) =
+      indTypes.toList.flatMap (fun indType =>
+        indType.ctors.map (·.name)) := by
+  simp only [declaredConstructorInfos, List.map_flatMap,
+    declaredConstructorInfosFor_names]
+
 /-- Every source constructor occurs by name in the exact metadata list
 synthesized for its family. -/
 theorem declaredConstructorInfosFor_name
@@ -3689,6 +3741,8 @@ structure RecursorDeclarationResult where
   kTarget : Bool
   sourceTypes : Array InductiveType
   infos : List RecursorVal
+  infos_names : infos.map (·.name) =
+    sourceTypes.toList.map (fun indType => mkRecName indType.name)
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
   info_of_source_index : ∀ (i : Nat) (_upper : i < sourceTypes.size),
     ∃ info ∈ infos, info.name = mkRecName sourceTypes[i].name
@@ -3703,6 +3757,9 @@ structure RecursorDeclarationTail
     (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool)
     (sourceTypes : Array InductiveType) (startIndex : Nat) where
   infos : List RecursorVal
+  infos_names : infos.map (·.name) =
+    (sourceTypes.toList.drop startIndex).map
+      (fun indType => mkRecName indType.name)
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
   info_of_source_index : ∀ (i : Nat) (_lower : startIndex ≤ i)
     (_upper : i < sourceTypes.size),
@@ -3785,6 +3842,14 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
             (env.add (.recInfo recursor))
         pure {
           infos := recursor :: tail.infos
+          infos_names := by
+            have dropped : indTypes.toList.drop dIdx =
+                indTypes[dIdx] :: indTypes.toList.drop (dIdx + 1) := by
+              rw [List.drop_eq_getElem_cons (by simpa using h)]
+              simp
+            simp only [List.map_cons]
+            rw [tail.infos_names, dropped]
+            rfl
           infos_kTarget := by
             intro other member
             rcases List.mem_cons.mp member with rfl | member
@@ -3803,6 +3868,13 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
       else
         pure {
           infos := []
+          infos_names := by
+            simp only [List.map_nil]
+            have dropped : indTypes.toList.drop dIdx = [] := by
+              apply List.drop_eq_nil_iff.mpr
+              simpa only [Array.length_toList] using Nat.le_of_not_gt h
+            rw [dropped]
+            rfl
           infos_kTarget := by simp
           info_of_source_index := by
             intro i lower upper
@@ -3892,6 +3964,7 @@ def declareRecursors (stats : InductiveStats)
     kTarget := k
     sourceTypes := indTypes
     infos := result.infos
+    infos_names := by simpa using result.infos_names
     infos_kTarget := result.infos_kTarget
     info_of_source_index := by
       intro i upper
@@ -3938,6 +4011,15 @@ theorem declareRecursors_sourceTypes_eq
       simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
       cases run
       rfl
+
+/-- A successful recursor phase emits exactly one canonical recursor name per
+source family, in source order. -/
+theorem declareRecursors_infos_names
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.infos.map (·.name) =
+      indTypes.toList.map (fun indType => mkRecName indType.name) := by
+  rw [← declareRecursors_sourceTypes_eq run]
+  exact result.infos_names
 
 /-- Every source-family index contributes a generated recursor with the
 kernel's canonical recursor name. -/
