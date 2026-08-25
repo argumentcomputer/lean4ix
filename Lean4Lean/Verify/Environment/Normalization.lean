@@ -462,6 +462,118 @@ theorem VState.WF.empty_of_reserves
   whnf_wf := .empty
   unfold_wf _ := by simp
 
+/-- A fresh local declaration is found at its generated identifier. -/
+theorem localContextFindNew
+    (lctx : LocalContext) (id : FVarId) (name : Name)
+    (type : Expr) (bi : BinderInfo) (kind : LocalDeclKind)
+    (hwf : lctx.WF) (hfresh : lctx.find? id = none) :
+    (lctx.mkLocalDecl id name type bi kind).find? id =
+      some (.cdecl lctx.decls.size id name type bi kind) := by
+  have hwf' := LocalContext.WF.mkLocalDecl
+    (name := name) (ty := type) (bi := bi) (kind := kind) hwf hfresh
+  rw [hwf'.find?_eq_find?_toList]
+  rw [LocalContext.mkLocalDecl_toList]
+  simp [LocalDecl.fvarId]
+
+/-- The empty local context contains no free-variable declaration. -/
+theorem emptyLocalContextFindNone (id : FVarId) :
+    (⟨.empty, .empty, .empty⟩ : LocalContext).find? id = none := by
+  have h := LocalContext.WF.find?_eq_find?_toList
+    (fv := id) LocalContext.WF.nil
+  rw [h]
+  simp [LocalContext.toList]
+
+/-- Extending a well-formed local context at a fresh identifier preserves
+every lookup at an older identifier. -/
+theorem localContextFindOld
+    (lctx : LocalContext) (oldId newId : FVarId)
+    (name : Name) (type : Expr) (bi : BinderInfo)
+    (kind : LocalDeclKind) (decl : LocalDecl)
+    (hwf : lctx.WF) (hfresh : lctx.find? newId = none)
+    (hfind : lctx.find? oldId = some decl) :
+    (lctx.mkLocalDecl newId name type bi kind).find? oldId = some decl := by
+  have hwf' := LocalContext.WF.mkLocalDecl
+    (name := name) (ty := type) (bi := bi) (kind := kind) hwf hfresh
+  rw [hwf'.find?_eq_find?_toList]
+  rw [LocalContext.mkLocalDecl_toList]
+  have hne : oldId ≠ newId := by
+    intro heq
+    rw [heq, hfresh] at hfind
+    contradiction
+  simp only [List.find?_cons, LocalDecl.fvarId]
+  rw [show (oldId == newId) = false by simp [hne]]
+  simpa only [hwf.find?_eq_find?_toList, LocalDecl.fvarId] using hfind
+
+/-- A candidate local context built entirely from fresh ordinary
+declarations, with the name-generator invariant needed by structural replay. -/
+structure CandidateLocalContextRun
+    (context : AddInductive.Context) : Prop where
+  wf : context.lctx.WF
+  reserves : ∀ decl ∈ context.lctx.toList,
+    context.ngen.Reserves decl.fvarId
+
+namespace CandidateLocalContextRun
+
+theorem empty (context : AddInductive.Context)
+    (h : context.lctx = ({} : LocalContext)) :
+    CandidateLocalContextRun context where
+  wf := by rw [h]; exact LocalContext.WF.nil
+  reserves := by
+    intro decl membership
+    rw [h] at membership
+    rw [show ({} : LocalContext).toList = [] by rfl] at membership
+    contradiction
+
+theorem fresh (run : CandidateLocalContextRun context) :
+    context.lctx.find? context.freshFVarId = none := by
+  rw [run.wf.find?_eq_find?_toList, List.find?_eq_none]
+  intro decl membership equal
+  have reserved := run.reserves decl membership
+  have idEq : context.freshFVarId = decl.fvarId :=
+    beq_iff_eq.mp equal
+  rw [← idEq] at reserved
+  exact NameGenerator.not_reserves_self (by
+    simpa [AddInductive.Context.freshFVarId] using reserved)
+
+theorem push (run : CandidateLocalContextRun context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr) :
+    CandidateLocalContextRun
+      (context.pushLocalDecl name binderInfo type) where
+  wf := by
+    simpa [AddInductive.Context.pushLocalDecl] using
+      LocalContext.WF.mkLocalDecl run.wf run.fresh
+  reserves := by
+    intro decl membership
+    simp only [AddInductive.Context.pushLocalDecl,
+      LocalContext.mkLocalDecl_toList, List.mem_cons] at membership ⊢
+    rcases membership with rfl | membership
+    · simpa [LocalDecl.fvarId, AddInductive.Context.freshFVarId] using
+        (NameGenerator.next_reserves_self (ngen := context.ngen))
+    · exact NameGenerator.Reserves.mono NameGenerator.LE.next
+        (run.reserves decl membership)
+
+theorem push_findNew (run : CandidateLocalContextRun context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr) :
+    (context.pushLocalDecl name binderInfo type).lctx.find?
+        context.freshFVarId =
+      some (.cdecl context.lctx.decls.size context.freshFVarId
+        name type binderInfo .default) := by
+  simpa [AddInductive.Context.pushLocalDecl] using
+    localContextFindNew context.lctx context.freshFVarId name type
+      binderInfo .default run.wf run.fresh
+
+theorem push_findOld (run : CandidateLocalContextRun context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr)
+    {id : FVarId} {decl : LocalDecl}
+    (hfind : context.lctx.find? id = some decl) :
+    (context.pushLocalDecl name binderInfo type).lctx.find? id =
+      some decl := by
+  simpa [AddInductive.Context.pushLocalDecl] using
+    localContextFindOld context.lctx id context.freshFVarId
+      name type binderInfo .default decl run.wf run.fresh hfind
+
+end CandidateLocalContextRun
+
 /-- Positional verified context for an executable normalization candidate.
 
 The equality pins every checker-visible field (environment, local context,
@@ -545,6 +657,362 @@ def CandidateContextRun.root
     run.context.fuel = candidateContext.fuel := by
   have h := congrArg (fun c : TypeChecker.Context => c.fuel) run.context_eq
   simpa only [AddInductive.Context.toTypeChecker] using h
+
+/-- Translate the exact type returned by `AddInductive.getType` for a known
+candidate-local declaration.
+
+The explicit lookup premise is essential: `LocalContext.get!` has an
+inhabited fallback, so a successful `getType` equation alone does not prove
+that the requested free variable belongs to the local context.  Once the
+lookup is owned by the producer, `TrLCtx.find?_of_mem` supplies both the
+corresponding Theory lookup and a strict translation of its stored type. -/
+theorem CandidateContextRun.getTypeTranslation
+    (run : CandidateContextRun candidateContext)
+    (hfind : candidateContext.lctx.find? fv = some decl)
+    (hget : AddInductive.getType (.fvar fv) candidateContext =
+      .ok parameterType) :
+    ∃ value' parameterType',
+      run.context.vlctx.find? (.inr fv) =
+        some (value', parameterType') ∧
+      run.context.TrExprS parameterType parameterType' := by
+  have hfind' : run.context.lctx.find? fv = some decl := by
+    simpa only [run.context_lctx] using hfind
+  have hfindML : run.context.mlctx.lctx.find? fv = some decl := by
+    rw [run.context.lctx_eq]
+    exact hfind'
+  have hfindList : run.context.mlctx.lctx.toList.find?
+      (fv == ·.fvarId) = some decl := by
+    rw [← run.context.trlctx.1.find?_eq_find?_toList]
+    exact hfindML
+  have fvEq : fv = decl.fvarId := by
+    simpa using List.find?_some hfindList
+  obtain ⟨value', parameterType', valueFind, _, _, _, typeTr⟩ :=
+    run.context.trlctx.find?_of_mem run.context.Ewf
+      (List.mem_of_find?_eq_some hfindList)
+  have parameterTypeEq : decl.type = parameterType := by
+    unfold AddInductive.getType at hget
+    simp only [AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind,
+      ReaderT.pure, Pure.pure, Except.bind, Except.pure] at hget
+    change Except.ok ((candidateContext.lctx.get! fv).type) =
+      Except.ok parameterType at hget
+    simpa [LocalContext.get!, hfind] using Except.ok.inj hget
+  subst parameterType
+  exact ⟨value', parameterType', by simpa only [fvEq] using valueFind,
+    typeTr⟩
+
+/-- Every shared parameter expression is a free variable whose declaration
+is still present in the current validation context. -/
+structure FamilyParameterLocalState
+    (stats : AddInductive.InductiveStats)
+    (context : AddInductive.Context) : Prop where
+  localContext : CandidateLocalContextRun context
+  parameters : ∀ {parameter : Expr}, parameter ∈ stats.params.toList →
+    ∃ fv decl, parameter = .fvar fv ∧
+      context.lctx.find? fv = some decl
+
+namespace FamilyParameterLocalState
+
+theorem empty (context : AddInductive.Context) (levels : List Level)
+    (h : context.lctx = ({} : LocalContext)) :
+    FamilyParameterLocalState
+      (AddInductive.InductiveStats.initial levels) context where
+  localContext := CandidateLocalContextRun.empty context h
+  parameters := by simp [AddInductive.InductiveStats.initial]
+
+theorem pushLocal (run : FamilyParameterLocalState stats context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr) :
+    FamilyParameterLocalState stats
+      (context.pushLocalDecl name binderInfo type) where
+  localContext := run.localContext.push name binderInfo type
+  parameters := by
+    intro parameter member
+    obtain ⟨fv, decl, rfl, hfind⟩ := run.parameters member
+    exact ⟨fv, decl, rfl,
+      run.localContext.push_findOld name binderInfo type hfind⟩
+
+theorem pushParameter (run : FamilyParameterLocalState stats context)
+    (name : Name) (binderInfo : BinderInfo) (type : Expr) :
+    FamilyParameterLocalState
+      { stats with params := stats.params.push context.freshExpr }
+      (context.pushLocalDecl name binderInfo type) where
+  localContext := run.localContext.push name binderInfo type
+  parameters := by
+    intro parameter member
+    simp only [Array.toList_push, List.mem_append, List.mem_singleton] at member
+    rcases member with member | rfl
+    · obtain ⟨fv, decl, rfl, hfind⟩ := run.parameters member
+      exact ⟨fv, decl, rfl,
+        run.localContext.push_findOld name binderInfo type hfind⟩
+    · exact ⟨context.freshFVarId,
+        .cdecl context.lctx.decls.size context.freshFVarId
+          name type binderInfo .default,
+        rfl, run.localContext.push_findNew name binderInfo type⟩
+
+end FamilyParameterLocalState
+
+/-- A retained comparison RHS was read from a genuine local parameter. -/
+def FamilyComparisonRhsLocal
+    (step : AddInductive.CandidateIsDefEqStep) : Prop :=
+  ∃ fv decl, step.context.lctx.find? fv = some decl ∧
+    AddInductive.getType (.fvar fv) step.context = .ok step.rhs
+
+/-- Recover the strict Theory translation of a comparison RHS from its
+producer-owned local declaration. -/
+theorem FamilyComparisonRhsLocal.translation
+    (rhsLocal : FamilyComparisonRhsLocal step)
+    (contextRun : CandidateContextRun step.context) :
+    ∃ rhs', contextRun.context.TrExprS step.rhs rhs' := by
+  obtain ⟨fv, decl, hfind, hget⟩ := rhsLocal
+  obtain ⟨_, rhs', _, rhsTr⟩ :=
+    contextRun.getTypeTranslation hfind hget
+  exact ⟨rhs', rhsTr⟩
+
+/-- Interpret one retained family-parameter comparison once the current
+family domain has been translated.  The RHS translation is recovered from
+the validator's local inventory rather than supplied independently. -/
+theorem FamilyComparisonRhsLocal.isDefEqRun
+    (rhsLocal : FamilyComparisonRhsLocal step)
+    (valid : step.Valid)
+    (contextRun : CandidateContextRun step.context)
+    (lhs' : VExpr)
+    (lhsTr : contextRun.context.TrExprS step.lhs lhs') :
+    ∃ rhs', Nonempty
+      (IsDefEqRun contextRun.context.venv contextRun.context.lparams
+        contextRun.context.vlctx step.lhs step.rhs lhs' rhs') := by
+  obtain ⟨rhs', rhsTr⟩ := rhsLocal.translation contextRun
+  exact ⟨rhs', ⟨IsDefEqRun.ofCandidateStep step valid
+    contextRun.context contextRun.context_eq rfl rfl rfl
+    contextRun.state_wf lhsTr rhsTr step.context.fuel.recDepth rfl⟩⟩
+
+private def FamilyParameterCountInvariant (nparams i : Nat)
+    (stats : AddInductive.InductiveStats) : Prop :=
+  i ≤ nparams ∧
+    if stats.indConsts.isEmpty then
+      stats.params.size + (nparams - i) = nparams
+    else
+      stats.params.size = nparams
+
+/-- Interpret the local-parameter inventory through one exact family
+telescope.  Besides preserving every real lookup, this proves that each
+exposed comparison RHS came from its retained `getType` read. -/
+private theorem familyTypeParameterComparison_localResult
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (localState : FamilyParameterLocalState stats context)
+    (count : FamilyParameterCountInvariant nparams i stats) :
+    FamilyParameterLocalState trace.result.stats trace.result.context ∧
+      trace.result.stats.params.size = nparams ∧
+      ∀ step ∈ trace.comparisons, FamilyComparisonRhsLocal step := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      let nextLocal := localState.pushParameter name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      have nextCount : FamilyParameterCountInvariant nparams (i + 1)
+          { stats with params := stats.params.push context.freshExpr } := by
+        unfold FamilyParameterCountInvariant at count ⊢
+        simp only [firstFamily, if_true, Array.size_push] at count ⊢
+        omega
+      simpa only [AddInductive.FamilyTypeParameterComparisonTrace.result,
+        AddInductive.FamilyTypeParameterComparisonTrace.comparisons] using
+        ih nextLocal nextCount
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      have paramsSize : stats.params.size = nparams := by
+        unfold FamilyParameterCountInvariant at count
+        simpa only [laterFamily, Bool.false_eq_true, if_false] using count.2
+      have parameterMember : stats.params[i]! ∈ stats.params.toList := by
+        rw [show stats.params[i]! = stats.params[i] by simp [isParameter,
+          paramsSize]]
+        exact List.getElem_mem (by simpa only [Array.length_toList,
+          paramsSize] using isParameter)
+      obtain ⟨fv, decl, parameterEq, parameterFind⟩ :=
+        localState.parameters parameterMember
+      have parameterTypeRun' : AddInductive.getType (.fvar fv) context =
+          .ok parameterType := by
+        rw [← parameterEq]
+        exact parameterTypeRun
+      have nextCount : FamilyParameterCountInvariant nparams (i + 1)
+          stats := by
+        unfold FamilyParameterCountInvariant at count ⊢
+        simp only [laterFamily, Bool.false_eq_true, if_false] at count ⊢
+        exact ⟨by omega, count.2⟩
+      obtain ⟨terminalLocal, terminalSize, comparisons⟩ :=
+        ih localState nextCount
+      refine ⟨terminalLocal, terminalSize, ?_⟩
+      intro step member
+      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+        List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨fv, decl, parameterFind, parameterTypeRun'⟩
+      · exact comparisons step member
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      let nextLocal := localState.pushLocal name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      simpa only [AddInductive.FamilyTypeParameterComparisonTrace.result,
+        AddInductive.FamilyTypeParameterComparisonTrace.comparisons] using
+        ih nextLocal count
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+      have paramsSize : stats.params.size = nparams := by
+        unfold FamilyParameterCountInvariant at count
+        subst i
+        split at count <;> omega
+      exact ⟨localState, paramsSize, by
+        intro step member
+        simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+          List.not_mem_nil] at member⟩
+
+private def FamilyBlockParameterLocalInvariant (nparams : Nat)
+    (stats : AddInductive.InductiveStats)
+    (context : AddInductive.Context) : Prop :=
+  FamilyParameterLocalState stats context ∧
+    if stats.indConsts.isEmpty then stats.params.size = 0
+    else stats.params.size = nparams
+
+/-- Thread the local-parameter inventory through the complete source-indexed
+family block and attach a genuine local RHS to every retained comparison. -/
+private theorem familyParameterComparisonBlock_comparisonRhsLocal
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      indTypes dIdx stats context)
+    (invariant : FamilyBlockParameterLocalInvariant nparams stats context) :
+    ∀ familyComparisons ∈ trace.comparisons,
+      ∀ step ∈ familyComparisons, FamilyComparisonRhsLocal step := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+      have statsFirst : stats.indConsts.isEmpty = true := by
+        rw [telescope.result_indConsts_eq] at isFirst
+        exact isFirst
+      have paramsEmpty : stats.params.size = 0 := by
+        simpa only [statsFirst, if_true] using invariant.2
+      have count : FamilyParameterCountInvariant nparams 0 stats := by
+        unfold FamilyParameterCountInvariant
+        simp only [Nat.zero_le, statsFirst, if_true, paramsEmpty,
+          Nat.zero_add, Nat.sub_zero, and_self]
+      obtain ⟨resultLocal, resultSize, headLocal⟩ :=
+        familyTypeParameterComparison_localResult telescope invariant.1 count
+      have tailLocal : FamilyParameterLocalState
+          { telescope.result.stats with
+            lctx := telescope.result.context.lctx
+            resultLevel := sorted.sortLevel!
+            isNotZero := sorted.sortLevel!.isNeverZero
+            nindices := telescope.result.stats.nindices.push
+              telescope.result.nindices
+            indConsts := telescope.result.stats.indConsts.push
+              (.const indTypes[dIdx].name telescope.result.stats.levels) }
+          telescope.result.context := by
+        exact ⟨resultLocal.localContext, resultLocal.parameters⟩
+      have tailInvariant : FamilyBlockParameterLocalInvariant nparams
+          { telescope.result.stats with
+            lctx := telescope.result.context.lctx
+            resultLevel := sorted.sortLevel!
+            isNotZero := sorted.sortLevel!.isNeverZero
+            nindices := telescope.result.stats.nindices.push
+              telescope.result.nindices
+            indConsts := telescope.result.stats.indConsts.push
+              (.const indTypes[dIdx].name telescope.result.stats.levels) }
+          telescope.result.context := by
+        refine ⟨tailLocal, ?_⟩
+        simp only [Array.isEmpty_push, Bool.false_eq_true, if_false]
+        exact resultSize
+      have tailResult := ih tailInvariant
+      intro familyComparisons familyMember step stepMember
+      simp only [AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
+        List.mem_cons] at familyMember
+      rcases familyMember with rfl | familyMember
+      · exact headLocal step stepMember
+      · exact tailResult familyComparisons familyMember step stepMember
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+      have statsLater : stats.indConsts.isEmpty = false := by
+        rw [telescope.result_indConsts_eq] at isLater
+        exact isLater
+      have paramsSize : stats.params.size = nparams := by
+        simpa only [statsLater, Bool.false_eq_true, if_false] using invariant.2
+      have count : FamilyParameterCountInvariant nparams 0 stats := by
+        unfold FamilyParameterCountInvariant
+        simp only [Nat.zero_le, statsLater, Bool.false_eq_true, if_false,
+          paramsSize, and_self]
+      obtain ⟨resultLocal, resultSize, headLocal⟩ :=
+        familyTypeParameterComparison_localResult telescope invariant.1 count
+      have tailLocal : FamilyParameterLocalState
+          { telescope.result.stats with
+            nindices := telescope.result.stats.nindices.push
+              telescope.result.nindices
+            indConsts := telescope.result.stats.indConsts.push
+              (.const indTypes[dIdx].name telescope.result.stats.levels) }
+          telescope.result.context := by
+        exact ⟨resultLocal.localContext, resultLocal.parameters⟩
+      have tailInvariant : FamilyBlockParameterLocalInvariant nparams
+          { telescope.result.stats with
+            nindices := telescope.result.stats.nindices.push
+              telescope.result.nindices
+            indConsts := telescope.result.stats.indConsts.push
+              (.const indTypes[dIdx].name telescope.result.stats.levels) }
+          telescope.result.context := by
+        refine ⟨tailLocal, ?_⟩
+        simp only [Array.isEmpty_push, Bool.false_eq_true, if_false]
+        exact resultSize
+      have tailResult := ih tailInvariant
+      intro familyComparisons familyMember step stepMember
+      simp only [AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
+        List.mem_cons] at familyMember
+      rcases familyMember with rfl | familyMember
+      · exact headLocal step stepMember
+      · exact tailResult familyComparisons familyMember step stepMember
+  | terminal dIdx stats context outOfBounds =>
+      intro familyComparisons familyMember
+      simp only [AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
+        List.not_mem_nil] at familyMember
+
+/-- Initial-block specialization: empty entry locals and the empty initial
+parameter array suffice to derive the local RHS certificate for every family
+comparison. -/
+theorem familyParameterComparisonBlock_comparisonRhsLocal_ofInitial
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      indTypes 0
+      (AddInductive.InductiveStats.initial (context.lparams.map .param))
+      context)
+    (lctxEmpty : context.lctx = ({} : LocalContext)) :
+    ∀ familyComparisons ∈ trace.comparisons,
+      ∀ step ∈ familyComparisons, FamilyComparisonRhsLocal step := by
+  apply familyParameterComparisonBlock_comparisonRhsLocal trace
+  refine ⟨FamilyParameterLocalState.empty context
+    (context.lparams.map .param) lctxEmpty, ?_⟩
+  simp [AddInductive.InductiveStats.initial]
+
+/-- Every comparison exposed by a retained family-validation run owns the
+local declaration from which its RHS type was read. -/
+theorem _root_.Lean4Lean.AddInductive.FamilyValidationBlockRun.parameterComparisonRhsLocal
+    (run : AddInductive.FamilyValidationBlockRun nparams indTypes context)
+    (lctxEmpty : context.lctx = ({} : LocalContext))
+    (familyMember : familyComparisons ∈ run.parameterComparisons)
+    (comparisonMember : comparison ∈ familyComparisons) :
+    TypeChecker.FamilyComparisonRhsLocal comparison := by
+  apply TypeChecker.familyParameterComparisonBlock_comparisonRhsLocal_ofInitial
+    run.parameterComparisonTrace lctxEmpty familyComparisons
+  · simpa only [AddInductive.FamilyValidationBlockRun.parameterComparisons]
+      using familyMember
+  · exact comparisonMember
+
+/-- Producer-level projection of the retained local-RHS certificate. -/
+theorem _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparisonRhsLocal
+    (execution : AddInductive.NormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context)
+    (produced : AddInductive.buildNormalizationCandidateExecution nparams
+      indTypes numNested isUnsafe context = .ok execution)
+    (nonempty : indTypes.isEmpty = false)
+    (lctxEmpty : context.lctx = ({} : LocalContext))
+    (familyMember : familyComparisons ∈
+      execution.familyParameterComparisons produced nonempty)
+    (comparisonMember : comparison ∈ familyComparisons) :
+    TypeChecker.FamilyComparisonRhsLocal comparison :=
+  (execution.familyValidationBlockRun produced nonempty)
+    |>.parameterComparisonRhsLocal lctxEmpty familyMember comparisonMember
 
 /-- Reset only the implementation and Theory local contexts while retaining
 the exact environment, safety mode, level parameters, fuel, and name
@@ -11588,6 +12056,50 @@ info: 'Lean4Lean.TypeChecker.candidateFreshFVarId_reserved' depends on axioms: [
 -/
 #guard_msgs in
 #print axioms TypeChecker.candidateFreshFVarId_reserved
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateLocalContextRun.push' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateLocalContextRun.push
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateContextRun.getTypeTranslation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateContextRun.getTypeTranslation
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyComparisonRhsLocal.isDefEqRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyComparisonRhsLocal.isDefEqRun
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.familyParameterComparisonRhsLocal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.NormalizationCandidateExecution.familyParameterComparisonRhsLocal
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateContextRun.root' depends on axioms: [propext,
