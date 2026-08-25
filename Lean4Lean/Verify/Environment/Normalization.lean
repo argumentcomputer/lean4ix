@@ -1,5 +1,6 @@
 import Lean4Lean.Verify.TypeChecker
 import Lean4Lean.Inductive.ValidationTrace
+import Std.Data.TreeSet.Lemmas
 
 namespace Lean4Lean
 open Lean hiding Environment Exception
@@ -1955,6 +1956,21 @@ def CandidateSemanticStage.root
   lparams_eq := rfl
   vlctx_eq := rfl
 
+/-- The recursive candidate interpreter consumes the predecessor of the
+checker recursion depth. -/
+def _root_.Lean4Lean.AddInductive.Context.candidateWhnfFuel
+    (context : AddInductive.Context) : Nat :=
+  context.fuel.recDepth - 1
+
+/-- A positive checker recursion depth is exactly one step beyond its
+candidate WHNF budget. -/
+theorem _root_.Lean4Lean.AddInductive.Context.candidateWhnfDepth
+    (context : AddInductive.Context)
+    (nonzero : context.fuel.recDepth ≠ 0) :
+    context.fuel.recDepth = context.candidateWhnfFuel + 1 := by
+  simp only [AddInductive.Context.candidateWhnfFuel]
+  omega
+
 /-- Source-position evidence interpreted in one shared candidate stage.
 
 `context_eq` prevents a verified stage for another producer position from
@@ -2942,6 +2958,38 @@ theorem checkName_constants_fresh
   rw [SMap.find?_isSome] at contains
   cases hfind : env.constants.find? name <;> simp_all
 
+/-- A successful nonprimitive name check excludes every hard-coded kernel
+primitive name. -/
+theorem checkName_primitives_fresh
+    {env : Environment} {name : Name}
+    (check : env.checkName name false = .ok ()) :
+    Environment.primitives.contains name = false := by
+  cases hc : env.contains name <;>
+    cases hp : Environment.primitives.contains name <;>
+      simp [Kernel.Environment.checkName, hc, hp, Bind.bind, Except.bind]
+        at check ⊢
+
+/-- Every primitive reflected by the Theory environment is among the
+kernel's hard-coded primitive names. -/
+theorem reflectedPrimitiveNames_mem_primitives
+    {name : Name} (member : name ∈ VEnv.reflectedPrimitiveNames) :
+    Environment.primitives.contains name = true := by
+  simp [VEnv.reflectedPrimitiveNames] at member
+  rcases member with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
+      rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
+      rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals simp [Environment.primitives, NameSet.ofList, NameSet.contains]
+
+/-- Excluding kernel primitives also excludes the smaller reflected
+primitive inventory. -/
+theorem not_reflectedPrimitive_of_primitives_fresh
+    {name : Name}
+    (fresh : Environment.primitives.contains name = false) :
+    name ∉ VEnv.reflectedPrimitiveNames := by
+  intro member
+  rw [reflectedPrimitiveNames_mem_primitives member] at fresh
+  contradiction
+
 /-- Verify-layer projection that the producer's family-only declaration trace
 preserves persistent-map well-formedness. -/
 theorem declarationTraceConstantsWF
@@ -2960,6 +3008,24 @@ theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.map_wf
     (run : AddInductive.DeclareInductiveInfoListRun allowPrimitive env infos
       finalEnv) (wf : env.constants.WF) : finalEnv.constants.WF :=
   VInductDecl.declarationTraceConstantsWF run wf
+
+/-- Every family name accepted by a nonprimitive declaration trace avoids
+both the kernel and Theory primitive inventories. -/
+theorem _root_.Lean4Lean.AddInductive.DeclareInductiveInfoListRun.names_not_primitive
+    (run : AddInductive.DeclareInductiveInfoListRun false env infos
+      finalEnv) :
+    ∀ info ∈ infos,
+      info.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains info.name = false := by
+  induction run with
+  | nil => intro info member; nomatch member
+  | cons check tail ih =>
+      intro info member
+      rcases List.mem_cons.mp member with rfl | member
+      · have fresh := VInductDecl.checkName_primitives_fresh check
+        exact ⟨VInductDecl.not_reflectedPrimitive_of_primitives_fresh fresh,
+          fresh⟩
+      · exact ih info member
 
 /-- Family declaration preserves every lookup already present in its input
 map. -/
@@ -4235,6 +4301,34 @@ inductive CandidateBlockFamilyTypeSourceListInput
       (tail : CandidateBlockFamilyTypeSourceListInput env Us sources raws) :
       CandidateBlockFamilyTypeSourceListInput env Us
         (source :: sources) (raw :: raws)
+
+/-- Transfer a name-only property from an aligned implementation family
+inventory to the corresponding raw Theory families. -/
+theorem CandidateBlockFamilyTypeSourceListInput.forall_names_of_declared
+    {env : VEnv} {Us : List Name}
+    {sources : List InductiveType} {raws : List VInductiveType}
+    {P : Name → Prop}
+    (input : CandidateBlockFamilyTypeSourceListInput env Us sources raws)
+    {infos : List InductiveVal}
+    (declared : List.Forall₂
+      (fun source info => info.name = source.name) sources infos)
+    (property : ∀ info ∈ infos, P info.name) :
+    ∀ raw ∈ raws, P raw.name := by
+  induction input generalizing infos with
+  | nil =>
+      cases declared
+      intro raw member
+      nomatch member
+  | cons head tail ih =>
+      cases declared with
+      | cons declaredHead declaredTail =>
+          intro raw' member
+          rcases List.mem_cons.mp member with rfl | member
+          · have name_eq := declaredHead.trans head.name_eq
+            simpa only [name_eq] using property _ (.head _)
+          · exact ih declaredTail
+              (fun other otherMember =>
+                property other (.tail _ otherMember)) raw' member
 
 /-- Recover candidate-independent raw family types from the exact successful
 ordinary family traversal.  Closed source types can be translated in the
@@ -7413,6 +7507,123 @@ def ProducedBlockGenerationShapeCandidate.constructorValidation
       { produced.execution.validationContext with
         env := produced.execution.familyEnv } :=
   produced.execution.constructorValidation
+
+/-- Assemble the family-only staging owner directly from a retained detailed
+execution.  This deliberately precedes the full raw-block shape gate: the raw
+family list can therefore be chosen and staged before constructor enrichment
+determines the final common source declaration. -/
+noncomputable def
+    _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familySourceStaging
+    {nparams : Nat} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (execution : AddInductive.NormalizationCandidateExecution nparams
+      kernelSources numNested isUnsafe context)
+    (producedExecution :
+      AddInductive.buildNormalizationCandidateExecution nparams kernelSources
+        numNested isUnsafe context = .ok execution)
+    {ves : VEnvs} (wf : ves.WF context.env)
+    (namePrefix_ne : context.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix)
+    {familyDecl : VInductDecl}
+    (uvars_eq : familyDecl.uvars = context.lparams.length)
+    (familySources : CandidateBlockFamilyTypeSourceListInput
+      (ves.venv context.safety) context.lparams kernelSources
+      familyDecl.types)
+    (recDepth_ne : context.fuel.recDepth ≠ 0)
+    (terminals : CandidateBlockFamilyTerminalSortList
+      execution.candidate.families)
+    (context_safety_eq : context.safety = .safe)
+    (isUnsafe_eq : isUnsafe = false)
+    (context_allowPrimitive_eq : context.allowPrimitive = false) :
+    NormalizationCandidateBlockFamilySourceStagingInput context
+      execution (ves.venv context.safety) context.lparams
+      familyDecl := by
+  have nindices_size : execution.stats.nindices.size =
+      kernelSources.length :=
+    execution.validationNindicesSize_all producedExecution
+  have metadata : List.Forall₂
+      (fun indType info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo
+          execution.stats nparams kernelSources.toArray
+          indType numIndices numNested isUnsafe
+            execution.validationContext)
+      kernelSources execution.declaredInfos := by
+    simpa only [AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.stats nparams kernelSources.toArray
+          numNested isUnsafe execution.validationContext
+          (by simpa using nindices_size)
+  have declaredNames : List.Forall₂
+      (fun source info => info.name = source.name)
+      kernelSources execution.declaredInfos :=
+    Lean4Lean.List.Forall₂.imp (h := metadata) fun source info relation => by
+      obtain ⟨numIndices, rfl⟩ := relation
+      rfl
+  have declarationTrace := execution.declareTrace
+  have allowPrimitive_eq :
+      execution.validationContext.allowPrimitive = false :=
+    (execution.validationContext_allowPrimitive_all
+      producedExecution).trans context_allowPrimitive_eq
+  rw [allowPrimitive_eq] at declarationTrace
+  have traceNames : ∀ info ∈ execution.declaredInfos,
+      info.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains info.name = false := by
+    simpa only [AddInductive.NormalizationCandidateExecution.declaredInfos]
+      using declarationTrace.names_not_primitive
+  exact {
+    uvars_eq := uvars_eq
+    preFamily := TypeChecker.CandidateSemanticStage.root wf rfl namePrefix_ne
+    familySources := familySources
+    whnfFuel := context.candidateWhnfFuel
+    whnfDepth := context.candidateWhnfDepth recDepth_ne
+    terminals := terminals
+    nindices_size := nindices_size
+    validation_env_eq :=
+      execution.validationContext_env_all producedExecution
+    validation_lparams_eq :=
+      execution.validationContext_lparams_all producedExecution
+    context_safety_eq := context_safety_eq
+    isUnsafe_eq := isUnsafe_eq
+    preMapWF := (wf.tr (safety := context.safety)).aligned.map_wf
+    names_not_primitive :=
+      familySources.forall_names_of_declared
+        (P := fun name => name ∉ VEnv.reflectedPrimitiveNames ∧
+          Environment.primitives.contains name = false)
+        declaredNames traceNames }
+
+/-- Reindex direct family staging through a proof-carrying generation-shape
+producer when the final raw source is already known. -/
+noncomputable def ProducedBlockGenerationShapeCandidate.familySourceStaging
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockGenerationShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {ves : VEnvs} (wf : ves.WF context.env)
+    (namePrefix_ne : context.ngen.namePrefix ≠
+      (({} : TypeChecker.VState).ngen).namePrefix)
+    {familyDecl : VInductDecl}
+    (uvars_eq : familyDecl.uvars = context.lparams.length)
+    (familySources : CandidateBlockFamilyTypeSourceListInput
+      (ves.venv context.safety) context.lparams kernelSources
+      familyDecl.types)
+    (recDepth_ne : context.fuel.recDepth ≠ 0)
+    (terminals : CandidateBlockFamilyTerminalSortList
+      produced.candidate.families)
+    (context_safety_eq : context.safety = .safe)
+    (isUnsafe_eq : isUnsafe = false)
+    (context_allowPrimitive_eq : context.allowPrimitive = false) :
+    NormalizationCandidateBlockFamilySourceStagingInput context
+      produced.execution (ves.venv context.safety) context.lparams
+      familyDecl := by
+  apply produced.execution.familySourceStaging produced.producedExecution wf
+    namePrefix_ne uvars_eq familySources recDepth_ne
+  · simpa only [ProducedBlockGenerationShapeCandidate.candidate] using terminals
+  · exact context_safety_eq
+  · exact isUnsafe_eq
+  · exact context_allowPrimitive_eq
 
 /-- Run the ordinary arbitrary-block producer and reject any candidate whose
 retained traces cannot support generation of the complete raw Theory block. -/

@@ -1479,10 +1479,11 @@ private theorem familyValidationTelescope_sizes_of_run
       fuel context = .ok result) :
     result.stats.nindices = stats.nindices ∧
       result.stats.indConsts = stats.indConsts ∧
-      result.stats.levels = stats.levels ∧
+    result.stats.levels = stats.levels ∧
       result.stats.params.size = nparams ∧
       result.context.lparams = context.lparams ∧
-      result.context.env = context.env := by
+      result.context.env = context.env ∧
+      result.context.allowPrimitive = context.allowPrimitive := by
   induction fuel generalizing stats type i nindices context result with
   | zero =>
       simp [observeFamilyValidationTelescope,
@@ -1608,7 +1609,7 @@ private theorem familyValidationTelescope_sizes_of_run
           simp [ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
             MonadExceptOf.throw] at success
           subst result
-          refine ⟨rfl, rfl, rfl, ?_, rfl, rfl⟩
+          refine ⟨rfl, rfl, rfl, ?_, rfl, rfl, rfl⟩
           unfold familyValidationTelescopeStatsInvariant at invariant
           simpa using invariant.2
         · simp [hi, ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
@@ -1752,9 +1753,10 @@ private theorem familyValidationOuter_sizes_of_run
       context = .ok result) :
     result.stats.nindices.size = indTypes.size ∧
       result.stats.indConsts.size = indTypes.size ∧
-      result.stats.params.size = nparams ∧
+    result.stats.params.size = nparams ∧
       result.validationContext.env = context.env ∧
-      result.validationContext.lparams = context.lparams := by
+      result.validationContext.lparams = context.lparams ∧
+      result.validationContext.allowPrimitive = context.allowPrimitive := by
   unfold observeFamilyValidationOuterLoop at success
   rw [checkInductiveTypes.loopInd.eq_1] at success
   by_cases hdIdx : dIdx < indTypes.size
@@ -1830,7 +1832,7 @@ private theorem familyValidationOuter_sizes_of_run
                         simp only [hempty', Bool.false_eq_true, if_false,
                           hparams]
                     obtain ⟨hnindices, hindConsts, hlevels, hparams,
-                        hlparams, henv⟩ :=
+                        hlparams, henv, hallowPrimitive⟩ :=
                       familyValidationTelescope_sizes_of_run nparams stats
                         root 0 0 context.fuel.inductiveFuel context
                         telescopeResult telescopeInvariant htelescope
@@ -1881,7 +1883,7 @@ private theorem familyValidationOuter_sizes_of_run
                             · simp only [show dIdx + 1 ≠ 0 by omega,
                                 if_false, nextStats]
                               exact hparams
-                          rw [← henv, ← hlparams]
+                          rw [← henv, ← hlparams, ← hallowPrimitive]
                           apply familyValidationOuter_sizes_of_run nparams
                             indTypes (dIdx + 1) nextStats
                             telescopeResult.context result nonempty nextInvariant
@@ -1921,7 +1923,7 @@ private theorem familyValidationOuter_sizes_of_run
                               · simp only [show dIdx + 1 ≠ 0 by omega,
                                   if_false, nextStats]
                                 exact hparams
-                            rw [← henv, ← hlparams]
+                            rw [← henv, ← hlparams, ← hallowPrimitive]
                             apply familyValidationOuter_sizes_of_run nparams
                               indTypes (dIdx + 1) nextStats
                               telescopeResult.context result nonempty
@@ -1945,7 +1947,7 @@ private theorem familyValidationOuter_sizes_of_run
       Except.bind] at success
     simp [hlevels, hnindices, hindConsts, hparams] at success
     subst result
-    exact ⟨hnindices, hindConsts, hparams, rfl, rfl⟩
+    exact ⟨hnindices, hindConsts, hparams, rfl, rfl, rfl⟩
 termination_by indTypes.size - dIdx
 decreasing_by
   all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
@@ -2060,9 +2062,10 @@ theorem FamilyValidationBlockResult.invariants_of_run
       .ok result) :
     result.stats.params.size = nparams ∧
       result.stats.nindices.size = indTypes.length ∧
-      result.stats.indConsts.size = indTypes.length ∧
+    result.stats.indConsts.size = indTypes.length ∧
       result.validationContext.env = context.env ∧
-      result.validationContext.lparams = context.lparams := by
+      result.validationContext.lparams = context.lparams ∧
+      result.validationContext.allowPrimitive = context.allowPrimitive := by
   have indTypes_ne : indTypes ≠ [] := by
     intro hempty
     subst indTypes
@@ -2089,7 +2092,8 @@ theorem FamilyValidationBlockResult.invariants_of_run
     (InductiveStats.initial (context.lparams.map .param)) context result
     size_pos initialInvariant outerRun
   exact ⟨sizes.2.2.1, by simpa using sizes.1,
-    by simpa using sizes.2.1, sizes.2.2.2.1, sizes.2.2.2.2⟩
+    by simpa using sizes.2.1, sizes.2.2.2.1, sizes.2.2.2.2.1,
+    sizes.2.2.2.2.2⟩
 
 /-- Terminal counter invariants exposed by any successful nonempty arbitrary-
 block family-validation run. -/
@@ -2122,7 +2126,17 @@ theorem FamilyValidationBlockResult.validationContext_lparams_of_run
     (run : observeFamilyValidationBlock nparams indTypes context =
       .ok result) :
     result.validationContext.lparams = context.lparams :=
-  (result.invariants_of_run nonempty run).2.2.2.2
+  (result.invariants_of_run nonempty run).2.2.2.2.1
+
+/-- Family validation preserves the primitive-name mode in its terminal
+reader context. -/
+theorem FamilyValidationBlockResult.validationContext_allowPrimitive_of_run
+    (result : FamilyValidationBlockResult)
+    (nonempty : indTypes.isEmpty = false)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.validationContext.allowPrimitive = context.allowPrimitive :=
+  (result.invariants_of_run nonempty run).2.2.2.2.2
 
 /-- Family validation never changes the kernel environment in its reader
 context.  The empty block is handled directly; nonempty blocks use the retained
@@ -2168,6 +2182,53 @@ theorem FamilyValidationBlockResult.validationContext_lparams_of_run_all
       rfl
   | cons head tail =>
       exact result.validationContext_lparams_of_run (by simp) run
+
+/-- Family validation preserves the primitive-name mode for both empty and
+nonempty blocks. -/
+theorem
+    FamilyValidationBlockResult.validationContext_allowPrimitive_of_run_all
+    (result : FamilyValidationBlockResult)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.validationContext.allowPrimitive = context.allowPrimitive := by
+  cases indTypes with
+  | nil =>
+      unfold observeFamilyValidationBlock checkInductiveTypes at run
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+        Except.bind] at run
+      rw [checkInductiveTypes.loopInd.eq_1] at run
+      simp [InductiveStats.initial, readThe, MonadReader.read,
+        MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind,
+        ReaderT.pure, Pure.pure, Except.pure, Except.bind] at run
+      subst result
+      rfl
+  | cons head tail =>
+      exact result.validationContext_allowPrimitive_of_run (by simp) run
+
+/-- Family validation establishes the index-array size invariant for both
+empty and nonempty blocks.  Unlike the parameter-array invariant, this remains
+true in the empty block even when the internal assertion takes its default
+fallback. -/
+theorem FamilyValidationBlockResult.nindices_size_of_run_all
+    (result : FamilyValidationBlockResult)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.stats.nindices.size = indTypes.length := by
+  cases indTypes with
+  | nil =>
+      unfold observeFamilyValidationBlock checkInductiveTypes at run
+      simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+        ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure, Except.pure,
+        Except.bind] at run
+      rw [checkInductiveTypes.loopInd.eq_1] at run
+      simp [InductiveStats.initial, readThe, MonadReader.read,
+        MonadReaderOf.read, ReaderT.read, ReaderT.bind, Bind.bind,
+        ReaderT.pure, Pure.pure, Except.pure, Except.bind] at run
+      subst result
+      split <;> rfl
+  | cons head tail =>
+      exact (result.sizes_of_run (by simp) run).2.1
 
 /-- The family-validation result stored by a detailed normalization
 execution. -/
@@ -2235,6 +2296,31 @@ theorem NormalizationCandidateExecution.validationContext_lparams_all
     execution.validationContext.lparams = context.lparams := by
   simpa only [NormalizationCandidateExecution.familyValidationResult] using
     execution.familyValidationResult.validationContext_lparams_of_run_all
+      (execution.familyValidationResult_run produced)
+
+/-- A successful detailed execution retains the input primitive-name mode in
+its terminal validation context. -/
+theorem NormalizationCandidateExecution.validationContext_allowPrimitive_all
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution) :
+    execution.validationContext.allowPrimitive = context.allowPrimitive := by
+  simpa only [NormalizationCandidateExecution.familyValidationResult] using
+    execution.familyValidationResult
+      |>.validationContext_allowPrimitive_of_run_all
+        (execution.familyValidationResult_run produced)
+
+/-- A successful detailed execution retains the family index-array size even
+for the degenerate empty-block continuation. -/
+theorem NormalizationCandidateExecution.validationNindicesSize_all
+    (execution : NormalizationCandidateExecution nparams indTypes numNested
+      isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams indTypes
+      numNested isUnsafe context = .ok execution) :
+    execution.stats.nindices.size = indTypes.length := by
+  simpa only [NormalizationCandidateExecution.familyValidationResult] using
+    execution.familyValidationResult.nindices_size_of_run_all
       (execution.familyValidationResult_run produced)
 
 /-- Recover the universally quantified family-validation continuation

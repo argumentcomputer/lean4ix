@@ -251,6 +251,70 @@ theorem Environment.checkInductiveInput.WF
   refine (Except.WF.any (checkNoNestedAux ctor.name ctor.type)).bind
     fun _ _ => .pure ⟨constructorClosed, rfl⟩
 
+/-- Every constructor source in one retained list-validation trace is closed;
+this interprets the exact `checkNoMVarNoFVar` equation stored at each source
+position. -/
+theorem AddInductive.ConstructorListValidationTrace.sources_closed
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {familyIdx : Nat} {context : AddInductive.Context}
+    {seen : NameSet} {constructors : List Constructor}
+    (trace : AddInductive.ConstructorListValidationTrace stats isUnsafe
+      familyIdx context seen constructors) :
+    ∀ constructor ∈ constructors,
+      constructor.type.FVarsIn (fun _ => False) := by
+  induction trace with
+  | nil =>
+      intro constructor member
+      nomatch member
+  | cons seen head tail fresh closed rootCheck typeTrace tailTrace ih =>
+      intro constructor member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact checkNoMVarNoFVar.WF context.env constructor.name
+          constructor.type () closed
+      · exact ih constructor member
+
+/-- The complete retained block trace exposes constructor-source closedness
+for every family and constructor in source order. -/
+theorem AddInductive.ConstructorBlockValidationTraces.sources_closed
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {context : AddInductive.Context} {familyIdx : Nat}
+    {types : List InductiveType}
+    (traces : AddInductive.ConstructorBlockValidationTraces stats isUnsafe
+      context familyIdx types) :
+    ∀ source ∈ types, ∀ constructor ∈ source.ctors,
+      constructor.type.FVarsIn (fun _ => False) := by
+  induction traces with
+  | nil =>
+      intro source member
+      nomatch member
+  | cons head tail ih =>
+      intro source member constructor constructorMember
+      rcases List.mem_cons.mp member with rfl | member
+      · exact head.sources_closed constructor constructorMember
+      · exact ih source member constructor constructorMember
+
+/-- Constructor-source closedness projected from the complete retained block
+validation owner. -/
+theorem AddInductive.ConstructorBlockValidationRun.sources_closed
+    {types : List InductiveType} {stats : AddInductive.InductiveStats}
+    {isUnsafe : Bool} {context : AddInductive.Context}
+    (run : AddInductive.ConstructorBlockValidationRun types stats isUnsafe
+      context) :
+    ∀ source ∈ types, ∀ constructor ∈ source.ctors,
+      constructor.type.FVarsIn (fun _ => False) :=
+  run.traces.sources_closed
+
+/-- The exact public precheck stored by an outer inductive execution retains
+closedness of every original family and constructor source. -/
+theorem AddInductive.EnvironmentInductiveExecution.inputClosed
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    EnvironmentInductiveInputClosed types :=
+  Environment.checkInductiveInput.WF env types () execution.inputCheck
+
 /-- Semantic completion boundary for one retained inductive execution.  It
 packages the exact safety-indexed model extension required by `VEnvs.WF`. -/
 def AddInductive.EnvironmentInductiveExecution.PreservesVEnvs
@@ -1289,6 +1353,166 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedValidationLparams_eq
   simpa only [AddInductive.Context.forInductive] using
     execution.flattened.eliminationExecution.normalization.validationContext_lparams_all
       (execution.flattened.normalization_run execution.flattenedRun)
+
+/-- The normalization prefix retains the primitive-admission mode selected by
+the outer environment execution. -/
+theorem AddInductive.EnvironmentInductiveExecution.flattenedValidationAllowPrimitive_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    execution.flattened.eliminationExecution.normalization.validationContext.allowPrimitive =
+      allowPrimitive := by
+  simpa only [AddInductive.Context.forInductive] using
+    execution.flattened.eliminationExecution.normalization.validationContext_allowPrimitive_all
+      (execution.flattened.normalization_run execution.flattenedRun)
+
+/-- Family-only Theory staging selected by a retained default-fuel safe
+nonprimitive outer execution.  The declaration is still intentionally free of
+constructors; the next dependent phase enriches it without changing the
+computed family endpoint. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedFamilySourceStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    (ves : VEnvs) where
+  familyDecl : VInductDecl
+  nparams_eq : familyDecl.nparams = nparams
+  staging : VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput
+    (AddInductive.Context.forInductive env lparams false false {})
+    execution.flattened.eliminationExecution.normalization
+    (ves.venv .safe) lparams familyDecl
+
+/-- Constructor-source closedness read from the exact validation hierarchy
+embedded in the flattened normalization execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.flattenedConstructorSourcesClosed
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    ∀ source ∈ execution.nested.types,
+      ∀ constructor ∈ source.ctors,
+        constructor.type.FVarsIn (fun _ => False) :=
+  execution.flattened.eliminationExecution.normalization
+    |>.constructorValidation.sources_closed
+
+/-- Enrich a family-only outer staging result with the exact retained
+constructor traversals.  Constructor closedness comes from validation; only
+readiness at the already-computed family endpoint remains explicit. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedFamilySourceStagingResult.enrich
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (family : execution.FlattenedFamilySourceStagingResult ves)
+    (projectionReady : ProjectionReady
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      family.staging.familyInsertion.blockEnv)
+    (structureEtaReady : StructureEtaReady
+      execution.flattened.eliminationExecution.normalization.familyEnv
+      family.staging.familyInsertion.blockEnv) :
+    Nonempty
+      (VInductDecl.NormalizationCandidateBlockEnrichedStagingResult
+        family.staging) :=
+  family.staging.enrich projectionReady structureEtaReady
+    execution.flattenedConstructorSourcesClosed
+
+/-- Thread an already translated raw family list through the retained outer
+execution.  Default safe nonprimitive execution fixes the candidate root's
+fresh-name namespace, positive recursion depth, safety, and primitive mode, so
+none remains a caller-selected semantic premise. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.flattenedFamilySourceStaging
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs} (wf : ves.WF env)
+    {familyDecl : VInductDecl}
+    (uvars_eq : familyDecl.uvars = lparams.length)
+    (familySources : VInductDecl.CandidateBlockFamilyTypeSourceListInput
+      (ves.venv .safe) lparams execution.nested.types familyDecl.types)
+    (terminals : VInductDecl.CandidateBlockFamilyTerminalSortList
+      execution.flattened.candidate.families) :
+    VInductDecl.NormalizationCandidateBlockFamilySourceStagingInput
+      (AddInductive.Context.forInductive env lparams false false {})
+      execution.flattened.eliminationExecution.normalization
+      (ves.venv .safe) lparams familyDecl := by
+  apply
+    execution.flattened.eliminationExecution.normalization.familySourceStaging
+      (execution.flattened.normalization_run execution.flattenedRun) wf
+      (by simp [AddInductive.Context.forInductive])
+      uvars_eq familySources
+      (by simp [AddInductive.Context.forInductive]) terminals
+  · rfl
+  · rfl
+  · rfl
+
+/-- Recover and stage one family-only raw Theory declaration from the exact
+pre-family candidate traversal retained by a default safe nonprimitive outer
+execution.  Source closedness and the candidate terminal-sort interpretation
+are the only semantic facts not yet projected here from that execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.exists_flattenedFamilySourceStaging
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs} (wf : ves.WF env)
+    (closed : ∀ source ∈ execution.nested.types,
+      source.type.FVarsIn (fun _ => False))
+    (terminals : VInductDecl.CandidateBlockFamilyTerminalSortList
+      execution.flattened.candidate.families) :
+    Nonempty
+      (execution.FlattenedFamilySourceStagingResult ves) := by
+  let context := AddInductive.Context.forInductive env lparams false false {}
+  let normalization :=
+    execution.flattened.eliminationExecution.normalization
+  let preFamily : TypeChecker.CandidateSemanticStage
+      { context with lctx := {} } (ves.venv .safe) lparams :=
+    TypeChecker.CandidateSemanticStage.root wf rfl (by
+      simp [context, AddInductive.Context.forInductive])
+  obtain ⟨⟨familyRaws, familySources⟩⟩ :=
+    VInductDecl.CandidateBlockFamilyTypeSourceListInput.exists_ofProduced
+      preFamily normalization.candidate.families
+        normalization.familyTypesProduced closed
+  let familyDecl : VInductDecl := {
+    uvars := lparams.length
+    nparams := nparams
+    types := familyRaws }
+  exact ⟨{
+    familyDecl
+    nparams_eq := rfl
+    staging := execution.flattenedFamilySourceStaging wf rfl
+      familySources terminals }⟩
+
+/-- In the ordinary no-rewrite case, exact equality between the nested pass's
+flattened sources and the public input lets the retained precheck discharge
+the remaining family-source closedness premise. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.exists_flattenedFamilySourceStaging_of_types_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs} (wf : ves.WF env)
+    (types_eq : execution.nested.types = types)
+    (terminals : VInductDecl.CandidateBlockFamilyTerminalSortList
+      execution.flattened.candidate.families) :
+    Nonempty
+      (execution.FlattenedFamilySourceStagingResult ves) := by
+  apply execution.exists_flattenedFamilySourceStaging wf
+  · intro source member
+    rw [types_eq] at member
+    exact (execution.inputClosed source member).1
+  · exact terminals
 
 /-- A recognized primitive execution's exact family metadata translates to
 the canonical Theory family inventory.  The proof selects the sole retained
