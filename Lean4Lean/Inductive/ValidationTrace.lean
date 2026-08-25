@@ -1967,11 +1967,14 @@ theorem checkInductiveTypes_factor
     checkInductiveTypes_outerLoop_factor nparams indTypes.toArray 0
       (InductiveStats.initial (context.lparams.map .param)) k context
 
-/-- The exact residual observer contract after ordinary family validation,
-raw family declaration, and constructor validation have succeeded.  It asks
-only for the recursive candidate-expression traversals that
-`AddInductive.run` does not itself perform: family types in the input
+/-- Legacy pointwise observer contract after ordinary family validation, raw
+family declaration, and constructor validation have succeeded.  It records
+the recursive candidate-expression traversals for family types in the input
 environment and constructor types in the post-family environment.
+
+`AddInductive.run` now executes the retained normalization prefix directly,
+so this contract is useful for independent reconstruction lemmas but is no
+longer an operational-completeness premise.
 
 The constructor equation is intentionally part of the antecedent.  Besides
 being available from every successful public run, it carries the structural
@@ -2023,22 +2026,22 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
   unfold buildNormalizationCandidateExecutionAfterValidation
   split
   next error actual =>
-    rw [familyTypesRun] at actual
+    rw [declareRun] at actual
     contradiction
-  next actualFamilyTypes actualFamilyTypesRun =>
+  next actualFamilyEnv actualDeclareRun =>
+    have familyEnvEq : actualFamilyEnv = familyEnv :=
+      Except.ok.inj (actualDeclareRun.symm.trans declareRun)
+    subst actualFamilyEnv
     split
     next error actual =>
-      rw [declareRun] at actual
+      rw [constructorRun] at actual
       contradiction
-    next actualFamilyEnv actualDeclareRun =>
-      have familyEnvEq : actualFamilyEnv = familyEnv :=
-        Except.ok.inj (actualDeclareRun.symm.trans declareRun)
-      subst actualFamilyEnv
+    next actualConstructorRun =>
       split
       next error actual =>
-        rw [constructorRun] at actual
+        rw [familyTypesRun] at actual
         contradiction
-      next actualConstructorResult actualConstructorRun =>
+      next actualFamilyTypes actualFamilyTypesRun =>
         obtain ⟨families, familiesRun⟩ :=
           executeCandidateFamilyList_ok_of_observable
             actualFamilyTypes.candidates constructorObservers

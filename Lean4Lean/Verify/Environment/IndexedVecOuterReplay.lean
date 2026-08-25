@@ -1720,14 +1720,6 @@ theorem indexedVecNormalizationCandidateProduced :
   unfold AddInductive.buildNormalizationCandidate
   rw [indexedVec_checkInductiveTypes]
   simp only [ReaderT.bind, Bind.bind]
-  rw [show
-    (withReader (fun _ : AddInductive.Context =>
-        { indexedVecFamilyCandidateContext with lctx := {} })
-      (AddInductive.normalizeCandidateFamilyTypeList
-        [indexedVecKernelType])) indexedVecFamilyCandidate.trace.terminalContext =
-      .ok (.cons indexedVecFamilyListCandidate.familyType .nil) by
-    simpa using indexedVecFamilyTypeListCandidateProduced]
-  simp only [Except.bind]
   rw [indexedVecDeclareFromTerminal]
   unfold AddInductive.withEnv
   change (ReaderT.bind
@@ -1735,16 +1727,26 @@ theorem indexedVecNormalizationCandidateProduced :
         indexedVecCandidateInductiveStats false)
       (fun _ => ReaderT.bind
         (fun _ : AddInductive.Context =>
+          AddInductive.normalizeCandidateFamilyTypeList
+            [indexedVecKernelType]
+            { indexedVecFamilyCandidateContext with lctx := {} })
+        (fun familyTypes => ReaderT.bind
+        (fun _ : AddInductive.Context =>
           AddInductive.normalizeCandidateFamilyList
-            (.cons indexedVecFamilyListCandidate.familyType .nil)
-            ctorContext)
+            familyTypes ctorContext)
         (fun families => pure
           (⟨families⟩ : AddInductive.NormalizationCandidate
-            [indexedVecKernelType]))))
+            [indexedVecKernelType])))))
       indexedVecCtorValidationContext = _
   simp only [ReaderT.bind, Bind.bind]
   rw [indexedVecValidationCheckConstructors]
   simp only [Except.bind]
+  rw [show AddInductive.normalizeCandidateFamilyTypeList
+      [indexedVecKernelType]
+        { indexedVecFamilyCandidateContext with lctx := {} } =
+        .ok (.cons indexedVecFamilyListCandidate.familyType .nil) by
+      simpa using indexedVecFamilyTypeListCandidateProduced]
+  simp only
   rw [indexedVecFamilyListCandidateProduced]
   rfl
 

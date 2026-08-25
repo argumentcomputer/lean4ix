@@ -3605,21 +3605,12 @@ theorem addDecl.inductDecl_WF_of_execution
       exact preserves allowPrimitive finalEnv execution primitiveResult
 
 /-- Fully decomposed inductive-branch contract.  Operational completeness is
-reduced to the one normalization observer boundary for each flattened result;
-semantic completion is supplied as pointwise `VEnvs` components for the exact
-retained outer execution. -/
+derived from the retained public normalization prefix; semantic completion is
+supplied as pointwise `VEnvs` components for the exact outer execution. -/
 theorem addDecl.inductDecl_WF_of_components
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool) (fuel : FuelConfig := {})
-    (candidateObservers : ∀ allowPrimitive,
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok allowPrimitive →
-        ∀ nested : ElimNestedInductive.Result,
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                allowPrimitive fuel))
     (semantics : ∀ allowPrimitive finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe allowPrimitive fuel finalEnv),
@@ -3631,9 +3622,8 @@ theorem addDecl.inductDecl_WF_of_components
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_execution wf lparams nparams types isUnsafe fuel
-  · intro allowPrimitive primitiveRun
-    exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers
-      (candidateObservers allowPrimitive primitiveRun)
+  · intro allowPrimitive _primitiveRun
+    exact AddInductive.EnvironmentInductiveExecution.complete
   · intro allowPrimitive finalEnv execution primitiveRun
     exact (semantics allowPrimitive finalEnv execution primitiveRun).toPreservesVEnvs
 
@@ -3650,14 +3640,6 @@ theorem addDecl.inductDecl_WF_of_transactions
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool) (fuel : FuelConfig := {})
-    (candidateObservers : ∀ allowPrimitive,
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok allowPrimitive →
-        ∀ nested : ElimNestedInductive.Result,
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                allowPrimitive fuel))
     (semantics : ∀ allowPrimitive finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe allowPrimitive fuel finalEnv),
@@ -3669,7 +3651,7 @@ theorem addDecl.inductDecl_WF_of_transactions
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_components wf lparams nparams types isUnsafe
-    fuel candidateObservers
+    fuel
   intro allowPrimitive finalEnv execution primitiveRun
   exact (semantics allowPrimitive finalEnv execution primitiveRun).toVEnvsExtension
     wf
@@ -3689,14 +3671,6 @@ theorem addDecl.inductDecl_WF_of_nonprimitive_transactions
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool) (fuel : FuelConfig := {})
-    (candidateObservers : ∀ allowPrimitive,
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok allowPrimitive →
-        ∀ nested : ElimNestedInductive.Result,
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                allowPrimitive fuel))
     (semantics : ∀ allowPrimitive finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe allowPrimitive fuel finalEnv),
@@ -3708,7 +3682,7 @@ theorem addDecl.inductDecl_WF_of_nonprimitive_transactions
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_transactions wf lparams nparams types
-    isUnsafe fuel candidateObservers
+    isUnsafe fuel
   intro allowPrimitive finalEnv execution primitiveRun
   exact (semantics allowPrimitive finalEnv execution primitiveRun)
     |>.toTransactionalVEnvsExtension wf
@@ -3732,14 +3706,6 @@ theorem addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool) (fuel : FuelConfig := {})
-    (candidateObservers : ∀ allowPrimitive,
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok allowPrimitive →
-        ∀ nested : ElimNestedInductive.Result,
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                allowPrimitive fuel))
     (semantics : ∀ allowPrimitive finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe allowPrimitive fuel finalEnv),
@@ -3751,7 +3717,7 @@ theorem addDecl.inductDecl_WF_of_readiness_completed_nonprimitive_transactions
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_components wf lparams nparams types
-    isUnsafe fuel candidateObservers
+    isUnsafe fuel
   intro allowPrimitive finalEnv execution primitiveRun
   exact (semantics allowPrimitive finalEnv execution primitiveRun)
     |>.toVEnvsExtension wf
@@ -3766,14 +3732,6 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool) (fuel : FuelConfig := {})
-    (candidateObservers : ∀ allowPrimitive,
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok allowPrimitive →
-        ∀ nested : ElimNestedInductive.Result,
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                allowPrimitive fuel))
     (nonprimitiveSemantics : ∀ finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe false fuel finalEnv),
@@ -3785,7 +3743,7 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
       ∃ ves' : VEnvs, ves'.WF finalEnv ∧
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_components wf lparams nparams types
-    isUnsafe fuel candidateObservers
+    isUnsafe fuel
   intro allowPrimitive finalEnv execution primitiveRun
   cases allowPrimitive with
   | false =>
@@ -3801,24 +3759,13 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions
             wf primitiveResult).toTransactionalVEnvsExtension wf
         |>.toVEnvsExtension wf
 
-/-- Default-fuel primitive split with no primitive observer callback.  The
-false recognizer branch retains the remaining general observer/semantic
-contracts; the true branch derives its Bool/Nat observers from recognition,
-the actual nested run, and input well-formedness. -/
+/-- Default-fuel primitive split.  The retained public normalization prefix
+closes operational completeness in both recognizer branches; callers provide
+only nonprimitive semantic completion. -/
 theorem addDecl.inductDecl_WF_of_split_primitive_transactions_default
     {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (lparams : List Name) (nparams : Nat) (types : List InductiveType)
     (isUnsafe : Bool)
-    (candidateObservers :
-      Environment.checkPrimitiveInductive env lparams nparams types
-          isUnsafe = .ok false →
-        ∀ nested : ElimNestedInductive.Result,
-          ElimNestedInductive.runAt env ({} : FuelConfig).inductiveFuel
-              nparams lparams types = .ok nested →
-          AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
-            nparams nested.types nested.aux2nested.size isUnsafe
-              (AddInductive.Context.forInductive env lparams isUnsafe
-                false {}))
     (nonprimitiveSemantics : ∀ finalEnv
         (execution : AddInductive.EnvironmentInductiveExecution env lparams
           nparams types isUnsafe false {} finalEnv),
@@ -3831,20 +3778,8 @@ theorem addDecl.inductDecl_WF_of_split_primitive_transactions_default
         ∀ safety, ves.venv safety ≤ ves'.venv safety := by
   apply addDecl.inductDecl_WF_of_execution wf lparams nparams types
     isUnsafe {}
-  · intro allowPrimitive primitiveRun
-    cases allowPrimitive with
-    | false =>
-        exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers_of_nestedRun
-          (candidateObservers primitiveRun)
-    | true =>
-        have primitiveResult :
-            PrimitiveInductiveResult lparams nparams types isUnsafe true :=
-          checkPrimitiveInductive.WF env lparams nparams types isUnsafe
-            true primitiveRun
-        exact AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers_of_nestedRun
-          fun nested nestedRun =>
-            primitiveCandidateObserversOfNestedRun wf primitiveResult
-              nested nestedRun
+  · intro allowPrimitive _primitiveRun
+    exact AddInductive.EnvironmentInductiveExecution.complete
   · intro allowPrimitive finalEnv execution primitiveRun
     cases allowPrimitive with
     | false =>
@@ -3911,7 +3846,6 @@ info: 'Lean4Lean.addDecl.inductDecl_WF_of_split_primitive_transactions_default' 
  Expr.lowerLooseBVars_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,
- Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,

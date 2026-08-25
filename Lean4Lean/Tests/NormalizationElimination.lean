@@ -136,6 +136,14 @@ info: 'Lean4Lean.AddInductive.NormalizationRecursorExecution.complete_of_normali
 #print axioms Lean4Lean.AddInductive.NormalizationRecursorExecution.complete_of_normalization
 
 /--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.completeForRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.NormalizationCandidateExecution.completeForRun
+
+/--
 info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.completeForRun_of_candidateObservers' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -166,6 +174,14 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.complete_of_normaliz
 -/
 #guard_msgs in
 #print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.complete_of_normalization
+
+/--
+info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.complete' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms Lean4Lean.AddInductive.EnvironmentInductiveExecution.complete
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.complete_of_candidateObservers' depends on axioms: [propext,

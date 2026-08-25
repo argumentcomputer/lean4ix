@@ -2488,18 +2488,18 @@ def buildNormalizationCandidateExecutionAfterValidation
     M (NormalizationCandidateExecution nparams types numNested isUnsafe
       candidateContext) :=
   fun validationContext =>
-    match executeCandidateFamilyTypeList
-        { candidateContext with lctx := {} } types with
+    match hdeclare : declareInductiveTypes stats nparams types.toArray
+        numNested isUnsafe validationContext with
     | .error error => .error error
-    | .ok familyTypes =>
-      match hdeclare : declareInductiveTypes stats nparams types.toArray
-          numNested isUnsafe validationContext with
+    | .ok familyEnv =>
+      match hconstructors : checkConstructors types.toArray stats isUnsafe
+          { validationContext with env := familyEnv } with
       | .error error => .error error
-      | .ok familyEnv =>
-        match hconstructors : checkConstructors types.toArray stats isUnsafe
-            { validationContext with env := familyEnv } with
+      | .ok () =>
+        match executeCandidateFamilyTypeList
+            { candidateContext with lctx := {} } types with
         | .error error => .error error
-        | .ok () =>
+        | .ok familyTypes =>
           match executeCandidateFamilyList
               { candidateContext with env := familyEnv, lctx := {} }
               familyTypes.candidates with
@@ -2563,13 +2563,13 @@ def buildNormalizationCandidate
   fun candidateContext =>
   let indTypes := types.toArray
   checkInductiveTypes nparams indTypes (fun stats => do
-    let familyTypes ←
-      withReader (fun _ : Context => { candidateContext with lctx := {} }) do
-        normalizeCandidateFamilyTypeList types
     let familyEnv ←
       declareInductiveTypes stats nparams indTypes numNested isUnsafe
     withEnv familyEnv do
       checkConstructors indTypes stats isUnsafe
+      let familyTypes ←
+        withReader (fun _ : Context => { candidateContext with lctx := {} }) do
+          normalizeCandidateFamilyTypeList types
       let families ←
         withReader (fun _ : Context =>
           { candidateContext with env := familyEnv, lctx := {} }) do
@@ -2591,31 +2591,36 @@ theorem NormalizationCandidateExecution.produces
   unfold buildNormalizationCandidate
   rw [validationRun]
   simp only [ReaderT.bind, Bind.bind]
-  rw [show
-    (withReader (fun _ : Context =>
-        { candidateContext with lctx := {} })
-      (normalizeCandidateFamilyTypeList types)) execution.validationContext =
-        .ok execution.familyTypes.candidates by
-      change normalizeCandidateFamilyTypeList types
-        { candidateContext with lctx := {} } = _
-      exact execution.familyTypes.produced.normalize]
-  simp only [Except.bind]
   rw [execution.declareRun]
   unfold withEnv
   change (ReaderT.bind
       (checkConstructors types.toArray execution.stats isUnsafe)
       (fun _ => ReaderT.bind
         (withReader (fun _ : Context =>
+          { candidateContext with lctx := {} })
+          (normalizeCandidateFamilyTypeList types))
+        (fun familyTypes => ReaderT.bind
+        (withReader (fun _ : Context =>
           { candidateContext with
             env := execution.familyEnv, lctx := {} })
-          (normalizeCandidateFamilyList execution.familyTypes.candidates))
+          (normalizeCandidateFamilyList familyTypes))
         (fun families => pure
-          (⟨families⟩ : NormalizationCandidate types))))
+          (⟨families⟩ : NormalizationCandidate types)))))
       ({ execution.validationContext with
         env := execution.familyEnv } : Context) = _
   simp only [ReaderT.bind, Bind.bind]
   rw [execution.constructorRun]
   simp only [Except.bind]
+  rw [show
+    (withReader (fun _ : Context =>
+        { candidateContext with lctx := {} })
+      (normalizeCandidateFamilyTypeList types))
+      { execution.validationContext with env := execution.familyEnv } =
+        .ok execution.familyTypes.candidates by
+      change normalizeCandidateFamilyTypeList types
+        { candidateContext with lctx := {} } = _
+      exact execution.familyTypes.produced.normalize]
+  simp only
   rw [show
     (withReader (fun _ : Context =>
         { candidateContext with
@@ -3582,18 +3587,25 @@ theorem declareRecursors_infos_kTarget
   rw [← declareRecursors_kTarget_eq run]
   exact result.infos_kTarget info member
 
+/-- Run an ordinary flattened inductive transaction through the retained
+normalization prefix consumed by Theory/Verify.  The prefix keeps the kernel's
+family-validation, raw-declaration, and constructor-validation order, then
+executes the exact pre-family and post-family candidate traversals before any
+generated constructor or recursor metadata is committed. -/
 def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Environment := do
-  let isUnsafe := (← read).safety != .safe
+  let candidateContext ← read
+  let isUnsafe := candidateContext.safety != .safe
   let indTypes := types.toArray
-  let {lparams, ..} ← read
+  let {lparams, ..} := candidateContext
   Environment.checkDuplicatedUnivParams lparams
-  checkInductiveTypes nparams indTypes fun stats => do
-  withEnv (← declareInductiveTypes stats nparams indTypes numNested isUnsafe) do
-  checkConstructors indTypes stats isUnsafe
-  withEnv (← declareConstructors stats indTypes isUnsafe) do
-  let elimLevel ← getElimLevel stats indTypes
-  let k ← isKTarget stats indTypes
-  let recursors ← declareRecursors stats indTypes elimLevel k
+  let normalization ← liftM <| buildNormalizationCandidateExecution
+    nparams types numNested isUnsafe candidateContext
+  withReader (fun _ : Context =>
+    { normalization.validationContext with env := normalization.familyEnv }) do
+  withEnv (← declareConstructors normalization.stats indTypes isUnsafe) do
+  let elimLevel ← getElimLevel normalization.stats indTypes
+  let k ← isKTarget normalization.stats indTypes
+  let recursors ← declareRecursors normalization.stats indTypes elimLevel k
   pure recursors.env
 
 end AddInductive

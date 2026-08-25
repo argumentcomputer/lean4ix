@@ -771,11 +771,10 @@ def recLevelParams
 
 end NormalizationEliminationExecution
 
-/-- The sole remaining observer-completeness boundary for a successful
-ordinary inductive add: its family-validation and normalization prefix can be
-retained by the detailed candidate producer.  Downstream constructor,
-elimination, K-target, and recursor phases are composed from their real public
-equations. -/
+/-- A successful ordinary inductive add retains its family-validation and
+normalization prefix through the detailed candidate producer.  Downstream
+constructor, elimination, K-target, and recursor phases are composed from
+their real public equations. -/
 def NormalizationCandidateExecution.CompleteForRun
     (nparams : Nat) (types : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context) : Prop :=
@@ -786,15 +785,11 @@ def NormalizationCandidateExecution.CompleteForRun
         buildNormalizationCandidateExecution nparams types numNested isUnsafe
           candidateContext = .ok normalization
 
-/-- The pointwise recursive candidate observers are the whole residual of
-normalization completeness.  Every validation, raw-family declaration, and
-constructor-validation equation is recovered from the successful public run
-and supplied as an antecedent; the observer contract contributes only calls
-absent from that public path. -/
-theorem NormalizationCandidateExecution.completeForRun_of_candidateObservers
-    (isUnsafeEq : isUnsafe = (candidateContext.safety != .safe))
-    (observers : CandidateObserversComplete nparams types numNested isUnsafe
-      candidateContext) :
+/-- The public runner now consumes the retained normalization prefix itself,
+so every successful call directly exposes the exact execution required by
+the downstream Theory/Verify pipeline. -/
+theorem NormalizationCandidateExecution.completeForRun
+    (isUnsafeEq : isUnsafe = (candidateContext.safety != .safe)) :
     CompleteForRun nparams types numNested isUnsafe candidateContext := by
   subst isUnsafe
   intro finalEnv publicRun
@@ -812,56 +807,22 @@ theorem NormalizationCandidateExecution.completeForRun_of_candidateObservers
       have checkedEq : checked = () := Subsingleton.elim _ _
       subst checked
       rw [duplicatedRun] at publicRun'
-      rw [checkInductiveTypes_factor] at publicRun'
-      cases validationRun :
-          observeFamilyValidationBlock nparams types candidateContext with
+      cases normalizationRun : buildNormalizationCandidateExecution nparams
+          types numNested (candidateContext.safety != .safe)
+          candidateContext with
       | error error =>
-          rw [validationRun] at publicRun'
+          rw [normalizationRun] at publicRun'
           contradiction
-      | ok validation =>
-          rw [validationRun] at publicRun'
-          simp only [ReaderT.bind, Bind.bind, Except.bind] at publicRun'
-          cases declareRun : declareInductiveTypes validation.stats nparams
-              types.toArray numNested (candidateContext.safety != .safe)
-              validation.validationContext with
-          | error error =>
-              rw [declareRun] at publicRun'
-              contradiction
-          | ok familyEnv =>
-              rw [declareRun] at publicRun'
-              unfold withEnv at publicRun'
-              change (ReaderT.bind
-                  (checkConstructors types.toArray validation.stats
-                    (candidateContext.safety != .safe))
-                  (fun _ => ReaderT.bind
-                    (declareConstructors validation.stats types.toArray
-                      (candidateContext.safety != .safe))
-                    (fun constructorEnv => withReader
-                      (fun c : Context => { c with env := constructorEnv })
-                      (ReaderT.bind
-                        (getElimLevel validation.stats types.toArray)
-                        (fun elimLevel => ReaderT.bind
-                          (isKTarget validation.stats types.toArray)
-                          (fun k => ReaderT.bind
-                            (declareRecursors validation.stats types.toArray
-                              elimLevel k)
-                            (fun recursors => pure recursors.env)))))))
-                  ({ validation.validationContext with
-                    env := familyEnv } : Context) =
-                .ok finalEnv at publicRun'
-              simp only [ReaderT.bind, Bind.bind] at publicRun'
-              cases constructorRun : checkConstructors types.toArray
-                  validation.stats (candidateContext.safety != .safe)
-                  { validation.validationContext with env := familyEnv } with
-              | error error =>
-                  rw [constructorRun] at publicRun'
-                  contradiction
-              | ok checkedConstructors =>
-                  have checkedConstructorsEq : checkedConstructors = () :=
-                    Subsingleton.elim _ _
-                  subst checkedConstructors
-                  exact build_ok_of_candidateObservers observers validationRun
-                    declareRun constructorRun
+      | ok normalization => exact ⟨normalization, rfl⟩
+
+/-- Compatibility wrapper for clients that still provide the former
+candidate-observer premise.  Public acceptance already discharges it. -/
+theorem NormalizationCandidateExecution.completeForRun_of_candidateObservers
+    (isUnsafeEq : isUnsafe = (candidateContext.safety != .safe))
+    (_observers : CandidateObserversComplete nparams types numNested isUnsafe
+      candidateContext) :
+    CompleteForRun nparams types numNested isUnsafe candidateContext :=
+  completeForRun isUnsafeEq
 
 /-- The retained normalization/elimination prefix extended through the exact
 recursor synthesis and declaration phase used by `run`.  `recursors.infos`
@@ -1054,33 +1015,24 @@ theorem complete_of_normalization
       have checkedEq : checked = () := Subsingleton.elim _ _
       subst checked
       rw [duplicatedRun] at publicRun'
-      rw [normalization.familyValidation normalizationRun] at publicRun'
-      simp only [ReaderT.bind, Bind.bind] at publicRun'
-      rw [normalization.declareRun] at publicRun'
-      simp only [Except.bind] at publicRun'
-      unfold withEnv at publicRun'
+      rw [normalizationRun] at publicRun'
       change (ReaderT.bind
-          (checkConstructors types.toArray normalization.stats
+          (declareConstructors normalization.stats types.toArray
             (candidateContext.safety != .safe))
-          (fun _ => ReaderT.bind
-            (declareConstructors normalization.stats types.toArray
-              (candidateContext.safety != .safe))
-            (fun constructorEnv => withReader
-              (fun c : Context => { c with env := constructorEnv })
-              (ReaderT.bind
-                (getElimLevel normalization.stats types.toArray)
-                (fun elimLevel => ReaderT.bind
-                  (isKTarget normalization.stats types.toArray)
-                  (fun k => ReaderT.bind
-                    (declareRecursors normalization.stats types.toArray
-                      elimLevel k)
-                    (fun recursors => pure recursors.env)))))))
+          (fun constructorEnv => withReader
+            (fun c : Context => { c with env := constructorEnv })
+            (ReaderT.bind
+              (getElimLevel normalization.stats types.toArray)
+              (fun elimLevel => ReaderT.bind
+                (isKTarget normalization.stats types.toArray)
+                (fun k => ReaderT.bind
+                  (declareRecursors normalization.stats types.toArray
+                    elimLevel k)
+                  (fun recursors => pure recursors.env))))))
           ({ normalization.validationContext with
             env := normalization.familyEnv } : Context) =
         .ok finalEnv at publicRun'
       simp only [ReaderT.bind, Bind.bind] at publicRun'
-      rw [normalization.constructorRun] at publicRun'
-      simp only [Except.bind] at publicRun'
       cases declareRun : declareConstructors normalization.stats types.toArray
           (candidateContext.safety != .safe)
           { normalization.validationContext with
@@ -1199,38 +1151,27 @@ theorem addInductiveRun
     ReaderT.bind, Bind.bind, Pure.pure, Except.pure, liftExcept_apply]
   simp only [Except.bind]
   rw [execution.duplicatedUnivParamsRun]
-  rw [execution.eliminationExecution.normalization.familyValidation
-    (execution.normalization_run produced)]
-  simp only [ReaderT.bind, Bind.bind]
-  rw [execution.eliminationExecution.normalization.declareRun]
-  simp only [Except.bind]
-  unfold withEnv
+  rw [execution.normalization_run produced]
   change (ReaderT.bind
-      (checkConstructors types.toArray
-        execution.eliminationExecution.normalization.stats
-          (candidateContext.safety != .safe))
-      (fun _ => ReaderT.bind
-        (declareConstructors execution.eliminationExecution.normalization.stats
-          types.toArray (candidateContext.safety != .safe))
-        (fun constructorEnv => withReader
-          (fun c : Context => { c with env := constructorEnv })
-          (ReaderT.bind
-            (getElimLevel execution.eliminationExecution.normalization.stats
+      (declareConstructors execution.eliminationExecution.normalization.stats
+        types.toArray (candidateContext.safety != .safe))
+      (fun constructorEnv => withReader
+        (fun c : Context => { c with env := constructorEnv })
+        (ReaderT.bind
+          (getElimLevel execution.eliminationExecution.normalization.stats
+            types.toArray)
+          (fun elimLevel => ReaderT.bind
+            (isKTarget execution.eliminationExecution.normalization.stats
               types.toArray)
-            (fun elimLevel => ReaderT.bind
-              (isKTarget execution.eliminationExecution.normalization.stats
-                types.toArray)
-              (fun k => ReaderT.bind
-                (declareRecursors
-                  execution.eliminationExecution.normalization.stats
-                  types.toArray elimLevel k)
-                (fun recursors => pure recursors.env)))))))
+            (fun k => ReaderT.bind
+              (declareRecursors
+                execution.eliminationExecution.normalization.stats
+                types.toArray elimLevel k)
+              (fun recursors => pure recursors.env))))))
       ({ execution.eliminationExecution.normalization.validationContext with
         env := execution.eliminationExecution.normalization.familyEnv } :
           Context) = _
   simp only [ReaderT.bind, Bind.bind]
-  rw [execution.eliminationExecution.normalization.constructorRun]
-  simp only [Except.bind]
   rw [execution.eliminationExecution.declareConstructorsRun]
   change (ReaderT.bind
       (getElimLevel execution.eliminationExecution.normalization.stats
@@ -1487,8 +1428,8 @@ theorem complete_of_normalization_of_nestedRun
       (by cases isUnsafe <;> rfl)
       (normalizationComplete nested nestedRun)
 
-/-- Full operational completeness from candidate observers specialized to
-the exact successful nested-elimination result. -/
+/-- Compatibility form of operational completeness from candidate observers
+specialized to the exact successful nested-elimination result. -/
 theorem complete_of_candidateObservers_of_nestedRun
     (candidateObservers : ∀ (nested : ElimNestedInductive.Result),
       ElimNestedInductive.runAt env fuel.inductiveFuel nparams lparams types =
@@ -1502,9 +1443,8 @@ theorem complete_of_candidateObservers_of_nestedRun
     NormalizationCandidateExecution.completeForRun_of_candidateObservers
       (by cases isUnsafe <;> rfl) (candidateObservers nested nestedRun)
 
-/-- Full nested-aware operational completeness now has a single observer
-boundary: retaining the normalization prefix of each successful flattened
-ordinary call.  The public outer phases and all ordinary downstream phases are
+/-- Full nested-aware operational completeness from retained normalization
+prefixes.  The public outer phases and all ordinary downstream phases are
 complete by exact case analysis. -/
 theorem complete_of_normalization
     (normalizationComplete : ∀ (nested : ElimNestedInductive.Result),
@@ -1517,8 +1457,17 @@ theorem complete_of_normalization
     NormalizationRecursorExecution.complete_of_normalization
       (by cases isUnsafe <;> rfl) (normalizationComplete nested)
 
-/-- Full nested-aware operational completeness from the exact pointwise
-candidate observers absent from each flattened public run. -/
+/-- The retained public normalization prefix closes ordinary and nested
+operational completeness without any caller-supplied observer premise. -/
+theorem complete :
+    EnvironmentInductiveExecution.Complete env lparams nparams types
+      isUnsafe allowPrimitive fuel :=
+  complete_of_normalization fun _nested =>
+    NormalizationCandidateExecution.completeForRun
+      (by cases isUnsafe <;> rfl)
+
+/-- Compatibility form from exact pointwise candidate observers.  The public
+runner now retains the same traversals internally. -/
 theorem complete_of_candidateObservers
     (candidateObservers : ∀ (nested : ElimNestedInductive.Result),
       NormalizationCandidateExecution.CandidateObserversComplete nparams

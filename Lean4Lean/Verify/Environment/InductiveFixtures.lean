@@ -6655,30 +6655,24 @@ theorem annotatedPiNormalizationCandidate_produced :
   unfold AddInductive.buildNormalizationCandidate
   rw [annotatedPi_checkInductiveTypes]
   simp only [ReaderT.bind, Bind.bind]
-  rw [show
-    (withReader (fun _ : AddInductive.Context =>
-        { annotatedPiFamilyCandidateContext with lctx := {} })
-      (AddInductive.normalizeCandidateFamilyTypeList
-        [annotatedPiKernelType])) annotatedPiFamilyCandidateContext =
-      .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) by
-    change AddInductive.normalizeCandidateFamilyTypeList
-      [annotatedPiKernelType]
-      { annotatedPiFamilyCandidateContext with lctx := {} } = _
-    rw [show { annotatedPiFamilyCandidateContext with lctx := {} } =
-      annotatedPiFamilyCandidateContext by rfl]
-    exact annotatedPiFamilyTypeList_candidateTrace]
-  simp only [Except.bind]
   rw [annotatedPi_declareInductiveTypes]
   unfold AddInductive.withEnv
   change (ReaderT.bind
       (AddInductive.checkConstructors #[annotatedPiKernelType]
         annotatedPiInductiveStats false)
       (fun _ => ReaderT.bind
-        (AddInductive.normalizeCandidateFamilyList
-          (.cons annotatedPiFamilyListCandidate.familyType .nil))
+        (withReader (fun _ : AddInductive.Context =>
+          { annotatedPiFamilyCandidateContext with lctx := {} })
+          (AddInductive.normalizeCandidateFamilyTypeList
+            [annotatedPiKernelType]))
+        (fun familyTypes => ReaderT.bind
+        (withReader (fun _ : AddInductive.Context =>
+          { annotatedPiFamilyCandidateContext with
+            env := annotatedPiTypeKernelEnv, lctx := {} })
+          (AddInductive.normalizeCandidateFamilyList familyTypes))
         (fun families => pure
           (⟨families⟩ : AddInductive.NormalizationCandidate
-            [annotatedPiKernelType]))))
+            [annotatedPiKernelType])))))
       ({ annotatedPiFamilyCandidateContext with
         env := annotatedPiTypeKernelEnv } :
           AddInductive.Context) = _
@@ -6688,7 +6682,31 @@ theorem annotatedPiNormalizationCandidate_produced :
   simp only [ReaderT.bind, Bind.bind]
   rw [annotatedPi_checkConstructors]
   simp only [Except.bind]
-  rw [annotatedPiFamilyList_candidateTrace]
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { annotatedPiFamilyCandidateContext with lctx := {} })
+      (AddInductive.normalizeCandidateFamilyTypeList
+        [annotatedPiKernelType])) annotatedPiCtorCandidateContext =
+      .ok (.cons annotatedPiFamilyListCandidate.familyType .nil) by
+    change AddInductive.normalizeCandidateFamilyTypeList
+      [annotatedPiKernelType]
+      { annotatedPiFamilyCandidateContext with lctx := {} } = _
+    rw [show { annotatedPiFamilyCandidateContext with lctx := {} } =
+      annotatedPiFamilyCandidateContext by rfl]
+    exact annotatedPiFamilyTypeList_candidateTrace]
+  simp only
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { annotatedPiFamilyCandidateContext with
+          env := annotatedPiTypeKernelEnv, lctx := {} })
+      (AddInductive.normalizeCandidateFamilyList
+        (.cons annotatedPiFamilyListCandidate.familyType .nil)))
+      annotatedPiCtorCandidateContext =
+        .ok annotatedPiNormalizationCandidate.families by
+      change AddInductive.normalizeCandidateFamilyList
+        (.cons annotatedPiFamilyListCandidate.familyType .nil)
+        annotatedPiCtorCandidateContext = _
+      exact annotatedPiFamilyList_candidateTrace]
   rfl
 
 private def aliasFormerFamilyCandidateStep :
@@ -7037,30 +7055,24 @@ theorem aliasFormerNormalizationCandidate_produced :
   unfold AddInductive.buildNormalizationCandidate
   rw [aliasFormer_checkInductiveTypes]
   simp only [ReaderT.bind, Bind.bind]
-  rw [show
-    (withReader (fun _ : AddInductive.Context =>
-        { aliasFormerCandidateContext with lctx := {} })
-      (AddInductive.normalizeCandidateFamilyTypeList
-        [aliasFormerKernelType])) aliasFormerCandidateContext =
-      .ok (.cons aliasFormerFamilyListCandidate.familyType .nil) by
-    change AddInductive.normalizeCandidateFamilyTypeList
-      [aliasFormerKernelType]
-      { aliasFormerCandidateContext with lctx := {} } = _
-    rw [show { aliasFormerCandidateContext with lctx := {} } =
-      aliasFormerCandidateContext by rfl]
-    exact aliasFormerFamilyTypeList_candidateTrace]
-  simp only [Except.bind]
   rw [aliasFormer_declareInductiveTypes]
   unfold AddInductive.withEnv
   change (ReaderT.bind
       (AddInductive.checkConstructors #[aliasFormerKernelType]
         aliasFormerInductiveStats false)
       (fun _ => ReaderT.bind
-        (AddInductive.normalizeCandidateFamilyList
-          (.cons aliasFormerFamilyListCandidate.familyType .nil))
+        (withReader (fun _ : AddInductive.Context =>
+          { aliasFormerCandidateContext with lctx := {} })
+          (AddInductive.normalizeCandidateFamilyTypeList
+            [aliasFormerKernelType]))
+        (fun familyTypes => ReaderT.bind
+        (withReader (fun _ : AddInductive.Context =>
+          { aliasFormerCandidateContext with
+            env := aliasFormerCtorNormalizationKernelEnv, lctx := {} })
+          (AddInductive.normalizeCandidateFamilyList familyTypes))
         (fun families => pure
           (⟨families⟩ : AddInductive.NormalizationCandidate
-            [aliasFormerKernelType]))))
+            [aliasFormerKernelType])))))
       ({ aliasFormerCandidateContext with
         env := aliasFormerCtorNormalizationKernelEnv } :
           AddInductive.Context) = _
@@ -7070,7 +7082,31 @@ theorem aliasFormerNormalizationCandidate_produced :
   simp only [ReaderT.bind, Bind.bind]
   rw [aliasFormer_checkConstructors]
   simp only [Except.bind]
-  rw [aliasFormerFamilyList_candidateTrace]
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { aliasFormerCandidateContext with lctx := {} })
+      (AddInductive.normalizeCandidateFamilyTypeList
+        [aliasFormerKernelType])) aliasFormerCtorCandidateContext =
+      .ok (.cons aliasFormerFamilyListCandidate.familyType .nil) by
+    change AddInductive.normalizeCandidateFamilyTypeList
+      [aliasFormerKernelType]
+      { aliasFormerCandidateContext with lctx := {} } = _
+    rw [show { aliasFormerCandidateContext with lctx := {} } =
+      aliasFormerCandidateContext by rfl]
+    exact aliasFormerFamilyTypeList_candidateTrace]
+  simp only
+  rw [show
+    (withReader (fun _ : AddInductive.Context =>
+        { aliasFormerCandidateContext with
+          env := aliasFormerCtorNormalizationKernelEnv, lctx := {} })
+      (AddInductive.normalizeCandidateFamilyList
+        (.cons aliasFormerFamilyListCandidate.familyType .nil)))
+      aliasFormerCtorCandidateContext =
+        .ok aliasFormerNormalizationCandidate.families by
+      change AddInductive.normalizeCandidateFamilyList
+        (.cons aliasFormerFamilyListCandidate.familyType .nil)
+        aliasFormerCtorCandidateContext = _
+      exact aliasFormerFamilyList_candidateTrace]
   rfl
 
 /-- Erasing the retained trace produces the expected AliasFormer analysis
