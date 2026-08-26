@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 
 import Lean4Lean.Tests.Toolchain
 import Lean4Lean.Tests.ConditionReflect
+import Lean4Lean.Tests.ModDivCondition
 import Lean4Lean.Tests.DifferentialParity
 import Lean4Lean.Tests.Environment
 import Lean4Lean.Tests.LevelStd

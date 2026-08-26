@@ -1749,6 +1749,45 @@ to the replacement.
   boundary, or reconciliation can import the same proof layer without the
   fork-owned split and Lean-v4.33 normalization adaptations.
 
+## D035 — retained Nat-≤ selector evidence
+
+- **Status:** implemented as the tenth bounded UP6 slice; the checker now
+  exports the selector evidence needed by Nat.mod/div, but this entry does not
+  claim either recursive primitive certificate.
+- **Owner:** Argument Computer Corporation; review with the Nat.mod and Nat.div
+  declaration slices.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally the generic
+  reflection-checker WF segment and `ModDivCondition.lean`; no bitwise support,
+  Nat.mod/div recursion, or admitted generic primitive boundary was imported.
+- **Executable delta:** `Reflection.checkITE` and
+  `Reflection.checkNatDITE` check closed-lambda equations rather than equations
+  in temporary local contexts. `Condition.check` also checks the synthesized
+  Boolean decision function's type. The Nat-≤ primitive wrapper first checks a
+  finite list of evidence expressions so their translations are available to
+  the conservation proof.
+- **Accepted-domain decision:** the closed equations and explicit decision
+  function check are intentional evidence-retaining guards inherited from the
+  upstream certificate design. They strengthen the observable checker contract
+  needed by the proof instead of reconstructing unrecorded facts after the
+  check succeeds.
+- **Verification delta:** `ConditionChecker` proves the executable reflection
+  and Nat-≤ checker path. `ModDivCondition` packages successful checks as a
+  `NatLESelectorCertificate`, canonicalizes both ITE and DITE equations, and
+  selects their true or false branches from the already certified direct
+  `Nat.ble` semantics.
+- **Ix impact:** the forthcoming Nat.mod/div transports can consume one
+  explicit, monotone selector capability rather than depending on the generic
+  primitive theorem or on an opaque Boolean-elimination assumption.
+- **Tests:** `Lean4Lean.Tests.ModDivCondition` pins the exact checker-WF and
+  evidence-wrapper axiom closures, including the existing executable-model
+  bridge axioms, and separately pins representative ITE and constructor-DITE
+  selector endpoints to the four expected logical/admitted dependencies.
+- **Removal condition:** upstream exposes the same retained-evidence boundary,
+  or reconciliation can import its checker and selector modules directly while
+  preserving this fork's explicit trust pins and readiness-aware Nat.ble
+  dependency.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

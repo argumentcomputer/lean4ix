@@ -99,11 +99,16 @@ def Reflection.natDITE (r : Reflection) : Expr :=
 def Reflection.checkITE (r : Reflection) (fail : ∀ {α}, M α) : M Unit := do
   unless ← isDefEq (← checkType r.ite) (.arrow q(Prop) <| .arrow q(Bool) <|
     .arrow (mkApp2 r.type (.bvar 1) (.bvar 0)) q(∀ α : Type, α → α → α)) do fail
-  withLocalDecl `p .default q(Prop) fun p => do
-  withLocalDecl `H .default (mkApp2 r.type p q(true)) fun H => do
-    unless ← isDefEq (mkApp3 r.ite p q(true) H) q(fun α : Type => fun a _ : α => a) do fail
-  withLocalDecl `H .default (mkApp2 r.type p q(false)) fun H => do
-    unless ← isDefEq (mkApp3 r.ite p q(false) H) q(fun α : Type => fun _ a : α => a) do fail
+  let trueLhs := .lam0 q(Prop) <| .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+    mkApp3 r.ite (.bvar 1) q(true) (.bvar 0)
+  let trueRhs := .lam0 q(Prop) <| .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+    .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 1
+  unless ← isDefEq trueLhs trueRhs do fail
+  let falseLhs := .lam0 q(Prop) <| .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+    mkApp3 r.ite (.bvar 1) q(false) (.bvar 0)
+  let falseRhs := .lam0 q(Prop) <| .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+    .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 0
+  unless ← isDefEq falseLhs falseRhs do fail
 
 def Reflection.checkNatDITE (r : Reflection) (fail : ∀ {α}, M α) : M Unit := do
   unless ← isDefEq (← checkType q(Not)) q(Prop → Prop) do fail
@@ -115,13 +120,21 @@ def Reflection.checkNatDITE (r : Reflection) (fail : ∀ {α}, M α) : M Unit :=
     .arrow (mkApp2 r.type (.bvar 0) q(true)) (.bvar 1)) do fail
   unless ← isDefEq (← checkType r.ofFalse) (.arrow q(Prop) <|
     .arrow (mkApp2 r.type (.bvar 0) q(false)) (mkApp q(Not) (.bvar 1))) do fail
-  withLocalDecl `p .default q(Prop) fun p => do
-  withLocalDecl `a .default (.arrow p q(Nat)) fun a => do
-  withLocalDecl `b .default (.arrow (mkApp q(Not) p) q(Nat)) fun b => do
-  withLocalDecl `H .default (mkApp2 r.type p q(true)) fun H => do
-    unless ← isDefEq (mkApp5 r.natDITE p q(true) H a b) (mkApp a (mkApp2 r.ofTrue p H)) do fail
-  withLocalDecl `H .default (mkApp2 r.type p q(false)) fun H => do
-    unless ← isDefEq (mkApp5 r.natDITE p q(false) H a b) (mkApp b (mkApp2 r.ofFalse p H)) do fail
+  let close (truth : Expr) (body : Expr) :=
+    .lam0 q(Prop) <|
+    .lam0 (.arrow (.bvar 0) q(Nat)) <|
+    .lam0 (.arrow (mkApp q(Not) (.bvar 1)) q(Nat)) <|
+    .lam0 (mkApp2 r.type (.bvar 2) truth) body
+  let trueLhs := close q(true) <|
+    mkApp5 r.natDITE (.bvar 3) q(true) (.bvar 0) (.bvar 2) (.bvar 1)
+  let trueRhs := close q(true) <|
+    mkApp (.bvar 2) (mkApp2 r.ofTrue (.bvar 3) (.bvar 0))
+  unless ← isDefEq trueLhs trueRhs do fail
+  let falseLhs := close q(false) <|
+    mkApp5 r.natDITE (.bvar 3) q(false) (.bvar 0) (.bvar 2) (.bvar 1)
+  let falseRhs := close q(false) <|
+    mkApp (.bvar 1) (mkApp2 r.ofFalse (.bvar 3) (.bvar 0))
+  unless ← isDefEq falseLhs falseRhs do fail
 
 def Condition.check (cond : Condition) (fail : ∀ {α}, M α)
     (ite := false) (dite := false) : M Unit := do
@@ -136,6 +149,11 @@ def Condition.check (cond : Condition) (fail : ∀ {α}, M α)
     let e := .lam0 q(Nat) <| .lam0 q(Nat) <| mkApp3 reflect.toDec
       (mkApp2 cond.prop x y) (mkApp2 asBool x y) (mkApp2 proof x y)
     _ ← checkType e
+    let decideFn := .lam0 q(Nat) <| .lam0 q(Nat) <|
+      mkApp5 q(@_root_.ite.{1}) q(Bool)
+        (mkApp2 cond.prop (.bvar 1) (.bvar 0))
+        (mkApp2 cond.dec (.bvar 1) (.bvar 0)) q(true) q(false)
+    unless ← isDefEq (← inferType decideFn) q(Nat → Nat → Bool) do fail
     unless ← isDefEq (← inferType asBool) q(Nat → Nat → Bool) do fail
     unless ← isProp (← inferType proof) do fail
     unless ← isDefEq e cond.dec do fail
@@ -149,6 +167,83 @@ def Condition.check (cond : Condition) (fail : ∀ {α}, M α)
       unless ← isDefEq (mkApp natITE q(true)) q(fun a _ : Nat => a) do fail
       unless ← isDefEq (mkApp natITE q(false)) q(fun _ a : Nat => a) do fail
     if dite then throw <| .other "unsupported"
+
+def Condition.natLEReflectProof : Expr :=
+  q(fun n m {q : Prop} (H : _ → _ → q) =>
+    H (@Nat.le_of_ble_eq_true n m) (@Nat.not_le_of_not_ble_eq_true n m))
+
+def Condition.natLEReflectedFn : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| mkApp3 Reflection.defn₁.toDec
+    (mkApp2 Condition.natLE.prop (.bvar 1) (.bvar 0))
+    (mkApp2 q(Nat.ble) (.bvar 1) (.bvar 0))
+    (mkApp2 Condition.natLEReflectProof (.bvar 1) (.bvar 0))
+
+def Condition.natLEDecideFn : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| mkApp5 q(@_root_.ite.{1}) q(Bool)
+    (mkApp2 Condition.natLE.prop (.bvar 1) (.bvar 0))
+    (mkApp2 Condition.natLE.dec (.bvar 1) (.bvar 0)) q(true) q(false)
+
+/-- Expressions whose translations are retained by the verified Nat-≤
+primitive-condition checker. The ordinary condition checker validates their
+types or equations; this explicit pass exposes the translations to the
+conservation proof without fixing their target representation. -/
+def Condition.natLEEvidenceExpressions : List Expr :=
+  let r := Reflection.defn₁
+  let iteTy := .arrow q(Prop) <| .arrow q(Bool) <|
+    .arrow (mkApp2 r.type (.bvar 1) (.bvar 0))
+      q(∀ α : Type, α → α → α)
+  let iteTrueL := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+      mkApp3 r.ite (.bvar 1) q(true) (.bvar 0)
+  let iteTrueR := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+      .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 1
+  let iteFalseL := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+      mkApp3 r.ite (.bvar 1) q(false) (.bvar 0)
+  let iteFalseR := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+      .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 0
+  let diteTy := .arrow q(Prop) <| .arrow q(Bool) <|
+    .arrow (mkApp2 r.type (.bvar 1) (.bvar 0)) <|
+    .arrow (.arrow (.bvar 2) q(Nat)) <|
+    .arrow (.arrow (mkApp q(Not) (.bvar 3)) q(Nat)) q(Nat)
+  let ofTrueTy := .arrow q(Prop) <|
+    .arrow (mkApp2 r.type (.bvar 0) q(true)) (.bvar 1)
+  let ofFalseTy := .arrow q(Prop) <|
+    .arrow (mkApp2 r.type (.bvar 0) q(false)) (mkApp q(Not) (.bvar 1))
+  let close (truth : Expr) (body : Expr) :=
+    .lam0 q(Prop) <|
+    .lam0 (.arrow (.bvar 0) q(Nat)) <|
+    .lam0 (.arrow (mkApp q(Not) (.bvar 1)) q(Nat)) <|
+    .lam0 (mkApp2 r.type (.bvar 2) truth) body
+  let diteTrueL := close q(true) <|
+    mkApp5 r.natDITE (.bvar 3) q(true) (.bvar 0) (.bvar 2) (.bvar 1)
+  let diteTrueR := close q(true) <|
+    mkApp (.bvar 2) (mkApp2 r.ofTrue (.bvar 3) (.bvar 0))
+  let diteFalseL := close q(false) <|
+    mkApp5 r.natDITE (.bvar 3) q(false) (.bvar 0) (.bvar 2) (.bvar 1)
+  let diteFalseR := close q(false) <|
+    mkApp (.bvar 1) (mkApp2 r.ofFalse (.bvar 3) (.bvar 0))
+  [Condition.natLE.dec, Condition.natLE.prop, q(Nat → Nat → Prop),
+    r.type, q(Prop → Bool → Prop), r.ite, iteTy,
+    iteTrueL, iteTrueR, iteFalseL, iteFalseR,
+    q(Not), q(Prop → Prop), r.natDITE, diteTy,
+    r.ofTrue, ofTrueTy, r.ofFalse, ofFalseTy,
+    diteTrueL, diteTrueR, diteFalseL, diteFalseR,
+    Condition.natLEReflectedFn, Condition.natLEDecideFn,
+    q(Nat → Nat → Bool), q(Nat.ble), Condition.natLEReflectProof]
+
+def checkExprTypes : List Expr → M Unit
+  | [] => pure ()
+  | e :: es => do
+    _ ← checkType e
+    checkExprTypes es
+
+def Condition.natLE.checkForPrimitive
+    (fail : ∀ {α}, M α) : M Unit := do
+  checkExprTypes Condition.natLEEvidenceExpressions
+  Condition.natLE.check fail (ite := true) (dite := true)
 
 protected def Condition.ite (cond : Condition) (α : Expr) (args : Array Expr) (t e : Expr) : Expr :=
   mkApp5 q(@ite.{1}) α (mkAppN cond.prop args) (mkAppN cond.dec args) t e

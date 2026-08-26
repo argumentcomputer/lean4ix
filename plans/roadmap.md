@@ -2774,9 +2774,38 @@ The seventh semantic slice, `Nat.ble`, is now green:
   `checkPrimitiveDef.WF` and retains the same six inherited sorry carriers.
   The global source frontier remains 15.
 
-The next bounded UP6 work is the shifts and small bitwise wrappers. Their
-accepted domains and reflection dependencies remain subject to a fresh audit
-before a slice is selected.
+The eighth semantic slice, `Nat.shiftLeft`, is green:
+
+- `checkNatShiftLeftPrimitive` isolates the zero and successor equations;
+- the semantic recurrence consumes only the already-certified typed Nat.mul
+  reflection, and the direct live definition path avoids
+  `checkPrimitiveDef.WF` with the same six inherited sorry carriers;
+- `Nat.shiftRight` remains ordered after Nat.div and was not conflated with
+  the independent left-shift certificate.
+
+The ninth UP6 slice establishes the consumer-neutral reflected-condition
+foundation in `ConditionSupport` and `ConditionReflect`. It canonicalizes the
+checked ITE and Nat-DITE equations and proves typed branch selection, without
+importing bitwise or recursive mod/div semantics. Four exact theorem-closure
+pins distinguish the standard-only equation normalization from the existing
+sorry-carrying typed selection boundary.
+
+The tenth UP6 slice retains the checker evidence required by Nat.mod/div:
+
+- the executable selector checks use closed-lambda equations and explicitly
+  validate the synthesized Boolean decision function;
+- `Condition.natLE.checkForPrimitive` checks a finite evidence inventory, and
+  `ConditionChecker` proves that successful execution retains its exact
+  translations and equations;
+- `ModDivCondition` exports a monotone `NatLESelectorCertificate` whose ITE and
+  DITE selectors consume the direct `Nat.ble` reflection;
+- exact checker and selector axiom closures are pinned independently. No
+  Nat.mod or Nat.div declaration certificate is claimed by this slice.
+
+The next bounded UP6 work is the actual Nat.mod recursive checker and
+conservation certificate. Nat.div follows it; Nat.shiftRight then consumes
+Nat.div. Bitwise and its wrappers remain a separate well-founded-recursion
+track and are not dependencies of the mod/div path.
 
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,
