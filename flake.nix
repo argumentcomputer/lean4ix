@@ -491,6 +491,25 @@
           grep -q '"outcome":"rejected"' selection
           grep -q '"phase":"selection"' selection
 
+          # `Lean4Lean.Environment` has child modules. Fresh replay must select
+          # the exact root rather than fail as an ambiguous prefix match; the
+          # deliberately missing declaration should therefore be rejected only
+          # after selection, at kernel replay.
+          printf '%s\n' '${builtins.toJSON {
+            schema = "lean4lean.differential";
+            version = 1;
+            id = "fresh-exact-module-selection";
+            module = "Lean4Lean.Environment";
+            declaration = "Lean.DoesNotExist";
+            fresh = true;
+            expectedOutcome = "rejected";
+            expectedPhase = "kernel-replay";
+          }}' > fresh-selection.json
+          ${lean4leanCLI}/bin/lean4lean --case=fresh-selection.json > fresh-selection
+          grep -q '"caseId":"fresh-exact-module-selection"' fresh-selection
+          grep -q '"outcome":"rejected"' fresh-selection
+          grep -q '"phase":"kernel-replay"' fresh-selection
+
           printf '%s\n' '${builtins.toJSON {
             schema = "lean4lean.differential";
             version = 1;

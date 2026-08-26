@@ -42,6 +42,17 @@ def isModulePrefixOfCI (target mod : Name) : Bool :=
   let m := mod.toString.toLower
   m == t || (t ++ ".").isPrefixOf m
 
+/-- Match a discovered module against a requested target. Fresh replay must
+select exactly one module; ordinary replay deliberately accepts a module
+prefix. An inferred package root is compared case-insensitively because Lake
+package and Lean library capitalization need not agree. -/
+def matchesModuleTarget (fresh inferred : Bool) (target mod : Name) : Bool :=
+  if fresh then
+    if inferred then target.toString.toLower == mod.toString.toLower
+    else target == mod
+  else if inferred then isModulePrefixOfCI target mod
+  else target.isPrefixOf mod
+
 /-- Module paths contain only string components; numeric `Name` components
 would make `Lean.modToFilePath` panic. -/
 def isModuleName : Name → Bool
@@ -250,7 +261,7 @@ unsafe def mainCore (args : List String)
       let mut found := false
       for path in (← SearchPath.findAllWithExt sp "olean") do
         if let some m := (← searchModuleNameOfFileName path sp) then
-          if if inferred then isModulePrefixOfCI target m else target.isPrefixOf m then
+          if matchesModuleTarget fresh inferred target m then
             targetModules := targetModules.insert m
             found := true
       if not found then
