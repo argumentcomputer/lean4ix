@@ -1776,7 +1776,8 @@ to the replacement.
   `NatLESelectorCertificate`, canonicalizes both ITE and DITE equations, and
   selects their true or false branches from the already certified direct
   `Nat.ble` semantics.
-- **Ix impact:** the forthcoming Nat.mod/div transports can consume one
+- **Ix impact:** the direct Nat.mod transport now consumes, and the forthcoming
+  Nat.div transport can consume, one
   explicit, monotone selector capability rather than depending on the generic
   primitive theorem or on an opaque Boolean-elimination assumption.
 - **Tests:** `Lean4Lean.Tests.ModDivCondition` pins the exact checker-WF and
@@ -1787,6 +1788,50 @@ to the replacement.
   or reconciliation can import its checker and selector modules directly while
   preserving this fork's explicit trust pins and readiness-aware Nat.ble
   dependency.
+
+## D036 — direct Nat.mod certificate without a new expression axiom
+
+- **Status:** implemented as the eleventh bounded UP6 slice; the live safe
+  definition path has a direct Nat.mod certificate, and Nat.div is next.
+- **Owner:** Argument Computer Corporation; review with the Nat.div declaration
+  slice and any later consolidation of the shared fuel-recursion layer.
+- **Source:** manually adapted from lean4lean PR #32, principally commit
+  `27304be` as retained at head
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`; no whole-PR merge, bitwise
+  certificate, or admitted generic primitive dispatch was imported.
+- **Executable delta:** `natModTopEquation`, `natModGoEquation`, and
+  `checkNatModPrimitive` name the exact closed type, zero equation,
+  less-than-or-equal helper type, recursive helper type, selector checks, and
+  top/recursive equations that the existing monolithic recognizer accepts.
+  The live `checkPrimitiveDefCore` Nat.mod branch now calls that named checker.
+- **Verification delta:** `checkPrimitiveDef.natMod.WF_typed` retains the
+  checker trace; `FuelStep` and `VExpr.natModGo` prove the fuel-indexed literal
+  semantics; the recursive branch consumes the retained Nat-≤ selector and
+  direct Nat.sub reflection; and `NatModPrimitiveEvidence` installs the result
+  through every readiness safety model and `addDefinition.WF`.
+- **Trust decision:** PR #32's proof route adds the opaque expression equality
+  `Lean.Expr.liftLooseBVars_eq`. This fork instead defines the proof-side
+  sources structurally with `liftLooseBVars'` and pins the resulting theorem
+  closures. The slice adds no custom axiom, `native_decide` proof, or source
+  `sorry`.
+- **Accepted-domain decision:** the checker retains the closed primitive type,
+  zero equation, Nat-≤ and recursive-helper types, selector evidence,
+  top-level equation, and recursive equation. These are evidence-preserving
+  guards matching the executable upstream certificate, not a narrower
+  hard-coded semantic model.
+- **Ix impact:** the model now certifies actual natural-number remainder on
+  literals through a narrow live root suitable for later Ix kernel transport;
+  it does not yet certify Nat.div, shiftRight, gcd, or bitwise operations.
+- **Tests:** `Lean4Lean.Tests.NatMod` enforces an explicit axiom allowlist for
+  the checker, fuel, semantics, conservation, wrapper, and safe-definition
+  roots, including exclusion of `Lean.Expr.liftLooseBVars_eq`.
+  `Lean4Lean.Tests.Primitive` checks that all nine direct live roots avoid
+  `checkPrimitiveDef.WF` and reach exactly the six existing inherited sorry
+  carriers. The global source frontier remains 15.
+- **Removal condition:** upstream lands an equivalent Nat.mod certificate
+  without requiring a stronger opaque expression axiom, or reconciliation can
+  reuse its result while preserving the fork's readiness transport,
+  accepted-domain checks, and exact trust pins.
 
 ## Review checklist
 

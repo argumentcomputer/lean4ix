@@ -2222,6 +2222,69 @@ theorem VEnv.HasPrimitives.addNatSub {env env' : VEnv}
       obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
       exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
 
+/-- Replace the vacuous/old `Nat.mod` reflection field after inserting a
+checked definition, while transporting all unrelated primitive facts. -/
+theorem VEnv.HasPrimitives.addNatMod {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Nat.mod ci = some env')
+    (href : (env'.addDefEq df).ReflectsNatNatNat ``Nat.mod Nat.mod) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Nat.mod ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Nat.mod ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natMod := href
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natSub := (h.natSub.addConst hadd (by decide)).addDefEq
+    natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => h.charOfNat (by
+      change env''.constants ``Char.ofNat = some _ at H
+      rwa [same ``Char.ofNat (by decide)] at H)
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
+
 /-- Replace the vacuous/old `Nat.mul` reflection field after inserting a
 checked definition, while transporting all unrelated primitive facts. -/
 theorem VEnv.HasPrimitives.addNatMul {env env' : VEnv}

@@ -20,6 +20,24 @@ namespace Lean4Lean.Environment
 open Lean hiding Environment Exception
 open Kernel TypeChecker
 
+theorem checkTypeIsDefEqGuard.fvarsIn.bind_WF
+    {c : VContext} {s : VState}
+    {fail : ∀ {α}, M α} {next : M β} {Q : β → VState → Prop}
+    (he : e.FVarsIn (· ∈ c.vlctx.fvars)) (hA : c.TrExprS A A')
+    (hfail : ∀ {α} {s'}, M.WF c s' (fail : M α) fun _ _ => False)
+    (hnext : ∀ s' e', c.TrExprS e e' → c.HasType e' A' →
+      M.WF c s' next Q) :
+    M.WF c s (do
+      unless ← TypeChecker.isDefEq (← TypeChecker.checkType e) A do fail
+      next) Q := by
+  refine (checkType.WF he).bind fun _ _ _ h => ?_
+  let ⟨e', _, _, he', hty, hhas⟩ := h
+  refine (isDefEq.WF hty hA).bind fun b s' _ hEq => ?_
+  split
+  · exact hnext s' e' he'
+      (hhas.defeqU_r c.Ewf c.Δwf (hEq (by assumption)))
+  · exact (hfail (s' := s')).bind nofun
+
 theorem checkTypeIsDefEqGuard.bind_WF {c : VContext} {s : VState}
     {fail : ∀ {α}, M α} {next : M β} {Q : β → VState → Prop}
     (he : c.TrExprS e e') (he_unique : TrExprS.IsUnique e)
@@ -84,6 +102,71 @@ theorem checkTypeDiscard.bind_WF {c : VContext} {s : VState}
     M.WF c s (do _ ← TypeChecker.checkType e; next) Q :=
   (checkType.WF he).bind fun _ s' _ _ => hnext s'
 
+theorem checkTypeDiscard.capture.bind_WF {c : VContext} {s : VState}
+    {next : M β} {Q : β → VState → Prop}
+    (he : e.FVarsIn (· ∈ c.vlctx.fvars))
+    (hnext : ∀ s' e' A', c.TrExprS e e' → c.HasType e' A' →
+      M.WF c s' next Q) :
+    M.WF c s (do _ ← TypeChecker.checkType e; next) Q := by
+  refine (checkType.WF he).bind fun _ s' _ h => ?_
+  rcases h with ⟨e', A', _, he', _, hhas⟩
+  exact hnext s' e' A' he' hhas
+
+theorem Expr.closed_fvarsIn {c : VContext} {e : Expr}
+    (hf : e.hasFVar = false) (hm : e.hasMVar = false) :
+    e.FVarsIn (· ∈ c.vlctx.fvars) := by
+  apply fvarsIn_iff.mpr
+  refine ⟨?_, fvarsIn_iff_hasMVar hm⟩
+  intro fv hfv
+  rw [fvarsList_eq_nil hf] at hfv
+  simp at hfv
+
+/-- Close an `FVarsIn` goal for a concrete expression by structural reduction.
+
+`FVarsIn` recurses on `Expr` constructors, so the kernel evaluates it directly.
+Going through `hasFVar`/`hasMVar` instead does not work: those read the cached
+`Expr.data` word produced by the extern `mkData`, which the kernel cannot
+reduce, so `rfl`, `decide` and `simp` all get stuck on the `Decidable`
+instance. The only other way to close such a goal is `native_decide`, which
+would put the Lean compiler into the trusted base of the conservation
+theorem; prefer this tactic. -/
+syntax "fvars_closed" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+macro_rules
+  | `(tactic| fvars_closed) =>
+    `(tactic| set_option linter.unusedSimpArgs false in
+      simp [Expr.FVarsIn, FVarsIn, Level.hasMVar', Expr.lam0, Expr.arrow,
+        mkAppB, mkAppN, mkApp5, mkApp4, mkApp3, mkApp2, mkApp,
+        Condition.reflectedITE, Condition.reflectedDITE, Condition.natLE,
+        Reflection.defn₁, Reflection.ite, Reflection.natDITE,
+        FVarsIn.liftLooseBVars, Expr.liftLooseBVars'])
+  | `(tactic| fvars_closed [$ts,*]) =>
+    `(tactic| set_option linter.unusedSimpArgs false in
+      simp [$ts,*, Expr.FVarsIn, FVarsIn, Level.hasMVar', Expr.lam0, Expr.arrow,
+        mkAppB, mkAppN, mkApp5, mkApp4, mkApp3, mkApp2, mkApp,
+        Condition.reflectedITE, Condition.reflectedDITE, Condition.natLE,
+        Reflection.defn₁, Reflection.ite, Reflection.natDITE,
+        FVarsIn.liftLooseBVars, Expr.liftLooseBVars'])
+
+theorem TrExprS.natBinaryType_of_contains
+    {env : VEnv} (wf : env.WF) (h : env.HasPrimitives)
+    (hnat : env.contains ``Nat) (Us : List Name) (Δ : VLCtx) :
+    TrExprS env Us Δ q(Nat → Nat → Nat)
+      (.forallE .nat <| .forallE .nat .nat) := by
+  let Δ1 : VLCtx := (none, .vlam .nat) :: Δ
+  let Δ2 : VLCtx := (none, .vlam .nat) :: Δ1
+  have hnat0 := TrExprS.natType_of_contains wf h hnat Us Δ
+  have hnat1 := TrExprS.natType_of_contains wf h hnat Us Δ1
+  have hnat2 := TrExprS.natType_of_contains wf h hnat Us Δ2
+  have hinnerS : TrExprS env Us Δ1 q(Nat → Nat)
+      (.forallE .nat .nat) :=
+    .forallE hnat1.2 hnat2.2 hnat1.1 hnat2.1
+  have hinnerT : env.IsType Us.length Δ1.toCtx
+      (.forallE .nat .nat) := by
+    obtain ⟨u, hA⟩ := hnat1.2
+    obtain ⟨w, hB⟩ := hnat2.2
+    exact ⟨_, .forallE hA hB⟩
+  exact .forallE hnat0.2 hinnerT hnat0.1 hinnerS
 
 theorem checkTypeList.WF {c : VContext} {s : VState} {es : List Expr}
     (hes : ∀ e ∈ es, e.FVarsIn (· ∈ c.vlctx.fvars)) :

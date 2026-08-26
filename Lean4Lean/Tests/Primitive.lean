@@ -48,6 +48,7 @@ run_cmd do
   let shiftLeftRoot := ``Lean4Lean.addDefinition.WF_safe_natShiftLeft
   let beqRoot := ``Lean4Lean.addDefinition.WF_safe_natBEq
   let bleRoot := ``Lean4Lean.addDefinition.WF_safe_natBLE
+  let modRoot := ``Lean4Lean.addDefinition.WF_safe_natMod
   let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
@@ -57,6 +58,7 @@ run_cmd do
   let shiftLeftClosure := dependencyClosure env [shiftLeftRoot] {}
   let beqClosure := dependencyClosure env [beqRoot] {}
   let bleClosure := dependencyClosure env [bleRoot] {}
+  let modClosure := dependencyClosure env [modRoot] {}
   if closure.contains genericBoundary then
     throwError "the direct Nat.add declaration certificate regressed through checkPrimitiveDef.WF"
   if predClosure.contains genericBoundary then
@@ -73,6 +75,8 @@ run_cmd do
     throwError "the direct Nat.beq declaration certificate regressed through checkPrimitiveDef.WF"
   if bleClosure.contains genericBoundary then
     throwError "the direct Nat.ble declaration certificate regressed through checkPrimitiveDef.WF"
+  if modClosure.contains genericBoundary then
+    throwError "the direct Nat.mod declaration certificate regressed through checkPrimitiveDef.WF"
   let some liveInfo := env.find? ``Lean4Lean.addDefinition.WF
     | throwError "addDefinition.WF is missing"
   unless (directConstants liveInfo).contains root do
@@ -91,6 +95,8 @@ run_cmd do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.beq certificate"
   unless (directConstants liveInfo).contains bleRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.ble certificate"
+  unless (directConstants liveInfo).contains modRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the Nat.mod certificate"
   let sorryCarriers := env.constants.toList.foldl (init := #[]) fun found (name, info) =>
     if closure.contains name && (directConstants info).contains ``sorryAx then
       found.push name
@@ -194,4 +200,16 @@ run_cmd do
   let bleRemoved := expectedSorryCarriers.filter (!bleObservedSet.contains ·)
   unless bleAdded.isEmpty && bleRemoved.isEmpty do
     throwError m!"Nat.ble direct-certificate sorry closure changed; added: {bleAdded}; removed: {bleRemoved}"
-  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.beq, and Nat.ble direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  let modSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if modClosure.contains name && (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let modObservedSet : Lean.NameSet :=
+    modSorryCarriers.foldl (·.insert ·) {}
+  let modAdded := modSorryCarriers.filter (!expectedSet.contains ·)
+  let modRemoved := expectedSorryCarriers.filter (!modObservedSet.contains ·)
+  unless modAdded.isEmpty && modRemoved.isEmpty do
+    throwError m!"Nat.mod direct-certificate sorry closure changed; added: {modAdded}; removed: {modRemoved}"
+  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.beq, Nat.ble, and Nat.mod direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
