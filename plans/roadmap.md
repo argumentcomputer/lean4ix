@@ -93,11 +93,11 @@ must be updated whenever a proof enters or leaves the frontier.
 | V3 annotation-consumed telescope delta | **Retains the semantic input needed by the index-boundary continuation above.** Recursive candidate interpretation now preserves a second pointwise telescope certificate from every exact raw Pi domain to the annotation-consumed local domain actually used by `Context.pushLocalDecl`; the former normalized-view certificate remains unchanged. Public root projections expose this producer-owned telescope with exact arity, and proof-carrying `take`/`drop` operations retain the raw-context convention needed for later substitution. Remaining context work is to instantiate its shared-parameter prefix into the exact later-family boundary, relocate the index suffix across the first family's retained locals, and use those typed consumed domains to push the validator's exact index nodes. Source-ordered iteration, canonical `Normalization.BlockWF`, and exact `checkedFamilies?` success follow afterward. |
 | V3 exact readiness handoff delta | **Supersedes the replay-to-readiness plumbing clauses in both exact transaction rows above.** Direct ordinary and genuinely nested constructors now consume their dependent exact transaction, input `VEnvs.WF`, and projection readiness at the transaction's named safe endpoint. They derive the coherent replay and readiness-completed extension internally, so no caller can reselect a source, transaction family, or endpoint. Remaining producer work is exactly the branch-specific semantic evidence needed to construct those dependent transactions plus final projection readiness. |
 | V3 recursive projection staging delta | **Closed at the generated-minor and projector-program layers.** Projection syntax binds constructor fields followed by the exact checked induction-hypothesis telescope; its universe, lift, and term-substitution laws preserve that telescope. The selector is typed beneath arbitrary generated IH binders, generated projector programs transport the exact IH domains, and the exact iota proof beta-reduces every ignored binder. `VStructureView` now admits one-constructor unindexed recursive families directly: the `recursive_eq`, empty-IH, and field-only compatibility equations have been removed, while a concrete `RecursiveCell` fixture checks a genuinely nonempty generated IH telescope. Remaining V3 work is readiness integration and the persistent eta/rebuild certificate across arbitrary environment extensions, not a projection-minor shape mismatch. |
-| Supported builds | Current Theory + Verify build: 177 jobs green. Current default build/tests: 253 jobs green. |
+| Supported builds | Current Theory + Verify build: 179 jobs green. Current default build/tests: 256 jobs green. |
 | Proof frontier | 9 supported proof declarations: 6 metatheory and 3 checker verification. The compiled allowlist has 15 entries after adding 6 deliberately rejected fixtures. Lane V removed 7 proof sorries from the previous 16-entry proof frontier. |
 | Experimental surface | Zero source `sorry` tokens and no `stop`-hidden admissions, but endpoints remain conditional. The concrete five-rule `D2RegisteredBodyStep` discharge compiles. Both inherited D2 Nat sites are now replayed internally, so `D2BlockStepExact` contains only the Tree check, a paired five-rule Tree replay, and the discharged registered-body field. D2 also has generic conversion-aware prefix/collapse replay, an exact eight-common-arguments-plus-fields capture inventory, and a named `D2TreeLevelAlignmentStep`; the Tree suffix/body share the NORM-DI-dependent local head-argument/source-level alignment boundary rather than being pure engineering. The current full `Lean4Lean.Experimental` gate is green at 152 jobs (its pre-existing lint warnings are not promoted to errors). |
 | Project axioms | 28 declarations: 26 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory and all 11 high-risk repaired signatures, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 325 exact union leaves. |
-| Upstream intake audit | Refreshed and implemented through UP5 plus eleven bounded UP6 slices on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation; direct, live `Nat.add`, `Nat.pred`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.beq`, `Nat.ble`, `Nat.shiftLeft`, and `Nat.mod` certificates; and the shared condition and retained Nat-≤ selector layers. All nine direct-root dependency pins exclude the generic primitive boundary and record exactly six inherited upstream proof dependencies. Nat.mod adds no source admission or custom expression axiom: its loose-bvar reasoning is structural. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; Nat.div, the later primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
+| Upstream intake audit | Refreshed and implemented through UP5 plus twelve bounded UP6 slices on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation; direct, live `Nat.add`, `Nat.pred`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.beq`, `Nat.ble`, `Nat.shiftLeft`, `Nat.mod`, and `Nat.div` certificates; and the shared condition and retained Nat-≤ selector layers. All ten direct-root dependency pins exclude the generic primitive boundary and record exactly six inherited upstream proof dependencies. Nat.mod/div add no source admission or opaque expression axiom: Nat.mod reasons structurally and Nat.div proves its reducible lift builder equal to the proof-side structural lift. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; Nat.shiftRight, the later primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
 
 ### Delivered foundation
 
@@ -2820,9 +2820,27 @@ The eleventh UP6 slice provides the direct `Nat.mod` certificate:
   sorry carriers as the other eight direct roots, so the global source
   frontier remains 15.
 
-The next bounded UP6 work is `Nat.div`; `Nat.shiftRight` then consumes it.
-Bitwise and its wrappers remain a separate well-founded-recursion track and
-are not dependencies of the mod/div path.
+The twelfth UP6 slice provides the direct `Nat.div` certificate:
+
+- `checkNatDivPrimitive` retains the exact quotient and recursive equations,
+  helper types, and Nat-≤ selector evidence;
+- `primitiveLiftLooseBVars` replaces the upstream certificate's dependence on
+  an opaque runtime lift equality, while `primitiveLiftLooseBVars_eq` proves
+  its identity with the proof-side structural lift by recursion on expressions;
+- the top and recursive semantics consume the retained Nat-≤ selector,
+  Nat.sub reflection, and shared fuel-recursion evidence;
+- `NatDivPrimitiveEvidence.conservesHasPrimitives`,
+  `checkSafeNatDivDefinition.WF`, and `addDefinition.WF_safe_natDiv` carry the
+  result through all readiness safety models and the live environment path;
+  and
+- its focused trust audit forbids `Lean.Expr.liftLooseBVars_eq`, while the
+  direct-root regression excludes `checkPrimitiveDef.WF` and reaches exactly
+  the same six inherited sorry carriers as the other nine direct roots. The
+  global source frontier remains 15.
+
+The next bounded UP6 work is `Nat.shiftRight`, which can now consume the
+certified Nat.div reflection. Bitwise and its wrappers remain a separate
+well-founded-recursion track and are not dependencies of the mod/div path.
 
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,
