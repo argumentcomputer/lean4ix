@@ -2006,6 +2006,12 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     {env blockEnv : VEnv} {Us : List Name}
     (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source) where
+  firstCandidate : AddInductive.CandidateFamily firstSource
+  secondCandidate : AddInductive.CandidateFamily secondSource
+  remainingCandidates : AddInductive.CandidateList
+    AddInductive.CandidateFamily remainingSources
+  candidates_eq : produced.candidate.families =
+    .cons firstCandidate (.cons secondCandidate remainingCandidates)
   firstRaw : VInductiveType
   secondRaw : VInductiveType
   remainingRaws : List VInductiveType
@@ -2016,6 +2022,11 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     storedBinders
   stored_length : storedBinders.length =
     (VInductDecl.ctorFields secondRaw.type).length
+  terminalRun : TypeChecker.CandidateContextRun
+    secondCandidate.familyType.type.trace.terminalContext
+  terminal_venv : terminalRun.context.venv = env
+  terminal_lparams : terminalRun.context.lparams = Us
+  terminal_vlctx : terminalRun.context.vlctx.toCtx = storedBinders.reverse
 
 /-- Select the exact second family's complete annotation-consumed telescope
 from the same dependent semantic hierarchy used by outer validation. -/
@@ -2067,20 +2078,30 @@ theorem
               | cons secondRoot remainingRoots =>
                 cases remainingShapes with
                 | cons secondShape remainingShapes =>
-                  obtain ⟨inferred, recursive⟩ := secondRoot.type.recursive
-                  obtain ⟨storedBinders, telescope, storedLength⟩ :=
-                    recursive.annotationSpineEvidence secondShape.storedSpine
+                  obtain ⟨terminalRun, storedBinders, terminalVenv,
+                      terminalLparams, telescope, storedLength,
+                      terminalVlctx⟩ :=
+                    secondRoot.type.annotationSpineContext
+                      secondShape.storedSpine
                   have spineLength :=
                     secondShape.spineLength_eq_ctorFields
                   rw [spineLength] at telescope storedLength
                   exact ⟨{
+                    firstCandidate := firstCandidate
+                    secondCandidate := secondCandidate
+                    remainingCandidates := remainingCandidates
+                    candidates_eq := hCandidates
                     firstRaw := firstRaw
                     secondRaw := secondRaw
                     remainingRaws := remainingRaws
                     raws_eq := by rw [hRawTypes, hRawTypesTail]
                     storedBinders := storedBinders
                     telescope := telescope
-                    stored_length := storedLength }⟩
+                    stored_length := storedLength
+                    terminalRun := terminalRun
+                    terminal_venv := terminalVenv
+                    terminal_lparams := terminalLparams
+                    terminal_vlctx := terminalVlctx }⟩
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine' depends on axioms: [propext,
@@ -2115,6 +2136,83 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondF
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine
+
+/-- The first two family candidates are normalized in the same exact
+producer-owned reader context.
+
+The ordinary producer normalizes every family type in one snapshotted reader
+context.  This theorem retains that operational identity at the exact two
+candidates selected by `SecondFamilyAnnotationSpine`; no name equality is
+supplied by a semantic caller. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_context_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    annotation.firstCandidate.familyType.type.context =
+      annotation.secondCandidate.familyType.type.context := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have candidatesEq := annotation.candidates_eq
+  change normalization.families.candidates =
+    .cons annotation.firstCandidate
+      (.cons annotation.secondCandidate annotation.remainingCandidates) at candidatesEq
+  have familyTypesProduced := normalization.familyTypes.produced
+  rw [← normalization.families.produced.familyTypes_eq] at familyTypesProduced
+  rw [candidatesEq] at familyTypesProduced
+  simp only [AddInductive.CandidateList.familyTypes] at familyTypesProduced
+  have firstContextEq :=
+    AddInductive.CandidateFamilyType.context_eq_of_normalize
+      familyTypesProduced.head
+  have secondContextEq :=
+    AddInductive.CandidateFamilyType.context_eq_of_normalize
+      familyTypesProduced.tail.head
+  exact firstContextEq.trans secondContextEq.symm
+
+/-- The exact common reader context in particular fixes every main-spine free
+variable allocated by the first two family candidates. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_ngen_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    annotation.firstCandidate.familyType.type.context.ngen =
+      annotation.secondCandidate.familyType.type.context.ngen :=
+  congrArg AddInductive.Context.ngen annotation.candidate_context_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_context_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_context_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_ngen_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_ngen_eq
 
 private theorem candidateContextRun_cast_context
     {left right : AddInductive.Context}
@@ -2388,6 +2486,114 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondF
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterComparisons
+
+/-- Joint producer-owned staging for the exact second-family candidate
+telescope and the validator suffix reached after its shared parameters.
+
+Both components are selected from the same dependent candidate hierarchy and
+outer family-validation trace.  Downstream index alignment therefore cannot
+mix an annotation telescope with an independently chosen validator position. -/
+structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source) where
+  annotation : produced.SecondFamilyAnnotationSpine semantic
+  secondComparisons : List AddInductive.CandidateIsDefEqStep
+  remainingComparisons : List (List AddInductive.CandidateIsDefEqStep)
+  comparisons_eq :
+    (produced.execution.eliminationExecution.normalization
+      |>.familyParameterComparisonTrace
+        (produced.execution.normalization_run produced.producedExecution)
+        produced.kernelSources_nonempty).comparisons =
+      [] :: secondComparisons :: remainingComparisons
+  comparisonRuns : ∀ step ∈ secondComparisons,
+    TypeChecker.FamilyComparisonSemanticRun step
+  position :
+    AddInductive.FamilyParameterComparisonBlockTrace.FamilyTelescopePosition
+      source.nparams
+  position_eq :
+    (produced.execution.eliminationExecution.normalization
+      |>.familyParameterComparisonTrace
+        (produced.execution.normalization_run produced.producedExecution)
+        produced.kernelSources_nonempty).secondTelescope? = some position
+  currentRun : TypeChecker.CandidateContextRun position.context
+  boundary : TypeChecker.FamilyParameterIndexBoundary position.trace
+    currentRun
+
+/-- Select the joint second-family annotation/validator staging directly from
+the retained producer and semantic hierarchy. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (produced.SecondFamilyIndexStaging semantic) := by
+  obtain ⟨annotation⟩ :=
+    produced.semanticSecondFamilyAnnotationSpine semantic
+  obtain ⟨secondComparisons, remainingComparisons, comparisonsEq,
+      comparisonRuns, position, positionEq, currentRun, ⟨boundary⟩⟩ :=
+    produced.semanticSecondFamilyParameterComparisons semantic
+      context_lctx_eq
+  exact ⟨{
+    annotation := annotation
+    secondComparisons := secondComparisons
+    remainingComparisons := remainingComparisons
+    comparisons_eq := comparisonsEq
+    comparisonRuns := comparisonRuns
+    position := position
+    position_eq := positionEq
+    currentRun := currentRun
+    boundary := boundary }⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
 
 /-- The retained first-family validation and its exact semantic root determine
 the Theory representation of the block's common result universe.  The value

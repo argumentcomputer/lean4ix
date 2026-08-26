@@ -443,6 +443,28 @@ theorem candidateTypeAnnotation_exists_translation
     let .app _ _ _ type_tr := fn_tr
     exact ih type_tr
 
+/-- The validator's exact annotation-consumed kernel expression has a strict
+Theory translation whenever its raw source does.
+
+The target remains existential and is selected by the source-indexed
+annotation trace.  In particular, this theorem does not claim that annotation
+peeling is a function of the already translated raw endpoint: strict
+translation may erase transparent kernel forms above the annotation wrapper. -/
+theorem consumeTypeAnnotations_exists_translation
+    (source_tr : TrExprS env Us Δ source source') :
+    ∃ consumed',
+      TrExprS env Us Δ (AddInductive.consumeTypeAnnotations source)
+        consumed' := by
+  cases htrace : AddInductive.CandidateTypeAnnotationTrace.build source with
+  | mk consumed trace =>
+    have consumed_eq : consumed =
+        AddInductive.consumeTypeAnnotations source := by
+      simpa only [htrace] using
+        AddInductive.CandidateTypeAnnotationTrace.build_consumed source
+    obtain ⟨consumed', consumed_tr⟩ :=
+      candidateTypeAnnotation_exists_translation trace source_tr
+    exact ⟨consumed', by simpa only [← consumed_eq] using consumed_tr⟩
+
 /-- The empty executable checker state is well formed for any verified
 context whose free-variable names are already reserved by the kernel name
 generator.  `VState.WF.empty` is the empty-local-context specialization;
@@ -865,6 +887,7 @@ structure FamilyParameterIndexBoundary
     context source nparams nindices fuel
   source' : VExpr
   source_tr : contextRun.context.TrExprS source source'
+  localState : FamilyParameterLocalState stats context
   result_eq : trace.result = outer.result
   comparisons_eq_nil : trace.comparisons = []
 
@@ -967,6 +990,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := boundary.trace
           source' := boundary.source'
           source_tr := boundary.source_tr
+          localState := boundary.localState
           result_eq := by
             simpa only [
               AddInductive.FamilyTypeParameterComparisonTrace.result] using
@@ -1004,6 +1028,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := current
           source' := source'
           source_tr := source_tr
+          localState := localState
           result_eq := rfl
           comparisons_eq_nil := currentEmpty }⟩
   | terminal stats context source i nindices fuel notForall
@@ -1023,6 +1048,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := current
           source' := source'
           source_tr := source_tr
+          localState := localState
           result_eq := rfl
           comparisons_eq_nil := rfl }⟩
 
@@ -1896,6 +1922,394 @@ theorem TrExprS.forallE_components
   cases run with
   | forallE domainType bodyType domain_tr body_tr =>
     exact ⟨_, _, rfl, domainType, bodyType, domain_tr, body_tr⟩
+
+/-- At a nonterminal index boundary, translate both the raw binder domain and
+the exact annotation-consumed kernel domain selected by validation.
+
+The result is source-indexed: the raw `forallE` syntax is recovered from the
+boundary itself, and annotation peeling follows that kernel domain's retained
+structural trace.  No translated-endpoint peeling function is assumed. -/
+structure FamilyParameterIndexBoundary.IndexDomainTranslation
+    (boundary : FamilyParameterIndexBoundary outer contextRun) : Type where
+  name : Name
+  domain : Expr
+  body : Expr
+  binderInfo : BinderInfo
+  domain' : VExpr
+  body' : VExpr
+  consumed' : VExpr
+  source_eq : boundary.source = .forallE name domain body binderInfo
+  source'_eq : boundary.source' = .forallE domain' body'
+  domain_type : contextRun.context.IsType domain'
+  body_type : contextRun.context.venv.IsType
+    contextRun.context.lparams.length
+    (domain' :: contextRun.context.vlctx.toCtx) body'
+  domain_tr : contextRun.context.TrExprS domain domain'
+  body_tr : TrExprS contextRun.context.venv contextRun.context.lparams
+    ((none, .vlam domain') :: contextRun.context.vlctx) body body'
+  consumed_tr : contextRun.context.TrExprS
+    (AddInductive.consumeTypeAnnotations domain) consumed'
+
+/-- Construct the complete source-indexed translation package for the next
+index domain. -/
+theorem FamilyParameterIndexBoundary.indexDomainTranslation_of_forall
+    (boundary : FamilyParameterIndexBoundary outer contextRun)
+    (isForall : boundary.source.isForall = true) :
+    Nonempty boundary.IndexDomainTranslation := by
+  cases hsource : boundary.source with
+  | forallE name domain body binderInfo =>
+    have source_tr := boundary.source_tr
+    rw [hsource] at source_tr
+    obtain ⟨domain', body', source'_eq, domainType, bodyType,
+        domain_tr, body_tr⟩ := TrExprS.forallE_components source_tr
+    obtain ⟨consumed', consumed_tr⟩ :=
+      consumeTypeAnnotations_exists_translation domain_tr
+    exact ⟨{
+      name := name
+      domain := domain
+      body := body
+      binderInfo := binderInfo
+      domain' := domain'
+      body' := body'
+      consumed' := consumed'
+      source_eq := hsource
+      source'_eq := source'_eq
+      domain_type := domainType
+      body_type := bodyType
+      domain_tr := domain_tr
+      body_tr := body_tr
+      consumed_tr := consumed_tr }⟩
+  | _ => simp_all [Expr.isForall]
+
+/-- Compatibility projection retaining the earlier existential surface. -/
+theorem FamilyParameterIndexBoundary.annotationTranslation_of_forall
+    (boundary : FamilyParameterIndexBoundary outer contextRun)
+    (isForall : boundary.source.isForall = true) :
+    ∃ name domain body binderInfo domain' body' consumed',
+      boundary.source = .forallE name domain body binderInfo ∧
+      boundary.source' = .forallE domain' body' ∧
+      contextRun.context.TrExprS domain domain' ∧
+      contextRun.context.TrExprS
+        (AddInductive.consumeTypeAnnotations domain) consumed' := by
+  obtain ⟨run⟩ := boundary.indexDomainTranslation_of_forall isForall
+  exact ⟨run.name, run.domain, run.body, run.binderInfo, run.domain',
+    run.body', run.consumed', run.source_eq, run.source'_eq, run.domain_tr,
+    run.consumed_tr⟩
+
+/-- Semantic completion of one translated index domain.  The single new fact
+is the raw/annotation-consumed definitional equality at the exact Theory
+endpoints selected above; the candidate telescope is responsible for
+constructing this field. -/
+structure FamilyParameterIndexBoundary.IndexDomainRun
+    (boundary : FamilyParameterIndexBoundary outer contextRun) : Type where
+  translation : boundary.IndexDomainTranslation
+  sort : VLevel
+  annotation_def : contextRun.context.venv.IsDefEq
+    contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+    translation.domain' translation.consumed' (.sort sort)
+
+/-- The completed annotation equality types the exact local domain used by
+validation. -/
+theorem FamilyParameterIndexBoundary.IndexDomainRun.consumed_type
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary) :
+    contextRun.context.IsType run.translation.consumed' :=
+  ⟨run.sort, run.annotation_def.hasType.2⟩
+
+/-- Push the exact validator local declaration selected by a completed index
+domain.  Freshness is derived from the boundary's retained local-context
+inventory. -/
+def FamilyParameterIndexBoundary.IndexDomainRun.pushContext
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary) :
+    CandidateContextRun
+      (context.pushLocalDecl run.translation.name
+        run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain)) :=
+  contextRun.pushLocalDecl run.translation.name run.translation.binderInfo
+    (AddInductive.consumeTypeAnnotations run.translation.domain)
+    boundary.localState.localContext.fresh run.translation.consumed'
+    run.translation.consumed_tr run.consumed_type
+
+/-- Relocate the retained raw-body translation across the exact
+raw/annotation-consumed domain equality before instantiating the validator's
+fresh free variable. -/
+theorem FamilyParameterIndexBoundary.IndexDomainRun.bodyTranslation
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary) :
+    ∃ body'', TrExprS contextRun.context.venv contextRun.context.lparams
+      ((none, .vlam run.translation.consumed') ::
+        contextRun.context.vlctx) run.translation.body body'' := by
+  have henv : VEnv.WF contextRun.context.venv := contextRun.context.Ewf
+  let domainContext : VLCtx.IsDefEq contextRun.context.venv
+      contextRun.context.lparams.length
+      ((none, .vlam run.translation.domain') :: contextRun.context.vlctx)
+      ((none, .vlam run.translation.consumed') ::
+        contextRun.context.vlctx) :=
+    .cons (.refl henv contextRun.context.Δwf) (by nofun)
+      (.vlam run.annotation_def)
+  exact run.translation.body_tr.defeqDFC henv domainContext
+
+/-- Instantiate the relocated body translation with the exact fresh free
+variable allocated by validation's pushed context. -/
+theorem
+    FamilyParameterIndexBoundary.IndexDomainRun.instantiatedBodyTranslation
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary) :
+    ∃ body'', run.pushContext.context.TrExprS
+      (run.translation.body.instantiate1 context.freshExpr) body'' := by
+  obtain ⟨storedBody', storedBody_tr⟩ := run.bodyTranslation
+  let nextContextRun := run.pushContext
+  have bodyVenv : nextContextRun.context.venv =
+      contextRun.context.venv := rfl
+  have bodyLparams : nextContextRun.context.lparams =
+      contextRun.context.lparams := rfl
+  have bodyVlctx : nextContextRun.context.vlctx =
+      (some (context.freshFVarId,
+          (AddInductive.consumeTypeAnnotations
+            run.translation.domain).fvarsList),
+        .vlam run.translation.consumed') ::
+        contextRun.context.vlctx := rfl
+  have bodyΔwf := nextContextRun.context.Δwf
+  rw [bodyVenv, bodyLparams, bodyVlctx] at bodyΔwf
+  have instantiatedBody_tr :=
+    storedBody_tr.inst_fvar contextRun.context.Ewf.ordered bodyΔwf
+  refine ⟨storedBody', ?_⟩
+  change TrExprS nextContextRun.context.venv
+    nextContextRun.context.lparams nextContextRun.context.vlctx
+    (run.translation.body.instantiate1 context.freshExpr) storedBody'
+  rw [bodyVenv, bodyLparams, bodyVlctx]
+  simpa only [AddInductive.Context.freshExpr, Expr.instantiate1_eq] using
+    instantiatedBody_tr
+
+/-- Exact producer-owned continuation after consuming one index binder.
+
+The record retains both sides of the WHNF observation and the validator's
+actual tail trace.  Its result equality continues to point at the original
+outer family trace, while `toBoundary` below exposes the tail as the next
+source-indexed boundary. -/
+structure FamilyParameterIndexBoundary.IndexDomainAdvance
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary) : Type where
+  body' : VExpr
+  body_tr : run.pushContext.context.TrExprS
+    (run.translation.body.instantiate1 context.freshExpr) body'
+  view : Expr
+  fuel : Nat
+  tail : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+    (context.pushLocalDecl run.translation.name
+      run.translation.binderInfo
+      (AddInductive.consumeTypeAnnotations run.translation.domain))
+    view nparams (nindices + 1) fuel
+  view' : VExpr
+  view_tr : run.pushContext.context.TrExprS view view'
+  whnf : Nonempty (WhnfRun run.pushContext.context.venv
+    run.pushContext.context.lparams run.pushContext.context.vlctx
+    (run.translation.body.instantiate1 context.freshExpr) view body' view')
+  localState : FamilyParameterLocalState stats
+    (context.pushLocalDecl run.translation.name
+      run.translation.binderInfo
+      (AddInductive.consumeTypeAnnotations run.translation.domain))
+  result_eq : tail.result = outer.result
+  comparisons_eq_nil : tail.comparisons = []
+
+/-- Re-index an exact one-step continuation as the next index boundary. -/
+def FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    {run : FamilyParameterIndexBoundary.IndexDomainRun boundary}
+    (advance : FamilyParameterIndexBoundary.IndexDomainAdvance run) :
+    FamilyParameterIndexBoundary advance.tail run.pushContext where
+  source := advance.view
+  fuel := advance.fuel
+  trace := advance.tail
+  source' := advance.view'
+  source_tr := advance.view_tr
+  localState := advance.localState
+  result_eq := rfl
+  comparisons_eq_nil := advance.comparisons_eq_nil
+
+/-- The re-indexed boundary still reaches the original family result. -/
+theorem FamilyParameterIndexBoundary.IndexDomainAdvance.result_eq_outer
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    {run : FamilyParameterIndexBoundary.IndexDomainRun boundary}
+    (advance : FamilyParameterIndexBoundary.IndexDomainAdvance run) :
+    advance.toBoundary.trace.result = outer.result := by
+  exact advance.result_eq
+
+/-- Consume the validator's exact `index` constructor, replay its retained
+WHNF step in the pushed verified context, and expose its exact tail.
+
+The completed `IndexDomainRun` is the only semantic input: it supplies the
+raw/annotation-consumed Theory equality at the source-indexed domain chosen
+by validation. -/
+theorem FamilyParameterIndexBoundary.IndexDomainRun.advance
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : FamilyParameterIndexBoundary.IndexDomainRun boundary)
+    (whnfFuel : Nat)
+    (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (FamilyParameterIndexBoundary.IndexDomainAdvance run) := by
+  obtain ⟨body', body_tr⟩ := run.instantiatedBodyTranslation
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryLocalState, boundaryResultEq,
+      boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail =>
+    omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail =>
+    omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    have source_eq := run.translation.source_eq
+    simp only [Expr.forallE.injEq] at source_eq
+    rcases source_eq with
+      ⟨name_eq, domain_eq, body_eq, binderInfo_eq⟩
+    have whnf' : AddInductive.CandidateWhnfStep.Valid
+        ⟨context.pushLocalDecl run.translation.name
+            run.translation.binderInfo
+            (AddInductive.consumeTypeAnnotations run.translation.domain),
+          run.translation.body.instantiate1 context.freshExpr, view⟩ := by
+      simpa only [← name_eq, ← domain_eq, ← body_eq,
+        ← binderInfo_eq] using whnf
+    have tail_result_eq : tail.result = outer.result := by
+      simpa only [AddInductive.FamilyTypeParameterComparisonTrace.result]
+        using boundaryResultEq
+    have tail_comparisons : tail.comparisons = [] := by
+      simpa only [
+        AddInductive.FamilyTypeParameterComparisonTrace.comparisons]
+        using boundaryComparisons
+    have transportTail :
+        ∀ (translatedName : Name) (translatedDomain : Expr)
+            (translatedBinderInfo : BinderInfo),
+          name = translatedName → domain = translatedDomain →
+          binderInfo = translatedBinderInfo →
+          ∃ tail' :
+              AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+                (context.pushLocalDecl translatedName translatedBinderInfo
+                  (AddInductive.consumeTypeAnnotations translatedDomain))
+                view nparams (nindices + 1) fuel,
+            tail'.result = outer.result ∧ tail'.comparisons = [] := by
+      intro translatedName translatedDomain translatedBinderInfo
+        translatedName_eq translatedDomain_eq translatedBinderInfo_eq
+      subst translatedName
+      subst translatedDomain
+      subst translatedBinderInfo
+      exact ⟨tail, tail_result_eq, tail_comparisons⟩
+    obtain ⟨tail', tailResultEq, tailComparisons⟩ :=
+      transportTail run.translation.name run.translation.domain
+        run.translation.binderInfo name_eq domain_eq binderInfo_eq
+    have nextDepth :
+        (context.pushLocalDecl run.translation.name
+          run.translation.binderInfo
+          (AddInductive.consumeTypeAnnotations
+            run.translation.domain)).fuel.recDepth = whnfFuel + 1 := by
+      simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+    obtain ⟨view', view_tr, whnfRun⟩ :=
+      WhnfRun.exists_ofCandidateStep
+        ⟨context.pushLocalDecl run.translation.name
+            run.translation.binderInfo
+            (AddInductive.consumeTypeAnnotations run.translation.domain),
+          run.translation.body.instantiate1 context.freshExpr, view⟩
+        whnf' run.pushContext body' body_tr whnfFuel nextDepth
+    exact ⟨{
+      body' := body'
+      body_tr := body_tr
+      view := view
+      fuel := fuel
+      tail := tail'
+      view' := view'
+      view_tr := view_tr
+      whnf := whnfRun
+      localState := boundaryLocalState.pushLocal run.translation.name
+        run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain)
+      result_eq := by
+        exact tailResultEq
+      comparisons_eq_nil := tailComparisons }⟩
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+    have source_eq := run.translation.source_eq
+    change boundarySource = .forallE run.translation.name
+      run.translation.domain run.translation.body
+        run.translation.binderInfo at source_eq
+    rw [source_eq] at notForall
+    contradiction
+
+/-- Exact terminal witness for an index boundary which has no remaining Pi
+node.  The boundary itself continues to retain the complete dependent result
+equation back to the outer family trace. -/
+structure FamilyParameterIndexBoundary.Terminal
+    (boundary : FamilyParameterIndexBoundary outer contextRun) : Type where
+  notForall : boundary.source.isForall = false
+
+/-- At `i = nparams`, the retained family trace is either the next exact index
+Pi or its exact terminal continuation.  Fresh/shared-parameter constructors
+are excluded by their dependent counter premise. -/
+theorem FamilyParameterIndexBoundary.progress
+    (boundary : FamilyParameterIndexBoundary outer contextRun) :
+    boundary.source.isForall = true ∨ Nonempty boundary.Terminal := by
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryLocalState, boundaryResultEq,
+      boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail =>
+    omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail =>
+    omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    exact .inl rfl
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+    exact .inr ⟨{ notForall := notForall }⟩
+
+/-- One source-indexed elimination step at the exact parameter/index
+boundary.  A remaining Pi exposes the validator's raw and
+annotation-consumed domain translations; otherwise the exact terminal payload
+is returned. -/
+theorem FamilyParameterIndexBoundary.annotationTranslation_or_terminal
+    (boundary : FamilyParameterIndexBoundary outer contextRun) :
+    (∃ name domain body binderInfo domain' body' consumed',
+      boundary.source = .forallE name domain body binderInfo ∧
+      boundary.source' = .forallE domain' body' ∧
+      contextRun.context.TrExprS domain domain' ∧
+      contextRun.context.TrExprS
+        (AddInductive.consumeTypeAnnotations domain) consumed') ∨
+      Nonempty boundary.Terminal := by
+  rcases boundary.progress with isForall | terminal
+  · exact .inl (boundary.annotationTranslation_of_forall isForall)
+  · exact .inr terminal
 
 /-- Recursively turn every retained candidate observation into verified
 normalization evidence, constructing and transporting the exact verified
@@ -3427,6 +3841,187 @@ theorem CandidateExprRun.annotationSpineEvidence
   exact ⟨storedBinders, by simpa only [rawTel] using storedEvidence,
     storedLength⟩
 
+/-- Recursive worker joining the annotation-consumed telescope to the exact
+verified terminal context built from those same stored domains. -/
+private theorem CandidateExprRun.annotationSpineContextAux
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true)
+    (contextRun : CandidateContextRun candidateContext)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    (vlctx_eq : contextRun.context.vlctx = Δ)
+    {rawΔ : VLCtx} {rawSource' : VExpr}
+    (contextEq : VLCtx.IsDefEq env Us.length rawΔ Δ)
+    (rawSource_tr : TrExprS env Us rawΔ source rawSource') :
+    ∃ (rawBinders storedBinders : List VExpr) (rawResult : VExpr)
+        (terminalRun : CandidateContextRun trace.terminalContext),
+      rawSource' = VExpr.forallN rawBinders rawResult ∧
+      TelDefEqEvidence env Us.length rawΔ.toCtx
+        rawBinders storedBinders ∧
+      rawBinders.length = trace.spineLength ∧
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us ∧
+      terminalRun.context.vlctx.toCtx =
+        storedBinders.reverse ++ Δ.toCtx := by
+  induction run generalizing rawΔ rawSource' with
+  | @terminal Δ context source inferred result source' result' inferred'
+      checked normalized node =>
+    let terminalRun : CandidateContextRun
+        (AddInductive.CandidateExprTrace.terminal
+          context source inferred result checked normalized).terminalContext := by
+      simpa only [AddInductive.CandidateExprTrace.terminalContext] using
+        contextRun
+    refine ⟨[], [], rawSource', terminalRun, rfl, .nil, rfl,
+      venv_eq, lparams_eq, ?_⟩
+    change contextRun.context.vlctx.toCtx = Δ.toCtx
+    rw [vlctx_eq]
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.storedSpine,
+      Bool.and_eq_true] at aligned
+    obtain ⟨sourceEq, bodyAligned⟩ := aligned
+    have alignedSource_tr : TrExprS env Us rawΔ
+        (.forallE name domain body binderInfo) rawSource' :=
+      rawSource_tr.eqv (Expr.structuralEq_eqv sourceEq)
+    let @TrExprS.forallE _ _ rawDomain rawBody _ _ _ _ _
+        rawDomainType rawBodyType rawDomain_tr rawBody_tr := alignedSource_tr
+    have henv : VEnv.WF env := by
+      simpa only [venv_eq] using contextRun.context.Ewf
+    have hΔ : VLCtx.WF env Us.length Δ := by
+      simpa only [venv_eq, lparams_eq, vlctx_eq] using
+        contextRun.context.Δwf
+    have hRawΔ := contextEq.wf
+    have rawToDomainU :=
+      rawDomain_tr.uniq henv contextEq domainRun.source_tr
+    have domainTypeRaw :=
+      domainType.defeqDFC henv (contextEq.symm henv).defeqCtx
+    have rawToDomain :=
+      rawToDomainU.of_r henv hRawΔ.toCtx domainTypeRaw
+    have annotationDef :=
+      annotationsRun.isDefEqU.of_l henv hΔ.toCtx domainType
+    have annotationDefRaw :=
+      annotationDef.defeqDFC henv (contextEq.symm henv).defeqCtx
+    have rawToStored := rawToDomain.trans annotationDefRaw
+    have storedDomain_tr : contextRun.context.TrExprS
+        annotations.consumed storedDomain' := by
+      simpa only [VContext.TrExprS, venv_eq, lparams_eq, vlctx_eq] using
+        annotationsRun.rhs_tr
+    let nextContextRun := contextRun.pushLocalDecl name binderInfo
+      annotations.consumed fresh storedDomain' storedDomain_tr (by
+        change contextRun.context.venv.IsType
+          contextRun.context.lparams.length
+          contextRun.context.vlctx.toCtx storedDomain'
+        rw [venv_eq, lparams_eq, vlctx_eq]
+        exact ⟨u, annotationDef.hasType.2⟩)
+    have nextVenv : nextContextRun.context.venv = env := by
+      simp only [nextContextRun, CandidateContextRun.pushLocalDecl_venv,
+        venv_eq]
+    have nextLparams : nextContextRun.context.lparams = Us := by
+      simp only [nextContextRun, CandidateContextRun.pushLocalDecl_lparams,
+        lparams_eq]
+    have nextVlctx : nextContextRun.context.vlctx = bodyΔ := by
+      simp only [nextContextRun, CandidateContextRun.pushLocalDecl_vlctx]
+      rw [vlctx_eq, bodyContext]
+    have bodyWF := bodyRun.context_wf
+    rw [bodyContext] at bodyWF
+    have rawFresh :
+        ∀ fv deps,
+          some (context.freshFVarId, annotations.consumed.fvarsList) =
+              some (fv, deps) →
+            fv ∉ rawΔ.fvars ∧ deps ⊆ rawΔ.fvars := by
+      intro fv deps heq
+      cases heq
+      have hfresh := bodyWF.2.1 _ _ rfl
+      simpa only [contextEq.fvars] using hfresh
+    let rawBodyΔ : VLCtx :=
+      (some (context.freshFVarId, annotations.consumed.fvarsList),
+        .vlam rawDomain) :: rawΔ
+    have bodyContextEqConcrete : VLCtx.IsDefEq env Us.length rawBodyΔ
+        ((some (context.freshFVarId, annotations.consumed.fvarsList),
+          .vlam storedDomain') :: Δ) :=
+      .cons contextEq rawFresh (.vlam rawToStored)
+    have bodyContextEq : VLCtx.IsDefEq env Us.length rawBodyΔ bodyΔ := by
+      simpa only [bodyContext] using bodyContextEqConcrete
+    have rawBodyΔwf := bodyContextEq.wf
+    have rawBodyInst_tr : TrExprS env Us rawBodyΔ
+        (body.instantiate1 context.freshExpr) rawBody := by
+      simpa only [AddInductive.Context.freshExpr,
+        Expr.instantiate1_eq] using
+        rawBody_tr.inst_fvar henv.ordered rawBodyΔwf
+    obtain ⟨rawBinders, storedBinders, rawResult, terminalRun,
+        rawBodyEq, storedTail, tailLength, terminalVenv,
+        terminalLparams, terminalContextEq⟩ :=
+      bodyIH bodyAligned nextContextRun nextVenv nextLparams nextVlctx
+        bodyContextEq rawBodyInst_tr
+    refine ⟨rawDomain :: rawBinders, storedDomain' :: storedBinders,
+      rawResult, terminalRun, ?_, ?_, ?_, terminalVenv, terminalLparams,
+      ?_⟩
+    · simp only [VExpr.forallN, rawBodyEq]
+    · exact .cons (.ofDefEq rawToStored) (by
+        simpa only [rawBodyΔ, VLCtx.toCtx] using storedTail)
+    · simpa only [List.length_cons,
+        AddInductive.CandidateExprTrace.spineLength] using
+        congrArg Nat.succ tailLength
+    · calc
+        terminalRun.context.vlctx.toCtx =
+            storedBinders.reverse ++ bodyΔ.toCtx := terminalContextEq
+        _ = storedBinders.reverse ++ storedDomain' :: Δ.toCtx := by
+          rw [bodyContext]
+          rfl
+        _ = (storedDomain' :: storedBinders).reverse ++ Δ.toCtx := by
+          simp only [List.reverse_cons, List.singleton_append,
+            List.append_assoc]
+
+/-- The annotation-consumed candidate telescope and the exact verified
+terminal context are selected jointly by one recursive semantic run.
+
+In particular, the returned context is not reconstructed from names: its
+Theory declarations are definitionally the reverse of the stored telescope
+chosen by the candidate's retained annotation equalities. -/
+theorem CandidateExprRun.annotationSpineContext
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true)
+    (contextRun : CandidateContextRun candidateContext)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    (vlctx_eq : contextRun.context.vlctx = Δ) :
+    ∃ (terminalRun : CandidateContextRun trace.terminalContext)
+        (storedBinders : List VExpr),
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us ∧
+      TelDefEqEvidence env Us.length Δ.toCtx
+        (VExpr.telN trace.spineLength source') storedBinders ∧
+      storedBinders.length = trace.spineLength ∧
+      terminalRun.context.vlctx.toCtx =
+        storedBinders.reverse ++ Δ.toCtx := by
+  have henv : VEnv.WF env := by
+    simpa only [venv_eq] using contextRun.context.Ewf
+  obtain ⟨rawBinders, storedBinders, rawResult, terminalRun,
+      rawEq, telescope, rawLength, terminalVenv, terminalLparams,
+      terminalContextEq⟩ :=
+    run.annotationSpineContextAux aligned contextRun venv_eq lparams_eq
+      vlctx_eq (.refl henv run.context_wf) run.source_tr
+  have rawTel : VExpr.telN trace.spineLength source' = rawBinders := by
+    rw [rawEq, ← rawLength]
+    exact candidateTelN_forallN_length rawBinders rawResult
+  have storedLength : storedBinders.length = trace.spineLength :=
+    telescope.length_eq.symm.trans rawLength
+  exact ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
+    by simpa only [rawTel] using telescope, storedLength,
+    terminalContextEq⟩
+
 /-- A stored candidate spine fixes the exact number of raw and reconstructed
 view binders, independently of the terminal result typing witness. -/
 theorem CandidateExprRun.spineLengths
@@ -4062,6 +4657,28 @@ theorem CandidateExprSemanticRootRun.annotationSpineEvidence
         storedBinders.length = candidate.trace.spineLength := by
   obtain ⟨inferred, recursive⟩ := run.recursive
   exact recursive.annotationSpineEvidence storedSpine
+
+/-- Root-level projection joining the candidate's annotation-consumed
+telescope to its exact verified terminal reader context. -/
+theorem CandidateExprSemanticRootRun.annotationSpineContext
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (storedSpine : candidate.trace.storedSpine = true) :
+    ∃ (terminalRun : CandidateContextRun candidate.trace.terminalContext)
+        (storedBinders : List VExpr),
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us ∧
+      TelDefEqEvidence env Us.length []
+        (VExpr.telN candidate.trace.spineLength source') storedBinders ∧
+      storedBinders.length = candidate.trace.spineLength ∧
+      terminalRun.context.vlctx.toCtx = storedBinders.reverse := by
+  obtain ⟨inferred, recursive⟩ := run.recursive
+  obtain ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
+      telescope, storedLength, terminalContextEq⟩ :=
+    recursive.annotationSpineContext storedSpine run.contextRun run.venv_eq
+      run.lparams_eq run.vlctx_eq
+  exact ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
+    telescope, storedLength, by
+      simpa only [VLCtx.toCtx, List.append_nil] using terminalContextEq⟩
 
 /-- Turn an exact root translation and a recursive identity witness into the
 generation-ready spine package. The root equalities transport the recursive
@@ -12713,6 +13330,165 @@ info: 'Lean4Lean.TypeChecker.candidateTypeAnnotation_exists_translation' depends
 #print axioms TypeChecker.candidateTypeAnnotation_exists_translation
 
 /--
+info: 'Lean4Lean.TypeChecker.consumeTypeAnnotations_exists_translation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.consumeTypeAnnotations_exists_translation
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.indexDomainTranslation_of_forall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.indexDomainTranslation_of_forall
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_of_forall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_of_forall
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.consumed_type' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.consumed_type
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.pushContext' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.pushContext
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.bodyTranslation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.bodyTranslation
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.instantiatedBodyTranslation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Expr.instantiate1_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.instantiatedBodyTranslation
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainAdvance.result_eq_outer' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainAdvance.result_eq_outer
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.advance' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.advance
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.progress' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyParameterIndexBoundary.progress
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_or_terminal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_or_terminal
+
+/--
 info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -13106,6 +13882,39 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.annotationSpineEvidence' depends o
 #print axioms TypeChecker.CandidateExprRun.annotationSpineEvidence
 
 /--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.annotationSpineContext' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.annotationSpineContext
+
+/--
 info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.annotationSpineEvidence' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -13138,6 +13947,40 @@ info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.annotationSpineEvidenc
 #guard_msgs in
 #print axioms
   TypeChecker.CandidateExprSemanticRootRun.annotationSpineEvidence
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.annotationSpineContext' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.CandidateExprSemanticRootRun.annotationSpineContext
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms: [propext,
