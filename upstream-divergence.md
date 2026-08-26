@@ -1614,6 +1614,42 @@ to the replacement.
   stronger generic proof) and reconciliation preserves the retained Nat.mul
   dependency, readiness transaction, and exact trust pins.
 
+## D031 — typed Nat-to-Bool reflection and direct Nat.beq certificate
+
+- **Status:** implemented as the sixth semantic UP6 slice; Nat.ble and the
+  remaining comparison, shift, bitwise, and mod/div families remain open.
+- **Owner:** Argument Computer Corporation; retain through Nat.ble and review
+  when the condition-reflection consumers land.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its typed
+  Nat-to-Bool reflection, shared four-equation checker, constructor-recursion
+  conservation theorem, Nat.beq certificate, and live dispatch; no whole-PR
+  merge.
+- **Contract delta:** `ReflectsNatNatBool` now retains the reflected
+  constant's `Nat → Nat → Bool` typing in addition to literal computation.
+  The previous evaluation-only contract sufficed for literal reduction but
+  could not type the reflected predicate for later condition consumers. All
+  constant, definition-equation, structure-eta, and primitive-family
+  transports preserve both components.
+- **Executable delta:** `checkNatBEqPrimitive` extracts the Nat.beq branch and
+  closes the three open constructor equations with `Expr.lam0`; no
+  condition-reflection or mod/div code enters this slice.
+- **Verification delta:** `checkNatBinaryBoolTyped.WF` certifies the common
+  four-equation trace, `of_rec_equations` proves the resulting literal
+  reflection, and `addNatBEqDef` installs it through the readiness-aware
+  `AddDef` transaction. Live safe dispatch no longer reaches the generic
+  recognizer theorem for Nat.beq.
+- **Ix impact:** equality on Nat literals is now both computable and typed in
+  the verified model, providing the narrow predicate evidence required by
+  later Ix condition and arithmetic transports.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all six direct roots are
+  named by live dispatch, exclude `checkPrimitiveDef.WF`, and each reach
+  exactly the same six inherited sorry-carrying dependencies. The source
+  frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the typed predicate
+  contract, readiness transaction, and exact trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

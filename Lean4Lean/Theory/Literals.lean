@@ -219,8 +219,12 @@ def VEnv.ReflectsNatNat (env : VEnv) (fc : Name) (f : Nat → Nat) :=
   (∀ U Γ, env.HasType U Γ (.const fc []) (.forallE .nat .nat)) ∧
   ∀ a, env.IsDefEqU 0 [] (.app (.const fc []) (.natLit a)) (.natLit (f a))
 
+/-- Semantic certificate for a Boolean-valued binary natural-number primitive.
+The typing component is retained for condition-reflection consumers. -/
 def VEnv.ReflectsNatNatBool (env : VEnv) (fc : Name) (f : Nat → Nat → Bool) :=
   env.contains fc →
+  (∀ U Γ, env.HasType U Γ (.const fc [])
+    (.forallE .nat <| .forallE .nat .bool)) ∧
   ∀ a b, env.IsDefEqU 0 []
     (.app (.app (.const fc []) (.natLit a)) (.natLit b)) (.boolLit (f a b))
 
@@ -411,6 +415,17 @@ theorem VEnv.HasPrimitives.addConst
     obtain ⟨htype, heval⟩ := href hold
     exact ⟨fun U Γ => (htype U Γ).mono hle,
       fun a b => (heval a b).mono hle⟩
+  have liftBinaryBool {name : Name} {f : Nat → Nat → Bool}
+      (href : env.ReflectsNatNatBool name f)
+      (hold : env.contains name) :
+      (∀ U Γ, env'.HasType U Γ (.const name [])
+        (.forallE .nat <| .forallE .nat .bool)) ∧
+      ∀ a b, env'.IsDefEqU 0 []
+        (.app (.app (.const name []) (.natLit a)) (.natLit b))
+        (.boolLit (f a b)) := by
+    obtain ⟨htype, heval⟩ := href hold
+    exact ⟨fun U Γ => (htype U Γ).mono hle,
+      fun a b => (heval a b).mono hle⟩
   exact {
     bool := fun h => by
       obtain ⟨hfalse, htrue⟩ := H.bool (oldContains ``Bool
@@ -451,12 +466,10 @@ theorem VEnv.HasPrimitives.addConst
       (by simp [VEnv.reflectedPrimitiveNames]) h)
     natDiv := fun h => liftBinary H.natDiv (oldContains ``Nat.div
       (by simp [VEnv.reflectedPrimitiveNames]) h)
-    natBEq := fun h a b =>
-      (H.natBEq (oldContains ``Nat.beq
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natBLE := fun h a b =>
-      (H.natBLE (oldContains ``Nat.ble
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
+    natBEq := fun h => liftBinaryBool H.natBEq (oldContains ``Nat.beq
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natBLE := fun h => liftBinaryBool H.natBLE (oldContains ``Nat.ble
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
     natLAnd := fun h => liftBinary H.natLAnd (oldContains ``Nat.land
       (by simp [VEnv.reflectedPrimitiveNames]) h)
     natLOr := fun h => liftBinary H.natLOr (oldContains ``Nat.lor
