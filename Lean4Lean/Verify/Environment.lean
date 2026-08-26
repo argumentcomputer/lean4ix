@@ -937,6 +937,167 @@ theorem addDefinition.WF_safe_natBitwise
         haddC, hmodC, hdivC, hty, hcert,
         hiteS, hboolCert, hdecideS, hnatCert⟩
 
+/-- Shared readiness-aware transaction for a finite safe primitive whose
+checker returns a compact, primitive-specific evidence tail. -/
+theorem addDefinition.WF_safe_primitive
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) {n : Name} (hname : v.name = n)
+    (hsafety : v.safety = .safe)
+    {Q : VDefVal → Prop}
+    (hcheck : ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧ Q v')
+    (hconserve : ∀ {v' : VDefVal} (safety : DefinitionSafety) {base : VEnv},
+      Q v' →
+      ves.venv .safe ≤ ves.venv safety →
+      TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' →
+      v.levelParams = [] →
+      v'.name = n →
+      v.levelParams.length = v'.uvars →
+      v'.uvars = 0 →
+      (ves.venv safety).addConst n v'.toVConstant = some base →
+      (base.addDefEq v'.toDefEq).WF →
+      (base.addDefEq v'.toDefEq).HasPrimitives) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  unfold addDefinition
+  simp [hsafety]
+  refine hcheck.run wf |>.bind fun _ hchecked => ?_
+  obtain ⟨ci', htrSafe, hciSafe, hfresh, hlevels, hQ⟩ := hchecked
+  have hle : v.safety ≤ .safe := DefinitionSafety.le_safe
+  have hmono := wf.mono hle
+  have htr : TrDefVal v.safety (ves.venv v.safety)
+      (.defnInfo v) ci' := by
+    refine ⟨⟨⟨?_, htrSafe.1.1.2.1,
+      htrSafe.1.1.2.2.mono hmono⟩, htrSafe.1.2⟩,
+      htrSafe.2.mono hmono⟩
+    rw [ConstantInfo.defnInfo_safety]
+    exact DefinitionSafety.le_rfl
+  have ⟨ves', hwf, hstep⟩ := addDef.WF wf v ci' v.safety
+    (fun _ h => by simpa [ConstantInfo.defnInfo_safety] using h)
+    htr (hciSafe.mono hmono) hfresh ?_ ?_
+  · refine .pure ⟨ves', hwf, ?_, ?_⟩
+    · intro safety
+      exact (hstep safety).le
+    · exact ⟨ci', hstep⟩
+  · intro _
+    exact ⟨by rw [ConstantInfo.defnInfo_safety, hsafety], hlevels⟩
+  · intro safety base hvisible hadd
+    have hsafetyLe : safety ≤ v.safety := by
+      simpa [ConstantInfo.defnInfo_safety] using hvisible
+    have hmodelMono : ves.venv .safe ≤ ves.venv safety :=
+      hmono.trans (wf.mono hsafetyLe)
+    have hci : ci'.WF (ves.venv safety) :=
+      hciSafe.mono hmodelMono
+    have hbaseWF : (base.addDefEq ci'.toDefEq).WF := by
+      obtain ⟨decls, henvWF⟩ := (wf.tr (safety := safety)).wf
+      have haddCi :
+          (ves.venv safety).addConst ci'.name ci'.toVConstant =
+            some base := by
+        have haddCi := hadd
+        have hvname : v.name = ci'.name := htrSafe.1.2
+        rw [hvname] at haddCi
+        exact haddCi
+      exact ⟨.def ci' :: decls, .decl (.def hci haddCi) henvWF⟩
+    have hname' : ci'.name = n := htrSafe.1.2.symm.trans hname
+    have huvars : ci'.uvars = 0 := by
+      calc
+        ci'.uvars = v.levelParams.length := htrSafe.1.1.2.1.symm
+        _ = 0 := by simp [hlevels]
+    have hadd' : (ves.venv safety).addConst n ci'.toVConstant =
+        some base := by
+      simpa [hname] using hadd
+    exact hconserve safety hQ hmodelMono htrSafe hlevels hname'
+      htrSafe.1.1.2.1 huvars hadd' hbaseWF
+
+/-- Fully proved safe `Nat.land` specialization path. -/
+theorem addDefinition.WF_safe_natLand
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.land)
+    (hsafety : v.safety = .safe) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  refine addDefinition.WF_safe_primitive wf v hname hsafety
+    (checkSafeNatLandDefinition.WF wf v hname hsafety) ?_
+  intro v' safety base hQ hmono _ hlevels hname' _ huvars' hadd' hwf'
+  obtain ⟨hnat, hbool, hbitwise, hty, op', hvalue, hopTy, hf, ht⟩ := hQ
+  have hty' := hty.mono hmono
+  have hopTy' := hopTy.mono hmono
+  have hf' := hf.mono hmono
+  have ht' := ht.mono hmono
+  rw [hlevels] at hty' hopTy' hf' ht'
+  exact (wf.hasPrimitives (safety := safety)).addNatLandDef
+    (wf.tr (safety := safety)).wf (hmono.contains hnat)
+    (hmono.contains hbool) (hmono.contains hbitwise)
+    hname' hadd' hwf' huvars' hty' hvalue hopTy' hf' ht'
+
+/-- Fully proved safe `Nat.lor` specialization path. -/
+theorem addDefinition.WF_safe_natLor
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.lor)
+    (hsafety : v.safety = .safe) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  refine addDefinition.WF_safe_primitive wf v hname hsafety
+    (checkSafeNatLorDefinition.WF wf v hname hsafety) ?_
+  intro v' safety base hQ hmono _ hlevels hname' _ huvars' hadd' hwf'
+  obtain ⟨hnat, hbool, hbitwise, hty, op', hvalue, hopTy, hf, ht⟩ := hQ
+  have hty' := hty.mono hmono
+  have hopTy' := hopTy.mono hmono
+  have hf' := hf.mono hmono
+  have ht' := ht.mono hmono
+  rw [hlevels] at hty' hopTy' hf' ht'
+  exact (wf.hasPrimitives (safety := safety)).addNatLorDef
+    (wf.tr (safety := safety)).wf (hmono.contains hnat)
+    (hmono.contains hbool) (hmono.contains hbitwise)
+    hname' hadd' hwf' huvars' hty' hvalue hopTy' hf' ht'
+
+/-- Fully proved safe `Nat.xor` specialization path. -/
+theorem addDefinition.WF_safe_natXor
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.xor)
+    (hsafety : v.safety = .safe) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  refine addDefinition.WF_safe_primitive wf v hname hsafety
+    (checkSafeNatXorDefinition.WF wf v hname hsafety) ?_
+  intro v' safety base hQ hmono _ hlevels hname' _ huvars' hadd' hwf'
+  obtain ⟨hnat, _, hbitwise, hty, op', hvalue,
+    hopTy, hff, htf, hft, htt⟩ := hQ
+  have hty' := hty.mono hmono
+  have hopTy' := hopTy.mono hmono
+  have hff' := hff.mono hmono
+  have htf' := htf.mono hmono
+  have hft' := hft.mono hmono
+  have htt' := htt.mono hmono
+  rw [hlevels] at hty' hopTy' hff' htf' hft' htt'
+  exact (wf.hasPrimitives (safety := safety)).addNatXorDef
+    (hmono.contains hnat) (hmono.contains hbitwise)
+    hname' hadd' hwf' huvars' hty' hvalue hopTy'
+    hff' htf' hft' htt'
+
 /-- Fully proved safe `Nat.mod` declaration path. The checker retains the
 selector and fuel-recursion evidence, and the semantic certificate installs
 literal remainder reflection in every safety model receiving the definition. -/
@@ -1109,6 +1270,12 @@ theorem addDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
   by_cases hnatBitwise : v.safety = .safe ∧ v.name = ``Nat.bitwise
   · exact addDefinition.WF_safe_natBitwise wf v
       hnatBitwise.2 hnatBitwise.1
+  by_cases hnatLand : v.safety = .safe ∧ v.name = ``Nat.land
+  · exact addDefinition.WF_safe_natLand wf v hnatLand.2 hnatLand.1
+  by_cases hnatLor : v.safety = .safe ∧ v.name = ``Nat.lor
+  · exact addDefinition.WF_safe_natLor wf v hnatLor.2 hnatLor.1
+  by_cases hnatXor : v.safety = .safe ∧ v.name = ``Nat.xor
+  · exact addDefinition.WF_safe_natXor wf v hnatXor.2 hnatXor.1
   by_cases hnatGcd : v.safety = .safe ∧ v.name = ``Nat.gcd
   · exact addDefinition.WF_safe_natGcd wf v hnatGcd.2 hnatGcd.1
   by_cases hnatMod : v.safety = .safe ∧ v.name = ``Nat.mod

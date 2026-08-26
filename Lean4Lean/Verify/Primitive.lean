@@ -14,8 +14,9 @@ This module manually adapts bounded pieces of upstream lean4lean PR #32 at
 `6cfd43a48d17be85c76414638655c12ef9a7ee23`. The current bounded surface
 covers the body-first foundation and direct `Nat.add`, `Nat.pred`, `Nat.sub`,
 `Nat.mul`, `Nat.pow`, `Nat.shiftLeft`, `Nat.shiftRight`, `Nat.beq`, `Nat.ble`,
-`Nat.mod`, `Nat.div`, `Char.ofNat`, and `String.ofList` certificates; later
-primitive families remain separate slices.
+`Nat.mod`, `Nat.div`, `Char.ofNat`, and `String.ofList` certificates. The
+well-founded Nat and bitwise-specialization families are kept in focused
+companion modules.
 -/
 
 namespace Lean4Lean
@@ -236,9 +237,9 @@ private theorem TrExprS.listConsType {env : VEnv} (wf : env.WF)
       · exact hlistα1
       · exact hlistα2
 
-/-- Translate the canonical `Bool` type and recover its sort from the stored
-`Bool.false` declaration. The local `HasPrimitives` contract intentionally
-does not duplicate a separate `boolType` field. -/
+/-- Translate the canonical `Bool` type. The exact `boolType` contract is
+available directly; recovering the sort through the stored `Bool.false`
+typing also keeps this helper aligned with the constructor translation. -/
 theorem TrExprS.boolType_of_contains
     {env : VEnv} (wf : env.WF) (hprim : env.HasPrimitives)
     (hbool : env.contains ``Bool) (Us : List Name) (Δ : VLCtx) :

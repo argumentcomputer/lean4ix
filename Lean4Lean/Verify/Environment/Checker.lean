@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 -/
 
 import Lean4Lean.Verify.Environment.Boundaries
-import Lean4Lean.Verify.BitwiseReflect
+import Lean4Lean.Verify.BitwiseSpecializations
 import Lean4Lean.Verify.NatDivReflect
 import Lean4Lean.Verify.NatGcdReflect
 import Lean4Lean.Verify.NatModReflect
@@ -649,6 +649,118 @@ theorem checkSafeNatBitwiseDefinition.WF
   exact Environment.checkPrimitiveDef.natBitwise.WF_typed
     (c := .mk' wf .safe v.levelParams) (s := state')
     (ty' := v'.type) hname rfl rfl htype
+
+/-- Direct typed checker evidence for the safe `Nat.xor` specialization. -/
+theorem checkSafeNatXorDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.xor)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).contains ``Bool ∧
+          (ves.venv .safe).contains ``Nat.bitwise ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .nat) ∧
+          ∃ op' : VExpr,
+            v'.value = .app (.const ``Nat.bitwise []) op' ∧
+            (ves.venv .safe).HasType v.levelParams.length [] op'
+              (.forallE .bool <| .forallE .bool .bool) ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.app (.app op' .boolFalse) .boolFalse) .boolFalse ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.app (.app op' .boolTrue) .boolFalse) .boolTrue ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.app (.app op' .boolFalse) .boolTrue) .boolTrue ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.app (.app op' .boolTrue) .boolTrue) .boolFalse := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue _
+  exact Environment.checkPrimitiveDef.natXor.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value) hname htype hvalue
+
+/-- Direct typed checker evidence for the safe `Nat.land` specialization. -/
+theorem checkSafeNatLandDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.land)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).contains ``Bool ∧
+          (ves.venv .safe).contains ``Nat.bitwise ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .nat) ∧
+          ∃ op' : VExpr,
+            v'.value = .app (.const ``Nat.bitwise []) op' ∧
+            (ves.venv .safe).HasType v.levelParams.length [] op'
+              (.forallE .bool <| .forallE .bool .bool) ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.lam .bool <| .app (.app op' .boolFalse) (.bvar 0))
+              (.lam .bool .boolFalse) ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.lam .bool <| .app (.app op' .boolTrue) (.bvar 0))
+              (.lam .bool <| .bvar 0) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue _
+  exact Environment.checkPrimitiveDef.natLand.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl htype hvalue
+
+/-- Direct typed checker evidence for the safe `Nat.lor` specialization. -/
+theorem checkSafeNatLorDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.lor)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).contains ``Bool ∧
+          (ves.venv .safe).contains ``Nat.bitwise ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .nat) ∧
+          ∃ op' : VExpr,
+            v'.value = .app (.const ``Nat.bitwise []) op' ∧
+            (ves.venv .safe).HasType v.levelParams.length [] op'
+              (.forallE .bool <| .forallE .bool .bool) ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.lam .bool <| .app (.app op' .boolFalse) (.bvar 0))
+              (.lam .bool <| .bvar 0) ∧
+            (ves.venv .safe).IsDefEqU v.levelParams.length []
+              (.lam .bool <| .app (.app op' .boolTrue) (.bvar 0))
+              (.lam .bool .boolTrue) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue _
+  exact Environment.checkPrimitiveDef.natLor.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl htype hvalue
 
 /-- Direct body/type/equation certificate for the safe `Nat.beq` definition
 path. This theorem does not use the generic primitive-recognizer boundary. -/

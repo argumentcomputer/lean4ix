@@ -1754,7 +1754,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
   let fal := q(false)
-  let defeq1 a b := isDefEq (.arrow q(Nat) a) (.arrow q(Nat) b)
+  let defeqBool1 a b := isDefEq (.lam0 q(Bool) a) (.lam0 q(Bool) b)
   let x := .bvar 0
   let env ← getEnv
   match v.name with
@@ -1782,25 +1782,28 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
     _ ← checkNatBitwisePrimitive env v fail
   | ``Nat.land =>
     unless env.contains ``Nat.bitwise && v.levelParams.isEmpty do fail
+    let .app (.const ``Nat.bitwise []) and := v.value | fail
     -- land : Nat → Nat → Nat
     unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let .app (.const ``Nat.bitwise []) and := v.value | fail
+    unless ← isDefEq (← inferType and) q(Bool → Bool → Bool) do fail
     let and := mkApp2 and
-    unless ← defeq1 (and fal x) fal do fail
-    unless ← defeq1 (and tru x) x do fail
+    unless ← defeqBool1 (and fal x) fal do fail
+    unless ← defeqBool1 (and tru x) x do fail
   | ``Nat.lor =>
     unless env.contains ``Nat.bitwise && v.levelParams.isEmpty do fail
+    let .app (.const ``Nat.bitwise []) or := v.value | fail
     -- lor : Nat → Nat → Nat
     unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let .app (.const ``Nat.bitwise []) or := v.value | fail
+    unless ← isDefEq (← inferType or) q(Bool → Bool → Bool) do fail
     let or := mkApp2 or
-    unless ← defeq1 (or fal x) x do fail
-    unless ← defeq1 (or tru x) tru do fail
+    unless ← defeqBool1 (or fal x) x do fail
+    unless ← defeqBool1 (or tru x) tru do fail
   | ``Nat.xor =>
     unless env.contains ``Nat.bitwise && v.levelParams.isEmpty do fail
+    let .app (.const ``Nat.bitwise []) xor := v.value | fail
     -- xor : Nat → Nat → Nat
     unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let .app (.const ``Nat.bitwise []) xor := v.value | fail
+    unless ← isDefEq (← inferType xor) q(Bool → Bool → Bool) do fail
     let xor := mkApp2 xor
     unless ← isDefEq (xor fal fal) fal do fail
     unless ← isDefEq (xor tru fal) tru do fail

@@ -2061,9 +2061,9 @@ to the replacement.
 ## D042 — generic-state Nat.bitwise well-founded certificate
 
 - **Status:** implemented as the seventeenth bounded UP6 slice; the live safe
-  definition path now has a direct `Nat.bitwise` certificate. The small
-  `Nat.land`/`Nat.lor`/`Nat.xor` wrappers, final finite dispatch, and generic
-  V4 disposition remain open.
+  definition path now has a direct `Nat.bitwise` certificate. Its named
+  specializations are tracked by D043; final exhaustive dispatch and the
+  generic V4 disposition remain open.
 - **Owner:** Argument Computer Corporation; review with the remaining
   well-founded primitive work and any upstream revision of PR #32.
 - **Source:** manually adapted from lean4lean PR #32 at
@@ -2110,6 +2110,51 @@ to the replacement.
   proof-relevant certificate, structural closure checks, exact Boolean typing,
   Kripke reflection, and readiness-aware direct transaction; or reconciliation
   explicitly retains this Ix acceptance boundary.
+
+## D043 — checked Nat.bitwise specialization wrappers
+
+- **Status:** implemented as the eighteenth bounded UP6 slice; the live safe
+  definition path now has direct certificates for `Nat.land`, `Nat.lor`, and
+  `Nat.xor`. All finite definition-primitive names have direct endpoints;
+  exhaustive treatment of the remaining impossible primitive-name cases and
+  the generic V4 disposition remain open.
+- **Owner:** Argument Computer Corporation; review with final UP6 dispatch and
+  any upstream revision of PR #32.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its finite wrapper
+  recognizers, typed certificates, Boolean reflection lemmas, and environment
+  endpoints; no whole-PR merge or generic-dispatch admission was imported.
+- **Executable delta:** each wrapper requires the checked `Nat.bitwise`
+  dependency, zero universe parameters, the exact `Nat → Nat → Nat` type, and
+  a body syntactically headed by `Nat.bitwise`. The retained operator is now
+  independently inferred and compared with `Bool → Bool → Bool` before its
+  conjunction, disjunction, or exclusive-or equations are accepted. The old
+  local branches checked equations without first certifying this operator
+  type.
+- **Verification delta:** the typed recognizers retain the translated operator
+  and every checked equation. Complete-table reflection handles xor, the two
+  left-fixed lambda equations generate the and/or tables, and Kripke
+  specialization of D042 yields literal `Nat.land`, `Nat.lor`, and `Nat.xor`
+  reflection. A shared readiness-aware safe-primitive transaction carries
+  each result into every safety model receiving the definition, and the live
+  `addDefinition.WF` proof dispatches directly to all three endpoints.
+- **Trust decision:** the slice adds no custom axiom, `native_decide` proof,
+  or source `sorry`. Each new direct root excludes `checkPrimitiveDef.WF` and
+  retains exactly the same six known inherited sorry carriers as the previous
+  fifteen roots.
+- **Ix impact:** the generic bitwise recurrence can now be transported once,
+  while Ix consumers use the conventional named operations at kernel,
+  out-of-circuit cache, and circuit interfaces without reopening the
+  well-founded-recursion proof.
+- **Tests:** `Lean4Lean.Tests.NatBitwiseSpecializations` pins all typed checker,
+  Boolean bridge, specialization, conservation, and safe-checker roots;
+  `Lean4Lean.Tests.Primitive` covers eighteen direct live roots and the exact
+  inherited trust closure. The complete 269-target `lake build --wfail`
+  passes and the global source frontier remains 15.
+- **Removal condition:** upstream lands equivalent operator typing, Boolean
+  table derivations, Kripke specialization, and readiness-aware direct
+  endpoints; or reconciliation explicitly retains this stricter local
+  wrapper boundary.
 
 ## Review checklist
 
