@@ -1048,99 +1048,8 @@ theorem familyTypeParameterComparison_semanticRuns_of_later
     (whnfFuel : Nat)
     (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
     ∀ step ∈ trace.comparisons, FamilyComparisonSemanticRun step := by
-  induction trace generalizing source' with
-  | freshParameter stats context i nindices fuel name domain body view
-      binderInfo isParameter firstFamily whnf tail ih =>
-      rw [later] at firstFamily
-      contradiction
-  | sharedParameter stats context i nindices fuel name domain body
-      parameterType view binderInfo isParameter laterFamily parameterTypeRun
-      defeq whnf tail ih =>
-      let @TrExprS.forallE _ _ domain' body' _ _ _ _ _
-          domainType bodyType domain_tr body_tr := source_tr
-      have parameterMember : stats.params[i]! ∈ stats.params.toList := by
-        rw [show stats.params[i]! = stats.params[i] by
-          simp [isParameter, paramsSize]]
-        exact List.getElem_mem (by
-          simpa only [Array.length_toList, paramsSize] using isParameter)
-      obtain ⟨fv, decl, parameterEq, parameterFind⟩ :=
-        localState.parameters parameterMember
-      have parameterTypeRun' : AddInductive.getType (.fvar fv) context =
-          .ok parameterType := by
-        rw [← parameterEq]
-        exact parameterTypeRun
-      obtain ⟨fvValue, parameterType', fvFind, parameterType_tr⟩ :=
-        contextRun.getTypeTranslation parameterFind parameterTypeRun'
-      have fv_tr : contextRun.context.TrExprS (.fvar fv) fvValue :=
-        .fvar fvFind
-      let comparisonRun : IsDefEqRun contextRun.context.venv
-          contextRun.context.lparams contextRun.context.vlctx domain
-          parameterType _ _ :=
-        IsDefEqRun.ofCandidateStep ⟨context, domain, parameterType⟩ defeq
-          contextRun.context contextRun.context_eq rfl rfl rfl
-          contextRun.state_wf domain_tr parameterType_tr
-          context.fuel.recDepth rfl
-      have henv : VEnv.WF contextRun.context.venv := contextRun.context.Ewf
-      have hctx : OnCtx contextRun.context.vlctx.toCtx
-          (contextRun.context.venv.IsType
-            contextRun.context.lparams.length) :=
-        contextRun.context.Δwf.toCtx
-      obtain ⟨u, domainHasType⟩ := domainType
-      have domainDef : contextRun.context.venv.IsDefEq
-          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
-          _ _ (.sort u) :=
-        comparisonRun.isDefEqU.of_l henv hctx domainHasType
-      have fvHasParameterType : contextRun.context.venv.HasType
-          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
-          fvValue parameterType' :=
-        contextRun.context.Δwf.find?_wf contextRun.context.Ewf.ordered fvFind
-      have fvHasDomain : contextRun.context.venv.HasType
-          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
-          fvValue _ :=
-        domainDef.symm.defeq fvHasParameterType
-      have bodyInst_tr : contextRun.context.TrExprS
-          (body.instantiate1 (.fvar fv)) (body'.inst fvValue) := by
-        simpa only [Expr.instantiate1_eq] using
-          body_tr.inst contextRun.context.Ewf.ordered fvHasDomain fv_tr
-      have bodyInst_tr' : contextRun.context.TrExprS
-          (body.instantiate1 stats.params[i]!) (body'.inst fvValue) := by
-        rw [parameterEq]
-        exact bodyInst_tr
-      obtain ⟨view', view_tr, _viewRun⟩ :=
-        WhnfRun.exists_ofCandidateStep ⟨context,
-          body.instantiate1 stats.params[i]!, view⟩ whnf contextRun
-          (body'.inst fvValue) bodyInst_tr' whnfFuel whnfDepth
-      have tailRuns := ih later paramsSize localState contextRun view'
-        view_tr whnfDepth
-      intro step member
-      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
-        List.mem_cons] at member
-      rcases member with rfl | member
-      · exact ⟨contextRun, _, _, ⟨comparisonRun⟩⟩
-      · exact tailRuns step member
-  | index stats context i nindices fuel name domain body view binderInfo
-      notParameter whnf tail ih =>
-      have remaining : nparams - i = 0 := by omega
-      have comparisonLength :=
-        (AddInductive.FamilyTypeParameterComparisonTrace.index stats context
-          i nindices fuel name domain body view binderInfo notParameter whnf
-          tail).comparisons_length_of_laterFamily later
-      rw [remaining] at comparisonLength
-      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons]
-        at comparisonLength
-      have comparisonsEmpty : tail.comparisons = [] := by
-        cases hcomparisons : tail.comparisons with
-        | nil => rfl
-        | cons head rest =>
-            rw [hcomparisons] at comparisonLength
-            simp at comparisonLength
-      intro step member
-      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
-        comparisonsEmpty, List.not_mem_nil] at member
-  | terminal =>
-      intro step member
-      simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
-        List.not_mem_nil] at member
+  exact (familyTypeParameterComparison_semanticPrefix_of_later trace later
+    paramsSize localState contextRun source' source_tr whnfFuel whnfDepth).1
 
 private def FamilyParameterCountInvariant (nparams i : Nat)
     (stats : AddInductive.InductiveStats) : Prop :=
@@ -2861,6 +2770,13 @@ theorem TelDefEqEvidence.telDefEq :
   | .nil => trivial
   | .cons head tail => ⟨⟨_, head.isDefEq⟩, tail.telDefEq⟩
 
+/-- A checker-produced telescope certificate has the same number of raw and
+stored binders. -/
+theorem TelDefEqEvidence.length_eq
+    (run : TelDefEqEvidence env U Γ As As') :
+    As.length = As'.length :=
+  run.telDefEq.length_eq
+
 /-- Pointwise telescope equality followed by equality of the terminal result.
 
 Keeping these witnesses in one inductive preserves the raw-binder context at
@@ -2920,6 +2836,43 @@ theorem TelDefEqEvidence.take
     (run : TelDefEqEvidence env U Γ As As') (n : Nat) :
     TelDefEqEvidence env U Γ (As.take n) (As'.take n) :=
   .ofTelDefEq (run.telDefEq.take n)
+
+/-- Drop an aligned prefix while retaining the raw telescope context selected
+by the checker. -/
+theorem TelDefEqEvidence.drop
+    (run : TelDefEqEvidence env U Γ As As') (n : Nat) :
+    TelDefEqEvidence env U ((As.take n).reverse ++ Γ)
+      (As.drop n) (As'.drop n) :=
+  .ofTelDefEq (run.telDefEq.drop n)
+
+/-- Weakening reifies a transported Theory telescope back into explicit
+pointwise evidence. -/
+theorem TelDefEqEvidence.weakN
+    (run : TelDefEqEvidence env U Γ As As')
+    (ord : env.Ordered) (W : Ctx.LiftN n k Γ Γ') :
+    TelDefEqEvidence env U Γ'
+      (VExpr.liftTelN n As k) (VExpr.liftTelN n As' k) :=
+  .ofTelDefEq (run.telDefEq.weakN ord W)
+
+/-- Substitute one typed term through both surfaces of a checker-produced
+telescope certificate. -/
+theorem TelDefEqEvidence.instN
+    (run : TelDefEqEvidence env U Γ₁ As As')
+    (ord : env.Ordered)
+    (term : env.HasType U Γ₀ e₀ A₀)
+    (context : Ctx.InstN Γ₀ e₀ A₀ k Γ₁ Γ) :
+    TelDefEqEvidence env U Γ
+      (VExpr.instTelN e₀ As k) (VExpr.instTelN e₀ As' k) :=
+  .ofTelDefEq (run.telDefEq.instN ord term context)
+
+/-- Move a checker-produced telescope between definitionally equal base
+contexts without changing either telescope surface. -/
+theorem TelDefEqEvidence.defeqDFC
+    (run : TelDefEqEvidence env U Γ₁ As As')
+    (ord : env.Ordered)
+    (context : env.IsDefEqCtx U Γ₀ Γ₁ Γ₂) :
+    TelDefEqEvidence env U Γ₂ As As' :=
+  .ofTelDefEq (run.telDefEq.defeqDFC ord context)
 
 /-- Transport a checker-produced telescope certificate through environment
 growth. -/
@@ -3285,9 +3238,11 @@ private theorem CandidateExprRun.spineEvidenceAux
     {rawΔ : VLCtx} {rawSource' : VExpr}
     (contextEq : VLCtx.IsDefEq env Us.length rawΔ Δ)
     (rawSource_tr : TrExprS env Us rawΔ source rawSource') :
-    ∃ rawBinders viewBinders rawResult viewResult resultType,
+    ∃ rawBinders storedBinders viewBinders rawResult viewResult resultType,
       rawSource' = VExpr.forallN rawBinders rawResult ∧
       view' = VExpr.forallN viewBinders viewResult ∧
+      TelDefEqEvidence env Us.length rawΔ.toCtx
+        rawBinders storedBinders ∧
       TelResultDefEqEvidence env Us.length rawΔ.toCtx
         rawBinders viewBinders rawResult viewResult resultType ∧
       rawBinders.length = trace.spineLength := by
@@ -3304,7 +3259,7 @@ private theorem CandidateExprRun.spineEvidenceAux
         (contextEq.symm henv).defeqCtx
     have final := VEnv.IsDefEq.transU_r henv hRawΔ.toCtx
       rawToSource sourceToView
-    exact ⟨[], [], rawSource', _, _, rfl, rfl,
+    exact ⟨[], [], [], rawSource', _, _, rfl, rfl, .nil,
       .terminal (.ofDefEq final), rfl⟩
   | @forallE domain context name binderInfo Δ source inferred body
       source' domain' body' inferred' domainView' domainInferred'
@@ -3370,14 +3325,16 @@ private theorem CandidateExprRun.spineEvidenceAux
       simpa only [AddInductive.Context.freshExpr,
         Expr.instantiate1_eq] using
         rawBody_tr.inst_fvar henv.ordered rawBodyΔwf
-    obtain ⟨rawBinders, viewBinders, rawResult, viewResult,
-        resultType, rawBodyEq, viewBodyEq, tail, tailLength⟩ :=
+    obtain ⟨rawBinders, storedBinders, viewBinders, rawResult, viewResult,
+        resultType, rawBodyEq, viewBodyEq, storedTail, tail, tailLength⟩ :=
       bodyIH bodyAligned bodyContextEq rawBodyInst_tr
-    refine ⟨rawDomain :: rawBinders,
+    refine ⟨rawDomain :: rawBinders, storedDomain' :: storedBinders,
       domainView' :: viewBinders, rawResult, viewResult, resultType,
-      ?_, ?_, ?_, ?_⟩
+      ?_, ?_, ?_, ?_, ?_⟩
     · simp only [VExpr.forallN, rawBodyEq]
     · simp only [VExpr.forallN, viewBodyEq]
+    · exact .cons (.ofDefEq rawToStored) (by
+        simpa only [rawBodyΔ, VLCtx.toCtx] using storedTail)
     · exact .forallE head (by
         simpa only [rawBodyΔ, VLCtx.toCtx] using tail)
     · simpa only [List.length_cons,
@@ -3410,8 +3367,8 @@ theorem CandidateExprRun.spineEvidence
       simpa only [node.check.venv_eq] using node.check.context.Ewf
     | forallE _ _ _ _ node =>
       simpa only [node.check.venv_eq] using node.check.context.Ewf
-  obtain ⟨rawBinders, viewBinders, rawResult, viewResult,
-      resultType, rawEq, viewEq, evidence, rawLength⟩ :=
+  obtain ⟨rawBinders, storedBinders, viewBinders, rawResult, viewResult,
+      resultType, rawEq, viewEq, _storedEvidence, evidence, rawLength⟩ :=
     run.spineEvidenceAux aligned
       (.refl henv run.context_wf) run.source_tr
   have viewLength : viewBinders.length = trace.spineLength :=
@@ -3433,6 +3390,43 @@ theorem CandidateExprRun.spineEvidence
   simpa only [rawTel, viewTel, rawResultEq, viewResultEq] using
     ⟨resultType, evidence⟩
 
+/-- Extract the annotation-consumed telescope selected by the candidate's
+retained equality executions.
+
+Unlike the normalized view telescope, this surface is exactly the sequence
+of local-domain translations used by `Context.pushLocalDecl`.  The raw side
+remains the source-indexed Pi telescope, so consumers may `take`, `drop`,
+instantiate, or relocate the certificate without identifying an annotated
+kernel domain with its consumed syntax. -/
+theorem CandidateExprRun.annotationSpineEvidence
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true) :
+    ∃ storedBinders,
+      TelDefEqEvidence env Us.length Δ.toCtx
+          (VExpr.telN trace.spineLength source') storedBinders ∧
+        storedBinders.length = trace.spineLength := by
+  have henv : VEnv.WF env := by
+    cases run with
+    | terminal node =>
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    | forallE _ _ _ _ node =>
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+  obtain ⟨rawBinders, storedBinders, viewBinders, rawResult, viewResult,
+      resultType, rawEq, viewEq, storedEvidence, evidence, rawLength⟩ :=
+    run.spineEvidenceAux aligned
+      (.refl henv run.context_wf) run.source_tr
+  have rawTel : VExpr.telN trace.spineLength source' = rawBinders := by
+    rw [rawEq, ← rawLength]
+    exact candidateTelN_forallN_length rawBinders rawResult
+  have storedLength : storedBinders.length = trace.spineLength :=
+    storedEvidence.length_eq.symm.trans rawLength
+  exact ⟨storedBinders, by simpa only [rawTel] using storedEvidence,
+    storedLength⟩
+
 /-- A stored candidate spine fixes the exact number of raw and reconstructed
 view binders, independently of the terminal result typing witness. -/
 theorem CandidateExprRun.spineLengths
@@ -3450,8 +3444,8 @@ theorem CandidateExprRun.spineLengths
       simpa only [node.check.venv_eq] using node.check.context.Ewf
     | forallE _ _ _ _ node =>
       simpa only [node.check.venv_eq] using node.check.context.Ewf
-  obtain ⟨rawBinders, viewBinders, rawResult, viewResult,
-      resultType, rawEq, viewEq, evidence, rawLength⟩ :=
+  obtain ⟨rawBinders, storedBinders, viewBinders, rawResult, viewResult,
+      resultType, rawEq, viewEq, _storedEvidence, evidence, rawLength⟩ :=
     run.spineEvidenceAux aligned
       (.refl henv run.context_wf) run.source_tr
   have viewLength : viewBinders.length = trace.spineLength :=
@@ -4056,6 +4050,18 @@ theorem CandidateExprSemanticRootRun.spine
     (storedSpine : candidate.trace.storedSpine = true) :
     CandidateExprSpineRun env Us candidate source' run.view :=
   ⟨storedSpine, run.recursive⟩
+
+/-- Root-level projection of the exact annotation-consumed telescope retained
+by the recursive semantic run. -/
+theorem CandidateExprSemanticRootRun.annotationSpineEvidence
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    (storedSpine : candidate.trace.storedSpine = true) :
+    ∃ storedBinders,
+      TelDefEqEvidence env Us.length []
+          (VExpr.telN candidate.trace.spineLength source') storedBinders ∧
+        storedBinders.length = candidate.trace.spineLength := by
+  obtain ⟨inferred, recursive⟩ := run.recursive
+  exact recursive.annotationSpineEvidence storedSpine
 
 /-- Turn an exact root translation and a recursive identity witness into the
 generation-ready spine package. The root equalities transport the recursive
@@ -9174,6 +9180,21 @@ structure CandidateBlockFamilySemanticGenerationShape
   constructors : CandidateConstructorSemanticGenerationShapeList source
     blockEnv Us root.constructors
 
+/-- The family component of the block gate covers the complete raw Pi
+telescope, independently of the analyzer's parameter/index split. -/
+theorem CandidateBlockFamilySemanticGenerationShape.spineLength_eq_ctorFields
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    (shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root) :
+    candidate.familyType.type.trace.spineLength =
+      (ctorFields raw.type).length := by
+  rw [shape.spineLength_eq]
+  exact congrArg List.length
+    (TypeChecker.candidateCtorFields_split source.nparams raw.type).symm
+
 /-- Exact source-order structural generation evidence for every family in a
 retained mutual semantic hierarchy. -/
 inductive CandidateBlockFamilySemanticGenerationShapeList
@@ -13050,6 +13071,73 @@ info: 'Lean4Lean.TypeChecker.CandidateExprRun.spineEvidence' depends on axioms: 
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateExprRun.spineEvidence
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.annotationSpineEvidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprRun.annotationSpineEvidence
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprSemanticRootRun.annotationSpineEvidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.CandidateExprSemanticRootRun.annotationSpineEvidence
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprSpineRun.evidenceAt' depends on axioms: [propext,

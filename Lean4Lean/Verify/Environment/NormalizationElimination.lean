@@ -1988,6 +1988,134 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticFirstFa
 #print axioms
   ProducedBlockRecursorShapeCandidate.semanticFirstFamilyContextRun
 
+/-- Producer-owned raw/annotation telescope for the exact second family.
+
+The raw-family equation fixes the second Theory source position.  The binder
+count is the complete raw Pi spine selected by the block generation gate, and
+the right telescope is selected solely by the recursive candidate equality
+executions. -/
+structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source) where
+  firstRaw : VInductiveType
+  secondRaw : VInductiveType
+  remainingRaws : List VInductiveType
+  raws_eq : source.types = firstRaw :: secondRaw :: remainingRaws
+  storedBinders : List VExpr
+  telescope : TypeChecker.TelDefEqEvidence env Us.length []
+    (VExpr.telN (VInductDecl.ctorFields secondRaw.type).length secondRaw.type)
+    storedBinders
+  stored_length : storedBinders.length =
+    (VInductDecl.ctorFields secondRaw.type).length
+
+/-- Select the exact second family's complete annotation-consumed telescope
+from the same dependent semantic hierarchy used by outer validation. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source) :
+    Nonempty (produced.SecondFamilyAnnotationSpine semantic) := by
+  have roots := semantic.families
+  have blockShape : candidateBlockFamilySemanticGenerationShape source
+      produced.candidate.families source.types = true := by
+    simpa only [ProducedBlockRecursorShapeCandidate.candidate,
+      normalizationCandidateBlockGenerationShape] using produced.shape
+  cases hCandidates : produced.candidate.families with
+  | cons firstCandidate remainingCandidates =>
+    rw [hCandidates] at roots blockShape
+    cases remainingCandidates with
+    | cons secondCandidate remainingCandidates =>
+      cases hRawTypes : source.types with
+      | nil =>
+        rw [hRawTypes] at roots
+        nomatch roots
+      | cons firstRaw rawTypes =>
+        rw [hRawTypes] at roots blockShape
+        cases hRawTypesTail : rawTypes with
+        | nil =>
+          rw [hRawTypesTail] at roots
+          cases roots with
+          | cons firstRoot remainingRoots => nomatch remainingRoots
+        | cons secondRaw remainingRaws =>
+          rw [hRawTypesTail] at roots blockShape
+          have shapes :=
+            CandidateBlockFamilySemanticGenerationShapeList.ofCheck roots
+              blockShape
+          cases roots with
+          | cons firstRoot remainingRoots =>
+            cases shapes with
+            | cons firstShape remainingShapes =>
+              cases remainingRoots with
+              | cons secondRoot remainingRoots =>
+                cases remainingShapes with
+                | cons secondShape remainingShapes =>
+                  obtain ⟨inferred, recursive⟩ := secondRoot.type.recursive
+                  obtain ⟨storedBinders, telescope, storedLength⟩ :=
+                    recursive.annotationSpineEvidence secondShape.storedSpine
+                  have spineLength :=
+                    secondShape.spineLength_eq_ctorFields
+                  rw [spineLength] at telescope storedLength
+                  exact ⟨{
+                    firstRaw := firstRaw
+                    secondRaw := secondRaw
+                    remainingRaws := remainingRaws
+                    raws_eq := by rw [hRawTypes, hRawTypesTail]
+                    storedBinders := storedBinders
+                    telescope := telescope
+                    stored_length := storedLength }⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine
+
 private theorem candidateContextRun_cast_context
     {left right : AddInductive.Context}
     (h : left = right)
