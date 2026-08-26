@@ -5238,10 +5238,34 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal
       rw [secondTerminal]
       rfl
 
+/-- Exact producer-owned endpoint package for the second-family index suffix.
+The retained prefix context is the original shared-parameter base, while the
+alignment records its embedding through every first- and second-family index
+local present at the final validator boundary. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.IndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain) where
+  prefixes : staging.RawFirstIndexPrefixContexts raw
+  chain : staging.boundary.IndexDomainChain
+  alignment : chain.EndpointAlignment env Us
+    staging.annotation.terminalRun.context.vlctx prefixes.firstParameterΔ
+
 /-- Consume the complete second-family producer index suffix through the
 validator's retained trace.  The initial alpha cursor is recovered from the
 shared parameter telescope and then maintained by `indexDomainChain`. -/
-theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainCompletion
     {source : VInductDecl}
     {firstSource secondSource : InductiveType}
     {remainingSources : List InductiveType}
@@ -5256,7 +5280,7 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
     (staging : produced.SecondFamilyIndexStaging semantic)
     (raw : staging.annotation.RawFirstIndexDomain)
     (context_lctx_eq : context.lctx = {}) :
-    Nonempty staging.boundary.IndexDomainChain := by
+    Nonempty (staging.IndexDomainCompletion raw) := by
   obtain ⟨prefixes⟩ :=
     staging.rawFirstIndexPrefixContexts raw context_lctx_eq
   have terminalNotForall := staging.annotation.terminal_notForall
@@ -5334,11 +5358,36 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
           staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
         congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
       _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
-  exact suffix.cursor.indexDomainChain terminalWF staging.boundary
-    staging.current_venv staging.current_lparams prefixes.first_shape
-    relation prefixes.first_terminal_lift
-    prefixes.current_firstTerminal_defeq sourceScope sourceAlpha
-    staging.annotation.whnfFuel validatorDepth candidateDepth
+  obtain ⟨⟨chain, alignment⟩⟩ :=
+    suffix.cursor.indexDomainChainAligned terminalWF staging.boundary
+      staging.current_venv staging.current_lparams prefixes.first_shape
+      relation prefixes.first_terminal_lift prefixes.first_terminal_lift
+      prefixes.current_firstTerminal_defeq sourceScope sourceAlpha
+      staging.annotation.whnfFuel validatorDepth candidateDepth
+  exact ⟨{
+    prefixes := prefixes
+    chain := chain
+    alignment := alignment }⟩
+
+/-- Compatibility projection of the endpoint-aligned second-family run. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty staging.boundary.IndexDomainChain := by
+  obtain ⟨completion⟩ := staging.indexDomainCompletion raw context_lctx_eq
+  exact ⟨completion.chain⟩
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall' depends on axioms: [propext,
@@ -5348,6 +5397,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnn
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainCompletion
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain' depends on axioms: [propext,
