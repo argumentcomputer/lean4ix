@@ -6,6 +6,20 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 
 import Lean4Lean.Std.Basic
 
+/-!
+# Semantic universe levels
+
+`VLevel` gives the implementation-independent meaning of universe levels used
+by Theory. Its equivalence relation is extensional equality under every
+valuation, so it deliberately forgets the identity, shape, and hash of a raw
+`Lean.Level` tree.
+
+The executable checker may preserve a particular raw tree to match Lean's C++
+kernel and its caches. Semantic comparison remains governed by this layer, with
+the complete Géran canonicalization implemented in `Lean4Lean.Level` and proved
+sound and complete in `Lean4Lean.Verify.Level`.
+-/
+
 namespace Lean4Lean
 open Lean4Lean
 

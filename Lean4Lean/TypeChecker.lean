@@ -13,6 +13,16 @@ import Lean4Lean.ForEachExprV
 import Lean4Lean.EquivManager
 import Lean4Lean.FuelConfig
 
+/-!
+# Universe-level representation boundary
+
+Kernel-facing construction and substitution use the `*Cpp` helpers to reproduce
+the C++ kernel's raw `Lean.Level` trees, including hash- and cache-visible
+structure. Those helpers are local simplifiers, not the semantic equality
+procedure. Sort comparison below continues to use `Level.isEquiv'`, whose
+complete fallback is the verified Géran canonicalizer.
+-/
+
 namespace Lean4Lean
 open Lean hiding Environment Exception
 open Kernel
@@ -621,6 +631,8 @@ def quickIsDefEq (t s : Expr) (useHash := false) : RecM LBool := do
   match t, s with
   | .lam .., .lam .. => toLBoolM <| isDefEqLambda t s
   | .forallE .., .forallE .. => toLBoolM <| isDefEqForall t s
+  -- Raw C++ construction may leave different trees for equivalent levels;
+  -- compare their semantics through the canonicalizing equality procedure.
   | .sort a1, .sort a2 => pure (a1.isEquiv' a2).toLBool
   | .mdata _ a1, .mdata _ a2 => toLBoolM <| isDefEq a1 a2
   | .mvar .., .mvar .. => unreachable!

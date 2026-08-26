@@ -70,6 +70,7 @@ either direction remain reviewable.
 | `Lean4Lean/Experimental/` | Active semantic and metatheoretic research. These modules are not part of the supported default surface and may expose conditional endpoints. |
 | `Lean4Lean/Audit/` | Machine-checked sorry and axiom-frontier policy. |
 | `Lean4Lean/Tests/` | Regression, consumer-surface, replay, and differential fixtures. |
+| `docs/universe-levels.md` | Boundary between raw C++ level construction, Theory semantics, and Géran canonicalization. |
 | `Main.lean` | Differential replay and kernel-checking command-line application. |
 | `plans/roadmap.md` | Authoritative current milestones, proof frontier, and release gates. |
 | `upstream-divergence.md` | Durable differences between Lean4Ix and lean4lean, including removal conditions. |
@@ -109,6 +110,13 @@ emphasis on:
 
 This is only an overview. The divergence ledger is the authoritative record of
 intentional differences, and the roadmap is the authoritative status document.
+
+Universe levels deliberately have separate representation and semantic layers.
+The executable checker reproduces the C++ kernel's cheap constructor-time
+simplifications when exact expression hashes and cache entries matter, while
+semantic equality and ordering continue to use the verified Géran canonical
+form. The C++ compatibility functions are not a competing normalizer; see the
+[universe-level design note](docs/universe-levels.md) for the precise boundary.
 
 ### Naming during the migration
 
@@ -220,6 +228,8 @@ an expected rejection at the `elaboration` phase.
   machine-checks the admitted-proof and axiom frontier.
 - [docs/axiom-audit.md](docs/axiom-audit.md) explains the validity review,
   repaired runtime domains, and removal condition for every custom contract.
+- [docs/universe-levels.md](docs/universe-levels.md) explains why exact raw
+  C++ level structure and semantic Géran canonicalization coexist.
 - [bugs-found.md](bugs-found.md) records Lean kernel bugs uncovered by the
   original lean4lean development.
 - [divergences.md](divergences.md) records deliberate differences between the

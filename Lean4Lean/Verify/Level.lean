@@ -13,6 +13,17 @@ import Lean4Lean.Verify.Axioms
 import Std.Tactic.BVDecide
 import Std.Data.TreeMap.Lemmas
 
+/-!
+# Verification of universe-level canonicalization
+
+This file proves the semantic properties of the Géran-based `NormLevel`
+canonicalizer and the complete `normalize'`, `isEquiv'`, and `geq'` interfaces.
+The `*Cpp` definitions that also appear below characterize the C++ kernel's
+raw constructor-time substitution; they are not a second canonical form.
+Their connection to `VLevel` semantics is completed by the translation lemmas
+in `Lean4Lean.Verify.Typing.Lemmas`.
+-/
+
 namespace Lean
 
 namespace Level

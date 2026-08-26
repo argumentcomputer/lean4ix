@@ -28,10 +28,17 @@ def getUndefParam (l : Level) (ps : List Name) : Option Name := Id.run do
       return true
 
 /-!
-## Level normalization
+## Semantic level canonicalization
 
 Based on Yoan Géran, "A Canonical Form for Universe Levels in Impredicative Type Theory"
 <https://lmf.cnrs.fr/downloads/Perso/long.pdf>.
+
+This is Lean4Ix's complete universe-level canonicalizer. It supports semantic
+equivalence and ordering; `isEquiv'` and `geq'` use Lean's inexpensive checks as
+fast paths and this canonical form as the complete fallback. It is intentionally
+separate from the C++-compatible raw constructors in `Lean4Lean.Instantiate`:
+those constructors preserve kernel-visible syntax and cache identity, but do
+not promise a canonical result.
 -/
 
 namespace Normalize

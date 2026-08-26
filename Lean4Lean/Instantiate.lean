@@ -43,17 +43,24 @@ def cheapBetaReduce (e : Expr) : Expr := Id.run do
 end Expr
 
 /-!
-## Kernel-compatible universe substitution
+## C++-compatible raw universe-level construction
 
 Lean's public `mkLevelMax'` and `mkLevelIMax'` helpers do not currently use
-the same cheap normalizations as the C++ kernel. Because universe
+the same local constructor simplifications as the C++ kernel. Because universe
 substitution feeds expression hashes and the type checker's unfold cache, the
-kernel-facing paths below use explicit copies of the C++ rules. These wrappers
-can disappear when Lean's public helpers and kernel constructors coincide.
+kernel-facing paths below use explicit copies of the C++ rules.
+
+These functions reproduce the raw `Lean.Level` tree built by the kernel. They
+are deliberately cheap and partial: their outputs are not canonical forms, and
+they do not replace the complete Géran canonicalizer in `Lean4Lean.Level` or
+the semantic equivalence relation in `Lean4Lean.Theory.VLevel`. The Verify
+layer proves that these raw constructors preserve that existing semantics.
+These wrappers can disappear when Lean's public helpers and kernel constructors
+coincide.
 -/
 
 /-- `Lean.mkLevelMaxCore` without its extra explicit-level subsumption rule,
-matching the C++ kernel's `mk_max`. -/
+matching the C++ kernel's local `mk_max` constructor behavior. -/
 @[inline] def mkLevelMaxCoreCpp (u v : Level) (elseK : Unit → Level) : Level :=
   let subsumes : Level → Level → Bool := fun u v =>
     match u with
@@ -69,7 +76,8 @@ matching the C++ kernel's `mk_max`. -/
   else
     elseK ()
 
-/-- Cheap level maximum using the C++ kernel's normalization rules. -/
+/-- Builds a raw level maximum using the C++ kernel's local simplification
+rules. The result need not be a canonical universe level. -/
 def mkLevelMaxCpp (u v : Level) : Level :=
   mkLevelMaxCoreCpp u v fun _ => mkLevelMax u v
 
@@ -81,11 +89,14 @@ def mkLevelMaxCpp (u v : Level) : Level :=
   else if u == v then u
   else elseK ()
 
-/-- Cheap impredicative maximum using the C++ kernel's normalization rules. -/
+/-- Builds a raw impredicative maximum using the C++ kernel's local
+simplification rules. The result need not be a canonical universe level. -/
 def mkLevelIMaxCpp (u v : Level) : Level :=
   mkLevelIMaxCoreCpp u v fun _ => mkLevelIMax u v
 
-/-- `Level.substParams` using the C++ kernel's level constructors. -/
+/-- `Level.substParams` rebuilding changed nodes with the C++ kernel's raw
+level constructors. This preserves kernel-visible structure; it does not run
+the Géran canonicalizer. -/
 @[specialize] def Level.substParamsCpp (u : Level) (s : Name → Option Level) : Level :=
   go u
 where
@@ -98,7 +109,8 @@ where
     | .param n => (s n).getD u
     | u => u
 
-/-- `Expr.instantiateLevelParamsCore` using `Level.substParamsCpp`. -/
+/-- `Expr.instantiateLevelParamsCore` using the C++-compatible raw level
+substitution in `Level.substParamsCpp`. -/
 @[specialize] def Expr.instantiateLevelParamsCoreCpp
     (s : Name → Option Level) (e : Expr) : Expr :=
   e.replace replaceFn
@@ -110,7 +122,8 @@ where
     | .sort u => e.updateSort! (u.substParamsCpp s)
     | _ => none
 
-/-- `Expr.instantiateLevelParams` using the C++ kernel's level constructors. -/
+/-- `Expr.instantiateLevelParams` preserving the raw level structure produced
+by the C++ kernel's constructors. -/
 def Expr.instantiateLevelParamsCpp
     (e : Expr) (paramNames : List Name) (levels : List Level) : Expr :=
   if paramNames.isEmpty || levels.isEmpty then e
@@ -120,12 +133,14 @@ def Expr.instantiateLevelParamsCpp
       | _, _, _ => none
     e.instantiateLevelParamsCoreCpp (go paramNames levels)
 
-/-- Instantiate a declaration type with the C++ kernel's level constructors. -/
+/-- Instantiate a declaration type with C++-compatible raw level
+construction. -/
 def ConstantInfo.instantiateTypeLevelParamsCpp
     (info : ConstantInfo) (levels : List Level) : Expr :=
   info.type.instantiateLevelParamsCpp info.levelParams levels
 
-/-- Instantiate a declaration value with the C++ kernel's level constructors. -/
+/-- Instantiate a declaration value with C++-compatible raw level
+construction. -/
 def ConstantInfo.instantiateValueLevelParams!Cpp
     (info : ConstantInfo) (levels : List Level) : Expr :=
   info.value?.get!.instantiateLevelParamsCpp info.levelParams levels

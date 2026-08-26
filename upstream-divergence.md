@@ -1365,7 +1365,7 @@ to the replacement.
   the corresponding bridges to be deleted. Do not remove this row by
   reinstating unconditional cache equations.
 
-## D024 — kernel-compatible universe substitution structure
+## D024 — C++-compatible raw universe-level construction
 
 - **Status:** implemented by UP5 from the reviewed `differential` topic;
   upstream-contribution candidate.
@@ -1373,18 +1373,23 @@ to the replacement.
   update.
 - **Source:** manually adapted from upstream topic commit
   `26f9838a876079204ad41a5faa174680cc49a3bf` rather than merged wholesale.
-- **Delta:** Lean v4.33.0's public level helpers and its C++ kernel normalize
-  two substitution cases differently: the Lean helper collapses
+- **Delta:** Lean v4.33.0's public level helpers and its C++ kernel apply
+  different local simplifications while constructing raw levels: the Lean
+  helper collapses
   `max (succ u) 1`, while C++ preserves it, and only C++ collapses
   `imax 1 u` to `u`. The fork has separately named `*Cpp` level, expression,
   and declaration-instantiation functions and uses them in kernel-facing
   constant inference, forall inference, projection inference, delta
-  unfolding, and recursor reduction. Verify proves these functions preserve
-  the same `VLevel` semantics as the previous path.
+  unfolding, and recursor reduction. These functions are not canonicalizers.
+  Semantic equivalence and ordering still use the Géran-based `NormLevel`
+  model through `isEquiv'` and `geq'`; Verify proves the C++-compatible raw
+  constructors preserve those existing `VLevel` semantics. See
+  `docs/universe-levels.md` for the layer boundary.
 - **Ix impact:** exact expression structure determines expression hashes and
   the type checker's unfold/WHNF cache keys and values. Out-of-circuit and
   circuit transports therefore need the C++ kernel's result, not merely a
-  definitionally equivalent universe.
+  semantically equivalent universe. Canonical equality alone cannot recover
+  the raw representation after it has been erased.
 - **Tests:** `Lean4Lean.Tests.DifferentialParity` builds deliberately raw
   unchecked local declarations, compares both discriminating cases against
   `Lean.Kernel.check` on Lean v4.33.0

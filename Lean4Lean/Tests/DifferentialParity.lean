@@ -57,6 +57,23 @@ private def rawMaxLevel : Level :=
 private def rawIMaxLevel : Level :=
   .imax levelOne (.param levelParam)
 
+/- The C++ compatibility helpers reproduce constructor-time syntax; they are
+not an alternative semantic normal form. In the max case the raw result is
+intentionally non-canonical, while the complete level comparison still proves
+it equivalent to the collapsed form. The imax case exercises the converse
+shape choice: C++ performs a local collapse which semantic comparison also
+accepts. -/
+#guard !(mkLevelMaxCpp (.succ replacementLevel) levelOne).isStructEq
+  (.succ replacementLevel)
+#guard (mkLevelMaxCpp (.succ replacementLevel) levelOne).isEquiv'
+  (.succ replacementLevel)
+#guard (Level.normalize' (mkLevelMaxCpp (.succ replacementLevel) levelOne)).isStructEq
+  (Level.normalize' (.succ replacementLevel))
+#guard (mkLevelIMaxCpp levelOne replacementLevel).isStructEq replacementLevel
+#guard (Level.imax levelOne replacementLevel).isEquiv' replacementLevel
+#guard (Level.normalize' (Level.imax levelOne replacementLevel)).isStructEq
+  (Level.normalize' replacementLevel)
+
 private def addUnchecked (env : Environment) (decl : Declaration) :
     Except Kernel.Exception Environment :=
   env.addDeclCore 0 0 decl none (doCheck := false)

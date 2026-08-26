@@ -145,16 +145,16 @@ theorem Level.mkLevelIMax'_hasMVar_eq_false
   grind [Lean.mkLevelIMax, Level.hasMVar',
     Level.mkLevelMax'_hasMVar_eq_false]
 
-/-- The C++-compatible normalized level maximum preserves absence of level
-metavariables. -/
+/-- The C++-compatible raw level-maximum constructor preserves absence of
+level metavariables. This is a structural property, not a canonicity claim. -/
 theorem Level.mkLevelMaxCpp_hasMVar_eq_false
     (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
     (mkLevelMaxCpp u v).hasMVar' = false := by
   simp only [mkLevelMaxCpp, mkLevelMaxCoreCpp, Level.getOffset_eq]
   grind [Lean.mkLevelMax, Level.hasMVar']
 
-/-- The C++-compatible normalized impredicative maximum preserves absence of
-level metavariables. -/
+/-- The C++-compatible raw impredicative-maximum constructor preserves absence
+of level metavariables. This is a structural property, not a canonicity claim. -/
 theorem Level.mkLevelIMaxCpp_hasMVar_eq_false
     (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
     (mkLevelIMaxCpp u v).hasMVar' = false := by
@@ -1805,6 +1805,9 @@ theorem ofLevel_mkLevelMax'
     · exact ⟨_, h2, (lem2 h (Nat.le_of_not_le h3) h1 h2).max_eq_right.symm⟩
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
+/-- The raw C++-compatible maximum constructor denotes the semantic maximum.
+The translated result is required only to be `VLevel`-equivalent to that
+maximum; the raw constructor does not claim to produce a canonical tree. -/
 theorem ofLevel_mkLevelMaxCpp
     (h1 : VLevel.ofLevel Us u = some u') (h2 : VLevel.ofLevel Us v = some v') :
     ∃ w, VLevel.ofLevel Us (mkLevelMaxCpp u v) = some w ∧ w ≈ .max u' v' := by
@@ -1942,6 +1945,9 @@ theorem ofLevel_mkLevelIMax'
   · simp_all; exact VLevel.imax_self.symm
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
+/-- The raw C++-compatible impredicative-maximum constructor denotes semantic
+`imax`. The translated result is equivalent to the intended value even when
+its raw tree differs from the Géran canonical form. -/
 theorem ofLevel_mkLevelIMaxCpp
     (h1 : VLevel.ofLevel Us u = some u') (h2 : VLevel.ofLevel Us v = some v') :
     ∃ w, VLevel.ofLevel Us (mkLevelIMaxCpp u v) = some w ∧ w ≈ .imax u' v' := by
@@ -2150,6 +2156,9 @@ theorem substParams_wf_list (red) {us us' : List _} (H : us.mapM (VLevel.ofLevel
     refine ⟨_, ⟨_, h3, _, h1, rfl⟩, .cons h4 h2⟩
 
 attribute [-simp] Bool.forall_bool in
+/-- C++-compatible raw substitution preserves the established `VLevel`
+semantics of universe instantiation; it does not assert that the rebuilt host
+level is canonical. -/
 theorem substParamsCpp_wf (red) (H : VLevel.ofLevel ps u = some u') :
     ∃ u₁, VLevel.ofLevel Us (u.substParamsCpp' F red) = some u₁ ∧
       u₁ ≈ u'.inst ls' := by

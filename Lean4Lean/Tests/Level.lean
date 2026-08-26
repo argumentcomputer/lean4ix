@@ -1,13 +1,22 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean4Lean.Level
 
 open Lean
 
 /-!
-# Regressions for the experimental level normalization
+# Regressions for Géran semantic level canonicalization
 
-Soundness of `normalize'`, `isEquiv'` and `geq'` is proved in `Verify/Level.lean`. What is
-*not* proved, and so is what these check, is canonicity of `normalize'` and completeness of
-`isEquiv'`/`geq'`.
+Soundness, canonicity, and completeness of `normalize'`, `isEquiv'`, and
+`geq'` are proved in `Verify/Level.lean`. These regressions pin representative
+canonical forms and exercise the executable decision procedures independently
+of those proofs. They concern semantic canonicalization, not the
+C++-compatible raw constructor simplifications tested in
+`Tests/DifferentialParity.lean`.
 -/
 
 private def u : Level := .param `u
