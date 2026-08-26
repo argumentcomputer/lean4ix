@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 import Lean4Lean.Verify.Typing.Lemmas
 import Lean4Lean.Verify.ConditionReflect
 import Lean4Lean.Verify.ModDivCondition
+import Lean4Lean.Verify.NatDivReflect
 import Lean4Lean.Verify.NatModReflect
 import Lean4Lean.Verify.Environment
 import Lean4Lean.Verify.Environment.InductiveReplayMatrix

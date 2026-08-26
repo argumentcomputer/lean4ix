@@ -1833,6 +1833,55 @@ to the replacement.
   reuse its result while preserving the fork's readiness transport,
   accepted-domain checks, and exact trust pins.
 
+## D037 — direct Nat.div certificate with a proved structural lift bridge
+
+- **Status:** implemented as the twelfth bounded UP6 slice; the live safe
+  definition path has a direct Nat.div certificate, and Nat.shiftRight is
+  next.
+- **Owner:** Argument Computer Corporation; review with Nat.shiftRight and any
+  later consolidation of the shared mod/div fuel-recursion layer.
+- **Source:** manually adapted from lean4lean PR #32, principally commit
+  `27304be` as retained at head
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`; no whole-PR merge, bitwise
+  certificate, or admitted generic primitive dispatch was imported.
+- **Executable delta:** `natDivTopEquation`, `natDivGoEquation`, and
+  `checkNatDivPrimitive` name the exact closed type, top-level quotient
+  equation, less-than-or-equal helper type, recursive helper type, selector
+  checks, and recursive equation. The live `checkPrimitiveDefCore` Nat.div
+  branch now calls that evidence-retaining checker. A reducible
+  `primitiveLiftLooseBVars` constructs the one-binder shifts used by those
+  equations instead of relying on an opaque runtime equality theorem.
+- **Verification delta:** `checkPrimitiveDef.natDiv.WF_typed` retains the
+  checker trace; the shared fuel-recursion layer proves literal quotient
+  evaluation from the checked top and recursive branches; those branches
+  consume the retained Nat-≤ selector and Nat.sub reflection;
+  and `NatDivPrimitiveEvidence` installs the result through every readiness
+  safety model and `addDefinition.WF`.
+- **Trust decision:** PR #32 assumes the opaque implementation equality
+  `Lean.Expr.liftLooseBVars_eq`. This fork proves
+  `primitiveLiftLooseBVars_eq` by structural recursion against the proof-side
+  `Expr.liftLooseBVars'`. The Nat.div trust test explicitly rejects any
+  dependency on the opaque equality. The slice adds no custom axiom,
+  `native_decide` proof, or source `sorry`.
+- **Accepted-domain decision:** the checker retains the closed primitive type,
+  helper types, selector evidence, and both defining equations. These are the
+  same evidence-preserving guards used by the executable certificate, not an
+  assumed semantic quotient model.
+- **Ix impact:** the model now certifies actual natural-number quotient on
+  literals through a narrow live root suitable for later Ix kernel transport.
+  It supplies the semantic dependency needed by Nat.shiftRight; gcd and
+  bitwise operations remain outside this slice.
+- **Tests:** `Lean4Lean.Tests.NatDiv` pins the structural lift theorem and the
+  checker, fuel, semantics, conservation, wrapper, and safe-definition roots
+  to an explicit axiom allowlist while forbidding
+  `Lean.Expr.liftLooseBVars_eq`. `Lean4Lean.Tests.Primitive` checks that all ten
+  direct live roots avoid `checkPrimitiveDef.WF` and reach exactly the six
+  existing inherited sorry carriers. The global source frontier remains 15.
+- **Removal condition:** upstream lands an equivalent Nat.div certificate
+  without requiring the opaque lift equality, or reconciliation can reuse its
+  result while preserving the fork's readiness transport, accepted-domain
+  checks, and exact trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

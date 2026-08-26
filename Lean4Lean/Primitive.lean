@@ -547,6 +547,87 @@ def natModGoEquation : Expr × Expr :=
     (.bvar 2)
   (lhs, rhs)
 
+/-- Structural loose-bvar lifting for primitive certificate source terms.
+
+Using a reducible builder here keeps the executable Nat.div certificate and
+its verification independent of the opaque kernel implementation of
+`Lean.Expr.liftLooseBVars`. -/
+def primitiveLiftLooseBVars (e : @& Expr) (s d : @& Nat) : Expr :=
+  match e with
+  | .bvar i => .bvar (if i < s then i else i + d)
+  | .mdata m e => .mdata m (primitiveLiftLooseBVars e s d)
+  | .proj n i e => .proj n i (primitiveLiftLooseBVars e s d)
+  | .app f a => .app (primitiveLiftLooseBVars f s d)
+      (primitiveLiftLooseBVars a s d)
+  | .lam n t b bi => .lam n (primitiveLiftLooseBVars t s d)
+      (primitiveLiftLooseBVars b (s + 1) d) bi
+  | .forallE n t b bi => .forallE n (primitiveLiftLooseBVars t s d)
+      (primitiveLiftLooseBVars b (s + 1) d) bi
+  | .letE n t v b bi => .letE n (primitiveLiftLooseBVars t s d)
+      (primitiveLiftLooseBVars v s d) (primitiveLiftLooseBVars b (s + 1) d) bi
+  | e@(.const ..)
+  | e@(.sort _)
+  | e@(.fvar _)
+  | e@(.mvar _)
+  | e@(.lit _) => e
+
+def natDivTopRhs (x y : Expr) : Expr :=
+  let succ := mkApp q(Nat.succ)
+  let go := mkApp5 q(Nat.div.go)
+  let c := Condition.natLE
+  let x' := primitiveLiftLooseBVars x 0 1
+  let y' := primitiveLiftLooseBVars y 0 1
+  c.reflectedDITE #[q(Nat.succ Nat.zero), y]
+    (go y' (.bvar 0) (succ x') x'
+      (mkApp q(Nat.lt_succ_self) x')) q(Nat.zero)
+
+def natDivTopEquation (divFn : Expr) : Expr × Expr :=
+  let div := mkApp2 divFn
+  let x := .bvar 1
+  let y := .bvar 0
+  let lhs := .lam0 q(Nat) <| .lam0 q(Nat) <| div x y
+  let rhs := .lam0 q(Nat) <| .lam0 q(Nat) <| natDivTopRhs x y
+  (lhs, rhs)
+
+def natDivGoLhsBody (y hy fuel x h : Expr) : Expr :=
+  let succ := mkApp q(Nat.succ)
+  let go := mkApp5 q(Nat.div.go)
+  go y hy (succ fuel) x h
+
+def natDivGoRhsBody (y hy fuel x h : Expr) : Expr :=
+  let succ := mkApp q(Nat.succ)
+  let sub := mkApp2 q(Nat.sub)
+  let go := mkApp5 q(Nat.div.go)
+  let c := Condition.natLE
+  c.reflectedDITE #[y, x]
+    (succ (go (primitiveLiftLooseBVars y 0 1)
+      (primitiveLiftLooseBVars hy 0 1)
+      (primitiveLiftLooseBVars fuel 0 1)
+      (sub (primitiveLiftLooseBVars x 0 1)
+        (primitiveLiftLooseBVars y 0 1))
+      (mkApp6 q(@Nat.div_rec_fuel_lemma)
+        (primitiveLiftLooseBVars x 0 1)
+        (primitiveLiftLooseBVars y 0 1)
+        (primitiveLiftLooseBVars fuel 0 1)
+        (primitiveLiftLooseBVars hy 0 1)
+        (.bvar 0) (primitiveLiftLooseBVars h 0 1)))) q(Nat.zero)
+
+def natDivGoEquation : Expr × Expr :=
+  let succ := mkApp q(Nat.succ)
+  let le := mkApp2 q(@LE.le Nat _)
+  let y := .bvar 4
+  let hy := .bvar 3
+  let fuel := .bvar 2
+  let x := .bvar 1
+  let h := .bvar 0
+  let close body := .lam0 q(Nat) <|
+    .lam0 (le q(Nat.succ Nat.zero) (.bvar 0)) <|
+    .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 (le (succ (.bvar 0)) (succ (.bvar 1))) body
+  let lhs := close <| natDivGoLhsBody y hy fuel x h
+  let rhs := close <| natDivGoRhsBody y hy fuel x h
+  (lhs, rhs)
+
 /-- Validate the closed top-level and fuel-step equations for `Nat.mod`. -/
 def checkNatModPrimitive (env : Environment) (v : DefinitionVal)
     (fail : ∀ {α}, M α) : M Unit := do
@@ -580,6 +661,31 @@ def checkNatModPrimitive (env : Environment) (v : DefinitionVal)
   _ ← checkType goR
   unless ← isDefEq goL goR do fail
 
+/-- Validate the closed top-level and fuel-step equations for `Nat.div`. -/
+def checkNatDivPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat && env.contains ``Nat.sub && env.contains ``Bool &&
+      env.contains ``Nat.ble && v.levelParams.isEmpty do fail
+  _ ← checkType q(Nat → Nat → Nat)
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  Condition.natLE.checkForPrimitive fail
+  _ ← checkType q(Nat → Nat → Prop)
+  unless ← isDefEq (← checkType q(@LE.le Nat _))
+    q(Nat → Nat → Prop) do fail
+  _ ← checkType q(∀ y, Nat.succ Nat.zero ≤ y →
+    ∀ fuel x : Nat, Nat.succ x ≤ fuel → Nat)
+  unless ← isDefEq (← checkType q(Nat.div.go))
+    q(∀ y, Nat.succ Nat.zero ≤ y →
+      ∀ fuel x : Nat, Nat.succ x ≤ fuel → Nat) do fail
+  let (topL, topR) := natDivTopEquation v.value
+  _ ← checkType topL
+  _ ← checkType topR
+  unless ← isDefEq topL topR do fail
+  let (goL, goR) := natDivGoEquation
+  _ ← checkType goL
+  _ ← checkType goR
+  unless ← isDefEq goL goR do fail
+
 def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
@@ -587,7 +693,6 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let zero := q(Nat.zero)
   let succ := mkApp q(Nat.succ)
   let add := mkApp2 q(Nat.add)
-  let sub := mkApp2 q(Nat.sub)
   let mod := mkApp2 q(Nat.mod)
   let div := mkApp2 q(Nat.div)
   let one := succ zero
@@ -611,28 +716,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.mod =>
     checkNatModPrimitive env v fail
   | ``Nat.div =>
-    unless env.contains ``Nat.sub && env.contains ``Bool && v.levelParams.isEmpty do fail
-    -- div : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let div := mkApp2 v.value
-    let c := Condition.natLE; c.check fail (dite := true)
-    unless ← isDefEq (← checkType q(@LE.le Nat _)) q(Nat → Nat → Prop) do fail
-    let le := mkApp2 q(@LE.le Nat _)
-    unless ← isDefEq (← checkType q(Nat.div.go))
-      q(∀ y, Nat.succ Nat.zero ≤ y → ∀ fuel x : Nat, Nat.succ x ≤ fuel → Nat) do fail
-    let go := mkApp5 q(Nat.div.go)
-    withLocalDecl `x .default q(Nat) fun x => do
-    withLocalDecl `y .default q(Nat) fun y => do
-    let e := c.dite #[one, y] (go y (.bvar 0) (succ x) x (mkApp q(Nat.lt_succ_self) x)) zero
-    _ ← checkType e
-    unless ← isDefEq (div x y) e do fail
-    withLocalDecl `hy .default (le one y) fun hy => do
-    withLocalDecl `fuel .default q(Nat) fun fuel => do
-    withLocalDecl `h .default (le (succ x) (succ fuel)) fun h => do
-    let e := c.dite #[y, x] (succ (go y hy fuel (sub x y)
-      (mkApp6 q(@Nat.div_rec_fuel_lemma) x y fuel hy (.bvar 0) h))) zero
-    _ ← checkType e
-    unless ← isDefEq (go y hy (succ fuel) x h) e do fail
+    checkNatDivPrimitive env v fail
   | ``Nat.gcd =>
     unless env.contains ``Nat.mod && v.levelParams.isEmpty do fail
     -- gcd : Nat → Nat → Nat

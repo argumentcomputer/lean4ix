@@ -95,6 +95,8 @@ import Lean4Lean.Verify.LocalContext
 import Lean4Lean.Verify.ModDivCondition
 import Lean4Lean.Verify.Name
 import Lean4Lean.Verify.NameGenerator
+import Lean4Lean.Verify.NatDivChecker
+import Lean4Lean.Verify.NatDivReflect
 import Lean4Lean.Verify.NatModChecker
 import Lean4Lean.Verify.NatModReflect
 import Lean4Lean.Verify.NormLt

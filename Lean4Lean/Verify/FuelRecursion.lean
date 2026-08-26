@@ -10,7 +10,8 @@ import Lean4Lean.Verify.Primitive
 # Fuel-indexed primitive recursion semantics
 
 This module isolates the semantic interpreter spine shared by checked
-fuel-indexed primitive recursions and instantiates it for `Nat.modCore.go`.
+fuel-indexed primitive recursions and instantiates it for `Nat.mod.go` and
+`Nat.div.go`.
 It is adapted from upstream lean4lean PR #32 at
 `6cfd43a48d17be85c76414638655c12ef9a7ee23`.
 -/
@@ -18,6 +19,8 @@ It is adapted from upstream lean4lean PR #32 at
 namespace Lean4Lean
 
 @[simp] private theorem Nat.mod_eq_hmod (a b : Nat) : a.mod b = a % b := rfl
+
+@[simp] private theorem Nat.div_eq_hdiv (a b : Nat) : a.div b = a / b := rfl
 
 /-- One unfolding step of a fuel-indexed recursion: either a terminal value,
 or a recursive call together with a post-processing of its result. -/
@@ -159,6 +162,109 @@ theorem VEnv.ReflectsNatNatNat.of_modCore_equations (henv : VEnv.WF env)
   · rename_i hab
     have heq : a.mod b = a := by
       simpa [hab] using Nat.mod_eq a b
+    rw [heq]
+    exact (hcfApp a b).trans henv trivial ht
+
+def VExpr.natDivGo (y fuel x : Nat) (hy hfuel : VExpr) : VExpr :=
+  .app (.app (.app (.app (.app (.const ``Nat.div.go []) (.natLit y)) hy)
+    (.natLit fuel)) (.natLit x)) hfuel
+
+/-- Fuel adequacy for the checked `Nat.div.go` equation, and hence semantic
+reflection of natural-number division. -/
+theorem VEnv.ReflectsNatNatNat.of_divCore_equations (henv : VEnv.WF env)
+    (hzeroT : ∀ Γ, env.HasType 0 Γ .natZero .nat)
+    (hsuccT : ∀ Γ, env.HasType 0 Γ .natSucc (.forallE .nat .nat))
+    (hf : ∀ U Γ, env.HasType U Γ (.const ``Nat.div [])
+      (.forallE .nat <| .forallE .nat .nat))
+    (hcf : env.IsDefEqU 0 [] (.const ``Nat.div []) f)
+    (htop : ∀ a b,
+      if 0 < b then
+        ∃ hy hfuel,
+          env.HasType 0 [] (.natDivGo b (a + 1) a hy hfuel) .nat ∧
+          env.IsDefEqU 0 []
+            (.app (.app f (.natLit a)) (.natLit b))
+            (.natDivGo b (a + 1) a hy hfuel)
+      else
+        env.IsDefEqU 0 []
+          (.app (.app f (.natLit a)) (.natLit b)) .natZero)
+    (hgo : ∀ y fuel x hy hfuel,
+      env.HasType 0 [] (.natDivGo y (fuel + 1) x hy hfuel) .nat →
+      if y ≤ x then
+        ∃ hy' hfuel',
+          env.HasType 0 [] (.natDivGo y fuel (x - y) hy' hfuel') .nat ∧
+          env.IsDefEqU 0 []
+            (.natDivGo y (fuel + 1) x hy hfuel)
+            (.app .natSucc (.natDivGo y fuel (x - y) hy' hfuel'))
+      else
+        env.IsDefEqU 0 []
+          (.natDivGo y (fuel + 1) x hy hfuel) .natZero) :
+    env.ReflectsNatNatNat ``Nat.div Nat.div := by
+  intro _
+  refine ⟨hf, fun a b => ?_⟩
+  have hlit (n) (Γ) : env.HasType 0 Γ (.natLit n) .nat := by
+    induction n with
+    | zero => exact hzeroT Γ
+    | succ n ih => exact .app (hsuccT Γ) ih
+  have hcfApp (x y) : env.IsDefEqU 0 []
+      (.app (.app (.const ``Nat.div []) (.natLit x)) (.natLit y))
+      (.app (.app f (.natLit x)) (.natLit y)) := by
+    have h₁ := hcf.app_same henv trivial (hf 0 []) (hlit x [])
+    exact h₁.app_same henv trivial (.app (hf 0 []) (hlit x [])) (hlit y [])
+  have goEval (y : Nat) (hypos : 0 < y) :
+      ∀ fuel x hy hfuel, x < fuel →
+        env.HasType 0 [] (.natDivGo y fuel x hy hfuel) .nat →
+        env.IsDefEqU 0 []
+        (.natDivGo y fuel x hy hfuel) (.natLit (x.div y)) := by
+    intro fuel x hy hfuel hlt hcallT
+    refine VEnv.natLit_defeq_of_fuel_relation henv
+      (G := fun fuel x e => ∃ hy hfuel, e = VExpr.natDivGo y fuel x hy hfuel)
+      (WT := fun e => env.HasType 0 [] e .nat)
+      id (fun x => x.div y)
+      (fun x => if y ≤ x then .recur (x - y) (· + 1) else .done 0)
+      ?_ ?_ ?_ fuel x _ ⟨hy, hfuel, rfl⟩ hcallT hlt
+    · intro x
+      by_cases h : y ≤ x
+      · simp only [if_pos h]
+        show x.div y = (x - y).div y + 1
+        simpa [hypos, h] using Nat.div_eq x y
+      · simp only [if_neg h]
+        show x.div y = 0
+        have hformula : x.div y =
+            if 0 < y ∧ y ≤ x then (x - y).div y + 1 else 0 := by
+          simpa using Nat.div_eq x y
+        rw [hformula]
+        simp [h]
+    · intro x next post hs
+      by_cases h : y ≤ x
+      · simp only [if_pos h] at hs
+        cases hs
+        exact Nat.sub_lt_self hypos h
+      · simp only [if_neg h] at hs
+        cases hs
+    · rintro fuel x e ⟨hy, hfuel, rfl⟩ hWT
+      have hg := hgo y fuel x hy hfuel hWT
+      by_cases h : y ≤ x
+      · simp only [if_pos h] at hg ⊢
+        obtain ⟨hy', hfuel', hrecT, hg⟩ := hg
+        refine ⟨_, ⟨hy', hfuel', rfl⟩, hrecT, fun q hq => ?_⟩
+        have hsucc := hq.app_arg henv trivial (hsuccT []) hrecT
+        simpa [VExpr.natLit] using hg.trans henv trivial hsucc
+      · simp only [if_neg h] at hg ⊢
+        exact hg
+  have ht := htop a b
+  split at ht
+  · rename_i hb
+    obtain ⟨hy, hfuel, hgoT, ht⟩ := ht
+    exact (hcfApp a b).trans henv trivial <|
+      ht.trans henv trivial
+        (goEval b hb (a + 1) a hy hfuel (by omega) hgoT)
+  · rename_i hb
+    have heq : a.div b = 0 := by
+      have hformula : a.div b =
+          if 0 < b ∧ b ≤ a then (a - b).div b + 1 else 0 := by
+        simpa using Nat.div_eq a b
+      rw [hformula]
+      simp [hb]
     rw [heq]
     exact (hcfApp a b).trans henv trivial ht
 

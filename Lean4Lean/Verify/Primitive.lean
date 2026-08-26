@@ -13,8 +13,8 @@ import Lean4Lean.Verify.TypeChecker
 This module manually adapts bounded pieces of upstream lean4lean PR #32 at
 `6cfd43a48d17be85c76414638655c12ef9a7ee23`. The current bounded surface
 covers the body-first foundation and direct `Nat.add`, `Nat.pred`, `Nat.sub`,
-`Nat.mul`, `Nat.pow`, `Nat.shiftLeft`, `Nat.beq`, and `Nat.ble` certificates;
-later primitive families remain separate slices.
+`Nat.mul`, `Nat.pow`, `Nat.shiftLeft`, `Nat.beq`, `Nat.ble`, `Nat.mod`, and
+`Nat.div` certificates; later primitive families remain separate slices.
 -/
 
 namespace Lean4Lean
@@ -2269,6 +2269,69 @@ theorem VEnv.HasPrimitives.addNatMod {env env' : VEnv}
     natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
     natSub := (h.natSub.addConst hadd (by decide)).addDefEq
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => h.charOfNat (by
+      change env''.constants ``Char.ofNat = some _ at H
+      rwa [same ``Char.ofNat (by decide)] at H)
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
+
+/-- Replace the vacuous/old `Nat.div` reflection field after inserting a
+checked definition, while transporting all unrelated primitive facts. -/
+theorem VEnv.HasPrimitives.addNatDiv {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Nat.div ci = some env')
+    (href : (env'.addDefEq df).ReflectsNatNatNat ``Nat.div Nat.div) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Nat.div ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Nat.div ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natMod := (h.natMod.addConst hadd (by decide)).addDefEq
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natSub := (h.natSub.addConst hadd (by decide)).addDefEq
+    natDiv := href
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq

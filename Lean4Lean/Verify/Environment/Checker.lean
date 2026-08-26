@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 -/
 
 import Lean4Lean.Verify.Environment.Boundaries
+import Lean4Lean.Verify.NatDivReflect
 import Lean4Lean.Verify.NatModReflect
 
 namespace Lean4Lean
@@ -478,6 +479,31 @@ theorem checkSafeNatModDefinition.WF
     simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
   intro state' v' _ htype hvalue _
   exact Environment.checkPrimitiveDef.natMod.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl rfl htype hvalue
+
+/-- Direct typed checker evidence for the safe `Nat.div` definition path.
+The retained certificate includes both fuel-recursion equations, the checked
+`Nat.div.go` type, and the reflected selector. -/
+theorem checkSafeNatDivDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.div)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          Environment.NatDivPrimitiveEvidence
+            (.mk' wf .safe v.levelParams) v v'.type := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue _
+  exact Environment.checkPrimitiveDef.natDiv.WF_typed
     (c := .mk' wf .safe v.levelParams) (s := state')
     (ty' := v'.type) (value' := v'.value)
     hname rfl rfl htype hvalue
