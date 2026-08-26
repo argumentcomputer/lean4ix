@@ -201,8 +201,13 @@ theorem containsLits {env : VEnv} (H : env.PreludeReady) :
 
 end VEnv.PreludeReady
 
+/-- Semantic certificate for a binary natural-number primitive. The typing
+component is retained because later primitive certificates apply an earlier
+operation to arbitrary typed recursive results. -/
 def VEnv.ReflectsNatNatNat (env : VEnv) (fc : Name) (f : Nat → Nat → Nat) :=
   env.contains fc →
+  (∀ U Γ, env.HasType U Γ (.const fc [])
+    (.forallE .nat <| .forallE .nat .nat)) ∧
   ∀ a b, env.IsDefEqU 0 []
     (.app (.app (.const fc []) (.natLit a)) (.natLit b)) (.natLit (f a b))
 
@@ -395,6 +400,17 @@ theorem VEnv.HasPrimitives.addConst
     rintro ⟨value, hvalue⟩
     exact ⟨value, (VEnv.addConst_le hadd).constants hvalue⟩
   have hle := VEnv.addConst_le hadd
+  have liftBinary {name : Name} {f : Nat → Nat → Nat}
+      (href : env.ReflectsNatNatNat name f)
+      (hold : env.contains name) :
+      (∀ U Γ, env'.HasType U Γ (.const name [])
+        (.forallE .nat <| .forallE .nat .nat)) ∧
+      ∀ a b, env'.IsDefEqU 0 []
+        (.app (.app (.const name []) (.natLit a)) (.natLit b))
+        (.natLit (f a b)) := by
+    obtain ⟨htype, heval⟩ := href hold
+    exact ⟨fun U Γ => (htype U Γ).mono hle,
+      fun a b => (heval a b).mono hle⟩
   exact {
     bool := fun h => by
       obtain ⟨hfalse, htrue⟩ := H.bool (oldContains ``Bool
@@ -421,48 +437,38 @@ theorem VEnv.HasPrimitives.addConst
         (by simp [VEnv.reflectedPrimitiveNames]) h)
       exact ⟨fun U Γ => (htype U Γ).mono hle,
         fun a => (heval a).mono hle⟩
-    natAdd := fun h a b =>
-      (H.natAdd (oldContains ``Nat.add
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natSub := fun h a b =>
-      (H.natSub (oldContains ``Nat.sub
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natMul := fun h a b =>
-      (H.natMul (oldContains ``Nat.mul
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natPow := fun h a b =>
-      (H.natPow (oldContains ``Nat.pow
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natGcd := fun h a b =>
-      (H.natGcd (oldContains ``Nat.gcd
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natMod := fun h a b =>
-      (H.natMod (oldContains ``Nat.mod
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natDiv := fun h a b =>
-      (H.natDiv (oldContains ``Nat.div
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
+    natAdd := fun h => liftBinary H.natAdd (oldContains ``Nat.add
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natSub := fun h => liftBinary H.natSub (oldContains ``Nat.sub
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natMul := fun h => liftBinary H.natMul (oldContains ``Nat.mul
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natPow := fun h => liftBinary H.natPow (oldContains ``Nat.pow
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natGcd := fun h => liftBinary H.natGcd (oldContains ``Nat.gcd
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natMod := fun h => liftBinary H.natMod (oldContains ``Nat.mod
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natDiv := fun h => liftBinary H.natDiv (oldContains ``Nat.div
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
     natBEq := fun h a b =>
       (H.natBEq (oldContains ``Nat.beq
         (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
     natBLE := fun h a b =>
       (H.natBLE (oldContains ``Nat.ble
         (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natLAnd := fun h a b =>
-      (H.natLAnd (oldContains ``Nat.land
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natLOr := fun h a b =>
-      (H.natLOr (oldContains ``Nat.lor
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natXor := fun h a b =>
-      (H.natXor (oldContains ``Nat.xor
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natShiftLeft := fun h a b =>
-      (H.natShiftLeft (oldContains ``Nat.shiftLeft
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
-    natShiftRight := fun h a b =>
-      (H.natShiftRight (oldContains ``Nat.shiftRight
-        (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle
+    natLAnd := fun h => liftBinary H.natLAnd (oldContains ``Nat.land
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natLOr := fun h => liftBinary H.natLOr (oldContains ``Nat.lor
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natXor := fun h => liftBinary H.natXor (oldContains ``Nat.xor
+      (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natShiftLeft := fun h => liftBinary H.natShiftLeft
+      (oldContains ``Nat.shiftLeft
+        (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natShiftRight := fun h => liftBinary H.natShiftRight
+      (oldContains ``Nat.shiftRight
+        (by simp [VEnv.reflectedPrimitiveNames]) h)
     charOfNat := fun h => H.charOfNat (by
       simpa only [lookup ``Char.ofNat
         (by simp [VEnv.reflectedPrimitiveNames])] using h)

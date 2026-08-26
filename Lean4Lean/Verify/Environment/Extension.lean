@@ -67,6 +67,17 @@ theorem VEnv.addConst_eq_of_ne
   split at hadd <;> cases hadd
   simp [hne]
 
+/-- Transport a typed binary-Nat reflection across a model extension when the
+reflected constant's lookup is known to come from the source model. -/
+private theorem VEnv.ReflectsNatNatNat.mono_of_contains
+    {env env' : VEnv} (H : env.ReflectsNatNatNat name f)
+    (hle : env ≤ env') (hback : env'.contains name → env.contains name) :
+    env'.ReflectsNatNatNat name f := by
+  intro found
+  obtain ⟨htype, heval⟩ := H (hback found)
+  exact ⟨fun U Γ => (htype U Γ).mono hle,
+    fun a b => (heval a b).mono hle⟩
+
 theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.HasPrimitives)
     (hname : Environment.primitives.contains name = false)
     (hadd : env.addConst name ci = some env') : env'.HasPrimitives := by
@@ -97,20 +108,22 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
       (oldContains (hprims (by simp)) h)
     exact ⟨fun U Γ => (htype U Γ).mono le,
       fun a => (heval a).mono le⟩
-  · intro h a b; exact (H.natAdd (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natSub (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natMul (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natPow (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natGcd (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natMod (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natDiv (oldContains (hprims (by simp)) h) a b).mono le
+  · exact H.natAdd.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natSub.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natMul.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natPow.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natGcd.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natMod.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natDiv.mono_of_contains le (oldContains (hprims (by simp)))
   · intro h a b; exact (H.natBEq (oldContains (hprims (by simp)) h) a b).mono le
   · intro h a b; exact (H.natBLE (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natLAnd (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natLOr (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natXor (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natShiftLeft (oldContains (hprims (by simp)) h) a b).mono le
-  · intro h a b; exact (H.natShiftRight (oldContains (hprims (by simp)) h) a b).mono le
+  · exact H.natLAnd.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natLOr.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natXor.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natShiftLeft.mono_of_contains le
+      (oldContains (hprims (by simp)))
+  · exact H.natShiftRight.mono_of_contains le
+      (oldContains (hprims (by simp)))
   · intro ci h; apply H.charOfNat; rwa [← same (hprims (by simp))]
   · intro ci h
     obtain ⟨rfl, h2, h3⟩ := H.stringOfList (by rwa [← same (hprims (by simp))])
@@ -123,20 +136,22 @@ theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
       let ⟨htype, heval⟩ := H.natPred h
       ⟨fun U Γ => (htype U Γ).mono VEnv.addDefEq_le,
         fun a => (heval a).mono VEnv.addDefEq_le⟩
-    natAdd h a b := (H.natAdd h a b).mono VEnv.addDefEq_le
-    natSub h a b := (H.natSub h a b).mono VEnv.addDefEq_le
-    natMul h a b := (H.natMul h a b).mono VEnv.addDefEq_le
-    natPow h a b := (H.natPow h a b).mono VEnv.addDefEq_le
-    natGcd h a b := (H.natGcd h a b).mono VEnv.addDefEq_le
-    natMod h a b := (H.natMod h a b).mono VEnv.addDefEq_le
-    natDiv h a b := (H.natDiv h a b).mono VEnv.addDefEq_le
+    natAdd := H.natAdd.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natSub := H.natSub.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natMul := H.natMul.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natPow := H.natPow.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natGcd := H.natGcd.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natMod := H.natMod.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natDiv := H.natDiv.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natBEq h a b := (H.natBEq h a b).mono VEnv.addDefEq_le
     natBLE h a b := (H.natBLE h a b).mono VEnv.addDefEq_le
-    natLAnd h a b := (H.natLAnd h a b).mono VEnv.addDefEq_le
-    natLOr h a b := (H.natLOr h a b).mono VEnv.addDefEq_le
-    natXor h a b := (H.natXor h a b).mono VEnv.addDefEq_le
-    natShiftLeft h a b := (H.natShiftLeft h a b).mono VEnv.addDefEq_le
-    natShiftRight h a b := (H.natShiftRight h a b).mono VEnv.addDefEq_le
+    natLAnd := H.natLAnd.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natLOr := H.natLOr.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natXor := H.natXor.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natShiftLeft := H.natShiftLeft.mono_of_contains VEnv.addDefEq_le
+      (fun h => h)
+    natShiftRight := H.natShiftRight.mono_of_contains VEnv.addDefEq_le
+      (fun h => h)
     stringOfList h :=
       let ⟨h1, h2, h3⟩ := H.stringOfList h
       ⟨h1, h2.mono VEnv.addDefEq_le, h3.mono VEnv.addDefEq_le⟩ }
@@ -152,22 +167,22 @@ theorem VEnv.HasPrimitives.addStructEta {env : VEnv}
       let ⟨htype, heval⟩ := H.natPred h
       ⟨fun U Γ => (htype U Γ).mono VEnv.addStructEta_le,
         fun a => (heval a).mono VEnv.addStructEta_le⟩
-    natAdd h a b := (H.natAdd h a b).mono VEnv.addStructEta_le
-    natSub h a b := (H.natSub h a b).mono VEnv.addStructEta_le
-    natMul h a b := (H.natMul h a b).mono VEnv.addStructEta_le
-    natPow h a b := (H.natPow h a b).mono VEnv.addStructEta_le
-    natGcd h a b := (H.natGcd h a b).mono VEnv.addStructEta_le
-    natMod h a b := (H.natMod h a b).mono VEnv.addStructEta_le
-    natDiv h a b := (H.natDiv h a b).mono VEnv.addStructEta_le
+    natAdd := H.natAdd.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natSub := H.natSub.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natMul := H.natMul.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natPow := H.natPow.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natGcd := H.natGcd.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natMod := H.natMod.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natDiv := H.natDiv.mono_of_contains VEnv.addStructEta_le (fun h => h)
     natBEq h a b := (H.natBEq h a b).mono VEnv.addStructEta_le
     natBLE h a b := (H.natBLE h a b).mono VEnv.addStructEta_le
-    natLAnd h a b := (H.natLAnd h a b).mono VEnv.addStructEta_le
-    natLOr h a b := (H.natLOr h a b).mono VEnv.addStructEta_le
-    natXor h a b := (H.natXor h a b).mono VEnv.addStructEta_le
-    natShiftLeft h a b := (H.natShiftLeft h a b).mono
-      VEnv.addStructEta_le
-    natShiftRight h a b := (H.natShiftRight h a b).mono
-      VEnv.addStructEta_le
+    natLAnd := H.natLAnd.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natLOr := H.natLOr.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natXor := H.natXor.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natShiftLeft := H.natShiftLeft.mono_of_contains VEnv.addStructEta_le
+      (fun h => h)
+    natShiftRight := H.natShiftRight.mono_of_contains VEnv.addStructEta_le
+      (fun h => h)
     stringOfList h :=
       let ⟨h1, h2, h3⟩ := H.stringOfList h
       ⟨h1, h2.mono VEnv.addStructEta_le,
@@ -1102,34 +1117,27 @@ theorem VEnv.HasPrimitives.of_addBool
           (by simp) (by simp) (by simp) found)
       exact ⟨fun U Γ => (htype U Γ).mono hle,
         fun a => (heval a).mono hle⟩
-    natAdd := fun found a b =>
-      (pre.natAdd (oldContains ``Nat.add
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natSub := fun found a b =>
-      (pre.natSub (oldContains ``Nat.sub
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natMul := fun found a b =>
-      (pre.natMul (oldContains ``Nat.mul
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natPow := fun found a b =>
-      (pre.natPow (oldContains ``Nat.pow
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natGcd := fun found a b =>
-      (pre.natGcd (oldContains ``Nat.gcd
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natMod := fun found a b =>
-      (pre.natMod (oldContains ``Nat.mod
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natDiv := fun found a b =>
-      (pre.natDiv (oldContains ``Nat.div
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
+    natAdd := pre.natAdd.mono_of_contains hle fun found =>
+      oldContains ``Nat.add (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natSub := pre.natSub.mono_of_contains hle fun found =>
+      oldContains ``Nat.sub (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natMul := pre.natMul.mono_of_contains hle fun found =>
+      oldContains ``Nat.mul (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natPow := pre.natPow.mono_of_contains hle fun found =>
+      oldContains ``Nat.pow (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natGcd := pre.natGcd.mono_of_contains hle fun found =>
+      oldContains ``Nat.gcd (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natMod := pre.natMod.mono_of_contains hle fun found =>
+      oldContains ``Nat.mod (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natDiv := pre.natDiv.mono_of_contains hle fun found =>
+      oldContains ``Nat.div (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
     natBEq := fun found a b =>
       (pre.natBEq (oldContains ``Nat.beq
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
@@ -1138,26 +1146,21 @@ theorem VEnv.HasPrimitives.of_addBool
       (pre.natBLE (oldContains ``Nat.ble
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
         found) a b).mono hle
-    natLAnd := fun found a b =>
-      (pre.natLAnd (oldContains ``Nat.land
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natLOr := fun found a b =>
-      (pre.natLOr (oldContains ``Nat.lor
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natXor := fun found a b =>
-      (pre.natXor (oldContains ``Nat.xor
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natShiftLeft := fun found a b =>
-      (pre.natShiftLeft (oldContains ``Nat.shiftLeft
-        (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found) a b).mono hle
-    natShiftRight := fun found a b =>
-      (pre.natShiftRight (oldContains ``Nat.shiftRight
-        (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found) a b).mono hle
+    natLAnd := pre.natLAnd.mono_of_contains hle fun found =>
+      oldContains ``Nat.land (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natLOr := pre.natLOr.mono_of_contains hle fun found =>
+      oldContains ``Nat.lor (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natXor := pre.natXor.mono_of_contains hle fun found =>
+      oldContains ``Nat.xor (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natShiftLeft := pre.natShiftLeft.mono_of_contains hle fun found =>
+      oldContains ``Nat.shiftLeft (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natShiftRight := pre.natShiftRight.mono_of_contains hle fun found =>
+      oldContains ``Nat.shiftRight (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
     charOfNat := fun found => pre.charOfNat
       (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found)
@@ -1219,34 +1222,27 @@ theorem VEnv.HasPrimitives.of_addNat
           (by simp) (by simp) (by simp) found)
       exact ⟨fun U Γ => (htype U Γ).mono hle,
         fun a => (heval a).mono hle⟩
-    natAdd := fun found a b =>
-      (pre.natAdd (oldContains ``Nat.add
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natSub := fun found a b =>
-      (pre.natSub (oldContains ``Nat.sub
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natMul := fun found a b =>
-      (pre.natMul (oldContains ``Nat.mul
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natPow := fun found a b =>
-      (pre.natPow (oldContains ``Nat.pow
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natGcd := fun found a b =>
-      (pre.natGcd (oldContains ``Nat.gcd
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natMod := fun found a b =>
-      (pre.natMod (oldContains ``Nat.mod
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natDiv := fun found a b =>
-      (pre.natDiv (oldContains ``Nat.div
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
+    natAdd := pre.natAdd.mono_of_contains hle fun found =>
+      oldContains ``Nat.add (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natSub := pre.natSub.mono_of_contains hle fun found =>
+      oldContains ``Nat.sub (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natMul := pre.natMul.mono_of_contains hle fun found =>
+      oldContains ``Nat.mul (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natPow := pre.natPow.mono_of_contains hle fun found =>
+      oldContains ``Nat.pow (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natGcd := pre.natGcd.mono_of_contains hle fun found =>
+      oldContains ``Nat.gcd (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natMod := pre.natMod.mono_of_contains hle fun found =>
+      oldContains ``Nat.mod (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natDiv := pre.natDiv.mono_of_contains hle fun found =>
+      oldContains ``Nat.div (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
     natBEq := fun found a b =>
       (pre.natBEq (oldContains ``Nat.beq
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
@@ -1255,26 +1251,21 @@ theorem VEnv.HasPrimitives.of_addNat
       (pre.natBLE (oldContains ``Nat.ble
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
         found) a b).mono hle
-    natLAnd := fun found a b =>
-      (pre.natLAnd (oldContains ``Nat.land
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natLOr := fun found a b =>
-      (pre.natLOr (oldContains ``Nat.lor
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natXor := fun found a b =>
-      (pre.natXor (oldContains ``Nat.xor
-        (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
-        found) a b).mono hle
-    natShiftLeft := fun found a b =>
-      (pre.natShiftLeft (oldContains ``Nat.shiftLeft
-        (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found) a b).mono hle
-    natShiftRight := fun found a b =>
-      (pre.natShiftRight (oldContains ``Nat.shiftRight
-        (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found) a b).mono hle
+    natLAnd := pre.natLAnd.mono_of_contains hle fun found =>
+      oldContains ``Nat.land (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natLOr := pre.natLOr.mono_of_contains hle fun found =>
+      oldContains ``Nat.lor (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natXor := pre.natXor.mono_of_contains hle fun found =>
+      oldContains ``Nat.xor (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natShiftLeft := pre.natShiftLeft.mono_of_contains hle fun found =>
+      oldContains ``Nat.shiftLeft (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natShiftRight := pre.natShiftRight.mono_of_contains hle fun found =>
+      oldContains ``Nat.shiftRight (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
     charOfNat := fun found => pre.charOfNat
       (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found)

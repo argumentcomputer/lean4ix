@@ -43,16 +43,20 @@ run_cmd do
   let root := ``Lean4Lean.addDefinition.WF_safe_natAdd
   let predRoot := ``Lean4Lean.addDefinition.WF_safe_natPred
   let subRoot := ``Lean4Lean.addDefinition.WF_safe_natSub
+  let mulRoot := ``Lean4Lean.addDefinition.WF_safe_natMul
   let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
   let subClosure := dependencyClosure env [subRoot] {}
+  let mulClosure := dependencyClosure env [mulRoot] {}
   if closure.contains genericBoundary then
     throwError "the direct Nat.add declaration certificate regressed through checkPrimitiveDef.WF"
   if predClosure.contains genericBoundary then
     throwError "the direct Nat.pred declaration certificate regressed through checkPrimitiveDef.WF"
   if subClosure.contains genericBoundary then
     throwError "the direct Nat.sub declaration certificate regressed through checkPrimitiveDef.WF"
+  if mulClosure.contains genericBoundary then
+    throwError "the direct Nat.mul declaration certificate regressed through checkPrimitiveDef.WF"
   let some liveInfo := env.find? ``Lean4Lean.addDefinition.WF
     | throwError "addDefinition.WF is missing"
   unless (directConstants liveInfo).contains root do
@@ -61,6 +65,8 @@ run_cmd do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.pred certificate"
   unless (directConstants liveInfo).contains subRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.sub certificate"
+  unless (directConstants liveInfo).contains mulRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the Nat.mul certificate"
   let sorryCarriers := env.constants.toList.foldl (init := #[]) fun found (name, info) =>
     if closure.contains name && (directConstants info).contains ``sorryAx then
       found.push name
@@ -103,4 +109,16 @@ run_cmd do
   let subRemoved := expectedSorryCarriers.filter (!subObservedSet.contains ·)
   unless subAdded.isEmpty && subRemoved.isEmpty do
     throwError m!"Nat.sub direct-certificate sorry closure changed; added: {subAdded}; removed: {subRemoved}"
-  logInfo "Nat.add, Nat.pred, and Nat.sub direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  let mulSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if mulClosure.contains name && (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let mulObservedSet : Lean.NameSet :=
+    mulSorryCarriers.foldl (·.insert ·) {}
+  let mulAdded := mulSorryCarriers.filter (!expectedSet.contains ·)
+  let mulRemoved := expectedSorryCarriers.filter (!mulObservedSet.contains ·)
+  unless mulAdded.isEmpty && mulRemoved.isEmpty do
+    throwError m!"Nat.mul direct-certificate sorry closure changed; added: {mulAdded}; removed: {mulRemoved}"
+  logInfo "Nat.add, Nat.pred, Nat.sub, and Nat.mul direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"

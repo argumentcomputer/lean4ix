@@ -1545,6 +1545,42 @@ to the replacement.
   stronger generic proof) and reconciliation preserves the retained Nat.pred
   dependency, readiness transaction, and exact trust pins.
 
+## D029 — typed binary reflection and direct Nat.mul certificate
+
+- **Status:** implemented as the fourth semantic UP6 slice; upstream-derived
+  specialization with the remaining primitive families still open.
+- **Owner:** Argument Computer Corporation; retain through Nat.pow and review
+  with the complete primitive dispatch.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its typed binary
+  reflection, shared binary-step recurrence proof, Nat.mul recognizer and
+  conservation certificate, and live dispatch; no whole-PR merge.
+- **Contract delta:** `ReflectsNatNatNat` now retains the reflected constant's
+  `Nat → Nat → Nat` typing in addition to literal computation. Literal
+  evaluation alone was enough for reduction but could not justify applying
+  Nat.add to Nat.mul's arbitrary typed recursive result. All model-extension,
+  primitive-family, definition-equation, and structure-eta transports now
+  preserve both components.
+- **Executable delta:** `checkNatMulPrimitive` extracts the Nat.mul branch and
+  closes both equations with `Expr.lam0`; unported branches retain their old
+  helper shape until their own slices land.
+- **Verification delta:** the typed recognizer translates the recursive Nat.add
+  application, `of_binop_step_equations` proves the general binary recurrence,
+  and `addNatMulDef` installs the resulting reflection through the existing
+  readiness-aware `AddDef` transaction. Live safe dispatch no longer reaches
+  the generic recognizer theorem for Nat.mul.
+- **Ix impact:** the stronger reflection is the evidence shape needed for
+  compositional arithmetic transports: an Ix consumer can both reduce a
+  certified binary primitive on literals and type its use inside the next
+  primitive certificate.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all four direct
+  elementary-Nat roots are named by live dispatch, exclude
+  `checkPrimitiveDef.WF`, and each reach exactly the same six inherited
+  sorry-carrying dependencies. The source frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the typed binary
+  contract, readiness transaction, and exact trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:
