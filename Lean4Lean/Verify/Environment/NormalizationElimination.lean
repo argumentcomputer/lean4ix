@@ -2029,6 +2029,8 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     firstCandidate.familyType.type.trace.terminalContext
   first_stored_spine :
     firstCandidate.familyType.type.trace.storedSpine = true
+  first_validation_annotations :
+    firstCandidate.familyType.type.trace.validationAnnotations
   first_annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
     firstCandidate.familyType.type.trace [] firstTerminalRun.context.vlctx
       firstStoredBinders
@@ -2108,6 +2110,10 @@ theorem
       have secondAnnotations :=
         secondCandidate.familyType.validationAnnotations_of_normalize
           secondProduced
+      have firstProduced := familyTypesProduced.head
+      have firstAnnotations :=
+        firstCandidate.familyType.validationAnnotations_of_normalize
+          firstProduced
       cases hRawTypes : source.types with
       | nil =>
         rw [hRawTypes] at roots
@@ -2166,6 +2172,7 @@ theorem
                     firstStoredLength := firstStoredLength
                     firstTerminalRun := firstTerminalRun
                     first_stored_spine := firstShape.storedSpine
+                    first_validation_annotations := firstAnnotations
                     first_annotation_spine := firstAnnotationSpine
                     first_terminal_venv := firstTerminalVenv
                     first_terminal_lparams := firstTerminalLparams
@@ -2703,11 +2710,12 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirst
               source.nparams).reverse ∧
           VLCtx.FVLift' snapshot.Δ annotation.terminalRun.context.vlctx 0
             (.skipN .refl
-              (annotation.storedBinders.drop source.nparams).length) 0 := by
+              (annotation.storedBinders.drop source.nparams).length) 0 ∧
+          snapshot.Δ.FVarLamOnly := by
   obtain ⟨position⟩ := raw.annotationAt
   obtain ⟨snapshot, tail, snapshotSuffixEq, snapshotContext,
-      snapshotFVars, terminalLift⟩ :=
-    annotation.annotation_spine.snapshotAt position
+      snapshotFVars, terminalLift, snapshotShape⟩ :=
+    annotation.annotation_spine.snapshotAt_shaped .nil position
   have suffixEq : snapshot.consumed' :: tail =
       raw.consumedDomain :: raw.consumedTail :=
     snapshotSuffixEq.symm.trans raw.consumed_suffix_eq
@@ -2715,7 +2723,7 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirst
       simpa only [VLCtx.toCtx, List.append_nil] using snapshotContext,
     by simpa [VLCtx.fvars] using
       snapshotFVars,
-    terminalLift⟩
+    terminalLift, snapshotShape⟩
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.annotationSnapshot' depends on axioms: [propext,
@@ -2868,17 +2876,19 @@ theorem
       VLCtx.FVLift' parameterΔ
         annotation.firstTerminalRun.context.vlctx 0
         (.skipN .refl
-          (annotation.firstStoredBinders.drop source.nparams).length) 0 := by
+          (annotation.firstStoredBinders.drop source.nparams).length) 0 ∧
+      parameterΔ.FVarLamOnly := by
   have parameterBound : source.nparams ≤
       annotation.firstStoredBinders.length := by
     rw [annotation.firstStoredLength, ← annotation.firstSpineLength_eq]
     exact annotation.first_nparams_le_spineLength context_lctx_eq
-  obtain ⟨parameterΔ, parameterContext, parameterFVars, terminalLift⟩ :=
-    annotation.first_annotation_spine.prefixContext parameterBound
+  obtain ⟨parameterΔ, parameterContext, parameterFVars, terminalLift,
+      parameterShape⟩ :=
+    annotation.first_annotation_spine.prefixContext_shaped .nil parameterBound
   exact ⟨parameterΔ, by
       simpa only [VLCtx.toCtx, List.append_nil] using parameterContext,
     by simpa [VLCtx.fvars] using parameterFVars,
-    terminalLift⟩
+    terminalLift, parameterShape⟩
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidate_context_eq' depends on axioms: [propext,
@@ -2987,6 +2997,456 @@ private theorem candidateContextRun_cast_context
     (h ▸ run).context = run.context := by
   cases h
   rfl
+
+private theorem list_map_fvar_injective :
+    ∀ {left right : List FVarId},
+      left.map Expr.fvar = right.map Expr.fvar → left = right := by
+  intro left
+  induction left with
+  | nil =>
+      intro right equality
+      cases right
+      · rfl
+      · simp at equality
+  | cons head tail ih =>
+      intro right equality
+      cases right with
+      | nil => simp at equality
+      | cons other rest =>
+          simp only [List.map_cons, List.cons.injEq] at equality
+          rw [Expr.fvar.inj equality.1, ih equality.2]
+
+private theorem sharedParameterTelescopeDefEqAux
+    {env : VEnv} {Us : List Name}
+    {nparams : Nat}
+    {stats : AddInductive.InductiveStats}
+    {validatorContext : AddInductive.Context}
+    {validatorSource : Expr} {i nindices fuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      validatorContext validatorSource i nindices fuel}
+    {suffixSource : Expr} {suffixFuel : Nat}
+    {suffix : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      validatorContext suffixSource nparams nindices suffixFuel}
+    {parameters : List Expr}
+    (path : AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath
+      nparams outer suffix parameters)
+    (paramsSize : stats.params.size = nparams)
+    (localState : TypeChecker.FamilyParameterLocalState stats validatorContext)
+    (currentRun : TypeChecker.CandidateContextRun validatorContext)
+    (currentVenv : currentRun.context.venv = env)
+    (currentLparams : currentRun.context.lparams = Us)
+    {validatorSource' : VExpr}
+    (validatorSourceTr : currentRun.context.TrExprS
+      validatorSource validatorSource')
+    (recursionFuel : Nat)
+    (validatorDepth : validatorContext.fuel.recDepth = recursionFuel + 1)
+    {firstContext : AddInductive.Context} {firstSource : Expr}
+    {firstTrace : AddInductive.CandidateExprTrace firstContext firstSource}
+    {firstΔ firstTerminalΔ : VLCtx} {firstDomains : List VExpr}
+    (firstSpine : TypeChecker.CandidateAnnotationSpine env Us firstTrace
+      firstΔ firstTerminalΔ firstDomains)
+    (firstAnnotations : firstTrace.validationAnnotations)
+    (firstLocalRun : TypeChecker.CandidateLocalContextRun firstContext)
+    (validatorFirstTerminal : validatorContext = firstTrace.terminalContext)
+    {secondContext : AddInductive.Context} {secondSource : Expr}
+    {secondTrace : AddInductive.CandidateExprTrace secondContext secondSource}
+    {secondΔ secondTerminalΔ : VLCtx} {secondDomains : List VExpr}
+    (secondSpine : TypeChecker.CandidateAnnotationSpine env Us secondTrace
+      secondΔ secondTerminalΔ secondDomains)
+    (secondAnnotations : secondTrace.validationAnnotations)
+    (secondPosition : secondTrace.AnnotationAt count)
+    (secondAligned : secondTrace.storedSpine = true)
+    (secondDepth : secondContext.fuel.recDepth = recursionFuel + 1)
+    (validatorSecondRoot : validatorSource = secondTrace.rootWhnf)
+    (parametersFirst : parameters = firstTrace.parameterList count)
+    (parametersSecond : parameters = secondTrace.parameterList count)
+    (contextRelation : VLCtx.IsDefEqFVars env Us.length firstΔ secondΔ)
+    (currentFirstTerminal : VLCtx.IsDefEq env Us.length
+      currentRun.context.vlctx firstTerminalΔ) :
+    TypeChecker.TelDefEqEvidence env Us.length firstΔ.toCtx
+      (firstDomains.take count) (secondDomains.take count) := by
+  have henv : VEnv.WF env := by
+    simpa only [currentVenv] using currentRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length currentRun.context.vlctx := by
+    simpa only [currentVenv, currentLparams] using currentRun.context.Δwf
+  have firstTerminalWF : VLCtx.WF env Us.length firstTerminalΔ :=
+    (currentFirstTerminal.symm henv.ordered).wf
+  induction secondPosition generalizing stats validatorSource i fuel outer
+      suffixSource suffixFuel suffix parameters validatorSource'
+      firstContext firstSource firstTrace firstΔ firstDomains
+      secondΔ secondDomains with
+  | zero annotationMatch =>
+      cases path with
+      | done => exact .nil
+      | shared =>
+          simp only [AddInductive.CandidateExprTrace.parameterList]
+            at parametersSecond
+          contradiction
+  | succ bodyCandidate secondPosition ih =>
+      rename_i n secondCandidateContext secondCandidateSource
+        secondInferred secondName secondDomain secondBody secondBinderInfo
+        secondFresh secondAnnotationsNode secondAnnotationsEq secondChecked
+        secondNormalized secondDomainCandidate
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at secondAligned
+      rcases secondAligned with ⟨secondSourceStored, secondBodyAligned⟩
+      rcases secondAnnotations with
+        ⟨secondAnnotationMatch, secondTailAnnotations⟩
+      cases secondSpine with
+      | forallE secondDomainCandidate' secondBodyCandidate secondStoredDomain
+          secondStoredDomains secondHead secondTail =>
+          cases firstSpine with
+          | terminal =>
+              simp only [AddInductive.CandidateExprTrace.parameterList]
+                at parametersFirst parametersSecond
+              simp_all
+          | forallE firstDomainCandidate firstBodyCandidate firstStoredDomain
+              firstStoredDomains firstHead firstTail =>
+              rename_i firstDomain firstName firstBinderInfo firstBody
+                firstInferred firstAnnotationsNode firstFresh
+                firstAnnotationsEq firstChecked firstNormalized
+              rcases firstAnnotations with
+                ⟨firstAnnotationMatch, firstTailAnnotations⟩
+              simp only [AddInductive.CandidateExprTrace.parameterList]
+                at parametersFirst parametersSecond
+              cases path with
+              | done => simp_all
+              | shared tail suffix parametersTail isParameter laterFamily
+                  parameterTypeRun comparisonValid whnf pathTail =>
+                  rename_i validatorView validatorFuel parameterType
+                    validatorDomain validatorName validatorBody
+                    validatorBinderInfo
+                  have parameterFirst : stats.params[i]! =
+                      firstContext.freshExpr :=
+                    (List.cons.inj parametersFirst).1
+                  have parameterSecond : stats.params[i]! =
+                      secondCandidateContext.freshExpr :=
+                    (List.cons.inj parametersSecond).1
+                  have parametersFirstTail : parametersTail =
+                      firstBodyCandidate.parameterList n :=
+                    (List.cons.inj parametersFirst).2
+                  have parametersSecondTail : parametersTail =
+                      bodyCandidate.parameterList n :=
+                    (List.cons.inj parametersSecond).2
+                  have sourceParts := validatorSecondRoot
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                    Expr.forallE.injEq] at sourceParts
+                  rcases sourceParts with
+                    ⟨validatorNameEq, validatorDomainEq, validatorBodyEq,
+                      validatorBinderInfoEq⟩
+                  obtain ⟨firstSnapshot, firstSnapshotContext,
+                      firstStoredEq⟩ := firstHead firstAnnotationMatch
+                  subst firstSnapshotContext
+                  obtain ⟨secondSnapshot, secondSnapshotContext,
+                      secondStoredEq⟩ := secondHead secondAnnotationMatch
+                  subst secondSnapshotContext
+                  have firstRootParts := firstSnapshot.root_eq
+                  simp only [Expr.forallE.injEq] at firstRootParts
+                  rcases firstRootParts with
+                    ⟨firstSnapshotNameEq, firstSnapshotDomainEq,
+                      firstSnapshotBodyEq, firstSnapshotBinderInfoEq⟩
+                  have secondRootParts := secondSnapshot.root_eq
+                  simp only [Expr.forallE.injEq] at secondRootParts
+                  rcases secondRootParts with
+                    ⟨secondSnapshotNameEq, secondSnapshotDomainEq,
+                      secondSnapshotBodyEq, secondSnapshotBinderInfoEq⟩
+                  have validatorSnapshotDomainEq : validatorDomain =
+                      secondSnapshot.domain :=
+                    validatorDomainEq.trans secondSnapshotDomainEq
+                  have firstConsumedSourceEq :
+                      firstAnnotationsNode.consumed =
+                        firstSnapshot.consumed := by
+                    calc
+                      firstAnnotationsNode.consumed =
+                          AddInductive.consumeTypeAnnotations firstDomain :=
+                        firstAnnotationMatch
+                      _ = AddInductive.consumeTypeAnnotations
+                            firstSnapshot.domain :=
+                        congrArg AddInductive.consumeTypeAnnotations
+                          firstSnapshotDomainEq
+                      _ = firstSnapshot.consumed :=
+                        firstSnapshot.annotation_match.symm
+                  have firstParameterTypeRun :=
+                    TypeChecker.CandidateExprTrace.head_getType_terminal
+                      firstName firstBinderInfo firstAnnotationsNode
+                      firstBodyCandidate firstLocalRun
+                  have parameterTypeEq : parameterType =
+                      firstAnnotationsNode.consumed := by
+                    have validatorParameterTypeRun := parameterTypeRun
+                    rw [parameterFirst, validatorFirstTerminal]
+                      at validatorParameterTypeRun
+                    exact Except.ok.inj
+                      (validatorParameterTypeRun.symm.trans
+                        firstParameterTypeRun)
+                  have parameterSnapshotEq : parameterType =
+                      firstSnapshot.consumed :=
+                    parameterTypeEq.trans firstConsumedSourceEq
+                  let @TrExprS.forallE _ _ validatorDomain'
+                      validatorBody' _ _ _ _ _ validatorDomainType
+                      validatorBodyType validatorDomainTr validatorBodyTr :=
+                    validatorSourceTr
+                  have parameterMember : stats.params[i]! ∈
+                      stats.params.toList := by
+                    rw [show stats.params[i]! = stats.params[i] by
+                      simp [isParameter, paramsSize]]
+                    exact List.getElem_mem (by
+                      simpa only [Array.length_toList, paramsSize] using
+                        isParameter)
+                  obtain ⟨fv, decl, parameterEq, parameterFind⟩ :=
+                    localState.parameters parameterMember
+                  have parameterTypeRun' :
+                      AddInductive.getType (.fvar fv) validatorContext =
+                        .ok parameterType := by
+                    rw [← parameterEq]
+                    exact parameterTypeRun
+                  obtain ⟨fvValue, parameterType', fvFind,
+                      parameterTypeTr⟩ :=
+                    currentRun.getTypeTranslation parameterFind
+                      parameterTypeRun'
+                  have fvTr : currentRun.context.TrExprS (.fvar fv)
+                      fvValue := .fvar fvFind
+                  let comparisonRun : TypeChecker.IsDefEqRun
+                      currentRun.context.venv currentRun.context.lparams
+                      currentRun.context.vlctx validatorDomain parameterType
+                      validatorDomain' parameterType' :=
+                    TypeChecker.IsDefEqRun.ofCandidateStep
+                      ⟨validatorContext, validatorDomain, parameterType⟩
+                      comparisonValid currentRun.context
+                      currentRun.context_eq rfl rfl rfl
+                      currentRun.state_wf validatorDomainTr parameterTypeTr
+                      validatorContext.fuel.recDepth rfl
+                  have currentEnvWF : VEnv.WF currentRun.context.venv :=
+                    currentRun.context.Ewf
+                  have currentCtxWF : OnCtx
+                      currentRun.context.vlctx.toCtx
+                      (currentRun.context.venv.IsType
+                        currentRun.context.lparams.length) :=
+                    currentRun.context.Δwf.toCtx
+                  obtain ⟨validatorSort, validatorDomainHasType⟩ :=
+                    validatorDomainType
+                  have validatorDomainDef :
+                      currentRun.context.venv.IsDefEq
+                        currentRun.context.lparams.length
+                        currentRun.context.vlctx.toCtx validatorDomain'
+                        parameterType' (.sort validatorSort) :=
+                    comparisonRun.isDefEqU.of_l currentEnvWF currentCtxWF
+                      validatorDomainHasType
+                  have fvHasParameterType :
+                      currentRun.context.venv.HasType
+                        currentRun.context.lparams.length
+                        currentRun.context.vlctx.toCtx fvValue
+                        parameterType' :=
+                    currentRun.context.Δwf.find?_wf
+                      currentRun.context.Ewf.ordered fvFind
+                  have fvHasDomain : currentRun.context.venv.HasType
+                      currentRun.context.lparams.length
+                      currentRun.context.vlctx.toCtx fvValue
+                      validatorDomain' :=
+                    validatorDomainDef.symm.defeq fvHasParameterType
+                  have bodyInstTr : currentRun.context.TrExprS
+                      (validatorBody.instantiate1 (.fvar fv))
+                      (validatorBody'.inst fvValue) := by
+                    simpa only [Expr.instantiate1_eq] using
+                      validatorBodyTr.inst currentRun.context.Ewf.ordered
+                        fvHasDomain fvTr
+                  have bodyInstTr' : currentRun.context.TrExprS
+                      (validatorBody.instantiate1 stats.params[i]!)
+                      (validatorBody'.inst fvValue) := by
+                    rw [parameterEq]
+                    exact bodyInstTr
+                  obtain ⟨validatorView', validatorViewTr,
+                      ⟨validatorViewRun⟩⟩ :=
+                    TypeChecker.WhnfRun.exists_ofCandidateStep
+                      ⟨validatorContext,
+                        validatorBody.instantiate1 stats.params[i]!,
+                        validatorView⟩ whnf currentRun
+                      (validatorBody'.inst fvValue) bodyInstTr'
+                      recursionFuel validatorDepth
+                  have validatorDomainTrEnv : TrExprS env Us
+                      currentRun.context.vlctx validatorDomain
+                      validatorDomain' := by
+                    simpa only [TypeChecker.VContext.TrExprS, currentVenv,
+                      currentLparams] using validatorDomainTr
+                  have parameterTypeTrEnv : TrExprS env Us
+                      currentRun.context.vlctx parameterType
+                      parameterType' := by
+                    simpa only [TypeChecker.VContext.TrExprS, currentVenv,
+                      currentLparams] using parameterTypeTr
+                  have firstLift : VLCtx.FVLift' firstSnapshot.Δ
+                      firstTerminalΔ 0
+                      (.skipN .refl
+                        (firstStoredDomain :: firstStoredDomains).length) 0 := by
+                    have combined :=
+                      (VLCtx.FVLift'.skip_fvar _ _
+                        VLCtx.FVLift'.refl).comp
+                        (TypeChecker.CandidateAnnotationSpine.terminalLift
+                          firstTail)
+                    simpa only [List.length_cons, Lift.comp_skipN,
+                      Lift.comp, Lift.skipN_skipN, VLocalDecl.depth,
+                      Nat.one_add] using combined
+                  have firstWF : VLCtx.WF env Us.length firstSnapshot.Δ :=
+                    firstLift.wf henv firstTerminalWF
+                  have validatorDomainClosed : Closed validatorDomain 0 := by
+                    rw [validatorSnapshotDomainEq]
+                    simpa only [secondSnapshot.context_noBV] using
+                      secondSnapshot.domain_tr.closed
+                  have validatorDomainFVars :
+                      FVarsIn (· ∈ firstSnapshot.Δ.fvars)
+                        validatorDomain := by
+                    rw [validatorSnapshotDomainEq]
+                    simpa only [contextRelation.fvars] using
+                      secondSnapshot.domain_tr.fvarsIn
+                  have parameterTypeClosed : Closed parameterType 0 := by
+                    rw [parameterSnapshotEq]
+                    simpa only [firstSnapshot.context_noBV] using
+                      firstSnapshot.consumed_tr.closed
+                  have parameterTypeFVars :
+                      FVarsIn (· ∈ firstSnapshot.Δ.fvars)
+                        parameterType := by
+                    rw [parameterSnapshotEq]
+                    exact firstSnapshot.consumed_tr.fvarsIn
+                  obtain ⟨baseDomain, baseDomainTr⟩ :=
+                    validatorDomainTrEnv.weakFV'_inv henv firstLift
+                      currentFirstTerminal validatorDomainClosed
+                      validatorDomainFVars
+                  obtain ⟨baseParameterType, baseParameterTypeTr⟩ :=
+                    parameterTypeTrEnv.weakFV'_inv henv firstLift
+                      currentFirstTerminal parameterTypeClosed
+                      parameterTypeFVars
+                  have comparisonCurrent : env.IsDefEqU Us.length
+                      currentRun.context.vlctx.toCtx validatorDomain'
+                      parameterType' := by
+                    simpa only [currentVenv, currentLparams] using
+                      comparisonRun.isDefEqU
+                  have baseDomainAtTerminal :=
+                    baseDomainTr.weakFV' henv.ordered firstLift
+                      firstTerminalWF
+                  have baseParameterTypeAtTerminal :=
+                    baseParameterTypeTr.weakFV' henv.ordered firstLift
+                      firstTerminalWF
+                  have currentDomainEq :=
+                    validatorDomainTrEnv.uniq henv currentFirstTerminal
+                      baseDomainAtTerminal
+                  have currentParameterTypeEq :=
+                    parameterTypeTrEnv.uniq henv currentFirstTerminal
+                      baseParameterTypeAtTerminal
+                  have comparisonAtTerminal :=
+                    comparisonCurrent.defeqDFC henv.ordered
+                      currentFirstTerminal.defeqCtx
+                  have currentDomainEqAtTerminal :=
+                    currentDomainEq.defeqDFC henv.ordered
+                      currentFirstTerminal.defeqCtx
+                  have currentParameterTypeEqAtTerminal :=
+                    currentParameterTypeEq.defeqDFC henv.ordered
+                      currentFirstTerminal.defeqCtx
+                  have liftedComparison : env.IsDefEqU Us.length
+                      firstTerminalΔ.toCtx
+                      (baseDomain.lift'
+                        ((Lift.skipN Lift.refl
+                          (firstStoredDomain :: firstStoredDomains).length).consN 0))
+                      (baseParameterType.lift'
+                        ((Lift.skipN Lift.refl
+                          (firstStoredDomain :: firstStoredDomains).length).consN 0)) :=
+                    (currentDomainEqAtTerminal.symm.trans henv
+                      firstTerminalWF.toCtx comparisonAtTerminal).trans henv
+                        firstTerminalWF.toCtx
+                        currentParameterTypeEqAtTerminal
+                  have comparisonAtBase : env.IsDefEqU Us.length
+                      firstSnapshot.Δ.toCtx baseDomain baseParameterType :=
+                    (VEnv.IsDefEqU.weak'_iff henv firstTerminalWF.toCtx
+                      firstLift.toCtx).1 liftedComparison
+                  have snapshotDomainTr : TrExprS env Us secondSnapshot.Δ
+                      validatorDomain secondSnapshot.domain' := by
+                    rw [validatorSnapshotDomainEq]
+                    exact secondSnapshot.domain_tr
+                  have baseDomainSnapshotEq : env.IsDefEqU Us.length
+                      firstSnapshot.Δ.toCtx baseDomain
+                      secondSnapshot.domain' :=
+                    baseDomainTr.uniqFVars henv contextRelation firstWF
+                      snapshotDomainTr
+                  have snapshotParameterTypeTr : TrExprS env Us
+                      firstSnapshot.Δ parameterType
+                      firstSnapshot.consumed' := by
+                    rw [parameterSnapshotEq]
+                    exact firstSnapshot.consumed_tr
+                  have baseParameterSnapshotEq : env.IsDefEqU Us.length
+                      firstSnapshot.Δ.toCtx baseParameterType
+                      firstSnapshot.consumed' :=
+                    baseParameterTypeTr.uniq henv (.refl henv firstWF)
+                      snapshotParameterTypeTr
+                  have secondAnnotationAtFirst : env.IsDefEqU Us.length
+                      firstSnapshot.Δ.toCtx secondSnapshot.domain'
+                      secondSnapshot.consumed' :=
+                    secondSnapshot.annotation_run.isDefEqU.defeqDFC
+                      henv.ordered
+                      (contextRelation.defeqCtx.symm henv.ordered)
+                  have firstAnnotation :=
+                    firstSnapshot.annotation_run.isDefEqU.of_l henv
+                      firstWF.toCtx firstSnapshot.domain_type
+                  have storedDomainsU : env.IsDefEqU Us.length
+                      firstSnapshot.Δ.toCtx firstSnapshot.consumed'
+                      secondSnapshot.consumed' :=
+                    (((baseParameterSnapshotEq.symm.trans henv firstWF.toCtx
+                      comparisonAtBase.symm).trans henv firstWF.toCtx
+                        baseDomainSnapshotEq).trans henv firstWF.toCtx
+                          secondAnnotationAtFirst)
+                  have storedDomainsDef :=
+                    storedDomainsU.of_l henv firstWF.toCtx
+                      firstAnnotation.hasType.2
+                  rw [firstStoredEq, secondStoredEq] at storedDomainsDef
+                  have candidateTailIsForall :
+                      (secondBody.instantiate1
+                        secondCandidateContext.freshExpr).isForall = true :=
+                    secondPosition.traceSource_isForall secondBodyAligned
+                  have candidateBodyEq :=
+                    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                      bodyCandidate.rootWhnf_valid recursionFuel (by
+                        simpa [AddInductive.Context.pushLocalDecl] using
+                          secondDepth) candidateTailIsForall
+                  have validatorTailIsForall :
+                      (validatorBody.instantiate1
+                        stats.params[i]!).isForall = true := by
+                    rw [parameterSecond, validatorBodyEq]
+                    exact candidateTailIsForall
+                  have validatorBodyWhnfEq :=
+                    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                      whnf recursionFuel validatorDepth validatorTailIsForall
+                  have nextSourceEq : validatorView =
+                      bodyCandidate.rootWhnf :=
+                    validatorBodyWhnfEq.trans (by
+                      rw [parameterSecond, validatorBodyEq]
+                      exact candidateBodyEq.symm)
+                  have freshIdEq : firstContext.freshFVarId =
+                      secondCandidateContext.freshFVarId := by
+                    apply Expr.fvar.inj
+                    exact parameterFirst.symm.trans parameterSecond
+                  have nextRelation : VLCtx.IsDefEqFVars env Us.length
+                      ((some (firstContext.freshFVarId,
+                          firstAnnotationsNode.consumed.fvarsList),
+                        .vlam firstStoredDomain) :: firstSnapshot.Δ)
+                      ((some (secondCandidateContext.freshFVarId,
+                          secondAnnotationsNode.consumed.fvarsList),
+                        .vlam secondStoredDomain) :: secondSnapshot.Δ) := by
+                    rw [← freshIdEq]
+                    exact .cons_fvar contextRelation (.vlam storedDomainsDef)
+                  have tailEvidence := ih pathTail paramsSize localState
+                    validatorViewTr firstTail firstTailAnnotations
+                    (firstLocalRun.push firstName firstBinderInfo
+                      firstAnnotationsNode.consumed)
+                    (by simpa only [
+                      AddInductive.CandidateExprTrace.terminalContext] using
+                        validatorFirstTerminal)
+                    secondTail secondTailAnnotations secondBodyAligned
+                    (by simpa [AddInductive.Context.pushLocalDecl] using
+                      secondDepth)
+                    nextSourceEq parametersFirstTail parametersSecondTail
+                    nextRelation
+                  have combined : TypeChecker.TelDefEqEvidence env Us.length
+                      firstSnapshot.Δ.toCtx
+                      (firstStoredDomain :: firstStoredDomains.take n)
+                      (secondStoredDomain :: secondStoredDomains.take n) :=
+                    .cons (.ofDefEq storedDomainsDef) tailEvidence
+                  simpa only [List.take_succ_cons] using combined
 
 /-- A selected second-family telescope starts in the exact reader context
 reached after the first family's complete telescope. -/
@@ -3553,9 +4013,10 @@ theorem
   exact positionContext.trans firstContext
 
 /-- The validator's first-index context and the first candidate's producer
-terminal context translate the same kernel local context. -/
+terminal context are ordinary definitionally equal verified translations of
+the same kernel local context. -/
 theorem
-    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.current_firstTerminal_defeqFVars
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.current_firstTerminal_defeq
     {source : VInductDecl}
     {firstSource secondSource : InductiveType}
     {remainingSources : List InductiveType}
@@ -3569,7 +4030,7 @@ theorem
       produced.candidate source}
     (staging : produced.SecondFamilyIndexStaging semantic)
     (context_lctx_eq : context.lctx = {}) :
-    VLCtx.IsDefEqFVars env Us.length staging.currentRun.context.vlctx
+    VLCtx.IsDefEq env Us.length staging.currentRun.context.vlctx
       staging.annotation.firstTerminalRun.context.vlctx := by
   have contextEq := staging.position_context_eq_firstTerminal context_lctx_eq
   have currentTr := staging.currentRun.context.trlctx
@@ -3592,7 +4053,28 @@ theorem
   rw [← lctxEq] at firstTr
   have henv : VEnv.WF env := by
     simpa only [staging.current_venv] using staging.currentRun.context.Ewf
-  exact TrLCtx.isDefEqFVars henv currentTr firstTr
+  exact TrLCtx.isDefEq henv currentTr firstTr
+
+/-- Free-variable-preserving projection of the exact validator/first-terminal
+context equality. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.current_firstTerminal_defeqFVars
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (context_lctx_eq : context.lctx = {}) :
+    VLCtx.IsDefEqFVars env Us.length staging.currentRun.context.vlctx
+      staging.annotation.firstTerminalRun.context.vlctx :=
+  (staging.current_firstTerminal_defeq context_lctx_eq).toFVars
 
 /-- The boundary's strict kernel/Theory parameter inventory covers the exact
 declared shared-parameter prefix from initial position zero. -/
@@ -4241,9 +4723,10 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstInd
             staging.annotation.terminalRun.context.vlctx 0
             (.skipN .refl
               (staging.annotation.storedBinders.drop source.nparams).length)
-            0 := by
+            0 ∧
+          snapshot.Δ.FVarLamOnly := by
   obtain ⟨position, snapshot, consumedEq, snapshotContext,
-      snapshotFVars, terminalLift⟩ := raw.annotationSnapshot
+      snapshotFVars, terminalLift, snapshotShape⟩ := raw.annotationSnapshot
   have candidateIsForall :=
     position.traceSource_isForall staging.annotation.stored_spine
   have contextDepth : staging.position.context.fuel.recDepth =
@@ -4277,7 +4760,509 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstInd
   exact ⟨position, snapshot, boundaryRootEq, consumedEq, snapshotContext, by
       rw [staging.parameterSources_eq_secondParameterList context_lctx_eq]
       exact snapshotFVars,
-    terminalLift⟩
+    terminalLift, snapshotShape⟩
+
+/-- Joint inventory for the two producer-owned shared-parameter contexts used
+at the first second-family index.
+
+The first context is the prefix of the first candidate's terminal context;
+the second is the exact annotation snapshot context.  Their free-variable
+identifiers are already equal by construction.  The remaining semantic seam
+is precisely definitional equality of their declarations. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.RawFirstIndexPrefixContexts
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain) where
+  position :
+    staging.annotation.secondCandidate.familyType.type.trace.AnnotationAt
+      source.nparams
+  snapshot : TypeChecker.CandidateAnnotationSnapshot env Us position.root
+  boundary_root_eq : staging.boundary.source = position.root
+  snapshot_consumed_eq : snapshot.consumed' = raw.consumedDomain
+  firstParameterΔ : VLCtx
+  first_context : firstParameterΔ.toCtx =
+    (staging.annotation.firstStoredBinders.take source.nparams).reverse
+  snapshot_context : snapshot.Δ.toCtx =
+    (staging.annotation.storedBinders.take source.nparams).reverse
+  parameter_fvars_eq : firstParameterΔ.fvars = snapshot.Δ.fvars
+  first_shape : firstParameterΔ.FVarLamOnly
+  snapshot_shape : snapshot.Δ.FVarLamOnly
+  first_terminal_lift : VLCtx.FVLift' firstParameterΔ
+    staging.annotation.firstTerminalRun.context.vlctx 0
+    (.skipN .refl
+      (staging.annotation.firstStoredBinders.drop source.nparams).length) 0
+  snapshot_terminal_lift : VLCtx.FVLift' snapshot.Δ
+    staging.annotation.terminalRun.context.vlctx 0
+    (.skipN .refl
+      (staging.annotation.storedBinders.drop source.nparams).length) 0
+  current_firstTerminal_defeq : VLCtx.IsDefEq env Us.length
+    staging.currentRun.context.vlctx
+    staging.annotation.firstTerminalRun.context.vlctx
+
+/-- Assemble the exact two-prefix inventory without asking a caller to select
+either context or annotation position. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexPrefixContexts
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (staging.RawFirstIndexPrefixContexts raw) := by
+  obtain ⟨position, snapshot, boundaryRootEq, snapshotConsumedEq,
+      snapshotContext, snapshotFVars, snapshotTerminalLift, snapshotShape⟩ :=
+    staging.rawFirstIndexAnnotationAlignment raw context_lctx_eq
+  obtain ⟨firstParameterΔ, firstContext, firstFVars,
+      firstTerminalLift, firstShape⟩ :=
+    staging.annotation.firstParameterContext context_lctx_eq
+  have mappedFVars : firstParameterΔ.fvars.map Expr.fvar =
+      snapshot.Δ.fvars.map Expr.fvar := by
+    calc
+      firstParameterΔ.fvars.map Expr.fvar =
+          (staging.annotation.firstCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse := firstFVars
+      _ = (staging.annotation.secondCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse :=
+        congrArg List.reverse
+          (staging.annotation.parameterLists_eq context_lctx_eq)
+      _ = (staging.boundary.parameters.map Prod.fst).reverse :=
+        congrArg List.reverse
+          (staging.parameterSources_eq_secondParameterList
+            context_lctx_eq).symm
+      _ = snapshot.Δ.fvars.map Expr.fvar := snapshotFVars.symm
+  exact ⟨{
+    position := position
+    snapshot := snapshot
+    boundary_root_eq := boundaryRootEq
+    snapshot_consumed_eq := snapshotConsumedEq
+    firstParameterΔ := firstParameterΔ
+    first_context := firstContext
+    snapshot_context := snapshotContext
+    parameter_fvars_eq := list_map_fvar_injective mappedFVars
+    first_shape := firstShape
+    snapshot_shape := snapshotShape
+    first_terminal_lift := firstTerminalLift
+    snapshot_terminal_lift := snapshotTerminalLift
+    current_firstTerminal_defeq :=
+      staging.current_firstTerminal_defeq context_lctx_eq }⟩
+
+/-- The retained shared-parameter validator constructs pointwise equality of
+the first and second candidates' exact annotation-consumed parameter
+telescopes. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (prefixes : staging.RawFirstIndexPrefixContexts raw)
+    (context_lctx_eq : context.lctx = {}) :
+    env.TelDefEq Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (staging.annotation.storedBinders.take source.nparams) := by
+  have candidateIsForall :=
+    prefixes.position.traceSource_isForall staging.annotation.stored_spine
+  have validatorDepth : staging.position.context.fuel.recDepth =
+      staging.annotation.whnfFuel + 1 := by
+    calc
+      staging.position.context.fuel.recDepth = context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) staging.position_fuel_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth :=
+        rfl
+      _ = staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
+        (congrArg (fun candidateContext => candidateContext.fuel.recDepth)
+          staging.annotation.second_candidate_context_eq).symm
+      _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
+  have candidateRootEq :
+      staging.annotation.secondCandidate.familyType.type.trace.rootWhnf =
+        secondSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      staging.annotation.secondCandidate.familyType.type.trace.rootWhnf_valid
+      staging.annotation.whnfFuel staging.annotation.whnfDepth
+      candidateIsForall
+  have validatorRootEq : staging.position.source = secondSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      staging.position_root_whnf staging.annotation.whnfFuel validatorDepth
+      candidateIsForall
+  have validatorSecondRoot : staging.position.source =
+      staging.annotation.secondCandidate.familyType.type.trace.rootWhnf :=
+    validatorRootEq.trans candidateRootEq.symm
+  have firstRootLctx :
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+        ({} : LocalContext) := by
+    calc
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+          staging.annotation.secondCandidate.familyType.type.context.lctx :=
+        congrArg AddInductive.Context.lctx
+          staging.annotation.candidate_context_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).lctx :=
+        congrArg AddInductive.Context.lctx
+          staging.annotation.second_candidate_context_eq
+      _ = {} := rfl
+  have parameterSourcesFirst :
+      staging.boundary.parameters.map Prod.fst =
+        staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams :=
+    staging.parameterSources_eq_positionParams.trans
+      (staging.position_params_eq_firstParameterList context_lctx_eq)
+  have parameterSourcesSecond :
+      staging.boundary.parameters.map Prod.fst =
+        staging.annotation.secondCandidate.familyType.type.trace.parameterList
+          source.nparams :=
+    staging.parameterSources_eq_secondParameterList context_lctx_eq
+  have evidence := sharedParameterTelescopeDefEqAux
+    staging.boundary.prefix_path staging.boundary.params_size
+    staging.boundary.localState staging.currentRun staging.current_venv
+    staging.current_lparams staging.parameterRoot_tr
+    staging.annotation.whnfFuel validatorDepth
+    staging.annotation.first_annotation_spine
+    staging.annotation.first_validation_annotations
+    (TypeChecker.CandidateLocalContextRun.empty _ firstRootLctx)
+    (staging.position_context_eq_firstTerminal context_lctx_eq)
+    staging.annotation.annotation_spine staging.annotation.validation_annotations
+    prefixes.position staging.annotation.stored_spine
+    staging.annotation.whnfDepth validatorSecondRoot parameterSourcesFirst
+    parameterSourcesSecond (.nil)
+    (staging.current_firstTerminal_defeq context_lctx_eq)
+  simpa only [VLCtx.toCtx] using evidence.telDefEq
+
+/-- Complete the validator's exact first index once the two producer-owned
+shared-parameter contexts are known definitionally equal.
+
+Both strict translations are first lowered from the validator context to the
+first candidate's parameter prefix.  The candidate annotation equality is
+transported from the second prefix to that common context, then weakened back
+to the first terminal context and compared with the validator translations.
+Thus the sole remaining seam is equality of the declarations stored under the
+already-identical free-variable identifiers. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun_of_parameterContextDefEqFVars
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (prefixes : staging.RawFirstIndexPrefixContexts raw)
+    (parameterContextDefEq : VLCtx.IsDefEqFVars env Us.length
+      prefixes.firstParameterΔ prefixes.snapshot.Δ) :
+    Nonempty staging.boundary.IndexDomainRun := by
+  have henv : VEnv.WF env := by
+    simpa only [staging.current_venv] using staging.currentRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length
+      staging.currentRun.context.vlctx := by
+    simpa only [staging.current_venv, staging.current_lparams] using
+      staging.currentRun.context.Δwf
+  have firstTerminalWF : VLCtx.WF env Us.length
+      staging.annotation.firstTerminalRun.context.vlctx := by
+    simpa only [staging.annotation.first_terminal_venv,
+      staging.annotation.first_terminal_lparams] using
+      staging.annotation.firstTerminalRun.context.Δwf
+  have firstParameterWF : VLCtx.WF env Us.length
+      prefixes.firstParameterΔ :=
+    prefixes.first_terminal_lift.wf henv firstTerminalWF
+  have isForall : staging.boundary.source.isForall = true := by
+    rw [prefixes.boundary_root_eq, prefixes.snapshot.root_eq]
+    rfl
+  obtain ⟨translation⟩ :=
+    staging.boundary.indexDomainTranslation_of_forall isForall
+  have rootEq :
+      (Expr.forallE translation.name translation.domain translation.body
+        translation.binderInfo) =
+      (Expr.forallE prefixes.snapshot.name prefixes.snapshot.domain
+        prefixes.snapshot.body prefixes.snapshot.binderInfo) :=
+    translation.source_eq.symm.trans
+      (prefixes.boundary_root_eq.trans prefixes.snapshot.root_eq)
+  simp only [Expr.forallE.injEq] at rootEq
+  obtain ⟨_nameEq, domainEq, _bodyEq, _binderEq⟩ := rootEq
+  have consumedSourceEq :
+      AddInductive.consumeTypeAnnotations translation.domain =
+        prefixes.snapshot.consumed :=
+    (congrArg AddInductive.consumeTypeAnnotations domainEq).trans
+      prefixes.snapshot.annotation_match.symm
+  have currentDomainTr : TrExprS env Us
+      staging.currentRun.context.vlctx translation.domain
+      translation.domain' := by
+    simpa only [TypeChecker.VContext.TrExprS, staging.current_venv,
+      staging.current_lparams] using
+      translation.domain_tr
+  have currentConsumedTr : TrExprS env Us
+      staging.currentRun.context.vlctx
+      (AddInductive.consumeTypeAnnotations translation.domain)
+      translation.consumed' := by
+    simpa only [TypeChecker.VContext.TrExprS, staging.current_venv,
+      staging.current_lparams] using
+      translation.consumed_tr
+  have snapshotDomainTr : TrExprS env Us prefixes.snapshot.Δ
+      translation.domain prefixes.snapshot.domain' := by
+    rw [domainEq]
+    exact prefixes.snapshot.domain_tr
+  have snapshotConsumedTr : TrExprS env Us prefixes.snapshot.Δ
+      (AddInductive.consumeTypeAnnotations translation.domain)
+      prefixes.snapshot.consumed' := by
+    rw [consumedSourceEq]
+    exact prefixes.snapshot.consumed_tr
+  have domainClosed : Closed translation.domain 0 := by
+    rw [domainEq]
+    simpa only [prefixes.snapshot.context_noBV] using
+      prefixes.snapshot.domain_tr.closed
+  have domainFVars : FVarsIn (· ∈ prefixes.firstParameterΔ.fvars)
+      translation.domain := by
+    rw [domainEq]
+    simpa only [prefixes.parameter_fvars_eq] using
+      prefixes.snapshot.domain_tr.fvarsIn
+  have consumedClosed : Closed
+      (AddInductive.consumeTypeAnnotations translation.domain) 0 := by
+    rw [consumedSourceEq]
+    simpa only [prefixes.snapshot.context_noBV] using
+      prefixes.snapshot.consumed_tr.closed
+  have consumedFVars : FVarsIn (· ∈ prefixes.firstParameterΔ.fvars)
+      (AddInductive.consumeTypeAnnotations translation.domain) := by
+    rw [consumedSourceEq]
+    simpa only [prefixes.parameter_fvars_eq] using
+      prefixes.snapshot.consumed_tr.fvarsIn
+  obtain ⟨baseDomain, baseDomainTr⟩ :=
+    currentDomainTr.weakFV'_inv henv prefixes.first_terminal_lift
+      prefixes.current_firstTerminal_defeq domainClosed domainFVars
+  obtain ⟨baseConsumed, baseConsumedTr⟩ :=
+    currentConsumedTr.weakFV'_inv henv prefixes.first_terminal_lift
+      prefixes.current_firstTerminal_defeq consumedClosed consumedFVars
+  have baseDomainEq : env.IsDefEqU Us.length prefixes.firstParameterΔ.toCtx
+      baseDomain prefixes.snapshot.domain' :=
+    baseDomainTr.uniqFVars henv parameterContextDefEq firstParameterWF
+      snapshotDomainTr
+  have baseConsumedEq : env.IsDefEqU Us.length
+      prefixes.firstParameterΔ.toCtx baseConsumed
+      prefixes.snapshot.consumed' :=
+    baseConsumedTr.uniqFVars henv parameterContextDefEq firstParameterWF
+      snapshotConsumedTr
+  have annotationAtFirst : env.IsDefEqU Us.length
+      prefixes.firstParameterΔ.toCtx prefixes.snapshot.domain'
+      prefixes.snapshot.consumed' :=
+    prefixes.snapshot.annotation_run.isDefEqU.defeqDFC henv.ordered
+      (parameterContextDefEq.defeqCtx.symm henv.ordered)
+  have annotationAtPrefix : env.IsDefEqU Us.length
+      prefixes.firstParameterΔ.toCtx baseDomain baseConsumed :=
+    (baseDomainEq.trans henv firstParameterWF.toCtx
+      annotationAtFirst).trans henv firstParameterWF.toCtx
+        baseConsumedEq.symm
+  have annotationAtFirstTerminal :=
+    annotationAtPrefix.weak' henv.ordered prefixes.first_terminal_lift.toCtx
+  have baseDomainAtFirstTerminal :=
+    baseDomainTr.weakFV' henv.ordered prefixes.first_terminal_lift
+      firstTerminalWF
+  have baseConsumedAtFirstTerminal :=
+    baseConsumedTr.weakFV' henv.ordered prefixes.first_terminal_lift
+      firstTerminalWF
+  have currentDomainEq :=
+    currentDomainTr.uniq henv prefixes.current_firstTerminal_defeq
+      baseDomainAtFirstTerminal
+  have currentConsumedEq :=
+    currentConsumedTr.uniq henv prefixes.current_firstTerminal_defeq
+      baseConsumedAtFirstTerminal
+  have annotationAtCurrent :=
+    annotationAtFirstTerminal.defeqDFC henv.ordered
+      ((prefixes.current_firstTerminal_defeq.symm henv.ordered).defeqCtx)
+  have annotationU : env.IsDefEqU Us.length
+      staging.currentRun.context.vlctx.toCtx translation.domain'
+      translation.consumed' :=
+    (currentDomainEq.trans henv currentWF.toCtx annotationAtCurrent).trans
+      henv currentWF.toCtx currentConsumedEq.symm
+  have domainType : env.IsType Us.length
+      staging.currentRun.context.vlctx.toCtx translation.domain' := by
+    simpa only [TypeChecker.VContext.IsType, staging.current_venv,
+      staging.current_lparams] using
+      translation.domain_type
+  obtain ⟨sort, domainHasType⟩ := domainType
+  have annotationDef := annotationU.of_l henv currentWF.toCtx domainHasType
+  exact ⟨{
+    translation := translation
+    sort := sort
+    annotation_def := by
+      simpa only [staging.current_venv, staging.current_lparams] using
+        annotationDef }⟩
+
+/-- Theory telescope equality is sufficient to close the translator-facing
+parameter-context seam.  The exact candidate shapes and free-variable names
+stored in `prefixes` recover `IsDefEqFVars` without requiring dependency-list
+identity. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun_of_parameterContextDefEq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (prefixes : staging.RawFirstIndexPrefixContexts raw)
+    (parameterContextDefEq : env.IsDefEqCtx Us.length []
+      prefixes.firstParameterΔ.toCtx prefixes.snapshot.Δ.toCtx) :
+    Nonempty staging.boundary.IndexDomainRun :=
+  staging.firstIndexDomainRun_of_parameterContextDefEqFVars raw prefixes
+    (VLCtx.IsDefEqFVars.of_defeqCtx prefixes.first_shape
+      prefixes.snapshot_shape prefixes.parameter_fvars_eq
+      parameterContextDefEq)
+
+/-- Pointwise equality of the two annotation-consumed parameter telescopes
+constructs the exact first validator index run. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun_of_parameterTelescopeDefEq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (prefixes : staging.RawFirstIndexPrefixContexts raw)
+    (parameterTelescopeDefEq : env.TelDefEq Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (staging.annotation.storedBinders.take source.nparams)) :
+    Nonempty staging.boundary.IndexDomainRun := by
+  apply staging.firstIndexDomainRun_of_parameterContextDefEq raw prefixes
+  simpa only [List.append_nil, prefixes.first_context,
+    prefixes.snapshot_context] using parameterTelescopeDefEq.ctx
+
+/-- Construct the exact first second-family index run entirely from the
+retained producer and validator evidence. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty staging.boundary.IndexDomainRun := by
+  obtain ⟨prefixes⟩ :=
+    staging.rawFirstIndexPrefixContexts raw context_lctx_eq
+  exact staging.firstIndexDomainRun_of_parameterTelescopeDefEq raw prefixes
+    (staging.parameterTelescopeDefEq raw prefixes context_lctx_eq)
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstIndexDomainRun
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.second_candidate_context_eq' depends on axioms: [propext,

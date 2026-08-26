@@ -597,6 +597,44 @@ theorem push_findOld (run : CandidateLocalContextRun context)
 
 end CandidateLocalContextRun
 
+/-- Every local declaration already present at a candidate node remains at
+the exact terminal context reached through its main Pi spine. -/
+theorem CandidateExprTrace.terminal_findOld
+    {context : AddInductive.Context} {source : Expr}
+    (trace : AddInductive.CandidateExprTrace context source)
+    (localRun : CandidateLocalContextRun context)
+    {fv : FVarId} {decl : LocalDecl}
+    (found : context.lctx.find? fv = some decl) :
+    trace.terminalContext.lctx.find? fv = some decl := by
+  induction trace with
+  | terminal => exact found
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+      exact bodyIH (localRun.push name binderInfo annotations.consumed)
+        (localRun.push_findOld name binderInfo annotations.consumed found)
+
+/-- The fresh free variable allocated for a candidate Pi retains the exact
+annotation-consumed kernel domain at the candidate's terminal context. -/
+theorem CandidateExprTrace.head_getType_terminal
+    {context : AddInductive.Context} (name : Name)
+    (binderInfo : BinderInfo) {domain bodySource : Expr}
+    (annotations : AddInductive.CandidateTypeAnnotations domain)
+    (bodyCandidate : AddInductive.CandidateExprTrace
+      (context.pushLocalDecl name binderInfo annotations.consumed) bodySource)
+    (localRun : CandidateLocalContextRun context) :
+    AddInductive.getType context.freshExpr bodyCandidate.terminalContext =
+      .ok annotations.consumed := by
+  have foundAtBody := localRun.push_findNew name binderInfo annotations.consumed
+  have foundAtTerminal := terminal_findOld bodyCandidate
+    (localRun.push name binderInfo annotations.consumed) foundAtBody
+  unfold AddInductive.getType
+  simp only [getLCtx, ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure]
+  change Except.ok ((bodyCandidate.terminalContext.lctx.get!
+    context.freshFVarId).type) = _
+  simp [LocalContext.get!, foundAtTerminal, LocalDecl.type]
+
 /-- Positional verified context for an executable normalization candidate.
 
 The equality pins every checker-visible field (environment, local context,
@@ -3712,14 +3750,63 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPat
 #print axioms
   AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath.annotationAt_root_eq
 
+/-- A verified local context containing exactly producer-allocated
+free-variable assumptions: no bound-variable entries and no hidden lets. -/
+inductive VLCtx.FVarLamOnly : VLCtx → Prop where
+  | nil : FVarLamOnly []
+  | cons : FVarLamOnly Δ →
+      FVarLamOnly ((some (fv, deps), .vlam type) :: Δ)
+
+/-- Lift an ordinary Theory context equality back to the translator's
+free-variable-preserving context relation when both implementations contain
+only corresponding free-variable assumptions.  Dependency lists may differ;
+they are deliberately absent from `IsDefEqCtx`. -/
+theorem VLCtx.IsDefEqFVars.of_defeqCtx
+    (leftShape : left.FVarLamOnly)
+    (rightShape : right.FVarLamOnly)
+    (fvarsEq : left.fvars = right.fvars)
+    (contextEq : env.IsDefEqCtx U [] left.toCtx right.toCtx) :
+    VLCtx.IsDefEqFVars env U left right := by
+  induction leftShape generalizing right with
+  | nil =>
+      cases rightShape with
+      | nil => exact .nil
+      | cons rightShape => simp at fvarsEq
+  | @cons left fv deps type leftShape ih =>
+      cases rightShape with
+      | nil => simp at fvarsEq
+      | @cons right fv' deps' type' rightShape =>
+          simp only [VLCtx.fvars_cons_some, List.cons.injEq] at fvarsEq
+          obtain ⟨rfl, tailFvarsEq⟩ := fvarsEq
+          cases contextEq with
+          | succ tailContextEq headDefEq =>
+              exact .cons_fvar
+                (ih rightShape tailFvarsEq tailContextEq)
+                (.vlam headDefEq)
+
+/--
+info: 'Lean4Lean.VLCtx.IsDefEqFVars.of_defeqCtx' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms VLCtx.IsDefEqFVars.of_defeqCtx
+
+/-- Free-variable-preserving context equality retains the exact identifier
+sequence even when dependency metadata differs. -/
+theorem VLCtx.IsDefEqFVars.fvars :
+    VLCtx.IsDefEqFVars env U left right → left.fvars = right.fvars
+  | .nil => rfl
+  | .cons_bvar relation _ => relation.fvars
+  | .cons_fvar relation _ =>
+      congrArg (fun tail => _ :: tail) relation.fvars
+
 /-- Two verified translations of the same kernel local-context inventory use
-the same free-variable slots and definitionally equal local declarations. -/
-private theorem trLCtx_isDefEqFVars_aux
+the same metadata slots and definitionally equal local declarations. -/
+private theorem trLCtx_isDefEq_aux
     (henv : VEnv.WF env)
     (hds : (ds.map (·.fvarId)).Nodup)
     (left : TrLCtx' env Us ds Δ₁)
     (right : TrLCtx' env Us ds Δ₂) :
-    VLCtx.IsDefEqFVars env Us.length Δ₁ Δ₂ := by
+    VLCtx.IsDefEq env Us.length Δ₁ Δ₂ := by
   induction left generalizing Δ₂ with
   | nil =>
       cases right
@@ -3732,27 +3819,50 @@ private theorem trLCtx_isDefEqFVars_aux
             exact hds.tail
           have tailEq := ih tailNodup right
           have tailWF := left.wf tailNodup
+          have metadata : ∀ fv deps,
+              some (d.fvarId, d.deps) = some (fv, deps) →
+                fv ∉ Δ₁.fvars ∧ deps ⊆ Δ₁.fvars := by
+            intro fv deps metadataEq
+            simp only [Option.some.injEq, Prod.mk.injEq] at metadataEq
+            rcases metadataEq with ⟨rfl, rfl⟩
+            constructor
+            · intro member
+              have freshKernel : d.fvarId ∉ ds.map (·.fvarId) :=
+                (List.nodup_cons.mp hds).1
+              rw [← left.fvars_eq] at member
+              exact freshKernel member
+            · exact declaration.deps_wf
           cases declaration with
           | vlam typeTr typeType =>
               cases declaration₂ with
               | vlam typeTr₂ typeType₂ =>
                   obtain ⟨u, typeHas⟩ := typeType
                   have typeEq :=
-                    (typeTr.uniqFVars henv tailEq tailWF typeTr₂).of_l
+                    (typeTr.uniq henv tailEq typeTr₂).of_l
                       henv tailWF.toCtx typeHas
-                  exact .cons_fvar tailEq (.vlam typeEq)
+                  exact .cons tailEq metadata (.vlam typeEq)
           | vlet typeTr valueTr valueType =>
               cases declaration₂ with
               | vlet typeTr₂ valueTr₂ valueType₂ =>
                   obtain ⟨u, typeHas⟩ :=
                     valueType.isType henv tailWF.toCtx
                   have typeEq :=
-                    (typeTr.uniqFVars henv tailEq tailWF typeTr₂).of_l
+                    (typeTr.uniq henv tailEq typeTr₂).of_l
                       henv tailWF.toCtx typeHas
                   have valueEq :=
-                    (valueTr.uniqFVars henv tailEq tailWF valueTr₂).of_l
+                    (valueTr.uniq henv tailEq valueTr₂).of_l
                       henv tailWF.toCtx valueType
-                  exact .cons_fvar tailEq (.vlet valueEq typeEq)
+                  exact .cons tailEq metadata (.vlet valueEq typeEq)
+
+/-- Verified implementations of one exact kernel `LocalContext` are unique
+up to ordinary verified-context definitional equality.  In particular, the
+kernel-owned dependency metadata is retained literally on both sides. -/
+theorem _root_.Lean4Lean.TrLCtx.isDefEq
+    (henv : VEnv.WF env)
+    (left : TrLCtx env Us lctx Δ₁)
+    (right : TrLCtx env Us lctx Δ₂) :
+    VLCtx.IsDefEq env Us.length Δ₁ Δ₂ :=
+  trLCtx_isDefEq_aux henv left.1.nodup left.2 right.2
 
 /-- Verified implementations of one exact kernel `LocalContext` are unique
 up to definitional equality while retaining its free-variable identifiers. -/
@@ -3761,7 +3871,19 @@ theorem _root_.Lean4Lean.TrLCtx.isDefEqFVars
     (left : TrLCtx env Us lctx Δ₁)
     (right : TrLCtx env Us lctx Δ₂) :
     VLCtx.IsDefEqFVars env Us.length Δ₁ Δ₂ :=
-  trLCtx_isDefEqFVars_aux henv left.1.nodup left.2 right.2
+  (left.isDefEq henv right).toFVars
+
+/--
+info: 'Lean4Lean.TrLCtx.isDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TrLCtx.isDefEq
 
 /--
 info: 'Lean4Lean.TrLCtx.isDefEqFVars' depends on axioms: [propext,
@@ -3957,6 +4079,55 @@ theorem CandidateAnnotationSpine.prefixContext
               AddInductive.CandidateExprTrace.parameterList] using fvarsEq
           · simpa only [List.drop_succ_cons] using terminalLift
 
+/-- Shape-refining version of `prefixContext` for candidate traversals that
+start in a context containing only producer-allocated free assumptions.
+
+The extra result rules out invisible let declarations, which `toCtx` and the
+free-variable list cannot exclude on their own. -/
+theorem CandidateAnnotationSpine.prefixContext_shaped
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly)
+    (hcount : count ≤ domains.length) :
+    ∃ prefixΔ : VLCtx,
+      prefixΔ.toCtx = (domains.take count).reverse ++ Δ.toCtx ∧
+      prefixΔ.fvars.map Expr.fvar =
+        (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar ∧
+      VLCtx.FVLift' prefixΔ terminalΔ 0
+        (.skipN .refl (domains.drop count).length) 0 ∧
+      prefixΔ.FVarLamOnly := by
+  induction spine generalizing count with
+  | terminal =>
+      have countEq : count = 0 := by simpa using hcount
+      subst count
+      exact ⟨_, rfl, rfl, VLCtx.FVLift'.refl, initialShape⟩
+  | forallE domainCandidate bodyCandidate storedDomain' domains head tail ih =>
+      cases count with
+      | zero =>
+          have combined :=
+            (VLCtx.FVLift'.skip_fvar _ _
+              VLCtx.FVLift'.refl).comp tail.terminalLift
+          refine ⟨_, rfl, rfl, ?_, initialShape⟩
+          simpa only [List.drop_zero, List.length_cons,
+            Lift.comp_skipN, Lift.comp, Lift.skipN_skipN,
+            VLocalDecl.depth, Nat.one_add] using combined
+      | succ count =>
+          have tailBound : count ≤ domains.length := by
+            simpa only [List.length_cons, Nat.succ_le_succ_iff] using hcount
+          obtain ⟨prefixΔ, contextEq, fvarsEq, terminalLift, shape⟩ :=
+            ih (.cons initialShape) tailBound
+          refine ⟨prefixΔ, ?_, ?_, ?_, shape⟩
+          · simpa only [List.take_succ_cons, List.reverse_cons,
+              List.singleton_append, List.append_assoc, VLCtx.toCtx] using
+              contextEq
+          · simpa [VLCtx.fvars, List.append_assoc,
+              AddInductive.Context.freshExpr,
+              AddInductive.CandidateExprTrace.parameterList] using fvarsEq
+          · simpa only [List.drop_succ_cons] using terminalLift
+
 /-- Select the semantic snapshot and exact stored-domain suffix at one
 producer-owned structural annotation position.
 
@@ -4018,6 +4189,81 @@ theorem CandidateAnnotationSpine.snapshotAt
           · simpa only [List.drop_succ_cons,
               AddInductive.CandidateExprTrace.AnnotationAt.root] using
               terminalLift
+
+/-- Shape-refining annotation selection for a producer telescope rooted in a
+free-variable-only verified context. -/
+theorem CandidateAnnotationSpine.snapshotAt_shaped
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly)
+    (position : trace.AnnotationAt count) :
+    ∃ snapshot : CandidateAnnotationSnapshot env Us position.root,
+      ∃ tail, domains.drop count = snapshot.consumed' :: tail ∧
+        snapshot.Δ.toCtx =
+          (domains.take count).reverse ++ Δ.toCtx ∧
+        snapshot.Δ.fvars.map Expr.fvar =
+          (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar ∧
+        VLCtx.FVLift' snapshot.Δ terminalΔ 0
+          (.skipN .refl (domains.drop count).length) 0 ∧
+        snapshot.Δ.FVarLamOnly := by
+  induction position generalizing Δ terminalΔ domains with
+  | zero annotationMatch =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
+          obtain ⟨snapshot, snapshotContext, snapshotEq⟩ :=
+            head annotationMatch
+          subst snapshotContext
+          refine ⟨snapshot, domains, ?_, ?_, ?_, ?_, initialShape⟩
+          · simp only [List.drop_zero, snapshotEq]
+          · rfl
+          · rfl
+          · have combined :=
+              (VLCtx.FVLift'.skip_fvar _ _
+                VLCtx.FVLift'.refl).comp tail.terminalLift
+            simpa only [List.drop_zero, List.length_cons,
+              Lift.comp_skipN, Lift.comp, Lift.skipN_skipN,
+              VLocalDecl.depth, Nat.one_add] using combined
+  | succ bodyCandidate position ih =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
+          obtain ⟨snapshot, suffix, suffixEq, contextEq, fvarsEq,
+              terminalLift, shape⟩ :=
+            ih tail (.cons initialShape)
+          refine ⟨snapshot, suffix, ?_, ?_, ?_, ?_, shape⟩
+          · simpa only [List.drop_succ_cons,
+              AddInductive.CandidateExprTrace.AnnotationAt.root] using
+              suffixEq
+          · simpa only [List.take_succ_cons, List.reverse_cons,
+              List.singleton_append, List.append_assoc, VLCtx.toCtx,
+              AddInductive.CandidateExprTrace.AnnotationAt.root] using
+              contextEq
+          · simpa [VLCtx.fvars, List.append_assoc,
+              AddInductive.Context.freshExpr,
+              AddInductive.CandidateExprTrace.parameterList,
+              AddInductive.CandidateExprTrace.AnnotationAt.root] using
+              fvarsEq
+          · simpa only [List.drop_succ_cons,
+              AddInductive.CandidateExprTrace.AnnotationAt.root] using
+              terminalLift
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.prefixContext_shaped' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.prefixContext_shaped
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt_shaped' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.snapshotAt_shaped
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt' depends on axioms: [propext, Classical.choice, Quot.sound]
