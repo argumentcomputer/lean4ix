@@ -3051,7 +3051,8 @@ def NormalizationCandidateExecution.CandidateObserversComplete
           { candidateContext with env := familyEnv, lctx := {} } types
 
 /-- Successful pointwise candidate observers, source closure, stored-spine
-evidence, and the ordinary validation/declaration/constructor equations
+and parameter-prefix evidence, and the ordinary
+validation/declaration/constructor equations
 reconstruct the complete retained normalization execution.  The public
 builder obtains both structural facts from executable gates; this theorem
 remains a compatibility bridge for callers that reconstruct a run from the
@@ -3080,7 +3081,19 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
           executeCandidateFamilyList
               { candidateContext with env := familyEnv, lctx := {} }
               familyTypes.candidates = .ok families →
-            CandidateFamilyGenerationSpineList families.candidates) :
+            CandidateFamilyGenerationSpineList families.candidates)
+    (parameterSpines :
+      ∀ (familyTypes : CandidateFamilyTypeListExecution
+          { candidateContext with lctx := {} } types)
+        (families : CandidateFamilyListExecution
+          { candidateContext with env := familyEnv, lctx := {} }
+          familyTypes.candidates),
+        executeCandidateFamilyTypeList
+            { candidateContext with lctx := {} } types = .ok familyTypes →
+          executeCandidateFamilyList
+              { candidateContext with env := familyEnv, lctx := {} }
+              familyTypes.candidates = .ok families →
+            CandidateFamilyParameterSpineList nparams families.candidates) :
     ∃ execution : NormalizationCandidateExecution nparams types numNested
         isUnsafe candidateContext,
       buildNormalizationCandidateExecution nparams types numNested isUnsafe
@@ -3131,7 +3144,13 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
                 Except.ok.inj (actualFamiliesRun.symm.trans familiesRun)
               subst actualFamilies
               split
-              next _ => exact ⟨_, rfl⟩
+              next _ =>
+                split
+                next _ => exact ⟨_, rfl⟩
+                next notParameters =>
+                  exact (notParameters
+                    (parameterSpines familyTypes families familyTypesRun
+                      familiesRun).check_eq_true).elim
               next notSpines =>
                 exact (notSpines
                   (generationSpines familyTypes families familyTypesRun

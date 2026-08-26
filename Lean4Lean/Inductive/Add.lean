@@ -2337,6 +2337,67 @@ theorem CandidateFamilyGenerationSpineList.check_eq_true
       simp [CandidateFamilyGenerationSpineList.check, family,
         constructors.check_eq_true, ih]
 
+/-- Source-indexed evidence that every retained family candidate exposes the
+complete declared parameter prefix.  This is kept separate from
+`CandidateFamilyGenerationSpineList`: the latter certifies that WHNF did not
+invent the stored generation telescope, while this list pins the minimum split
+accepted by the earlier family validator. -/
+inductive CandidateFamilyParameterSpineList (nparams : Nat) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Prop where
+  | nil : CandidateFamilyParameterSpineList nparams .nil
+  | cons
+      (family : nparams ≤ candidate.familyType.type.trace.spineLength)
+      (tail : CandidateFamilyParameterSpineList nparams candidates) :
+      CandidateFamilyParameterSpineList nparams (.cons candidate candidates)
+
+/-- Executable parameter-prefix gate for an exact dependent family block. -/
+def CandidateFamilyParameterSpineList.check (nparams : Nat) :
+    {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Bool
+  | [], .nil => true
+  | _ :: _, .cons candidate candidates =>
+      decide (nparams ≤ candidate.familyType.type.trace.spineLength) &&
+        CandidateFamilyParameterSpineList.check nparams candidates
+
+/-- A successful parameter-prefix gate reconstructs its source-indexed proof. -/
+theorem CandidateFamilyParameterSpineList.of_check (nparams : Nat) :
+    (candidates : CandidateList CandidateFamily sources) →
+      CandidateFamilyParameterSpineList.check nparams candidates = true →
+        CandidateFamilyParameterSpineList nparams candidates
+  | .nil, _ => .nil
+  | .cons candidate candidates, checked => by
+      simp only [CandidateFamilyParameterSpineList.check, Bool.and_eq_true,
+        decide_eq_true_eq] at checked
+      exact .cons checked.1
+        (CandidateFamilyParameterSpineList.of_check nparams candidates checked.2)
+
+/-- Proof-carrying family parameter-prefix evidence evaluates back to its
+executable gate. -/
+theorem CandidateFamilyParameterSpineList.check_eq_true
+    (bounds : CandidateFamilyParameterSpineList nparams candidates) :
+    CandidateFamilyParameterSpineList.check nparams candidates = true := by
+  induction bounds with
+  | nil => rfl
+  | cons family tail ih =>
+      simp [CandidateFamilyParameterSpineList.check, family, ih]
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.of_check' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyParameterSpineList.of_check
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.check_eq_true' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyParameterSpineList.check_eq_true
+
 /-- Project the pre-family candidate spine from a complete dependent family
 candidate list without erasing source indices or using a parallel list. -/
 def CandidateList.familyTypes :
@@ -3021,6 +3082,8 @@ structure NormalizationCandidateExecution
     { candidateContext with env := familyEnv, lctx := {} }
     familyTypes.candidates
   generationSpines : CandidateFamilyGenerationSpineList families.candidates
+  familyParameterSpines :
+    CandidateFamilyParameterSpineList nparams families.candidates
 
 def NormalizationCandidateExecution.candidate
     (execution : NormalizationCandidateExecution nparams types numNested
@@ -3083,22 +3146,30 @@ def buildNormalizationCandidateExecutionAfterValidation
               | .ok families =>
                 if hspines : CandidateFamilyGenerationSpineList.check
                     families.candidates then
-                  .ok {
-                    validationContext
-                    stats
-                    familySourcesClosed :=
-                      FamilySourceClosedList.of_check _ hsources
-                    familyTypes
-                    familyTerminals :=
-                      CandidateFamilyTypeTerminalSortList.of_check _ hterminals
-                    familyEnv
-                    declareRun := by simpa using hdeclare
-                    declareTrace := DeclareInductiveInfoListRun.of_run (by
-                      simpa only [declareInductiveTypes] using hdeclare)
-                    constructorRun := by simpa using hconstructors
-                    families
-                    generationSpines :=
-                      CandidateFamilyGenerationSpineList.of_check _ hspines }
+                  if hparameters : CandidateFamilyParameterSpineList.check
+                      nparams families.candidates then
+                    .ok {
+                      validationContext
+                      stats
+                      familySourcesClosed :=
+                        FamilySourceClosedList.of_check _ hsources
+                      familyTypes
+                      familyTerminals :=
+                        CandidateFamilyTypeTerminalSortList.of_check _ hterminals
+                      familyEnv
+                      declareRun := by simpa using hdeclare
+                      declareTrace := DeclareInductiveInfoListRun.of_run (by
+                        simpa only [declareInductiveTypes] using hdeclare)
+                      constructorRun := by simpa using hconstructors
+                      families
+                      generationSpines :=
+                        CandidateFamilyGenerationSpineList.of_check _ hspines
+                      familyParameterSpines :=
+                        CandidateFamilyParameterSpineList.of_check nparams _
+                          hparameters }
+                  else
+                    .error (.other
+                      "normalization candidate family parameter spine is incomplete")
                 else
                   .error (.other
                     "normalization candidate generation spine is not complete")
