@@ -674,6 +674,15 @@ def CandidateContextRun.ofVContext
     CandidateContextRun candidateContext :=
   ⟨context, context_eq, state_wf, namePrefix_ne⟩
 
+/-- Casting the implementation context index does not change the retained
+verified `VContext`. -/
+theorem CandidateContextRun.cast_context_context
+    {left right : AddInductive.Context}
+    (h : left = right) (run : CandidateContextRun left) :
+    (h ▸ run).context = run.context := by
+  cases h
+  rfl
+
 /-- Construct the root certificate used by family and constructor candidates.
 Their candidate traversal deliberately resets the local context to empty. -/
 def CandidateContextRun.root
@@ -2613,6 +2622,38 @@ structure FamilyParameterIndexBoundary.Terminal
     (boundary : FamilyParameterIndexBoundary outer contextRun) : Type where
   notForall : boundary.source.isForall = false
 
+/-- A terminal index boundary is already at the reader context stored by its
+trace result.  The dependent counter rules out parameter constructors, and
+the non-Pi witness rules out an index constructor. -/
+theorem FamilyParameterIndexBoundary.Terminal.result_context_eq
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (terminal : boundary.Terminal) :
+    boundary.trace.result.context = context := by
+  have boundaryNotForall := terminal.notForall
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail => omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail => omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    simp only [Lean.Expr.isForall] at boundaryNotForall
+    contradiction
+  | terminal => rfl
+
 /-- At `i = nparams`, the retained family trace is either the next exact index
 Pi or its exact terminal continuation.  Fresh/shared-parameter constructors
 are excluded by their dependent counter premise. -/
@@ -3512,6 +3553,97 @@ def CandidateExprStagedInput.rootInput
     whnfDepth := input.whnfDepth }
 
 end TypeChecker
+
+namespace AddInductive.FamilyParameterComparisonBlockTrace
+
+/-- One exact source-order family node together with the dependent outer
+trace that follows its completed telescope.  Unlike `FamilyTelescopePosition`,
+this payload retains the continuation, so consumers can hand the terminal
+context directly to the next family without reselecting it by counters. -/
+structure FamilyContinuation (nparams : Nat)
+    (indTypes : Array InductiveType) where
+  dIdx : Nat
+  stats : InductiveStats
+  context : Context
+  source : Expr
+  telescope : FamilyTypeParameterComparisonTrace nparams stats context
+    source 0 0 context.fuel.inductiveFuel
+  nextStats : InductiveStats
+  tail : FamilyParameterComparisonBlockTrace nparams indTypes (dIdx + 1)
+    nextStats telescope.result.context
+
+/-- Forget the retained outer tail while preserving the exact dependent
+telescope position. -/
+def FamilyContinuation.position
+    (continuation : FamilyContinuation nparams indTypes) :
+    FamilyTelescopePosition nparams :=
+  ⟨continuation.stats, continuation.context, continuation.source, 0, 0,
+    continuation.context.fuel.inductiveFuel, continuation.telescope⟩
+
+/-- Select the first source family together with its exact remaining outer
+trace. -/
+def headContinuation? :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      Option (FamilyContinuation nparams indTypes)
+  | .firstFamily dIdx stats context _ _ _ _ _ _ telescope _ _ _ tail =>
+      some ⟨dIdx, stats, context, _, telescope, _, tail⟩
+  | .laterFamily dIdx stats context _ _ _ _ _ _ telescope _ _ _ _ tail =>
+      some ⟨dIdx, stats, context, _, telescope, _, tail⟩
+  | .terminal .. => none
+
+/-- Select the second source family together with the exact outer trace that
+starts after its telescope. -/
+def secondContinuation?
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) : Option (FamilyContinuation nparams indTypes) :=
+  match trace.headContinuation? with
+  | some first => first.tail.headContinuation?
+  | none => none
+
+/-- Forgetting the second continuation produces exactly the existing second
+telescope selector. -/
+theorem secondTelescope?_eq_map_position
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) :
+    trace.secondTelescope? =
+      trace.secondContinuation?.map FamilyContinuation.position := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    cases tail <;> rfl
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    cases tail <;> rfl
+  | terminal => rfl
+
+/-- A selected continuation forgets to the same selected telescope position. -/
+theorem secondContinuation?_position
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation) :
+    trace.secondTelescope? = some continuation.position := by
+  rw [trace.secondTelescope?_eq_map_position, selected]
+  rfl
+
+/-- Recover the exact dependent continuation from any successful selection of
+the second telescope. -/
+theorem exists_secondContinuation_of_secondTelescope
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {position : FamilyTelescopePosition nparams}
+    (selected : trace.secondTelescope? = some position) :
+    ∃ continuation, trace.secondContinuation? = some continuation ∧
+      continuation.position = position := by
+  rw [trace.secondTelescope?_eq_map_position] at selected
+  cases continuationEq : trace.secondContinuation? with
+  | none => simp [continuationEq] at selected
+  | some continuation =>
+      refine ⟨continuation, rfl, ?_⟩
+      rw [continuationEq] at selected
+      exact Option.some.inj selected
+
+end AddInductive.FamilyParameterComparisonBlockTrace
 
 namespace AddInductive.CandidateExprTrace
 
@@ -4930,6 +5062,65 @@ theorem FamilyParameterIndexBoundary.IndexDomainChain.endpoint_result_eq
       simpa only [FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
         boundary.result_eq
   | step run advance tail ih => exact ih.trans advance.result_eq
+
+/-- Reindex the endpoint's verified context onto the original family
+telescope result once the exact endpoint has been shown terminal. -/
+def FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (chain : boundary.IndexDomainChain)
+    (terminal : chain.endpoint.boundary.Terminal) :
+    CandidateContextRun outer.result.context := by
+  have endpointContextEq :
+      chain.endpoint.boundary.trace.result.context =
+        chain.endpoint.context := terminal.result_context_eq
+  have outerContextEq : chain.endpoint.context = outer.result.context := by
+    rw [← endpointContextEq]
+    exact congrArg
+      AddInductive.FamilyTypeParameterComparisonTrace.Result.context
+      chain.endpoint_result_eq
+  exact outerContextEq ▸ chain.endpoint.contextRun
+
+/-- The transported terminal run retains the initial semantic environment. -/
+theorem
+    FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun_venv
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (chain : boundary.IndexDomainChain)
+    (terminal : chain.endpoint.boundary.Terminal) :
+    (chain.endpointContextRun terminal).context.venv =
+      contextRun.context.venv := by
+  unfold endpointContextRun
+  rw [CandidateContextRun.cast_context_context]
+  exact chain.endpoint_venv
+
+/-- The transported terminal run retains the initial universe parameters. -/
+theorem
+    FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun_lparams
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (chain : boundary.IndexDomainChain)
+    (terminal : chain.endpoint.boundary.Terminal) :
+    (chain.endpointContextRun terminal).context.lparams =
+      contextRun.context.lparams := by
+  unfold endpointContextRun
+  rw [CandidateContextRun.cast_context_context]
+  exact chain.endpoint_lparams
 
 /-- Semantic state retained at the exact endpoint of an index chain.
 
@@ -16041,6 +16232,30 @@ info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_
 #guard_msgs in
 #print axioms
   TypeChecker.FamilyParameterIndexBoundary.annotationTranslation_or_terminal
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.exists_secondContinuation_of_secondTelescope' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyParameterComparisonBlockTrace.exists_secondContinuation_of_secondTelescope
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateExprRun.exists_ofCandidate' depends on axioms: [propext,

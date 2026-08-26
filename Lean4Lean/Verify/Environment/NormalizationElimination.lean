@@ -3920,6 +3920,56 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
     currentRun.context.vlctx.toCtx parameterRoot
     (boundary.parameters.map Prod.snd) boundary.source'
 
+/-- The exact second family selected from the outer source traversal, retaining
+the dependent tail that begins after its complete telescope. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.ValidationContinuation
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic) where
+  continuation :
+    AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+      source.nparams
+      (firstSource :: secondSource :: remainingSources).toArray
+  selected :
+    (produced.execution.eliminationExecution.normalization
+      |>.familyParameterComparisonTrace
+        (produced.execution.normalization_run produced.producedExecution)
+        produced.kernelSources_nonempty).secondContinuation? =
+      some continuation
+  position_eq : continuation.position = staging.position
+
+/-- Recover the second family's dependent source-order continuation from the
+position already owned by the joint producer/validator staging. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.validationContinuation
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic) :
+    Nonempty staging.ValidationContinuation := by
+  obtain ⟨continuation, selected, positionEq⟩ :=
+    AddInductive.FamilyParameterComparisonBlockTrace.exists_secondContinuation_of_secondTelescope
+      staging.position_eq
+  exact ⟨⟨continuation, selected, positionEq⟩⟩
+
 /-- Select the joint second-family annotation/validator staging directly from
 the retained producer and semantic hierarchy. -/
 theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
@@ -5262,6 +5312,238 @@ structure
   alignment : chain.EndpointAlignment env Us
     staging.annotation.terminalRun.context.vlctx prefixes.firstParameterΔ
 
+/-- A completed index chain whose retained endpoint is also the validator's
+exact terminal node.  This is the source-order handoff consumed by the next
+family. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    extends staging.IndexDomainCompletion raw where
+  terminal : toIndexDomainCompletion.chain.endpoint.boundary.Terminal
+
+/-- The exact verified context at the second family validator's continuation
+point. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.terminalRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw) :
+    TypeChecker.CandidateContextRun staging.position.trace.result.context :=
+  completion.chain.endpointContextRun completion.terminal
+
+/-- The exact continuation context retains the semantic environment. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.terminal_venv
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw) :
+    completion.terminalRun.context.venv = env := by
+  exact (completion.chain.endpointContextRun_venv completion.terminal).trans
+    staging.current_venv
+
+/-- The exact continuation context retains the semantic universe parameters. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.terminal_lparams
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw) :
+    completion.terminalRun.context.lparams = Us := by
+  exact
+    (completion.chain.endpointContextRun_lparams completion.terminal).trans
+      staging.current_lparams
+
+/-- The endpoint alignment is retained after reindexing onto the outer
+family continuation context. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.current_reference
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw) :
+    VLCtx.IsDefEq env Us.length completion.terminalRun.context.vlctx
+      completion.alignment.reference := by
+  have terminalContextEq : completion.terminalRun.context =
+      completion.chain.endpoint.contextRun.context := by
+    unfold terminalRun TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun
+    apply TypeChecker.CandidateContextRun.cast_context_context
+  rw [terminalContextEq]
+  exact completion.alignment.current_reference
+
+/-- Reindex the terminal validator run onto the exact context at which the
+retained outer source-order tail begins. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuationRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (validation : staging.ValidationContinuation) :
+    TypeChecker.CandidateContextRun
+      validation.continuation.telescope.result.context := by
+  have resultContextEq : staging.position.trace.result.context =
+      validation.continuation.telescope.result.context :=
+    congrArg (fun position => position.trace.result.context)
+      validation.position_eq.symm
+  exact resultContextEq ▸ completion.terminalRun
+
+/-- Transporting the run onto the outer tail changes only its dependent
+context index. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuationRun_context
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (validation : staging.ValidationContinuation) :
+    (completion.continuationRun validation).context =
+      completion.terminalRun.context := by
+  unfold continuationRun
+  apply TypeChecker.CandidateContextRun.cast_context_context
+
+/-- The source-order continuation retains the semantic environment. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuation_venv
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (validation : staging.ValidationContinuation) :
+    (completion.continuationRun validation).context.venv = env := by
+  rw [completion.continuationRun_context validation]
+  exact completion.terminal_venv
+
+/-- The source-order continuation retains the semantic universe parameters. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuation_lparams
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (validation : staging.ValidationContinuation) :
+    (completion.continuationRun validation).context.lparams = Us := by
+  rw [completion.continuationRun_context validation]
+  exact completion.terminal_lparams
+
+/-- The aligned Theory endpoint is preserved at the exact next-family
+boundary selected from the outer validation trace. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuation_reference
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (validation : staging.ValidationContinuation) :
+    VLCtx.IsDefEq env Us.length
+      (completion.continuationRun validation).context.vlctx
+      completion.alignment.reference := by
+  rw [completion.continuationRun_context validation]
+  exact completion.current_reference
+
 /-- Consume the complete second-family producer index suffix through the
 validator's retained trace.  The initial alpha cursor is recovered from the
 shared parameter telescope and then maintained by `indexDomainChain`. -/
@@ -5465,6 +5747,30 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.validationContinuation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.validationContinuation
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuation_reference' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.continuation_reference
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq' depends on axioms: [propext,
