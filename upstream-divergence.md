@@ -1581,6 +1581,39 @@ to the replacement.
   stronger generic proof) and reconciliation preserves the typed binary
   contract, readiness transaction, and exact trust pins.
 
+## D030 — direct Nat.pow certificate completes the elementary recurrence spine
+
+- **Status:** implemented as the fifth semantic UP6 slice; upstream-derived
+  specialization with comparison, bitwise, mod/div, and wrapper families
+  still open.
+- **Owner:** Argument Computer Corporation; retain through final primitive
+  dispatch and review with the complete V4 disposition.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its Nat.pow
+  recognizer, binary-step conservation specialization, and live dispatch; no
+  whole-PR merge.
+- **Executable delta:** `checkNatPowPrimitive` extracts the Nat.pow branch and
+  closes its base-one and successor equations with `Expr.lam0`; later
+  primitive branches retain their existing helper shape until their bounded
+  slices land.
+- **Verification delta:** the typed recognizer translates one as
+  `Nat.succ Nat.zero` and types the recursive multiplication with the retained
+  Nat.mul reflection. `of_pow_equations` reuses the generic binary recurrence
+  at base value one, and `addNatPowDef` installs the result through the fork's
+  readiness-aware `AddDef` transaction. Live safe dispatch no longer reaches
+  the generic recognizer theorem for Nat.pow.
+- **Ix impact:** the complete elementary arithmetic chain now has narrow,
+  compositional declaration certificates through exponentiation. An Ix
+  transport can select these roots without importing the later condition or
+  well-founded-recursion certificate machinery.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all five direct elementary
+  Nat roots are named by live dispatch, exclude `checkPrimitiveDef.WF`, and
+  each reach exactly the same six inherited sorry-carrying dependencies. The
+  source frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the retained Nat.mul
+  dependency, readiness transaction, and exact trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

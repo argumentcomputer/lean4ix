@@ -315,6 +315,76 @@ theorem addDefinition.WF_safe_natMul
       (wf.tr (safety := safety)).wf haddC' hname' hadd' hbaseWF huvars
       hty' hz' hs'
 
+/-- Fully proved safe `Nat.pow` declaration path. Its recurrence step uses
+the retained typed `Nat.mul` reflection installed by the preceding slice. -/
+theorem addDefinition.WF_safe_natPow
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.pow)
+    (hsafety : v.safety = .safe) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  unfold addDefinition
+  simp [hsafety]
+  refine (checkSafeNatPowDefinition.WF wf v hname hsafety).run wf |>.bind
+    fun _ hchecked => ?_
+  obtain ⟨ci', htrSafe, hciSafe, hfresh, hlevels, hmulC,
+    hty, hz, hs⟩ := hchecked
+  have hle : v.safety ≤ .safe := DefinitionSafety.le_safe
+  have hmono := wf.mono hle
+  have htr : TrDefVal v.safety (ves.venv v.safety) (.defnInfo v) ci' := by
+    refine ⟨⟨⟨?_, htrSafe.1.1.2.1, htrSafe.1.1.2.2.mono hmono⟩,
+      htrSafe.1.2⟩, htrSafe.2.mono hmono⟩
+    rw [ConstantInfo.defnInfo_safety]
+    exact DefinitionSafety.le_rfl
+  have ⟨ves', hwf, hstep⟩ := addDef.WF wf v ci' v.safety
+    (fun _ h => by simpa [ConstantInfo.defnInfo_safety] using h)
+    htr (hciSafe.mono hmono) hfresh ?_ ?_
+  · refine .pure ⟨ves', hwf, ?_, ?_⟩
+    · intro safety
+      exact (hstep safety).le
+    · exact ⟨ci', hstep⟩
+  · intro _
+    exact ⟨by rw [ConstantInfo.defnInfo_safety, hsafety], hlevels⟩
+  · intro safety base hvisible hadd
+    have hsafetyLe : safety ≤ v.safety := by
+      simpa [ConstantInfo.defnInfo_safety] using hvisible
+    have hmodelMono : ves.venv .safe ≤ ves.venv safety :=
+      hmono.trans (wf.mono hsafetyLe)
+    have hci : ci'.WF (ves.venv safety) :=
+      hciSafe.mono hmodelMono
+    have hbaseWF : (base.addDefEq ci'.toDefEq).WF := by
+      obtain ⟨decls, henvWF⟩ := (wf.tr (safety := safety)).wf
+      have haddCi : (ves.venv safety).addConst ci'.name ci'.toVConstant =
+          some base := by
+        have haddCi := hadd
+        have hvname : v.name = ci'.name := htrSafe.1.2
+        rw [hvname] at haddCi
+        exact haddCi
+      exact ⟨.def ci' :: decls, .decl (.def hci haddCi) henvWF⟩
+    have hname' : ci'.name = ``Nat.pow :=
+      htrSafe.1.2.symm.trans hname
+    have huvars : ci'.uvars = 0 := by
+      calc
+        ci'.uvars = v.levelParams.length := htrSafe.1.1.2.1.symm
+        _ = 0 := by simp [hlevels]
+    have hadd' : (ves.venv safety).addConst ``Nat.pow ci'.toVConstant =
+        some base := by
+      simpa [hname] using hadd
+    have hty' := hty.mono hmodelMono
+    have hz' := hz.mono hmodelMono
+    have hs' := hs.mono hmodelMono
+    rw [hlevels] at hty' hz' hs'
+    have hmulC' : (ves.venv safety).contains ``Nat.mul := by
+      obtain ⟨mulCi, hmulLookup⟩ := hmulC
+      exact ⟨mulCi, hmodelMono.constants hmulLookup⟩
+    exact (wf.hasPrimitives (safety := safety)).addNatPowDef
+      (wf.tr (safety := safety)).wf hmulC' hname' hadd' hbaseWF huvars
+      hty' hz' hs'
+
 theorem addDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) :
     (addDefinition env v).WF fun env' =>
@@ -329,6 +399,8 @@ theorem addDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
   · exact addDefinition.WF_safe_natSub wf v hnatSub.2 hnatSub.1
   by_cases hnatMul : v.safety = .safe ∧ v.name = ``Nat.mul
   · exact addDefinition.WF_safe_natMul wf v hnatMul.2 hnatMul.1
+  by_cases hnatPow : v.safety = .safe ∧ v.name = ``Nat.pow
+  · exact addDefinition.WF_safe_natPow wf v hnatPow.2 hnatPow.1
   unfold addDefinition; split
   · refine checkConstantVal.WF wf (.defnInfo v) false DefinitionSafety.unsafe_le
       |>.run wf |>.bind fun _ ⟨ci0, htr, hwfc, hn, hnonprim⟩ => ?_

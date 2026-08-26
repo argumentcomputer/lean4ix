@@ -317,6 +317,24 @@ def checkNatMulPrimitive (env : Environment) (v : DefinitionVal)
   unless ← defeq1 (mul x zero) zero do fail
   unless ← defeq2 (mul y (succ x)) (add (mul y x) y) do fail
 
+/-- Validate the closed type and defining equations for the elementary
+`Nat.pow` primitive. -/
+def checkNatPowPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat.mul && v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  let pow := mkApp2 v.value
+  let mul := mkApp2 q(Nat.mul)
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let one := succ zero
+  let x := .bvar 0
+  let y := .bvar 1
+  let defeq1 a b := isDefEq (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  let defeq2 a b := defeq1 (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  unless ← defeq1 (pow x zero) one do fail
+  unless ← defeq2 (pow y (succ x)) (mul (pow y x) y) do fail
+
 def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
@@ -345,12 +363,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.mul =>
     checkNatMulPrimitive env v fail
   | ``Nat.pow =>
-    unless env.contains ``Nat.mul && v.levelParams.isEmpty do fail
-    -- pow : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let pow := mkApp2 v.value
-    unless ← defeq1 (pow x zero) one do fail
-    unless ← defeq2 (pow y (succ x)) (mul (pow y x) y) do fail
+    checkNatPowPrimitive env v fail
   | ``Nat.mod =>
     unless env.contains ``Nat.sub && env.contains ``Bool && v.levelParams.isEmpty do fail
     -- mod : Nat → Nat → Nat
