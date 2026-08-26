@@ -54,6 +54,7 @@ run_cmd do
   let modRoot := ``Lean4Lean.addDefinition.WF_safe_natMod
   let divRoot := ``Lean4Lean.addDefinition.WF_safe_natDiv
   let gcdRoot := ``Lean4Lean.addDefinition.WF_safe_natGcd
+  let bitwiseRoot := ``Lean4Lean.addDefinition.WF_safe_natBitwise
   let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
@@ -69,6 +70,7 @@ run_cmd do
   let modClosure := dependencyClosure env [modRoot] {}
   let divClosure := dependencyClosure env [divRoot] {}
   let gcdClosure := dependencyClosure env [gcdRoot] {}
+  let bitwiseClosure := dependencyClosure env [bitwiseRoot] {}
   if closure.contains genericBoundary then
     throwError "the direct Nat.add declaration certificate regressed through checkPrimitiveDef.WF"
   if predClosure.contains genericBoundary then
@@ -97,6 +99,8 @@ run_cmd do
     throwError "the direct Nat.div declaration certificate regressed through checkPrimitiveDef.WF"
   if gcdClosure.contains genericBoundary then
     throwError "the direct Nat.gcd declaration certificate regressed through checkPrimitiveDef.WF"
+  if bitwiseClosure.contains genericBoundary then
+    throwError "the direct Nat.bitwise declaration certificate regressed through checkPrimitiveDef.WF"
   let some liveInfo := env.find? ``Lean4Lean.addDefinition.WF
     | throwError "addDefinition.WF is missing"
   unless (directConstants liveInfo).contains root do
@@ -127,6 +131,8 @@ run_cmd do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.div certificate"
   unless (directConstants liveInfo).contains gcdRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.gcd certificate"
+  unless (directConstants liveInfo).contains bitwiseRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the Nat.bitwise certificate"
   let sorryCarriers := env.constants.toList.foldl (init := #[]) fun found (name, info) =>
     if closure.contains name && (directConstants info).contains ``sorryAx then
       found.push name
@@ -311,4 +317,18 @@ run_cmd do
   let gcdRemoved := expectedSorryCarriers.filter (!gcdObservedSet.contains ·)
   unless gcdAdded.isEmpty && gcdRemoved.isEmpty do
     throwError m!"Nat.gcd direct-certificate sorry closure changed; added: {gcdAdded}; removed: {gcdRemoved}"
-  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Char.ofNat, String.ofList, Nat.beq, Nat.ble, Nat.mod, Nat.div, and Nat.gcd direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  let bitwiseSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if bitwiseClosure.contains name &&
+        (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let bitwiseObservedSet : Lean.NameSet :=
+    bitwiseSorryCarriers.foldl (·.insert ·) {}
+  let bitwiseAdded := bitwiseSorryCarriers.filter (!expectedSet.contains ·)
+  let bitwiseRemoved :=
+    expectedSorryCarriers.filter (!bitwiseObservedSet.contains ·)
+  unless bitwiseAdded.isEmpty && bitwiseRemoved.isEmpty do
+    throwError m!"Nat.bitwise direct-certificate sorry closure changed; added: {bitwiseAdded}; removed: {bitwiseRemoved}"
+  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Char.ofNat, String.ofList, Nat.beq, Nat.ble, Nat.mod, Nat.div, Nat.gcd, and Nat.bitwise direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"

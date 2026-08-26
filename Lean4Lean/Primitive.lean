@@ -191,6 +191,21 @@ def Condition.natLEDecideFn : Expr :=
     (mkApp2 Condition.natLE.prop (.bvar 1) (.bvar 0))
     (mkApp2 Condition.natLE.dec (.bvar 1) (.bvar 0)) q(true) q(false)
 
+def Condition.natEqReflectProof : Expr :=
+  q(fun n m {q : Prop} (H : _ → _ → q) =>
+    H (@Nat.eq_of_beq_eq_true n m) (@Nat.ne_of_beq_eq_false n m))
+
+def Condition.natEqReflectedFn : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| mkApp3 Reflection.defn₂.toDec
+    (mkApp2 Condition.natEq.prop (.bvar 1) (.bvar 0))
+    (mkApp2 q(Nat.beq) (.bvar 1) (.bvar 0))
+    (mkApp2 Condition.natEqReflectProof (.bvar 1) (.bvar 0))
+
+def Condition.natEqDecideFn : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| mkApp5 q(@_root_.ite.{1}) q(Bool)
+    (mkApp2 Condition.natEq.prop (.bvar 1) (.bvar 0))
+    (mkApp2 Condition.natEq.dec (.bvar 1) (.bvar 0)) q(true) q(false)
+
 /-- Expressions whose translations are retained by the verified Nat-≤
 primitive-condition checker. The ordinary condition checker validates their
 types or equations; this explicit pass exposes the translations to the
@@ -242,6 +257,38 @@ def Condition.natLEEvidenceExpressions : List Expr :=
     Condition.natLEReflectedFn, Condition.natLEDecideFn,
     q(Nat → Nat → Bool), q(Nat.ble), Condition.natLEReflectProof]
 
+def Condition.natEqEvidenceExpressions : List Expr :=
+  let r := Reflection.defn₂
+  let iteTy := .arrow q(Prop) <| .arrow q(Bool) <|
+    .arrow (mkApp2 r.type (.bvar 1) (.bvar 0))
+      q(∀ α : Type, α → α → α)
+  let trueL := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+      mkApp3 r.ite (.bvar 1) q(true) (.bvar 0)
+  let trueR := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(true)) <|
+      .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 1
+  let falseL := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+      mkApp3 r.ite (.bvar 1) q(false) (.bvar 0)
+  let falseR := .lam0 q(Prop) <|
+    .lam0 (mkApp2 r.type (.bvar 0) q(false)) <|
+      .lam0 q(Type) <| .lam0 (.bvar 0) <| .lam0 (.bvar 1) <| .bvar 0
+  [Condition.natEq.dec, Condition.natEq.prop, q(Nat → Nat → Prop),
+    r.type, q(Prop → Bool → Prop), r.ite, iteTy,
+    trueL, trueR, falseL, falseR,
+    Condition.natEqReflectedFn, Condition.natEqDecideFn,
+    q(Nat → Nat → Bool), q(Nat.beq), Condition.natEqReflectProof]
+
+def Condition.boolEvidenceExpressions : List Expr :=
+  let ite := Condition.bool.boolNatITE
+  [Condition.bool.dec, Condition.bool.prop, q(Bool → Prop),
+    ite, q(Bool → Nat → Nat → Nat),
+    mkApp ite q(true),
+    .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 1,
+    mkApp ite q(false),
+    .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 0]
+
 def checkExprTypes : List Expr → M Unit
   | [] => pure ()
   | e :: es => do
@@ -252,6 +299,16 @@ def Condition.natLE.checkForPrimitive
     (fail : ∀ {α}, M α) : M Unit := do
   checkExprTypes Condition.natLEEvidenceExpressions
   Condition.natLE.check fail (ite := true) (dite := true)
+
+def Condition.natEq.checkForPrimitive
+    (fail : ∀ {α}, M α) : M Unit := do
+  checkExprTypes Condition.natEqEvidenceExpressions
+  Condition.natEq.check fail (ite := true)
+
+def Condition.bool.checkForPrimitive
+    (fail : ∀ {α}, M α) : M Unit := do
+  checkExprTypes Condition.boolEvidenceExpressions
+  Condition.bool.check fail (ite := true)
 
 protected def Condition.ite (cond : Condition) (α : Expr) (args : Array Expr) (t e : Expr) : Expr :=
   mkApp5 q(@ite.{1}) α (mkAppN cond.prop args) (mkAppN cond.dec args) t e
@@ -601,6 +658,75 @@ def natWellFoundedEquation (e : Expr) : Expr → Option Expr
       if e' == lhs.getAppFn then some e else none
   | _ => none
 
+/-- The closed branch equation checked for a candidate implementation of
+`Nat.bitwise`. -/
+def natBitwiseEquation (bitwise : Expr) : Expr :=
+  let f := .bvar 2
+  let n := .bvar 1
+  let m := .bvar 0
+  let zero := q(Nat.zero)
+  let one := mkApp q(Nat.succ) zero
+  let two := mkApp q(Nat.succ) one
+  let add := mkApp2 q(Nat.add)
+  let mod := mkApp2 q(Nat.mod)
+  let div := mkApp2 q(Nat.div)
+  let bitwise := mkApp3 bitwise
+  let c := Condition.natEq
+  let bc := Condition.bool
+  let body :=
+    c.ite q(Nat) #[n, zero]
+      (bc.ite q(Nat) #[mkApp2 f q(false) q(true)] m zero) <|
+    c.ite q(Nat) #[m, zero]
+      (bc.ite q(Nat) #[mkApp2 f q(true) q(false)] n zero) <|
+    let n' := div n two
+    let m' := div m two
+    let b₁ := c.decide #[mod n two, one]
+    let b₂ := c.decide #[mod m two, one]
+    let r := bitwise f n' m'
+    bc.ite q(Nat) #[mkApp2 f b₁ b₂]
+      (add (add r r) one) (add r r)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) body
+
+def natBitwiseZeroEquation (equation : Expr) : Expr × Expr :=
+  let f := .bvar 1
+  let b := .bvar 0
+  let zero := q(Nat.zero)
+  let close body := .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) body
+  (close <| mkApp3 equation f zero b,
+    close <| mkApp3 Condition.bool.boolNatITE
+      (mkApp2 f q(false) q(true)) b zero)
+
+def natBitwiseZeroRightEquation (equation : Expr) : Expr × Expr :=
+  let f := .bvar 1
+  let zero := q(Nat.zero)
+  let a := mkApp q(Nat.succ) (.bvar 0)
+  let close body := .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) body
+  (close <| mkApp3 equation f a zero,
+    close <| mkApp3 Condition.bool.boolNatITE
+      (mkApp2 f q(true) q(false)) a zero)
+
+def natBitwiseSuccEquation (equation bitwise : Expr) : Expr × Expr :=
+  let f := .bvar 2
+  let a := mkApp q(Nat.succ) (.bvar 1)
+  let b := mkApp q(Nat.succ) (.bvar 0)
+  let zero := q(Nat.zero)
+  let one := mkApp q(Nat.succ) zero
+  let two := mkApp q(Nat.succ) one
+  let add := mkApp2 q(Nat.add)
+  let mod := mkApp2 q(Nat.mod)
+  let div := mkApp2 q(Nat.div)
+  let c := Condition.natEq
+  let n' := div a two
+  let m' := div b two
+  let b₁ := c.decide #[mod a two, one]
+  let b₂ := c.decide #[mod b two, one]
+  let r := mkApp3 bitwise f n' m'
+  let close body := .lam0 q(Bool → Bool → Bool) <|
+    .lam0 q(Nat) <| .lam0 q(Nat) body
+  (close <| mkApp3 equation f a b,
+    close <| mkApp3 Condition.bool.boolNatITE (mkApp2 f b₁ b₂)
+      (add (add r r) one) (add r r))
+
 /-- Transactionally discover a compiled fixpoint and then independently
 check every closed equation retained in its certificate. -/
 def unfoldNatWellFoundedCert (e : Expr) (fvs : Array Expr)
@@ -625,6 +751,18 @@ def unfoldNatWellFoundedNat2Cert (e eq_def : Expr)
   let cert ← withLocalDecl `m .default q(Nat) fun m =>
     withLocalDecl `n .default q(Nat) fun n =>
       M.sandbox (unfoldNatWellFoundedCore e #[m, n] eq_def fail)
+  unless cert.equation == equation do
+    throw <| .other "invalid well-founded recursion equation"
+  checkNatWellFoundedCertificate cert
+  return cert
+
+def unfoldNatWellFoundedBoolNat2Cert (e eq_def : Expr)
+    (fail : ∀ {α}, M α) : M NatWellFoundedCoreResult := do
+  let some equation := natWellFoundedEquation e eq_def | fail
+  let cert ← withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+    withLocalDecl `n .default q(Nat) fun n =>
+      withLocalDecl `m .default q(Nat) fun m =>
+        M.sandbox (unfoldNatWellFoundedCore e #[f, n, m] eq_def fail)
   unless cert.equation == equation do
     throw <| .other "invalid well-founded recursion equation"
   checkNatWellFoundedCertificate cert
@@ -807,6 +945,289 @@ def checkNatGcdFixCertificate (core : NatWellFoundedCoreResult)
   checkNatWellFoundedEquation cert.succLhs cert.succRhs
   return cert
 
+/-- Bitwise specialization of a generic well-founded certificate. The
+compiler-selected state representation is retained through `core.stateFn`;
+the accepted boundary does not require `PSigma` (or any other pair type). -/
+structure NatBitwiseFixCertificate where
+  core : NatWellFoundedCoreResult
+  callFn : Expr
+  topLhs : Expr
+  topRhs : Expr
+  topProof : Expr
+  zeroLhs : Expr
+  zeroRhs : Expr
+  zeroProofType : Expr
+  zeroRightLhs : Expr
+  zeroRightRhs : Expr
+  zeroRightProofType : Expr
+  succLhs : Expr
+  succRhs : Expr
+  succProofType : Expr
+  succProof : Expr
+
+def NatBitwiseFixCertificate.stateExpr (r : NatBitwiseFixCertificate)
+    (f a b : Expr) : Expr :=
+  mkAppN r.core.stateFn #[f, a, b]
+
+private def natBitwiseCall (bitwise : Expr) : Expr :=
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    mkApp3 bitwise (.bvar 2) (.bvar 1) (.bvar 0)
+
+def NatBitwiseFixCertificate.expectedTopLhs
+    (_r : NatBitwiseFixCertificate) (bitwise : Expr) : Expr :=
+  natBitwiseCall bitwise
+
+def NatBitwiseFixCertificate.expectedTopRhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let succ := mkApp q(Nat.succ)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    mkAppN r.callFn #[.bvar 2,
+      mkApp q(WellFounded.Nat.eager) (succ (.bvar 1)),
+      .bvar 1, .bvar 0, r.topProof]
+
+def NatBitwiseFixCertificate.expectedZeroLhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.zeroProofType <| mkAppN r.callFn
+      #[.bvar 3, succ (.bvar 2), zero, .bvar 1, .bvar 0]
+
+def NatBitwiseFixCertificate.expectedZeroRhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.zeroProofType <| mkApp3 Condition.bool.boolNatITE
+      (mkApp2 (.bvar 3) q(false) q(true)) (.bvar 1) zero
+
+def NatBitwiseFixCertificate.expectedZeroRightLhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.zeroRightProofType <| mkAppN r.callFn
+      #[.bvar 3, succ (.bvar 2), succ (.bvar 1), zero, .bvar 0]
+
+def NatBitwiseFixCertificate.expectedZeroRightRhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.zeroRightProofType <| mkApp3 Condition.bool.boolNatITE
+      (mkApp2 (.bvar 3) q(true) q(false)) (succ (.bvar 1)) zero
+
+def NatBitwiseFixCertificate.expectedSuccLhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let succ := mkApp q(Nat.succ)
+  let sa := succ (.bvar 2)
+  let sb := succ (.bvar 1)
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 q(Nat) <| .lam0 r.succProofType <| mkAppN r.callFn
+      #[.bvar 4, succ (.bvar 3), sa, sb, .bvar 0]
+
+def NatBitwiseFixCertificate.expectedSuccRhs
+    (r : NatBitwiseFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let one := succ zero
+  let two := succ one
+  let add := mkApp2 q(Nat.add)
+  let div := mkApp2 q(Nat.div)
+  let mod := mkApp2 q(Nat.mod)
+  let sa := succ (.bvar 2)
+  let sb := succ (.bvar 1)
+  let bit₁ := Condition.natEq.decide #[mod sa two, one]
+  let bit₂ := Condition.natEq.decide #[mod sb two, one]
+  let recursiveCall := mkAppN r.callFn #[.bvar 4, .bvar 3,
+    div sa two, div sb two, r.succProof]
+  .lam0 q(Bool → Bool → Bool) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 q(Nat) <| .lam0 r.succProofType <|
+      mkApp3 Condition.bool.boolNatITE (mkApp2 (.bvar 4) bit₁ bit₂)
+        (add (add recursiveCall recursiveCall) one)
+        (add recursiveCall recursiveCall)
+
+def NatBitwiseFixCertificate.shape
+    (r : NatBitwiseFixCertificate) (bitwise : Expr) : Bool :=
+  exprShapeEq r.topLhs (r.expectedTopLhs bitwise) &&
+  exprShapeEq r.topRhs r.expectedTopRhs &&
+  exprShapeEq r.zeroLhs r.expectedZeroLhs &&
+  exprShapeEq r.zeroRhs r.expectedZeroRhs &&
+  exprShapeEq r.zeroRightLhs r.expectedZeroRightLhs &&
+  exprShapeEq r.zeroRightRhs r.expectedZeroRightRhs &&
+  exprShapeEq r.succLhs r.expectedSuccLhs &&
+  exprShapeEq r.succRhs r.expectedSuccRhs &&
+  exprLooseBVarRange r.callFn == 0 &&
+  !r.callFn.hasFVar && !r.callFn.hasMVar
+
+def specializeNatBitwiseFixCertificate (core : NatWellFoundedCoreResult)
+    (_fail : ∀ {α}, M α) : M NatBitwiseFixCertificate := do
+  let reject {α} (message : String) : M α :=
+    throw <| .other s!"invalid Nat.bitwise specialization: {message}"
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let stateExpr f a b := mkAppN core.stateFn #[f, a, b]
+  let callFn ← withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+    withLocalDecl `fuel .default q(Nat) fun fuel =>
+      withLocalDecl `a .default q(Nat) fun a =>
+        withLocalDecl `b .default q(Nat) fun b => do
+          let go := mkAppN core.goFn #[f, a, b]
+          let lhsFn := mkApp2 go fuel (stateExpr f a b)
+          let .forallE _ hpTy _ _ ← inferType lhsFn
+            | reject "generic call has no proof binder"
+          withLocalDecl `hp .default hpTy fun hp =>
+            return (← getLCtx).mkLambda #[f, fuel, a, b, hp]
+              (mkApp lhsFn hp)
+  let topRhs ← withLambda core.callRhs
+      (reject "top equation lacks its operation lambda") fun f body =>
+    withLambda body
+        (reject "top equation lacks its first Nat lambda") fun n body =>
+      withLambda body
+          (reject "top equation lacks its second Nat lambda") fun m body => do
+        let args := body.getAppArgs
+        unless body.getAppFn == core.fixGo && args.size == 7 do
+          reject "top equation does not call the retained fixpoint"
+        let .app eager _ := args[4]!
+          | reject "top equation has malformed eager fuel"
+        return (← getLCtx).mkLambda #[f, n, m]
+          (mkAppN callFn #[f, mkApp eager (succ n), n, m, args[6]!])
+  let .lam _ _ (.lam _ _ (.lam _ _ topBody _) _) _ := topRhs
+    | reject "closed top equation has the wrong shape"
+  let topProof := topBody.getAppArgs[4]!
+  let (zeroLhs, zeroRhs) ←
+    withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+      withLocalDecl `fuel .default q(Nat) fun fuel =>
+        withLocalDecl `b .default q(Nat) fun b => do
+          let lhsFn := mkAppN callFn #[f, succ fuel, zero, b]
+          let .forallE _ hpTy _ _ ← inferType lhsFn
+            | reject "zero call has no proof binder"
+          withLocalDecl `hp .default hpTy fun hp =>
+            return ((← getLCtx).mkLambda #[f, fuel, b, hp] (mkApp lhsFn hp),
+              (← getLCtx).mkLambda #[f, fuel, b, hp] <|
+                mkApp3 Condition.bool.boolNatITE
+                  (mkApp2 f q(false) q(true)) b zero)
+  let (zeroRightLhs, zeroRightRhs) ←
+    withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+      withLocalDecl `fuel .default q(Nat) fun fuel =>
+        withLocalDecl `a .default q(Nat) fun a => do
+          let sa := succ a
+          let lhsFn := mkAppN callFn #[f, succ fuel, sa, zero]
+          let .forallE _ hpTy _ _ ← inferType lhsFn
+            | reject "right-zero call has no proof binder"
+          withLocalDecl `hp .default hpTy fun hp =>
+            return ((← getLCtx).mkLambda #[f, fuel, a, hp] (mkApp lhsFn hp),
+              (← getLCtx).mkLambda #[f, fuel, a, hp] <|
+                mkApp3 Condition.bool.boolNatITE
+                  (mkApp2 f q(true) q(false)) sa zero)
+  let (succLhs, succRhs) ←
+    withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+      withLocalDecl `fuel .default q(Nat) fun fuel =>
+        withLocalDecl `a .default q(Nat) fun a =>
+          withLocalDecl `b .default q(Nat) fun b => do
+            let sa := succ a
+            let sb := succ b
+            let state := stateExpr f sa sb
+            let lhsFn := mkAppN callFn #[f, succ fuel, sa, sb]
+            let .forallE _ hpTy _ _ ← inferType lhsFn
+              | reject "successor call has no proof binder"
+            withLocalDecl `hp .default hpTy fun hp => do
+              let lhs := mkApp lhsFn hp
+              let mut rhs := mkApp2
+                (mkAppN core.specStepRhs #[f, sa, sb, fuel]) state hp
+              rhs ← whnfCore rhs
+              rhs ← unfoldDefinition rhs
+              rhs ← whnfCore rhs
+              rhs ← unfoldDefinition rhs
+              rhs ← whnfCore rhs
+              rhs ← rhs.withApp fun decCases args => do
+                let .const ``Decidable.casesOn _ := decCases
+                  | reject "first successor split is not Decidable.casesOn"
+                unless args.size == 5 do
+                  reject "first successor split has the wrong arity"
+                whnfCore (mkApp args[3]! (mkApp q(Nat.succ_ne_zero) a))
+              rhs ← whnfCore rhs
+              rhs ← unfoldDefinition rhs
+              rhs ← whnfCore rhs
+              rhs ← rhs.withApp fun decCases args => do
+                let .const ``Decidable.casesOn _ := decCases
+                  | reject "second successor split is not Decidable.casesOn"
+                unless args.size == 5 do
+                  reject "second successor split has the wrong arity"
+                whnfCore (mkApp args[3]! (mkApp q(Nat.succ_ne_zero) b))
+              rhs ← whnfCore rhs
+              rhs ← unfoldDefinition rhs
+              rhs ← whnfCore rhs
+              let some recThunk := rhs.find? fun e =>
+                  let args := e.getAppArgs
+                  args.size == 2 && e.getAppFn.isLambda &&
+                    (e.getAppFn.find? fun e' =>
+                      e'.getAppFn == core.fixGo).isSome
+                | reject "missing recursive-call thunk"
+              let recCall ← whnfCore recThunk
+              let recArgs := recCall.getAppArgs
+              unless recCall.getAppFn == core.fixGo && recArgs.size == 7 do
+                reject "recursive-call thunk does not expose the fixpoint"
+              let one := succ zero
+              let two := succ one
+              let add := mkApp2 q(Nat.add)
+              let div := mkApp2 q(Nat.div)
+              let mod := mkApp2 q(Nat.mod)
+              let recState := stateExpr f (div sa two) (div sb two)
+              unless ← isDefEq recArgs[5]! recState do
+                reject "recursive call uses the wrong packed state"
+              let recProof := recArgs[6]!
+              let bit₁ := Condition.natEq.decide #[mod sa two, one]
+              let bit₂ := Condition.natEq.decide #[mod sb two, one]
+              let recursiveCall := mkAppN callFn #[f, fuel,
+                div sa two, div sb two, recProof]
+              let canonicalRhs := mkApp3 Condition.bool.boolNatITE
+                (mkApp2 f bit₁ bit₂)
+                (add (add recursiveCall recursiveCall) one)
+                (add recursiveCall recursiveCall)
+              return ((← getLCtx).mkLambda #[f, fuel, a, b, hp] lhs,
+                (← getLCtx).mkLambda #[f, fuel, a, b, hp] canonicalRhs)
+  let .lam _ _ (.lam _ _ (.lam _ _ (.lam _ zeroProofType _ _) _) _) _ :=
+    zeroLhs
+    | reject "closed zero LHS has the wrong shape"
+  let .lam _ _ (.lam _ _ (.lam _ _
+      (.lam _ zeroRightProofType _ _) _) _) _ :=
+    zeroRightLhs | reject "closed right-zero LHS has the wrong shape"
+  let .lam _ _ (.lam _ _ (.lam _ _ (.lam _ _
+      (.lam _ succProofType _ _) _) _) _) _ :=
+    succLhs | reject "closed successor LHS has the wrong shape"
+  let some succCall := succRhs.find? fun e =>
+      e.getAppFn == callFn && e.getAppArgs.size == 5
+    | reject "closed successor RHS lacks its recursive call"
+  let succProof := succCall.getAppArgs[4]!
+  return {
+    core
+    callFn
+    topLhs := core.callLhs
+    topRhs
+    topProof
+    zeroLhs
+    zeroRhs
+    zeroProofType
+    zeroRightLhs
+    zeroRightRhs
+    zeroRightProofType
+    succLhs
+    succRhs
+    succProofType
+    succProof }
+
+def checkNatBitwiseFixCertificate (core : NatWellFoundedCoreResult)
+    (bitwise : Expr) (fail : ∀ {α}, M α) : M NatBitwiseFixCertificate := do
+  let cert ← M.sandbox (specializeNatBitwiseFixCertificate core fail)
+  unless cert.shape bitwise do
+    throw <| .other "invalid Nat.bitwise well-founded recursion certificate"
+  _ ← checkType cert.callFn
+  checkNatWellFoundedCertificate cert.core
+  checkNatWellFoundedEquation cert.topLhs cert.topRhs
+  checkNatWellFoundedEquation cert.zeroLhs cert.zeroRhs
+  checkNatWellFoundedEquation cert.zeroRightLhs cert.zeroRightRhs
+  checkNatWellFoundedEquation cert.succLhs cert.succRhs
+  return cert
+
 /-- Expose one definitional reduction step under a lambda. This preserves the
 legacy GCD zero-case acceptance check alongside the stronger certificate. -/
 def reduceNatWellFoundedLam1 (e : Expr)
@@ -818,6 +1239,32 @@ def reduceNatWellFoundedLam1 (e : Expr)
     let body ← unfoldDefinition body
     let body ← whnfCore body
     return (← getLCtx).mkLambda #[fv] body
+
+def reduceNatWellFoundedLam2 (e : Expr)
+    (fail : ∀ {α}, M α) : M Expr :=
+  withLambda e fail fun fv body => do
+    let body ← reduceNatWellFoundedLam1 body fail
+    return (← getLCtx).mkLambda #[fv] body
+
+@[irreducible] def checkNatBitwiseZero
+    (bitwise : Expr) (fail : ∀ {α}, M α) : M Unit := do
+  let (lhs, rhs) := natBitwiseZeroEquation bitwise
+  let lhs ← reduceNatWellFoundedLam2 lhs fail
+  unless ← isDefEq lhs rhs do fail
+
+/-- Dynamic expressions whose translations are retained by the verified
+`Nat.bitwise` certificate. -/
+def natBitwiseEvidenceExpressions (bitwise equation : Expr) : List Expr :=
+  let body := natBitwiseEquation bitwise
+  [equation, body,
+    (natBitwiseZeroEquation body).1,
+    (natBitwiseZeroEquation body).2,
+    (natBitwiseZeroRightEquation body).1,
+    (natBitwiseZeroRightEquation body).2,
+    (natBitwiseSuccEquation body bitwise).1,
+    (natBitwiseSuccEquation body bitwise).2,
+    (natBitwiseZeroEquation bitwise).1,
+    (natBitwiseZeroEquation bitwise).2]
 
 /-- Validate `Nat.gcd` while retaining a generic-state, independently checked
 well-founded certificate. -/
@@ -859,6 +1306,50 @@ def checkNatGcdPrimitive (env : Environment) (v : DefinitionVal)
       (reject "direct zero reduction failed")
     unless ← isDefEq gz₁ (.lam0 q(Nat) <| .bvar 0) do
       reject "direct zero result failed"
+  return cert
+
+/-- Validate `Nat.bitwise` and retain a generic-state, independently checked
+well-founded certificate for the verification layer. -/
+def checkNatBitwisePrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M NatBitwiseFixCertificate := do
+  let reject {α} (message : String) : M α :=
+    throw <| .other s!"invalid Nat.bitwise certificate: {message}"
+  unless env.contains ``Nat && env.contains ``Bool &&
+      env.contains ``Nat.beq && env.contains ``Nat.add &&
+      env.contains ``Nat.mod && env.contains ``Nat.div &&
+      v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type
+      q((Bool → Bool → Bool) → Nat → Nat → Nat) do fail
+  let some bitwise' := natWellFoundedEquation v.value
+    q(type_of% Nat.bitwise.eq_def) | reject "malformed public equation"
+  let evidence := natBitwiseEvidenceExpressions v.value bitwise'
+  unless evidence.all fun e =>
+      exprLooseBVarRange e == 0 && !e.hasFVar && !e.hasMVar do
+    reject "semantic evidence is not closed"
+  checkExprTypes evidence
+  let bitwiseCore ← unfoldNatWellFoundedBoolNat2Cert v.value
+    q(type_of% Nat.bitwise.eq_def)
+    (reject "generic fixpoint discovery failed")
+  let cert ← checkNatBitwiseFixCertificate bitwiseCore v.value
+    (reject "bitwise fixpoint specialization failed")
+  _ ← M.sandbox do
+    unless ← isDefEq (← inferType bitwise')
+        q((Bool → Bool → Bool) → Nat → Nat → Nat) do
+      reject "public equation has the wrong type"
+    Condition.natEq.checkForPrimitive
+      (reject "Nat equality condition check failed")
+    Condition.bool.checkForPrimitive
+      (reject "Boolean condition check failed")
+    let e := natBitwiseEquation v.value
+    unless ← isDefEq bitwise' e do
+      reject "public branch equation failed"
+    let (z₁, z₂) := natBitwiseZeroEquation e
+    unless ← isDefEq z₁ z₂ do reject "left-zero equation failed"
+    let (zr₁, zr₂) := natBitwiseZeroRightEquation e
+    unless ← isDefEq zr₁ zr₂ do reject "right-zero equation failed"
+    let (s₁, s₂) := natBitwiseSuccEquation e v.value
+    unless ← isDefEq s₁ s₂ do reject "successor equation failed"
+    checkNatBitwiseZero v.value (reject "direct zero reduction failed")
   return cert
 
 /-- Validate the closed type and defining equations for the elementary
@@ -1263,13 +1754,6 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
   let fal := q(false)
-  let zero := q(Nat.zero)
-  let succ := mkApp q(Nat.succ)
-  let add := mkApp2 q(Nat.add)
-  let mod := mkApp2 q(Nat.mod)
-  let div := mkApp2 q(Nat.div)
-  let one := succ zero
-  let two := succ one
   let defeq1 a b := isDefEq (.arrow q(Nat) a) (.arrow q(Nat) b)
   let x := .bvar 0
   let env ← getEnv
@@ -1295,27 +1779,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.ble =>
     checkNatBLEPrimitive env v fail
   | ``Nat.bitwise =>
-    unless env.contains ``Nat && env.contains ``Bool && v.levelParams.isEmpty do fail
-    -- bitwise : Nat → Nat → Nat
-    unless ← isDefEq v.type q((Bool → Bool → Bool) → Nat → Nat → Nat) do fail
-    withLocalDecl `f .default q(Bool → Bool → Bool) fun f => do
-    withLocalDecl `n .default q(Nat) fun n => do
-    withLocalDecl `m .default q(Nat) fun m => do
-    let bitwise' ← unfoldNatWellFounded v.value #[f, n, m] q(type_of% Nat.bitwise.eq_def) fail
-    let bitwise := mkApp3 v.value
-    let c := Condition.natEq; c.check fail (ite := true)
-    let bc := Condition.bool; bc.check fail (ite := true)
-    let e :=
-      c.ite q(Nat) #[n, zero] (bc.ite q(Nat) #[mkApp2 f q(false) q(true)] m zero) <|
-      c.ite q(Nat) #[m, zero] (bc.ite q(Nat) #[mkApp2 f q(true) q(false)] n zero) <|
-      let n' := div n two
-      let m' := div m two
-      let b₁ := c.decide #[mod n two, one]
-      let b₂ := c.decide #[mod m two, one]
-      let r := bitwise f n' m'
-      bc.ite q(Nat) #[mkApp2 f b₁ b₂] (add (add r r) one) (add r r)
-    _ ← checkType e
-    unless ← isDefEq (mkApp3 bitwise' f n m) e do fail
+    _ ← checkNatBitwisePrimitive env v fail
   | ``Nat.land =>
     unless env.contains ``Nat.bitwise && v.levelParams.isEmpty do fail
     -- land : Nat → Nat → Nat

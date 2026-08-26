@@ -1,5 +1,6 @@
 import Lean4Lean.Theory.Inductive
 import Lean4Lean.Theory.Typing.Strong
+import Lean4Lean.Theory.Typing.Env
 
 /-! # Theory encodings of Lean literals and primitive reflection
 
@@ -27,6 +28,19 @@ def VExpr.natSucc : VExpr := .const ``Nat.succ []
 def VExpr.natLit : Nat → VExpr
   | 0 => .natZero
   | n+1 => .app .natSucc (.natLit n)
+
+@[simp] theorem VExpr.inst_nat (e : VExpr) (k : Nat) :
+    VExpr.nat.inst e k = .nat := rfl
+@[simp] theorem VExpr.inst_natZero (e : VExpr) (k : Nat) :
+    VExpr.natZero.inst e k = .natZero := rfl
+@[simp] theorem VExpr.inst_natSucc (e : VExpr) (k : Nat) :
+    VExpr.natSucc.inst e k = .natSucc := rfl
+@[simp] theorem VExpr.liftN_nat (n k : Nat) :
+    VExpr.nat.liftN n k = .nat := rfl
+@[simp] theorem VExpr.liftN_natZero (n k : Nat) :
+    VExpr.natZero.liftN n k = .natZero := rfl
+@[simp] theorem VExpr.liftN_natSucc (n k : Nat) :
+    VExpr.natSucc.liftN n k = .natSucc := rfl
 
 def VExpr.char : VExpr := .const ``Char []
 def VExpr.string : VExpr := .const ``String []
@@ -228,8 +242,29 @@ def VEnv.ReflectsNatNatBool (env : VEnv) (fc : Name) (f : Nat → Nat → Bool) 
   ∀ a b, env.IsDefEqU 0 []
     (.app (.app (.const fc []) (.natLit a)) (.natLit b)) (.boolLit (f a b))
 
+def VEnv.ReflectsBoolBin (env : VEnv) (op : VExpr)
+    (f : Bool → Bool → Bool) :=
+  env.HasType 0 [] op (.forallE .bool <| .forallE .bool .bool) ∧
+  ∀ a b, env.IsDefEqU 0 []
+    (.app (.app op (.boolLit a)) (.boolLit b)) (.boolLit (f a b))
+
+/-- A Kripke-style semantic certificate for `Nat.bitwise`. Quantification
+over future environment extensions lets the specialized Boolean operators be
+added after the generic bitwise primitive without invalidating its meaning. -/
+def VEnv.ReflectsNatBitwise (env : VEnv) (fc : Name) :=
+  env.contains fc →
+  (∀ U Γ, env.HasType U Γ (.const fc [])
+    (.forallE (.forallE .bool <| .forallE .bool .bool) <|
+      .forallE .nat <| .forallE .nat .nat)) ∧
+  ∀ env', env ≤ env' → env'.WF → ∀ op f, env'.ReflectsBoolBin op f → ∀ a b,
+    env'.IsDefEqU 0 []
+      (.app (.app (.app (.const fc []) op) (.natLit a)) (.natLit b))
+      (.natLit (Nat.bitwise f a b))
+
 structure VEnv.HasPrimitives (env : VEnv) : Prop where
   bool : env.contains ``Bool → env.contains ``Bool.false ∧ env.contains ``Bool.true
+  boolType : env.constants ``Bool = some ci →
+    ci = { uvars := 0, type := .sort (.succ .zero) }
   boolFalse : env.constants ``Bool.false = some ci → ci = { uvars := 0, type := .bool }
   boolTrue : env.constants ``Bool.true = some ci → ci = { uvars := 0, type := .bool }
   nat : env.contains ``Nat → env.contains ``Nat.zero ∧ env.contains ``Nat.succ
@@ -246,6 +281,7 @@ structure VEnv.HasPrimitives (env : VEnv) : Prop where
   natDiv : env.ReflectsNatNatNat ``Nat.div Nat.div
   natBEq : env.ReflectsNatNatBool ``Nat.beq Nat.beq
   natBLE : env.ReflectsNatNatBool ``Nat.ble Nat.ble
+  natBitwise : env.ReflectsNatBitwise ``Nat.bitwise
   natLAnd : env.ReflectsNatNatNat ``Nat.land Nat.land
   natLOr : env.ReflectsNatNatNat ``Nat.lor Nat.lor
   natXor : env.ReflectsNatNatNat ``Nat.xor Nat.xor
@@ -260,6 +296,16 @@ structure VEnv.HasPrimitives (env : VEnv) : Prop where
       (.forallE .listChar .string)) ∧
     env.HasType 0 [] .listCharNil .listChar ∧
     env.HasType 0 [] .listCharCons (.forallE .char <| .forallE .listChar .listChar)
+
+/-- The primitive contract fixes `Bool` at the kernel type used by Boolean
+literals and the universe-one selector checked by `Nat.bitwise`. -/
+theorem VEnv.HasPrimitives.bool_hasType {env : VEnv}
+    (h : env.HasPrimitives) (hbool : env.contains ``Bool) :
+    env.HasType 0 [] .bool (.sort (.succ .zero)) := by
+  obtain ⟨ci, hci⟩ := hbool
+  have hshape := h.boolType hci
+  subst ci
+  exact .const hci nofun rfl
 
 /-- A well-formed Boolean literal can only occur when the corresponding
 Boolean declaration is present. -/
@@ -278,13 +324,12 @@ theorem VExpr.WF.boolLit_has_type (wf : env.Ordered)
   | true => cases henv.boolTrue h1; exact .const h1 h2 h3
 
 /-- The primitive constants whose Theory reflections are tracked by
-`VEnv.HasPrimitives`. `Nat.bitwise` is also a kernel primitive name but has no
-dedicated field in the retained contract. -/
+`VEnv.HasPrimitives`. -/
 def VEnv.reflectedPrimitiveNames : List Name := [
   ``Bool, ``Bool.false, ``Bool.true,
   ``Nat, ``Nat.zero, ``Nat.succ,
   ``Nat.pred, ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow,
-  ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
+  ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble, ``Nat.bitwise,
   ``Nat.land, ``Nat.lor, ``Nat.xor,
   ``Nat.shiftLeft, ``Nat.shiftRight,
   ``Char.ofNat, ``String.ofList]
@@ -307,6 +352,8 @@ theorem VEnv.HasPrimitives.of_avoids
   exact {
     bool := fun hc =>
       (noContains ``Bool (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
+    boolType := fun hci =>
+      (noLookup ``Bool (by simp [VEnv.reflectedPrimitiveNames]) hci).elim
     boolFalse := fun hci =>
       (noLookup ``Bool.false
         (by simp [VEnv.reflectedPrimitiveNames]) hci).elim
@@ -350,6 +397,9 @@ theorem VEnv.HasPrimitives.of_avoids
         (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
     natBLE := fun hc =>
       (noContains ``Nat.ble
+        (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
+    natBitwise := fun hc =>
+      (noContains ``Nat.bitwise
         (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
     natLAnd := fun hc =>
       (noContains ``Nat.land
@@ -434,6 +484,9 @@ theorem VEnv.HasPrimitives.addConst
       obtain ⟨hfalse, htrue⟩ := H.bool (oldContains ``Bool
         (by simp [VEnv.reflectedPrimitiveNames]) h)
       exact ⟨newContains _ hfalse, newContains _ htrue⟩
+    boolType := fun h => H.boolType (by
+      simpa only [lookup ``Bool
+        (by simp [VEnv.reflectedPrimitiveNames])] using h)
     boolFalse := fun h => H.boolFalse (by
       simpa only [lookup ``Bool.false
         (by simp [VEnv.reflectedPrimitiveNames])] using h)
@@ -473,6 +526,13 @@ theorem VEnv.HasPrimitives.addConst
       (by simp [VEnv.reflectedPrimitiveNames]) h)
     natBLE := fun h => liftBinaryBool H.natBLE (oldContains ``Nat.ble
       (by simp [VEnv.reflectedPrimitiveNames]) h)
+    natBitwise := fun h => by
+      obtain ⟨htype, heval⟩ := H.natBitwise
+        (oldContains ``Nat.bitwise
+          (by simp [VEnv.reflectedPrimitiveNames]) h)
+      exact ⟨fun U Γ => (htype U Γ).mono hle,
+        fun env'' hle' hwf op f hop a b =>
+          heval env'' (hle.trans hle') hwf op f hop a b⟩
     natLAnd := fun h => liftBinary H.natLAnd (oldContains ``Nat.land
       (by simp [VEnv.reflectedPrimitiveNames]) h)
     natLOr := fun h => liftBinary H.natLOr (oldContains ``Nat.lor

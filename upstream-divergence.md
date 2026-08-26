@@ -2011,8 +2011,9 @@ to the replacement.
 ## D041 — generic-state Nat.gcd well-founded certificate
 
 - **Status:** implemented as the sixteenth bounded UP6 slice; the live safe
-  definition path now has a direct `Nat.gcd` certificate. `Nat.bitwise`, the
-  final finite dispatch, and the generic V4 disposition remain open.
+  definition path now has a direct `Nat.gcd` certificate. `Nat.bitwise` is
+  tracked by D042; its small named wrappers, the final finite dispatch, and
+  the generic V4 disposition remain open.
 - **Owner:** Argument Computer Corporation; review with the remaining
   well-founded primitive work and any upstream revision of PR #32.
 - **Source:** manually adapted from lean4lean PR #32 at
@@ -2056,6 +2057,59 @@ to the replacement.
   in the discovered state packer, structural rather than cache-authoritative
   closure checks, and an equivalent direct safe-definition transaction; or
   reconciliation explicitly retains this Ix acceptance boundary.
+
+## D042 — generic-state Nat.bitwise well-founded certificate
+
+- **Status:** implemented as the seventeenth bounded UP6 slice; the live safe
+  definition path now has a direct `Nat.bitwise` certificate. The small
+  `Nat.land`/`Nat.lor`/`Nat.xor` wrappers, final finite dispatch, and generic
+  V4 disposition remain open.
+- **Owner:** Argument Computer Corporation; review with the remaining
+  well-founded primitive work and any upstream revision of PR #32.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally executable
+  certificate commit `2fc4f84` and reflection commit `27304be`; no whole-PR
+  merge, generic-dispatch admission, or concrete-state contract was imported.
+- **Executable delta:** `checkNatBitwisePrimitive` returns a proof-relevant
+  `NatBitwiseFixCertificate`. It checks the primitive dependencies and exact
+  closed binary-Nat type, discovers and rechecks the well-founded recursive
+  state transactionally, and validates the public, top, zero, right-zero,
+  successor, Boolean-condition, and direct-zero equations. The certificate
+  retains the compiler-selected `stateFn`; recursive states are constructed
+  through that function rather than a hard-coded `PSigma` encoding.
+- **Acceptance and prelude repair:** auxiliary expressions are closed by the
+  same structural loose-binder traversal used for Nat.gcd, rather than by
+  trusting cached `Expr.hasLooseBVars` metadata. `VEnv.HasPrimitives` also now
+  records the exact `Bool : Type` declaration typing needed by the checked
+  selector and Nat-equality condition. Constructor presence alone supplied an
+  unspecified sort and was too weak to justify the host-syntax `Bool` used by
+  those certificates.
+- **Verification delta:** Boolean binary reflection, top/zero/right-zero/
+  successor semantics, condition reflection, and the fixpoint relation yield
+  Kripke `VEnv.ReflectsNatBitwise` semantics under arbitrary future
+  environment extensions and Boolean operators. Conservation is proved for
+  every readiness safety model extending the certificate's source model, and
+  `checkSafeNatBitwiseDefinition.WF`, `addNatBitwise`, and
+  `addDefinition.WF_safe_natBitwise` install the result through the live
+  definition transaction without the admitted generic dispatcher.
+- **Trust decision:** the slice adds no custom axiom, `native_decide` proof,
+  or source `sorry`. Its direct live root reaches exactly the same six known
+  inherited sorry carriers as the previous fourteen roots.
+- **Ix impact:** Ix can transport a generic verified bitwise recurrence once,
+  then specialize `land`, `lor`, and `xor` at its kernel and circuit
+  boundaries. Keeping the state-packing interface abstract also leaves room
+  for out-of-circuit cache and layout choices without changing the semantic
+  contract.
+- **Tests:** `Lean4Lean.Tests.NatBitwise` pins the checker, condition,
+  reflection, and direct-root axiom closures; `Lean4Lean.Tests.Primitive`
+  checks all fifteen direct live roots for dispatch reachability, exclusion of
+  `checkPrimitiveDef.WF`, and the exact inherited sorry closure. The complete
+  267-target `lake build --wfail` passes and the global source frontier
+  remains 15.
+- **Removal condition:** upstream adopts an equivalent generic-state
+  proof-relevant certificate, structural closure checks, exact Boolean typing,
+  Kripke reflection, and readiness-aware direct transaction; or reconciliation
+  explicitly retains this Ix acceptance boundary.
 
 ## Review checklist
 

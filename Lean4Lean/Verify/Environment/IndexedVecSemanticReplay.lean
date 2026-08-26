@@ -29,6 +29,9 @@ theorem indexedVecSemanticNatHasPrimitives : VEnv.HasPrimitives natFinalEnv := b
     contradiction
   refine {
     bool := fun h => (absent ``Bool rfl h).elim
+    boolType := fun h => by
+      change none = some _ at h
+      contradiction
     boolFalse := fun h => by
       change none = some _ at h
       contradiction
@@ -52,6 +55,7 @@ theorem indexedVecSemanticNatHasPrimitives : VEnv.HasPrimitives natFinalEnv := b
     natDiv := fun h => (absent ``Nat.div rfl h).elim
     natBEq := fun h => (absent ``Nat.beq rfl h).elim
     natBLE := fun h => (absent ``Nat.ble rfl h).elim
+    natBitwise := fun h => (absent ``Nat.bitwise rfl h).elim
     natLAnd := fun h => (absent ``Nat.land rfl h).elim
     natLOr := fun h => (absent ``Nat.lor rfl h).elim
     natXor := fun h => (absent ``Nat.xor rfl h).elim

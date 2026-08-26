@@ -71,6 +71,62 @@ theorem reduceNatWellFoundedLam1.WF {c : VContext} {s : VState}
   rw [hlctx]
   exact .pure (by simpa [c', VContext.withMLC] using hclosed.1)
 
+/-- The corresponding two-binder reduction preserves the closed translated
+lambda assembled after the first binder is discharged. -/
+theorem reduceNatWellFoundedLam2.WF {c : VContext} {s : VState}
+    {name₁ name₂ : Name} {ty₁ ty₂ body : Expr}
+    {bi₁ bi₂ : BinderInfo} {ty₁' ty₂' body' : VExpr}
+    {fail : ∀ {α}, M α}
+    (he : c.TrExprS (.lam name₁ ty₁ (.lam name₂ ty₂ body bi₂) bi₁)
+      (.lam ty₁' <| .lam ty₂' body')) :
+    M.WF c s
+      (reduceNatWellFoundedLam2
+        (.lam name₁ ty₁ (.lam name₂ ty₂ body bi₂) bi₁) fail)
+      fun out _ => c.TrExpr out (.lam ty₁' <| .lam ty₂' body') := by
+  simp only [reduceNatWellFoundedLam2]
+  refine withLambda.WF he ?_
+  intro id cwf' s' hs' hres c' hbody
+  rw [Expr.instantiate1_eq] at hbody
+  simp only [Lean.Expr.instantiate1'] at hbody
+  rw [Expr.instantiate1_eq]
+  refine (reduceNatWellFoundedLam1.WF hbody).bind fun out _ _ hout => ?_
+  refine getLCtx.WF.bind fun lctx _ _ hctx => ?_
+  obtain ⟨rfl, rfl⟩ := hctx
+  let ⟨_, _, heq⟩ := hout
+  let ⟨_, heq'⟩ := heq
+  have hlen : 1 ≤ c'.mlctx.length := by simp [c', VContext.withMLC]
+  have hclosed := cwf'.1.mkLambda_tr c.Ewf hout
+    heq'.hasType.2 1 hlen
+  have hlctx : c'.lctx'.mkLambda #[.fvar id] out =
+      c'.mlctx.mkLambda 1 hlen out := by
+    apply cwf'.1.mkLambda_eq
+    · exact (c'.mlctx.noBV ▸ hout.closed).looseBVarRange_zero
+    · simp
+  rw [hlctx]
+  exact .pure (by simpa [c', VContext.withMLC] using hclosed.1)
+
+/-- The direct two-lambda zero probe produces the same definitional equality
+as the independently translated source equation. -/
+theorem checkNatBitwiseZero.WF {c : VContext} {s : VState}
+    {bitwise : Expr} {fail : ∀ {α}, M α}
+    (hlhs : c.TrExprS (natBitwiseZeroEquation bitwise).1 lhs')
+    (hrhs : c.TrExprS (natBitwiseZeroEquation bitwise).2 rhs')
+    (hfail : ∀ {α} {s'}, M.WF c s' (fail : M α) fun _ _ => False) :
+    M.WF c s (checkNatBitwiseZero bitwise fail) fun _ _ =>
+      c.IsDefEqU lhs' rhs' := by
+  simp only [checkNatBitwiseZero]
+  obtain ⟨A, B, e, rfl⟩ : ∃ A B e, lhs' = .lam A (.lam B e) := by
+    cases hlhs with
+    | lam _ _ hbody =>
+      cases hbody
+      exact ⟨_, _, _, rfl⟩
+  refine (reduceNatWellFoundedLam2.WF hlhs).bind fun _ _ _ hred => ?_
+  let ⟨_, hredS, hredEq⟩ := hred
+  exact (isDefEq.WF hredS hrhs).bind fun b _ _ heq => by
+    split
+    · exact .pure (hredEq.symm.trans c.Ewf c.Δwf (heq (by assumption)))
+    · exact hfail.mono fun _ _ _ h => h.elim
+
 private theorem closedExpr_fvarsIn {c : VContext} {e : Expr}
     (hf : e.hasFVar = false) (hm : e.hasMVar = false) :
     e.FVarsIn (· ∈ c.vlctx.fvars) := by
@@ -223,6 +279,36 @@ def NatWellFoundedCoreResult.Valid (c : VContext)
   ∃ lhs' rhs', c.TrExprS r.specStepLhs lhs' ∧
     c.TrExprS r.specStepRhs rhs' ∧ c.IsDefEqU lhs' rhs'
 
+theorem NatWellFoundedCoreResult.Valid.mono
+    {c c' : VContext} {r : NatWellFoundedCoreResult}
+    (hv : r.Valid c) (hle : c.venv ≤ c'.venv)
+    (hlparams : c'.lparams = c.lparams)
+    (hvlctx : c'.vlctx = c.vlctx) : r.Valid c' := by
+  have eqMono {lhs rhs : Expr}
+      (h : ∃ lhs' rhs', c.TrExprS lhs lhs' ∧ c.TrExprS rhs rhs' ∧
+        c.IsDefEqU lhs' rhs') :
+      ∃ lhs' rhs', c'.TrExprS lhs lhs' ∧ c'.TrExprS rhs rhs' ∧
+        c'.IsDefEqU lhs' rhs' := by
+    rcases h with ⟨lhs', rhs', hl, hr, heq⟩
+    refine ⟨lhs', rhs', ?_, ?_, ?_⟩
+    · change TrExprS c.venv c.lparams c.vlctx lhs lhs' at hl
+      change TrExprS c'.venv c'.lparams c'.vlctx lhs lhs'
+      rw [hlparams, hvlctx]
+      exact hl.mono hle
+    · change TrExprS c.venv c.lparams c.vlctx rhs rhs' at hr
+      change TrExprS c'.venv c'.lparams c'.vlctx rhs rhs'
+      rw [hlparams, hvlctx]
+      exact hr.mono hle
+    · change c.venv.IsDefEqU c.lparams.length c.vlctx.toCtx lhs' rhs' at heq
+      change c'.venv.IsDefEqU c'.lparams.length c'.vlctx.toCtx lhs' rhs'
+      rw [hlparams, hvlctx]
+      exact heq.mono hle
+  rcases hv with ⟨hshape, hcall, hentry, htop, heager, htrue,
+    hfalse, hstep, hspecStep⟩
+  exact ⟨hshape, eqMono hcall, eqMono hentry, eqMono htop,
+    eqMono heager, eqMono htrue, eqMono hfalse, eqMono hstep,
+    eqMono hspecStep⟩
+
 def NatWellFoundedCoreResult.AuxValid (c : VContext)
     (r : NatWellFoundedCoreResult) : Prop :=
   (∃ lhs' rhs', c.TrExprS r.expectedEagerLhs lhs' ∧
@@ -341,6 +427,113 @@ theorem checkNatGcdFixCertificate.WF {c : VContext} {s : VState}
         .pure ⟨⟨hcore, htop, hzero, hsucc⟩, hshape⟩
   · exact .throw
 
+def NatBitwiseFixCertificate.Valid
+    (c : VContext) (r : NatBitwiseFixCertificate) : Prop :=
+  r.core.Valid c ∧
+    (∃ lhs' rhs', c.TrExprS r.topLhs lhs' ∧ c.TrExprS r.topRhs rhs' ∧
+      c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.zeroLhs lhs' ∧ c.TrExprS r.zeroRhs rhs' ∧
+      c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.zeroRightLhs lhs' ∧
+      c.TrExprS r.zeroRightRhs rhs' ∧ c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.succLhs lhs' ∧ c.TrExprS r.succRhs rhs' ∧
+      c.IsDefEqU lhs' rhs') ∧
+    ∃ callV A, c.TrExprS r.callFn callV ∧ c.HasType callV A
+
+def NatBitwiseFixCertificate.NormalizedValid
+    (c : VContext) (r : NatBitwiseFixCertificate) (bitwise : Expr) : Prop :=
+  r.core.Valid c ∧
+    (∃ lhs' rhs', c.TrExprS (r.expectedTopLhs bitwise) lhs' ∧
+      c.TrExprS r.expectedTopRhs rhs' ∧ c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.expectedZeroLhs lhs' ∧
+      c.TrExprS r.expectedZeroRhs rhs' ∧ c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.expectedZeroRightLhs lhs' ∧
+      c.TrExprS r.expectedZeroRightRhs rhs' ∧ c.IsDefEqU lhs' rhs') ∧
+    (∃ lhs' rhs', c.TrExprS r.expectedSuccLhs lhs' ∧
+      c.TrExprS r.expectedSuccRhs rhs' ∧ c.IsDefEqU lhs' rhs') ∧
+    ∃ callV A, c.TrExprS r.callFn callV ∧ c.HasType callV A
+
+theorem NatBitwiseFixCertificate.NormalizedValid.mono
+    {c c' : VContext} {r : NatBitwiseFixCertificate} {bitwise : Expr}
+    (hv : r.NormalizedValid c bitwise) (hle : c.venv ≤ c'.venv)
+    (hlparams : c'.lparams = c.lparams)
+    (hvlctx : c'.vlctx = c.vlctx) : r.NormalizedValid c' bitwise := by
+  have trMono {e : Expr} {e' : VExpr} (h : c.TrExprS e e') :
+      c'.TrExprS e e' := by
+    change TrExprS c.venv c.lparams c.vlctx e e' at h
+    change TrExprS c'.venv c'.lparams c'.vlctx e e'
+    rw [hlparams, hvlctx]
+    exact h.mono hle
+  have eqMono {lhs rhs : Expr}
+      (h : ∃ lhs' rhs', c.TrExprS lhs lhs' ∧ c.TrExprS rhs rhs' ∧
+        c.IsDefEqU lhs' rhs') :
+      ∃ lhs' rhs', c'.TrExprS lhs lhs' ∧ c'.TrExprS rhs rhs' ∧
+        c'.IsDefEqU lhs' rhs' := by
+    rcases h with ⟨lhs', rhs', hl, hr, heq⟩
+    refine ⟨lhs', rhs', trMono hl, trMono hr, ?_⟩
+    change c.venv.IsDefEqU c.lparams.length c.vlctx.toCtx lhs' rhs' at heq
+    change c'.venv.IsDefEqU c'.lparams.length c'.vlctx.toCtx lhs' rhs'
+    rw [hlparams, hvlctx]
+    exact heq.mono hle
+  rcases hv with ⟨hcore, htop, hzero, hzeroRight, hsucc,
+    callV, A, hcall, hcallT⟩
+  refine ⟨hcore.mono hle hlparams hvlctx, eqMono htop, eqMono hzero,
+    eqMono hzeroRight, eqMono hsucc, callV, A, trMono hcall, ?_⟩
+  change c.venv.HasType c.lparams.length c.vlctx.toCtx callV A at hcallT
+  change c'.venv.HasType c'.lparams.length c'.vlctx.toCtx callV A
+  rw [hlparams, hvlctx]
+  exact hcallT.mono hle
+
+theorem NatBitwiseFixCertificate.Valid.normalize {c : VContext}
+    {r : NatBitwiseFixCertificate} {bitwise : Expr} (hv : r.Valid c)
+    (hs : r.shape bitwise = true) : r.NormalizedValid c bitwise := by
+  rcases hv with ⟨hcore, htop, hzero, hzeroRight, hsucc, hcall⟩
+  rcases htop with ⟨tl, tr, htl, htr, hteq⟩
+  rcases hzero with ⟨zl, zr, hzl, hzr, hzeq⟩
+  rcases hzeroRight with ⟨zrl, zrr, hzrl, hzrr, hzreq⟩
+  rcases hsucc with ⟨sl, sr, hsl, hsr, hseq⟩
+  simp only [NatBitwiseFixCertificate.shape, Bool.and_eq_true] at hs
+  rcases hs with
+    ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨htls, htrs⟩, hzls⟩, hzrs⟩, hzrls⟩, hzrrs⟩,
+      hsls⟩, hsrs⟩, _hclosed⟩, _hnoFVar⟩, _hnoMVar⟩
+  exact ⟨hcore,
+    ⟨tl, tr, TrExprS.of_exprShapeEq (exprShapeEq_sound htls) htl,
+      TrExprS.of_exprShapeEq (exprShapeEq_sound htrs) htr, hteq⟩,
+    ⟨zl, zr, TrExprS.of_exprShapeEq (exprShapeEq_sound hzls) hzl,
+      TrExprS.of_exprShapeEq (exprShapeEq_sound hzrs) hzr, hzeq⟩,
+    ⟨zrl, zrr, TrExprS.of_exprShapeEq (exprShapeEq_sound hzrls) hzrl,
+      TrExprS.of_exprShapeEq (exprShapeEq_sound hzrrs) hzrr, hzreq⟩,
+    ⟨sl, sr, TrExprS.of_exprShapeEq (exprShapeEq_sound hsls) hsl,
+      TrExprS.of_exprShapeEq (exprShapeEq_sound hsrs) hsr, hseq⟩, hcall⟩
+
+theorem checkNatBitwiseFixCertificate.WF {c : VContext} {s : VState}
+    {core : NatWellFoundedCoreResult} {bitwise : Expr}
+    {fail : ∀ {α}, M α} :
+    M.WF c s (checkNatBitwiseFixCertificate core bitwise fail) fun out _ =>
+      out.Valid c ∧ out.shape bitwise = true := by
+  simp only [checkNatBitwiseFixCertificate]
+  refine M.WF.sandbox.bind fun cert _ _ _ => ?_
+  split
+  · rename_i hshape
+    have hflags := hshape
+    simp only [NatBitwiseFixCertificate.shape, Bool.and_eq_true] at hflags
+    have hnoFVar : cert.callFn.hasFVar = false := by
+      simpa using hflags.1.2
+    have hnoMVar : cert.callFn.hasMVar = false := by
+      simpa using hflags.2
+    have hcallFVars : cert.callFn.FVarsIn (· ∈ c.vlctx.fvars) :=
+      Expr.closed_fvarsIn hnoFVar hnoMVar
+    exact (checkType.WF hcallFVars).bind fun _ _ _ hcall =>
+      checkNatWellFoundedCertificate.WF.bind fun _ _ _ hcore =>
+      checkNatWellFoundedEquation.WF.bind fun _ _ _ htop =>
+      checkNatWellFoundedEquation.WF.bind fun _ _ _ hzero =>
+      checkNatWellFoundedEquation.WF.bind fun _ _ _ hzeroRight =>
+      checkNatWellFoundedEquation.WF.bind fun _ _ _ hsucc =>
+        let ⟨callV, A, _, hcallS, _, hcallT⟩ := hcall
+        .pure ⟨⟨hcore, htop, hzero, hzeroRight, hsucc,
+          ⟨callV, A, hcallS, hcallT⟩⟩, hshape⟩
+  · exact .throw
+
 theorem unfoldNatWellFoundedNat2Cert.WF {c : VContext} {s : VState}
     {e eq_def equation : Expr} {fail : ∀ {α}, M α}
     (hnat : c.TrExprS q(Nat) .nat) (hnatTy : c.IsType .nat)
@@ -368,6 +561,61 @@ theorem unfoldNatWellFoundedNat2Cert.WF {c : VContext} {s : VState}
       (withLocalDecl `m .default q(Nat) fun m =>
         withLocalDecl `n .default q(Nat) fun n =>
           M.sandbox (unfoldNatWellFoundedCore e #[m, n] eq_def fail))
+      (fun _ _ => True) := by simpa using hraw
+  refine hraw'.bind fun cert _ _ _ => ?_
+  split
+  · rename_i hequation
+    exact checkNatWellFoundedCertificate.WF.bind fun _ _ _ hvalid =>
+      .pure ⟨hequation, hvalid⟩
+  · exact .throw
+
+theorem unfoldNatWellFoundedBoolNat2Cert.WF {c : VContext} {s : VState}
+    {e eq_def equation : Expr} {fail : ∀ {α}, M α}
+    (hfun : c.TrExprS q(Bool → Bool → Bool)
+      (.forallE .bool <| .forallE .bool .bool))
+    (hfunTy : c.IsType (.forallE .bool <| .forallE .bool .bool))
+    (hnat : c.TrExprS q(Nat) .nat) (hnatTy : c.IsType .nat)
+    (heq : natWellFoundedEquation e eq_def = some equation) :
+    M.WF c s (unfoldNatWellFoundedBoolNat2Cert e eq_def fail) fun out _ =>
+      out.equation == equation ∧ out.Valid c := by
+  simp only [unfoldNatWellFoundedBoolNat2Cert, heq]
+  have hraw : M.WF (c.withMLC c.mlctx) s
+      (withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+        withLocalDecl `n .default q(Nat) fun n =>
+          withLocalDecl `m .default q(Nat) fun m =>
+            M.sandbox (unfoldNatWellFoundedCore e #[f, n, m] eq_def fail))
+      (fun _ _ => True) := by
+    refine .withLocalDecl hfun hfunTy .rfl
+      fun f cwf₁ s₁ hs₁ hres₁ => ?_
+    let c₁ := c.withMLC
+      (.vlam f `f q(Bool → Bool → Bool)
+        (.forallE .bool <| .forallE .bool .bool) .default c.mlctx)
+      (wf := cwf₁)
+    have hnat₁ : c₁.TrExprS q(Nat) .nat := by
+      let .const h₁ h₂ h₃ := hnat
+      exact .const h₁ h₂ h₃
+    have hnatTy₁ : c₁.IsType .nat :=
+      hnatTy.weakN c.Ewf (VLCtx.FVLift.skip_fvar _ _ .refl).toCtx
+    refine .withLocalDecl hnat₁ hnatTy₁ .rfl
+      fun n cwf₂ s₂ hs₂ hres₂ => ?_
+    let c₂ := c.withMLC
+      (.vlam n `n q(Nat) .nat .default
+        (.vlam f `f q(Bool → Bool → Bool)
+          (.forallE .bool <| .forallE .bool .bool) .default c.mlctx))
+      (wf := cwf₂)
+    have hnat₂ : c₂.TrExprS q(Nat) .nat := by
+      let .const h₁ h₂ h₃ := hnat
+      exact .const h₁ h₂ h₃
+    have hnatTy₂ : c₂.IsType .nat :=
+      hnatTy₁.weakN c₁.Ewf (VLCtx.FVLift.skip_fvar _ _ .refl).toCtx
+    refine .withLocalDecl hnat₂ hnatTy₂ .rfl
+      fun m cwf₃ s₃ hs₃ hres₃ => ?_
+    exact M.WF.sandbox.mono fun _ _ _ _ => trivial
+  have hraw' : M.WF c s
+      (withLocalDecl `f .default q(Bool → Bool → Bool) fun f =>
+        withLocalDecl `n .default q(Nat) fun n =>
+          withLocalDecl `m .default q(Nat) fun m =>
+            M.sandbox (unfoldNatWellFoundedCore e #[f, n, m] eq_def fail))
       (fun _ _ => True) := by simpa using hraw
   refine hraw'.bind fun cert _ _ _ => ?_
   split

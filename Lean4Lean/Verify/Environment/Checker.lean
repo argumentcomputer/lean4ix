@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 -/
 
 import Lean4Lean.Verify.Environment.Boundaries
+import Lean4Lean.Verify.BitwiseReflect
 import Lean4Lean.Verify.NatDivReflect
 import Lean4Lean.Verify.NatGcdReflect
 import Lean4Lean.Verify.NatModReflect
@@ -624,6 +625,30 @@ theorem checkSafeNatGcdDefinition.WF
   exact Environment.checkPrimitiveDef.natGcd.WF_typed
     (c := .mk' wf .safe v.levelParams) (s := state')
     (ty' := v'.type) hname rfl htype
+
+/-- Direct typed checker evidence for the safe `Nat.bitwise` definition
+path. The retained generic-state certificate includes its Boolean selector,
+Nat equality decider, public equations, and successor transition. -/
+theorem checkSafeNatBitwiseDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.bitwise)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          Environment.NatBitwisePrimitiveEvidence
+            (.mk' wf .safe v.levelParams) v v'.type := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype _ _
+  exact Environment.checkPrimitiveDef.natBitwise.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) hname rfl rfl htype
 
 /-- Direct body/type/equation certificate for the safe `Nat.beq` definition
 path. This theorem does not use the generic primitive-recognizer boundary. -/

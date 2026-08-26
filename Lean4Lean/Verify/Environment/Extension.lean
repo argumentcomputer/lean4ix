@@ -89,6 +89,18 @@ private theorem VEnv.ReflectsNatNatBool.mono_of_contains
   exact ⟨fun U Γ => (htype U Γ).mono hle,
     fun a b => (heval a b).mono hle⟩
 
+/-- Transport the Kripke `Nat.bitwise` reflection across a model extension
+when the reflected lookup is known to come from the source model. -/
+private theorem VEnv.ReflectsNatBitwise.mono_of_contains
+    {env env' : VEnv} (H : env.ReflectsNatBitwise name)
+    (hle : env ≤ env') (hback : env'.contains name → env.contains name) :
+    env'.ReflectsNatBitwise name := by
+  intro found
+  obtain ⟨htype, heval⟩ := H (hback found)
+  refine ⟨fun U Γ => (htype U Γ).mono hle, ?_⟩
+  intro future hfuture hwf op f hop a b
+  exact heval future (hle.trans hfuture) hwf op f hop a b
+
 theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.HasPrimitives)
     (hname : Environment.primitives.contains name = false)
     (hadd : env.addConst name ci = some env') : env'.HasPrimitives := by
@@ -107,6 +119,7 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
   · intro h
     let ⟨h1, h2⟩ := H.bool (oldContains (hprims (by simp)) h)
     exact ⟨newContains h1, newContains h2⟩
+  · intro ci h; apply H.boolType; rwa [← same (hprims (by simp))]
   · intro ci h; apply H.boolFalse; rwa [← same (hprims (by simp))]
   · intro ci h; apply H.boolTrue; rwa [← same (hprims (by simp))]
   · intro h
@@ -128,6 +141,8 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
   · exact H.natDiv.mono_of_contains le (oldContains (hprims (by simp)))
   · exact H.natBEq.mono_of_contains le (oldContains (hprims (by simp)))
   · exact H.natBLE.mono_of_contains le (oldContains (hprims (by simp)))
+  · exact H.natBitwise.mono_of_contains le
+      (oldContains (hprims (by simp)))
   · exact H.natLAnd.mono_of_contains le (oldContains (hprims (by simp)))
   · exact H.natLOr.mono_of_contains le (oldContains (hprims (by simp)))
   · exact H.natXor.mono_of_contains le (oldContains (hprims (by simp)))
@@ -161,6 +176,7 @@ theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
     natDiv := H.natDiv.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natBEq := H.natBEq.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natBLE := H.natBLE.mono_of_contains VEnv.addDefEq_le (fun h => h)
+    natBitwise := H.natBitwise.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natLAnd := H.natLAnd.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natLOr := H.natLOr.mono_of_contains VEnv.addDefEq_le (fun h => h)
     natXor := H.natXor.mono_of_contains VEnv.addDefEq_le (fun h => h)
@@ -196,6 +212,8 @@ theorem VEnv.HasPrimitives.addStructEta {env : VEnv}
     natDiv := H.natDiv.mono_of_contains VEnv.addStructEta_le (fun h => h)
     natBEq := H.natBEq.mono_of_contains VEnv.addStructEta_le (fun h => h)
     natBLE := H.natBLE.mono_of_contains VEnv.addStructEta_le (fun h => h)
+    natBitwise := H.natBitwise.mono_of_contains
+      VEnv.addStructEta_le (fun h => h)
     natLAnd := H.natLAnd.mono_of_contains VEnv.addStructEta_le (fun h => h)
     natLOr := H.natLOr.mono_of_contains VEnv.addStructEta_le (fun h => h)
     natXor := H.natXor.mono_of_contains VEnv.addStructEta_le (fun h => h)
@@ -1096,6 +1114,8 @@ contract.  `other` records that no unrelated primitive lookup changed. -/
 theorem VEnv.HasPrimitives.of_addBool
     {input output : VEnv} (pre : input.HasPrimitives)
     (hle : input ≤ output)
+    (boolLookup : output.constants ``Bool =
+      some { uvars := 0, type := .sort (.succ .zero) })
     (falseLookup : output.constants ``Bool.false =
       some { uvars := 0, type := .bool })
     (trueLookup : output.constants ``Bool.true =
@@ -1122,6 +1142,8 @@ theorem VEnv.HasPrimitives.of_addBool
     simpa only [other n member hBool hFalse hTrue] using found
   exact {
     bool := fun _ => ⟨⟨_, falseLookup⟩, ⟨_, trueLookup⟩⟩
+    boolType := fun found =>
+      Option.some.inj (found.symm.trans boolLookup)
     boolFalse := fun found => Option.some.inj (found.symm.trans falseLookup)
     boolTrue := fun found => Option.some.inj (found.symm.trans trueLookup)
     nat := fun found => by
@@ -1167,6 +1189,9 @@ theorem VEnv.HasPrimitives.of_addBool
         (by simp) (by simp) (by simp) found
     natBLE := pre.natBLE.mono_of_contains hle fun found =>
       oldContains ``Nat.ble (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natBitwise := pre.natBitwise.mono_of_contains hle fun found =>
+      oldContains ``Nat.bitwise (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found
     natLAnd := pre.natLAnd.mono_of_contains hle fun found =>
       oldContains ``Nat.land (by simp [VEnv.reflectedPrimitiveNames])
@@ -1232,6 +1257,9 @@ theorem VEnv.HasPrimitives.of_addNat
         (oldContains ``Bool (by simp [VEnv.reflectedPrimitiveNames])
           (by simp) (by simp) (by simp) found)
       exact ⟨newContains _ falsePresent, newContains _ truePresent⟩
+    boolType := fun found => pre.boolType
+      (oldLookup ``Bool (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found)
     boolFalse := fun found => pre.boolFalse
       (oldLookup ``Bool.false (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found)
@@ -1273,6 +1301,9 @@ theorem VEnv.HasPrimitives.of_addNat
         (by simp) (by simp) (by simp) found
     natBLE := pre.natBLE.mono_of_contains hle fun found =>
       oldContains ``Nat.ble (by simp [VEnv.reflectedPrimitiveNames])
+        (by simp) (by simp) (by simp) found
+    natBitwise := pre.natBitwise.mono_of_contains hle fun found =>
+      oldContains ``Nat.bitwise (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found
     natLAnd := pre.natLAnd.mono_of_contains hle fun found =>
       oldContains ``Nat.land (by simp [VEnv.reflectedPrimitiveNames])
@@ -1760,6 +1791,13 @@ theorem hasPrimitives
   cases inventory with
   | bool types_eq constructors_eq recursorNames =>
     apply pre.of_addBool trace.le
+    · have found := trace.addTypes.lookup
+          (ci := VPrimitiveInductive.boolFamily) (by
+            rw [types_eq]
+            simp)
+      exact trace.addRules.le.constants <| trace.addRecs.le.constants <|
+        trace.addCtors.le.constants <| by
+          simpa [VPrimitiveInductive.boolFamily] using found
     · have found := trace.addCtors.lookup
           (ci := VPrimitiveInductive.boolConstructors[0]) (by
             rw [constructors_eq]

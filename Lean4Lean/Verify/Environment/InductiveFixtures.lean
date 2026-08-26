@@ -2544,7 +2544,7 @@ private theorem outParam_hasPrimitives :
     List.not_mem_nil, or_false] at hn
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
       rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl | rfl <;>
+      rfl | rfl | rfl | rfl | rfl | rfl <;>
     rfl
 
 private theorem outParam_safePrimitives :
@@ -3456,7 +3456,7 @@ private theorem aliasFormerNormalization_hasPrimitives :
     List.not_mem_nil, or_false] at hn
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
       rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl | rfl <;>
+      rfl | rfl | rfl | rfl | rfl | rfl <;>
     rfl
 
 private theorem aliasFormerNormalization_safePrimitives :
@@ -3578,7 +3578,7 @@ private theorem aliasRecNormalization_hasPrimitives :
     List.not_mem_nil, or_false] at hn
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
       rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-      rfl | rfl | rfl | rfl | rfl <;>
+      rfl | rfl | rfl | rfl | rfl | rfl <;>
     rfl
 
 private theorem aliasRecNormalization_safePrimitives :

@@ -1077,6 +1077,9 @@ theorem VEnv.HasPrimitives.addNatGcd {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -1102,6 +1105,7 @@ theorem VEnv.HasPrimitives.addNatGcd {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq

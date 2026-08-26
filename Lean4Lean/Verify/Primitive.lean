@@ -1941,6 +1941,20 @@ theorem VEnv.ReflectsNatNatBool.addDefEq {env : VEnv} {df : VDefEq}
   exact ⟨fun U Γ => (htype U Γ).mono VEnv.addDefEq_le,
     fun a b => (heval a b).mono VEnv.addDefEq_le⟩
 
+theorem VEnv.ReflectsNatBitwise.addDefEq {env : VEnv} {df : VDefEq}
+    (h : env.ReflectsNatBitwise fc) :
+    (env.addDefEq df).ReflectsNatBitwise fc := by
+  intro hfc
+  obtain ⟨htype, heval⟩ := h hfc
+  refine ⟨fun U Γ => (htype U Γ).mono VEnv.addDefEq_le, ?_⟩
+  intro env' hle hwf op f hop a b
+  exact heval env' (VEnv.addDefEq_le.trans hle) hwf op f hop a b
+
+theorem VEnv.ReflectsBoolBin.mono {env env' : VEnv}
+    (h : env.ReflectsBoolBin op f) (hle : env ≤ env') :
+    env'.ReflectsBoolBin op f :=
+  ⟨h.1.mono hle, fun a b => (h.2 a b).mono hle⟩
+
 /-- Adding a fresh, differently named constant preserves an existing binary
 Nat reflection. -/
 theorem VEnv.ReflectsNatNatNat.addConst {env env' : VEnv}
@@ -1970,6 +1984,20 @@ theorem VEnv.ReflectsNatNatBool.addConst {env env' : VEnv}
   have hle := VEnv.addConst_le hadd
   exact ⟨fun U Γ => (htype U Γ).mono hle,
     fun a b => (heval a b).mono hle⟩
+
+theorem VEnv.ReflectsNatBitwise.addConst {env env' : VEnv}
+    (h : env.ReflectsNatBitwise fc)
+    (hadd : env.addConst n ci = some env') (hne : n ≠ fc) :
+    env'.ReflectsNatBitwise fc := by
+  intro hfc
+  obtain ⟨fcCi, hfcLookup⟩ := hfc
+  have hold : env.contains fc := ⟨fcCi, by
+    rwa [VEnv.addConst_other hadd hne] at hfcLookup⟩
+  obtain ⟨htype, heval⟩ := h hold
+  have hle := VEnv.addConst_le hadd
+  refine ⟨fun U Γ => (htype U Γ).mono hle, ?_⟩
+  intro env'' hle' hwf op f hop a b
+  exact heval env'' (hle.trans hle') hwf op f hop a b
 
 /-- Adding a fresh, differently named constant preserves an existing unary
 Nat reflection. -/
@@ -2119,6 +2147,9 @@ theorem VEnv.HasPrimitives.addNatPred {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -2144,6 +2175,7 @@ theorem VEnv.HasPrimitives.addNatPred {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -2819,6 +2851,9 @@ theorem VEnv.HasPrimitives.addNatAdd {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -2844,6 +2879,7 @@ theorem VEnv.HasPrimitives.addNatAdd {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -2885,6 +2921,9 @@ theorem VEnv.HasPrimitives.addNatSub {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -2910,6 +2949,7 @@ theorem VEnv.HasPrimitives.addNatSub {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -2951,6 +2991,9 @@ theorem VEnv.HasPrimitives.addNatMod {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -2976,6 +3019,7 @@ theorem VEnv.HasPrimitives.addNatMod {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3017,6 +3061,9 @@ theorem VEnv.HasPrimitives.addNatDiv {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3042,6 +3089,7 @@ theorem VEnv.HasPrimitives.addNatDiv {env env' : VEnv}
     natDiv := href
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3083,6 +3131,9 @@ theorem VEnv.HasPrimitives.addNatMul {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3108,6 +3159,7 @@ theorem VEnv.HasPrimitives.addNatMul {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3149,6 +3201,9 @@ theorem VEnv.HasPrimitives.addNatPow {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3174,6 +3229,7 @@ theorem VEnv.HasPrimitives.addNatPow {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3215,6 +3271,9 @@ theorem VEnv.HasPrimitives.addNatBEq {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3240,6 +3299,7 @@ theorem VEnv.HasPrimitives.addNatBEq {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := href
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3281,6 +3341,9 @@ theorem VEnv.HasPrimitives.addNatBLE {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3306,6 +3369,77 @@ theorem VEnv.HasPrimitives.addNatBLE {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := href
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hu, hty, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le,
+        hnil.mono le, hcons.mono le⟩ }
+
+/-- Install the checked `Nat.bitwise` reflection after inserting its
+definition, while transporting every unrelated primitive fact. -/
+theorem VEnv.HasPrimitives.addNatBitwise {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Nat.bitwise ci = some env')
+    (href : (env'.addDefEq df).ReflectsNatBitwise ``Nat.bitwise) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Nat.bitwise ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Nat.bitwise ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natSub := (h.natSub.addConst hadd (by decide)).addDefEq
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natMod := (h.natMod.addConst hadd (by decide)).addDefEq
+    natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := href
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3348,6 +3482,9 @@ theorem VEnv.HasPrimitives.addNatShiftLeft {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3373,6 +3510,7 @@ theorem VEnv.HasPrimitives.addNatShiftLeft {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3415,6 +3553,9 @@ theorem VEnv.HasPrimitives.addNatShiftRight {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3440,6 +3581,7 @@ theorem VEnv.HasPrimitives.addNatShiftRight {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3487,6 +3629,9 @@ theorem VEnv.HasPrimitives.addCharOfNat {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3512,6 +3657,7 @@ theorem VEnv.HasPrimitives.addCharOfNat {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
@@ -3563,6 +3709,9 @@ theorem VEnv.HasPrimitives.addStringOfList {env env' : VEnv}
     bool := fun H => by
       obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
       exact ⟨newContains hfalse, newContains htrue⟩
+    boolType := fun H => h.boolType (by
+      change env''.constants ``Bool = some _ at H
+      rwa [same ``Bool (by decide)] at H)
     boolFalse := fun H => h.boolFalse (by
       change env''.constants ``Bool.false = some _ at H
       rwa [same ``Bool.false (by decide)] at H)
@@ -3588,6 +3737,7 @@ theorem VEnv.HasPrimitives.addStringOfList {env env' : VEnv}
     natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
     natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
     natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natBitwise := (h.natBitwise.addConst hadd (by decide)).addDefEq
     natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
     natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
