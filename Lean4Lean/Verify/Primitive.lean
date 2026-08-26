@@ -102,6 +102,40 @@ theorem checkPrimitiveDef.WF_of_core {c : VContext} {s : VState}
   · exact hcore
   · exact .pure hfalse
 
+/-- A nonprimitive source name cannot enter any substantive primitive
+recognizer branch. This is the narrow residual fact used by the exhaustive
+front-end dispatch; it does not rely on the generic primitive theorem. -/
+theorem checkPrimitiveDef.WF_of_not_primitive {c : VContext} {s : VState}
+    (hn : ¬Lean.Kernel.Environment.primitives.contains v.name) :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b = false := by
+  apply checkPrimitiveDef.WF_of_core rfl
+  simp [checkPrimitiveDefCore, Lean.Kernel.Environment.primitives,
+    NameSet.contains, NameSet.ofList] at hn ⊢
+  split <;> simp_all
+  exact getEnv.WF.bind fun _ _ _ _ => .pure rfl
+
+/-- The six primitive names installed by inductive declarations are never
+accepted by the definition recognizer. -/
+theorem checkPrimitiveDef.WF_of_inductive_name {c : VContext} {s : VState}
+    (hname : v.name = ``Bool ∨ v.name = ``Bool.false ∨
+      v.name = ``Bool.true ∨ v.name = ``Nat ∨
+      v.name = ``Nat.zero ∨ v.name = ``Nat.succ) :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b = false := by
+  apply checkPrimitiveDef.WF_of_core rfl
+  refine getEnv.WF.bind fun _ _ _ _ => ?_
+  rcases hname with hname | hname | hname | hname | hname | hname
+  all_goals
+    simp [hname]
+    exact .pure rfl
+
+/-- The public checker rejects every nonsafe definition before inspecting its
+name or body. -/
+theorem checkPrimitiveDef.WF_of_not_safe {c : VContext} {s : VState}
+    (hsafety : v.safety ≠ .safe) :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b = false := by
+  simp [checkPrimitiveDef, hsafety]
+  exact .pure rfl
+
 /-- A globally closed translation can be reused under freshly introduced
 bound variables without changing its target expression. -/
 private theorem TrExprS.closed_weak

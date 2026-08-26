@@ -2116,8 +2116,8 @@ to the replacement.
 - **Status:** implemented as the eighteenth bounded UP6 slice; the live safe
   definition path now has direct certificates for `Nat.land`, `Nat.lor`, and
   `Nat.xor`. All finite definition-primitive names have direct endpoints;
-  exhaustive treatment of the remaining impossible primitive-name cases and
-  the generic V4 disposition remain open.
+  exhaustive live dispatch is tracked by D044, while the generic V4
+  disposition remains explicitly open.
 - **Owner:** Argument Computer Corporation; review with final UP6 dispatch and
   any upstream revision of PR #32.
 - **Source:** manually adapted from lean4lean PR #32 at
@@ -2155,6 +2155,53 @@ to the replacement.
   table derivations, Kripke specialization, and readiness-aware direct
   endpoints; or reconciliation explicitly retains this stricter local
   wrapper boundary.
+
+## D044 — exhaustive live primitive-definition dispatch
+
+- **Status:** implemented as the final finite-dispatch UP6 slice. Every
+  successful live `addDefinition.WF` path is now proved through a concrete
+  primitive certificate, a proved nonprimitive residual path, or a proved
+  impossible case. The generic V4 theorem remains an explicit source-level
+  research boundary, but it is no longer reachable from the live theorem.
+- **Owner:** Argument Computer Corporation; review with any upstream revision
+  of PR #32 and any later decision to prove, narrow, or remove generic V4.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its narrow
+  nonprimitive and primitive-inductive checker lemmas and final finite name
+  enumeration. The local environment transaction was adapted rather than
+  copied because Lean4Ix returns the stronger per-safety `VEnv.AddDef`
+  witness for every nonunsafe successful definition.
+- **Verification delta:** `checkPrimitiveDef.WF_of_not_primitive` proves that
+  names outside the reserved set return `false` without entering a primitive
+  recognizer; `checkPrimitiveDef.WF_of_inductive_name` rejects the six
+  primitive names installed by inductive declarations; and
+  `checkPrimitiveDef.WF_of_not_safe` captures the public safety guard.
+  Readiness-aware safe and partial residual transactions preserve
+  `HasPrimitives` using the nonprimitive name fact. Partial declarations with
+  reserved names and safe definitions using an inductive primitive name are
+  proved unable to pass `checkName`. The live theorem splits on safety,
+  exhaustively enumerates the 24-name primitive set, and dispatches the 18
+  definition names to their direct certificates.
+- **Trust decision:** the admitted generic `checkPrimitiveDef.WF` and the
+  generic `checkDefinition.WF` interface remain in source for V4 work and
+  downstream experiments; they are not silently presented as proved or
+  deleted. This slice adds no custom axiom, `native_decide` proof, or source
+  `sorry`. The dependency closure of the complete live `addDefinition.WF`
+  root excludes `checkPrimitiveDef.WF` and contains exactly the same six
+  inherited sorry carriers already pinned for every direct primitive root.
+- **Ix impact:** the executable kernel's ordinary definition insertion path
+  now has a finite, auditable primitive trust boundary. Ix can rely on the
+  stronger per-safety insertion witness without importing a universal
+  primitive-recognizer assumption into its out-of-circuit or circuit-facing
+  theorem transport.
+- **Tests:** `Lean4Lean.Tests.Primitive` computes the full transitive
+  dependency closure of `Lean4Lean.addDefinition.WF`, fails if the generic
+  boundary reappears, and pins its exact six-carrier inherited sorry closure
+  alongside the existing eighteen direct-root checks.
+- **Removal condition:** upstream lands an equivalent exhaustive dispatch
+  that preserves the local readiness and witness contract, or generic V4 is
+  proved and its strictly stronger theorem is deliberately reinstated after
+  an explicit trust review.
 
 ## Review checklist
 

@@ -877,6 +877,36 @@ theorem checkTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
       rw [← htr.1.2.1]
       exact hprop hisProp
 
+/-- Verify the ordinary definition-checking transaction when the declaration
+name is outside the finite primitive set. The primitive recognizer is proved
+to return `false` structurally, so this path is independent of the admitted
+generic primitive postcondition. -/
+theorem checkDefinition.WF_of_not_primitive
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal)
+    (hn : Environment.primitives.contains v.name = false) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) : TypeChecker.M Unit).WF
+      (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ ci' : VDefVal,
+          v.levelParams.length = ci'.uvars ∧
+          TrExprS (ves.venv .safe) v.levelParams [] v.type ci'.type ∧
+          v.name = ci'.name ∧
+          TrExprS (ves.venv .safe) v.levelParams [] v.value ci'.value ∧
+          ci'.WF (ves.venv .safe) ∧ env.find? v.name = none := by
+  refine (checkDefinitionBody.WF wf v).bind fun _ state' _ hbody => ?_
+  obtain ⟨ci', hu, htype, hname, hvalue, hci⟩ := hbody
+  refine (Environment.checkPrimitiveDef.WF_of_not_primitive
+    (c := .mk' wf .safe v.levelParams) (s := state') (v := v)
+    (by simp [hn])).bind fun allow _ _ hallow => ?_
+  subst allow
+  exact (TypeChecker.M.WF.liftExcept
+    (checkName.WF (wf.tr (safety := .safe)).map_wf v.name false)).mono
+      fun _ _ _ hcheckedName =>
+        ⟨ci', hu, htype, hname, hvalue, hci, hcheckedName.1⟩
+
 theorem checkDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) :
     ((do

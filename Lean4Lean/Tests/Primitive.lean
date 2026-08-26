@@ -9,8 +9,9 @@ import Lean4Lean.Verify.Environment
 /-!
 # Primitive verification regression pins
 
-The direct elementary-Nat declaration paths must stay independent of the
-generic admitted primitive-recognizer boundary.
+The complete live definition transaction and every direct finite-primitive
+declaration path must stay independent of the generic admitted
+primitive-recognizer boundary.
 -/
 
 open Lean Lean.Elab.Command
@@ -58,6 +59,7 @@ run_cmd do
   let landRoot := ``Lean4Lean.addDefinition.WF_safe_natLand
   let lorRoot := ``Lean4Lean.addDefinition.WF_safe_natLor
   let xorRoot := ``Lean4Lean.addDefinition.WF_safe_natXor
+  let liveRoot := ``Lean4Lean.addDefinition.WF
   let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
@@ -77,6 +79,7 @@ run_cmd do
   let landClosure := dependencyClosure env [landRoot] {}
   let lorClosure := dependencyClosure env [lorRoot] {}
   let xorClosure := dependencyClosure env [xorRoot] {}
+  let liveClosure := dependencyClosure env [liveRoot] {}
   if closure.contains genericBoundary then
     throwError "the direct Nat.add declaration certificate regressed through checkPrimitiveDef.WF"
   if predClosure.contains genericBoundary then
@@ -113,7 +116,9 @@ run_cmd do
     throwError "the direct Nat.lor declaration certificate regressed through checkPrimitiveDef.WF"
   if xorClosure.contains genericBoundary then
     throwError "the direct Nat.xor declaration certificate regressed through checkPrimitiveDef.WF"
-  let some liveInfo := env.find? ``Lean4Lean.addDefinition.WF
+  if liveClosure.contains genericBoundary then
+    throwError "the live addDefinition.WF path regressed through checkPrimitiveDef.WF"
+  let some liveInfo := env.find? liveRoot
     | throwError "addDefinition.WF is missing"
   unless (directConstants liveInfo).contains root do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.add certificate"
@@ -165,6 +170,18 @@ run_cmd do
     ``Lean4Lean.TypeChecker.Inner.reduceRecursor.WF]
   let observedSet : Lean.NameSet := sorryCarriers.foldl (·.insert ·) {}
   let expectedSet : Lean.NameSet := expectedSorryCarriers.foldl (·.insert ·) {}
+  let liveSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if liveClosure.contains name && (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let liveObservedSet : Lean.NameSet :=
+    liveSorryCarriers.foldl (·.insert ·) {}
+  let liveAdded := liveSorryCarriers.filter (!expectedSet.contains ·)
+  let liveRemoved := expectedSorryCarriers.filter (!liveObservedSet.contains ·)
+  unless liveAdded.isEmpty && liveRemoved.isEmpty do
+    throwError m!"live addDefinition.WF sorry closure changed; added: {liveAdded}; removed: {liveRemoved}"
   let added := sorryCarriers.filter (!expectedSet.contains ·)
   let removed := expectedSorryCarriers.filter (!observedSet.contains ·)
   unless added.isEmpty && removed.isEmpty do
@@ -388,4 +405,4 @@ run_cmd do
   let xorRemoved := expectedSorryCarriers.filter (!xorObservedSet.contains ·)
   unless xorAdded.isEmpty && xorRemoved.isEmpty do
     throwError m!"Nat.xor direct-certificate sorry closure changed; added: {xorAdded}; removed: {xorRemoved}"
-  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Char.ofNat, String.ofList, Nat.beq, Nat.ble, Nat.mod, Nat.div, Nat.gcd, Nat.bitwise, Nat.land, Nat.lor, and Nat.xor direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  logInfo "the exhaustive live addDefinition.WF path and all eighteen direct primitive certificates exclude checkPrimitiveDef.WF and retain exactly six known upstream proof dependencies"
