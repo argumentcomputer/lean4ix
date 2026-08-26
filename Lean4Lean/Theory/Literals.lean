@@ -206,6 +206,14 @@ def VEnv.ReflectsNatNatNat (env : VEnv) (fc : Name) (f : Nat → Nat → Nat) :=
   ∀ a b, env.IsDefEqU 0 []
     (.app (.app (.const fc []) (.natLit a)) (.natLit b)) (.natLit (f a b))
 
+/-- Semantic certificate for a unary natural-number primitive. The typing
+component is retained because later primitive certificates, notably
+`Nat.sub`, apply the unary operation to an arbitrary typed recursive result. -/
+def VEnv.ReflectsNatNat (env : VEnv) (fc : Name) (f : Nat → Nat) :=
+  env.contains fc →
+  (∀ U Γ, env.HasType U Γ (.const fc []) (.forallE .nat .nat)) ∧
+  ∀ a, env.IsDefEqU 0 [] (.app (.const fc []) (.natLit a)) (.natLit (f a))
+
 def VEnv.ReflectsNatNatBool (env : VEnv) (fc : Name) (f : Nat → Nat → Bool) :=
   env.contains fc →
   ∀ a b, env.IsDefEqU 0 []
@@ -219,6 +227,7 @@ structure VEnv.HasPrimitives (env : VEnv) : Prop where
   natZero : env.constants ``Nat.zero = some ci → ci = { uvars := 0, type := .nat }
   natSucc : env.constants ``Nat.succ = some ci →
     ci = { uvars := 0, type := .forallE .nat .nat }
+  natPred : env.ReflectsNatNat ``Nat.pred Nat.pred
   natAdd : env.ReflectsNatNatNat ``Nat.add Nat.add
   natSub : env.ReflectsNatNatNat ``Nat.sub Nat.sub
   natMul : env.ReflectsNatNatNat ``Nat.mul Nat.mul
@@ -257,12 +266,12 @@ theorem VExpr.WF.boolLit_has_type (wf : env.Ordered)
   | true => cases henv.boolTrue h1; exact .const h1 h2 h3
 
 /-- The primitive constants whose Theory reflections are tracked by
-`VEnv.HasPrimitives`. `Nat.pred` and `Nat.bitwise` are kernel primitive names
-too, but they have no dedicated fields in that contract. -/
+`VEnv.HasPrimitives`. `Nat.bitwise` is also a kernel primitive name but has no
+dedicated field in the retained contract. -/
 def VEnv.reflectedPrimitiveNames : List Name := [
   ``Bool, ``Bool.false, ``Bool.true,
   ``Nat, ``Nat.zero, ``Nat.succ,
-  ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow,
+  ``Nat.pred, ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow,
   ``Nat.gcd, ``Nat.mod, ``Nat.div, ``Nat.beq, ``Nat.ble,
   ``Nat.land, ``Nat.lor, ``Nat.xor,
   ``Nat.shiftLeft, ``Nat.shiftRight,
@@ -300,6 +309,9 @@ theorem VEnv.HasPrimitives.of_avoids
     natSucc := fun hci =>
       (noLookup ``Nat.succ
         (by simp [VEnv.reflectedPrimitiveNames]) hci).elim
+    natPred := fun hc =>
+      (noContains ``Nat.pred
+        (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
     natAdd := fun hc =>
       (noContains ``Nat.add
         (by simp [VEnv.reflectedPrimitiveNames]) hc).elim
@@ -404,6 +416,11 @@ theorem VEnv.HasPrimitives.addConst
     natSucc := fun h => H.natSucc (by
       simpa only [lookup ``Nat.succ
         (by simp [VEnv.reflectedPrimitiveNames])] using h)
+    natPred := fun h => by
+      obtain ⟨htype, heval⟩ := H.natPred (oldContains ``Nat.pred
+        (by simp [VEnv.reflectedPrimitiveNames]) h)
+      exact ⟨fun U Γ => (htype U Γ).mono hle,
+        fun a => (heval a).mono hle⟩
     natAdd := fun h a b =>
       (H.natAdd (oldContains ``Nat.add
         (by simp [VEnv.reflectedPrimitiveNames]) h) a b).mono hle

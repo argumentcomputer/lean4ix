@@ -89,11 +89,11 @@ must be updated whenever a proof enters or leaves the frontier.
 | V3 family root-translation transport delta | **Discharges the source-translation half of the outer pairing residual above.** A strict family root translated at the producer's empty local context is Theory-closed, so it now weakens definitionally unchanged into any verified candidate context with the same environment and level parameters. The dependent all-family semantic list lifts this pointwise to a complete source/raw `Forall₂`, preserving exact source order. Remaining outer work is therefore context ownership: thread verified contexts through the first-family parameter/index traversal and later-family index tails, then apply these transported roots to the retained comparison interpreter. Telescope relocation, canonical `Normalization.BlockWF`, and exact `checkedFamilies?` success remain afterward. |
 | V3 exact readiness handoff delta | **Supersedes the replay-to-readiness plumbing clauses in both exact transaction rows above.** Direct ordinary and genuinely nested constructors now consume their dependent exact transaction, input `VEnvs.WF`, and projection readiness at the transaction's named safe endpoint. They derive the coherent replay and readiness-completed extension internally, so no caller can reselect a source, transaction family, or endpoint. Remaining producer work is exactly the branch-specific semantic evidence needed to construct those dependent transactions plus final projection readiness. |
 | V3 recursive projection staging delta | **Closed at the generated-minor and projector-program layers.** Projection syntax binds constructor fields followed by the exact checked induction-hypothesis telescope; its universe, lift, and term-substitution laws preserve that telescope. The selector is typed beneath arbitrary generated IH binders, generated projector programs transport the exact IH domains, and the exact iota proof beta-reduces every ignored binder. `VStructureView` now admits one-constructor unindexed recursive families directly: the `recursive_eq`, empty-IH, and field-only compatibility equations have been removed, while a concrete `RecursiveCell` fixture checks a genuinely nonempty generated IH telescope. Remaining V3 work is readiness integration and the persistent eta/rebuild certificate across arbitrary environment extensions, not a projection-minor shape mismatch. |
-| Supported builds | Current Theory + Verify build: 169 jobs green. Current default build/tests: 241 jobs green. |
+| Supported builds | Current Theory + Verify build: 170 jobs green. Current default build/tests: 243 jobs green. |
 | Proof frontier | 9 supported proof declarations: 6 metatheory and 3 checker verification. The compiled allowlist has 15 entries after adding 6 deliberately rejected fixtures. Lane V removed 7 proof sorries from the previous 16-entry proof frontier. |
 | Experimental surface | Zero source `sorry` tokens and no `stop`-hidden admissions, but endpoints remain conditional. The concrete five-rule `D2RegisteredBodyStep` discharge compiles. Both inherited D2 Nat sites are now replayed internally, so `D2BlockStepExact` contains only the Tree check, a paired five-rule Tree replay, and the discharged registered-body field. D2 also has generic conversion-aware prefix/collapse replay, an exact eight-common-arguments-plus-fields capture inventory, and a named `D2TreeLevelAlignmentStep`; the Tree suffix/body share the NORM-DI-dependent local head-argument/source-level alignment boundary rather than being pure engineering. The current full `Lean4Lean.Experimental` gate is green at 152 jobs (its pre-existing lint warnings are not promoted to errors). |
 | Project axioms | 28 declarations: 26 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory and all 11 high-risk repaired signatures, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 325 exact union leaves. |
-| Upstream intake audit | Refreshed and implemented through UP5 plus the first UP6 primitive slice on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation and a direct, live `Nat.add` checker/conservation certificate; its dependency pin excludes the generic primitive boundary and records exactly six inherited upstream proof dependencies. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; the remaining primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
+| Upstream intake audit | Refreshed and implemented through UP5 plus the first two UP6 primitive slices on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation plus direct, live `Nat.add` and `Nat.pred` checker/conservation certificates. Both dependency pins exclude the generic primitive boundary and record exactly six inherited upstream proof dependencies. `Nat.pred` also extends the retained Theory contract with the unary reflection needed by `Nat.sub`. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; the remaining primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
 
 ### Delivered foundation
 
@@ -2686,8 +2686,23 @@ foundation:
   admission is introduced, and the generic V4 boundary remains one of the 15
   allowlisted source sorries until the remaining primitive dispatch lands.
 
-The next UP6 slice is `Nat.pred`, followed by `Nat.sub`; this reuses the new
-environment shell while adding only unary-Nat equation/reflection support.
+The second semantic slice, `Nat.pred`, is now green:
+
+- `checkNatPredPrimitive` isolates the executable branch and lambda-closes
+  its successor equation;
+- `VEnv.ReflectsNatNat` and the `natPred` field retain both the constant's
+  unary type and its action on every natural literal, rather than discarding
+  the checked equations after installation;
+- `checkPrimitiveDef.natPred.WF_typed`, `checkSafeNatPredDefinition.WF`, and
+  `addDefinition.WF_safe_natPred` form the direct live certificate path;
+- the updated reflection inventory is transported through ordinary constant,
+  definition-equation, structure-eta, Bool/Nat family, and fixture extensions;
+- `Tests/Primitive.lean` proves that both Nat.add and Nat.pred live roots avoid
+  `checkPrimitiveDef.WF` and each retain exactly the same six known inherited
+  sorry carriers. The global source frontier remains 15.
+
+The next UP6 slice is `Nat.sub`. Its checker and binary recurrence can now
+consume the retained `Nat.pred` typing and literal-reflection certificate.
 
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,

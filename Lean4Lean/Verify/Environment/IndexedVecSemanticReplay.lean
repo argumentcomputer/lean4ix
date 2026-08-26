@@ -42,6 +42,7 @@ theorem indexedVecSemanticNatHasPrimitives : VEnv.HasPrimitives natFinalEnv := b
     natSucc := fun h => by
       change some natType.ctors[1].toVConstant = some _ at h
       exact (Option.some.inj h).symm
+    natPred := fun h => (absent ``Nat.pred rfl h).elim
     natAdd := fun h => (absent ``Nat.add rfl h).elim
     natSub := fun h => (absent ``Nat.sub rfl h).elim
     natMul := fun h => (absent ``Nat.mul rfl h).elim

@@ -92,6 +92,11 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
     exact ⟨newContains h1, newContains h2⟩
   · intro ci h; apply H.natZero; rwa [← same (hprims (by simp))]
   · intro ci h; apply H.natSucc; rwa [← same (hprims (by simp))]
+  · intro h
+    obtain ⟨htype, heval⟩ := H.natPred
+      (oldContains (hprims (by simp)) h)
+    exact ⟨fun U Γ => (htype U Γ).mono le,
+      fun a => (heval a).mono le⟩
   · intro h a b; exact (H.natAdd (oldContains (hprims (by simp)) h) a b).mono le
   · intro h a b; exact (H.natSub (oldContains (hprims (by simp)) h) a b).mono le
   · intro h a b; exact (H.natMul (oldContains (hprims (by simp)) h) a b).mono le
@@ -114,6 +119,10 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
 theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
     (env.addDefEq df).HasPrimitives :=
   { H with
+    natPred h :=
+      let ⟨htype, heval⟩ := H.natPred h
+      ⟨fun U Γ => (htype U Γ).mono VEnv.addDefEq_le,
+        fun a => (heval a).mono VEnv.addDefEq_le⟩
     natAdd h a b := (H.natAdd h a b).mono VEnv.addDefEq_le
     natSub h a b := (H.natSub h a b).mono VEnv.addDefEq_le
     natMul h a b := (H.natMul h a b).mono VEnv.addDefEq_le
@@ -139,6 +148,10 @@ theorem VEnv.HasPrimitives.addStructEta {env : VEnv}
     (H : env.HasPrimitives) :
     (env.addStructEta rule).HasPrimitives :=
   { H with
+    natPred h :=
+      let ⟨htype, heval⟩ := H.natPred h
+      ⟨fun U Γ => (htype U Γ).mono VEnv.addStructEta_le,
+        fun a => (heval a).mono VEnv.addStructEta_le⟩
     natAdd h a b := (H.natAdd h a b).mono VEnv.addStructEta_le
     natSub h a b := (H.natSub h a b).mono VEnv.addStructEta_le
     natMul h a b := (H.natMul h a b).mono VEnv.addStructEta_le
@@ -1083,6 +1096,12 @@ theorem VEnv.HasPrimitives.of_addBool
     natSucc := fun found => pre.natSucc
       (oldLookup ``Nat.succ (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found)
+    natPred := fun found => by
+      obtain ⟨htype, heval⟩ := pre.natPred
+        (oldContains ``Nat.pred (by simp [VEnv.reflectedPrimitiveNames])
+          (by simp) (by simp) (by simp) found)
+      exact ⟨fun U Γ => (htype U Γ).mono hle,
+        fun a => (heval a).mono hle⟩
     natAdd := fun found a b =>
       (pre.natAdd (oldContains ``Nat.add
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)
@@ -1194,6 +1213,12 @@ theorem VEnv.HasPrimitives.of_addNat
     nat := fun _ => ⟨⟨_, zeroLookup⟩, ⟨_, succLookup⟩⟩
     natZero := fun found => Option.some.inj (found.symm.trans zeroLookup)
     natSucc := fun found => Option.some.inj (found.symm.trans succLookup)
+    natPred := fun found => by
+      obtain ⟨htype, heval⟩ := pre.natPred
+        (oldContains ``Nat.pred (by simp [VEnv.reflectedPrimitiveNames])
+          (by simp) (by simp) (by simp) found)
+      exact ⟨fun U Γ => (htype U Γ).mono hle,
+        fun a => (heval a).mono hle⟩
     natAdd := fun found a b =>
       (pre.natAdd (oldContains ``Nat.add
         (by simp [VEnv.reflectedPrimitiveNames]) (by simp) (by simp) (by simp)

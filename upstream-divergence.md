@@ -1477,6 +1477,42 @@ to the replacement.
   readiness transaction, dependency pin, or more precise accepted-domain
   requirements.
 
+## D027 — retained Nat.pred reflection and direct primitive certificate
+
+- **Status:** implemented as the second semantic UP6 slice; upstream-derived
+  specialization with the remaining primitive families still open.
+- **Owner:** Argument Computer Corporation; retain through the Nat.sub slice
+  and review when reconciling the complete primitive contract upstream.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its unary
+  reflection, Nat.pred recognizer certificate, conservation theorem, and live
+  dispatch; no whole-PR merge.
+- **Executable delta:** `checkNatPredPrimitive` extracts the Nat.pred branch
+  and closes its open successor equation with `Expr.lam0`, so the executable
+  check states the intended pointwise equation. Other unported primitive
+  branches retain their existing helpers until their own slices land.
+- **Verification delta:** the retained Theory contract now includes
+  `ReflectsNatNat` and a `natPred` field carrying both the unary constant type
+  and literal computation. This is the minimum persistent evidence required
+  to certify Nat.sub's successor recurrence; the previous local contract
+  intentionally omitted Nat.pred and would have forgotten that evidence
+  after declaration installation. The direct typed recognizer, safe checker,
+  and readiness-aware `AddDef` path establish and preserve the new field.
+- **Ix impact:** Nat.pred now has a concrete end-to-end declaration
+  certificate, and later transports can rely on its exact unary literal
+  behavior rather than merely its presence. Adding Nat.pred to
+  `reflectedPrimitiveNames` also prevents unrelated declaration transactions
+  from silently replacing it.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that the live dispatch names
+  both direct elementary-Nat roots, that neither reaches
+  `checkPrimitiveDef.WF`, and that each reaches exactly the same six inherited
+  sorry-carrying dependencies. The complete sorry-frontier and release-root
+  audits remain unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the unary reflection
+  needed by Nat.sub together with the fork's readiness transaction and trust
+  pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

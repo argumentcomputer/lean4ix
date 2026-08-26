@@ -15,6 +15,7 @@ without taking these APIs away from Theory consumers.
 
 namespace Lean4Lean.Tests.TheoryConsumerSurface
 
+#check VEnv.ReflectsNatNat
 #check VEnv.reflectedPrimitiveNames
 #check VEnv.HasPrimitives.of_avoids
 #check VEnv.addConst_other

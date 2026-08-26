@@ -2514,7 +2514,7 @@ theorem roseListHasPrimitives09 : VEnv.HasPrimitives listFinalEnv07 := by
     List.not_mem_nil, or_false] at member
   rcases member with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
     rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl |
-    rfl | rfl | rfl <;> rfl
+    rfl | rfl | rfl | rfl <;> rfl
 
 theorem roseListSafePrimitives09 :
     roseInputKernelEnv09.find? name = some info →

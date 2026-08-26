@@ -267,6 +267,22 @@ def checkNatAddPrimitive (env : Environment) (v : DefinitionVal)
   unless ← defeq1 (add x zero) x do fail
   unless ← defeq2 (add y (succ x)) (succ (add y x)) do fail
 
+/-- Validate the closed type and defining equations for the elementary
+`Nat.pred` primitive. The successor equation is closed with a lambda so the
+checker tests the intended pointwise equation. -/
+def checkNatPredPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat && v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat) do fail
+  let pred := mkApp v.value
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let x := .bvar 0
+  unless ← isDefEq (pred zero) zero do fail
+  unless ← isDefEq
+    (.lam0 q(Nat) <| pred (succ x))
+    (.lam0 q(Nat) x) do fail
+
 def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
@@ -290,12 +306,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.add =>
     checkNatAddPrimitive env v fail
   | ``Nat.pred =>
-    unless env.contains ``Nat && v.levelParams.isEmpty do fail
-    -- pred : Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat) do fail
-    let pred := mkApp v.value
-    unless ← isDefEq (pred zero) zero do fail
-    unless ← defeq1 (pred (succ x)) x do fail
+    checkNatPredPrimitive env v fail
   | ``Nat.sub =>
     unless env.contains ``Nat.pred && v.levelParams.isEmpty do fail
     -- sub : Nat → Nat → Nat
