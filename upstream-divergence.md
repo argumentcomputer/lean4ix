@@ -1716,6 +1716,39 @@ to the replacement.
   stronger generic proof) and reconciliation preserves the retained Nat.mul
   dependency, readiness transaction, and exact trust pins.
 
+## D034 — shared reflected-condition certificate foundation
+
+- **Status:** implemented as the ninth UP6 foundation slice; this certifies
+  selector behavior but does not yet claim a direct Nat.mod or Nat.div
+  declaration certificate.
+- **Owner:** Argument Computer Corporation; review with the first mod/div or
+  bitwise consumer.
+- **Source:** manually extracted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally
+  `ConditionReflect.lean` plus the small generic support declarations that
+  its upstream import obtained indirectly from the bitwise and monolithic
+  primitive modules. No mod/div recursion or bitwise certificate was imported.
+- **Dependency decision:** the fork exposes `ConditionSupport` explicitly.
+  It contains constructor fragments, lambda-equation instantiation, and the
+  raw checked-selector evidence types. `ConditionReflect` depends on that
+  neutral module rather than a misleading bitwise support import.
+- **Verification delta:** checked nondependent and dependent selector
+  equations can be canonicalized to chosen closed translations, and typed
+  calls select the branch determined by an evaluated Boolean condition. Seven
+  proof sites were adapted to Lean v4.33's current explicit lift/instantiation
+  normal forms; no checker domain was changed.
+- **Ix impact:** later Nat.mod/div and bitwise transports can share one typed
+  condition-elimination boundary instead of duplicating proof-argument and
+  branch-selection reasoning.
+- **Tests:** `Lean4Lean.Tests.ConditionReflect` pins four representative
+  theorem closures. The two equation-canonicalization endpoints use only
+  `propext`, `Classical.choice`, and `Quot.sound`; the two typed
+  branch-selection endpoints transparently retain the existing upstream
+  `sorryAx` dependency.
+- **Removal condition:** upstream exposes an equivalently neutral module
+  boundary, or reconciliation can import the same proof layer without the
+  fork-owned split and Lean-v4.33 normalization adaptations.
+
 ## Review checklist
 
 At each publish or ix pin boundary:
