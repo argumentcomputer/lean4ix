@@ -4,7 +4,7 @@ Modifications Copyright (c) 2026 Argument Computer Corporation.
 SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 -/
 
-import Lean4Lean.Verify.TypeChecker
+import Lean4Lean.Verify.Primitive
 import Lean4Lean.Environment
 
 /-!

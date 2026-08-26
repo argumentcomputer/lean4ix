@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean4Lean.TypeChecker
 import Lean4Lean.Environment.Basic
 
@@ -243,8 +249,25 @@ def unfoldNatWellFounded (e : Expr) (fvs : Array Expr) (eq_def : Expr) (fail : �
   unless ← isDefEq rhs rhs' do fail
   return (← getLCtx).mkLambda fvs rhs
 
-def checkPrimitiveDef (v : DefinitionVal) : M Bool := do
-  unless v.safety == .safe do return false
+/-- Validate the closed type and defining equations for the elementary
+`Nat.add` primitive. Keeping this branch separate gives its verification
+certificate a bounded executable surface instead of forcing it to unfold the
+entire primitive dispatcher. -/
+def checkNatAddPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat && v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  let add := mkApp2 v.value
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let x := .bvar 0
+  let y := .bvar 1
+  let defeq1 a b := isDefEq (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  let defeq2 a b := defeq1 (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  unless ← defeq1 (add x zero) x do fail
+  unless ← defeq2 (add y (succ x)) (succ (add y x)) do fail
+
+def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
   let fal := q(false)
@@ -265,14 +288,7 @@ def checkPrimitiveDef (v : DefinitionVal) : M Bool := do
   let env ← getEnv
   match v.name with
   | ``Nat.add =>
-    unless env.contains ``Nat && v.levelParams.isEmpty do fail
-    -- add : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let add := mkApp2 v.value
-    -- add x 0 ≡ x
-    unless ← defeq1 (add x zero) x do fail
-    -- add y (succ x) ≡ succ (add y x)
-    unless ← defeq2 (add y (succ x)) (succ (add y x)) do fail
+    checkNatAddPrimitive env v fail
   | ``Nat.pred =>
     unless env.contains ``Nat && v.levelParams.isEmpty do fail
     -- pred : Nat → Nat
@@ -461,6 +477,10 @@ def checkPrimitiveDef (v : DefinitionVal) : M Bool := do
     unless ← isDefEq v.type q(List Char → String) do fail
   | _ => return false
   return true
+
+def checkPrimitiveDef (v : DefinitionVal) : M Bool := do
+  unless v.safety == .safe do return false
+  checkPrimitiveDefCore v
 
 def checkPrimitiveInductive (_env : Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe : Bool) : Except Exception Bool := do

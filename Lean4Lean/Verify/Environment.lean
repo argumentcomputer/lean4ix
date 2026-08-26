@@ -34,12 +34,85 @@ theorem addAxiom.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env) (v : Axi
     cases v.isUnsafe <;> cases safety <;> trivial
   · exact .axiom htr (by rwa [← old.map_wf.find?'_eq_find?]) hci hadd old
 
+/-- Fully proved safe `Nat.add` declaration path. Ordinary body checking,
+recognizer equations, and preservation of primitive reflection are all
+discharged by concrete certificates; the generic `checkPrimitiveDef.WF`
+boundary is not used. -/
+theorem addDefinition.WF_safe_natAdd
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.add)
+    (hsafety : v.safety = .safe) :
+    (addDefinition env v).WF fun env' =>
+      ∃ ves' : VEnvs, ves'.WF env' ∧
+        (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
+        (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
+          (ves.venv safety).AddDef safety (.defnInfo v) ci'
+            (ves'.venv safety)) := by
+  unfold addDefinition
+  simp [hsafety]
+  refine (checkSafeNatAddDefinition.WF wf v hname hsafety).run wf |>.bind
+    fun _ hchecked => ?_
+  obtain ⟨ci', htrSafe, hciSafe, hfresh, hlevels, hnat,
+    hty, hz, hs⟩ := hchecked
+  have hle : v.safety ≤ .safe := DefinitionSafety.le_safe
+  have hmono := wf.mono hle
+  have htr : TrDefVal v.safety (ves.venv v.safety) (.defnInfo v) ci' := by
+    refine ⟨⟨⟨?_, htrSafe.1.1.2.1, htrSafe.1.1.2.2.mono hmono⟩,
+      htrSafe.1.2⟩, htrSafe.2.mono hmono⟩
+    rw [ConstantInfo.defnInfo_safety]
+    exact DefinitionSafety.le_rfl
+  have ⟨ves', hwf, hstep⟩ := addDef.WF wf v ci' v.safety
+    (fun _ h => by simpa [ConstantInfo.defnInfo_safety] using h)
+    htr (hciSafe.mono hmono) hfresh ?_ ?_
+  · refine .pure ⟨ves', hwf, ?_, ?_⟩
+    · intro safety
+      exact (hstep safety).le
+    · exact ⟨ci', hstep⟩
+  · intro _
+    exact ⟨by rw [ConstantInfo.defnInfo_safety, hsafety], hlevels⟩
+  · intro safety base hvisible hadd
+    have hsafetyLe : safety ≤ v.safety := by
+      simpa [ConstantInfo.defnInfo_safety] using hvisible
+    have hmodelMono : ves.venv .safe ≤ ves.venv safety :=
+      hmono.trans (wf.mono hsafetyLe)
+    have hci : ci'.WF (ves.venv safety) :=
+      hciSafe.mono hmodelMono
+    have hbaseWF : (base.addDefEq ci'.toDefEq).WF := by
+      obtain ⟨decls, henvWF⟩ := (wf.tr (safety := safety)).wf
+      have haddCi : (ves.venv safety).addConst ci'.name ci'.toVConstant =
+          some base := by
+        have haddCi := hadd
+        have hvname : v.name = ci'.name := htrSafe.1.2
+        rw [hvname] at haddCi
+        exact haddCi
+      exact ⟨.def ci' :: decls, .decl (.def hci haddCi) henvWF⟩
+    have hname' : ci'.name = ``Nat.add :=
+      htrSafe.1.2.symm.trans hname
+    have huvars : ci'.uvars = 0 := by
+      calc
+        ci'.uvars = v.levelParams.length := htrSafe.1.1.2.1.symm
+        _ = 0 := by simp [hlevels]
+    have hadd' : (ves.venv safety).addConst ``Nat.add ci'.toVConstant =
+        some base := by
+      simpa [hname] using hadd
+    have hty' := hty.mono hmodelMono
+    have hz' := hz.mono hmodelMono
+    have hs' := hs.mono hmodelMono
+    rw [hlevels] at hty' hz' hs'
+    have hnat' : (ves.venv safety).contains ``Nat := by
+      obtain ⟨natCi, hnatLookup⟩ := hnat
+      exact ⟨natCi, hmodelMono.constants hnatLookup⟩
+    exact (wf.hasPrimitives (safety := safety)).addNatAddDef
+      hnat' hname' hadd' hbaseWF huvars hty' hz' hs'
+
 theorem addDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) :
     (addDefinition env v).WF fun env' =>
       ∃ ves' : VEnvs, ves'.WF env' ∧ (∀ safety, ves.venv safety ≤ ves'.venv safety) ∧
         (v.safety ≠ .unsafe → ∃ ci' : VDefVal, ∀ safety,
           (ves.venv safety).AddDef safety (.defnInfo v) ci' (ves'.venv safety)) := by
+  by_cases hnatAdd : v.safety = .safe ∧ v.name = ``Nat.add
+  · exact addDefinition.WF_safe_natAdd wf v hnatAdd.2 hnatAdd.1
   unfold addDefinition; split
   · refine checkConstantVal.WF wf (.defnInfo v) false DefinitionSafety.unsafe_le
       |>.run wf |>.bind fun _ ⟨ci0, htr, hwfc, hn, hnonprim⟩ => ?_

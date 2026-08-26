@@ -87,6 +87,7 @@ import Lean4Lean.Verify.LocalContext
 import Lean4Lean.Verify.Name
 import Lean4Lean.Verify.NameGenerator
 import Lean4Lean.Verify.NormLt
+import Lean4Lean.Verify.Primitive
 import Lean4Lean.Verify.QSort
 import Lean4Lean.Verify.TypeChecker
 import Lean4Lean.Verify.TypeChecker.Basic

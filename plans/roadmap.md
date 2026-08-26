@@ -93,7 +93,7 @@ must be updated whenever a proof enters or leaves the frontier.
 | Proof frontier | 9 supported proof declarations: 6 metatheory and 3 checker verification. The compiled allowlist has 15 entries after adding 6 deliberately rejected fixtures. Lane V removed 7 proof sorries from the previous 16-entry proof frontier. |
 | Experimental surface | Zero source `sorry` tokens and no `stop`-hidden admissions, but endpoints remain conditional. The concrete five-rule `D2RegisteredBodyStep` discharge compiles. Both inherited D2 Nat sites are now replayed internally, so `D2BlockStepExact` contains only the Tree check, a paired five-rule Tree replay, and the discharged registered-body field. D2 also has generic conversion-aware prefix/collapse replay, an exact eight-common-arguments-plus-fields capture inventory, and a named `D2TreeLevelAlignmentStep`; the Tree suffix/body share the NORM-DI-dependent local head-argument/source-level alignment boundary rather than being pure engineering. The current full `Lean4Lean.Experimental` gate is green at 152 jobs (its pre-existing lint warnings are not promoted to errors). |
 | Project axioms | 28 declarations: 26 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory and all 11 high-risk repaired signatures, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 325 exact union leaves. |
-| Upstream intake audit | Refreshed and implemented through UP5 on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits with exact CLI, execution-order, structure, hash, and cache regressions. The formerly unconditional `Expr.looseBVarRange_eq` is now hereditary-bounded, all ten suspect contracts have exact repaired dispositions, adversarial regressions retain every counterexample family, and the four-root audit is green with zero project axioms reachable from Theory. PR #32 remains useful but does **not** prove generic `checkPrimitiveDef.WF`; PR #43 and PR #27 remain explicit non-imports. UP6-UP7 remain below. |
+| Upstream intake audit | Refreshed and implemented through UP5 plus the first UP6 primitive slice on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation and a direct, live `Nat.add` checker/conservation certificate; its dependency pin excludes the generic primitive boundary and records exactly six inherited upstream proof dependencies. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; the remaining primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
 
 ### Delivered foundation
 
@@ -2608,7 +2608,7 @@ Use four bounded stages:
    statement, or keep V4 explicitly open. Merely making the final root avoid
    the theorem does not eliminate the source sorry and is not V4 completion.
 
-###### UP6.0 live certificate inventory (started 2026-08-26)
+###### UP6.0 live certificate inventory and pilot status (2026-08-26)
 
 The extraction baseline is fork revision `aec5fdc9`. The upstream pull-request
 head was refreshed from `refs/pull/32/head` and is still
@@ -2662,7 +2662,32 @@ executable helpers `checkConstantValBody` and `checkDefinitionBody`, the safe
 definition execution-order change, and matching verification lemmas. It may
 narrow the existing `checkPrimitiveDef.WF` assumptions to accept the body
 evidence, but it does not count V4 complete and must not add another admission.
-The first semantic certificate commit after that foundation is `Nat.add`.
+That foundation is committed at `7dff5dd0`.
+
+The first semantic slice, `Nat.add`, is now implemented on top of that
+foundation:
+
+- `checkNatAddPrimitive` isolates the executable branch and closes its open
+  equations with lambdas, matching PR #32's intended pointwise check;
+- `Verify/Primitive.lean` proves the shared typed binary-Nat evidence, exact
+  checker execution, recurrence-to-literal reflection, and preservation of
+  the local readiness-aware `VEnv.HasPrimitives` contract;
+- `checkSafeNatAddDefinition.WF` packages the checked `VDefVal`, and
+  `addDefinition.WF_safe_natAdd` installs it through the existing local
+  `AddDef` transaction;
+- the live `addDefinition.WF` theorem dispatches its safe `Nat.add` case to
+  that specialized theorem before using the generic path for other names;
+- `Tests/Primitive.lean` checks both edges of that design: the live theorem
+  directly references the specialized certificate, while the specialized
+  certificate's transitive dependency closure excludes
+  `checkPrimitiveDef.WF`;
+- the same regression pins the six inherited direct sorry carriers still
+  reached through generic type-checker/metatheory infrastructure. No new
+  admission is introduced, and the generic V4 boundary remains one of the 15
+  allowlisted source sorries until the remaining primitive dispatch lands.
+
+The next UP6 slice is `Nat.pred`, followed by `Nat.sub`; this reuses the new
+environment shell while adding only unary-Nat equation/reflection support.
 
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,

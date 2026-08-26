@@ -201,6 +201,88 @@ theorem checkDefinitionBody.WF {env : Environment} {ves : VEnvs} (wf : ves.WF en
         rw [← hu]
         exact hvalueType
 
+/-- Common environment-checking shell for a proved safe primitive branch.
+The branch-specific certificate is supplied only after ordinary body checking
+has produced a translated, well-typed definition value. -/
+theorem checkSafePrimitiveDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) {n : Name} (hname : v.name = n)
+    (hsafety : v.safety = .safe)
+    (hn : Environment.primitives.contains n)
+    {P : VDefVal → Prop}
+    (hcheck : ∀ {state' : TypeChecker.VState} {v' : VDefVal},
+      v.levelParams.length = v'.uvars →
+      TrExprS (ves.venv .safe) v.levelParams [] v.type v'.type →
+      TrExprS (ves.venv .safe) v.levelParams [] v.value v'.value →
+      (ves.venv .safe).HasType v.levelParams.length [] v'.value v'.type →
+      (Environment.checkPrimitiveDef v).WF (.mk' wf .safe v.levelParams)
+        state' fun b _ => b → P v') :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧ P v' := by
+  refine (checkDefinitionBody.WF wf v).bind fun _ state' _ hbody => ?_
+  obtain ⟨v', huvars, htype, hvname, hvalue, hvalueT⟩ := hbody
+  have hvalueT' := hvalueT
+  change (ves.venv .safe).HasType v'.uvars [] v'.value v'.type at hvalueT'
+  rw [← huvars] at hvalueT'
+  refine (hcheck huvars htype hvalue hvalueT').bind fun allow _ _ hc => ?_
+  refine (TypeChecker.M.WF.liftExcept
+    (checkName.WF (wf.tr (safety := .safe)).map_wf v.name allow)).mono
+      fun _ _ _ hcheckedName => ?_
+  have hallow : allow = true := by
+    cases allow with
+    | false =>
+        have hnot := hcheckedName.2 rfl
+        have hreserved : Environment.primitives.contains v.name = true := by
+          simpa [hname] using hn
+        rw [hreserved] at hnot
+        contradiction
+    | true => rfl
+  refine ⟨v', ?_, hvalueT, hcheckedName.1, hc hallow⟩
+  exact ⟨⟨⟨by
+    rw [ConstantInfo.defnInfo_safety, hsafety]
+    exact DefinitionSafety.le_rfl,
+    huvars, htype⟩, hvname⟩, hvalue⟩
+
+/-- Direct body/type/equation certificate for the safe `Nat.add` definition
+path. This theorem does not use the generic primitive-recognizer boundary. -/
+theorem checkSafeNatAddDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.add)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .nat) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .app (.app v'.value (.bvar 0)) .natZero)
+            (.lam .nat <| .bvar 0) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .lam .nat <|
+              .app (.app v'.value (.bvar 1)) (.app .natSucc (.bvar 0)))
+            (.lam .nat <| .lam .nat <|
+              .app .natSucc (.app (.app v'.value (.bvar 1)) (.bvar 0))) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue hvalueT'
+  exact Environment.checkPrimitiveDef.natAdd.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl htype hvalue hvalueT'
+
 theorem checkTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : TheoremVal) :
     ((do

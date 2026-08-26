@@ -1438,6 +1438,45 @@ to the replacement.
   certificate architecture and this fork reconciles to that implementation;
   the named helpers may remain if they are part of the shared API.
 
+## D026 — direct Nat.add primitive certificate and lambda-closed equations
+
+- **Status:** implemented as the first semantic UP6 slice; upstream-derived
+  specialization with remaining primitive families still open.
+- **Owner:** Argument Computer Corporation; extend by one independently green
+  primitive family at a time.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its executable
+  certificate, checker infrastructure, conservation, and dispatch commits;
+  no whole-PR merge and no `PSigma`-specialized mod/div or bitwise material.
+- **Executable delta:** the isolated Nat.add equation helpers close their open
+  equations with `Expr.lam0`, as PR #32 does, rather than wrapping their
+  bodies in `Expr.arrow`. This checks equality of the intended pointwise
+  functions. Other primitive branches retain their old helpers until their
+  own certificate slices land. `checkNatAddPrimitive` is otherwise a
+  definitional extraction of the Nat.add branch into a bounded executable
+  surface.
+- **Verification delta:** `Verify/Primitive.lean` proves Nat.add's exact typed
+  recognizer trace, converts its zero/successor equations into literal
+  reflection, and transports all other local `HasPrimitives` fields through
+  the definition extension. `checkSafeNatAddDefinition.WF` and
+  `addDefinition.WF_safe_natAdd` connect those proofs to the retained
+  readiness-aware `AddDef` transaction. The live `addDefinition.WF` selects
+  this theorem for safe Nat.add before falling back to the generic primitive
+  boundary for other names.
+- **Ix impact:** Nat.add is the first primitive definition whose supported
+  declaration path has a concrete end-to-end certificate rather than relying
+  on the opaque generic recognizer assumption. The structure is intentionally
+  family-specific so Ix can transport only the primitives it supports.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that the live dispatch directly
+  names the Nat.add certificate and that the certificate's transitive closure
+  excludes `checkPrimitiveDef.WF`. It also pins the exact six inherited
+  sorry-carrying metatheory/type-checker dependencies; the global frontier
+  remains 15 and no new source admission is added.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and this fork can reconcile without losing its
+  readiness transaction, dependency pin, or more precise accepted-domain
+  requirements.
+
 ## Review checklist
 
 At each publish or ix pin boundary:
