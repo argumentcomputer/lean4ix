@@ -2334,6 +2334,26 @@ private theorem telDefEqEvidence_dropDirect
       | succ count =>
           simpa [List.reverse_cons, List.append_assoc] using ih count
 
+/-- Dropping a prefix within a literal `forallN` telescope retains exactly
+the corresponding binder-list suffix. -/
+private theorem dropN_forallN_of_le (count : Nat) :
+    ∀ (binders : List VExpr) (result : VExpr),
+      count ≤ binders.length →
+      VExpr.dropN count (VExpr.forallN binders result) =
+        VExpr.forallN (binders.drop count) result := by
+  induction count with
+  | zero =>
+      intro binders result bound
+      rfl
+  | succ count ih =>
+      intro binders result bound
+      cases binders with
+      | nil => simp at bound
+      | cons binder binders =>
+          simp only [List.length_cons, Nat.succ_le_succ_iff] at bound
+          simp only [VExpr.forallN, VExpr.dropN, List.drop]
+          exact ih binders result bound
+
 /-- Exact parameter-prefix equality retained from the second family's full
 raw/annotation telescope.  Both endpoints are producer-selected; callers do
 not choose a parallel semantic telescope. -/
@@ -2506,6 +2526,68 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawFirst
         raw_suffix_eq := rawSuffixEq
         consumed_suffix_eq := consumedSuffixEq
         annotation_evidence := head }⟩
+
+/-- The raw post-parameter expression is literally the retained first index
+domain followed by the remainder of the producer telescope. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.raw_drop_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {annotation : produced.SecondFamilyAnnotationSpine semantic}
+    (raw : annotation.RawFirstIndexDomain) :
+    VExpr.dropN source.nparams annotation.secondRaw.type =
+      .forallE raw.rawDomain
+        (VExpr.forallN raw.rawTail
+          (VExpr.dropN
+            (VInductDecl.ctorFields annotation.secondRaw.type).length
+            annotation.secondRaw.type)) := by
+  let fullBinders := VExpr.telN
+    (VInductDecl.ctorFields annotation.secondRaw.type).length
+    annotation.secondRaw.type
+  have fullLength : fullBinders.length =
+      (VInductDecl.ctorFields annotation.secondRaw.type).length :=
+    (telDefEqEvidence_length_eqDirect annotation.telescope).trans
+      annotation.stored_length
+  have prefixBound : source.nparams ≤ fullBinders.length := by
+    rw [fullLength]
+    exact annotation.nparams_le_rawSpineLength
+  calc
+    VExpr.dropN source.nparams annotation.secondRaw.type =
+        VExpr.dropN source.nparams
+          (VExpr.forallN fullBinders
+            (VExpr.dropN
+              (VInductDecl.ctorFields annotation.secondRaw.type).length
+              annotation.secondRaw.type)) := by
+      rw [VExpr.forallN_telN_dropN]
+    _ = VExpr.forallN (fullBinders.drop source.nparams)
+          (VExpr.dropN
+            (VInductDecl.ctorFields annotation.secondRaw.type).length
+            annotation.secondRaw.type) :=
+      dropN_forallN_of_le source.nparams fullBinders _ prefixBound
+    _ = .forallE raw.rawDomain
+          (VExpr.forallN raw.rawTail
+            (VExpr.dropN
+              (VInductDecl.ctorFields annotation.secondRaw.type).length
+              annotation.secondRaw.type)) := by
+      rw [raw.raw_suffix_eq]
+      rfl
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.raw_drop_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.raw_drop_eq
 
 /-- The first two producer-selected candidates allocate the same exact shared
 parameter free variables.  Both lower bounds and the root name-generator
@@ -2691,6 +2773,7 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
     {env blockEnv : VEnv} {Us : List Name}
     (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source)
+    (annotation : produced.SecondFamilyAnnotationSpine semantic)
     (context_lctx_eq : context.lctx = {}) :
     ∃ secondComparisons remainingComparisons,
       (produced.execution.eliminationExecution.normalization
@@ -2710,9 +2793,20 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
         position.i = 0 ∧
         position.nindices = 0 ∧
         ∃ currentRun : TypeChecker.CandidateContextRun position.context,
-          Nonempty
-            (TypeChecker.FamilyParameterIndexBoundary position.trace
-              currentRun) := by
+          currentRun.context.venv = env ∧
+          currentRun.context.lparams = Us ∧
+          ∃ parameterRoot : VExpr,
+            ∃ boundary : TypeChecker.FamilyParameterIndexBoundary
+                position.trace currentRun,
+              currentRun.context.TrExprS position.source parameterRoot ∧
+              currentRun.context.venv.IsDefEqU
+                currentRun.context.lparams.length
+                currentRun.context.vlctx.toCtx annotation.secondRaw.type
+                parameterRoot ∧
+              TypeChecker.FamilyParameterSemanticSpine
+                currentRun.context.venv currentRun.context.lparams.length
+                currentRun.context.vlctx.toCtx parameterRoot
+                (boundary.parameters.map Prod.snd) boundary.source' := by
   let normalization :=
     produced.execution.eliminationExecution.normalization
   have normalizationProduced :=
@@ -2731,8 +2825,20 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
       position.i = 0 ∧
       position.nindices = 0 ∧
       ∃ currentRun : TypeChecker.CandidateContextRun position.context,
-        Nonempty
-          (TypeChecker.FamilyParameterIndexBoundary position.trace currentRun)
+        currentRun.context.venv = env ∧
+        currentRun.context.lparams = Us ∧
+        ∃ parameterRoot : VExpr,
+          ∃ boundary : TypeChecker.FamilyParameterIndexBoundary
+              position.trace currentRun,
+            currentRun.context.TrExprS position.source parameterRoot ∧
+            currentRun.context.venv.IsDefEqU
+              currentRun.context.lparams.length
+              currentRun.context.vlctx.toCtx annotation.secondRaw.type
+              parameterRoot ∧
+            TypeChecker.FamilyParameterSemanticSpine
+              currentRun.context.venv currentRun.context.lparams.length
+              currentRun.context.vlctx.toCtx parameterRoot
+              (boundary.parameters.map Prod.snd) boundary.source'
   have roots := semantic.families
   cases hCandidates : produced.candidate.families with
   | cons firstCandidate remainingCandidates =>
@@ -2755,6 +2861,11 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
             rw [hRawTypesTail] at remainingSemantics
             cases remainingSemantics with
             | cons secondSemantic remainingSemantics =>
+              have annotationRawsEq := annotation.raws_eq
+              rw [hRawTypes, hRawTypesTail] at annotationRawsEq
+              simp only [List.cons.injEq] at annotationRawsEq
+              have secondRawEq : secondRaw = annotation.secondRaw :=
+                annotationRawsEq.2.1
               generalize comparisonTrace_eq : comparisonTrace = trace at ⊢
               cases trace with
               | firstFamily dIdx stats validationContext inBounds closed
@@ -2850,7 +2961,7 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                       secondRaw.type := by
                     simpa using secondTranslation
                   obtain ⟨secondRoot', secondRootTranslation,
-                      _secondRootRun⟩ :=
+                      ⟨secondRootRun⟩⟩ :=
                     TypeChecker.WhnfRun.exists_ofCandidateStep
                       ⟨telescope.result.context,
                         (firstSource :: secondSource ::
@@ -2859,11 +2970,13 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                       secondRootWhnf currentRun secondRaw.type
                       secondSourceTranslation secondSemantic.type.whnfFuel
                       whnfDepth
-                  obtain ⟨secondRuns, secondBoundary⟩ :=
-                    TypeChecker.familyTypeParameterComparison_semanticPrefix_of_later
+                  obtain ⟨secondRuns, secondBoundary, parameterSpine⟩ :=
+                    TypeChecker.familyTypeParameterComparison_semanticSpine_of_later
                       secondTelescope statsLater paramsSize secondLocal
                       currentRun secondRoot' secondRootTranslation
                       secondSemantic.type.whnfFuel whnfDepth
+                  have rawRootDef := secondRootRun.isDefEqU
+                  rw [secondRawEq] at rawRootDef
                   let secondPosition :
                       AddInductive.FamilyParameterComparisonBlockTrace.FamilyTelescopePosition
                         source.nparams := {
@@ -2877,12 +2990,12 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                   refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
                     secondRuns, secondPosition, (by rfl), paramsSize,
                     (by rfl), (by rfl),
-                    currentRun,
-                    ?_⟩
+                    currentRun, currentVenv, currentLparams,
+                    secondRoot', secondBoundary,
+                    secondRootTranslation, rawRootDef, parameterSpine⟩
                   · simp only [
                       AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
                       firstComparisons]
-                  · simpa only [secondPosition] using secondBoundary
                 | @firstFamily dIdx stats secondContext inBounds closed
                     inferred secondRoot checkType secondRootWhnf
                     secondTelescope sorted ensureSort isFirst tail =>
@@ -2981,8 +3094,19 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
   position_i_eq : position.i = 0
   position_nindices_eq : position.nindices = 0
   currentRun : TypeChecker.CandidateContextRun position.context
+  current_venv : currentRun.context.venv = env
+  current_lparams : currentRun.context.lparams = Us
+  parameterRoot : VExpr
+  parameterRoot_tr : currentRun.context.TrExprS position.source parameterRoot
+  rawRoot_def : currentRun.context.venv.IsDefEqU
+    currentRun.context.lparams.length currentRun.context.vlctx.toCtx
+    annotation.secondRaw.type parameterRoot
   boundary : TypeChecker.FamilyParameterIndexBoundary position.trace
     currentRun
+  parameterSpine : TypeChecker.FamilyParameterSemanticSpine
+    currentRun.context.venv currentRun.context.lparams.length
+    currentRun.context.vlctx.toCtx parameterRoot
+    (boundary.parameters.map Prod.snd) boundary.source'
 
 /-- Select the joint second-family annotation/validator staging directly from
 the retained producer and semantic hierarchy. -/
@@ -3004,8 +3128,10 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     produced.semanticSecondFamilyAnnotationSpine semantic
   obtain ⟨secondComparisons, remainingComparisons, comparisonsEq,
       comparisonRuns, position, positionEq, positionParamsSize, positionIEq,
-      positionNindicesEq, currentRun, ⟨boundary⟩⟩ :=
-    produced.semanticSecondFamilyParameterComparisons semantic
+      positionNindicesEq, currentRun, currentVenv, currentLparams,
+      parameterRoot, boundary,
+      parameterRootTr, rawRootDef, parameterSpine⟩ :=
+    produced.semanticSecondFamilyParameterComparisons semantic annotation
       context_lctx_eq
   exact ⟨{
     annotation := annotation
@@ -3019,7 +3145,13 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     position_i_eq := positionIEq
     position_nindices_eq := positionNindicesEq
     currentRun := currentRun
-    boundary := boundary }⟩
+    current_venv := currentVenv
+    current_lparams := currentLparams
+    parameterRoot := parameterRoot
+    parameterRoot_tr := parameterRootTr
+    rawRoot_def := rawRootDef
+    boundary := boundary
+    parameterSpine := parameterSpine }⟩
 
 /-- The boundary's strict kernel/Theory parameter inventory covers the exact
 declared shared-parameter prefix from initial position zero. -/
@@ -3060,6 +3192,171 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSo
   rw [staging.boundary.parameter_sources_eq, staging.position_i_eq,
     List.drop_zero]
 
+/-- Saturating the exact second raw family with the boundary's retained
+Theory parameter values reaches the validator's producer-owned index cursor
+up to definitional equality. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawParameterSuffix_def
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic) :
+    staging.currentRun.context.venv.IsDefEqU
+      staging.currentRun.context.lparams.length
+      staging.currentRun.context.vlctx.toCtx
+      (VExpr.instRev
+        (VExpr.dropN source.nparams staging.annotation.secondRaw.type)
+        (staging.boundary.parameters.map Prod.snd))
+      staging.boundary.source' := by
+  refine staging.parameterSpine.rawTerminal_defeq
+    (rawBinders :=
+      VExpr.telN source.nparams staging.annotation.secondRaw.type)
+    (rawTerminal :=
+      VExpr.dropN source.nparams staging.annotation.secondRaw.type)
+    staging.currentRun.context.Ewf staging.currentRun.context.Δwf.toCtx
+    ?_ ?_
+  · simpa only [VExpr.forallN_telN_dropN] using staging.rawRoot_def
+  · simpa only [List.length_map, staging.parameterPairs_length] using
+      staging.annotation.rawParameterTelescope_length.symm
+
+/-- Specialize the producer's first raw/annotation index-domain equality by
+the exact Theory values retained at the validator parameter boundary. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.specializeRawFirstIndexAnnotation
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain) :
+    staging.currentRun.context.venv.IsDefEq
+      staging.currentRun.context.lparams.length
+      staging.currentRun.context.vlctx.toCtx
+      (VExpr.instRev raw.rawDomain
+        (staging.boundary.parameters.map Prod.snd))
+      (VExpr.instRev raw.consumedDomain
+        (staging.boundary.parameters.map Prod.snd))
+      (.sort raw.sort) := by
+  let rawBinders :=
+    VExpr.telN source.nparams staging.annotation.secondRaw.type
+  let arguments := staging.boundary.parameters.map Prod.snd
+  have henv : VEnv.WF env := by
+    simpa only [staging.current_venv] using staging.currentRun.context.Ewf
+  have hΓ : OnCtx staging.currentRun.context.vlctx.toCtx
+      (env.IsType Us.length) := by
+    simpa only [staging.current_venv, staging.current_lparams] using
+      staging.currentRun.context.Δwf.toCtx
+  have rootDef : env.IsDefEqU Us.length
+      staging.currentRun.context.vlctx.toCtx
+      (VExpr.forallN rawBinders
+        (VExpr.dropN source.nparams staging.annotation.secondRaw.type))
+      staging.parameterRoot := by
+    simpa only [staging.current_venv, staging.current_lparams,
+      rawBinders, VExpr.forallN_telN_dropN] using staging.rawRoot_def
+  have parameterSpine : TypeChecker.FamilyParameterSemanticSpine
+      env Us.length staging.currentRun.context.vlctx.toCtx
+      staging.parameterRoot arguments staging.boundary.source' := by
+    simpa only [staging.current_venv, staging.current_lparams, arguments] using
+      staging.parameterSpine
+  have argumentsLength : arguments.length = rawBinders.length := by
+    simpa only [arguments, rawBinders, List.length_map,
+      staging.parameterPairs_length] using
+      staging.annotation.rawParameterTelescope_length.symm
+  have rawOnTel := staging.annotation.parameterTelescope.telDefEq.raw_onTel
+  have rawContext : OnCtx rawBinders.reverse (env.IsType Us.length) := by
+    simpa only [rawBinders, List.append_nil] using
+      rawOnTel.onCtx (show OnCtx ([] : List VExpr)
+        (env.IsType Us.length) from trivial)
+  have rawClosed := VEnv.CtxWF.closed henv.ordered rawContext
+  have annotationDef : env.IsDefEq Us.length
+      (rawBinders.reverse ++ staging.currentRun.context.vlctx.toCtx)
+      raw.rawDomain raw.consumedDomain (.sort raw.sort) := by
+    simpa only [rawBinders] using
+      raw.annotation_evidence.isDefEq.weakR henv.ordered rawClosed
+        staging.currentRun.context.vlctx.toCtx
+  have specialized := parameterSpine.specializeTerminalDefEq henv hΓ
+    rootDef argumentsLength annotationDef
+  rw [VExpr.instRev_closedN arguments (C := .sort raw.sort) trivial]
+    at specialized
+  simpa only [staging.current_venv, staging.current_lparams, arguments] using
+    specialized
+
+/-- Joint first-index alignment between the raw candidate telescope and the
+exact source-indexed validator Pi. -/
+structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.RawFirstIndexSpecialization
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain) where
+  translation : staging.boundary.IndexDomainTranslation
+  raw_domain_def : staging.currentRun.context.venv.IsDefEqU
+    staging.currentRun.context.lparams.length
+    staging.currentRun.context.vlctx.toCtx
+    (VExpr.instRev raw.rawDomain
+      (staging.boundary.parameters.map Prod.snd))
+    translation.domain'
+  annotation_def : staging.currentRun.context.venv.IsDefEq
+    staging.currentRun.context.lparams.length
+    staging.currentRun.context.vlctx.toCtx
+    (VExpr.instRev raw.rawDomain
+      (staging.boundary.parameters.map Prod.snd))
+    (VExpr.instRev raw.consumedDomain
+      (staging.boundary.parameters.map Prod.snd))
+    (.sort raw.sort)
+
+/-- A nonterminal validator boundary and the matching raw first-index node
+construct the exact joint specialization package. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexSpecialization
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (isForall : staging.boundary.source.isForall = true) :
+    Nonempty (staging.RawFirstIndexSpecialization raw) := by
+  obtain ⟨translation⟩ :=
+    staging.boundary.indexDomainTranslation_of_forall isForall
+  have wholeDef := staging.rawParameterSuffix_def
+  rw [raw.raw_drop_eq, VExpr.instRev_forallE_projection,
+    translation.source'_eq] at wholeDef
+  have rawDomainDef :=
+    (VEnv.IsDefEqU.forallE_inv staging.currentRun.context.Ewf
+      staging.currentRun.context.Δwf.toCtx wholeDef).1
+  exact ⟨{
+    translation := translation
+    raw_domain_def := ⟨_, rawDomainDef.choose_spec⟩
+    annotation_def := staging.specializeRawFirstIndexAnnotation raw }⟩
+
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterPairs_length' depends on axioms: [propext,
  Classical.choice,
@@ -3077,6 +3374,87 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_positionParams
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawParameterSuffix_def' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawParameterSuffix_def
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.specializeRawFirstIndexAnnotation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.specializeRawFirstIndexAnnotation
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexSpecialization' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexSpecialization
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging' depends on axioms: [propext,

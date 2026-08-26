@@ -870,6 +870,126 @@ theorem WhnfRun.exists_ofCandidateStep
     contextRun.state_wf source_tr result_tr
     recursionFuel hdepth⟩⟩
 
+/-- A producer-owned dependent argument spine through the validator's exact
+Theory WHNF cursors.
+
+Each argument is typed at the raw domain exposed by the current translated
+Pi.  The instantiated body is related to the next cursor by the retained
+WHNF execution, rather than by a syntactic equality invented downstream. -/
+inductive FamilyParameterSemanticSpine (env : VEnv) (U : Nat)
+    (Γ : List VExpr) : VExpr → List VExpr → VExpr → Prop where
+  | nil (source : VExpr) :
+      FamilyParameterSemanticSpine env U Γ source [] source
+  | cons
+      (argument_type : env.HasType U Γ argument domain)
+      (step : env.IsDefEqU U Γ (body.inst argument) next)
+      (tail : FamilyParameterSemanticSpine env U Γ next arguments result) :
+      FamilyParameterSemanticSpine env U Γ (.forallE domain body)
+        (argument :: arguments) result
+
+/-- Saturating a raw telescope along the operational parameter spine reaches
+the validator's retained boundary up to definitional equality.
+
+Pi injectivity is used only to retarget each producer-owned argument from the
+validator cursor to the corresponding raw telescope domain.  Successive
+cursors themselves remain connected by the exact WHNF equalities stored in
+the spine. -/
+theorem FamilyParameterSemanticSpine.rawTerminal_defeq
+    (spine : FamilyParameterSemanticSpine env U Γ root arguments result)
+    (henv : VEnv.WF env)
+    (hΓ : OnCtx Γ (env.IsType U))
+    (root_def : env.IsDefEqU U Γ
+      (VExpr.forallN rawBinders rawTerminal) root)
+    (length_eq : arguments.length = rawBinders.length) :
+    env.IsDefEqU U Γ (VExpr.instRev rawTerminal arguments) result := by
+  induction spine generalizing rawBinders rawTerminal with
+  | nil source =>
+      have rawBinders_eq : rawBinders = [] :=
+        List.length_eq_zero_iff.mp length_eq.symm
+      subst rawBinders
+      simpa only [VExpr.forallN, VExpr.instRev] using root_def
+  | @cons argument domain next arguments result body argumentType step tail ih =>
+      cases rawBinders with
+      | nil => simp at length_eq
+      | cons rawDomain rawBinders =>
+          simp only [VExpr.forallN] at root_def
+          obtain ⟨⟨_, domain_def⟩, ⟨_, body_def⟩⟩ :=
+            VEnv.IsDefEqU.forallE_inv henv hΓ root_def
+          have argumentRaw : env.HasType U Γ argument rawDomain :=
+            domain_def.symm.defeq argumentType
+          have bodyInst := body_def.instN henv argumentRaw .zero
+          have next_def : env.IsDefEqU U Γ
+              ((VExpr.forallN rawBinders rawTerminal).inst argument) next :=
+            VEnv.IsDefEqU.trans henv hΓ ⟨_, bodyInst⟩ step
+          have remainingLength : arguments.length = rawBinders.length := by
+            simpa using length_eq
+          rw [VExpr.instN_forallN, Nat.zero_add] at next_def
+          have tail_def := ih next_def (by
+            rw [VExpr.instTelN_length]
+            exact remainingLength)
+          simpa only [VExpr.instRev, remainingLength, Nat.add_zero] using
+            tail_def
+
+/-- Specialize an equality living under the raw parameter telescope along
+the validator's exact operational argument spine.
+
+Unlike a syntactic `SpineWF` replay, the induction follows every retained
+WHNF cursor.  The terminal equality is instantiated only after Pi
+injectivity has retargeted the current producer-owned argument to the exact
+raw binder domain. -/
+theorem FamilyParameterSemanticSpine.specializeTerminalDefEq
+    (spine : FamilyParameterSemanticSpine env U Γ root arguments result)
+    (henv : VEnv.WF env)
+    (hΓ : OnCtx Γ (env.IsType U))
+    (root_def : env.IsDefEqU U Γ
+      (VExpr.forallN rawBinders rawResult) root)
+    (length_eq : arguments.length = rawBinders.length)
+    (terminal_def : env.IsDefEq U (rawBinders.reverse ++ Γ)
+      rawTerminal storedTerminal terminalType) :
+    env.IsDefEq U Γ
+      (VExpr.instRev rawTerminal arguments)
+      (VExpr.instRev storedTerminal arguments)
+      (VExpr.instRev terminalType arguments) := by
+  induction spine generalizing rawBinders rawResult rawTerminal
+      storedTerminal terminalType with
+  | nil source =>
+      have rawBinders_eq : rawBinders = [] :=
+        List.length_eq_zero_iff.mp length_eq.symm
+      subst rawBinders
+      simpa only [List.reverse_nil, List.nil_append, VExpr.instRev] using
+        terminal_def
+  | @cons argument domain next arguments result body argumentType step tail ih =>
+      cases rawBinders with
+      | nil => simp at length_eq
+      | cons rawDomain rawBinders =>
+          simp only [VExpr.forallN] at root_def
+          obtain ⟨⟨_, domain_def⟩, ⟨_, body_def⟩⟩ :=
+            VEnv.IsDefEqU.forallE_inv henv hΓ root_def
+          have argumentRaw : env.HasType U Γ argument rawDomain :=
+            domain_def.symm.defeq argumentType
+          have bodyInst := body_def.instN henv argumentRaw .zero
+          have next_def : env.IsDefEqU U Γ
+              ((VExpr.forallN rawBinders rawResult).inst argument) next :=
+            VEnv.IsDefEqU.trans henv hΓ ⟨_, bodyInst⟩ step
+          have remainingLength : arguments.length = rawBinders.length := by
+            simpa using length_eq
+          have terminal_def' : env.IsDefEq U
+              (rawBinders.reverse ++ rawDomain :: Γ)
+              rawTerminal storedTerminal terminalType := by
+            simpa only [List.reverse_cons, List.singleton_append,
+              List.append_assoc] using terminal_def
+          let substitution := Ctx.InstN.consTel
+            (Γ₀ := Γ) (e₀ := argument) (A₀ := rawDomain)
+            rawBinders .zero
+          have instantiatedTerminal :=
+            terminal_def'.instN henv argumentRaw substitution
+          rw [VExpr.instN_forallN, Nat.zero_add] at next_def
+          have tail_def := ih next_def (by
+            rw [VExpr.instTelN_length]
+            exact remainingLength) instantiatedTerminal
+          simpa only [VExpr.instRev, remainingLength, Nat.add_zero] using
+            tail_def
+
 /-- Exact index-only suffix reached after interpreting a later family's
 shared-parameter prefix.
 
@@ -906,7 +1026,7 @@ comparison-only result with the exact translated source from which index
 context ownership must continue.  Shared parameters do not alter the reader
 context, statistics, or index count, so the boundary remains indexed by all
 three original values. -/
-theorem familyTypeParameterComparison_semanticPrefix_of_later
+theorem familyTypeParameterComparison_semanticSpine_of_later
     (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
       context source i nindices fuel)
     (later : stats.indConsts.isEmpty = false)
@@ -918,7 +1038,10 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
     (whnfFuel : Nat)
     (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
     (∀ step ∈ trace.comparisons, FamilyComparisonSemanticRun step) ∧
-      Nonempty (FamilyParameterIndexBoundary trace contextRun) := by
+      ∃ boundary : FamilyParameterIndexBoundary trace contextRun,
+        FamilyParameterSemanticSpine contextRun.context.venv
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          source' (boundary.parameters.map Prod.snd) boundary.source' := by
   induction trace generalizing source' with
   | freshParameter stats context i nindices fuel name domain body view
       binderInfo isParameter firstFamily whnf tail ih =>
@@ -977,11 +1100,11 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           (body.instantiate1 stats.params[i]!) (body'.inst fvValue) := by
         rw [parameterEq]
         exact bodyInst_tr
-      obtain ⟨view', view_tr, _viewRun⟩ :=
+      obtain ⟨view', view_tr, ⟨viewRun⟩⟩ :=
         WhnfRun.exists_ofCandidateStep ⟨context,
           body.instantiate1 stats.params[i]!, view⟩ whnf contextRun
           (body'.inst fvValue) bodyInst_tr' whnfFuel whnfDepth
-      obtain ⟨tailRuns, ⟨boundary⟩⟩ :=
+      obtain ⟨tailRuns, boundary, parameterSpine⟩ :=
         ih later paramsSize localState contextRun view' view_tr whnfDepth
       constructor
       · intro step member
@@ -991,7 +1114,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
         rcases member with rfl | member
         · exact ⟨contextRun, _, _, ⟨comparisonRun⟩⟩
         · exact tailRuns step member
-      · exact ⟨{
+      · refine ⟨{
           source := boundary.source
           fuel := boundary.fuel
           trace := boundary.trace
@@ -1024,7 +1147,9 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
             simpa only [
               AddInductive.FamilyTypeParameterComparisonTrace.result] using
               boundary.result_eq
-          comparisons_eq_nil := boundary.comparisons_eq_nil }⟩
+          comparisons_eq_nil := boundary.comparisons_eq_nil }, ?_⟩
+        simp only [List.map_cons]
+        exact .cons fvHasDomain viewRun.isDefEqU parameterSpine
   | index stats context i nindices fuel name domain body view binderInfo
       notParameter whnf tail ih =>
       have i_le : i ≤ nparams :=
@@ -1051,7 +1176,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
       · intro step member
         rw [currentEmpty] at member
         simp at member
-      · exact ⟨{
+      · refine ⟨{
           source := .forallE name domain body binderInfo
           fuel := fuel + 1
           trace := current
@@ -1070,7 +1195,9 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
             simpa using Nat.le_of_eq paramsSize
           localState := localState
           result_eq := rfl
-          comparisons_eq_nil := currentEmpty }⟩
+          comparisons_eq_nil := currentEmpty }, ?_⟩
+        simp only [List.map_nil]
+        exact .nil source'
   | terminal stats context source i nindices fuel notForall
       parametersComplete =>
       subst i
@@ -1082,7 +1209,7 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
         simp only [
           AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
           List.not_mem_nil] at member
-      · exact ⟨{
+      · refine ⟨{
           source := source
           fuel := fuel + 1
           trace := current
@@ -1101,7 +1228,29 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
             simpa using Nat.le_of_eq paramsSize
           localState := localState
           result_eq := rfl
-          comparisons_eq_nil := rfl }⟩
+          comparisons_eq_nil := rfl }, ?_⟩
+        simp only [List.map_nil]
+        exact .nil source'
+
+/-- Compatibility projection of the operational semantic spine to the
+source-indexed boundary used by existing consumers. -/
+theorem familyTypeParameterComparison_semanticPrefix_of_later
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (paramsSize : stats.params.size = nparams)
+    (localState : FamilyParameterLocalState stats context)
+    (contextRun : CandidateContextRun context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS source source')
+    (whnfFuel : Nat)
+    (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
+    (∀ step ∈ trace.comparisons, FamilyComparisonSemanticRun step) ∧
+      Nonempty (FamilyParameterIndexBoundary trace contextRun) := by
+  obtain ⟨runs, boundary, _⟩ :=
+    familyTypeParameterComparison_semanticSpine_of_later trace later
+      paramsSize localState contextRun source' source_tr whnfFuel whnfDepth
+  exact ⟨runs, ⟨boundary⟩⟩
 
 /-- Interpret every shared-parameter comparison in one later-family
 telescope from the strict translation of its exact validator root.
@@ -13204,6 +13353,57 @@ info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_localResult_of_first'
 -/
 #guard_msgs in
 #print axioms TypeChecker.familyTypeParameterComparison_localResult_of_first
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterSemanticSpine.rawTerminal_defeq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyParameterSemanticSpine.rawTerminal_defeq
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterSemanticSpine.specializeTerminalDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyParameterSemanticSpine.specializeTerminalDefEq
+
+/--
+info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticSpine_of_later' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.familyTypeParameterComparison_semanticSpine_of_later
 
 /--
 info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticPrefix_of_later' depends on axioms: [propext,
