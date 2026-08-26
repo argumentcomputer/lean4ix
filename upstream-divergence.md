@@ -1616,10 +1616,10 @@ to the replacement.
 
 ## D031 — typed Nat-to-Bool reflection and direct Nat.beq certificate
 
-- **Status:** implemented as the sixth semantic UP6 slice; Nat.ble and the
-  remaining comparison, shift, bitwise, and mod/div families remain open.
-- **Owner:** Argument Computer Corporation; retain through Nat.ble and review
-  when the condition-reflection consumers land.
+- **Status:** implemented as the sixth semantic UP6 slice; Nat.ble is tracked
+  separately by D032, while shift, bitwise, and mod/div families remain open.
+- **Owner:** Argument Computer Corporation; review alongside D032 when the
+  condition-reflection consumers land.
 - **Source:** manually adapted from lean4lean PR #32 at
   `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its typed
   Nat-to-Bool reflection, shared four-equation checker, constructor-recursion
@@ -1649,6 +1649,36 @@ to the replacement.
 - **Removal condition:** upstream lands the corresponding PR #32 slice (or a
   stronger generic proof) and reconciliation preserves the typed predicate
   contract, readiness transaction, and exact trust pins.
+
+## D032 — direct Nat.ble certificate
+
+- **Status:** implemented as the seventh semantic UP6 slice; the elementary
+  comparison pair is complete, while shifts, bitwise, and mod/div remain open.
+- **Owner:** Argument Computer Corporation; review with D031 when the shared
+  condition-reflection consumers land.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its Nat.ble
+  recognizer certificate, constructor-equation conservation, and final
+  dispatch pattern; no whole-PR merge.
+- **Executable delta:** `checkNatBLEPrimitive` extracts the Nat.ble branch and
+  checks its exact `(true, true, false)` constructor table plus successor-pair
+  recurrence under lambdas.
+- **Verification delta:** `checkPrimitiveDef.natBLE.WF_typed` reuses the
+  shared typed binary-Boolean checker introduced by D031;
+  `ReflectsNatNatBool.of_rec_equations` is instantiated at `Nat.ble`, and
+  `addNatBLEDef` installs the result through the fork's readiness-aware
+  `AddDef` transaction. Live safe dispatch no longer reaches the generic
+  recognizer theorem for Nat.ble.
+- **Ix impact:** both primitive Nat equality and ordering now have typed
+  literal computation certificates, completing the elementary predicate
+  basis needed by later verified condition handling.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all seven direct roots are
+  named by live dispatch, exclude `checkPrimitiveDef.WF`, and each reach
+  exactly the same six inherited sorry-carrying dependencies. The source
+  frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the shared typed
+  predicate contract, readiness transaction, and exact trust pins.
 
 ## Review checklist
 

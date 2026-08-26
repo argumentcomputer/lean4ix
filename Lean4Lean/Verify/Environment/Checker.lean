@@ -460,6 +460,47 @@ theorem checkSafeNatBEqDefinition.WF
     (ty' := v'.type) (value' := v'.value)
     hname rfl htype hvalue hvalueT'
 
+/-- Direct body/type/equation certificate for the safe `Nat.ble` definition
+path. This theorem does not use the generic primitive-recognizer boundary. -/
+theorem checkSafeNatBLEDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.ble)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).contains ``Bool ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .bool) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.app (.app v'.value .natZero) .natZero) .boolTrue ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .app (.app v'.value .natZero)
+              (.app .natSucc (.bvar 0))) (.lam .nat .boolTrue) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .app (.app v'.value (.app .natSucc (.bvar 0)))
+              .natZero) (.lam .nat .boolFalse) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .lam .nat <|
+              .app (.app v'.value (.app .natSucc (.bvar 1)))
+                (.app .natSucc (.bvar 0)))
+            (.lam .nat <| .lam .nat <|
+              .app (.app v'.value (.bvar 1)) (.bvar 0)) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue hvalueT'
+  exact Environment.checkPrimitiveDef.natBLE.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl htype hvalue hvalueT'
+
 theorem checkTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : TheoremVal) :
     ((do
