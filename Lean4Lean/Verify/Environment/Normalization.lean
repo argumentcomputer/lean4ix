@@ -990,6 +990,84 @@ theorem FamilyParameterSemanticSpine.specializeTerminalDefEq
           simpa only [VExpr.instRev, remainingLength, Nat.add_zero] using
             tail_def
 
+/-- Transparent structural equality with a Pi exposes a genuine Pi source.
+This small shape lemma lets retained WHNF observations be compared across
+reader contexts without treating `Expr.structuralEq` as propositional
+equality. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+    {source : Expr}
+    (h : Expr.structuralEq source
+      (.forallE name domain body binderInfo) = true) :
+    source.isForall = true := by
+  have eqv := Expr.structuralEq_eqv h
+  simp only [(· == ·), Expr.eqv_eq] at eqv
+  cases source <;> simp_all [Expr.isForall, Expr.eqv']
+
+/-- A successful retained WHNF observation of a syntactic Pi returns that Pi
+literally.  The proof evaluates the checker at the producer-owned positive
+recursion depth, so it is independent of the local reader context. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+    {context : AddInductive.Context} {source result : Expr}
+    (run : AddInductive.CandidateWhnfStep.Valid ⟨context, source, result⟩)
+    (recursionFuel : Nat)
+    (hdepth : context.fuel.recDepth = recursionFuel + 1)
+    (isForall : source.isForall = true) :
+    result = source := by
+  have selfRun : AddInductive.CandidateWhnfStep.Valid
+      ⟨context, source, source⟩ := by
+    cases source <;> simp_all [Expr.isForall]
+    unfold AddInductive.CandidateWhnfStep.Valid TypeChecker.M.run
+      TypeChecker.whnf TypeChecker.RecM.run
+    simp [readThe, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, StateT.bind, Except.bind, Bind.bind,
+      StateT.pure, Except.pure, Pure.pure,
+      StateT.run', Functor.map, Except.map]
+    rw [hdepth]
+    rfl
+  exact Except.ok.inj (run.symm.trans selfRun)
+
+/-- Exact shared-parameter path from a later-family telescope to its retained
+`i = nparams` suffix.
+
+Unlike a counter or result equality, this proof records every actual
+`sharedParameter` constructor and therefore preserves the kernel source path
+needed to align candidate annotations with validator index nodes. -/
+inductive _root_.Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath
+    (nparams : Nat) :
+    {stats : AddInductive.InductiveStats} →
+      {context : AddInductive.Context} → {source : Expr} →
+      {i nindices fuel : Nat} →
+      (outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+        context source i nindices fuel) →
+      {suffixSource : Expr} → {suffixFuel : Nat} →
+      (suffix : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+        context suffixSource nparams nindices suffixFuel) →
+      List Expr → Prop where
+  | done
+      (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+        context source nparams nindices fuel) :
+      SharedPrefixPath nparams trace trace []
+  | shared
+      (tail : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+        context view (i + 1) nindices fuel)
+      (suffix : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+        context suffixSource nparams nindices suffixFuel)
+      (parameters : List Expr)
+      (isParameter : i < nparams)
+      (laterFamily : stats.indConsts.isEmpty = false)
+      (parameterTypeRun : AddInductive.getType stats.params[i]! context =
+        .ok parameterType)
+      (defeq : AddInductive.CandidateIsDefEqStep.Valid
+        ⟨context, domain, parameterType⟩)
+      (whnf : AddInductive.CandidateWhnfStep.Valid
+        ⟨context, body.instantiate1 stats.params[i]!, view⟩)
+      (path : SharedPrefixPath nparams tail suffix parameters) :
+      SharedPrefixPath nparams
+        (.sharedParameter stats context i nindices fuel name domain body
+          parameterType view binderInfo isParameter laterFamily
+          parameterTypeRun defeq whnf tail)
+        suffix (stats.params[i]! :: parameters)
+
 /-- Exact index-only suffix reached after interpreting a later family's
 shared-parameter prefix.
 
@@ -1014,6 +1092,9 @@ structure FamilyParameterIndexBoundary
   params_size : stats.params.size = nparams
   parameter_sources_eq : parameters.map Prod.fst =
     stats.params.toList.drop i
+  prefix_path :
+    AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath nparams
+      outer trace (parameters.map Prod.fst)
   localState : FamilyParameterLocalState stats context
   result_eq : trace.result = outer.result
   comparisons_eq_nil : trace.comparisons = []
@@ -1142,6 +1223,9 @@ theorem familyTypeParameterComparison_semanticSpine_of_later
             rw [List.drop_eq_getElem_cons listIndexBound]
             congr 1
             simp [indexBound]
+          prefix_path := .shared tail boundary.trace
+            (boundary.parameters.map Prod.fst) isParameter laterFamily
+              parameterTypeRun defeq whnf boundary.prefix_path
           localState := boundary.localState
           result_eq := by
             simpa only [
@@ -1193,6 +1277,7 @@ theorem familyTypeParameterComparison_semanticSpine_of_later
             symm
             apply List.drop_of_length_le
             simpa using Nat.le_of_eq paramsSize
+          prefix_path := .done current
           localState := localState
           result_eq := rfl
           comparisons_eq_nil := currentEmpty }, ?_⟩
@@ -1226,6 +1311,7 @@ theorem familyTypeParameterComparison_semanticSpine_of_later
             symm
             apply List.drop_of_length_le
             simpa using Nat.le_of_eq paramsSize
+          prefix_path := .done current
           localState := localState
           result_eq := rfl
           comparisons_eq_nil := rfl }, ?_⟩
@@ -2353,6 +2439,7 @@ def FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary
     symm
     apply List.drop_of_length_le
     simpa using Nat.le_of_eq boundary.params_size
+  prefix_path := .done advance.tail
   localState := advance.localState
   result_eq := rfl
   comparisons_eq_nil := advance.comparisons_eq_nil
@@ -2388,8 +2475,8 @@ theorem FamilyParameterIndexBoundary.IndexDomainRun.advance
     ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
       boundarySourceTr, boundaryParameters, boundaryParameterTr,
       boundaryParametersLength, boundaryParamsSize,
-      boundaryParameterSourcesEq, boundaryLocalState, boundaryResultEq,
-      boundaryComparisons⟩
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
   cases boundaryTrace with
   | freshParameter stats context i nindices fuel name domain body view
       binderInfo isParameter firstFamily whnf tail =>
@@ -2490,8 +2577,10 @@ theorem FamilyParameterIndexBoundary.progress
     boundary.source.isForall = true ∨ Nonempty boundary.Terminal := by
   rcases boundary with
     ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
-      boundarySourceTr, boundaryLocalState, boundaryResultEq,
-      boundaryComparisons⟩
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
   cases boundaryTrace with
   | freshParameter stats context i nindices fuel name domain body view
       binderInfo isParameter firstFamily whnf tail =>
@@ -3468,7 +3557,160 @@ theorem AnnotationAt.consumed_eq
   | zero annotationMatch => exact annotationMatch
   | succ bodyCandidate tail => exact tail.consumed_eq
 
+/-- Any candidate trace carrying an annotation position starts at a genuine Pi
+source once the stored-spine gate is known. -/
+theorem AnnotationAt.traceSource_isForall
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    (position : trace.AnnotationAt count)
+    (aligned : trace.storedSpine = true) :
+    source.isForall = true := by
+  cases position <;>
+    simp only [AddInductive.CandidateExprTrace.storedSpine,
+      Bool.and_eq_true] at aligned <;>
+    exact AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+      aligned.1
+
 end AddInductive.CandidateExprTrace
+
+namespace AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath
+
+/-- Synchronize an exact later-family shared-parameter path with the same
+candidate's producer-owned annotation position.
+
+Both retained WHNF observations see the identical instantiated kernel body.
+Since the generation gate says that body is already a Pi, WHNF returns it
+literally in both reader contexts.  Recursing over the actual path therefore
+identifies the validator suffix root with the candidate annotation root,
+without a determinism or endpoint-uniqueness premise. -/
+theorem annotationAt_root_eq
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {source : Expr}
+    {i nindices fuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel}
+    {suffixSource : Expr} {suffixFuel : Nat}
+    {suffix : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context suffixSource nparams nindices suffixFuel}
+    {parameters : List Expr}
+    (path : SharedPrefixPath nparams outer suffix parameters)
+    (parameters_eq : parameters = candidate.parameterList count)
+    (position : candidate.AnnotationAt count)
+    (aligned : candidate.storedSpine = true)
+    (source_eq : source = candidate.rootWhnf)
+    (recursionFuel : Nat)
+    (contextDepth : context.fuel.recDepth = recursionFuel + 1)
+    (candidateDepth : candidateContext.fuel.recDepth = recursionFuel + 1) :
+    suffixSource = position.root := by
+  induction candidate generalizing count stats context source i nindices fuel
+      outer suffixSource suffixFuel suffix parameters with
+  | terminal => cases position
+  | forallE candidateContext candidateSource inferred candidateName
+      candidateDomain candidateBody candidateBinderInfo candidateFresh
+      candidateAnnotations candidateAnnotationsEq candidateChecked
+      candidateNormalized candidateDomainCandidate candidateBodyCandidate
+      domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.storedSpine,
+      Bool.and_eq_true] at aligned
+    obtain ⟨candidateSourceEq, bodyAligned⟩ := aligned
+    cases count with
+    | zero =>
+        cases position with
+        | zero annotationMatch =>
+            cases path with
+            | done trace => exact source_eq
+            | shared =>
+                simp [AddInductive.CandidateExprTrace.parameterList]
+                  at parameters_eq
+    | succ count =>
+        cases position with
+        | succ _ position =>
+            cases path with
+            | done trace =>
+                simp [AddInductive.CandidateExprTrace.parameterList]
+                  at parameters_eq
+            | @shared validatorView validatorI validatorNindices
+                validatorFuel validatorSuffixSource validatorSuffixFuel
+                parameterType validatorDomain validatorName validatorBody
+                validatorBinderInfo tail suffix parameters isParameter
+                laterFamily parameterTypeRun defeq whnf path =>
+                simp only [AddInductive.CandidateExprTrace.parameterList,
+                  List.cons.injEq] at parameters_eq
+                have candidateIsForall :
+                    (candidateBody.instantiate1
+                      candidateContext.freshExpr).isForall = true :=
+                  position.traceSource_isForall bodyAligned
+                have candidateBodyEq :=
+                  AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                    candidateBodyCandidate.rootWhnf_valid recursionFuel (by
+                      simpa [AddInductive.Context.pushLocalDecl] using
+                        candidateDepth) candidateIsForall
+                have sourceParts := source_eq
+                simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                  Expr.forallE.injEq] at sourceParts
+                rcases sourceParts with
+                  ⟨nameEq, domainEq, bodyEq, binderInfoEq⟩
+                have parameterEq : stats.params[i]! =
+                    candidateContext.freshExpr := parameters_eq.1
+                have validatorSourceIsForall :
+                    (validatorBody.instantiate1
+                      stats.params[i]!).isForall = true := by
+                  rw [parameterEq, bodyEq]
+                  exact candidateIsForall
+                have validatorBodyEq :=
+                  AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                    whnf recursionFuel contextDepth validatorSourceIsForall
+                apply bodyIH path parameters_eq.2 position bodyAligned
+                · exact validatorBodyEq.trans (by
+                    rw [parameterEq, bodyEq]
+                    exact candidateBodyEq.symm)
+                · exact contextDepth
+                · simpa [AddInductive.Context.pushLocalDecl] using
+                    candidateDepth
+
+end AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel]
+-/
+#guard_msgs in
+#print axioms AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateWhnfStep.result_eq_of_source_isForall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.AnnotationAt.traceSource_isForall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel]
+-/
+#guard_msgs in
+#print axioms AddInductive.CandidateExprTrace.AnnotationAt.traceSource_isForall
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath.annotationAt_root_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath.annotationAt_root_eq
 
 namespace TypeChecker
 

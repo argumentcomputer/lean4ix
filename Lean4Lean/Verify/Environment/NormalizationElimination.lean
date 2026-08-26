@@ -2032,6 +2032,11 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
   secondRun : TypeChecker.CandidateExprRun env Us
     secondCandidate.familyType.type.trace [] secondRaw.type
     secondView secondInferred
+  stored_spine :
+    secondCandidate.familyType.type.trace.storedSpine = true
+  whnfFuel : Nat
+  whnfDepth : secondCandidate.familyType.type.context.fuel.recDepth =
+    whnfFuel + 1
   validation_annotations :
     secondCandidate.familyType.type.trace.validationAnnotations
   annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
@@ -2133,6 +2138,9 @@ theorem
                     secondView := secondRoot.type.view
                     secondInferred := secondInferred
                     secondRun := secondRun
+                    stored_spine := secondShape.storedSpine
+                    whnfFuel := secondRoot.type.whnfFuel
+                    whnfDepth := secondRoot.type.whnfDepth
                     validation_annotations := secondAnnotations
                     annotation_spine := annotationSpine
                     terminal_venv := terminalVenv
@@ -2212,6 +2220,38 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.candidat
     AddInductive.CandidateFamilyType.context_eq_of_normalize
       familyTypesProduced.tail.head
   exact firstContextEq.trans secondContextEq.symm
+
+/-- The exact second candidate was normalized in the producer's snapshotted
+root reader context. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.second_candidate_context_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    annotation.secondCandidate.familyType.type.context =
+      { context with lctx := {} } := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have candidatesEq := annotation.candidates_eq
+  change normalization.families.candidates =
+    .cons annotation.firstCandidate
+      (.cons annotation.secondCandidate annotation.remainingCandidates)
+    at candidatesEq
+  have familyTypesProduced := normalization.familyTypes.produced
+  rw [← normalization.families.produced.familyTypes_eq]
+    at familyTypesProduced
+  rw [candidatesEq] at familyTypesProduced
+  simp only [AddInductive.CandidateList.familyTypes] at familyTypesProduced
+  exact AddInductive.CandidateFamilyType.context_eq_of_normalize
+    familyTypesProduced.tail.head
 
 /-- The exact common reader context in particular fixes every main-spine free
 variable allocated by the first two family candidates. -/
@@ -2923,6 +2963,9 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
         position.stats.params.size = source.nparams ∧
         position.i = 0 ∧
         position.nindices = 0 ∧
+        position.context.fuel = context.fuel ∧
+        AddInductive.CandidateWhnfStep.Valid
+          ⟨position.context, secondSource.type, position.source⟩ ∧
         ∃ currentRun : TypeChecker.CandidateContextRun position.context,
           currentRun.context.venv = env ∧
           currentRun.context.lparams = Us ∧
@@ -2955,6 +2998,9 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
       position.stats.params.size = source.nparams ∧
       position.i = 0 ∧
       position.nindices = 0 ∧
+      position.context.fuel = context.fuel ∧
+      AddInductive.CandidateWhnfStep.Valid
+        ⟨position.context, secondSource.type, position.source⟩ ∧
       ∃ currentRun : TypeChecker.CandidateContextRun position.context,
         currentRun.context.venv = env ∧
         currentRun.context.lparams = Us ∧
@@ -3120,7 +3166,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                     trace := secondTelescope }
                   refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
                     secondRuns, secondPosition, (by rfl), paramsSize,
-                    (by rfl), (by rfl),
+                    (by rfl), (by rfl), telescope.result_context_fuel,
+                    secondRootWhnf,
                     currentRun, currentVenv, currentLparams,
                     secondRoot', secondBoundary,
                     secondRootTranslation, rawRootDef, parameterSpine⟩
@@ -3224,6 +3271,9 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
   position_params_size : position.stats.params.size = source.nparams
   position_i_eq : position.i = 0
   position_nindices_eq : position.nindices = 0
+  position_fuel_eq : position.context.fuel = context.fuel
+  position_root_whnf : AddInductive.CandidateWhnfStep.Valid
+    ⟨position.context, secondSource.type, position.source⟩
   currentRun : TypeChecker.CandidateContextRun position.context
   current_venv : currentRun.context.venv = env
   current_lparams : currentRun.context.lparams = Us
@@ -3259,7 +3309,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     produced.semanticSecondFamilyAnnotationSpine semantic
   obtain ⟨secondComparisons, remainingComparisons, comparisonsEq,
       comparisonRuns, position, positionEq, positionParamsSize, positionIEq,
-      positionNindicesEq, currentRun, currentVenv, currentLparams,
+      positionNindicesEq, positionFuelEq, positionRootWhnf, currentRun,
+      currentVenv, currentLparams,
       parameterRoot, boundary,
       parameterRootTr, rawRootDef, parameterSpine⟩ :=
     produced.semanticSecondFamilyParameterComparisons semantic annotation
@@ -3275,6 +3326,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     position_params_size := positionParamsSize
     position_i_eq := positionIEq
     position_nindices_eq := positionNindicesEq
+    position_fuel_eq := positionFuelEq
+    position_root_whnf := positionRootWhnf
     currentRun := currentRun
     current_venv := currentVenv
     current_lparams := currentLparams
@@ -3894,6 +3947,111 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSo
         source.nparams :=
   staging.parameterSources_eq_positionParams.trans
     (staging.position_params_eq_secondParameterList context_lctx_eq)
+
+
+/-- The validator's exact first-index source is literally the candidate
+annotation root at the declared parameter position.
+
+The proof follows the retained shared-parameter path, identifies the two
+context-independent Pi WHNF observations, and retains the exact semantic
+snapshot whose consumed endpoint is the producer's first stored index domain. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexAnnotationAlignment
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ position : staging.annotation.secondCandidate.familyType.type.trace.AnnotationAt
+        source.nparams,
+      ∃ snapshot : TypeChecker.CandidateAnnotationSnapshot env Us
+          position.root,
+        staging.boundary.source = position.root ∧
+          snapshot.consumed' = raw.consumedDomain := by
+  obtain ⟨position, snapshot, consumedEq⟩ := raw.annotationSnapshot
+  have candidateIsForall :=
+    position.traceSource_isForall staging.annotation.stored_spine
+  have contextDepth : staging.position.context.fuel.recDepth =
+      staging.annotation.whnfFuel + 1 := by
+    calc
+      staging.position.context.fuel.recDepth = context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) staging.position_fuel_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth :=
+        rfl
+      _ = staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
+        (congrArg (fun candidateContext => candidateContext.fuel.recDepth)
+          staging.annotation.second_candidate_context_eq).symm
+      _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
+  have candidateRootEq :
+      staging.annotation.secondCandidate.familyType.type.trace.rootWhnf =
+        secondSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      staging.annotation.secondCandidate.familyType.type.trace.rootWhnf_valid
+      staging.annotation.whnfFuel staging.annotation.whnfDepth
+      candidateIsForall
+  have validatorRootEq : staging.position.source = secondSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      staging.position_root_whnf staging.annotation.whnfFuel contextDepth
+      candidateIsForall
+  have boundaryRootEq :=
+    staging.boundary.prefix_path.annotationAt_root_eq
+      (staging.parameterSources_eq_secondParameterList context_lctx_eq)
+      position staging.annotation.stored_spine
+      (validatorRootEq.trans candidateRootEq.symm)
+      staging.annotation.whnfFuel contextDepth staging.annotation.whnfDepth
+  exact ⟨position, snapshot, boundaryRootEq, consumedEq⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.second_candidate_context_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.second_candidate_context_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexAnnotationAlignment' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.rawFirstIndexAnnotationAlignment
+
 
 /-- Consequently, the exact second candidate parameter list also has the
 validator-selected declared length. -/
