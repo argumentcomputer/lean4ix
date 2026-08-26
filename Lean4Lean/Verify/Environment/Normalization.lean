@@ -3378,6 +3378,221 @@ def CandidateExprStagedInput.rootInput
     whnfFuel := input.whnfFuel
     whnfDepth := input.whnfDepth }
 
+end TypeChecker
+
+namespace AddInductive.CandidateExprTrace
+
+/-- A source-indexed path to one exact annotation node on a candidate's main
+Pi spine.  The path follows the recursively retained body candidate; its
+zero constructor owns the annotation provenance at the selected node. -/
+inductive AnnotationAt :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      (trace : AddInductive.CandidateExprTrace candidateContext source) →
+      Nat → Type where
+  | zero
+      (annotation_match : annotations.Matches) :
+      AnnotationAt
+        (.forallE context source inferred name domain body binderInfo fresh
+          annotations annotationsEq checked normalized domainCandidate
+          bodyCandidate) 0
+  | succ
+      (bodyCandidate : AddInductive.CandidateExprTrace
+        (context.pushLocalDecl name binderInfo annotations.consumed)
+        (body.instantiate1 context.freshExpr))
+      (tail : @AnnotationAt
+        (context.pushLocalDecl name binderInfo annotations.consumed)
+        (body.instantiate1 context.freshExpr) bodyCandidate n) :
+      AnnotationAt
+        (.forallE context source inferred name domain body binderInfo fresh
+          annotations annotationsEq checked normalized domainCandidate
+          bodyCandidate) (n + 1)
+
+/-- Every in-bounds main-spine position has the exact annotation provenance
+retained by the candidate producer. -/
+theorem annotationAt
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    (annotations : trace.validationAnnotations)
+    (count_lt : count < trace.spineLength) :
+    Nonempty (AnnotationAt trace count) := by
+  induction trace generalizing count with
+  | terminal =>
+      simp [AddInductive.CandidateExprTrace.spineLength] at count_lt
+  | forallE context source inferred name domain body binderInfo fresh
+      annotationsNode annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+    rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+    cases count with
+    | zero => exact ⟨.zero annotationMatch⟩
+    | succ count =>
+        obtain ⟨tailAt⟩ := bodyIH tailAnnotations (by
+          simpa [AddInductive.CandidateExprTrace.spineLength] using count_lt)
+        exact ⟨.succ bodyCandidate tailAt⟩
+
+/-- The exact kernel Pi exposed at a selected annotation position. -/
+def AnnotationAt.root :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      {trace : AddInductive.CandidateExprTrace candidateContext source} →
+      {count : Nat} → AnnotationAt trace count → Expr
+  | _, _, _, _, .zero (name := name) (domain := domain) (body := body)
+      (binderInfo := binderInfo) _ =>
+    .forallE name domain body binderInfo
+  | _, _, _, _, .succ _ tail => tail.root
+
+/-- Raw kernel domain at the selected annotation position. -/
+def AnnotationAt.domain :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      {trace : AddInductive.CandidateExprTrace candidateContext source} →
+      {count : Nat} → AnnotationAt trace count → Expr
+  | _, _, _, _, .zero (domain := domain) _ => domain
+  | _, _, _, _, .succ _ tail => tail.domain
+
+/-- Candidate-selected annotation-consumed kernel domain at the selected
+position. -/
+def AnnotationAt.consumed :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      {trace : AddInductive.CandidateExprTrace candidateContext source} →
+      {count : Nat} → AnnotationAt trace count → Expr
+  | _, _, _, _, .zero (annotations := annotations) _ => annotations.consumed
+  | _, _, _, _, .succ _ tail => tail.consumed
+
+/-- The selected candidate annotation is exactly the transparent peeling
+used by ordinary family validation. -/
+theorem AnnotationAt.consumed_eq
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {count : Nat}
+    (position : AnnotationAt trace count) :
+    position.consumed = AddInductive.consumeTypeAnnotations position.domain := by
+  cases position with
+  | zero annotationMatch => exact annotationMatch
+  | succ bodyCandidate tail => exact tail.consumed_eq
+
+end AddInductive.CandidateExprTrace
+
+namespace TypeChecker
+
+/-- Semantic snapshot of one exact candidate annotation node.  The kernel
+root remains indexed by the structural path, while both strict translations
+and the actual checker equality retain the precise recursive Theory context. -/
+structure CandidateAnnotationSnapshot (env : VEnv) (Us : List Name)
+    (root : Expr) where
+  Δ : VLCtx
+  name : Name
+  domain : Expr
+  body : Expr
+  binderInfo : BinderInfo
+  consumed : Expr
+  domain' : VExpr
+  consumed' : VExpr
+  sort : VLevel
+  root_eq : root = .forallE name domain body binderInfo
+  annotation_match : consumed = AddInductive.consumeTypeAnnotations domain
+  domain_tr : TrExprS env Us Δ domain domain'
+  consumed_tr : TrExprS env Us Δ consumed consumed'
+  domain_type : env.HasType Us.length Δ.toCtx domain' (.sort sort)
+  annotation_run : IsDefEqRun env Us Δ domain consumed domain' consumed'
+
+/-- Interpret a structural annotation position through the same recursive
+semantic run that produced the candidate telescope. -/
+theorem CandidateExprRun.annotationSnapshot
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (position : trace.AnnotationAt count) :
+    Nonempty (CandidateAnnotationSnapshot env Us position.root) := by
+  induction position generalizing Δ source' view' inferred' with
+  | zero annotationMatch =>
+      cases run with
+      | forallE annotations annotationsEq domainCandidate bodyCandidate node
+          domainRun annotationsRun bodyRun domainType bodyType bodySource
+          bodyContext =>
+        exact ⟨{
+          Δ := Δ
+          name := _
+          domain := _
+          body := _
+          binderInfo := _
+          consumed := _
+          domain' := _
+          consumed' := _
+          sort := _
+          root_eq := rfl
+          annotation_match := annotationMatch
+          domain_tr := domainRun.source_tr
+          consumed_tr := annotationsRun.rhs_tr
+          domain_type := domainType
+          annotation_run := annotationsRun }⟩
+  | succ bodyCandidate tail ih =>
+      cases run with
+      | forallE annotations annotationsEq domainCandidate bodyCandidate node
+          domainRun annotationsRun bodyRun domainType bodyType bodySource
+          bodyContext =>
+        exact ih bodyRun
+
+/-- Position-by-position semantic provenance for an annotation-consumed
+candidate telescope.
+
+The list index is the exact sequence of strict Theory translations selected
+by the candidate's annotation equality runs.  A head certificate is exposed
+only after supplying the producer's `Matches` witness, so this relation can be
+built from a semantic run before structural validation annotations are
+projected from the normalization execution. -/
+inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      AddInductive.CandidateExprTrace candidateContext source →
+      List VExpr → Prop where
+  | terminal : CandidateAnnotationSpine env Us
+      (.terminal context source inferred result checked normalized) []
+  | forallE
+      (domainCandidate : AddInductive.CandidateExprTrace context domain)
+      (bodyCandidate : AddInductive.CandidateExprTrace
+        (context.pushLocalDecl name binderInfo annotations.consumed)
+        (body.instantiate1 context.freshExpr))
+      (storedDomain' : VExpr) (domains : List VExpr)
+      (head : annotations.Matches →
+        ∃ snapshot : CandidateAnnotationSnapshot env Us
+            (.forallE name domain body binderInfo),
+          snapshot.consumed' = storedDomain')
+      (tail : CandidateAnnotationSpine env Us bodyCandidate domains) :
+      CandidateAnnotationSpine env Us
+        (.forallE context source inferred name domain body binderInfo fresh
+          annotations annotationsEq checked normalized domainCandidate
+          bodyCandidate)
+        (storedDomain' :: domains)
+
+/-- Select the semantic snapshot and exact stored-domain suffix at one
+producer-owned structural annotation position. -/
+theorem CandidateAnnotationSpine.snapshotAt
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace domains)
+    (position : trace.AnnotationAt count) :
+    ∃ snapshot : CandidateAnnotationSnapshot env Us position.root,
+      ∃ tail, domains.drop count = snapshot.consumed' :: tail := by
+  induction position generalizing domains with
+  | zero annotationMatch =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
+          obtain ⟨snapshot, snapshotEq⟩ := head annotationMatch
+          refine ⟨snapshot, domains, ?_⟩
+          simp only [List.drop_zero, snapshotEq]
+  | succ bodyCandidate position ih =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
+          simpa only [List.drop_succ_cons,
+            AddInductive.CandidateExprTrace.AnnotationAt.root] using ih tail
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.snapshotAt
+
 /-- Pointwise checker-produced equality for a pair of binder telescopes. The
 tail is checked in the context extended by the raw binder, exactly matching
 `VEnv.TelDefEq` and the mixed generator's raw-binder discipline. -/
@@ -4079,7 +4294,8 @@ private theorem CandidateExprRun.annotationSpineContextAux
       terminalRun.context.venv = env ∧
       terminalRun.context.lparams = Us ∧
       terminalRun.context.vlctx.toCtx =
-        storedBinders.reverse ++ Δ.toCtx := by
+        storedBinders.reverse ++ Δ.toCtx ∧
+      CandidateAnnotationSpine env Us trace storedBinders := by
   induction run generalizing rawΔ rawSource' with
   | @terminal Δ context source inferred result source' result' inferred'
       checked normalized node =>
@@ -4089,7 +4305,7 @@ private theorem CandidateExprRun.annotationSpineContextAux
       simpa only [AddInductive.CandidateExprTrace.terminalContext] using
         contextRun
     refine ⟨[], [], rawSource', terminalRun, rfl, .nil, rfl,
-      venv_eq, lparams_eq, ?_⟩
+      venv_eq, lparams_eq, ?_, .terminal⟩
     change contextRun.context.vlctx.toCtx = Δ.toCtx
     rw [vlctx_eq]
   | @forallE domain context name binderInfo Δ source inferred body
@@ -4171,12 +4387,34 @@ private theorem CandidateExprRun.annotationSpineContextAux
         rawBody_tr.inst_fvar henv.ordered rawBodyΔwf
     obtain ⟨rawBinders, storedBinders, rawResult, terminalRun,
         rawBodyEq, storedTail, tailLength, terminalVenv,
-        terminalLparams, terminalContextEq⟩ :=
+        terminalLparams, terminalContextEq, annotationTail⟩ :=
       bodyIH bodyAligned nextContextRun nextVenv nextLparams nextVlctx
         bodyContextEq rawBodyInst_tr
+    have annotationHead : annotations.Matches →
+        ∃ snapshot : CandidateAnnotationSnapshot env Us
+            (.forallE name domain body binderInfo),
+          snapshot.consumed' = storedDomain' := by
+      intro annotationMatch
+      exact ⟨{
+        Δ := Δ
+        name := name
+        domain := domain
+        body := body
+        binderInfo := binderInfo
+        consumed := annotations.consumed
+        domain' := domain'
+        consumed' := storedDomain'
+        sort := u
+        root_eq := rfl
+        annotation_match := annotationMatch
+        domain_tr := domainRun.source_tr
+        consumed_tr := annotationsRun.rhs_tr
+        domain_type := domainType
+        annotation_run := annotationsRun }, rfl⟩
     refine ⟨rawDomain :: rawBinders, storedDomain' :: storedBinders,
       rawResult, terminalRun, ?_, ?_, ?_, terminalVenv, terminalLparams,
-      ?_⟩
+      ?_, .forallE domainCandidate bodyCandidate storedDomain' storedBinders
+        annotationHead annotationTail⟩
     · simp only [VExpr.forallN, rawBodyEq]
     · exact .cons (.ofDefEq rawToStored) (by
         simpa only [rawBodyΔ, VLCtx.toCtx] using storedTail)
@@ -4218,12 +4456,13 @@ theorem CandidateExprRun.annotationSpineContext
         (VExpr.telN trace.spineLength source') storedBinders ∧
       storedBinders.length = trace.spineLength ∧
       terminalRun.context.vlctx.toCtx =
-        storedBinders.reverse ++ Δ.toCtx := by
+        storedBinders.reverse ++ Δ.toCtx ∧
+      CandidateAnnotationSpine env Us trace storedBinders := by
   have henv : VEnv.WF env := by
     simpa only [venv_eq] using contextRun.context.Ewf
   obtain ⟨rawBinders, storedBinders, rawResult, terminalRun,
       rawEq, telescope, rawLength, terminalVenv, terminalLparams,
-      terminalContextEq⟩ :=
+      terminalContextEq, annotationSpine⟩ :=
     run.annotationSpineContextAux aligned contextRun venv_eq lparams_eq
       vlctx_eq (.refl henv run.context_wf) run.source_tr
   have rawTel : VExpr.telN trace.spineLength source' = rawBinders := by
@@ -4233,7 +4472,7 @@ theorem CandidateExprRun.annotationSpineContext
     telescope.length_eq.symm.trans rawLength
   exact ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
     by simpa only [rawTel] using telescope, storedLength,
-    terminalContextEq⟩
+    terminalContextEq, annotationSpine⟩
 
 /-- A stored candidate spine fixes the exact number of raw and reconstructed
 view binders, independently of the terminal result typing witness. -/
@@ -4883,15 +5122,17 @@ theorem CandidateExprSemanticRootRun.annotationSpineContext
       TelDefEqEvidence env Us.length []
         (VExpr.telN candidate.trace.spineLength source') storedBinders ∧
       storedBinders.length = candidate.trace.spineLength ∧
-      terminalRun.context.vlctx.toCtx = storedBinders.reverse := by
+      terminalRun.context.vlctx.toCtx = storedBinders.reverse ∧
+      CandidateAnnotationSpine env Us candidate.trace storedBinders := by
   obtain ⟨inferred, recursive⟩ := run.recursive
   obtain ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
-      telescope, storedLength, terminalContextEq⟩ :=
+      telescope, storedLength, terminalContextEq, annotationSpine⟩ :=
     recursive.annotationSpineContext storedSpine run.contextRun run.venv_eq
       run.lparams_eq run.vlctx_eq
   exact ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
     telescope, storedLength, by
-      simpa only [VLCtx.toCtx, List.append_nil] using terminalContextEq⟩
+      simpa only [VLCtx.toCtx, List.append_nil] using terminalContextEq,
+    annotationSpine⟩
 
 /-- Turn an exact root translation and a recursive identity witness into the
 generation-ready spine package. The root equalities transport the recursive

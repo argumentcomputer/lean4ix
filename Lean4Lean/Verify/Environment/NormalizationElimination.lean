@@ -2027,6 +2027,15 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     (VInductDecl.ctorFields secondRaw.type).length
   terminalRun : TypeChecker.CandidateContextRun
     secondCandidate.familyType.type.trace.terminalContext
+  secondView : VExpr
+  secondInferred : VExpr
+  secondRun : TypeChecker.CandidateExprRun env Us
+    secondCandidate.familyType.type.trace [] secondRaw.type
+    secondView secondInferred
+  validation_annotations :
+    secondCandidate.familyType.type.trace.validationAnnotations
+  annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
+    secondCandidate.familyType.type.trace storedBinders
   terminal_venv : terminalRun.context.venv = env
   terminal_lparams : terminalRun.context.lparams = Us
   terminal_vlctx : terminalRun.context.vlctx.toCtx = storedBinders.reverse
@@ -2057,6 +2066,22 @@ theorem
     rw [hCandidates] at roots blockShape
     cases remainingCandidates with
     | cons secondCandidate remainingCandidates =>
+      let normalization :=
+        produced.execution.eliminationExecution.normalization
+      have familyTypesProduced := normalization.familyTypes.produced
+      rw [← normalization.families.produced.familyTypes_eq]
+        at familyTypesProduced
+      have candidatesEq := hCandidates
+      change normalization.families.candidates =
+        .cons firstCandidate (.cons secondCandidate remainingCandidates)
+        at candidatesEq
+      rw [candidatesEq] at familyTypesProduced
+      simp only [AddInductive.CandidateList.familyTypes]
+        at familyTypesProduced
+      have secondProduced := familyTypesProduced.tail.head
+      have secondAnnotations :=
+        secondCandidate.familyType.validationAnnotations_of_normalize
+          secondProduced
       cases hRawTypes : source.types with
       | nil =>
         rw [hRawTypes] at roots
@@ -2081,9 +2106,11 @@ theorem
               | cons secondRoot remainingRoots =>
                 cases remainingShapes with
                 | cons secondShape remainingShapes =>
+                  obtain ⟨secondInferred, secondRun⟩ :=
+                    secondRoot.type.recursive
                   obtain ⟨terminalRun, storedBinders, terminalVenv,
                       terminalLparams, telescope, storedLength,
-                      terminalVlctx⟩ :=
+                      terminalVlctx, annotationSpine⟩ :=
                     secondRoot.type.annotationSpineContext
                       secondShape.storedSpine
                   have spineLength :=
@@ -2103,6 +2130,11 @@ theorem
                     telescope := telescope
                     stored_length := storedLength
                     terminalRun := terminalRun
+                    secondView := secondRoot.type.view
+                    secondInferred := secondInferred
+                    secondRun := secondRun
+                    validation_annotations := secondAnnotations
+                    annotation_spine := annotationSpine
                     terminal_venv := terminalVenv
                     terminal_lparams := terminalLparams
                     terminal_vlctx := terminalVlctx }⟩
@@ -2526,6 +2558,105 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawFirst
         raw_suffix_eq := rawSuffixEq
         consumed_suffix_eq := consumedSuffixEq
         annotation_evidence := head }⟩
+
+/-- The producer's exact first-index raw node selects the corresponding
+annotation position on the same second-family candidate run. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.annotationAt
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {annotation : produced.SecondFamilyAnnotationSpine semantic}
+    (raw : annotation.RawFirstIndexDomain) :
+    Nonempty
+      (annotation.secondCandidate.familyType.type.trace.AnnotationAt
+        source.nparams) := by
+  let fullBinders := VExpr.telN
+    (VInductDecl.ctorFields annotation.secondRaw.type).length
+    annotation.secondRaw.type
+  have fullLength : fullBinders.length =
+      (VInductDecl.ctorFields annotation.secondRaw.type).length :=
+    annotation.telescope.length_eq.trans annotation.stored_length
+  have suffixLength : fullBinders.length - source.nparams =
+      raw.rawTail.length + 1 := by
+    simpa only [fullBinders, List.length_drop, List.length_cons] using
+      congrArg List.length raw.raw_suffix_eq
+  have count_lt : source.nparams <
+      annotation.secondCandidate.familyType.type.trace.spineLength := by
+    rw [annotation.spineLength_eq, ← fullLength]
+    change source.nparams < fullBinders.length
+    omega
+  exact annotation.secondCandidate.familyType.type.trace.annotationAt
+    annotation.validation_annotations count_lt
+
+/-- Interpret the selected first-index annotation position through the exact
+recursive semantic run retained by the second-family producer. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.annotationSnapshot
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {annotation : produced.SecondFamilyAnnotationSpine semantic}
+    (raw : annotation.RawFirstIndexDomain) :
+    ∃ position : annotation.secondCandidate.familyType.type.trace.AnnotationAt
+        source.nparams,
+      ∃ snapshot : TypeChecker.CandidateAnnotationSnapshot env Us position.root,
+        snapshot.consumed' = raw.consumedDomain := by
+  obtain ⟨position⟩ := raw.annotationAt
+  obtain ⟨snapshot, tail, snapshotSuffixEq⟩ :=
+    annotation.annotation_spine.snapshotAt position
+  have suffixEq : snapshot.consumed' :: tail =
+      raw.consumedDomain :: raw.consumedTail :=
+    snapshotSuffixEq.symm.trans raw.consumed_suffix_eq
+  exact ⟨position, snapshot, (List.cons.inj suffixEq).1⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.annotationSnapshot' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain.annotationSnapshot
 
 /-- The raw post-parameter expression is literally the retained first index
 domain followed by the remainder of the producer telescope. -/
