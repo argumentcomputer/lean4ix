@@ -1480,6 +1480,83 @@ theorem instantiateLevelParams_eq {e ps ls} :
   · refine instantiateLevelParamsCore_id.symm.trans ?_; congr; ext n
     cases ps <;> simp_all
 
+variable (red : Bool) (s : Name → Level) in
+def instantiateLevelParamsCoreCpp' : Expr → Expr
+  | .const c levels => .const c (levels.map (·.substParamsCpp' s red))
+  | .sort u => .sort (u.substParamsCpp' s red)
+  | .mdata m e => .mdata m (instantiateLevelParamsCoreCpp' e)
+  | .proj n i e => .proj n i (instantiateLevelParamsCoreCpp' e)
+  | .app f a => .app (instantiateLevelParamsCoreCpp' f) (instantiateLevelParamsCoreCpp' a)
+  | .lam n t b bi =>
+    .lam n (instantiateLevelParamsCoreCpp' t) (instantiateLevelParamsCoreCpp' b) bi
+  | .forallE n t b bi =>
+    .forallE n (instantiateLevelParamsCoreCpp' t) (instantiateLevelParamsCoreCpp' b) bi
+  | .letE n t v b bi => .letE n (instantiateLevelParamsCoreCpp' t)
+      (instantiateLevelParamsCoreCpp' v) (instantiateLevelParamsCoreCpp' b) bi
+  | e@(.bvar _)
+  | e@(.fvar _)
+  | e@(.mvar _)
+  | e@(.lit _) => e
+
+theorem instantiateLevelParamsCoreCpp_eq_self (h : e.hasLevelParam' = false) :
+    instantiateLevelParamsCoreCpp' red s e = e := by
+  induction e <;>
+    simp_all [instantiateLevelParamsCoreCpp', hasLevelParam', Level.hasParam_eq,
+      Level.substParamsCpp_eq_self]
+  exact List.map_id''' _ fun _ h' => Level.substParamsCpp_eq_self (h _ h')
+
+theorem instantiateLevelParamsCoreCpp_id {e : Expr} :
+    instantiateLevelParamsCoreCpp' false .param e = e := by
+  induction e <;>
+    simp_all [instantiateLevelParamsCoreCpp', Level.substParamsCpp_id]
+
+theorem instantiateLevelParamsCoreCpp_eq :
+    instantiateLevelParamsCoreCpp s e =
+      instantiateLevelParamsCoreCpp' true
+        (fun x => (s x).getD (.param x)) e := by
+  simp [instantiateLevelParamsCoreCpp, replace_eq]
+  have (e) (H : e.hasLevelParam = true →
+        replaceNoCache (instantiateLevelParamsCoreCpp.replaceFn s) e =
+          instantiateLevelParamsCoreCpp' true
+            (fun x => (s x).getD (.param x)) e) :
+      replaceNoCache (instantiateLevelParamsCoreCpp.replaceFn s) e =
+        instantiateLevelParamsCoreCpp' true
+          (fun x => (s x).getD (.param x)) e := by
+    cases eq : e.hasLevelParam <;> [skip; exact H eq]
+    rw [instantiateLevelParamsCoreCpp_eq_self (hasLevelParam_eq_false eq)]
+    suffices ∀ f, f e = some e → replaceNoCache f e = e by
+      apply this
+      simp [instantiateLevelParamsCoreCpp.replaceFn, eq]
+    intro f eq
+    cases e <;> simp only [replaceNoCache, eq]
+  induction e <;> (
+    refine this _ fun h => ?_
+    simp only [replaceNoCache, instantiateLevelParamsCoreCpp.replaceFn]
+    simp [h]
+    clear this h
+    simp_all [instantiateLevelParamsCoreCpp'])
+
+theorem instantiateLevelParamsCpp_eq {e ps levels} :
+    instantiateLevelParamsCpp e ps levels =
+      instantiateLevelParamsCoreCpp' (!ps.isEmpty && !levels.isEmpty)
+        (fun x => ((ps.idxOf? x).bind (levels[·]?)).getD (.param x)) e := by
+  simp only [instantiateLevelParamsCpp]
+  rw [← Bool.not_or]
+  cases eq : ps.isEmpty || levels.isEmpty <;> simp
+  · clear eq
+    simp [instantiateLevelParamsCoreCpp_eq, List.idxOf?]
+    congr
+    ext n
+    congr
+    induction ps generalizing levels <;> cases levels <;>
+      simp [instantiateLevelParamsCpp.go]
+    split <;> simp [*, List.findIdx?_cons]
+    cases List.findIdx? .. <;> simp
+  · refine instantiateLevelParamsCoreCpp_id.symm.trans ?_
+    congr
+    ext n
+    cases ps <;> simp_all
+
 theorem eqv_sort {e : Expr} : e == .sort u ↔ e = .sort u := by
   conv => lhs; simp [(· == ·)]
   cases e <;> simp [eqv_eq, eqv']

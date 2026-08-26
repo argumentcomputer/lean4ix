@@ -145,6 +145,23 @@ theorem Level.mkLevelIMax'_hasMVar_eq_false
   grind [Lean.mkLevelIMax, Level.hasMVar',
     Level.mkLevelMax'_hasMVar_eq_false]
 
+/-- The C++-compatible normalized level maximum preserves absence of level
+metavariables. -/
+theorem Level.mkLevelMaxCpp_hasMVar_eq_false
+    (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
+    (mkLevelMaxCpp u v).hasMVar' = false := by
+  simp only [mkLevelMaxCpp, mkLevelMaxCoreCpp, Level.getOffset_eq]
+  grind [Lean.mkLevelMax, Level.hasMVar']
+
+/-- The C++-compatible normalized impredicative maximum preserves absence of
+level metavariables. -/
+theorem Level.mkLevelIMaxCpp_hasMVar_eq_false
+    (hu : u.hasMVar' = false) (hv : v.hasMVar' = false) :
+    (mkLevelIMaxCpp u v).hasMVar' = false := by
+  simp only [mkLevelIMaxCpp, mkLevelIMaxCoreCpp]
+  grind [Lean.mkLevelIMax, Level.hasMVar',
+    Level.mkLevelMaxCpp_hasMVar_eq_false]
+
 /-- Substituting level parameters with metavariable-free levels preserves
 absence of level metavariables. -/
 theorem Level.substParams'_hasMVar_eq_false
@@ -184,6 +201,45 @@ theorem Level.substParams'_hasMVar_eq_false
     · exact Level.mkLevelIMax'_hasMVar_eq_false (ihu hu') (ihv hv')
     · simp [Level.hasMVar', ihu hu', ihv hv']
 
+/-- C++-compatible level substitution preserves absence of level
+metavariables when every replacement is metavariable-free. -/
+theorem Level.substParamsCpp'_hasMVar_eq_false
+    {s : Name → Level} {u : Level} {red : Bool}
+    (hs : ∀ n, (s n).hasMVar' = false)
+    (hu : u.hasMVar' = false) :
+    (u.substParamsCpp' s red).hasMVar' = false := by
+  induction u generalizing red with
+  | zero => rfl
+  | param => exact hs _
+  | mvar => simp [Level.hasMVar'] at hu
+  | succ u ih =>
+    simp only [Level.hasMVar'] at hu ⊢
+    exact ih hu
+  | max u v ihu ihv =>
+    simp only [Level.hasMVar'] at hu
+    have hu' : u.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    have hv' : v.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    simp only [Level.substParamsCpp']
+    split
+    · exact Level.mkLevelMaxCpp_hasMVar_eq_false (ihu hu') (ihv hv')
+    · simp [Level.hasMVar', ihu hu', ihv hv']
+  | imax u v ihu ihv =>
+    simp only [Level.hasMVar'] at hu
+    have hu' : u.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    have hv' : v.hasMVar' = false := by
+      revert hu
+      cases u.hasMVar' <;> cases v.hasMVar' <;> simp
+    simp only [Level.substParamsCpp']
+    split
+    · exact Level.mkLevelIMaxCpp_hasMVar_eq_false (ihu hu') (ihv hv')
+    · simp [Level.hasMVar', ihu hu', ihv hv']
+
 /-- Replacing universe parameters preserves expression free-variable
 containment when every replacement level is metavariable-free. -/
 theorem FVarsIn.instantiateLevelParamsCore'
@@ -193,6 +249,16 @@ theorem FVarsIn.instantiateLevelParamsCore'
   induction e <;>
     simp_all [Expr.instantiateLevelParamsCore', FVarsIn,
       Level.substParams'_hasMVar_eq_false]
+
+/-- Replacing universe parameters through the C++-compatible constructors
+preserves expression free-variable containment. -/
+theorem FVarsIn.instantiateLevelParamsCoreCpp'
+    (hs : ∀ n, (s n).hasMVar' = false)
+    (he : FVarsIn P e) :
+    FVarsIn P (Expr.instantiateLevelParamsCoreCpp' red s e) := by
+  induction e <;>
+    simp_all [Expr.instantiateLevelParamsCoreCpp', FVarsIn,
+      Level.substParamsCpp'_hasMVar_eq_false]
 
 theorem FVarsIn.abstract1 (h1 : FVarsIn P e) :
     FVarsIn P (Expr.abstract1 a e k) := by
@@ -1030,6 +1096,30 @@ theorem FVarsIn.instantiateLevelParams
     apply hls
     exact List.mem_iff_getElem?.2 ⟨i, hi⟩
 
+/-- A checked list of universe arguments preserves expression free-variable
+containment under C++-compatible universe substitution. -/
+theorem FVarsIn.instantiateLevelParamsCpp
+    (he : FVarsIn P e)
+    (Hlevels : levels.mapM (VLevel.ofLevel Us) = some levelVals) :
+    FVarsIn P (e.instantiateLevelParamsCpp ps levels) := by
+  rw [Expr.instantiateLevelParamsCpp_eq]
+  apply FVarsIn.instantiateLevelParamsCoreCpp' _ he
+  have hls : ∀ l ∈ levels, l.hasMVar' = false := by
+    rw [List.mapM_eq_some] at Hlevels
+    intro l hl
+    have ⟨_, _, h⟩ :=
+      Lean4Lean.List.Forall₂.forall_exists_l Hlevels _ hl
+    exact ofLevel_hasMVar h
+  intro n
+  generalize hopt : (ps.idxOf? n).bind (fun i => levels[i]?) = o
+  cases o with
+  | none => simp [Level.hasMVar']
+  | some l =>
+    simp only [Option.getD]
+    obtain ⟨i, _, hi⟩ := Option.bind_eq_some_iff.1 hopt
+    apply hls
+    exact List.mem_iff_getElem?.2 ⟨i, hi⟩
+
 /--
 info: 'Lean4Lean.FVarsIn.instantiateLevelParams' depends on axioms: [propext,
  Classical.choice,
@@ -1715,6 +1805,92 @@ theorem ofLevel_mkLevelMax'
     · exact ⟨_, h2, (lem2 h (Nat.le_of_not_le h3) h1 h2).max_eq_right.symm⟩
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
+theorem ofLevel_mkLevelMaxCpp
+    (h1 : VLevel.ofLevel Us u = some u') (h2 : VLevel.ofLevel Us v = some v') :
+    ∃ w, VLevel.ofLevel Us (mkLevelMaxCpp u v) = some w ∧ w ≈ .max u' v' := by
+  let subsumes (u v : Level) : Bool :=
+    match u with
+    | .max u₁ u₂ => v == u₁ || v == u₂
+    | _ => false
+  let mkLevelMaxCore (u v : Level) :=
+    if u == v then u
+    else if u.isZero then v
+    else if v.isZero then u
+    else if subsumes u v then u
+    else if subsumes v u then v
+    else if u.getLevelOffset == v.getLevelOffset then
+      if u.getOffset ≥ v.getOffset then u else v
+    else
+      .max u v
+  change ∃ w, VLevel.ofLevel Us (mkLevelMaxCore u v) = some w ∧ w ≈ .max u' v'
+  have le {u v u' v'} (h : subsumes u v)
+      (hu : VLevel.ofLevel Us u = some u')
+      (hv : VLevel.ofLevel Us v = some v') : v'.LE u' := by
+    simp [subsumes] at h
+    split at h <;> [skip; cases h]
+    simp [VLevel.ofLevel] at hu
+    obtain ⟨_, hu1, _, hu2, rfl⟩ := hu
+    simp at h
+    obtain rfl | rfl := h
+    · cases hv.symm.trans hu1
+      exact VLevel.le_max_left
+    · cases hv.symm.trans hu2
+      exact VLevel.le_max_right
+  simp only [mkLevelMaxCore]
+  split
+  · simp_all
+    exact VLevel.max_self.symm
+  split
+  · let .zero := u
+    simp [VLevel.ofLevel] at h1
+    subst u'
+    exact ⟨_, h2, VLevel.zero_le.max_eq_right.symm⟩
+  split
+  · let .zero := v
+    simp [VLevel.ofLevel] at h2
+    subst v'
+    exact ⟨_, h1, VLevel.zero_le.max_eq_left.symm⟩
+  split
+  · exact ⟨_, h1, (le ‹_› h1 h2).max_eq_left.symm⟩
+  split
+  · exact ⟨_, h2, (le ‹_› h2 h1).max_eq_right.symm⟩
+  split
+  · rename_i h
+    simp at h ⊢
+    let rec lem1 {v : Level} {u' v'}
+        (hu : VLevel.ofLevel Us v.getLevelOffset = some u')
+        (hv : VLevel.ofLevel Us v = some v') : u'.LE v' := by
+      unfold Level.getLevelOffset at hu
+      split at hu
+      · simp [VLevel.ofLevel] at hv
+        obtain ⟨_, hv, rfl⟩ := hv
+        exact VLevel.le_trans (lem1 hu hv) VLevel.le_succ
+      · cases hu.symm.trans hv
+        exact VLevel.le_refl _
+    let rec lem2 {u v : Level} {u' v'}
+        (h1 : u.getLevelOffset = v.getLevelOffset)
+        (h2 : u.getOffset' ≤ v.getOffset')
+        (hu : VLevel.ofLevel Us u = some u')
+        (hv : VLevel.ofLevel Us v = some v') : u'.LE v' := by
+      revert h1 h2
+      unfold Level.getLevelOffset Level.getOffset'
+      split <;> simp <;> split <;> (try simp)
+      · simp [VLevel.ofLevel] at hu
+        obtain ⟨_, hu, rfl⟩ := hu
+        simp [VLevel.ofLevel] at hv
+        obtain ⟨_, hv, rfl⟩ := hv
+        exact (VLevel.succ_le_succ <| lem2 · · hu hv)
+      · rintro rfl
+        exact lem1 (v := .succ _) hu hv
+      · rintro rfl
+        cases hu.symm.trans hv
+        exact VLevel.le_refl _
+    split <;> rename_i h3
+    · exact ⟨_, h1, (lem2 h.symm h3 h2 h1).max_eq_left.symm⟩
+    · exact ⟨_, h2, (lem2 h (Nat.le_of_not_le h3) h1 h2).max_eq_right.symm⟩
+  simp [VLevel.ofLevel]
+  exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
+
 theorem ofLevel_isNeverZero (h : VLevel.ofLevel Us u = some u') (H : u.isNeverZero) :
     u'.IsNeverZero := by
   induction u generalizing u' with simp [Level.isNeverZero, VLevel.ofLevel] at H h <;> intro ls
@@ -1765,6 +1941,41 @@ theorem ofLevel_mkLevelIMax'
   split
   · simp_all; exact VLevel.imax_self.symm
   simp [VLevel.ofLevel]; exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
+
+theorem ofLevel_mkLevelIMaxCpp
+    (h1 : VLevel.ofLevel Us u = some u') (h2 : VLevel.ofLevel Us v = some v') :
+    ∃ w, VLevel.ofLevel Us (mkLevelIMaxCpp u v) = some w ∧ w ≈ .imax u' v' := by
+  let mkLevelIMaxCore (u v : Level) :=
+    if v.isNeverZero then mkLevelMaxCpp u v
+    else if v.isZero then v
+    else if u.isZero || u == .succ .zero then v
+    else if u == v then u
+    else .imax u v
+  change ∃ w, VLevel.ofLevel Us (mkLevelIMaxCore u v) = some w ∧ w ≈ .imax u' v'
+  simp only [mkLevelIMaxCore]
+  split
+  · have ⟨_, a1, a2⟩ := ofLevel_mkLevelMaxCpp h1 h2
+    exact ⟨_, a1, .trans a2 (ofLevel_isNeverZero h2 ‹_›).imax_eq_max.symm⟩
+  split
+  · let .zero := v
+    simp [VLevel.ofLevel] at h2
+    subst v'
+    exact ⟨.zero, rfl, rfl⟩
+  split
+  · rename_i h
+    simp at h
+    obtain h | rfl := h
+    · let .zero := u
+      simp [VLevel.ofLevel] at h1
+      subst u'
+      exact ⟨_, h2, VLevel.zero_imax.symm⟩
+    · cases h1
+      exact ⟨_, h2, VLevel.one_imax.symm⟩
+  split
+  · simp_all
+    exact VLevel.imax_self.symm
+  simp [VLevel.ofLevel]
+  exact ⟨_, ⟨_, h1, _, h2, rfl⟩, rfl⟩
 
 variable! {ls : List VLevel} (hls : ∀ l ∈ ls, l.WF U') in
 theorem TrProj.instL (H : TrProj env U Γ s i e e') :
@@ -1938,6 +2149,67 @@ theorem substParams_wf_list (red) {us us' : List _} (H : us.mapM (VLevel.ofLevel
     have ⟨_, h3, h4⟩ := substParams_wf Hls eq eqF red H1
     refine ⟨_, ⟨_, h3, _, h1, rfl⟩, .cons h4 h2⟩
 
+attribute [-simp] Bool.forall_bool in
+theorem substParamsCpp_wf (red) (H : VLevel.ofLevel ps u = some u') :
+    ∃ u₁, VLevel.ofLevel Us (u.substParamsCpp' F red) = some u₁ ∧
+      u₁ ≈ u'.inst ls' := by
+  induction u generalizing u' red with
+    simp_all [VLevel.ofLevel, Level.substParamsCpp']
+  | zero => subst u'; rfl
+  | succ _ ih =>
+    obtain ⟨_, H, rfl⟩ := H
+    exact let ⟨_, h1, h2⟩ := ih _ H; ⟨_, ⟨_, h1, rfl⟩, VLevel.succ_congr h2⟩
+  | max _ _ ih1 ih2 =>
+    obtain ⟨_, H1, _, H2, rfl⟩ := H
+    generalize (_ && _) = red'
+    let ⟨_, a1, a2⟩ := ih1 (red := red') H1
+    let ⟨_, b1, b2⟩ := ih2 (red := red') H2
+    split
+    · have ⟨w, c1, c2⟩ := ofLevel_mkLevelMaxCpp a1 b1
+      exact ⟨_, c1, .trans c2 <| VLevel.max_congr a2 b2⟩
+    · simp [VLevel.ofLevel]
+      exact ⟨_, ⟨_, a1, _, b1, rfl⟩, VLevel.max_congr a2 b2⟩
+  | imax _ _ ih1 ih2 =>
+    obtain ⟨_, H1, _, H2, rfl⟩ := H
+    generalize (_ && _) = red'
+    let ⟨_, a1, a2⟩ := ih1 (red := red') H1
+    let ⟨_, b1, b2⟩ := ih2 (red := red') H2
+    split
+    · have ⟨w, c1, c2⟩ := ofLevel_mkLevelIMaxCpp a1 b1
+      exact ⟨_, c1, .trans c2 <| VLevel.imax_congr a2 b2⟩
+    · simp [VLevel.ofLevel]
+      exact ⟨_, ⟨_, a1, _, b1, rfl⟩, VLevel.imax_congr a2 b2⟩
+  | param x =>
+    obtain ⟨H, rfl⟩ := H
+    subst eqF
+    simp
+    have := List.idxOf_eq_getD_idxOf? x ps
+    unfold Option.getD at this
+    revert this
+    split <;> simp [*, Nat.ne_of_lt, VLevel.inst]
+    rintro rfl
+    clear ‹_› eq
+    generalize List.idxOf x ps = n at *
+    rw [List.mapM_eq_some] at Hls
+    induction Hls generalizing n with
+    | nil => cases H
+    | cons Hl _ ih =>
+      obtain _ | n := n <;> simp
+      · exact ⟨_, Hl, rfl⟩
+      · exact ih _ (Nat.lt_of_succ_lt_succ H)
+
+theorem substParamsCpp_wf_list (red) {us us' : List _}
+    (H : us.mapM (VLevel.ofLevel ps) = some us') :
+    ∃ us₁, (us.map (Level.substParamsCpp' F red)).mapM
+        (VLevel.ofLevel Us) = some us₁ ∧
+      List.Forall₂ (· ≈ ·) us₁ (us'.map (·.inst ls')) := by
+  induction us generalizing us' with simp_all
+  | cons u us ih =>
+    obtain ⟨_, H1, _, H2, rfl⟩ := H
+    have ⟨_, h1, h2⟩ := ih H2
+    have ⟨_, h3, h4⟩ := substParamsCpp_wf Hls eq eqF red H1
+    refine ⟨_, ⟨_, h3, _, h1, rfl⟩, .cons h4 h2⟩
+
 end
 
 include henv hΔ
@@ -1987,6 +2259,60 @@ theorem TrExpr.instL (H : TrExpr env ps Δ e e') :
   let ⟨_, s1, h1⟩ := H
   have Hls' := .of_mapM_ofLevel Hls
   (s1.instL henv hΔ Hls eq).defeq henv (hΔ.instL Hls') (VLCtx.instL_toCtx _ ▸ h1.instL Hls')
+
+theorem TrExprS.instLCpp (H : TrExprS env ps Δ e e') :
+    TrExpr env Us (Δ.instL ls')
+      (e.instantiateLevelParamsCpp ps ls) (e'.instL ls') := by
+  simp [Expr.instantiateLevelParamsCpp_eq]
+  generalize (_ && _) = red, eqF : (fun x : Name => _) = F
+  have Hls' := VLevel.WF.of_mapM_ofLevel Hls
+  have eq' := eq.trans (List.mapM_eq_some.1 Hls).length_eq
+  induction H with
+  | bvar h1 => exact (bvar (VLCtx.find?_instL h1)).trExpr henv (hΔ.instL Hls')
+  | fvar h1 => exact (fvar (VLCtx.find?_instL h1)).trExpr henv (hΔ.instL Hls')
+  | sort h1 =>
+    simp [Expr.instantiateLevelParamsCoreCpp']
+    have ⟨_, a1, a2⟩ := substParamsCpp_wf Hls eq eqF red h1
+    exact ⟨_, .sort a1, _, .sortDF (.of_ofLevel a1) (.inst Hls') a2⟩
+  | const h1 h2 h3 =>
+    have ⟨_, a1, a2⟩ := substParamsCpp_wf_list Hls eq eqF red h2
+    refine ⟨_, .const h1 a1 (by simp [h3]), _,
+      .constDF h1 (.of_mapM_ofLevel a1) ?_ ?_ a2⟩
+    · simp
+      exact fun _ _ => .inst Hls'
+    · simp [← (List.mapM_eq_some.1 a1).length_eq, h3]
+  | app h1 h2 _ _ ih1 ih2 =>
+    exact .app henv (hΔ.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h1.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h2.instL Hls') (ih1 hΔ) (ih2 hΔ)
+  | lam h1 h2 _ ih1 ih2 =>
+    exact .lam henv (hΔ.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h1.instL Hls') (ih1 hΔ)
+      (ih2 ⟨hΔ, nofun, eq' ▸ h1⟩)
+  | forallE h1 h2 _ _ ih1 ih2 =>
+    exact .forallE henv (hΔ.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h1.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h2.instL Hls') (ih1 hΔ)
+      (ih2 ⟨hΔ, nofun, eq' ▸ h1⟩)
+  | letE h1 _ _ _ ih1 ih2 ih3 =>
+    exact .letE henv (hΔ.instL Hls')
+      (VLCtx.instL_toCtx _ ▸ h1.instL Hls') (ih1 hΔ) (ih2 hΔ)
+      (ih3 ⟨hΔ, nofun, eq' ▸ h1⟩)
+  | lit h1 _ ih =>
+    refine .lit h1 (Expr.instantiateLevelParamsCoreCpp_eq_self ?_ ▸ ih hΔ :)
+    exact Literal.toConstructor_hasLevelParam
+  | mdata _ ih => exact .mdata (ih hΔ)
+  | proj _ h2 ih =>
+    exact .proj henv (hΔ.instL Hls') (ih hΔ)
+      (VLCtx.instL_toCtx _ ▸ h2.instL Hls')
+
+theorem TrExpr.instLCpp (H : TrExpr env ps Δ e e') :
+    TrExpr env Us (Δ.instL ls')
+      (e.instantiateLevelParamsCpp ps ls) (e'.instL ls') :=
+  let ⟨_, s1, h1⟩ := H
+  have Hls' := .of_mapM_ofLevel Hls
+  (s1.instLCpp henv hΔ Hls eq).defeq henv (hΔ.instL Hls')
+    (VLCtx.instL_toCtx _ ▸ h1.instL Hls')
 
 end
 

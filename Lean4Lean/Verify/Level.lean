@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 
 import Lean4Lean.Theory.VLevel
 import Lean4Lean.Level
+import Lean4Lean.Instantiate
 import Lean4Lean.Verify.Name
 import Lean4Lean.Verify.LevelStd
 import Lean4Lean.Verify.Axioms
@@ -169,6 +170,40 @@ open private substParams.go from Lean.Level in
 
 theorem substParams_id {u : Level} :
     substParams' .param false u = u := by induction u <;> simp_all [substParams']
+
+variable (s : Name → Level) in
+def substParamsCpp' (red : Bool) : Level → Level
+  | .zero => .zero
+  | .succ v => .succ (substParamsCpp' (v.hasParam ∧ red) v)
+  | .max v₁ v₂ =>
+    let red := (v₁.hasParam ∨ v₂.hasParam) ∧ red
+    (if red then mkLevelMaxCpp else .max)
+      (substParamsCpp' red v₁) (substParamsCpp' red v₂)
+  | .imax v₁ v₂ =>
+    let red := (v₁.hasParam ∨ v₂.hasParam) ∧ red
+    (if red then mkLevelIMaxCpp else .imax)
+      (substParamsCpp' red v₁) (substParamsCpp' red v₂)
+  | .param n => s n
+  | u => u
+
+theorem substParamsCpp_eq_self {u : Level} (h : u.hasParam' = false) :
+    substParamsCpp' s red u = u := by
+  induction u generalizing red <;>
+    simp_all [substParamsCpp', hasParam_eq, hasParam']
+
+@[simp] theorem substParamsCpp_eq (u : Level) (s : Name → Option Level) :
+    u.substParamsCpp s =
+      substParamsCpp' (fun x => (s x).getD (.param x)) true u := by
+  unfold substParamsCpp
+  induction u <;>
+    simp [substParamsCpp.go, substParamsCpp', hasParam_eq, hasParam',
+      ← Bool.or_eq_true] <;>
+    split <;> simp [*, substParamsCpp_eq_self] <;>
+    simp_all [substParamsCpp_eq_self]
+
+theorem substParamsCpp_id {u : Level} :
+    substParamsCpp' .param false u = u := by
+  induction u <;> simp_all [substParamsCpp']
 
 local notation "max'" => Max.max
 

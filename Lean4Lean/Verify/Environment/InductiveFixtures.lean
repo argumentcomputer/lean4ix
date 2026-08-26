@@ -2922,10 +2922,10 @@ private theorem annotatedPiType_lookup_family :
     Level.hasParam_eq, Level.hasParam']
   rfl
 
-open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] private theorem annotatedPi_mkLevelIMaxSuccZero :
-    mkLevelIMax' (.succ .zero) (.succ .zero) = .succ .zero := by
-  simp [mkLevelIMax', mkLevelIMaxCore, mkLevelMax', mkLevelMaxCore]
+    mkLevelIMaxCpp (.succ .zero) (.succ .zero) = .succ .zero := by
+  simp [mkLevelIMaxCpp, mkLevelIMaxCoreCpp, mkLevelMaxCpp,
+    mkLevelMaxCoreCpp]
 
 private theorem annotatedPiExceptPure
     {α} (a : α) :
@@ -2945,11 +2945,10 @@ private theorem annotatedPiExceptPure
   simp [annotationOutParamInfo, Bind.bind, Except.bind,
     annotatedPiExceptPure,
     ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 @[simp] private theorem annotatedPiInferConstantFamily
     (lctx : LocalContext) :
@@ -3705,7 +3704,7 @@ private theorem aliasRecNormalization_family_lookup :
   rfl
 
 private def recAliasWhnfKernelExpr : Expr :=
-  recAliasInfo.instantiateValueLevelParams! [.succ .zero]
+  recAliasInfo.instantiateValueLevelParams!Cpp [.succ .zero]
 
 private def aliasRecFieldKernelExpr : Expr :=
   aliasRecMkInfo.type.bindingDomain!
@@ -3719,11 +3718,11 @@ private theorem recAliasWhnfKernelExpr_eq :
     recAliasWhnfKernelExpr =
       .lam `α (.sort (.succ .zero)) (.bvar 0) .default := by
   simp [recAliasWhnfKernelExpr, recAliasInfo,
-    recAliasKernelDef, ConstantInfo.instantiateValueLevelParams!,
-    ConstantInfo.levelParams, ConstantInfo.value!,
+    recAliasKernelDef, ConstantInfo.instantiateValueLevelParams!Cpp,
+    ConstantInfo.levelParams, ConstantInfo.value?, ConstantInfo.value!,
     ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+    Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 private def recAliasUnfoldState (state : TypeChecker.State) :
     TypeChecker.State :=
@@ -3976,15 +3975,14 @@ private theorem checkTypeAliasFormerCandidate :
     aliasRecNormalizationRawContext.safety = .safe := rfl
 
 @[simp] private theorem recAliasInfo_instantiateType :
-    recAliasInfo.instantiateTypeLevelParams [.succ .zero] =
+    recAliasInfo.instantiateTypeLevelParamsCpp [.succ .zero] =
       .forallE `α (.sort (.succ .zero))
         (.sort (.succ .zero)) .default := by
   simp [recAliasInfo, recAliasKernelDef,
-    ConstantInfo.instantiateTypeLevelParams,
-    ConstantVal.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.levelParams,
+    ConstantInfo.toConstantVal, Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 @[simp] private theorem inferConstantRecAlias :
     TypeChecker.Inner.inferConstant aliasRecNormalizationRawContext
@@ -3994,9 +3992,11 @@ private theorem checkTypeAliasFormerCandidate :
   unfold TypeChecker.Inner.inferConstant
   rw [aliasRecNormalization_getRecAlias]
   simp [recAliasInfo, recAliasKernelDef, Bind.bind, Except.bind, normalizationExceptPure,
-    ConstantInfo.levelParams, ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore', Level.substParams']
+    ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 @[simp] private theorem inferConstantAliasRec :
     TypeChecker.Inner.inferConstant aliasRecNormalizationRawContext
@@ -4084,7 +4084,8 @@ private theorem unfoldTypeFamilyAlias (methods state) :
     aliasFormerNormalizationRawContext, aliasFormerNormalization_lookup, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind, typeFamilyAliasInfo, typeFamilyAliasKernelDef,
     ConstantInfo.deltaValue?, TypeChecker.Inner.instantiateDeltaValue, ConstantInfo.numLevelParams,
-    ConstantInfo.levelParams, ConstantInfo.toConstantVal, Expr.instantiateLevelParams]
+    ConstantInfo.levelParams, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp]
 
 private theorem unfoldAliasFormer (methods state) :
     TypeChecker.Inner.unfoldDefinition (.const ``AliasFormer [])
@@ -4116,9 +4117,9 @@ private theorem unfoldRecAliasInitial (methods) :
     StateT.bind, Except.bind, recAliasInfo, recAliasKernelDef,
     ConstantInfo.deltaValue?, TypeChecker.Inner.instantiateDeltaValue,
     ConstantInfo.numLevelParams,
-    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams,
-    ConstantInfo.value!, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams, recAliasWhnfKernelExpr,
+    ConstantInfo.instantiateValueLevelParams!Cpp, ConstantInfo.levelParams,
+    ConstantInfo.value?, ConstantInfo.value!, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp, recAliasWhnfKernelExpr,
     recAliasUnfoldState]
 
 private theorem unfoldRecAliasCoreInitial (methods) :
@@ -4348,15 +4349,16 @@ private def annotatedPiInnerKernel : Expr :=
     annotatedPiRawDomainKernel.getAppRevArgs = #[.sort .zero] := rfl
 
 private def annotatedPiOutParamWhnfKernelExpr : Expr :=
-  annotationOutParamInfo.instantiateValueLevelParams! [.succ .zero]
+  annotationOutParamInfo.instantiateValueLevelParams!Cpp [.succ .zero]
 
 private theorem annotatedPiOutParamWhnfKernelExpr_eq :
     annotatedPiOutParamWhnfKernelExpr =
       .lam `α (.sort (.succ .zero)) (.bvar 0) .default := by
   simp [annotatedPiOutParamWhnfKernelExpr, annotationOutParamInfo,
-    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams, ConstantInfo.value!,
-    ConstantInfo.toConstantVal, Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams']
+    ConstantInfo.instantiateValueLevelParams!Cpp, ConstantInfo.levelParams,
+    ConstantInfo.value?, ConstantInfo.value!, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 private def annotatedPiOutParamUnfoldState (state : TypeChecker.State) :
     TypeChecker.State :=
@@ -4458,9 +4460,11 @@ private theorem annotatedPiUnfoldOutParamCoreInitial (methods) :
     annotatedPiCtorCandidateContext, AddInductive.Context.toTypeChecker,
     annotatedPiType_lookup_outParam, Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
     annotationOutParamInfo, ConstantInfo.deltaValue?, TypeChecker.Inner.instantiateDeltaValue,
-    ConstantInfo.numLevelParams, ConstantInfo.instantiateValueLevelParams!,
-    ConstantInfo.levelParams, ConstantInfo.value!, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams, annotatedPiOutParamWhnfKernelExpr, annotatedPiOutParamUnfoldState]
+    ConstantInfo.numLevelParams, ConstantInfo.instantiateValueLevelParams!Cpp,
+    ConstantInfo.levelParams, ConstantInfo.value?, ConstantInfo.value!,
+    ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp, annotatedPiOutParamWhnfKernelExpr,
+    annotatedPiOutParamUnfoldState]
 
 private theorem annotatedPiUnfoldDomainInitial (methods) :
     TypeChecker.Inner.unfoldDefinition annotatedPiRawDomainKernel
@@ -4790,9 +4794,11 @@ private theorem annotatedPiWhnfCoreDomainCheap
   rw [show annotatedPiTypeKernelEnv.get ``outParam =
     .ok annotationOutParamInfo by exact annotatedPiType_get_outParam]
   simp [annotationOutParamInfo, annotatedPiOutParamFnType, Bind.bind, Except.bind,
-    annotatedPiExceptPure, ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore', Level.substParams']
+    annotatedPiExceptPure, ConstantInfo.levelParams,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 private def annotatedPiOutParamInferOnlyState
     (m : EquivManager) : TypeChecker.State :=
@@ -4983,9 +4989,9 @@ private theorem annotatedPiUnfoldOutParamCoreOfMiss
     annotationOutParamInfo, ConstantInfo.deltaValue?,
     TypeChecker.Inner.instantiateDeltaValue,
     ConstantInfo.numLevelParams,
-    ConstantInfo.instantiateValueLevelParams!, ConstantInfo.levelParams,
-    ConstantInfo.value!, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParams, annotatedPiOutParamWhnfKernelExpr,
+    ConstantInfo.instantiateValueLevelParams!Cpp, ConstantInfo.levelParams,
+    ConstantInfo.value?, ConstantInfo.value!, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp, annotatedPiOutParamWhnfKernelExpr,
     annotatedPiOutParamUnfoldState]
 
 private theorem annotatedPiUnfoldDomainOfMiss
@@ -5974,11 +5980,9 @@ private theorem annotatedPiCtor_noMVarNoFVar :
     .ok annotatedPiInfo by exact annotatedPiType_get_family]
   simp [annotatedPiInfo, Bind.bind, Except.bind,
     annotatedPiExceptPure, ConstantInfo.levelParams,
-    ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq,
-    Expr.instantiateLevelParamsCore_id]
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp]
 
 private theorem annotatedPiInferTypeFamilyOnly
     (n : Nat) (lctx : LocalContext) (state : TypeChecker.State)

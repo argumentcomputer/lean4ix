@@ -63,11 +63,11 @@ theorem inferConstant.WF {c : VContext}
       exact (ih H.2).le fun _ ⟨_, h2⟩ => ⟨_, .cons h1 h2⟩
   split <;> [rename_i h1; exact .throw]
   have main {e'} (he : c.TrExprS (.const name ls) e') : ∃ e' ty',
-      c.TrTyping (.const name ls) (ci.instantiateTypeLevelParams ls) e' ty' := by
+      c.TrTyping (.const name ls) (ci.instantiateTypeLevelParamsCpp ls) e' ty' := by
     let .const h4 H' eq := id he
     have ⟨_, _, h5, h6⟩ := c.trenv.find?_uniq eq1 h4
     have H := List.mapM_eq_some.1 H'
-    have s0 := h6.instL c.Ewf (Δ := []) trivial H' (h5.trans eq.symm)
+    have s0 := h6.instLCpp c.Ewf (Δ := []) trivial H' (h5.trans eq.symm)
     have s1 := s0.weakFV c.Ewf (.from_nil c.mlctx.noBV) c.Δwf
     rw [(c.Ewf.ordered.closedC h4).instL.liftN_eq (Nat.le_refl _)] at s1
     have ⟨_, s1, s2⟩ := s1
@@ -783,7 +783,7 @@ theorem inferProj.WF
                     hctorTr.2.1.trans <| hrawCtorUvars.trans <|
                       hlevelsLength'.symm.trans
                         (List.mapM_eq_some.1 hlevelsMap).length_eq.symm
-                  have hctorType₀ := hctorTr.2.2.instL c.Ewf
+                  have hctorType₀ := hctorTr.2.2.instLCpp c.Ewf
                     (Us := c.lparams) (ls' := levels') (Δ := [])
                     trivial hlevelsMap hctorLevelLength
                   have hctorType := hctorType₀.weakFV c.Ewf
@@ -798,18 +798,18 @@ theorem inferProj.WF
                   rw [artifact.view.constructor.rawType_eq] at hctorType
                   have hinstantiate :
                       ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParams familyLevels) =
-                      ctorInfo.type.instantiateLevelParams
+                        |>.instantiateTypeLevelParamsCpp familyLevels) =
+                      ctorInfo.type.instantiateLevelParamsCpp
                         ctorInfo.levelParams familyLevels := rfl
                   have hctorTypeShape : c.TrExpr
                       ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParams familyLevels)
+                        |>.instantiateTypeLevelParamsCpp familyLevels)
                       (VExpr.forallN
                         (artifact.view.constructorParams.map
                           (VExpr.instL levels')) ctorTail) := by
-                    simpa [ConstantInfo.instantiateTypeLevelParams,
-                      ConstantVal.instantiateTypeLevelParams,
-                      ConstantInfo.type, ConstantInfo.toConstantVal, ctorTail,
+                    simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                      ConstantInfo.type, ConstantInfo.levelParams,
+                      ConstantInfo.toConstantVal, ctorTail,
                       VInductDecl.NormalizedCtor.declaredBinders,
                       VStructureView.nparams,
                       VStructureView.constructorParams,
@@ -818,11 +818,11 @@ theorem inferProj.WF
                       List.map_append] using hctorType
                   have hctorTypeBelow : c.FVarsBelow (.proj st i e)
                       ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParams familyLevels) := by
+                        |>.instantiateTypeLevelParamsCpp familyLevels) := by
                     intro P _ _
-                    simpa [ConstantInfo.instantiateTypeLevelParams,
-                      ConstantVal.instantiateTypeLevelParams,
-                      ConstantInfo.type, ConstantInfo.toConstantVal] using
+                    simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                      ConstantInfo.type, ConstantInfo.levelParams,
+                      ConstantInfo.toConstantVal] using
                         hctorType₀.fvarsIn.mono nofun
                   have hparamArgsEq :
                       List.take info.numParams type.getAppArgs.toList =

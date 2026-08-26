@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean4Lean.Std.Basic
 
 namespace Lean4Lean
@@ -95,6 +101,11 @@ theorem max_self : max a a ≈ a := by simp [equiv_def, eval]
 
 theorem zero_imax : imax zero a ≈ a := by
   simp [equiv_def, eval, Lean.Nat.imax, eq_comm (b := 0)]
+
+theorem one_imax : imax (succ zero) a ≈ a := by
+  simp [equiv_def, eval, Lean.Nat.imax]
+  intro levels
+  cases eval levels a <;> rfl
 
 theorem imax_zero : imax a zero ≈ zero := by simp [equiv_def, eval, Lean.Nat.imax]
 

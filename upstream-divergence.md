@@ -1365,6 +1365,43 @@ to the replacement.
   the corresponding bridges to be deleted. Do not remove this row by
   reinstating unconditional cache equations.
 
+## D024 — kernel-compatible universe substitution structure
+
+- **Status:** implemented by UP5 from the reviewed `differential` topic;
+  upstream-contribution candidate.
+- **Owner:** Argument Computer Corporation; review on each Lean toolchain
+  update.
+- **Source:** manually adapted from upstream topic commit
+  `26f9838a876079204ad41a5faa174680cc49a3bf` rather than merged wholesale.
+- **Delta:** Lean v4.33.0's public level helpers and its C++ kernel normalize
+  two substitution cases differently: the Lean helper collapses
+  `max (succ u) 1`, while C++ preserves it, and only C++ collapses
+  `imax 1 u` to `u`. The fork has separately named `*Cpp` level, expression,
+  and declaration-instantiation functions and uses them in kernel-facing
+  constant inference, forall inference, projection inference, delta
+  unfolding, and recursor reduction. Verify proves these functions preserve
+  the same `VLevel` semantics as the previous path.
+- **Ix impact:** exact expression structure determines expression hashes and
+  the type checker's unfold/WHNF cache keys and values. Out-of-circuit and
+  circuit transports therefore need the C++ kernel's result, not merely a
+  definitionally equivalent universe.
+- **Tests:** `Lean4Lean.Tests.DifferentialParity` builds deliberately raw
+  unchecked local declarations, compares both discriminating cases against
+  `Lean.Kernel.check` on Lean v4.33.0
+  (`d8b18978322de05a8f3dba51ef03cf5461676c17`), and pins exact expression,
+  hash, unfolded-value, unfold-cache, and WHNF-cache parity. The fixture also
+  fails explicitly once the public helpers converge, prompting removal of
+  the compatibility layer.
+- **Axiom note:** no new axiom or admission. The adapted structural proofs
+  reduce the printed closure of
+  `primitiveCandidateObserversOfNestedRun` by `Expr.mkAppData_eq` and
+  `Expr.replace_eq`.
+- **Removal condition:** Lean's public level constructors and substitution
+  chain match the C++ kernel on the discriminating fixtures, after which the
+  `*Cpp` copies can be deleted and callers/proofs moved back to the standard
+  APIs. Upstream can satisfy this by promoting `26f9838` or an equivalent
+  stdlib/kernel convergence fix.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

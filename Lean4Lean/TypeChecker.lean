@@ -137,7 +137,7 @@ def inferConstant (tc : Context) (name : Name) (ls : List Level) (inferOnly : Bo
           s!"invalid declaration, safe declaration must not contain partial declaration '{e}'"
     for l in ls do
       checkLevel tc l
-  return info.instantiateTypeLevelParams ls
+  return info.instantiateTypeLevelParamsCpp ls
 
 /-- Infers the type of expression `e`. If `inferOnly := false`, this function throws an error
 whenever `e` is not typeable according to Lean's algorithmic typing judgment (barring resource
@@ -173,7 +173,7 @@ def inferForall (e : Expr) (inferOnly : Bool) : RecM Expr := loop #[] #[] e wher
   | e => do
     let r ← inferType (e.instantiateRev fvars) inferOnly
     let s ← ensureSortCore r e
-    return .sort <| us.foldr mkLevelIMax' s.sortLevel!
+    return .sort <| us.foldr mkLevelIMaxCpp s.sortLevel!
 
 /-- Returns whether `t` and `s` are definitionally equal according to Lean's algorithmic
 definitional equality judgment.
@@ -277,7 +277,7 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   let .ctorInfo ctorInfo := c_info | invalidProj e
   unless idx < ctorInfo.numFields do invalidProj e
   let r ← inferProjParams e (args.toList.take I_val.numParams)
-    (c_info.instantiateTypeLevelParams I_levels)
+    (c_info.instantiateTypeLevelParamsCpp I_levels)
   let maybePropType := !(← getSortLevel type).isNeverZero
   let r ← inferProjFields e I_name struct maybePropType 0 idx r
   let .forallE _ dom _ _ ← whnf r | invalidProj e
@@ -452,7 +452,7 @@ def isDelta (env : Environment) (e : Expr) : Option ConstantInfo := do
   none
 
 def instantiateDeltaValue (ci : ConstantInfo) (ls : List Level) : Expr :=
-  ci.deltaValue?.get!.instantiateLevelParams ci.levelParams ls
+  ci.deltaValue?.get!.instantiateLevelParamsCpp ci.levelParams ls
 
 /-- If `e` is itself a constant that can be delta-reduced, returns its value with the constant's
 level parameters instantiated. Unlike `unfoldDefinition`, this does not look through applications:

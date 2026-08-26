@@ -1326,9 +1326,9 @@ theorem checkTypeInductiveConst
       rfl]
     simp [AddInductive.Context.toTypeChecker, hlevels, hunsafe, htype,
       ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-      ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-      ConstantVal.instantiateTypeLevelParams,
-      Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore_id,
+      ConstantInfo.instantiateTypeLevelParamsCpp,
+      ConstantInfo.type, ConstantInfo.toConstantVal,
+      Expr.instantiateLevelParamsCpp,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   unfold TypeChecker.M.run TypeChecker.checkType TypeChecker.RecM.run
   simp [readThe, MonadReaderOf.read, ReaderT.read,

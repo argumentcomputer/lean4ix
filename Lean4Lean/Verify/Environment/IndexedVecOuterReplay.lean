@@ -791,10 +791,10 @@ theorem indexedVecValidationConsRootCheckTypeM :
         indexedVecCtorValidationContext.lparams
         indexedVecCtorValidationContext.fuel
         (TypeChecker.checkType indexedVecKernelCons.type) =
-      .ok (.sort (.succ (.succ (.param `u)))) := by
+      .ok (.sort consRootInferredLevel) := by
   change TypeChecker.M.run ctorEnv .safe {} [`u] ({} : FuelConfig)
     (TypeChecker.checkType indexedVecKernelCons.type) =
-      .ok (.sort (.succ (.succ (.param `u))))
+      .ok (.sort consRootInferredLevel)
   simpa [indexedVecKernelCons, consRootContext, ctorContext] using
     replayConsRootCheckTypeM
 
@@ -810,24 +810,22 @@ def validationInferOnlyInsert
   rw [type_get_family]
   simp [indexedVecInfo,
     ConstantInfo.levelParams, ConstantInfo.type,
-    ConstantInfo.instantiateTypeLevelParams,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
     ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq,
-    Expr.instantiateLevelParamsCore', Level.substParams',
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
+  exact indexedVecInfoInstantiate
 
 @[simp] theorem inferConstantNatOnly (lctx : LocalContext) :
     TypeChecker.Inner.inferConstant (tcContext lctx) ``Nat [] true =
       .ok (.sort (.succ .zero)) := by
   unfold TypeChecker.Inner.inferConstant
   simp [tcContext, natInfo,
-    ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParams,
+    ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParamsCpp,
     ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq,
-    Expr.instantiateLevelParamsCore', Level.substParams',
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
+  rfl
 
 theorem inferTypeNatOnlyCore
     (fuel : Nat) (lctx : LocalContext) (state : TypeChecker.State)

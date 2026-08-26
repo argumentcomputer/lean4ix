@@ -1951,7 +1951,7 @@ private theorem indexedVecPreFamilyTelescopeCheckValid
     (contextFuel : context.fuel = ({} : FuelConfig)) :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨context, indexedVecPreFamilyIndexTelescope,
-        .sort (mkLevelIMax' (.succ .zero)
+        .sort (mkLevelIMaxCpp (.succ .zero)
           (.succ (.succ (.param `u))))⟩ := by
   unfold AddInductive.CandidateCheckTypeStep.Valid
   rw [contextEnv, contextSafety, contextLparams, contextFuel]

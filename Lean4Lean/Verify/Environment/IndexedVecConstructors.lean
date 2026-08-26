@@ -115,13 +115,13 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
     indexedVecInfo.isUnsafe = false := rfl
 
 @[simp] theorem indexedVecInfoInstantiate :
-    indexedVecInfo.instantiateTypeLevelParams [.param `u] =
+    indexedVecInfo.instantiateTypeLevelParamsCpp [.param `u] =
       indexedVecInfo.type := by
-  rw [ConstantInfo.instantiateTypeLevelParams,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq]
-  simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.toConstantVal,
-    Expr.instantiateLevelParamsCore', Level.substParams']
+  rw [ConstantInfo.instantiateTypeLevelParamsCpp,
+    Expr.instantiateLevelParamsCpp_eq]
+  simp [indexedVecInfo, ConstantInfo.type, ConstantInfo.levelParams,
+    ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp']
 
 @[simp] theorem inferConstantFamily (lctx) :
     TypeChecker.Inner.inferConstant (tcContext lctx) ``IndexedVec
@@ -144,10 +144,9 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
   unfold TypeChecker.Inner.inferConstant
   simp [tcContext, natInfo,
     ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams',
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[simp] theorem inferConstantZero (lctx) :
@@ -156,9 +155,9 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
   unfold TypeChecker.Inner.inferConstant
   simp [tcContext, natZeroInfo,
     ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[simp] theorem inferConstantSucc (lctx) :
@@ -167,9 +166,9 @@ def tcContext (lctx : LocalContext := {}) : TypeChecker.Context where
   unfold TypeChecker.Inner.inferConstant
   simp [tcContext, natSuccInfo,
     ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem selfDefEq (e : Expr) fuel context state :
@@ -579,7 +578,7 @@ def nilCtorTypeRaw : Expr :=
   rfl
 
 def nilCtorInferredLevel : Level :=
-  mkLevelIMax' (.succ (.succ (.param `u))) (.succ (.param `u))
+  mkLevelIMaxCpp (.succ (.succ (.param `u))) (.succ (.param `u))
 
 theorem nilInfoTypeShape : indexedVecNilInfo.type = nilCtorTypeRaw := by
   rfl

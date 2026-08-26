@@ -826,7 +826,7 @@ theorem mkForall_hasType {c : MLCtx}
     (hu : VLevel.ofLevel Us u = some u')
     (H2 : env.HasType Us.length c.vlctx.toCtx e' (.sort u')) (n hn)
     (hus : us.length = n) :
-    ∃ u₀', VLevel.ofLevel Us (List.foldl (fun x y => mkLevelIMax' y x) u us) = some u₀' ∧
+    ∃ u₀', VLevel.ofLevel Us (List.foldl (fun x y => mkLevelIMaxCpp y x) u us) = some u₀' ∧
     env.HasType Us.length (c.dropN n hn).vlctx.toCtx (c.mkForall' n hn e') (.sort u₀') := by
   subst hus
   induction hus generalizing c e' u u' with
@@ -834,7 +834,7 @@ theorem mkForall_hasType {c : MLCtx}
   | cons h _ ih =>
     match c, hΔ with
     | .vlam x name ty ty' bi c, .cons hΔ hu₁ =>
-      have ⟨_, h5, h6⟩ := ofLevel_mkLevelIMax' h hu
+      have ⟨_, h5, h6⟩ := ofLevel_mkLevelIMaxCpp h hu
       refine ih hΔ h5 ?_ (Nat.le_of_succ_le_succ hn)
       refine .defeq (.sortDF ?_ (.of_ofLevel h5) h6.symm) (hu₁.forallE H2)
       exact ⟨.of_ofLevel h, .of_ofLevel hu⟩
@@ -1140,7 +1140,8 @@ theorem unfoldDefinitionCore.WF {c : VContext} {s : VState} (he : c.TrExprS e e'
     let .const a1 a2 a3 := he
     have ⟨rfl, b1, b2, b3⟩ := c.trenv.find?_uniq h3 a1
     simp [instantiateDeltaValue, h4]
-    have c1 := c.trenv.of_value h3 b1 h4 |>.instL c.Ewf (by trivial) a2 (b2.trans a3.symm)
+    have c1 := c.trenv.of_value h3 b1 h4
+      |>.instLCpp c.Ewf (by trivial) a2 (b2.trans a3.symm)
     have := c1.weakFV c.Ewf (.from_nil c.mlctx.noBV) c.Δwf
     rw [c1.wf.closedN c.Ewf trivial |>.liftN_eq (Nat.zero_le _)] at this
     simp [VExpr.instL] at this; rw [VLevel.inst_map_id] at this

@@ -19,6 +19,23 @@ def replayInsert (state : TypeChecker.State) (e type : Expr) :
     TypeChecker.State :=
   { state with inferTypeC := state.inferTypeC.insert e type }
 
+/-- The exact C++-kernel universe fold for the suffix beginning at `tail`. -/
+def consAfterHeadInferredLevel : Level :=
+  mkLevelIMaxCpp (.succ (.param `u)) (.succ (.param `u))
+
+/-- The exact C++-kernel universe fold for the suffix beginning at `head`. -/
+def consAfterNInferredLevel : Level :=
+  mkLevelIMaxCpp (.succ (.param `u)) consAfterHeadInferredLevel
+
+/-- The exact C++-kernel universe fold for the suffix beginning at `n`. -/
+def consAfterAlphaInferredLevel : Level :=
+  mkLevelIMaxCpp (.succ .zero) consAfterNInferredLevel
+
+/-- The exact C++-kernel universe fold for the complete constructor type. -/
+def consRootInferredLevel : Level :=
+  mkLevelIMaxCpp (.succ (.succ (.param `u)))
+    consAfterAlphaInferredLevel
+
 open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] theorem replayMkLevelIMaxSuccParamSelf :
     mkLevelIMax' (.succ (.param `u)) (.succ (.param `u)) =
@@ -846,7 +863,7 @@ theorem replayInferConsAfterHeadTerminal :
 theorem replayConsAfterHeadCheckTypeM :
     TypeChecker.M.run ctorEnv .safe consHeadContext.lctx [`u]
       ({} : FuelConfig) (TypeChecker.checkType consAfterHead) =
-        .ok (.sort (.succ (.param `u))) := by
+        .ok (.sort consAfterHeadInferredLevel) := by
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType consAfterHead false
       (TypeChecker.Methods.withFuel 10000)
@@ -1135,7 +1152,7 @@ theorem replayInferConsAfterNTerminal (fuel : Nat) :
 theorem replayConsAfterNCheckTypeM :
     TypeChecker.M.run ctorEnv .safe consNContext.lctx [`u]
       ({} : FuelConfig) (TypeChecker.checkType consAfterN) =
-        .ok (.sort (.succ (.param `u))) := by
+        .ok (.sort consAfterNInferredLevel) := by
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType consAfterN false
       (TypeChecker.Methods.withFuel 10000)
@@ -1659,7 +1676,7 @@ theorem replayInferConsAfterAlphaTerminal (fuel : Nat) :
 theorem replayConsAfterAlphaCheckTypeM :
     TypeChecker.M.run ctorEnv .safe consAlphaContext.lctx [`u]
       ({} : FuelConfig) (TypeChecker.checkType consAfterAlpha) =
-        .ok (.sort (.succ (.param `u))) := by
+        .ok (.sort consAfterAlphaInferredLevel) := by
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType consAfterAlpha false
       (TypeChecker.Methods.withFuel 10000)
@@ -2187,7 +2204,7 @@ open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 theorem replayConsRootCheckTypeM :
     TypeChecker.M.run ctorEnv .safe consRootContext.lctx [`u]
       ({} : FuelConfig) (TypeChecker.checkType indexedVecConsInfo.type) =
-        .ok (.sort (.succ (.succ (.param `u)))) := by
+        .ok (.sort consRootInferredLevel) := by
   change Except.map (fun x : Expr × TypeChecker.State => x.1)
     (TypeChecker.Inner.inferType indexedVecConsInfo.type false
       (TypeChecker.Methods.withFuel 10000)
@@ -2410,7 +2427,7 @@ theorem consTailAnnotationsEq :
 theorem consRootCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consRootContext, indexedVecConsInfo.type,
-        .sort (.succ (.succ (.param `u)))⟩ := by
+        .sort consRootInferredLevel⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
     consRootContext, ctorContext] using
     replayConsRootCheckTypeM
@@ -2425,7 +2442,7 @@ theorem consRootWhnfValid :
 theorem consAfterAlphaCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consAlphaContext, consAfterAlpha,
-        .sort (.succ (.param `u))⟩ := by
+        .sort consAfterAlphaInferredLevel⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
     consAlphaContext, consRootContext, ctorContext,
     AddInductive.Context.pushLocalDecl] using
@@ -2441,7 +2458,7 @@ theorem consAfterAlphaWhnfValid :
 
 theorem consAfterNCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
-      ⟨consNContext, consAfterN, .sort (.succ (.param `u))⟩ := by
+      ⟨consNContext, consAfterN, .sort consAfterNInferredLevel⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
     consNContext, consAlphaContext, consRootContext, ctorContext,
     AddInductive.Context.pushLocalDecl] using
@@ -2458,7 +2475,7 @@ theorem consAfterNWhnfValid :
 theorem consAfterHeadCheckValid :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨consHeadContext, consAfterHead,
-        .sort (.succ (.param `u))⟩ := by
+        .sort consAfterHeadInferredLevel⟩ := by
   simpa [AddInductive.CandidateCheckTypeStep.Valid,
     consHeadContext, consNContext, consAlphaContext,
     consRootContext, ctorContext, AddInductive.Context.pushLocalDecl] using
@@ -2599,7 +2616,7 @@ def consAfterHeadCandidateTrace :
       (consAfterN.bindingBody!.instantiate1 consNContext.freshExpr) :=
   .forallE consHeadContext
     (consAfterN.bindingBody!.instantiate1 consNContext.freshExpr)
-    (.sort (.succ (.param `u))) consTailName consTailDomain
+    (.sort consAfterHeadInferredLevel) consTailName consTailDomain
     consAfterHead.bindingBody! .default consHeadContextFresh
     consTailAnnotations consTailAnnotationsEq
     (by simpa only [consAfterHeadShape] using consAfterHeadCheckValid)
@@ -2620,7 +2637,7 @@ def consAfterNCandidateTrace :
   .forallE consNContext
     (consAfterAlpha.bindingBody!.instantiate1
       consAlphaContext.freshExpr)
-    (.sort (.succ (.param `u))) consHeadName consAlphaExpr
+    (.sort consAfterNInferredLevel) consHeadName consAlphaExpr
     consAfterN.bindingBody! .default consNContextFresh
     consHeadAnnotations consHeadAnnotationsEq
     (by simpa only [consAfterNShape] using consAfterNCheckValid)
@@ -2639,7 +2656,7 @@ def consAfterAlphaCandidateTrace :
       (consNTypeRaw.instantiate1 consRootContext.freshExpr) :=
   .forallE consAlphaContext
     (consNTypeRaw.instantiate1 consRootContext.freshExpr)
-    (.sort (.succ (.param `u))) consNName (.const ``Nat [])
+    (.sort consAfterAlphaInferredLevel) consNName (.const ``Nat [])
     consAfterAlpha.bindingBody! .implicit consAlphaContextFresh
     consNatAnnotations consNatAnnotationsEq
     (by simpa only [consAfterAlphaShape] using consAfterAlphaCheckValid)
@@ -2656,7 +2673,7 @@ def consCandidateTrace :
     AddInductive.CandidateExprTrace consRootContext
       indexedVecConsInfo.type :=
   .forallE consRootContext indexedVecConsInfo.type
-    (.sort (.succ (.succ (.param `u)))) consAlphaName
+    (.sort consRootInferredLevel) consAlphaName
     (.sort (.succ (.param `u))) consNTypeRaw .implicit consRootFresh
     consAlphaAnnotations consAlphaAnnotationsEq consRootCheckValid
     (by
@@ -2816,7 +2833,7 @@ theorem consAfterHeadCandidateTraceLoop :
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consHeadContext)
       (e := consAfterN.bindingBody!.instantiate1 consNContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 9996)
+      (inferred := .sort consAfterHeadInferredLevel) (fuel := 9996)
       (name := consTailName) (domain := consTailDomain)
       (body := consAfterHead.bindingBody!) (binderInfo := .default)
       (hfresh := consHeadContextFresh)
@@ -2853,7 +2870,7 @@ theorem consAfterNCandidateTraceLoop :
       (context := consNContext)
       (e := consAfterAlpha.bindingBody!.instantiate1
         consAlphaContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 9997)
+      (inferred := .sort consAfterNInferredLevel) (fuel := 9997)
       (name := consHeadName) (domain := consAlphaExpr)
       (body := consAfterN.bindingBody!) (binderInfo := .default)
       (hfresh := consNContextFresh)
@@ -2888,7 +2905,7 @@ theorem consAfterAlphaCandidateTraceLoop :
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consAlphaContext)
       (e := consNTypeRaw.instantiate1 consRootContext.freshExpr)
-      (inferred := .sort (.succ (.param `u))) (fuel := 9998)
+      (inferred := .sort consAfterAlphaInferredLevel) (fuel := 9998)
       (name := consNName) (domain := .const ``Nat [])
       (body := consAfterAlpha.bindingBody!) (binderInfo := .implicit)
       (hfresh := consAlphaContextFresh)
@@ -2922,7 +2939,7 @@ theorem consCandidateTraceLoop :
     consAlphaAnnotations] using
     (AddInductive.buildCandidateExpr_loop_of_whnf_forall
       (context := consRootContext) (e := indexedVecConsInfo.type)
-      (inferred := .sort (.succ (.succ (.param `u)))) (fuel := 9999)
+      (inferred := .sort consRootInferredLevel) (fuel := 9999)
       (name := consAlphaName)
       (domain := .sort (.succ (.param `u)))
       (body := consNTypeRaw) (binderInfo := .implicit)

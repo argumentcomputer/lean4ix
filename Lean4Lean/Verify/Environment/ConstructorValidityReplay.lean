@@ -2883,10 +2883,11 @@ theorem prbValidationFamilyGet :
       Level.hasParam_eq, Level.hasParam']
     rfl
   simp [propRecursiveBoundaryKernelType, propRecursiveBoundaryInfo, ConstantInfo.levelParams,
-    ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq, hsafety, hlparams,
+    ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq, hsafety, hlparams,
     hlevel, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+  simp [Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp', ConstantInfo.type,
     ConstantInfo.toConstantVal]
 
 def prbValidationFamilyTail (alpha : Expr) : Expr :=
@@ -2999,10 +3000,10 @@ theorem prbInferTypeForallCore
   simp [hclosed, hcache, hforall, Bind.bind, ReaderT.bind,
     StateT.bind, Except.bind]
 
-open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] theorem prbMkLevelIMaxSuccParamZero :
-    mkLevelIMax' (.succ (.param `u)) .zero = .zero := by
-  simp [mkLevelIMax', mkLevelIMaxCore, Level.isNeverZero, Level.isZero]
+    mkLevelIMaxCpp (.succ (.param `u)) .zero = .zero := by
+  simp [mkLevelIMaxCpp, mkLevelIMaxCoreCpp, Level.isNeverZero,
+    Level.isZero]
 
 def prbValidationConstState (state : TypeChecker.State) : TypeChecker.State :=
   prbReplayInsert state
@@ -4599,7 +4600,7 @@ theorem prbPreFamilyIndexTelescopeCheckValidReplay
     (depth : context.fuel.recDepth = 10000) :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨context, prbPreFamilyIndexTelescopeReplay,
-        .sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))⟩ := by
+        .sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero))⟩ := by
   have domainRun : TypeChecker.Inner.inferType'
       prbValidationAlpha false (TypeChecker.Methods.withFuel 9998)
       context.toTypeChecker ({} : TypeChecker.State) =
@@ -4632,7 +4633,7 @@ theorem prbPreFamilyIndexTelescopeCheckValidReplay
       (TypeChecker.Methods.withFuel 9999) context.toTypeChecker
       ({} : TypeChecker.State) =
         .ok (.sort
-          (mkLevelIMax' (.succ (.param `u)) (.succ .zero)),
+          (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero)),
           prbPreFamilyTelescopeFinalStateReplay) := by
     unfold prbPreFamilyIndexTelescopeReplay TypeChecker.Inner.inferForall
     simp only [TypeChecker.Inner.inferForall.loop]
@@ -4677,7 +4678,7 @@ theorem prbPreFamilyIndexTelescopeCheckValidReplay
   have outerRun := prbInferTypeForallCore 9999 context.toTypeChecker
     ({} : TypeChecker.State) prbPreFamilyTelescopeFinalStateReplay
     prbValidationAName prbValidationAlpha (.sort .zero)
-    (.sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero)))
+    (.sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero)))
     .default
     (by
       apply Expr.hasLooseBVars_eq_false_of_bounded <;>
@@ -6114,10 +6115,11 @@ theorem cvmCtorAfterProofForallTest :
   unfold cvmDeclaredInfo AddInductive.singletonDeclaredInfo
   rw [terminalLparams]
   simp [constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
-    ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq, Bind.bind, Except.bind,
+    ConstantInfo.levelParams, ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+  simp [Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp', ConstantInfo.type,
     ConstantInfo.toConstantVal]
 
 theorem cvmKernelFamilyTypeShapeTest :
@@ -6130,11 +6132,11 @@ theorem cvmKernelFamilyTypeShapeTest :
         .default := by
   rfl
 
-open private mkLevelIMaxCore mkLevelMaxCore from Lean.Level in
 @[simp] theorem cvmMkLevelIMaxSuccParamSelfTest :
-    mkLevelIMax' (.succ (.param `u)) (.succ (.param `u)) =
+    mkLevelIMaxCpp (.succ (.param `u)) (.succ (.param `u)) =
       .succ (.param `u) := by
-  simp [mkLevelIMax', mkLevelIMaxCore, mkLevelMax', mkLevelMaxCore]
+  simp [mkLevelIMaxCpp, mkLevelIMaxCoreCpp, mkLevelMaxCpp,
+    mkLevelMaxCoreCpp]
 
 def cvmValidationFamilyOnlyStateTest : TypeChecker.State :=
   cvmInferOnlyInsertTest ({} : TypeChecker.State)
@@ -7266,7 +7268,7 @@ theorem cvmValidationAlphaToPropCheckTest (indexName : Name) :
       ⟨cvmValidationRootContextTest,
         .forallE indexName (.fvar cvmValidationAlphaIdTest)
           (.sort .zero) .default,
-        .sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))⟩ := by
+        .sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero))⟩ := by
   have domainRun : TypeChecker.Inner.inferType'
       (.fvar cvmValidationAlphaIdTest) false
       (TypeChecker.Methods.withFuel 9998)
@@ -7301,7 +7303,7 @@ theorem cvmValidationAlphaToPropCheckTest (indexName : Name) :
       cvmValidationRootContextTest.toTypeChecker
       ({} : TypeChecker.State) =
         .ok (.sort
-          (mkLevelIMax' (.succ (.param `u)) (.succ .zero)),
+          (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero)),
           cvmValidationPDomainFinalStateTest) := by
     unfold TypeChecker.Inner.inferForall
     simp only [TypeChecker.Inner.inferForall.loop]
@@ -7350,7 +7352,7 @@ theorem cvmValidationAlphaToPropCheckTest (indexName : Name) :
     cvmValidationRootContextTest.toTypeChecker ({} : TypeChecker.State)
     cvmValidationPDomainFinalStateTest indexName
     (.fvar cvmValidationAlphaIdTest) (.sort .zero)
-    (.sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))) .default
+    (.sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero))) .default
     (by
       apply Expr.hasLooseBVars_eq_false_of_bounded <;>
         simp [Expr.looseBVarRange']) Std.HashMap.getElem?_empty
@@ -7380,7 +7382,7 @@ theorem cvmValidationAlphaToPropCheckTest (indexName : Name) :
 theorem cvmValidationPDomainCheckTest :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨cvmValidationRootContextTest, cvmValidationPDomainTest,
-        .sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))⟩ := by
+        .sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero))⟩ := by
   rw [cvmValidationPDomainShapeTest]
   exact cvmValidationAlphaToPropCheckTest cvmValidationIndexNameTest
 
@@ -7430,11 +7432,13 @@ theorem cvmValidationFamilyGetTest :
       Level.hasParam_eq, Level.hasParam']
     rfl
   simp [constructorValidityMatrixKernelType, constructorValidityMatrixInfo,
-    ConstantInfo.levelParams, ConstantInfo.isUnsafe, ConstantInfo.instantiateTypeLevelParams,
-    ConstantInfo.toConstantVal, ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, safety, lparams, levelCheck, Bind.bind, Except.bind, Pure.pure,
+    ConstantInfo.levelParams, ConstantInfo.isUnsafe,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp_eq, safety, lparams, levelCheck,
+    Bind.bind, Except.bind, Pure.pure,
     Except.pure]
-  simp [Expr.instantiateLevelParamsCore', Level.substParams', ConstantInfo.type,
+  simp [Expr.instantiateLevelParamsCoreCpp', Level.substParamsCpp', ConstantInfo.type,
     ConstantInfo.toConstantVal]
 
 def cvmValidationFamilyConstStateTest
@@ -8491,7 +8495,7 @@ theorem cvmCtorPDomainValidationShapeTest :
 theorem cvmValidationCtorPDomainCheckTest :
     AddInductive.CandidateCheckTypeStep.Valid
       ⟨cvmValidationRootContextTest, cvmCtorPDomain,
-        .sort (mkLevelIMax' (.succ (.param `u)) (.succ .zero))⟩ := by
+        .sort (mkLevelIMaxCpp (.succ (.param `u)) (.succ .zero))⟩ := by
   rw [cvmCtorPDomainValidationShapeTest]
   exact cvmValidationAlphaToPropCheckTest cvmCtorPDomain.bindingName!
 

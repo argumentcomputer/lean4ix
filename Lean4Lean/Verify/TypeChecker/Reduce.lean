@@ -18,7 +18,7 @@ theorem applyRecursorRule_eq_slices
     (hfirst : info.getFirstIndexIdx ≤ recArgs.size) :
     applyRecursorRule info rule levels recArgs majorArgs =
       Expr.mkAppList
-        (rule.rhs.instantiateLevelParams info.levelParams levels)
+        (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
         (recArgs.toList.take info.getFirstIndexIdx ++
           majorArgs.toList.drop (majorArgs.size - rule.nfields) ++
           recArgs.toList.drop (info.getMajorIdx + 1)) := by
@@ -48,7 +48,7 @@ theorem applyRecursorRule_fvarsBelow
     {levels : List Level} {e major : Expr}
     (hfirst : info.getFirstIndexIdx ≤ e.getAppArgs.size)
     (hrhs : FVarsIn (fun _ => False)
-      (rule.rhs.instantiateLevelParams info.levelParams levels))
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels))
     (hmajor : FVarsBelow Δ e major) :
     FVarsBelow Δ e
       (applyRecursorRule info rule levels e.getAppArgs major.getAppArgs) := by
@@ -74,8 +74,8 @@ theorem instantiateLevelParams_fvarsIn_of_trExprS_empty
     {levelVals : List VLevel} {e : Expr} {e' : VExpr}
     (H : TrExprS env ps [] e e')
     (Hlevels : levels.mapM (VLevel.ofLevel Us) = some levelVals) :
-    FVarsIn (fun _ => False) (e.instantiateLevelParams ps levels) := by
-  simpa using H.fvarsIn.instantiateLevelParams Hlevels
+    FVarsIn (fun _ => False) (e.instantiateLevelParamsCpp ps levels) := by
+  simpa using H.fvarsIn.instantiateLevelParamsCpp Hlevels
 
 /-- Strict translation of a constant-headed application fixes the host
 universe-list length to the registered kernel constant's universe arity. -/
@@ -1892,7 +1892,7 @@ theorem reduceRecursor.WF_of_quotInit_false_of_applyRecursorRule
         major.getAppArgs)))
     (hfirst : info.getFirstIndexIdx ≤ e.getAppArgs.size)
     (hrhs : FVarsIn (fun _ => False)
-      (rule.rhs.instantiateLevelParams info.levelParams levels))
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels))
     (hmajor : c.FVarsBelow e major)
     (hout : c.TrExpr
       (applyRecursorRule info rule levels e.getAppArgs major.getAppArgs) e') :
@@ -1921,7 +1921,7 @@ theorem reduceRecursor.WF_of_quotInit_false_of_applyRecursorRule_of_whnf
     (he : c.TrExprS e e')
     (hfirst : info.getFirstIndexIdx ≤ e.getAppArgs.size)
     (hrhs : FVarsIn (fun _ => False)
-      (rule.rhs.instantiateLevelParams info.levelParams levels))
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels))
     (hout : c.TrExpr
       (applyRecursorRule info rule levels e.getAppArgs
         whnfMajor.getAppArgs) e') :
@@ -1966,7 +1966,7 @@ theorem applyRecursorRule_trExpr
     (hfirst : info.getFirstIndexIdx ≤ recArgs.size)
     (henv : venv.WF) (hΔ : Δ.WF venv Us.length)
     (hrhs : TrExpr venv Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels) rhs')
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels) rhs')
     (hhead : venv.HasType Us.length Δ.toCtx rhs' A)
     (hcaptures : List.Forall₂ (TrExprS venv Us Δ)
       (recArgs.toList.take info.getFirstIndexIdx ++
@@ -2006,7 +2006,7 @@ theorem applyRecursorRule_trExpr_of_generation
     (hrec : List.Forall₂ (TrExprS venv Us Δ) recArgs.toList fArgs)
     (hctor : List.Forall₂ (TrExprS venv Us Δ) majorArgs.toList aArgs)
     (hrhs : TrExpr venv Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels) rhs')
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels) rhs')
     (hhead : venv.HasType Us.length Δ.toCtx rhs' A)
     (hcapspine : venv.SpineWF Us.length Δ.toCtx A
       (gen.ruleCaptureValues constructor fArgs aArgs) B)
@@ -2058,7 +2058,7 @@ theorem applyRecursorRule_trExpr_of_nestedRegistered
     (hlen1 : m1.length =
       certificate.restored.nested.generation.recUvars)
     (hrhs : TrExpr after Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels)
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
       ((certificate.restored.nested.restoredRule i constructor).rhs.instL m1))
     (hcaptures : List.Forall₂ (TrExprS after Us Δ)
       (recArgs.toList.take info.getFirstIndexIdx ++
@@ -2125,7 +2125,7 @@ theorem applyRecursorRule_trExpr_of_nestedGeneration
     (hrec : List.Forall₂ (TrExprS after Us Δ) recArgs.toList fArgs)
     (hctor : List.Forall₂ (TrExprS after Us Δ) majorArgs.toList aArgs)
     (hrhs : TrExpr after Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels)
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
       ((certificate.restored.nested.restoredRule i constructor).rhs.instL m1))
     (hcapspine : after.SpineWF Us.length Δ.toCtx
       ((certificate.restored.nested.restoredRule i constructor).type.instL m1)
@@ -2196,7 +2196,7 @@ theorem applyRecursorRule_trExpr_of_nestedGenerationBody
     (hrec : List.Forall₂ (TrExprS after Us Δ) recArgs.toList fArgs)
     (hctor : List.Forall₂ (TrExprS after Us Δ) majorArgs.toList aArgs)
     (hrhs : TrExpr after Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels)
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
       ((certificate.restored.nested.restoredRule i constructor).rhs.instL m1))
     (hcapspine : after.SpineWF Us.length Δ.toCtx
       ((certificate.restored.nested.restoredRule i constructor).type.instL m1)
@@ -2261,7 +2261,7 @@ theorem applyRecursorRule_trExpr_of_nestedGenerationBodyMatched
     (hrec : List.Forall₂ (TrExprS after Us Δ) recArgs.toList fArgs)
     (hctor : List.Forall₂ (TrExprS after Us Δ) majorArgs.toList aArgs)
     (hrhs : TrExpr after Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels)
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
       ((certificate.restored.nested.restoredRule i constructor).rhs.instL m1))
     (hcapspine : after.SpineWF Us.length Δ.toCtx
       ((certificate.restored.nested.restoredRule i constructor).type.instL m1)
@@ -2373,7 +2373,7 @@ theorem inductiveReduceRec_result_trExpr_of_nestedGenerationBodyMatched
     (hctor : List.Forall₂ (TrExprS after Us Δ)
       ctorMajor.getAppArgs.toList aArgs)
     (hrhs : TrExpr after Us Δ
-      (rule.rhs.instantiateLevelParams info.levelParams levels)
+      (rule.rhs.instantiateLevelParamsCpp info.levelParams levels)
       ((certificate.restored.nested.restoredRule i constructor).rhs.instL m1))
     (hcapspine : after.SpineWF Us.length Δ.toCtx
       ((certificate.restored.nested.restoredRule i constructor).type.instL m1)

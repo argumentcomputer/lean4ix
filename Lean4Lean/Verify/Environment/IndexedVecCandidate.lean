@@ -309,10 +309,9 @@ private theorem indexedVecInferTypeFuel
   unfold Lean4Lean.TypeChecker.Inner.inferConstant
   simp [indexedVecTypeCheckerContext, indexedVecKernel_get_nat,
     natInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
-    Level.substParams', Bind.bind, Except.bind,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
 @[simp] theorem indexedVecPreFamilyInferConstantZero
@@ -323,9 +322,9 @@ private theorem indexedVecInferTypeFuel
   unfold Lean4Lean.TypeChecker.Inner.inferConstant
   simp [indexedVecTypeCheckerContext, indexedVecKernel_get_zero,
     natZeroInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[simp] theorem indexedVecPreFamilyInferConstantSucc
@@ -336,9 +335,9 @@ private theorem indexedVecInferTypeFuel
   unfold Lean4Lean.TypeChecker.Inner.inferConstant
   simp [indexedVecTypeCheckerContext, indexedVecKernel_get_succ,
     natSuccInfo, ConstantInfo.levelParams, ConstantInfo.isUnsafe,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams,
-    Expr.instantiateLevelParams_eq, Expr.instantiateLevelParamsCore',
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[simp] private theorem indexedVecInferTypeNatCore
@@ -547,8 +546,8 @@ private theorem indexedVecInnerWithLocalDecl
         indexedVecAfterIndexState indexedVecAfterIndexState_sort_cache)
 
 private def indexedVecFamilyInferredLevel : Level :=
-  mkLevelIMax' (.succ (.succ (.param `u)))
-    (mkLevelIMax' (.succ .zero) (.succ (.succ (.param `u))))
+  mkLevelIMaxCpp (.succ (.succ (.param `u)))
+    (mkLevelIMaxCpp (.succ .zero) (.succ (.succ (.param `u))))
 
 private theorem indexedVecFamilyInferForall :
     Lean4Lean.TypeChecker.Inner.inferForall
@@ -724,7 +723,7 @@ private theorem indexedVecNat_whnfM (lctx : LocalContext) :
   simp [Functor.map, StateT.map, Except.map]
 
 private def indexedVecInnerInferredLevel : Level :=
-  mkLevelIMax' (.succ .zero) (.succ (.succ (.param `u)))
+  mkLevelIMaxCpp (.succ .zero) (.succ (.succ (.param `u)))
 
 private def indexedVecInnerNatState : Lean4Lean.TypeChecker.State :=
   { ({} : Lean4Lean.TypeChecker.State) with
@@ -915,9 +914,9 @@ theorem indexedVecPreFamilyNatCheckTypeM (lctx : LocalContext) :
         .ok (.sort (.succ .zero)) := by
   unfold Lean4Lean.TypeChecker.Inner.inferConstant
   simp [indexedVecTypeCheckerContext, indexedVecKernel_get_nat, natInfo, ConstantInfo.levelParams,
-    ConstantInfo.instantiateTypeLevelParams, ConstantInfo.toConstantVal,
-    ConstantVal.instantiateTypeLevelParams, Expr.instantiateLevelParams_eq,
-    Expr.instantiateLevelParamsCore', Level.substParams', Bind.bind, Except.bind, Pure.pure,
+    ConstantInfo.instantiateTypeLevelParamsCpp,
+    ConstantInfo.type, ConstantInfo.toConstantVal,
+    Expr.instantiateLevelParamsCpp, Bind.bind, Except.bind, Pure.pure,
     Except.pure]
 
 private def indexedVecPreFamilyNatInferOnlyState :
@@ -1668,9 +1667,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecFamily_candidateTrace' depend
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
- Expr.mkData_eq,
- Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,
@@ -1691,9 +1687,7 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVec_checkInductiveTypes' depends
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
  Expr.mkData_eq,
- Expr.replace_eq,
  Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
@@ -1715,9 +1709,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_nindi
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
- Expr.mkData_eq,
- Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,
@@ -1738,9 +1729,6 @@ info: 'Lean4Lean.InductiveReplayFixtures.indexedVecCandidateInductiveStats_param
  Expr.instantiateRev_eq,
  Expr.instantiate_eq,
  Expr.looseBVarRange_eq,
- Expr.mkAppData_eq,
- Expr.mkData_eq,
- Expr.replace_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  PersistentHashMap.findAux_isSome,

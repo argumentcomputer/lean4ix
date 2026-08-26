@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 
 import Lean.Structure
 import Lean4Lean.Expr
+import Lean4Lean.Instantiate
 import Lean4Lean.Environment.Basic
 
 namespace Lean4Lean
@@ -80,7 +81,7 @@ runtime operation unchanged while giving verification a stable boundary for
 the three argument slices. -/
 def applyRecursorRule (info : RecursorVal) (rule : RecursorRule)
     (levels : List Level) (recArgs majorArgs : Array Expr) : Expr :=
-  let rhs := rule.rhs.instantiateLevelParams info.levelParams levels
+  let rhs := rule.rhs.instantiateLevelParamsCpp info.levelParams levels
   let rhs := mkAppRange rhs 0 info.getFirstIndexIdx recArgs
   let rhs := mkAppRange rhs (majorArgs.size - rule.nfields)
     majorArgs.size majorArgs

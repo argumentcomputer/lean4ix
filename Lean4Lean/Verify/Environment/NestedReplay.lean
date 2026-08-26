@@ -8312,7 +8312,7 @@ theorem roseProducedMainApplyRecursorRuleFVarsBelow09
         roseProducedRestoredRecInfo09.getMajorIdx := by
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
-  · exact roseProducedMainSelectedRuleFVars09.instantiateLevelParams Hlevels
+  · exact roseProducedMainSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hmajor
 
 /-- The inherited `List.nil` rule instantiates the same free-variable
@@ -8334,7 +8334,7 @@ theorem roseProducedNilApplyRecursorRuleFVarsBelow09
         roseProducedRestoredAuxRecInfo09.getMajorIdx := by
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
-  · exact roseProducedNilSelectedRuleFVars09.instantiateLevelParams Hlevels
+  · exact roseProducedNilSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hmajor
 
 /-- The inherited `List.cons` rule instantiates the same free-variable
@@ -8356,7 +8356,7 @@ theorem roseProducedConsApplyRecursorRuleFVarsBelow09
         roseProducedRestoredAuxRecInfo09.getMajorIdx := by
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
-  · exact roseProducedConsSelectedRuleFVars09.instantiateLevelParams Hlevels
+  · exact roseProducedConsSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hmajor
 
 /-- Build the live selected-branch certificate for the main recursor from
@@ -9197,7 +9197,7 @@ theorem roseEnvironmentInductiveExecution_mainReduceRecursorWF09
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
   · obtain ⟨_, Hlevels⟩ := he.getAppFn_const_levels hfn
-    exact roseProducedMainSelectedRuleFVars09.instantiateLevelParams Hlevels
+    exact roseProducedMainSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hout
 
 /-- The inherited `List.nil` execution inhabits the same live verifier
@@ -9248,7 +9248,7 @@ theorem roseEnvironmentInductiveExecution_nilReduceRecursorWF09
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
   · obtain ⟨_, Hlevels⟩ := he.getAppFn_const_levels hfn
-    exact roseProducedNilSelectedRuleFVars09.instantiateLevelParams Hlevels
+    exact roseProducedNilSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hout
 
 /-- The inherited `List.cons` execution inhabits the same live verifier
@@ -9300,7 +9300,7 @@ theorem roseEnvironmentInductiveExecution_consReduceRecursorWF09
       native_decide
     exact Nat.le_trans hmeta (Nat.le_of_lt hbound)
   · obtain ⟨_, Hlevels⟩ := he.getAppFn_const_levels hfn
-    exact roseProducedConsSelectedRuleFVars09.instantiateLevelParams Hlevels
+    exact roseProducedConsSelectedRuleFVars09.instantiateLevelParamsCpp Hlevels
   · exact hout
 
 /-- End-to-end concrete vertical slice: the exact environment returned by the
