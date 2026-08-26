@@ -2040,7 +2040,7 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
   validation_annotations :
     secondCandidate.familyType.type.trace.validationAnnotations
   annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
-    secondCandidate.familyType.type.trace storedBinders
+    secondCandidate.familyType.type.trace [] storedBinders
   terminal_venv : terminalRun.context.venv = env
   terminal_lparams : terminalRun.context.lparams = Us
   terminal_vlctx : terminalRun.context.vlctx.toCtx = storedBinders.reverse
@@ -2657,7 +2657,7 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirst
       ∃ snapshot : TypeChecker.CandidateAnnotationSnapshot env Us position.root,
         snapshot.consumed' = raw.consumedDomain := by
   obtain ⟨position⟩ := raw.annotationAt
-  obtain ⟨snapshot, tail, snapshotSuffixEq⟩ :=
+  obtain ⟨snapshot, tail, snapshotSuffixEq, _, _⟩ :=
     annotation.annotation_spine.snapshotAt position
   have suffixEq : snapshot.consumed' :: tail =
       raw.consumedDomain :: raw.consumedTail :=
