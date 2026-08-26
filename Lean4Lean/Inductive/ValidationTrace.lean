@@ -1461,6 +1461,31 @@ theorem result_indConsts_eq
       simpa only [result] using ih
   | terminal => rfl
 
+/-- The counter at the root of any successful family-telescope suffix has
+not passed the declared parameter boundary.
+
+Shared and fresh parameter nodes advance the counter only under their exact
+`i < nparams` branch.  Index nodes leave it unchanged, while the terminal
+node records equality with `nparams`. -/
+theorem startIndex_le_nparams
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    i ≤ nparams := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    exact ih
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+    omega
+
 /-- The exact later-family parameter comparisons, in telescope order.  Fresh
 first-family parameters and ordinary indices contribute no comparison. -/
 def comparisons :
@@ -1877,6 +1902,39 @@ def firstContext :
   | .laterFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ _ =>
     telescope.result.context
   | .terminal _ _ context _ => context
+
+/-- Fully indexed payload for one family telescope selected from the outer
+source traversal. -/
+structure FamilyTelescopePosition (nparams : Nat) where
+  stats : InductiveStats
+  context : Context
+  source : Expr
+  i : Nat
+  nindices : Nat
+  fuel : Nat
+  trace : FamilyTypeParameterComparisonTrace nparams stats context source
+    i nindices fuel
+
+/-- Select the exact telescope at the head of an outer-trace suffix. -/
+def headTelescope? :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      Option (FamilyTelescopePosition nparams)
+  | .firstFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ =>
+    some ⟨_, _, _, _, _, _, telescope⟩
+  | .laterFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ _ =>
+    some ⟨_, _, _, _, _, _, telescope⟩
+  | .terminal .. => none
+
+/-- Select the exact second family telescope, if the retained source suffix
+contains two family nodes.  The value is computed from the dependent outer
+trace; consumers cannot reselect a telescope by matching only its counters or
+comparison list. -/
+def secondTelescope? :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      Option (FamilyTelescopePosition nparams)
+  | .firstFamily _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.headTelescope?
+  | .laterFamily _ _ _ _ _ _ _ _ _ _ _ _ _ _ tail => tail.headTelescope?
+  | .terminal .. => none
 
 /-- Exact kernel parameter-comparison executions, grouped in source family
 order.  The first family normally contributes an empty list; every later
@@ -4210,6 +4268,14 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_context_
 -/
 #guard_msgs in
 #print axioms FamilyTypeParameterComparisonTrace.result_context_fuel
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.startIndex_le_nparams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.startIndex_le_nparams
 
 /--
 info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.comparison_valid' depends on axioms: [propext,

@@ -848,6 +848,184 @@ theorem WhnfRun.exists_ofCandidateStep
     contextRun.state_wf source_tr result_tr
     recursionFuel hdepth⟩⟩
 
+/-- Exact index-only suffix reached after interpreting a later family's
+shared-parameter prefix.
+
+The boundary retains the producer's original trace object, terminal-result
+identity, and strict translation at the unchanged validator context.  In
+particular, a consumer cannot select another source expression or reconstruct
+an index suffix from a comparison count. -/
+structure FamilyParameterIndexBoundary
+    (outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (contextRun : CandidateContextRun context) where
+  source : Expr
+  fuel : Nat
+  trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+    context source nparams nindices fuel
+  source' : VExpr
+  source_tr : contextRun.context.TrExprS source source'
+  result_eq : trace.result = outer.result
+  comparisons_eq_nil : trace.comparisons = []
+
+/-- Interpret a later family's exact shared-parameter prefix and expose the
+retained suffix at the first index position.
+
+Besides the semantic run for every comparison, this strengthens the former
+comparison-only result with the exact translated source from which index
+context ownership must continue.  Shared parameters do not alter the reader
+context, statistics, or index count, so the boundary remains indexed by all
+three original values. -/
+theorem familyTypeParameterComparison_semanticPrefix_of_later
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (paramsSize : stats.params.size = nparams)
+    (localState : FamilyParameterLocalState stats context)
+    (contextRun : CandidateContextRun context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS source source')
+    (whnfFuel : Nat)
+    (whnfDepth : context.fuel.recDepth = whnfFuel + 1) :
+    (∀ step ∈ trace.comparisons, FamilyComparisonSemanticRun step) ∧
+      Nonempty (FamilyParameterIndexBoundary trace contextRun) := by
+  induction trace generalizing source' with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      rw [later] at firstFamily
+      contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      let @TrExprS.forallE _ _ domain' body' _ _ _ _ _
+          domainType bodyType domain_tr body_tr := source_tr
+      have parameterMember : stats.params[i]! ∈ stats.params.toList := by
+        rw [show stats.params[i]! = stats.params[i] by
+          simp [isParameter, paramsSize]]
+        exact List.getElem_mem (by
+          simpa only [Array.length_toList, paramsSize] using isParameter)
+      obtain ⟨fv, decl, parameterEq, parameterFind⟩ :=
+        localState.parameters parameterMember
+      have parameterTypeRun' : AddInductive.getType (.fvar fv) context =
+          .ok parameterType := by
+        rw [← parameterEq]
+        exact parameterTypeRun
+      obtain ⟨fvValue, parameterType', fvFind, parameterType_tr⟩ :=
+        contextRun.getTypeTranslation parameterFind parameterTypeRun'
+      have fv_tr : contextRun.context.TrExprS (.fvar fv) fvValue :=
+        .fvar fvFind
+      let comparisonRun : IsDefEqRun contextRun.context.venv
+          contextRun.context.lparams contextRun.context.vlctx domain
+          parameterType _ _ :=
+        IsDefEqRun.ofCandidateStep ⟨context, domain, parameterType⟩ defeq
+          contextRun.context contextRun.context_eq rfl rfl rfl
+          contextRun.state_wf domain_tr parameterType_tr
+          context.fuel.recDepth rfl
+      have henv : VEnv.WF contextRun.context.venv := contextRun.context.Ewf
+      have hctx : OnCtx contextRun.context.vlctx.toCtx
+          (contextRun.context.venv.IsType
+            contextRun.context.lparams.length) :=
+        contextRun.context.Δwf.toCtx
+      obtain ⟨u, domainHasType⟩ := domainType
+      have domainDef : contextRun.context.venv.IsDefEq
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          _ _ (.sort u) :=
+        comparisonRun.isDefEqU.of_l henv hctx domainHasType
+      have fvHasParameterType : contextRun.context.venv.HasType
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          fvValue parameterType' :=
+        contextRun.context.Δwf.find?_wf contextRun.context.Ewf.ordered fvFind
+      have fvHasDomain : contextRun.context.venv.HasType
+          contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+          fvValue _ :=
+        domainDef.symm.defeq fvHasParameterType
+      have bodyInst_tr : contextRun.context.TrExprS
+          (body.instantiate1 (.fvar fv)) (body'.inst fvValue) := by
+        simpa only [Expr.instantiate1_eq] using
+          body_tr.inst contextRun.context.Ewf.ordered fvHasDomain fv_tr
+      have bodyInst_tr' : contextRun.context.TrExprS
+          (body.instantiate1 stats.params[i]!) (body'.inst fvValue) := by
+        rw [parameterEq]
+        exact bodyInst_tr
+      obtain ⟨view', view_tr, _viewRun⟩ :=
+        WhnfRun.exists_ofCandidateStep ⟨context,
+          body.instantiate1 stats.params[i]!, view⟩ whnf contextRun
+          (body'.inst fvValue) bodyInst_tr' whnfFuel whnfDepth
+      obtain ⟨tailRuns, ⟨boundary⟩⟩ :=
+        ih later paramsSize localState contextRun view' view_tr whnfDepth
+      constructor
+      · intro step member
+        simp only [
+          AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+          List.mem_cons] at member
+        rcases member with rfl | member
+        · exact ⟨contextRun, _, _, ⟨comparisonRun⟩⟩
+        · exact tailRuns step member
+      · exact ⟨{
+          source := boundary.source
+          fuel := boundary.fuel
+          trace := boundary.trace
+          source' := boundary.source'
+          source_tr := boundary.source_tr
+          result_eq := by
+            simpa only [
+              AddInductive.FamilyTypeParameterComparisonTrace.result] using
+              boundary.result_eq
+          comparisons_eq_nil := boundary.comparisons_eq_nil }⟩
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      have i_le : i ≤ nparams :=
+        (AddInductive.FamilyTypeParameterComparisonTrace.index stats context
+          i nindices fuel name domain body view binderInfo notParameter whnf
+          tail).startIndex_le_nparams
+      have nparams_le : nparams ≤ i := Nat.le_of_not_gt notParameter
+      have i_eq : i = nparams := Nat.le_antisymm i_le nparams_le
+      subst i
+      let current :=
+        AddInductive.FamilyTypeParameterComparisonTrace.index stats context
+          nparams nindices fuel name domain body view binderInfo notParameter
+          whnf tail
+      have currentLength : current.comparisons.length = 0 := by
+        simpa only [current, Nat.sub_self] using
+          current.comparisons_length_of_laterFamily later
+      have currentEmpty : current.comparisons = [] := by
+        cases hcomparisons : current.comparisons with
+        | nil => rfl
+        | cons head tail =>
+          rw [hcomparisons] at currentLength
+          simp at currentLength
+      constructor
+      · intro step member
+        rw [currentEmpty] at member
+        simp at member
+      · exact ⟨{
+          source := .forallE name domain body binderInfo
+          fuel := fuel + 1
+          trace := current
+          source' := source'
+          source_tr := source_tr
+          result_eq := rfl
+          comparisons_eq_nil := currentEmpty }⟩
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+      subst i
+      let current :=
+        AddInductive.FamilyTypeParameterComparisonTrace.terminal stats
+          context source nparams nindices fuel notForall rfl
+      constructor
+      · intro step member
+        simp only [
+          AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
+          List.not_mem_nil] at member
+      · exact ⟨{
+          source := source
+          fuel := fuel + 1
+          trace := current
+          source' := source'
+          source_tr := source_tr
+          result_eq := rfl
+          comparisons_eq_nil := rfl }⟩
+
 /-- Interpret every shared-parameter comparison in one later-family
 telescope from the strict translation of its exact validator root.
 
@@ -12324,6 +12502,39 @@ info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_localResult_of_first'
 -/
 #guard_msgs in
 #print axioms TypeChecker.familyTypeParameterComparison_localResult_of_first
+
+/--
+info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticPrefix_of_later' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.familyTypeParameterComparison_semanticPrefix_of_later
 
 /--
 info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticRuns_of_later' depends on axioms: [propext,

@@ -2006,7 +2006,8 @@ context, its retained validator WHNF supplies the inner root translation, and
 the local-state traversal supplies the genuine shared-parameter declarations.
 The result exposes the producer's grouped comparison list as an exact
 `[] :: second :: remaining` decomposition; neither the second family nor its
-comparison inventory is selected by a caller. -/
+comparison inventory is selected by a caller.  It also returns the exact
+translated index-only suffix selected from that same second outer node. -/
 theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterComparisons
     {source : VInductDecl}
     {firstSource secondSource : InductiveType}
@@ -2026,8 +2027,18 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
           (produced.execution.normalization_run produced.producedExecution)
           produced.kernelSources_nonempty).comparisons =
         [] :: secondComparisons :: remainingComparisons ∧
-      ∀ step ∈ secondComparisons,
-        TypeChecker.FamilyComparisonSemanticRun step := by
+      (∀ step ∈ secondComparisons,
+        TypeChecker.FamilyComparisonSemanticRun step) ∧
+      ∃ position,
+        (produced.execution.eliminationExecution.normalization
+          |>.familyParameterComparisonTrace
+            (produced.execution.normalization_run produced.producedExecution)
+            produced.kernelSources_nonempty).secondTelescope? =
+          some position ∧
+        ∃ currentRun : TypeChecker.CandidateContextRun position.context,
+          Nonempty
+            (TypeChecker.FamilyParameterIndexBoundary position.trace
+              currentRun) := by
   let normalization :=
     produced.execution.eliminationExecution.normalization
   have normalizationProduced :=
@@ -2038,8 +2049,13 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
   change ∃ secondComparisons remainingComparisons,
     comparisonTrace.comparisons =
       [] :: secondComparisons :: remainingComparisons ∧
-    ∀ step ∈ secondComparisons,
-      TypeChecker.FamilyComparisonSemanticRun step
+    (∀ step ∈ secondComparisons,
+      TypeChecker.FamilyComparisonSemanticRun step) ∧
+    ∃ position,
+      comparisonTrace.secondTelescope? = some position ∧
+      ∃ currentRun : TypeChecker.CandidateContextRun position.context,
+        Nonempty
+          (TypeChecker.FamilyParameterIndexBoundary position.trace currentRun)
   have roots := semantic.families
   cases hCandidates : produced.candidate.families with
   | cons firstCandidate remainingCandidates =>
@@ -2166,16 +2182,28 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                       secondRootWhnf currentRun secondRaw.type
                       secondSourceTranslation secondSemantic.type.whnfFuel
                       whnfDepth
-                  have secondRuns :=
-                    TypeChecker.familyTypeParameterComparison_semanticRuns_of_later
+                  obtain ⟨secondRuns, secondBoundary⟩ :=
+                    TypeChecker.familyTypeParameterComparison_semanticPrefix_of_later
                       secondTelescope statsLater paramsSize secondLocal
                       currentRun secondRoot' secondRootTranslation
                       secondSemantic.type.whnfFuel whnfDepth
+                  let secondPosition :
+                      AddInductive.FamilyParameterComparisonBlockTrace.FamilyTelescopePosition
+                        source.nparams := {
+                    stats := nextStats
+                    context := telescope.result.context
+                    source := secondRoot
+                    i := 0
+                    nindices := 0
+                    fuel := telescope.result.context.fuel.inductiveFuel
+                    trace := secondTelescope }
                   refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
-                    secondRuns⟩
-                  simp only [
-                    AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
-                    firstComparisons]
+                    secondRuns, secondPosition, (by rfl), currentRun,
+                    ?_⟩
+                  · simp only [
+                      AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
+                      firstComparisons]
+                  · simpa only [secondPosition] using secondBoundary
                 | @firstFamily dIdx stats secondContext inBounds closed
                     inferred secondRoot checkType secondRootWhnf
                     secondTelescope sorted ensureSort isFirst tail =>
