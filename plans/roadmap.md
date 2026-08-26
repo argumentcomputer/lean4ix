@@ -97,7 +97,7 @@ must be updated whenever a proof enters or leaves the frontier.
 | Proof frontier | 9 supported proof declarations: 6 metatheory and 3 checker verification. The compiled allowlist has 15 entries after adding 6 deliberately rejected fixtures. Lane V removed 7 proof sorries from the previous 16-entry proof frontier. |
 | Experimental surface | Zero source `sorry` tokens and no `stop`-hidden admissions, but endpoints remain conditional. The concrete five-rule `D2RegisteredBodyStep` discharge compiles. Both inherited D2 Nat sites are now replayed internally, so `D2BlockStepExact` contains only the Tree check, a paired five-rule Tree replay, and the discharged registered-body field. D2 also has generic conversion-aware prefix/collapse replay, an exact eight-common-arguments-plus-fields capture inventory, and a named `D2TreeLevelAlignmentStep`; the Tree suffix/body share the NORM-DI-dependent local head-argument/source-level alignment boundary rather than being pure engineering. The current full `Lean4Lean.Experimental` gate is green at 152 jobs (its pre-existing lint warnings are not promoted to errors). |
 | Project axioms | 28 declarations: 26 in `Verify/Axioms.lean` and 2 pointer-equality implications in `PtrEq.lean`. The audit assigns stable IDs/classifications, pins the exact inventory and all 11 high-risk repaired signatures, proves Theory reaches none, rejects dead or forbidden entries, and fails if a manifest axiom enters the global simp set. Its exact four-root closure additionally classifies 3 logical leaves, `sorryAx`, 6 rejected-fixture declarations, and 287 generated `native_decide`/`bv_decide` leaves, for 325 exact union leaves. |
-| Upstream intake audit | Refreshed and implemented through UP5 plus twelve bounded UP6 slices on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation; direct, live `Nat.add`, `Nat.pred`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.beq`, `Nat.ble`, `Nat.shiftLeft`, `Nat.mod`, and `Nat.div` certificates; and the shared condition and retained Nat-≤ selector layers. All ten direct-root dependency pins exclude the generic primitive boundary and record exactly six inherited upstream proof dependencies. Nat.mod/div add no source admission or opaque expression axiom: Nat.mod reasons structurally and Nat.div proves its reducible lift builder equal to the proof-side structural lift. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; Nat.shiftRight, the later primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
+| Upstream intake audit | Refreshed and implemented through UP5 plus thirteen bounded UP6 slices on 2026-08-26 against upstream `e0e3f6bc`, which is still the fork's merge base. UP0-UP4 manually adapt PR #45's truthful domains/models, PR #44's bounded loose-bvar and safe-checker path, and PR #46's audit evidence. UP5 manually adapts the three accepted `differential` commits. UP6 now has its committed body-first foundation; direct, live `Nat.add`, `Nat.pred`, `Nat.sub`, `Nat.mul`, `Nat.pow`, `Nat.beq`, `Nat.ble`, `Nat.shiftLeft`, `Nat.shiftRight`, `Nat.mod`, and `Nat.div` certificates; and the shared condition and retained Nat-≤ selector layers. All eleven direct-root dependency pins exclude the generic primitive boundary and record exactly six inherited upstream proof dependencies. Nat.mod/div add no source admission or opaque expression axiom: Nat.mod reasons structurally and Nat.div proves its reducible lift builder equal to the proof-side structural lift. PR #32 still does **not** prove generic `checkPrimitiveDef.WF`; the later primitive families, final exhaustive dispatch, and V4 disposition remain open. PR #43 and PR #27 remain explicit non-imports. |
 
 ### Delivered foundation
 
@@ -2838,9 +2838,25 @@ The twelfth UP6 slice provides the direct `Nat.div` certificate:
   the same six inherited sorry carriers as the other nine direct roots. The
   global source frontier remains 15.
 
-The next bounded UP6 work is `Nat.shiftRight`, which can now consume the
-certified Nat.div reflection. Bitwise and its wrappers remain a separate
-well-founded-recursion track and are not dependencies of the mod/div path.
+The thirteenth UP6 slice provides the direct `Nat.shiftRight` certificate:
+
+- `checkNatShiftRightPrimitive` retains the exact closed type, zero-shift
+  equation, and quotient-by-two successor equation;
+- `checkPrimitiveDef.natShiftRight.WF_typed` reuses the common typed shift
+  checker and the retained Nat.div translation;
+- `ReflectsNatNatNat.of_shiftRight_equations` proves literal evaluation by
+  induction on the shift amount and the certified Nat.div action;
+- `addNatShiftRightDef`, `checkSafeNatShiftRightDefinition.WF`, and
+  `addDefinition.WF_safe_natShiftRight` transport the result through every
+  readiness safety model and the live environment path; and
+- the eleven-root regression excludes `checkPrimitiveDef.WF` and reaches
+  exactly the same six inherited sorry carriers, leaving the global source
+  frontier at 15.
+
+The next bounded UP6 work should take another finite certificate such as
+`Char.ofNat` or `String.ofList`; Nat.gcd and Nat.bitwise remain the separate
+well-founded-recursion track, and their wrappers follow only after that
+semantic core is honest.
 
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,
