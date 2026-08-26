@@ -458,6 +458,43 @@ theorem checkSafeNatShiftLeftDefinition.WF
     (ty' := v'.type) (value' := v'.value)
     hname rfl htype hvalue hvalueT'
 
+/-- Direct body/type/equation certificate for the safe `Nat.shiftRight`
+definition path. This theorem does not use the generic primitive-recognizer
+boundary. -/
+theorem checkSafeNatShiftRightDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Nat.shiftRight)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat.div ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat <| .forallE .nat .nat) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .app (.app v'.value (.bvar 0)) .natZero)
+            (.lam .nat <| .bvar 0) ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length []
+            (.lam .nat <| .lam .nat <|
+              .app (.app v'.value (.bvar 0)) (.app .natSucc (.bvar 1)))
+            (.lam .nat <| .lam .nat <|
+              .app (.app (.const ``Nat.div [])
+                (.app (.app v'.value (.bvar 0)) (.bvar 1)))
+                (.natLit 2)) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype hvalue hvalueT'
+  exact Environment.checkPrimitiveDef.natShiftRight.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) (value' := v'.value)
+    hname rfl htype hvalue hvalueT'
+
 /-- Direct typed checker evidence for the safe `Nat.mod` definition path.
 The retained certificate includes the zero equation, both fuel-recursion
 equations, the checked `Nat.modCore.go` type, and the reflected selector. -/

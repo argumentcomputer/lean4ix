@@ -46,6 +46,7 @@ run_cmd do
   let mulRoot := ``Lean4Lean.addDefinition.WF_safe_natMul
   let powRoot := ``Lean4Lean.addDefinition.WF_safe_natPow
   let shiftLeftRoot := ``Lean4Lean.addDefinition.WF_safe_natShiftLeft
+  let shiftRightRoot := ``Lean4Lean.addDefinition.WF_safe_natShiftRight
   let beqRoot := ``Lean4Lean.addDefinition.WF_safe_natBEq
   let bleRoot := ``Lean4Lean.addDefinition.WF_safe_natBLE
   let modRoot := ``Lean4Lean.addDefinition.WF_safe_natMod
@@ -57,6 +58,7 @@ run_cmd do
   let mulClosure := dependencyClosure env [mulRoot] {}
   let powClosure := dependencyClosure env [powRoot] {}
   let shiftLeftClosure := dependencyClosure env [shiftLeftRoot] {}
+  let shiftRightClosure := dependencyClosure env [shiftRightRoot] {}
   let beqClosure := dependencyClosure env [beqRoot] {}
   let bleClosure := dependencyClosure env [bleRoot] {}
   let modClosure := dependencyClosure env [modRoot] {}
@@ -73,6 +75,8 @@ run_cmd do
     throwError "the direct Nat.pow declaration certificate regressed through checkPrimitiveDef.WF"
   if shiftLeftClosure.contains genericBoundary then
     throwError "the direct Nat.shiftLeft declaration certificate regressed through checkPrimitiveDef.WF"
+  if shiftRightClosure.contains genericBoundary then
+    throwError "the direct Nat.shiftRight declaration certificate regressed through checkPrimitiveDef.WF"
   if beqClosure.contains genericBoundary then
     throwError "the direct Nat.beq declaration certificate regressed through checkPrimitiveDef.WF"
   if bleClosure.contains genericBoundary then
@@ -95,6 +99,8 @@ run_cmd do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.pow certificate"
   unless (directConstants liveInfo).contains shiftLeftRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.shiftLeft certificate"
+  unless (directConstants liveInfo).contains shiftRightRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the Nat.shiftRight certificate"
   unless (directConstants liveInfo).contains beqRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.beq certificate"
   unless (directConstants liveInfo).contains bleRoot do
@@ -182,6 +188,21 @@ run_cmd do
     expectedSorryCarriers.filter (!shiftLeftObservedSet.contains ·)
   unless shiftLeftAdded.isEmpty && shiftLeftRemoved.isEmpty do
     throwError m!"Nat.shiftLeft direct-certificate sorry closure changed; added: {shiftLeftAdded}; removed: {shiftLeftRemoved}"
+  let shiftRightSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if shiftRightClosure.contains name &&
+        (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let shiftRightObservedSet : Lean.NameSet :=
+    shiftRightSorryCarriers.foldl (·.insert ·) {}
+  let shiftRightAdded :=
+    shiftRightSorryCarriers.filter (!expectedSet.contains ·)
+  let shiftRightRemoved :=
+    expectedSorryCarriers.filter (!shiftRightObservedSet.contains ·)
+  unless shiftRightAdded.isEmpty && shiftRightRemoved.isEmpty do
+    throwError m!"Nat.shiftRight direct-certificate sorry closure changed; added: {shiftRightAdded}; removed: {shiftRightRemoved}"
   let beqSorryCarriers := env.constants.toList.foldl (init := #[])
       fun found (name, info) =>
     if beqClosure.contains name && (directConstants info).contains ``sorryAx then
@@ -230,4 +251,4 @@ run_cmd do
   let divRemoved := expectedSorryCarriers.filter (!divObservedSet.contains ·)
   unless divAdded.isEmpty && divRemoved.isEmpty do
     throwError m!"Nat.div direct-certificate sorry closure changed; added: {divAdded}; removed: {divRemoved}"
-  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.beq, Nat.ble, Nat.mod, and Nat.div direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Nat.beq, Nat.ble, Nat.mod, and Nat.div direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"

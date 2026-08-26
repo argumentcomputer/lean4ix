@@ -1882,6 +1882,41 @@ to the replacement.
   result while preserving the fork's readiness transport, accepted-domain
   checks, and exact trust pins.
 
+## D038 — direct Nat.shiftRight certificate over verified division
+
+- **Status:** implemented as the thirteenth bounded UP6 slice; both shift
+  primitives now have direct live certificates.
+- **Owner:** Argument Computer Corporation; review with later arithmetic
+  wrappers and any consolidation of the shared shift checker.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its shared shift
+  checker, quotient recurrence proof, and conservation theorem; no whole-PR
+  merge, bitwise certificate, or admitted generic dispatch was imported.
+- **Executable delta:** `checkNatShiftRightPrimitive` extracts the exact
+  closed binary-Nat type, zero-shift equation, and successor equation from the
+  monolithic recognizer. Its sole arithmetic dependency is the now-certified
+  `Nat.div` constant.
+- **Verification delta:** `checkPrimitiveDef.natShiftRight.WF_typed` reuses
+  `checkNatShiftTyped.WF` and translates the recursive quotient by literal
+  two. `ReflectsNatNatNat.of_shiftRight_equations` proves literal reflection
+  by induction on the shift amount, rewriting the recursive result through
+  retained Nat.div reflection. `addNatShiftRightDef` then installs the result
+  through every readiness model and the live `addDefinition.WF` dispatch.
+- **Accepted-domain decision:** this remains the upstream finite,
+  equation-based certificate. It neither identifies the implementation with
+  bitwise recursion nor narrows the accepted body beyond the two equations
+  already checked by the executable recognizer.
+- **Ix impact:** literal right shifts now have a narrow verified transport
+  root, completing the pair of performance-relevant natural-number shifts
+  without importing the larger gcd/bitwise well-founded-recursion machinery.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all eleven direct live
+  roots are named by dispatch, avoid `checkPrimitiveDef.WF`, and reach exactly
+  the six existing inherited sorry carriers. The global source frontier
+  remains 15, with no new custom axiom or native decision.
+- **Removal condition:** upstream lands the corresponding certificate (or a
+  stronger generic proof) and reconciliation preserves the readiness
+  transaction, exact accepted equations, and trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

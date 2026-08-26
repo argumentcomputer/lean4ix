@@ -504,6 +504,23 @@ def checkNatShiftLeftPrimitive (env : Environment) (v : DefinitionVal)
   unless ← defeq1 (shl x zero) x do fail
   unless ← defeq2 (shl x (succ y)) (shl (mul two x) y) do fail
 
+/-- Validate the closed type and two recursive equations for `Nat.shiftRight`. -/
+def checkNatShiftRightPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat.div && v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  let shr := mkApp2 v.value
+  let div := mkApp2 q(Nat.div)
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let two := succ (succ zero)
+  let x := .bvar 0
+  let y := .bvar 1
+  let defeq1 a b := isDefEq (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  let defeq2 a b := defeq1 (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  unless ← defeq1 (shr x zero) x do fail
+  unless ← defeq2 (shr x (succ y)) (div (shr x y) two) do fail
+
 def natModTopEquation (modFn : Expr) : Expr × Expr :=
   let succ := mkApp q(Nat.succ)
   let mod := mkApp2 modFn
@@ -698,9 +715,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let one := succ zero
   let two := succ one
   let defeq1 a b := isDefEq (.arrow q(Nat) a) (.arrow q(Nat) b)
-  let defeq2 a b := defeq1 (.arrow q(Nat) a) (.arrow q(Nat) b)
   let x := .bvar 0
-  let y := .bvar 1
   let env ← getEnv
   match v.name with
   | ``Nat.add =>
@@ -783,12 +798,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.shiftLeft =>
     checkNatShiftLeftPrimitive env v fail
   | ``Nat.shiftRight =>
-    unless env.contains ``Nat.div && v.levelParams.isEmpty do fail
-    -- shiftRight : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let shr := mkApp2 v.value
-    unless ← defeq1 (shr x zero) x do fail
-    unless ← defeq2 (shr x (succ y)) (div (shr x y) two) do fail
+    checkNatShiftRightPrimitive env v fail
   | ``Char.ofNat =>
     unless env.contains ``Nat && v.levelParams.isEmpty do fail
     -- Char : Type
