@@ -2442,6 +2442,11 @@ structure FamilyParameterIndexBoundary.IndexDomainAdvance
     view nparams (nindices + 1) fuel
   view' : VExpr
   view_tr : run.pushContext.context.TrExprS view view'
+  whnf_valid : AddInductive.CandidateWhnfStep.Valid
+    ⟨context.pushLocalDecl run.translation.name
+        run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain),
+      run.translation.body.instantiate1 context.freshExpr, view⟩
   whnf : Nonempty (WhnfRun run.pushContext.context.venv
     run.pushContext.context.lparams run.pushContext.context.vlctx
     (run.translation.body.instantiate1 context.freshExpr) view body' view')
@@ -2584,6 +2589,7 @@ theorem FamilyParameterIndexBoundary.IndexDomainRun.advance
       tail := tail'
       view' := view'
       view_tr := view_tr
+      whnf_valid := whnf'
       whnf := whnfRun
       localState := boundaryLocalState.pushLocal run.translation.name
         run.translation.binderInfo
@@ -3757,6 +3763,288 @@ inductive VLCtx.FVarLamOnly : VLCtx → Prop where
   | cons : FVarLamOnly Δ →
       FVarLamOnly ((some (fv, deps), .vlam type) :: Δ)
 
+/-- A verified local context containing only bound assumptions.  This is the
+common alpha-normal form of two `FVarLamOnly` contexts whose producer-owned
+free-variable identifiers may differ. -/
+inductive VLCtx.BVarLamOnly : VLCtx → Prop where
+  | nil : BVarLamOnly []
+  | cons : BVarLamOnly Δ → BVarLamOnly ((none, .vlam type) :: Δ)
+
+/-- Forget only the kernel free-variable metadata of a verified context.
+Theory declarations and their de Bruijn positions remain unchanged. -/
+def VLCtx.bvarize : VLCtx → VLCtx
+  | [] => []
+  | (_, declaration) :: Δ =>
+      (none, declaration) :: VLCtx.bvarize Δ
+
+/-- Abstract a source-ordered sequence of kernel free variables, starting at
+the supplied loose-bound-variable depth. -/
+def _root_.Lean.Expr.abstractFVarsAux :
+    Nat → List Lean.FVarId → Lean.Expr → Lean.Expr
+  | _, [], expression => expression
+  | depth, fv :: fvs, expression =>
+      Lean.Expr.abstractFVarsAux (depth + 1) fvs
+        (Lean.Expr.abstract1 fv expression depth)
+
+/-- Abstract every free-variable slot represented by a verified context.
+The head slot becomes bound variable zero and older slots follow beneath it. -/
+def _root_.Lean.Expr.abstractFVars (Δ : VLCtx)
+    (expression : Lean.Expr) : Lean.Expr :=
+  Lean.Expr.abstractFVarsAux 0 Δ.fvars expression
+
+theorem _root_.Lean.Expr.abstractFVarsAux_forallE
+    (depth : Nat) (fvars : List Lean.FVarId)
+    (name : Name) (domain body : Lean.Expr)
+    (binderInfo : Lean.BinderInfo) :
+    Lean.Expr.abstractFVarsAux depth fvars
+        (.forallE name domain body binderInfo) =
+      .forallE name
+        (Lean.Expr.abstractFVarsAux depth fvars domain)
+        (Lean.Expr.abstractFVarsAux (depth + 1) fvars body) binderInfo := by
+  induction fvars generalizing depth domain body with
+  | nil => rfl
+  | cons fv fvars ih =>
+      simp only [Lean.Expr.abstractFVarsAux, Lean.Expr.abstract1]
+      rw [ih]
+
+theorem _root_.Lean.Expr.abstractFVars_forallE
+    (Δ : VLCtx) (name : Name) (domain body : Lean.Expr)
+    (binderInfo : Lean.BinderInfo) :
+    Lean.Expr.abstractFVars Δ (.forallE name domain body binderInfo) =
+      .forallE name (Lean.Expr.abstractFVars Δ domain)
+        (Lean.Expr.abstractFVarsAux 1 Δ.fvars body) binderInfo := by
+  exact Lean.Expr.abstractFVarsAux_forallE 0 Δ.fvars name domain body
+    binderInfo
+
+/-- Abstracting free variables preserves the outer Pi/non-Pi shape. -/
+theorem _root_.Lean.Expr.abstract1_isForall
+    (fv : Lean.FVarId) (expression : Lean.Expr) (depth : Nat) :
+    (expression.abstract1 fv depth).isForall = expression.isForall := by
+  cases expression <;> try rfl
+  case fvar =>
+    simp only [Lean.Expr.abstract1]
+    split <;> rfl
+
+theorem _root_.Lean.Expr.abstractFVarsAux_isForall
+    (depth : Nat) (fvars : List Lean.FVarId) (expression : Lean.Expr) :
+    (Lean.Expr.abstractFVarsAux depth fvars expression).isForall =
+      expression.isForall := by
+  induction fvars generalizing depth expression with
+  | nil => rfl
+  | cons fv fvars ih =>
+      simp only [Lean.Expr.abstractFVarsAux, ih,
+        Lean.Expr.abstract1_isForall]
+
+theorem _root_.Lean.Expr.abstractFVars_isForall
+    (Δ : VLCtx) (expression : Lean.Expr) :
+    (Lean.Expr.abstractFVars Δ expression).isForall = expression.isForall := by
+  exact Lean.Expr.abstractFVarsAux_isForall 0 Δ.fvars expression
+
+/-- Adding a fresh free-assumption slot and immediately instantiating it is
+the positional successor step of alpha normalization. -/
+theorem _root_.Lean.Expr.abstractFVars_cons_instantiate1
+    {Δ : VLCtx} {fv : Lean.FVarId} {deps : List Lean.FVarId}
+    {declaration : VLocalDecl} {body : Lean.Expr}
+    (avoid : body.FVarsIn (· ≠ fv)) :
+    Lean.Expr.abstractFVars ((some (fv, deps), declaration) :: Δ)
+        (body.instantiate1 (.fvar fv)) =
+      Lean.Expr.abstractFVarsAux 1 Δ.fvars body := by
+  simp only [Lean.Expr.abstractFVars, Lean.Expr.instantiate1_eq]
+  change Lean.Expr.abstractFVarsAux 0 (fv :: Δ.fvars)
+      (body.instantiate1' (.fvar fv)) = _
+  rw [Lean.Expr.abstractFVarsAux]
+  rw [avoid.abstract_instantiate1 (k := 0)]
+
+/-- Transparent annotation peeling commutes with abstracting one kernel free
+variable. -/
+theorem AddInductive.consumeTypeAnnotations_abstract1
+    (source : Lean.Expr) (fv : Lean.FVarId) (depth : Nat) :
+    AddInductive.consumeTypeAnnotations
+        (Lean.Expr.abstract1 fv source depth) =
+      Lean.Expr.abstract1 fv
+        (AddInductive.consumeTypeAnnotations source) depth := by
+  fun_induction AddInductive.consumeTypeAnnotations source <;>
+    simp_all [AddInductive.consumeTypeAnnotations, Lean.Expr.abstract1]
+  case case7 source _ _ =>
+    cases source <;>
+      simp_all [AddInductive.consumeTypeAnnotations, Lean.Expr.abstract1]
+    case fvar =>
+      split <;> unfold AddInductive.consumeTypeAnnotations <;> rfl
+    case app =>
+      rename_i fn arg hNotApp hNotConst
+      cases fn <;>
+        simp_all [AddInductive.consumeTypeAnnotations, Lean.Expr.abstract1]
+      case app fn type =>
+        cases fn <;>
+          simp_all [AddInductive.consumeTypeAnnotations,
+            Lean.Expr.abstract1]
+        case fvar =>
+          split <;> unfold AddInductive.consumeTypeAnnotations <;> rfl
+      all_goals
+        split <;> unfold AddInductive.consumeTypeAnnotations <;> rfl
+
+theorem AddInductive.consumeTypeAnnotations_abstractFVarsAux
+    (depth : Nat) (fvars : List Lean.FVarId) (source : Lean.Expr) :
+    AddInductive.consumeTypeAnnotations
+        (Lean.Expr.abstractFVarsAux depth fvars source) =
+      Lean.Expr.abstractFVarsAux depth fvars
+        (AddInductive.consumeTypeAnnotations source) := by
+  induction fvars generalizing depth source with
+  | nil => rfl
+  | cons fv fvars ih =>
+      simp only [Lean.Expr.abstractFVarsAux, ih,
+        AddInductive.consumeTypeAnnotations_abstract1]
+
+theorem AddInductive.consumeTypeAnnotations_abstractFVars
+    (Δ : VLCtx) (source : Lean.Expr) :
+    AddInductive.consumeTypeAnnotations
+        (Lean.Expr.abstractFVars Δ source) =
+      Lean.Expr.abstractFVars Δ
+        (AddInductive.consumeTypeAnnotations source) := by
+  exact AddInductive.consumeTypeAnnotations_abstractFVarsAux
+    0 Δ.fvars source
+
+theorem VLCtx.BVarLamOnly.snoc
+    {pre : VLCtx} {type : VExpr}
+    (shape : pre.BVarLamOnly) :
+    (pre ++ [(none, VLocalDecl.vlam type)]).BVarLamOnly := by
+  induction shape with
+  | nil => exact .cons .nil
+  | cons shape ih => exact .cons ih
+
+private theorem VLCtx.Abstract.underBVarLams
+    {pre base : VLCtx} {fv : Lean.FVarId}
+    {deps : List Lean.FVarId} {type : VExpr}
+    (shape : pre.BVarLamOnly) :
+    VLCtx.Abstract base fv (VLocalDecl.vlam type) pre.length pre.length
+      (pre ++ (some (fv, deps), VLocalDecl.vlam type) :: base)
+      (pre ++ (none, VLocalDecl.vlam type) :: base) := by
+  induction shape with
+  | nil => exact .zero
+  | @cons preTail preType shape ih =>
+      simpa only [List.length_cons, List.cons_append,
+        VLocalDecl.depth, Nat.add_comm] using
+        VLCtx.Abstract.succ (d := VLocalDecl.vlam preType) ih
+
+private theorem TrExprS.abstractFVarsAux
+    {env : VEnv} {Us : List Name}
+    {pre suffix : VLCtx} {source : Lean.Expr} {target : VExpr}
+    (preShape : pre.BVarLamOnly)
+    (suffixShape : suffix.FVarLamOnly)
+    (run : TrExprS env Us (pre ++ suffix) source target) :
+    TrExprS env Us (pre ++ VLCtx.bvarize suffix)
+      (Lean.Expr.abstractFVarsAux pre.length suffix.fvars source) target := by
+  induction suffixShape generalizing pre source with
+  | nil =>
+      simpa [VLCtx.bvarize, Lean.Expr.abstractFVarsAux] using run
+  | @cons suffix fv deps type suffixShape ih =>
+      have abstracted := run.abstract
+        (VLCtx.Abstract.underBVarLams preShape)
+      have tail := ih (preShape.snoc (type := type)) (by
+        simpa only [List.append_assoc, List.singleton_append] using
+          abstracted)
+      simpa [VLCtx.bvarize, VLCtx.fvars, Lean.Expr.abstractFVarsAux,
+        List.length_append] using tail
+
+/-- Strict translation is invariant under alpha-normalizing every producer
+free-variable slot into its corresponding bound-variable position. -/
+theorem TrExprS.abstractFVars
+    {env : VEnv} {Us : List Name}
+    {Δ : VLCtx} {source : Lean.Expr} {target : VExpr}
+    (shape : Δ.FVarLamOnly)
+    (run : TrExprS env Us Δ source target) :
+    TrExprS env Us (VLCtx.bvarize Δ)
+      (Lean.Expr.abstractFVars Δ source) target := by
+  simpa [Lean.Expr.abstractFVars] using
+    TrExprS.abstractFVarsAux VLCtx.BVarLamOnly.nil shape run
+
+theorem VLCtx.bvarize_toCtx (Δ : VLCtx) :
+    (VLCtx.bvarize Δ).toCtx = Δ.toCtx := by
+  induction Δ with
+  | nil => rfl
+  | cons head Δ ih =>
+      rcases head with ⟨metadata, declaration⟩
+      cases declaration <;>
+        simp_all [VLCtx.bvarize, VLCtx.toCtx]
+
+/-- Pointwise definitional equality of free-assumption contexts, allowing
+the kernel free-variable identifiers and dependency metadata to differ. -/
+inductive VLCtx.FVarAlpha (env : VEnv) (U : Nat) :
+    VLCtx → VLCtx → Prop
+  | nil : FVarAlpha env U [] []
+  | cons :
+      FVarAlpha env U left right →
+      VLocalDecl.IsDefEq env U left.toCtx leftDecl rightDecl →
+      FVarAlpha env U
+        ((some (leftFVar, leftDeps), leftDecl) :: left)
+        ((some (rightFVar, rightDeps), rightDecl) :: right)
+
+theorem VLCtx.FVarAlpha.bvarize :
+    VLCtx.FVarAlpha env U left right →
+      VLCtx.IsDefEq env U (VLCtx.bvarize left) (VLCtx.bvarize right)
+  | .nil => .nil
+  | .cons relation declaration => by
+      exact .cons relation.bvarize (by nofun) (by
+        simpa only [VLCtx.bvarize_toCtx] using declaration)
+
+theorem VLCtx.FVarAlpha.defeqCtx
+    (relation : VLCtx.FVarAlpha env U left right) :
+    env.IsDefEqCtx U [] left.toCtx right.toCtx := by
+  simpa only [VLCtx.bvarize_toCtx] using relation.bvarize.defeqCtx
+
+/-- Corresponding free-assumption contexts are alpha-related whenever their
+Theory declarations are pointwise definitionally equal. -/
+theorem _root_.Lean4Lean.VLCtx.FVarAlpha.of_defeqCtx
+    (leftShape : left.FVarLamOnly)
+    (rightShape : right.FVarLamOnly)
+    (contextEq : env.IsDefEqCtx U [] left.toCtx right.toCtx) :
+    VLCtx.FVarAlpha env U left right := by
+  induction leftShape generalizing right with
+  | nil =>
+      cases rightShape with
+      | nil => exact .nil
+      | cons rightShape => cases contextEq
+  | @cons left fv deps type leftShape ih =>
+      cases rightShape with
+      | nil => cases contextEq
+      | @cons right fv' deps' type' rightShape =>
+          cases contextEq with
+          | succ tailContextEq headDefEq =>
+              exact .cons (ih rightShape tailContextEq) (.vlam headDefEq)
+
+/-- Translation congruence for alpha-equivalent kernel expressions under
+pointwise corresponding free-assumption contexts. -/
+theorem TrExprS.uniqAlpha
+    {env : VEnv} {Us : List Name}
+    {left right : VLCtx} {leftSource rightSource : Lean.Expr}
+    {leftTarget rightTarget : VExpr}
+    (henv : VEnv.WF env)
+    (relation : VLCtx.FVarAlpha env Us.length left right)
+    (leftShape : left.FVarLamOnly)
+    (rightShape : right.FVarLamOnly)
+    (leftRun : TrExprS env Us left leftSource leftTarget)
+    (rightRun : TrExprS env Us right rightSource rightTarget)
+    (sourceAlpha : Lean.Expr.abstractFVars left leftSource =
+      Lean.Expr.abstractFVars right rightSource) :
+    env.IsDefEqU Us.length left.toCtx leftTarget rightTarget := by
+  have leftAbstract := leftRun.abstractFVars leftShape
+  have rightAbstract := rightRun.abstractFVars rightShape
+  rw [← sourceAlpha] at rightAbstract
+  have result := leftAbstract.uniq henv relation.bvarize rightAbstract
+  simpa only [VLCtx.bvarize_toCtx] using result
+
+/--
+info: 'Lean4Lean.TrExprS.abstractFVars' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrExprS.abstractFVars
+
+/--
+info: 'Lean4Lean.TrExprS.uniqAlpha' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TrExprS.uniqAlpha
+
 /-- Lift an ordinary Theory context equality back to the translator's
 free-variable-preserving context relation when both implementations contain
 only corresponding free-variable assumptions.  Dependency lists may differ;
@@ -3916,6 +4204,7 @@ structure CandidateAnnotationSnapshot (env : VEnv) (Us : List Name)
   root_eq : root = .forallE name domain body binderInfo
   annotation_match : consumed = AddInductive.consumeTypeAnnotations domain
   domain_tr : TrExprS env Us Δ domain domain'
+  body_fvars : body.FVarsIn (· ∈ Δ.fvars)
   consumed_tr : TrExprS env Us Δ consumed consumed'
   domain_type : env.HasType Us.length Δ.toCtx domain' (.sort sort)
   annotation_run : IsDefEqRun env Us Δ domain consumed domain' consumed'
@@ -3969,6 +4258,7 @@ theorem CandidateExprRun.annotationSnapshot
           root_eq := rfl
           annotation_match := annotationMatch
           domain_tr := domainRun.source_tr
+          body_fvars := node.whnf.rhs_tr.fvarsIn.2
           consumed_tr := annotationsRun.rhs_tr
           domain_type := domainType
           annotation_run := annotationsRun }⟩
@@ -4011,6 +4301,102 @@ inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
           annotations annotationsEq checked normalized domainCandidate
           bodyCandidate)
         Δ terminalΔ (storedDomain' :: domains)
+
+/-- An exact producer-owned suffix of an annotation spine.  The cursor owns
+the literal recursive trace and verified context reached at that position. -/
+structure CandidateAnnotationCursor (env : VEnv) (Us : List Name)
+    (terminalΔ : VLCtx) where
+  candidateContext : AddInductive.Context
+  source : Expr
+  trace : AddInductive.CandidateExprTrace candidateContext source
+  Δ : VLCtx
+  domains : List VExpr
+  spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains
+  shape : Δ.FVarLamOnly
+  stored : trace.storedSpine = true
+  annotations : trace.validationAnnotations
+  terminal_notForall : trace.terminalResult.isForall = false
+
+/-- The exact suffix selected by a structural annotation position, together
+with its prefix context, free-variable inventory, and unchanged fuel. -/
+structure CandidateAnnotationSpine.PositionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    {count : Nat} (position : trace.AnnotationAt count) where
+  cursor : CandidateAnnotationCursor env Us terminalΔ
+  root_eq : position.root = cursor.trace.rootWhnf
+  context_eq : cursor.Δ.toCtx =
+    (domains.take count).reverse ++ Δ.toCtx
+  fvars_eq : cursor.Δ.fvars.map Expr.fvar =
+    (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
+  fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
+
+/-- Follow an annotation path into the literal recursive spine.  No suffix
+trace, context, or semantic snapshot is independently reselected. -/
+theorem CandidateAnnotationSpine.positionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly)
+    (stored : trace.storedSpine = true)
+    (annotations : trace.validationAnnotations)
+    (terminalNotForall : trace.terminalResult.isForall = false)
+    {count : Nat} (position : trace.AnnotationAt count) :
+    Nonempty (spine.PositionSuffix position) := by
+  induction position generalizing Δ terminalΔ domains with
+  | zero annotationMatch =>
+      exact ⟨{
+        cursor := {
+          candidateContext := _
+          source := _
+          trace := _
+          Δ := Δ
+          domains := domains
+          spine := spine
+          shape := initialShape
+          stored := stored
+          annotations := annotations
+          terminal_notForall := terminalNotForall }
+        root_eq := rfl
+        context_eq := rfl
+        fvars_eq := rfl
+        fuel_eq := rfl }⟩
+  | succ bodyCandidate position ih =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
+          simp only [AddInductive.CandidateExprTrace.storedSpine,
+            Bool.and_eq_true] at stored
+          rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+          obtain ⟨suffix⟩ := ih tail (.cons initialShape) stored.2
+            tailAnnotations terminalNotForall
+          exact ⟨{
+            cursor := suffix.cursor
+            root_eq := suffix.root_eq
+            context_eq := by
+              simpa only [List.take_succ_cons, List.reverse_cons,
+                List.singleton_append, List.append_assoc, VLCtx.toCtx] using
+                suffix.context_eq
+            fvars_eq := by
+              simpa [VLCtx.fvars, List.append_assoc,
+                AddInductive.Context.freshExpr,
+                AddInductive.CandidateExprTrace.parameterList] using
+                suffix.fvars_eq
+            fuel_eq := by
+              simpa [AddInductive.Context.pushLocalDecl] using
+                suffix.fuel_eq }⟩
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.positionSuffix' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.positionSuffix
 
 /-- The exact annotation prefix context embeds into the exact terminal
 context by skipping precisely the remaining producer-owned binder slots. -/
@@ -4264,6 +4650,740 @@ info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt_shaped' depends
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateAnnotationSpine.snapshotAt_shaped
+
+/-- Construct one exact validator index domain from an alpha-equivalent
+candidate annotation snapshot.
+
+The validator context may contain unrelated producer locals between the
+shared parameter prefix and its newly allocated index locals.  `base` removes
+those slots, `reference` re-inserts them through the exact lift, and
+`FVarAlpha` compares the resulting kernel expression with the candidate after
+both free-variable inventories are abstracted to one positional telescope. -/
+theorem FamilyParameterIndexBoundary.indexDomainRun_of_alpha
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    {env : VEnv} {Us : List Name} {candidateRoot : Lean.Expr}
+    (candidate : CandidateAnnotationSnapshot env Us candidateRoot)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    {base reference : VLCtx} {lift : Lift}
+    (baseShape : base.FVarLamOnly)
+    (candidateShape : candidate.Δ.FVarLamOnly)
+    (relation : VLCtx.FVarAlpha env Us.length base candidate.Δ)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length
+      contextRun.context.vlctx reference)
+    (sourceScope : boundary.source.FVarsIn (· ∈ base.fvars))
+    (sourceAlpha : Lean.Expr.abstractFVars base boundary.source =
+      Lean.Expr.abstractFVars candidate.Δ candidateRoot)
+    (isForall : boundary.source.isForall = true) :
+    Nonempty boundary.IndexDomainRun := by
+  have henv : VEnv.WF env := by
+    simpa only [venv_eq] using contextRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length contextRun.context.vlctx := by
+    simpa only [venv_eq, lparams_eq] using contextRun.context.Δwf
+  have referenceWF : VLCtx.WF env Us.length reference :=
+    (currentReference.symm henv.ordered).wf
+  have baseWF : VLCtx.WF env Us.length base :=
+    referenceLift.wf henv referenceWF
+  obtain ⟨translation⟩ :=
+    boundary.indexDomainTranslation_of_forall isForall
+  have rootAlpha : Lean.Expr.abstractFVars base
+      (.forallE translation.name translation.domain translation.body
+        translation.binderInfo) =
+      Lean.Expr.abstractFVars candidate.Δ
+        (.forallE candidate.name candidate.domain candidate.body
+          candidate.binderInfo) := by
+    calc
+      Lean.Expr.abstractFVars base
+          (.forallE translation.name translation.domain translation.body
+            translation.binderInfo) =
+          Lean.Expr.abstractFVars base boundary.source :=
+        congrArg (Lean.Expr.abstractFVars base)
+          translation.source_eq.symm
+      _ = Lean.Expr.abstractFVars candidate.Δ candidateRoot := sourceAlpha
+      _ = Lean.Expr.abstractFVars candidate.Δ
+          (.forallE candidate.name candidate.domain candidate.body
+            candidate.binderInfo) :=
+        congrArg (Lean.Expr.abstractFVars candidate.Δ) candidate.root_eq
+  rw [Lean.Expr.abstractFVars_forallE,
+    Lean.Expr.abstractFVars_forallE] at rootAlpha
+  simp only [Lean.Expr.forallE.injEq] at rootAlpha
+  obtain ⟨_nameAlpha, domainAlpha, _bodyAlpha, _binderAlpha⟩ := rootAlpha
+  have consumedAlpha : Lean.Expr.abstractFVars base
+      (AddInductive.consumeTypeAnnotations translation.domain) =
+      Lean.Expr.abstractFVars candidate.Δ candidate.consumed := by
+    calc
+      Lean.Expr.abstractFVars base
+          (AddInductive.consumeTypeAnnotations translation.domain) =
+          AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars base translation.domain) :=
+        (AddInductive.consumeTypeAnnotations_abstractFVars
+          base translation.domain).symm
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars candidate.Δ candidate.domain) :=
+        congrArg AddInductive.consumeTypeAnnotations domainAlpha
+      _ = Lean.Expr.abstractFVars candidate.Δ
+            (AddInductive.consumeTypeAnnotations candidate.domain) :=
+        AddInductive.consumeTypeAnnotations_abstractFVars
+          candidate.Δ candidate.domain
+      _ = Lean.Expr.abstractFVars candidate.Δ candidate.consumed :=
+        congrArg (Lean.Expr.abstractFVars candidate.Δ)
+          candidate.annotation_match.symm
+  have sourceScope' := sourceScope
+  rw [translation.source_eq] at sourceScope'
+  have domainScope : translation.domain.FVarsIn (· ∈ base.fvars) :=
+    sourceScope'.1
+  have consumedScope :
+      (AddInductive.consumeTypeAnnotations translation.domain).FVarsIn
+        (· ∈ base.fvars) := by
+    cases htrace : AddInductive.CandidateTypeAnnotationTrace.build
+        translation.domain with
+    | mk consumed trace =>
+        have consumed_eq : consumed =
+            AddInductive.consumeTypeAnnotations translation.domain := by
+          simpa only [htrace] using
+            AddInductive.CandidateTypeAnnotationTrace.build_consumed
+              translation.domain
+        simpa only [← consumed_eq] using
+          candidateTypeAnnotation_fvarsIn trace domainScope
+  have currentNoBV : contextRun.context.vlctx.NoBV := by
+    exact contextRun.context.mlctx.noBV
+  have domainClosed : Closed translation.domain 0 := by
+    simpa only [currentNoBV] using translation.domain_tr.closed
+  have consumedClosed :
+      Closed (AddInductive.consumeTypeAnnotations translation.domain) 0 := by
+    simpa only [currentNoBV] using translation.consumed_tr.closed
+  have currentDomainTr : TrExprS env Us contextRun.context.vlctx
+      translation.domain translation.domain' := by
+    simpa only [VContext.TrExprS, venv_eq, lparams_eq] using
+      translation.domain_tr
+  have currentConsumedTr : TrExprS env Us contextRun.context.vlctx
+      (AddInductive.consumeTypeAnnotations translation.domain)
+      translation.consumed' := by
+    simpa only [VContext.TrExprS, venv_eq, lparams_eq] using
+      translation.consumed_tr
+  obtain ⟨baseDomain, baseDomainTr⟩ :=
+    currentDomainTr.weakFV'_inv henv referenceLift currentReference
+      domainClosed domainScope
+  obtain ⟨baseConsumed, baseConsumedTr⟩ :=
+    currentConsumedTr.weakFV'_inv henv referenceLift currentReference
+      consumedClosed consumedScope
+  have baseDomainEq : env.IsDefEqU Us.length base.toCtx
+      baseDomain candidate.domain' :=
+    baseDomainTr.uniqAlpha henv relation baseShape candidateShape
+      candidate.domain_tr domainAlpha
+  have baseConsumedEq : env.IsDefEqU Us.length base.toCtx
+      baseConsumed candidate.consumed' :=
+    baseConsumedTr.uniqAlpha henv relation baseShape candidateShape
+      candidate.consumed_tr consumedAlpha
+  have annotationAtCandidate : env.IsDefEqU Us.length
+      candidate.Δ.toCtx candidate.domain' candidate.consumed' :=
+    candidate.annotation_run.isDefEqU
+  have annotationAtBase : env.IsDefEqU Us.length base.toCtx
+      baseDomain baseConsumed := by
+    have candidateAtBase := annotationAtCandidate.defeqDFC henv.ordered
+      (relation.defeqCtx.symm henv.ordered)
+    exact (baseDomainEq.trans henv baseWF.toCtx candidateAtBase).trans
+      henv baseWF.toCtx baseConsumedEq.symm
+  have annotationAtReference :=
+    annotationAtBase.weak' henv.ordered referenceLift.toCtx
+  have baseDomainAtReference :=
+    baseDomainTr.weakFV' henv.ordered referenceLift referenceWF
+  have baseConsumedAtReference :=
+    baseConsumedTr.weakFV' henv.ordered referenceLift referenceWF
+  have currentDomainEq :=
+    currentDomainTr.uniq henv currentReference baseDomainAtReference
+  have currentConsumedEq :=
+    currentConsumedTr.uniq henv currentReference baseConsumedAtReference
+  have annotationAtCurrent :=
+    annotationAtReference.defeqDFC henv.ordered
+      ((currentReference.symm henv.ordered).defeqCtx)
+  have annotationU : env.IsDefEqU Us.length
+      contextRun.context.vlctx.toCtx translation.domain'
+      translation.consumed' :=
+    (currentDomainEq.trans henv currentWF.toCtx annotationAtCurrent).trans
+      henv currentWF.toCtx currentConsumedEq.symm
+  have domainType : env.IsType Us.length contextRun.context.vlctx.toCtx
+      translation.domain' := by
+    simpa only [VContext.IsType, venv_eq, lparams_eq] using
+      translation.domain_type
+  obtain ⟨sort, domainHasType⟩ := domainType
+  have annotationDef := annotationU.of_l henv currentWF.toCtx domainHasType
+  exact ⟨{
+    translation := translation
+    sort := sort
+    annotation_def := by
+      simpa only [venv_eq, lparams_eq] using annotationDef }⟩
+
+/-- Exact validator-owned chain consuming a producer annotation suffix.
+Every step stores the completed domain run and the literal retained advance;
+`done` marks exhaustion of the producer annotation spine. -/
+inductive FamilyParameterIndexBoundary.IndexDomainChain :
+    {nparams : Nat} → {stats : AddInductive.InductiveStats} →
+    {context : AddInductive.Context} → {rootSource : Lean.Expr} →
+    {i nindices rootFuel : Nat} →
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel} →
+    {contextRun : CandidateContextRun context} →
+    (boundary : FamilyParameterIndexBoundary outer contextRun) → Type where
+  | done
+      {boundary : FamilyParameterIndexBoundary outer contextRun} :
+      FamilyParameterIndexBoundary.IndexDomainChain boundary
+  | step
+      {boundary : FamilyParameterIndexBoundary outer contextRun}
+      (run : boundary.IndexDomainRun)
+      (advance : FamilyParameterIndexBoundary.IndexDomainAdvance run)
+      (tail : FamilyParameterIndexBoundary.IndexDomainChain
+        advance.toBoundary) :
+      FamilyParameterIndexBoundary.IndexDomainChain boundary
+
+/-- Lowered data needed to extend an alpha cursor after one exact domain. -/
+structure FamilyParameterIndexBoundary.IndexDomainAlphaPreparation
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    (boundary : FamilyParameterIndexBoundary outer contextRun)
+    {env : VEnv} {Us : List Name} {candidateRoot : Lean.Expr}
+    (candidate : CandidateAnnotationSnapshot env Us candidateRoot)
+    {base reference : VLCtx} {lift : Lift}
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (run : boundary.IndexDomainRun) where
+  baseConsumed : VExpr
+  base_consumed_tr : TrExprS env Us base
+    (AddInductive.consumeTypeAnnotations run.translation.domain) baseConsumed
+  base_consumed_candidate : env.IsDefEq Us.length base.toCtx
+    baseConsumed candidate.consumed' (.sort candidate.sort)
+  current_consumed_reference : env.IsDefEq Us.length
+    contextRun.context.vlctx.toCtx run.translation.consumed'
+    (baseConsumed.lift' lift) (.sort run.sort)
+
+/-- Recover the exact lowered consumed domain and both equalities required to
+extend the base/reference alpha invariant after a completed domain run. -/
+theorem FamilyParameterIndexBoundary.IndexDomainRun.alphaPreparation
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (run : boundary.IndexDomainRun)
+    {env : VEnv} {Us : List Name} {candidateRoot : Lean.Expr}
+    (candidate : CandidateAnnotationSnapshot env Us candidateRoot)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    {base reference : VLCtx} {lift : Lift}
+    (baseShape : base.FVarLamOnly)
+    (candidateShape : candidate.Δ.FVarLamOnly)
+    (relation : VLCtx.FVarAlpha env Us.length base candidate.Δ)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length
+      contextRun.context.vlctx reference)
+    (sourceScope : boundary.source.FVarsIn (· ∈ base.fvars))
+    (sourceAlpha : Lean.Expr.abstractFVars base boundary.source =
+      Lean.Expr.abstractFVars candidate.Δ candidateRoot) :
+    Nonempty (boundary.IndexDomainAlphaPreparation candidate referenceLift
+      run) := by
+  have henv : VEnv.WF env := by
+    simpa only [venv_eq] using contextRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length contextRun.context.vlctx := by
+    simpa only [venv_eq, lparams_eq] using contextRun.context.Δwf
+  have referenceWF : VLCtx.WF env Us.length reference :=
+    (currentReference.symm henv.ordered).wf
+  have baseWF : VLCtx.WF env Us.length base :=
+    referenceLift.wf henv referenceWF
+  have rootAlpha : Lean.Expr.abstractFVars base
+      (.forallE run.translation.name run.translation.domain
+        run.translation.body run.translation.binderInfo) =
+      Lean.Expr.abstractFVars candidate.Δ
+        (.forallE candidate.name candidate.domain candidate.body
+          candidate.binderInfo) := by
+    calc
+      Lean.Expr.abstractFVars base
+          (.forallE run.translation.name run.translation.domain
+            run.translation.body run.translation.binderInfo) =
+          Lean.Expr.abstractFVars base boundary.source :=
+        congrArg (Lean.Expr.abstractFVars base)
+          run.translation.source_eq.symm
+      _ = Lean.Expr.abstractFVars candidate.Δ candidateRoot := sourceAlpha
+      _ = Lean.Expr.abstractFVars candidate.Δ
+          (.forallE candidate.name candidate.domain candidate.body
+            candidate.binderInfo) :=
+        congrArg (Lean.Expr.abstractFVars candidate.Δ) candidate.root_eq
+  rw [Lean.Expr.abstractFVars_forallE,
+    Lean.Expr.abstractFVars_forallE] at rootAlpha
+  simp only [Lean.Expr.forallE.injEq] at rootAlpha
+  obtain ⟨_nameAlpha, domainAlpha, _bodyAlpha, _binderAlpha⟩ := rootAlpha
+  have consumedAlpha : Lean.Expr.abstractFVars base
+      (AddInductive.consumeTypeAnnotations run.translation.domain) =
+      Lean.Expr.abstractFVars candidate.Δ candidate.consumed := by
+    calc
+      Lean.Expr.abstractFVars base
+          (AddInductive.consumeTypeAnnotations run.translation.domain) =
+          AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars base run.translation.domain) :=
+        (AddInductive.consumeTypeAnnotations_abstractFVars
+          base run.translation.domain).symm
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars candidate.Δ candidate.domain) :=
+        congrArg AddInductive.consumeTypeAnnotations domainAlpha
+      _ = Lean.Expr.abstractFVars candidate.Δ
+            (AddInductive.consumeTypeAnnotations candidate.domain) :=
+        AddInductive.consumeTypeAnnotations_abstractFVars
+          candidate.Δ candidate.domain
+      _ = Lean.Expr.abstractFVars candidate.Δ candidate.consumed :=
+        congrArg (Lean.Expr.abstractFVars candidate.Δ)
+          candidate.annotation_match.symm
+  have sourceScope' := sourceScope
+  rw [run.translation.source_eq] at sourceScope'
+  have domainScope : run.translation.domain.FVarsIn (· ∈ base.fvars) :=
+    sourceScope'.1
+  have consumedScope :
+      (AddInductive.consumeTypeAnnotations run.translation.domain).FVarsIn
+        (· ∈ base.fvars) := by
+    cases htrace : AddInductive.CandidateTypeAnnotationTrace.build
+        run.translation.domain with
+    | mk consumed trace =>
+        have consumed_eq : consumed =
+            AddInductive.consumeTypeAnnotations run.translation.domain := by
+          simpa only [htrace] using
+            AddInductive.CandidateTypeAnnotationTrace.build_consumed
+              run.translation.domain
+        simpa only [← consumed_eq] using
+          candidateTypeAnnotation_fvarsIn trace domainScope
+  have currentNoBV : contextRun.context.vlctx.NoBV :=
+    contextRun.context.mlctx.noBV
+  have consumedClosed :
+      Closed (AddInductive.consumeTypeAnnotations run.translation.domain) 0 := by
+    simpa only [currentNoBV] using run.translation.consumed_tr.closed
+  have currentConsumedTr : TrExprS env Us contextRun.context.vlctx
+      (AddInductive.consumeTypeAnnotations run.translation.domain)
+      run.translation.consumed' := by
+    simpa only [VContext.TrExprS, venv_eq, lparams_eq] using
+      run.translation.consumed_tr
+  obtain ⟨baseConsumed, baseConsumedTr⟩ :=
+    currentConsumedTr.weakFV'_inv henv referenceLift currentReference
+      consumedClosed consumedScope
+  have baseConsumedEq : env.IsDefEqU Us.length base.toCtx
+      baseConsumed candidate.consumed' :=
+    baseConsumedTr.uniqAlpha henv relation baseShape candidateShape
+      candidate.consumed_tr consumedAlpha
+  have candidateAnnotation := candidate.annotation_run.isDefEqU.of_l
+    henv candidate.context_wf.toCtx candidate.domain_type
+  have candidateConsumedAtBase : env.HasType Us.length base.toCtx
+      candidate.consumed' (.sort candidate.sort) :=
+    candidateAnnotation.hasType.2.defeqDFC henv.ordered
+      (relation.defeqCtx.symm henv.ordered)
+  have baseConsumedCandidate := baseConsumedEq.of_r henv baseWF.toCtx
+    candidateConsumedAtBase
+  have baseConsumedAtReference :=
+    baseConsumedTr.weakFV' henv.ordered referenceLift referenceWF
+  have currentConsumedEq :=
+    currentConsumedTr.uniq henv currentReference baseConsumedAtReference
+  have currentConsumedType : env.HasType Us.length
+      contextRun.context.vlctx.toCtx run.translation.consumed'
+      (.sort run.sort) := by
+    simpa only [venv_eq, lparams_eq] using run.annotation_def.hasType.2
+  have currentConsumedReference' := currentConsumedEq.of_l henv
+    currentWF.toCtx currentConsumedType
+  have currentConsumedReference : env.IsDefEq Us.length
+      contextRun.context.vlctx.toCtx run.translation.consumed'
+      (baseConsumed.lift' lift) (.sort run.sort) := by
+    simpa using currentConsumedReference'
+  exact ⟨{
+    baseConsumed := baseConsumed
+    base_consumed_tr := baseConsumedTr
+    base_consumed_candidate := baseConsumedCandidate
+    current_consumed_reference := currentConsumedReference }⟩
+
+/-- Consume every Pi node in an exact producer annotation cursor through the
+validator's retained index trace.
+
+The base context removes unrelated earlier-family locals, while `reference`
+re-inserts them.  After each exact `advance`, both contexts and the positional
+alpha relation are extended with the consumed domain chosen at that node. -/
+theorem CandidateAnnotationCursor.indexDomainChain
+    {env : VEnv} {Us : List Name} {terminalΔ : VLCtx}
+    (cursor : CandidateAnnotationCursor env Us terminalΔ)
+    (terminalWF : VLCtx.WF env Us.length terminalΔ)
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    (boundary : FamilyParameterIndexBoundary outer contextRun)
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    {base reference : VLCtx} {lift : Lift}
+    (baseShape : base.FVarLamOnly)
+    (relation : VLCtx.FVarAlpha env Us.length base cursor.Δ)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length
+      contextRun.context.vlctx reference)
+    (sourceScope : boundary.source.FVarsIn (· ∈ base.fvars))
+    (sourceAlpha : Lean.Expr.abstractFVars base boundary.source =
+      Lean.Expr.abstractFVars cursor.Δ cursor.trace.rootWhnf)
+    (whnfFuel : Nat)
+    (validatorDepth : context.fuel.recDepth = whnfFuel + 1)
+    (candidateDepth : cursor.candidateContext.fuel.recDepth =
+      whnfFuel + 1) :
+    Nonempty boundary.IndexDomainChain := by
+  rcases cursor with ⟨candidateContext, candidateSource, candidateTrace,
+    candidateΔ, candidateDomains, spine, candidateShape, stored,
+    annotations, terminalNotForall⟩
+  induction spine generalizing nparams stats context rootSource i nindices
+      rootFuel outer contextRun boundary base reference lift with
+  | terminal =>
+      exact ⟨.done⟩
+  | @forallE candidateContext candidateDomain candidateName
+      candidateBinderInfo candidateBody candidateΔ terminalΔ candidateSource
+      candidateInferred candidateFresh annotationsNode annotationsEq
+      candidateChecked candidateNormalized domainCandidate bodyCandidate
+      storedDomain candidateDomains head tail ih =>
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at stored
+      rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      subst candidateΔ
+      have boundaryForall : boundary.source.isForall = true := by
+        have rootShape := congrArg Lean.Expr.isForall sourceAlpha
+        rw [Lean.Expr.abstractFVars_isForall,
+          Lean.Expr.abstractFVars_isForall] at rootShape
+        simpa only [AddInductive.CandidateExprTrace.rootWhnf,
+          Lean.Expr.isForall] using rootShape
+      obtain ⟨run⟩ := boundary.indexDomainRun_of_alpha snapshot venv_eq
+        lparams_eq baseShape candidateShape relation referenceLift
+        currentReference sourceScope sourceAlpha boundaryForall
+      obtain ⟨preparation⟩ := run.alphaPreparation snapshot venv_eq
+        lparams_eq baseShape candidateShape relation referenceLift
+        currentReference sourceScope sourceAlpha
+      obtain ⟨advance⟩ := run.advance whnfFuel validatorDepth
+      have henv : VEnv.WF env := by
+        simpa only [venv_eq] using contextRun.context.Ewf
+      have candidateTailWF := tail.terminalLift.wf henv terminalWF
+      let candidateTailTrace := bodyCandidate
+      cases tail with
+      | terminal =>
+          exact ⟨.step run advance .done⟩
+      | forallE nextDomainCandidate nextBodyCandidate nextStoredDomain
+          nextDomains nextHead nextTail =>
+          have currentWF : VLCtx.WF env Us.length
+              contextRun.context.vlctx := by
+            simpa only [venv_eq, lparams_eq] using contextRun.context.Δwf
+          have referenceWF : VLCtx.WF env Us.length reference :=
+            (currentReference.symm henv.ordered).wf
+          let deps := (AddInductive.consumeTypeAnnotations
+            run.translation.domain).fvarsList
+          let nextBase : VLCtx :=
+            (some (context.freshFVarId, deps),
+              .vlam preparation.baseConsumed) :: base
+          let nextReference : VLCtx :=
+            (some (context.freshFVarId, deps),
+              .vlam (preparation.baseConsumed.lift' lift)) :: reference
+          have depsSubset : deps ⊆ base.fvars := by
+            exact (fvarsIn_iff.mp
+              preparation.base_consumed_tr.fvarsIn).1
+          have nextReferenceLift : VLCtx.FVLift' nextBase nextReference 0
+              (.consN lift 1) 0 := by
+            simpa only [nextBase, nextReference, VLocalDecl.lift',
+              VLocalDecl.depth] using referenceLift.cons_fvar
+                (context.freshFVarId, deps) (.vlam preparation.baseConsumed)
+                depsSubset
+          have pushedVenv : run.pushContext.context.venv = env := by
+            change contextRun.context.venv = env
+            exact venv_eq
+          have pushedLparams : run.pushContext.context.lparams = Us := by
+            change contextRun.context.lparams = Us
+            exact lparams_eq
+          have pushedWF : VLCtx.WF env Us.length
+              run.pushContext.context.vlctx := by
+            simpa only [pushedVenv, pushedLparams] using
+              run.pushContext.context.Δwf
+          have nextCurrentReference : VLCtx.IsDefEq env Us.length
+              run.pushContext.context.vlctx nextReference := by
+            have concrete : VLCtx.IsDefEq env Us.length
+                ((some (context.freshFVarId, deps),
+                    .vlam run.translation.consumed') ::
+                  contextRun.context.vlctx)
+                nextReference := by
+              exact .cons currentReference pushedWF.2.1
+                (.vlam preparation.current_consumed_reference)
+            change VLCtx.IsDefEq env Us.length
+              ((some (context.freshFVarId, deps),
+                  .vlam run.translation.consumed') ::
+                contextRun.context.vlctx) nextReference
+            exact concrete
+          have nextRelation : VLCtx.FVarAlpha env Us.length nextBase
+              ((some (candidateContext.freshFVarId,
+                  annotationsNode.consumed.fvarsList),
+                .vlam storedDomain) :: snapshot.Δ) := by
+            rw [← snapshotStored]
+            exact .cons relation (.vlam
+              preparation.base_consumed_candidate)
+          have nextBaseShape : nextBase.FVarLamOnly := by
+            exact .cons baseShape
+          have nextCandidateShape : VLCtx.FVarLamOnly
+              ((some (candidateContext.freshFVarId,
+                  annotationsNode.consumed.fvarsList),
+                VLocalDecl.vlam storedDomain) :: snapshot.Δ) := by
+            exact .cons candidateShape
+          have currentSourceScope := sourceScope
+          rw [run.translation.source_eq] at currentSourceScope
+          have validatorBodyScope : run.translation.body.FVarsIn
+              (· ∈ base.fvars) := currentSourceScope.2
+          have freshBase : context.freshFVarId ∉ base.fvars := by
+            intro present
+            have presentReference : context.freshFVarId ∈ reference.fvars :=
+              referenceLift.fvars_sublist.subset present
+            have presentCurrent : context.freshFVarId ∈
+                contextRun.context.vlctx.fvars := by
+              rw [currentReference.fvars]
+              exact presentReference
+            exact (pushedWF.2.1 _ _ rfl).1 presentCurrent
+          have validatorBodyAvoid : run.translation.body.FVarsIn
+              (· ≠ context.freshFVarId) := by
+            exact validatorBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact freshBase member)
+          have freshCandidate : candidateContext.freshFVarId ∉
+              snapshot.Δ.fvars := by
+            exact (candidateTailWF.2.1 _ _ rfl).1
+          have snapshotRoot := snapshot.root_eq
+          simp only [Lean.Expr.forallE.injEq] at snapshotRoot
+          obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
+            _snapshotBinder⟩ := snapshotRoot
+          have candidateBodyScope : candidateBody.FVarsIn
+              (· ∈ snapshot.Δ.fvars) := by
+            simpa only [snapshotBody] using snapshot.body_fvars
+          have candidateBodyAvoid : candidateBody.FVarsIn
+              (· ≠ candidateContext.freshFVarId) := by
+            exact candidateBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact freshCandidate member)
+          have rootAlpha : Lean.Expr.abstractFVars base
+              (.forallE run.translation.name run.translation.domain
+                run.translation.body run.translation.binderInfo) =
+              Lean.Expr.abstractFVars snapshot.Δ
+                (.forallE candidateName candidateDomain candidateBody
+                  candidateBinderInfo) := by
+            calc
+              _ = Lean.Expr.abstractFVars base boundary.source :=
+                congrArg (Lean.Expr.abstractFVars base)
+                  run.translation.source_eq.symm
+              _ = Lean.Expr.abstractFVars snapshot.Δ
+                  (AddInductive.CandidateExprTrace.forallE candidateContext
+                    candidateSource candidateInferred candidateName
+                    candidateDomain candidateBody candidateBinderInfo
+                    candidateFresh annotationsNode annotationsEq
+                    candidateChecked candidateNormalized domainCandidate
+                    candidateTailTrace).rootWhnf := sourceAlpha
+              _ = _ := rfl
+          rw [Lean.Expr.abstractFVars_forallE,
+            Lean.Expr.abstractFVars_forallE] at rootAlpha
+          simp only [Lean.Expr.forallE.injEq] at rootAlpha
+          obtain ⟨_alphaName, _alphaDomain, bodyAlpha,
+            _alphaBinder⟩ := rootAlpha
+          have preWhnfAlpha : Lean.Expr.abstractFVars nextBase
+              (run.translation.body.instantiate1 context.freshExpr) =
+              Lean.Expr.abstractFVars
+                ((some (candidateContext.freshFVarId,
+                  annotationsNode.consumed.fvarsList),
+                  .vlam storedDomain) :: snapshot.Δ)
+                (candidateBody.instantiate1 candidateContext.freshExpr) := by
+            calc
+              _ = Lean.Expr.abstractFVarsAux 1 base.fvars
+                  run.translation.body := by
+                exact Lean.Expr.abstractFVars_cons_instantiate1
+                  validatorBodyAvoid
+              _ = Lean.Expr.abstractFVarsAux 1 snapshot.Δ.fvars
+                  candidateBody := bodyAlpha
+              _ = _ := (Lean.Expr.abstractFVars_cons_instantiate1
+                candidateBodyAvoid).symm
+          have tailStored := stored.2
+          simp only [AddInductive.CandidateExprTrace.storedSpine,
+            Bool.and_eq_true] at tailStored
+          have candidateInputForall :
+              (candidateBody.instantiate1
+                candidateContext.freshExpr).isForall = true :=
+            AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+              tailStored.1
+          have validatorInputForall :
+              (run.translation.body.instantiate1
+                context.freshExpr).isForall = true := by
+            have shapeEq := congrArg Lean.Expr.isForall preWhnfAlpha
+            simpa only [Lean.Expr.abstractFVars_isForall,
+              candidateInputForall] using shapeEq
+          have nextValidatorDepth :
+              (context.pushLocalDecl run.translation.name
+                run.translation.binderInfo
+                (AddInductive.consumeTypeAnnotations
+                  run.translation.domain)).fuel.recDepth = whnfFuel + 1 := by
+            simpa [AddInductive.Context.pushLocalDecl] using validatorDepth
+          have validatorViewEq : advance.view =
+              run.translation.body.instantiate1 context.freshExpr :=
+            AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+              advance.whnf_valid whnfFuel nextValidatorDepth
+              validatorInputForall
+          have nextCandidateDepth :
+              (candidateContext.pushLocalDecl candidateName
+                candidateBinderInfo annotationsNode.consumed).fuel.recDepth =
+                whnfFuel + 1 := by
+            simpa [AddInductive.Context.pushLocalDecl] using candidateDepth
+          have candidateViewEq : candidateTailTrace.rootWhnf =
+              candidateBody.instantiate1 candidateContext.freshExpr :=
+            AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+              candidateTailTrace.rootWhnf_valid whnfFuel nextCandidateDepth
+              candidateInputForall
+          have nextSourceAlpha : Lean.Expr.abstractFVars nextBase
+              advance.toBoundary.source =
+              Lean.Expr.abstractFVars
+                ((some (candidateContext.freshFVarId,
+                  annotationsNode.consumed.fvarsList),
+                  .vlam storedDomain) :: snapshot.Δ)
+                candidateTailTrace.rootWhnf := by
+            rw [show advance.toBoundary.source = advance.view by rfl,
+              validatorViewEq, candidateViewEq]
+            exact preWhnfAlpha
+          have nextSourceScope : advance.toBoundary.source.FVarsIn
+              (· ∈ nextBase.fvars) := by
+            rw [show advance.toBoundary.source = advance.view by rfl,
+              validatorViewEq]
+            have bodyScope : run.translation.body.FVarsIn
+                (· ∈ nextBase.fvars) :=
+              validatorBodyScope.mono (by
+                intro fv member
+                simp only [nextBase, VLCtx.fvars]
+                exact .tail _ member)
+            have freshScope : context.freshExpr.FVarsIn
+                (· ∈ nextBase.fvars) := by
+              simp [AddInductive.Context.freshExpr, nextBase, VLCtx.fvars,
+                FVarsIn]
+            simpa only [Lean.Expr.instantiate1_eq] using
+              bodyScope.instantiate1 freshScope
+          have nextValidatorVenv :
+              run.pushContext.context.venv = env := pushedVenv
+          have nextValidatorLparams :
+              run.pushContext.context.lparams = Us := pushedLparams
+          obtain ⟨tailChain⟩ := ih terminalWF advance.toBoundary
+            nextValidatorVenv nextValidatorLparams nextBaseShape
+            nextReferenceLift nextCurrentReference nextSourceScope
+            nextValidatorDepth nextCandidateShape stored.2 tailAnnotations
+            terminalNotForall nextRelation nextSourceAlpha nextCandidateDepth
+          exact ⟨.step run advance tailChain⟩
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.alphaPreparation' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainRun.alphaPreparation
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationCursor.indexDomainChain' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationCursor.indexDomainChain
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.indexDomainRun_of_alpha' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.indexDomainRun_of_alpha
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -5092,6 +6212,7 @@ private theorem CandidateExprRun.annotationSpineContextAux
         root_eq := rfl
         annotation_match := annotationMatch
         domain_tr := domainRun.source_tr
+        body_fvars := node.whnf.rhs_tr.fvarsIn.2
         consumed_tr := annotationsRun.rhs_tr
         domain_type := domainType
         annotation_run := annotationsRun }, rfl, rfl⟩

@@ -4798,6 +4798,11 @@ structure
   parameter_fvars_eq : firstParameterΔ.fvars = snapshot.Δ.fvars
   first_shape : firstParameterΔ.FVarLamOnly
   snapshot_shape : snapshot.Δ.FVarLamOnly
+  first_fvars : firstParameterΔ.fvars.map Expr.fvar =
+    (staging.annotation.firstCandidate.familyType.type.trace.parameterList
+      source.nparams).reverse
+  snapshot_fvars : snapshot.Δ.fvars.map Expr.fvar =
+    (staging.boundary.parameters.map Prod.fst).reverse
   first_terminal_lift : VLCtx.FVLift' firstParameterΔ
     staging.annotation.firstTerminalRun.context.vlctx 0
     (.skipN .refl
@@ -4861,6 +4866,8 @@ theorem
     parameter_fvars_eq := list_map_fvar_injective mappedFVars
     first_shape := firstShape
     snapshot_shape := snapshotShape
+    first_fvars := firstFVars
+    snapshot_fvars := snapshotFVars
     first_terminal_lift := firstTerminalLift
     snapshot_terminal_lift := snapshotTerminalLift
     current_firstTerminal_defeq :=
@@ -5195,6 +5202,186 @@ theorem
     staging.rawFirstIndexPrefixContexts raw context_lctx_eq
   exact staging.firstIndexDomainRun_of_parameterTelescopeDefEq raw prefixes
     (staging.parameterTelescopeDefEq raw prefixes context_lctx_eq)
+
+/-- The producer annotation spine stops at the same non-Pi result recorded by
+the family normalization run. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    annotation.secondCandidate.familyType.type.trace.terminalResult.isForall =
+      false := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have terminals := normalization.familyTerminals
+  rw [← normalization.families.produced.familyTypes_eq] at terminals
+  have candidatesEq := annotation.candidates_eq
+  change normalization.families.candidates =
+    .cons annotation.firstCandidate
+      (.cons annotation.secondCandidate annotation.remainingCandidates)
+    at candidatesEq
+  rw [candidatesEq] at terminals
+  simp only [AddInductive.CandidateList.familyTypes] at terminals
+  cases terminals with
+  | cons firstTerminal remainingTerminals =>
+    cases remainingTerminals with
+    | cons secondTerminal remainingTerminals =>
+      rw [secondTerminal]
+      rfl
+
+/-- Consume the complete second-family producer index suffix through the
+validator's retained trace.  The initial alpha cursor is recovered from the
+shared parameter telescope and then maintained by `indexDomainChain`. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty staging.boundary.IndexDomainChain := by
+  obtain ⟨prefixes⟩ :=
+    staging.rawFirstIndexPrefixContexts raw context_lctx_eq
+  have terminalNotForall := staging.annotation.terminal_notForall
+  obtain ⟨suffix⟩ := staging.annotation.annotation_spine.positionSuffix
+    .nil staging.annotation.stored_spine
+    staging.annotation.validation_annotations terminalNotForall
+    prefixes.position
+  have cursorContext : suffix.cursor.Δ.toCtx =
+      (staging.annotation.storedBinders.take source.nparams).reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using suffix.context_eq
+  have parameterTelescope :=
+    staging.parameterTelescopeDefEq raw prefixes context_lctx_eq
+  have parameterContext : env.IsDefEqCtx Us.length []
+      prefixes.firstParameterΔ.toCtx suffix.cursor.Δ.toCtx := by
+    simpa only [List.append_nil, prefixes.first_context, cursorContext] using
+      parameterTelescope.ctx
+  have relation : VLCtx.FVarAlpha env Us.length
+      prefixes.firstParameterΔ suffix.cursor.Δ :=
+    VLCtx.FVarAlpha.of_defeqCtx prefixes.first_shape suffix.cursor.shape
+      parameterContext
+  have mappedFVars : prefixes.firstParameterΔ.fvars.map Expr.fvar =
+      suffix.cursor.Δ.fvars.map Expr.fvar := by
+    calc
+      prefixes.firstParameterΔ.fvars.map Expr.fvar =
+          (staging.annotation.firstCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse := prefixes.first_fvars
+      _ = (staging.annotation.secondCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse :=
+        congrArg List.reverse
+          (staging.annotation.parameterLists_eq context_lctx_eq)
+      _ = suffix.cursor.Δ.fvars.map Expr.fvar := by
+        have suffixFVars := suffix.fvars_eq
+        change suffix.cursor.Δ.fvars.map Expr.fvar =
+          (staging.annotation.secondCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse ++ [] at suffixFVars
+        simpa only [List.append_nil] using suffixFVars.symm
+  have cursorFVars : prefixes.firstParameterΔ.fvars =
+      suffix.cursor.Δ.fvars :=
+    list_map_fvar_injective mappedFVars
+  have sourceScope : staging.boundary.source.FVarsIn
+      (· ∈ prefixes.firstParameterΔ.fvars) := by
+    rw [prefixes.boundary_root_eq, prefixes.snapshot.root_eq]
+    exact ⟨by
+        simpa only [prefixes.parameter_fvars_eq] using
+          prefixes.snapshot.domain_tr.fvarsIn,
+      by
+        simpa only [prefixes.parameter_fvars_eq] using
+          prefixes.snapshot.body_fvars⟩
+  have sourceAlpha : Lean.Expr.abstractFVars prefixes.firstParameterΔ
+      staging.boundary.source =
+      Lean.Expr.abstractFVars suffix.cursor.Δ
+        suffix.cursor.trace.rootWhnf := by
+    rw [prefixes.boundary_root_eq, suffix.root_eq]
+    simp only [Lean.Expr.abstractFVars, cursorFVars]
+  have terminalWF : VLCtx.WF env Us.length
+      staging.annotation.terminalRun.context.vlctx := by
+    simpa only [staging.annotation.terminal_venv,
+      staging.annotation.terminal_lparams] using
+      staging.annotation.terminalRun.context.Δwf
+  have validatorDepth : staging.position.context.fuel.recDepth =
+      staging.annotation.whnfFuel + 1 := by
+    calc
+      staging.position.context.fuel.recDepth = context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) staging.position_fuel_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth :=
+        rfl
+      _ = staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
+        (congrArg (fun candidateContext => candidateContext.fuel.recDepth)
+          staging.annotation.second_candidate_context_eq).symm
+      _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
+  have candidateDepth : suffix.cursor.candidateContext.fuel.recDepth =
+      staging.annotation.whnfFuel + 1 := by
+    calc
+      suffix.cursor.candidateContext.fuel.recDepth =
+          staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
+      _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
+  exact suffix.cursor.indexDomainChain terminalWF staging.boundary
+    staging.current_venv staging.current_lparams prefixes.first_shape
+    relation prefixes.first_terminal_lift
+    prefixes.current_firstTerminal_defeq sourceScope sourceAlpha
+    staging.annotation.whnfFuel validatorDepth candidateDepth
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq' depends on axioms: [propext,
