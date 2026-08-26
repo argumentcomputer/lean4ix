@@ -1653,7 +1653,8 @@ to the replacement.
 ## D032 — direct Nat.ble certificate
 
 - **Status:** implemented as the seventh semantic UP6 slice; the elementary
-  comparison pair is complete, while shifts, bitwise, and mod/div remain open.
+  comparison pair is complete. Nat.shiftLeft is tracked separately by D033;
+  Nat.shiftRight, bitwise, and mod/div remain open.
 - **Owner:** Argument Computer Corporation; review with D031 when the shared
   condition-reflection consumers land.
 - **Source:** manually adapted from lean4lean PR #32 at
@@ -1679,6 +1680,41 @@ to the replacement.
 - **Removal condition:** upstream lands the corresponding PR #32 slice (or a
   stronger generic proof) and reconciliation preserves the shared typed
   predicate contract, readiness transaction, and exact trust pins.
+
+## D033 — direct Nat.shiftLeft certificate
+
+- **Status:** implemented as the eighth semantic UP6 slice; Nat.shiftRight
+  remains ordered after Nat.div, while bitwise and its wrappers remain open.
+- **Owner:** Argument Computer Corporation; review when the remaining shift or
+  bitwise families are extracted.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its shift checker,
+  recursive-input conservation theorem, and dispatch pattern; no whole-PR
+  merge.
+- **Executable delta:** `checkNatShiftLeftPrimitive` extracts the exact closed
+  type, zero-shift equation, and successor equation from the monolithic
+  recognizer. It depends only on the already certified Nat.mul constant.
+- **Verification delta:** `checkNatShiftTyped.WF` certifies the shared shift
+  trace and literal two, while `of_shiftLeft_equations` proves literal
+  reflection by induction on the shift amount with the first argument
+  generalized. `addNatShiftLeftDef` installs that reflection through the
+  fork's readiness-aware `AddDef` transaction, and live safe dispatch no
+  longer reaches the generic recognizer theorem for Nat.shiftLeft.
+- **Accepted-domain decision:** Nat.shiftLeft is extracted before the bitwise
+  family because its checker is finite and compositional. Nat.shiftRight
+  still requires the unported Nat.div certificate; Nat.land, Nat.lor, and
+  Nat.xor are syntactic wrappers over Nat.bitwise and cannot yet receive
+  honest literal reflection without that larger well-founded certificate.
+- **Ix impact:** verified literal left shifts can now be transported using a
+  narrow root whose only arithmetic dependency is Nat.mul, without importing
+  division, conditions, or bitwise well-founded recursion.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all eight direct roots are
+  named by live dispatch, exclude `checkPrimitiveDef.WF`, and each reach
+  exactly the same six inherited sorry-carrying dependencies. The source
+  frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the retained Nat.mul
+  dependency, readiness transaction, and exact trust pins.
 
 ## Review checklist
 

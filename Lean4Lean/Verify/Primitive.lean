@@ -13,8 +13,8 @@ import Lean4Lean.Verify.TypeChecker
 This module manually adapts bounded pieces of upstream lean4lean PR #32 at
 `6cfd43a48d17be85c76414638655c12ef9a7ee23`. The current bounded surface
 covers the body-first foundation and direct `Nat.add`, `Nat.pred`, `Nat.sub`,
-`Nat.mul`, `Nat.pow`, `Nat.beq`, and `Nat.ble` certificates; later primitive families
-remain separate slices.
+`Nat.mul`, `Nat.pow`, `Nat.shiftLeft`, `Nat.beq`, and `Nat.ble` certificates;
+later primitive families remain separate slices.
 -/
 
 namespace Lean4Lean
@@ -622,6 +622,144 @@ theorem checkNatBinaryBoolTyped.WF {c : VContext} {s : VState}
     · rw [if_neg hb]
       exact .throw
 
+/-- Verify the common type and two recursive equations for the binary Nat
+shift primitives. The successor right-hand side is supplied by each concrete
+primitive together with the translated literal `2`. -/
+theorem checkNatShiftTyped.WF {c : VContext} {s : VState}
+    {P₁ P₂ : Prop} {ty value sR : Expr} {ty' value' sR' : VExpr}
+    {err : Exception}
+    (h₁ : P₁) (h₂ : P₂)
+    (hnat : c.venv.contains ``Nat)
+    (hvlctx : c.vlctx = [])
+    (hty : c.TrExprS ty ty')
+    (hvalue0 : TrExprS c.venv c.lparams [] value value')
+    (hvalueT0 : c.venv.HasType c.lparams.length [] value' ty')
+    (hsR : NatBinaryEvidence c value value' →
+      TrExprS c.venv c.lparams [(none, .vlam .nat), (none, .vlam .nat)]
+        q(Nat.succ (Nat.succ Nat.zero)) (.natLit 2) →
+      c.venv.HasType c.lparams.length [.nat, .nat] (.natLit 2) .nat →
+      TrExprS c.venv c.lparams [(none, .vlam .nat), (none, .vlam .nat)]
+        sR sR') :
+    M.WF c s (do
+      unless ← isDefEq ty q(Nat → Nat → Nat) do throw err
+      unless ← isDefEq (.lam0 q(Nat) <| mkApp2 value (.bvar 0) q(Nat.zero))
+        (.lam0 q(Nat) <| .bvar 0) do throw err
+      unless ← isDefEq
+        (.lam0 q(Nat) <| .lam0 q(Nat) <|
+          mkApp2 value (.bvar 0) (mkApp q(Nat.succ) (.bvar 1)))
+        (.lam0 q(Nat) <| .lam0 q(Nat) <| sR) do throw err) fun _ _ =>
+        P₁ ∧ P₂ ∧
+        c.venv.IsDefEqU c.lparams.length [] ty'
+          (.forallE .nat <| .forallE .nat .nat) ∧
+        c.venv.IsDefEqU c.lparams.length []
+          (.lam .nat <| .app (.app value' (.bvar 0)) .natZero)
+          (.lam .nat <| .bvar 0) ∧
+        c.venv.IsDefEqU c.lparams.length []
+          (.lam .nat <| .lam .nat <|
+            .app (.app value' (.bvar 0)) (.app .natSucc (.bvar 1)))
+          (.lam .nat <| .lam .nat <| sR') := by
+  have hnat0 := TrExprS.natType_of_contains c.Ewf c.hasPrimitives hnat
+    c.lparams []
+  have hnat1 := TrExprS.natType_of_contains c.Ewf c.hasPrimitives hnat
+    c.lparams [(none, .vlam .nat)]
+  have hnat2 := TrExprS.natType_of_contains c.Ewf c.hasPrimitives hnat
+    c.lparams [(none, .vlam .nat), (none, .vlam .nat)]
+  have hinnerType : c.venv.IsType c.lparams.length [.nat]
+      (.forallE .nat .nat) := by
+    obtain ⟨u, hA⟩ := hnat1.2
+    obtain ⟨w, hB⟩ := hnat2.2
+    exact ⟨.imax u w, .forallEDF hA hB⟩
+  have hcanon : c.TrExprS q(Nat → Nat → Nat)
+      (.forallE .nat <| .forallE .nat .nat) := by
+    change TrExprS c.venv c.lparams c.vlctx _ _
+    rw [hvlctx]
+    exact .forallE hnat0.2 hinnerType hnat0.1
+      (.forallE hnat1.2 hnat2.2 hnat1.1 hnat2.1)
+  exact (isDefEq.WF hty hcanon).bind fun b _ _ htyEq => by
+    by_cases hb : b = true
+    · rw [if_pos hb]
+      have htyEq0 := htyEq hb
+      change c.venv.IsDefEqU c.lparams.length c.vlctx.toCtx ty'
+        (.forallE .nat <| .forallE .nat .nat) at htyEq0
+      rw [hvlctx] at htyEq0
+      have hvalueCanonT : c.venv.HasType c.lparams.length [] value'
+          (.forallE .nat <| .forallE .nat .nat) :=
+        hvalueT0.defeqU_r c.Ewf trivial htyEq0
+      have ev : NatBinaryEvidence c value value' :=
+        .mk' hnat hvalue0 hvalueCanonT
+      have hzS1 := TrExprS.natZero c.hasPrimitives hnat
+        (Us := c.lparams) (Δ := [(none, .vlam .nat)])
+      have hsS := TrExprS.natSucc c.hasPrimitives hnat
+        (Us := c.lparams) (Δ := [(none, .vlam .nat), (none, .vlam .nat)])
+      have hz₁ : c.TrExprS
+          (.lam0 q(Nat) <| mkApp2 value (.bvar 0) q(Nat.zero))
+          (.lam .nat <| .app (.app value' (.bvar 0)) .natZero) := by
+        change TrExprS c.venv c.lparams c.vlctx _ _
+        rw [hvlctx]
+        exact .lam hnat0.2 hnat0.1
+          (.app (.app ev.hv1T ev.hx1T) hzS1.2
+            (.app ev.hv1T ev.hx1T ev.hv1 ev.hx1S) hzS1.1)
+      have hz₂ : c.TrExprS (.lam0 q(Nat) <| .bvar 0)
+          (.lam .nat <| .bvar 0) := by
+        change TrExprS c.venv c.lparams c.vlctx _ _
+        rw [hvlctx]
+        exact .lam hnat0.2 hnat0.1 ev.hx1S
+      have hsyS : TrExprS c.venv c.lparams
+          [(none, .vlam .nat), (none, .vlam .nat)]
+          (mkApp q(Nat.succ) (.bvar 1))
+          (.app .natSucc (.bvar 1)) := .app hsS.2 ev.hy2T hsS.1 ev.hy2S
+      have hsyT : c.venv.HasType c.lparams.length [.nat, .nat]
+          (.app .natSucc (.bvar 1)) .nat := .app hsS.2 ev.hy2T
+      have hs₁ : c.TrExprS
+          (.lam0 q(Nat) <| .lam0 q(Nat) <|
+            mkApp2 value (.bvar 0) (mkApp q(Nat.succ) (.bvar 1)))
+          (.lam .nat <| .lam .nat <|
+            .app (.app value' (.bvar 0)) (.app .natSucc (.bvar 1))) := by
+        change TrExprS c.venv c.lparams c.vlctx _ _
+        rw [hvlctx]
+        exact .lam hnat0.2 hnat0.1 (.lam hnat1.2 hnat1.1
+          (.app (.app ev.hv2T ev.hx2T) hsyT
+            (.app ev.hv2T ev.hx2T ev.hv2 ev.hx2S) hsyS))
+      have hzeroS2 := TrExprS.natZero c.hasPrimitives hnat
+        (Us := c.lparams) (Δ := [(none, .vlam .nat), (none, .vlam .nat)])
+      have honeS : TrExprS c.venv c.lparams
+          [(none, .vlam .nat), (none, .vlam .nat)] q(Nat.succ Nat.zero)
+          (.natLit 1) := .app hsS.2 hzeroS2.2 hsS.1 hzeroS2.1
+      have honeT : c.venv.HasType c.lparams.length [.nat, .nat]
+          (.natLit 1) .nat := .app hsS.2 hzeroS2.2
+      have htwoS : TrExprS c.venv c.lparams
+          [(none, .vlam .nat), (none, .vlam .nat)]
+          q(Nat.succ (Nat.succ Nat.zero)) (.natLit 2) :=
+        .app hsS.2 honeT hsS.1 honeS
+      have htwoT : c.venv.HasType c.lparams.length [.nat, .nat]
+          (.natLit 2) .nat := .app hsS.2 honeT
+      have hs₂ : c.TrExprS (.lam0 q(Nat) <| .lam0 q(Nat) <| sR)
+          (.lam .nat <| .lam .nat <| sR') := by
+        change TrExprS c.venv c.lparams c.vlctx _ _
+        rw [hvlctx]
+        exact .lam hnat0.2 hnat0.1 (.lam hnat1.2 hnat1.1
+          (hsR ev htwoS htwoT))
+      exact (isDefEq.WF hz₁ hz₂).bind fun z _ _ hzEq => by
+        by_cases hzb : z = true
+        · rw [if_pos hzb]
+          have hzEq0 := hzEq hzb
+          change c.venv.IsDefEqU c.lparams.length c.vlctx.toCtx _ _ at hzEq0
+          rw [hvlctx] at hzEq0
+          exact (isDefEq.WF hs₁ hs₂).bind fun p _ _ hsEq => by
+            by_cases hsb : p = true
+            · rw [if_pos hsb]
+              have hsEq0 := hsEq hsb
+              change c.venv.IsDefEqU c.lparams.length c.vlctx.toCtx _ _
+                at hsEq0
+              rw [hvlctx] at hsEq0
+              exact .pure ⟨h₁, h₂, htyEq0, hzEq0, hsEq0⟩
+            · rw [if_neg hsb]
+              exact .throw
+        · rw [if_neg hzb]
+          exact .throw
+    · rw [if_neg hb]
+      exact .throw
+
 /-- Exact typed certificate for the public `Nat.add` recognizer branch. -/
 theorem checkPrimitiveDef.natAdd.WF_typed {c : VContext} {s : VState}
     (hname : v.name = ``Nat.add)
@@ -967,6 +1105,85 @@ theorem checkPrimitiveDef.natPow.WF_typed {c : VContext} {s : VState}
             c.hasPrimitives.natMul hmulC c.lparams _ ev.hΔ2
           .app (.app hopS.2 ev.hrecT) ev.hy2T
             (.app hopS.2 ev.hrecT hopS.1 ev.hrecS) ev.hy2S)).bind
+      fun _ _ _ h => .pure fun _ => h
+  · exact .throw
+
+/-- Exact typed certificate for the public `Nat.shiftLeft` recognizer branch. -/
+theorem checkPrimitiveDef.natShiftLeft.WF_typed {c : VContext} {s : VState}
+    (hname : v.name = ``Nat.shiftLeft)
+    (hvlctx : c.vlctx = [])
+    (hty : c.TrExprS v.type ty')
+    (hvalue : c.TrExprS v.value value')
+    (hvalueT : c.HasType value' ty') :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b →
+      v.levelParams = [] ∧
+      c.venv.contains ``Nat.mul ∧
+      c.venv.IsDefEqU c.lparams.length [] ty'
+        (.forallE .nat <| .forallE .nat .nat) ∧
+      c.venv.IsDefEqU c.lparams.length []
+        (.lam .nat <| .app (.app value' (.bvar 0)) .natZero)
+        (.lam .nat <| .bvar 0) ∧
+      c.venv.IsDefEqU c.lparams.length []
+        (.lam .nat <| .lam .nat <|
+          .app (.app value' (.bvar 0)) (.app .natSucc (.bvar 1)))
+        (.lam .nat <| .lam .nat <|
+          .app (.app value'
+            (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+            (.bvar 1)) := by
+  apply checkPrimitiveDef.WF_of_core (by simp)
+  simp only [checkPrimitiveDefCore, hname, checkNatShiftLeftPrimitive]
+  refine getEnv.WF.bind ?_
+  intro _ _ _ ⟨rfl, rfl⟩
+  split
+  · rename_i hdeps
+    have hdeps' : c.env.contains ``Nat.mul = true ∧
+        v.levelParams.isEmpty = true := by simpa using hdeps
+    have hlevels : v.levelParams = [] := by simpa using hdeps'.2
+    have hmulC : c.venv.contains ``Nat.mul :=
+      VContext.contains_safe_primitive c hdeps'.1 (by
+        simp [Lean.Kernel.Environment.primitives,
+          NameSet.contains, NameSet.ofList])
+    have hnat := VEnv.nat_of_reflected_binary_contains c.Ewf
+      c.hasPrimitives.natMul hmulC
+    have hvalue0 := hvalue
+    change TrExprS c.venv c.lparams c.vlctx v.value value' at hvalue0
+    rw [hvlctx] at hvalue0
+    have hvalueT0 := hvalueT
+    change c.venv.HasType c.lparams.length c.vlctx.toCtx value' ty' at hvalueT0
+    rw [hvlctx] at hvalueT0
+    exact (checkNatShiftTyped.WF hlevels hmulC hnat hvlctx hty
+        hvalue0 hvalueT0
+        (fun ev htwoS htwoT =>
+          have hmulS := TrExprS.reflectedNatBinary c.Ewf
+            c.hasPrimitives.natMul hmulC c.lparams _ ev.hΔ2
+          have hmulTwoS : TrExprS c.venv c.lparams
+              [(none, .vlam .nat), (none, .vlam .nat)]
+              (mkApp q(Nat.mul) q(Nat.succ (Nat.succ Nat.zero)))
+              (.app (.const ``Nat.mul []) (.natLit 2)) :=
+            .app hmulS.2 htwoT hmulS.1 htwoS
+          have hmulTwoT : c.venv.HasType c.lparams.length [.nat, .nat]
+              (.app (.const ``Nat.mul []) (.natLit 2))
+              (.forallE .nat .nat) := .app hmulS.2 htwoT
+          have hmulTwoXS : TrExprS c.venv c.lparams
+              [(none, .vlam .nat), (none, .vlam .nat)]
+              (mkApp2 q(Nat.mul) q(Nat.succ (Nat.succ Nat.zero)) (.bvar 0))
+              (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)) :=
+            .app hmulTwoT ev.hx2T hmulTwoS ev.hx2S
+          have hmulTwoXT : c.venv.HasType c.lparams.length [.nat, .nat]
+              (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)) .nat :=
+            .app hmulTwoT ev.hx2T
+          have hvMulS : TrExprS c.venv c.lparams
+              [(none, .vlam .nat), (none, .vlam .nat)]
+              (mkApp v.value
+                (mkApp2 q(Nat.mul) q(Nat.succ (Nat.succ Nat.zero)) (.bvar 0)))
+              (.app value'
+                (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0))) :=
+            .app ev.hv2T hmulTwoXT ev.hv2 hmulTwoXS
+          have hvMulT : c.venv.HasType c.lparams.length [.nat, .nat]
+              (.app value'
+                (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+              (.forallE .nat .nat) := .app ev.hv2T hmulTwoXT
+          .app hvMulT ev.hy2T hvMulS ev.hy2S)).bind
       fun _ _ _ h => .pure fun _ => h
   · exact .throw
 
@@ -1676,6 +1893,100 @@ theorem VEnv.ReflectsNatNatNat.of_pow_equations (henv : VEnv.WF env)
     hzeroT hsuccT hmul hmulC (fun _ => rfl) (fun _ _ => rfl)
     hf hcf hz hs
 
+/-- The recursive input-transform certificate used for `Nat.shiftLeft`,
+consuming the retained typed reflection for `Nat.mul`. -/
+theorem VEnv.ReflectsNatNatNat.of_shiftLeft_equations (henv : VEnv.WF env)
+    (hzeroT : ∀ Γ, env.HasType 0 Γ .natZero .nat)
+    (hsuccT : ∀ Γ, env.HasType 0 Γ .natSucc (.forallE .nat .nat))
+    (hmul : env.ReflectsNatNatNat ``Nat.mul Nat.mul)
+    (hmulC : env.contains ``Nat.mul)
+    (hf : ∀ U Γ, env.HasType U Γ (.const ``Nat.shiftLeft [])
+      (.forallE .nat <| .forallE .nat .nat))
+    (hcf : env.IsDefEqU 0 [] (.const ``Nat.shiftLeft []) f)
+    (hz : env.IsDefEqU 0 []
+      (.lam .nat <| .app (.app f (.bvar 0)) .natZero)
+      (.lam .nat <| .bvar 0))
+    (hs : env.IsDefEqU 0 []
+      (.lam .nat <| .lam .nat <|
+        .app (.app f (.bvar 0)) (.app .natSucc (.bvar 1)))
+      (.lam .nat <| .lam .nat <|
+        .app (.app f
+          (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+          (.bvar 1))) :
+    env.ReflectsNatNatNat ``Nat.shiftLeft Nat.shiftLeft := by
+  intro _
+  refine ⟨hf, fun a b => ?_⟩
+  obtain ⟨hmulT, hmulEval⟩ := hmul hmulC
+  have ⟨_, hNatSort⟩ := (hzeroT []).isType henv trivial
+  have hctx₁ : OnCtx [.nat] (env.IsType 0) :=
+    ⟨trivial, ⟨_, hNatSort⟩⟩
+  have hctx₂ : OnCtx [.nat, .nat] (env.IsType 0) :=
+    ⟨hctx₁, ⟨_, hNatSort.weak0 henv⟩⟩
+  have hlit := VEnv.natLit_hasType hzeroT hsuccT
+  have hfv (Γ) (hΓ : OnCtx Γ (env.IsType 0)) :
+      env.HasType 0 Γ f (.forallE .nat <| .forallE .nat .nat) :=
+    (hf 0 Γ).defeqU_l henv hΓ (hcf.weak0 henv)
+  have hfClosed : f.ClosedN := by
+    let ⟨_, hcf⟩ := hcf
+    exact (hcf.closedN' henv.ordered.closed trivial).2.1
+  have hcfApp (a b) : env.IsDefEqU 0 []
+      (.app (.app (.const ``Nat.shiftLeft []) (.natLit a)) (.natLit b))
+      (.app (.app f (.natLit a)) (.natLit b)) := by
+    have h₁ := hcf.app_same henv trivial (hf 0 []) (hlit a [])
+    exact h₁.app_same henv trivial (.app (hf 0 []) (hlit a [])) (hlit b [])
+  induction b generalizing a with
+  | zero =>
+    have hbody : env.HasType 0 [.nat]
+        (.app (.app f (.bvar 0)) .natZero) .nat :=
+      .app (.app (hfv _ hctx₁) (.bvar .zero)) (hzeroT _)
+    have heq := hz.lam_inst henv trivial hNatSort hbody (.bvar .zero)
+      (hlit a [])
+    simp [VExpr.inst, hfClosed.instN_eq] at heq
+    exact (hcfApp a 0).trans henv trivial heq
+  | succ b ih =>
+    have hbvar0 : env.HasType 0 [.nat, .nat] (.bvar 0) .nat := .bvar .zero
+    have hbvar1 : env.HasType 0 [.nat, .nat] (.bvar 1) .nat :=
+      .bvar (.succ .zero)
+    have hleft : env.HasType 0 [.nat, .nat]
+        (.app (.app f (.bvar 0)) (.app .natSucc (.bvar 1))) .nat :=
+      .app (.app (hfv _ hctx₂) hbvar0) (.app (hsuccT _) hbvar1)
+    have hmulBody : env.HasType 0 [.nat, .nat]
+        (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)) .nat :=
+      .app (.app (hmulT 0 _) (hlit 2 _)) hbvar0
+    have hright : env.HasType 0 [.nat, .nat]
+        (.app (.app f
+          (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+          (.bvar 1)) .nat :=
+      .app (.app (hfv _ hctx₂) hmulBody) hbvar1
+    have hinner₁ : env.HasType 0 [.nat]
+        (.lam .nat <| .app (.app f (.bvar 0)) (.app .natSucc (.bvar 1)))
+        (.forallE .nat .nat) := .lam (hNatSort.weak0 henv) hleft
+    have hinner₂ : env.HasType 0 [.nat]
+        (.lam .nat <| .app (.app f
+          (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+          (.bvar 1))
+        (.forallE .nat .nat) := .lam (hNatSort.weak0 henv) hright
+    have houter := hs.lam_inst henv trivial hNatSort hinner₁ hinner₂
+      (hlit b [])
+    have hstep := houter.lam_inst henv trivial hNatSort
+      (by simpa [VExpr.inst] using hleft.instN henv (.succ .zero) (hlit b []))
+      (by simpa [VExpr.inst] using hright.instN henv (.succ .zero) (hlit b []))
+      (hlit a [])
+    simp [VExpr.inst, VExpr.natSucc, hfClosed.instN_eq]
+      at hstep
+    have hmulEq := hmulEval 2 a
+    have harg := hmulEq.app_arg henv trivial (hfv [] trivial)
+      (.app (.app (hmulT 0 []) (hlit 2 [])) (hlit a []))
+    have hfa : env.HasType 0 []
+        (.app f (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.natLit a)))
+        (.forallE .nat .nat) :=
+      .app (hfv [] trivial)
+        (.app (.app (hmulT 0 []) (hlit 2 [])) (hlit a []))
+    have hargs := harg.app_same henv trivial hfa (hlit b [])
+    exact (hcfApp a (b + 1)).trans henv trivial <| hstep.trans henv trivial <|
+      hargs.trans henv trivial <|
+        (hcfApp (2 * a) b).symm.trans henv trivial (ih (a := 2 * a))
+
 /-- The four constructor equations checked for `Nat.beq` and `Nat.ble`
 determine a Boolean-valued operation on natural literals. -/
 theorem VEnv.ReflectsNatNatBool.of_rec_equations (henv : VEnv.WF env)
@@ -2163,6 +2474,70 @@ theorem VEnv.HasPrimitives.addNatBLE {env env' : VEnv}
       obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
       exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
 
+/-- Replace the vacuous/old `Nat.shiftLeft` reflection field after inserting
+a checked definition, while transporting all unrelated primitive facts. -/
+theorem VEnv.HasPrimitives.addNatShiftLeft {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Nat.shiftLeft ci = some env')
+    (href : (env'.addDefEq df).ReflectsNatNatNat
+      ``Nat.shiftLeft Nat.shiftLeft) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Nat.shiftLeft ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Nat.shiftLeft ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natSub := (h.natSub.addConst hadd (by decide)).addDefEq
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natMod := (h.natMod.addConst hadd (by decide)).addDefEq
+    natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := href
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => h.charOfNat (by
+      change env''.constants ``Char.ofNat = some _ at H
+      rwa [same ``Char.ofNat (by decide)] at H)
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
+
 /-- Shared bookkeeping for a checked Nat primitive definition: recover the
 new constant typing, its definition equation, and the constructor typings in
 the extended environment. -/
@@ -2362,6 +2737,47 @@ theorem VEnv.HasPrimitives.addNatPowDef {env env' : VEnv} {v : VDefVal}
   have href := VEnv.ReflectsNatNatNat.of_pow_equations hwf hzero hsucc
     hmulR hmulC' hf hcf (hz.mono le) (hs.mono le)
   exact h.addNatPow hadd href
+
+/-- A checked, well-typed Nat.shiftLeft definition with its two recursive
+equations preserves `HasPrimitives`. -/
+theorem VEnv.HasPrimitives.addNatShiftLeftDef
+    {env env' : VEnv} {v : VDefVal}
+    (h : env.HasPrimitives) (henv : env.WF)
+    (hmulC : env.contains ``Nat.mul)
+    (hname : v.name = ``Nat.shiftLeft)
+    (hadd : env.addConst ``Nat.shiftLeft v.toVConstant = some env')
+    (hwf : (env'.addDefEq v.toDefEq).WF)
+    (hu : v.uvars = 0)
+    (hty : env.IsDefEqU 0 [] v.type
+      (.forallE .nat <| .forallE .nat .nat))
+    (hz : env.IsDefEqU 0 []
+      (.lam .nat <| .app (.app v.value (.bvar 0)) .natZero)
+      (.lam .nat <| .bvar 0))
+    (hs : env.IsDefEqU 0 []
+      (.lam .nat <| .lam .nat <|
+        .app (.app v.value (.bvar 0)) (.app .natSucc (.bvar 1)))
+      (.lam .nat <| .lam .nat <|
+        .app (.app v.value
+          (.app (.app (.const ``Nat.mul []) (.natLit 2)) (.bvar 0)))
+          (.bvar 1))) :
+    (env'.addDefEq v.toDefEq).HasPrimitives := by
+  have hnat : env.contains ``Nat := by
+    have hfun := (h.natMul hmulC).1 0 []
+    have ⟨_, hfunType⟩ := hfun.isType henv trivial
+    obtain ⟨⟨_, hnatType⟩, _⟩ := hfunType.forallE_inv henv
+    obtain ⟨_, hnat, _⟩ := hnatType.const_inv henv trivial
+    exact ⟨_, hnat⟩
+  refine h.natDefKit hnat hname hadd hwf hu hty ?_
+  intro le hf hcf hzero hsucc
+  have hmulR : (env'.addDefEq v.toDefEq).ReflectsNatNatNat
+      ``Nat.mul Nat.mul :=
+    (h.natMul.addConst hadd (by decide)).addDefEq
+  have hmulC' : (env'.addDefEq v.toDefEq).contains ``Nat.mul := by
+    obtain ⟨mulCi, hmulLookup⟩ := hmulC
+    exact ⟨mulCi, le.constants hmulLookup⟩
+  have href := VEnv.ReflectsNatNatNat.of_shiftLeft_equations hwf hzero hsucc
+    hmulR hmulC' hf hcf (hz.mono le) (hs.mono le)
+  exact h.addNatShiftLeft hadd href
 
 /-- A checked, well-typed Nat.beq definition with its four constructor
 equations preserves `HasPrimitives`. -/

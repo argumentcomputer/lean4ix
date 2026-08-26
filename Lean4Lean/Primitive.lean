@@ -371,6 +371,23 @@ def checkNatBLEPrimitive (env : Environment) (v : DefinitionVal)
   unless ← defeq1 (ble (succ x) zero) q(false) do fail
   unless ← defeq2 (ble (succ y) (succ x)) (ble y x) do fail
 
+/-- Validate the closed type and two recursive equations for `Nat.shiftLeft`. -/
+def checkNatShiftLeftPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M Unit := do
+  unless env.contains ``Nat.mul && v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  let shl := mkApp2 v.value
+  let mul := mkApp2 q(Nat.mul)
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let two := succ (succ zero)
+  let x := .bvar 0
+  let y := .bvar 1
+  let defeq1 a b := isDefEq (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  let defeq2 a b := defeq1 (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+  unless ← defeq1 (shl x zero) x do fail
+  unless ← defeq2 (shl x (succ y)) (shl (mul two x) y) do fail
+
 def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
@@ -379,7 +396,6 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let succ := mkApp q(Nat.succ)
   let add := mkApp2 q(Nat.add)
   let sub := mkApp2 q(Nat.sub)
-  let mul := mkApp2 q(Nat.mul)
   let mod := mkApp2 q(Nat.mod)
   let div := mkApp2 q(Nat.div)
   let one := succ zero
@@ -513,12 +529,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
     unless ← isDefEq (xor fal tru) tru do fail
     unless ← isDefEq (xor tru tru) fal do fail
   | ``Nat.shiftLeft =>
-    unless env.contains ``Nat.mul && v.levelParams.isEmpty do fail
-    -- shiftLeft : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    let shl := mkApp2 v.value
-    unless ← defeq1 (shl x zero) x do fail
-    unless ← defeq2 (shl x (succ y)) (shl (mul two x) y) do fail
+    checkNatShiftLeftPrimitive env v fail
   | ``Nat.shiftRight =>
     unless env.contains ``Nat.div && v.levelParams.isEmpty do fail
     -- shiftRight : Nat → Nat → Nat
