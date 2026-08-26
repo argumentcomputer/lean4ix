@@ -1045,6 +1045,26 @@ private theorem familyTypeParameterComparison_localResult
         simp only [AddInductive.FamilyTypeParameterComparisonTrace.comparisons,
           List.not_mem_nil] at member⟩
 
+/-- Thread the producer-owned local inventory through a first-family
+telescope that starts before any shared parameter has been allocated.
+
+The result exposes exactly the two facts needed at the next source position:
+all retained parameter free variables are still genuine local declarations,
+and their array has reached the validator's complete `nparams` length. -/
+theorem familyTypeParameterComparison_localResult_of_first
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source 0 nindices fuel)
+    (first : stats.indConsts.isEmpty = true)
+    (paramsEmpty : stats.params.size = 0)
+    (localState : FamilyParameterLocalState stats context) :
+    FamilyParameterLocalState trace.result.stats trace.result.context ∧
+      trace.result.stats.params.size = nparams := by
+  have result := familyTypeParameterComparison_localResult trace localState (by
+    unfold FamilyParameterCountInvariant
+    simp only [Nat.zero_le, first, if_true, paramsEmpty, Nat.zero_add,
+      Nat.sub_zero, and_self])
+  exact ⟨result.1, result.2.1⟩
+
 private def FamilyBlockParameterLocalInvariant (nparams : Nat)
     (stats : AddInductive.InductiveStats)
     (context : AddInductive.Context) : Prop :=
@@ -12293,6 +12313,17 @@ info: 'Lean4Lean.TypeChecker.FamilyComparisonRhsLocal.isDefEqRun' depends on axi
 -/
 #guard_msgs in
 #print axioms TypeChecker.FamilyComparisonRhsLocal.isDefEqRun
+
+/--
+info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_localResult_of_first' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.familyTypeParameterComparison_localResult_of_first
 
 /--
 info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_semanticRuns_of_later' depends on axioms: [propext,

@@ -1988,6 +1988,251 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticFirstFa
 #print axioms
   ProducedBlockRecursorShapeCandidate.semanticFirstFamilyContextRun
 
+private theorem candidateContextRun_cast_context
+    {left right : AddInductive.Context}
+    (h : left = right)
+    (run : TypeChecker.CandidateContextRun left) :
+    (h ▸ run).context = run.context := by
+  cases h
+  rfl
+
+/-- Interpret the first later family's complete shared-parameter comparison
+inventory in the exact context reached by the first family.
+
+The two-family source prefix fixes every position.  The first-family context
+owner is transported only along the equality selected by the retained outer
+trace.  The dependent semantic second root is then weakened into that exact
+context, its retained validator WHNF supplies the inner root translation, and
+the local-state traversal supplies the genuine shared-parameter declarations.
+The result exposes the producer's grouped comparison list as an exact
+`[] :: second :: remaining` decomposition; neither the second family nor its
+comparison inventory is selected by a caller. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterComparisons
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ secondComparisons remainingComparisons,
+      (produced.execution.eliminationExecution.normalization
+        |>.familyParameterComparisonTrace
+          (produced.execution.normalization_run produced.producedExecution)
+          produced.kernelSources_nonempty).comparisons =
+        [] :: secondComparisons :: remainingComparisons ∧
+      ∀ step ∈ secondComparisons,
+        TypeChecker.FamilyComparisonSemanticRun step := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  let comparisonTrace :=
+    normalization.familyParameterComparisonTrace normalizationProduced
+      produced.kernelSources_nonempty
+  change ∃ secondComparisons remainingComparisons,
+    comparisonTrace.comparisons =
+      [] :: secondComparisons :: remainingComparisons ∧
+    ∀ step ∈ secondComparisons,
+      TypeChecker.FamilyComparisonSemanticRun step
+  have roots := semantic.families
+  cases hCandidates : produced.candidate.families with
+  | cons firstCandidate remainingCandidates =>
+    rw [hCandidates] at roots
+    cases remainingCandidates with
+    | cons secondCandidate remainingCandidates =>
+      cases hRawTypes : source.types with
+      | nil =>
+        rw [hRawTypes] at roots
+        nomatch roots
+      | cons firstRaw rawTypes =>
+        rw [hRawTypes] at roots
+        cases roots with
+        | cons firstSemantic remainingSemantics =>
+          cases hRawTypesTail : rawTypes with
+          | nil =>
+            rw [hRawTypesTail] at remainingSemantics
+            nomatch remainingSemantics
+          | cons secondRaw remainingRawTypes =>
+            rw [hRawTypesTail] at remainingSemantics
+            cases remainingSemantics with
+            | cons secondSemantic remainingSemantics =>
+              generalize comparisonTrace_eq : comparisonTrace = trace at ⊢
+              cases trace with
+              | firstFamily dIdx stats validationContext inBounds closed
+                  inferred root checkType rootWhnf telescope sorted ensureSort
+                  isFirst tail =>
+                obtain ⟨firstContextRun, firstVenv, firstLparams⟩ :=
+                  produced.semanticFirstFamilyContextRun semantic
+                    context_lctx_eq
+                have firstContextEq : comparisonTrace.firstContext =
+                    telescope.result.context :=
+                  congrArg
+                    AddInductive.FamilyParameterComparisonBlockTrace.firstContext
+                    comparisonTrace_eq
+                let currentRun : TypeChecker.CandidateContextRun
+                    telescope.result.context := firstContextEq ▸ firstContextRun
+                have currentContextEq : currentRun.context =
+                    firstContextRun.context :=
+                  candidateContextRun_cast_context firstContextEq
+                    firstContextRun
+                have currentVenv : currentRun.context.venv = env := by
+                  rw [currentContextEq]
+                  exact firstVenv
+                have currentLparams : currentRun.context.lparams = Us := by
+                  rw [currentContextEq]
+                  exact firstLparams
+                have secondTranslation := currentRun.rootTranslation
+                  currentVenv currentLparams secondSemantic.type.source_tr
+                have firstComparisons :=
+                  telescope.comparisons_eq_nil_of_firstFamily (by rfl)
+                obtain ⟨firstLocal, firstParamsSize⟩ :=
+                  TypeChecker.familyTypeParameterComparison_localResult_of_first
+                    telescope (by rfl) (by rfl)
+                      (TypeChecker.FamilyParameterLocalState.empty
+                        context (context.lparams.map .param) context_lctx_eq)
+                let nextStats : AddInductive.InductiveStats := {
+                  telescope.result.stats with
+                  lctx := telescope.result.context.lctx
+                  resultLevel := sorted.sortLevel!
+                  isNotZero := sorted.sortLevel!.isNeverZero
+                  nindices := telescope.result.stats.nindices.push
+                    telescope.result.nindices
+                  indConsts := telescope.result.stats.indConsts.push
+                    (.const
+                      (firstSource :: secondSource ::
+                        remainingSources).toArray[0].name
+                      telescope.result.stats.levels) }
+                cases tail with
+                | @laterFamily dIdx stats secondContext inBounds closed
+                    inferred secondRoot checkType secondRootWhnf
+                    secondTelescope sorted ensureSort isLater
+                    resultLevelCompatible tail =>
+                  have statsLater : nextStats.indConsts.isEmpty = false := by
+                    rw [secondTelescope.result_indConsts_eq] at isLater
+                    simpa only [nextStats] using isLater
+                  have paramsSize :
+                      nextStats.params.size = source.nparams := by
+                    simpa using firstParamsSize
+                  have secondLocal :
+                      TypeChecker.FamilyParameterLocalState nextStats
+                        telescope.result.context := by
+                    exact ⟨firstLocal.localContext, firstLocal.parameters⟩
+                  have normalizationCandidatesEq := hCandidates
+                  change normalization.families.candidates =
+                    AddInductive.CandidateList.cons firstCandidate
+                      (AddInductive.CandidateList.cons secondCandidate
+                        remainingCandidates) at normalizationCandidatesEq
+                  have familyTypesProduced :=
+                    normalization.familyTypes.produced
+                  rw [← normalization.families.produced.familyTypes_eq] at familyTypesProduced
+                  rw [normalizationCandidatesEq] at familyTypesProduced
+                  simp only [AddInductive.CandidateList.familyTypes] at familyTypesProduced
+                  have secondProduced := familyTypesProduced.tail.head
+                  have secondContextEq :=
+                    AddInductive.CandidateFamilyType.context_eq_of_normalize
+                      secondProduced
+                  have whnfDepth :
+                      telescope.result.context.fuel.recDepth =
+                        secondSemantic.type.whnfFuel + 1 := by
+                    calc
+                      telescope.result.context.fuel.recDepth =
+                          context.fuel.recDepth :=
+                        congrArg (fun fuel => fuel.recDepth)
+                          telescope.result_context_fuel
+                      _ = secondCandidate.familyType.type.context.fuel.recDepth :=
+                        (congrArg (fun candidateContext =>
+                          candidateContext.fuel.recDepth)
+                            secondContextEq).symm
+                      _ = secondSemantic.type.whnfFuel + 1 :=
+                        secondSemantic.type.whnfDepth
+                  have secondSourceTranslation : currentRun.context.TrExprS
+                      (firstSource :: secondSource ::
+                        remainingSources).toArray[0 + 1].type
+                      secondRaw.type := by
+                    simpa using secondTranslation
+                  obtain ⟨secondRoot', secondRootTranslation,
+                      _secondRootRun⟩ :=
+                    TypeChecker.WhnfRun.exists_ofCandidateStep
+                      ⟨telescope.result.context,
+                        (firstSource :: secondSource ::
+                          remainingSources).toArray[0 + 1].type,
+                        secondRoot⟩
+                      secondRootWhnf currentRun secondRaw.type
+                      secondSourceTranslation secondSemantic.type.whnfFuel
+                      whnfDepth
+                  have secondRuns :=
+                    TypeChecker.familyTypeParameterComparison_semanticRuns_of_later
+                      secondTelescope statsLater paramsSize secondLocal
+                      currentRun secondRoot' secondRootTranslation
+                      secondSemantic.type.whnfFuel whnfDepth
+                  refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
+                    secondRuns⟩
+                  simp only [
+                    AddInductive.FamilyParameterComparisonBlockTrace.comparisons,
+                    firstComparisons]
+                | @firstFamily dIdx stats secondContext inBounds closed
+                    inferred secondRoot checkType secondRootWhnf
+                    secondTelescope sorted ensureSort isFirst tail =>
+                  have notFirst :
+                      secondTelescope.result.stats.indConsts.isEmpty = false := by
+                    rw [secondTelescope.result_indConsts_eq]
+                    simp
+                  rw [notFirst] at isFirst
+                  contradiction
+                | @terminal dIdx stats secondContext outOfBounds =>
+                  simp at outOfBounds
+              | laterFamily dIdx stats validationContext inBounds closed
+                  inferred root checkType rootWhnf telescope sorted ensureSort
+                  isLater resultLevelCompatible tail =>
+                have first :
+                    telescope.result.stats.indConsts.isEmpty = true := by
+                  rw [telescope.result_indConsts_eq]
+                  rfl
+                rw [first] at isLater
+                contradiction
+              | terminal dIdx stats validationContext outOfBounds =>
+                simp at outOfBounds
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterComparisons' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterComparisons
+
 /-- The retained first-family validation and its exact semantic root determine
 the Theory representation of the block's common result universe.  The value
 is not selected by a caller: `VLevel.ofLevel` translates the precise kernel

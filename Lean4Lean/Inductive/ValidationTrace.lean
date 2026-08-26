@@ -1422,6 +1422,26 @@ def result :
   | .terminal stats context source _ nindices _ _ _ =>
     { type := source, stats, nindices, context }
 
+/-- Family-telescope traversal changes local declarations and the fresh-name
+counter only; it preserves the checker fuel configuration at the exact
+continuation context. -/
+theorem result_context_fuel
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    trace.result.context.fuel = context.fuel := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    simpa [result, Context.pushLocalDecl] using ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    simpa [result, Context.pushLocalDecl] using ih
+  | terminal => rfl
+
 /-- Traversing one family telescope never changes the already-accepted
 family-constant inventory. -/
 theorem result_indConsts_eq
@@ -4182,6 +4202,14 @@ theorem not_nonempty_of_error
   contradiction
 
 end ConstructorValidationRun
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_context_fuel' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.result_context_fuel
 
 /--
 info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.comparison_valid' depends on axioms: [propext,

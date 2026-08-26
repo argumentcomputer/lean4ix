@@ -1306,6 +1306,46 @@ theorem parameterList_length
       rw [body_ih]
       simpa [spineLength] using hcount
 
+/-- Candidate traversals started from the same name generator allocate the
+same free variables at every common main-spine position.
+
+The binder names, domains, and semantic observations may differ.  Only the
+reader's name-generator state selects `parameterList`, and every Pi step
+advances that state in the same way. -/
+theorem parameterList_eq_of_ngen_eq
+    {leftContext rightContext : Context}
+    {leftSource rightSource : Expr}
+    (left : CandidateExprTrace leftContext leftSource)
+    (right : CandidateExprTrace rightContext rightSource)
+    (ngen_eq : leftContext.ngen = rightContext.ngen)
+    (leftCount : count ≤ left.spineLength)
+    (rightCount : count ≤ right.spineLength) :
+    left.parameterList count = right.parameterList count := by
+  induction count generalizing leftContext rightContext leftSource rightSource with
+  | zero => rfl
+  | succ count ih =>
+    cases left with
+    | terminal => simp [CandidateExprTrace.spineLength] at leftCount
+    | @forallE leftContext leftSource leftInferred leftName leftDomain
+        leftBody leftBinderInfo leftFresh leftAnnotations leftAnnotationsEq
+        leftChecked leftValid leftDomainCandidate leftBodyCandidate =>
+      cases right with
+      | terminal => simp [CandidateExprTrace.spineLength] at rightCount
+      | @forallE rightContext rightSource rightInferred rightName rightDomain
+          rightBody rightBinderInfo rightFresh rightAnnotations
+          rightAnnotationsEq rightChecked rightValid rightDomainCandidate
+          rightBodyCandidate =>
+        simp only [CandidateExprTrace.parameterList]
+        have fresh_eq : leftContext.freshExpr = rightContext.freshExpr := by
+          simp [Context.freshExpr, Context.freshFVarId, ngen_eq]
+        have tail_eq := ih leftBodyCandidate rightBodyCandidate
+          (by simp [Context.pushLocalDecl, ngen_eq])
+          (by simpa [CandidateExprTrace.spineLength] using leftCount)
+          (by simpa [CandidateExprTrace.spineLength] using rightCount)
+        exact (congrArg (fun head => head ::
+          leftBodyCandidate.parameterList count) fresh_eq).trans
+            (congrArg (fun tail => rightContext.freshExpr :: tail) tail_eq)
+
 /-- Every annotation choice on the main Π spine matches the transparent
 peeling operation used by `checkInductiveTypes`.  This is operational
 provenance, separate from the semantic raw/consumed equality stored at each
@@ -3340,6 +3380,14 @@ info: 'Lean4Lean.AddInductive.CandidateExprTrace.parameterList_length' depends o
 -/
 #guard_msgs in
 #print axioms CandidateExprTrace.parameterList_length
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.parameterList_eq_of_ngen_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateExprTrace.parameterList_eq_of_ngen_eq
 
 /--
 info: 'Lean4Lean.AddInductive.CandidateExprTrace.checkInductiveTypes_loop_of_candidate' depends on axioms: [propext,
