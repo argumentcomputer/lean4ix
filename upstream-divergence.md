@@ -1917,6 +1917,51 @@ to the replacement.
   stronger generic proof) and reconciliation preserves the readiness
   transaction, exact accepted equations, and trust pins.
 
+## D039 — checked Char.ofNat boundary and semantic declaration contract
+
+- **Status:** implemented as the fourteenth bounded UP6 slice; the live safe
+  definition path has a direct `Char.ofNat` certificate, leaving
+  `String.ofList` as the next finite literal primitive.
+- **Owner:** Argument Computer Corporation; review with the `String.ofList`
+  slice and any upstream revision of primitive type-boundary checking.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its typed
+  `Char.ofNat` branch and semantic `HasPrimitives` field; no whole-PR merge or
+  admitted generic dispatch was imported.
+- **Executable delta:** the upstream branch calls inference-only
+  `ensureType q(Char)`. Lean4Ix instead composes `checkType q(Char)` with
+  `ensureSort`, so successful safe checking establishes the source `Char`
+  declaration's safety and typing before comparing `Nat → Char`. This agrees
+  on valid safe preludes and intentionally rejects a malformed prelude whose
+  `Char` declaration is unsafe or otherwise not checkable.
+- **Verification delta:** `checkTypeEnsuresType.WF` derives strict translation
+  and canonical type evidence without assuming `Char` was already verified;
+  `checkPrimitiveDef.charOfNat.WF_typed`,
+  `checkSafeCharOfNatDefinition.WF`, `addCharOfNat`, and
+  `addDefinition.WF_safe_charOfNat` carry that evidence through every
+  readiness safety model and the live dispatch.
+- **Contract repair:** the retained local `HasPrimitives.charOfNat` field used
+  to require syntactic equality of the stored type with `Nat → Char`, while
+  the executable checker accepts definitional equality. That implication is
+  false in general. The field now records zero universe parameters and
+  canonical typing in every context, matching the upstream semantic repair;
+  every environment transport was updated monotonically.
+- **Trust decision:** no equation from definitional equality to syntax was
+  introduced. The slice adds no custom axiom, `native_decide` proof, or source
+  `sorry`; its direct root reaches exactly the same six inherited sorry
+  carriers as the other finite primitive roots.
+- **Ix impact:** the verified kernel can now install the character conversion
+  constant needed by direct string-literal elaboration while retaining an
+  explicit safe-prelude boundary.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks all twelve direct live roots,
+  including `Char.ofNat`, for dispatch reachability, exclusion of
+  `checkPrimitiveDef.WF`, and the exact inherited sorry closure. The global
+  source frontier remains 15.
+- **Removal condition:** upstream adopts an equivalent checked `Char` boundary
+  and semantic declaration contract, or reconciliation preserves this fork's
+  stronger malformed-prelude rejection, readiness transaction, and trust
+  pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

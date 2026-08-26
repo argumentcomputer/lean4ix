@@ -14,8 +14,8 @@ This module manually adapts bounded pieces of upstream lean4lean PR #32 at
 `6cfd43a48d17be85c76414638655c12ef9a7ee23`. The current bounded surface
 covers the body-first foundation and direct `Nat.add`, `Nat.pred`, `Nat.sub`,
 `Nat.mul`, `Nat.pow`, `Nat.shiftLeft`, `Nat.shiftRight`, `Nat.beq`, `Nat.ble`,
-`Nat.mod`, and `Nat.div` certificates; later primitive families remain
-separate slices.
+`Nat.mod`, `Nat.div`, and `Char.ofNat` certificates; later primitive families
+remain separate slices.
 -/
 
 namespace Lean4Lean
@@ -52,6 +52,43 @@ theorem VContext.contains_safe_primitive
     rw [hsafety]
     exact DefinitionSafety.le_safe)
   exact ⟨ci', hci'⟩
+
+/-- Translate a constant directly from the aligned source and Theory
+environments after the executable checker has established its visibility and
+universe-arity guards. -/
+theorem VContext.trConst_of_find?
+    (c : VContext) (hfind : c.env.find? n = some ci)
+    (hsafety : c.safety ≤ ci.safety)
+    (hlevels : us.length = ci.levelParams.length)
+    (htranslate : us.mapM (VLevel.ofLevel c.lparams) = some us') :
+    c.TrExprS (.const n us) (.const n us') := by
+  obtain ⟨ci', hci', htr⟩ := c.trenv.find? hfind hsafety
+  exact .const hci' htranslate (hlevels.trans htr.2.1)
+
+/-- Monomorphic specialization of `VContext.trConst_of_find?`. -/
+theorem VContext.trConst_of_find?_empty
+    (c : VContext) (hfind : c.env.find? n = some ci)
+    (hsafety : c.safety ≤ ci.safety) (hlevels : ci.levelParams = []) :
+    c.TrExprS (.const n []) (.const n []) :=
+  VContext.trConst_of_find? c hfind hsafety (by simp [hlevels]) rfl
+
+/-- Checked inference followed by a sort check gives the same semantic
+type witness as `ensureType`, without assuming the source expression was
+already safe and well typed. -/
+private theorem checkTypeEnsuresType.WF {c : VContext} {s : VState}
+    (hfvars : e.FVarsIn (· ∈ c.vlctx.fvars)) :
+    M.WF c s (do ensureSort (← checkType e) e) fun e1 _ =>
+      ∃ e', c.TrExprS e e' ∧ ∃ u u', e1 = .sort u ∧
+        VLevel.ofLevel c.lparams u = some u' ∧
+        c.HasType e' (.sort u') := by
+  refine (checkType.WF hfvars).bind fun _ _ _
+    ⟨e', ty', _, he, hty, hhas⟩ => ?_
+  refine (ensureSort.WF hty).mono fun _ _ _
+    ⟨⟨_, hsort, hdefeq⟩, hshape⟩ => ?_
+  obtain ⟨_, rfl⟩ := hshape
+  let .sort u := hsort
+  exact ⟨e', he, _, _, rfl, u,
+    hhas.defeqU_r c.Ewf c.Δwf hdefeq.symm⟩
 
 /-- Lift a proof about the recognizer's substantive core through its public
 safety guard. -/
@@ -1259,6 +1296,71 @@ theorem checkPrimitiveDef.natShiftRight.WF_typed {c : VContext} {s : VState}
       fun _ _ _ h => .pure fun _ => h
   · exact .throw
 
+/-- Exact typed certificate for the public `Char.ofNat` recognizer branch. -/
+theorem checkPrimitiveDef.charOfNat.WF_typed {c : VContext} {s : VState}
+    (hname : v.name = ``Char.ofNat)
+    (_hsafety : v.safety = .safe)
+    (hvlctx : c.vlctx = [])
+    (hty : c.TrExprS v.type ty') :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b →
+      v.levelParams = [] ∧ c.venv.contains ``Nat ∧
+      c.venv.IsDefEqU c.lparams.length [] ty' (.forallE .nat .char) := by
+  apply checkPrimitiveDef.WF_of_core (by simp)
+  simp only [checkPrimitiveDefCore, hname]
+  refine getEnv.WF.bind ?_
+  intro _ _ _ ⟨rfl, rfl⟩
+  split
+  · rename_i hdeps
+    have hdeps' : c.env.contains ``Nat = true ∧
+        v.levelParams.isEmpty = true := by simpa using hdeps
+    have hlevels : v.levelParams = [] := by simpa using hdeps'.2
+    have hnat : c.venv.contains ``Nat :=
+      VContext.contains_safe_primitive c hdeps'.1 (by
+        simp [Lean.Kernel.Environment.primitives,
+          NameSet.contains, NameSet.ofList])
+    rw [← bind_assoc]
+    refine (checkTypeEnsuresType.WF (e := q(Char)) (by
+      change ∀ u ∈ ([] : List Level), u.hasMVar' = false
+      simp)).bind ?_
+    intro _ _ _ hcharTy
+    obtain ⟨char', hcharS, _, u', rfl, _, hcharHas⟩ := hcharTy
+    have hcharEq : .char = char' := by
+      simpa [trExprS?, VExpr.char] using
+        hcharS.trExprS?_eq (by trivial)
+    subst char'
+    let Δ1 : VLCtx := [(none, .vlam .nat)]
+    have hnat0 := TrExprS.natType_of_contains c.Ewf
+      c.hasPrimitives hnat c.lparams []
+    have hchar0 : TrExprS c.venv c.lparams [] q(Char) .char := by
+      change TrExprS c.venv c.lparams c.vlctx _ _ at hcharS
+      rwa [hvlctx] at hcharS
+    have hchar1 : TrExprS c.venv c.lparams Δ1 q(Char) .char :=
+      TrExprS.closed_weak c.Ewf hchar0 (.skip (.vlam .nat) .refl)
+    have hcharHas0 : c.venv.HasType c.lparams.length []
+        .char (.sort u') := by
+      change c.venv.HasType c.lparams.length c.vlctx.toCtx
+        .char (.sort u') at hcharHas
+      simpa [hvlctx, VLCtx.toCtx] using hcharHas
+    have hcharType1 : c.venv.IsType c.lparams.length [.nat] .char :=
+      ⟨u', hcharHas0.weak0 c.Ewf⟩
+    have hcanon0 : TrExprS c.venv c.lparams [] q(Nat → Char)
+        (.forallE .nat .char) :=
+      .forallE hnat0.2 hcharType1 hnat0.1 hchar1
+    have hcanon : c.TrExprS q(Nat → Char)
+        (.forallE .nat .char) := by
+      change TrExprS c.venv c.lparams c.vlctx _ _
+      rw [hvlctx]
+      exact hcanon0
+    exact (isDefEq.WF hty hcanon).bind fun _ _ _ htyEq => by
+      split
+      · have htyEq := htyEq (by assumption)
+        change c.venv.IsDefEqU c.lparams.length
+          c.vlctx.toCtx _ _ at htyEq
+        rw [hvlctx] at htyEq
+        exact .pure fun _ => ⟨hlevels, hnat, htyEq⟩
+      · exact .throw
+  · exact .throw
+
 /-- Exact typed certificate for the public `Nat.beq` recognizer branch. -/
 theorem checkPrimitiveDef.natBEq.WF_typed {c : VContext} {s : VState}
     (hname : v.name = ``Nat.beq)
@@ -1621,9 +1723,11 @@ theorem VEnv.HasPrimitives.addNatPred {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2318,9 +2422,11 @@ theorem VEnv.HasPrimitives.addNatAdd {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2381,9 +2487,11 @@ theorem VEnv.HasPrimitives.addNatSub {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2444,9 +2552,11 @@ theorem VEnv.HasPrimitives.addNatMod {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2507,9 +2617,11 @@ theorem VEnv.HasPrimitives.addNatDiv {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2570,9 +2682,11 @@ theorem VEnv.HasPrimitives.addNatMul {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2633,9 +2747,11 @@ theorem VEnv.HasPrimitives.addNatPow {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2696,9 +2812,11 @@ theorem VEnv.HasPrimitives.addNatBEq {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2759,9 +2877,11 @@ theorem VEnv.HasPrimitives.addNatBLE {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2823,9 +2943,11 @@ theorem VEnv.HasPrimitives.addNatShiftLeft {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := href
     natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H
@@ -2887,9 +3009,84 @@ theorem VEnv.HasPrimitives.addNatShiftRight {env env' : VEnv}
     natXor := (h.natXor.addConst hadd (by decide)).addDefEq
     natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
     natShiftRight := href
-    charOfNat := fun H => h.charOfNat (by
-      change env''.constants ``Char.ofNat = some _ at H
-      rwa [same ``Char.ofNat (by decide)] at H)
+    charOfNat := fun H => by
+      obtain ⟨hu, hty⟩ := h.charOfNat (by
+        change env''.constants ``Char.ofNat = some _ at H
+        rwa [same ``Char.ofNat (by decide)] at H)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
+
+/-- Install the semantically checked `Char.ofNat` declaration while
+transporting every unrelated primitive certificate. The semantic field is
+deliberately based on canonical typing, not syntactic equality of types. -/
+theorem VEnv.HasPrimitives.addCharOfNat {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Char.ofNat ci = some env')
+    (hwf : (env'.addDefEq df).WF)
+    (hu : ci.uvars = 0)
+    (hty : env.IsDefEqU 0 [] ci.type (.forallE .nat .char)) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Char.ofNat ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Char.ofNat ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  have hself : env''.constants ``Char.ofNat = some ci := by
+    change env'.constants ``Char.ofNat = some ci
+    exact VEnv.addConst_self hadd
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natSub := (h.natSub.addConst hadd (by decide)).addDefEq
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natMod := (h.natMod.addConst hadd (by decide)).addDefEq
+    natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => by
+      change env'.constants ``Char.ofNat = some _ at H
+      rw [VEnv.addConst_self hadd] at H
+      cases H
+      exact ⟨hu, fun U Γ =>
+        VEnv.HasType.const_of_type_defeq hwf hself hu
+          (hty.mono le) U Γ⟩
     stringOfList := fun H => by
       change env''.constants ``String.ofList = some _ at H
       rw [same ``String.ofList (by decide)] at H

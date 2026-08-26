@@ -801,8 +801,9 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
     checkNatShiftRightPrimitive env v fail
   | ``Char.ofNat =>
     unless env.contains ``Nat && v.levelParams.isEmpty do fail
-    -- Char : Type
-    _ ← ensureType q(Char)
+    -- Char : Type. Use checked inference here: unlike inference-only
+    -- `ensureType`, this also enforces the declaration's safety boundary.
+    _ ← ensureSort (← checkType q(Char)) q(Char)
     -- @Char.ofNat : Nat → Char
     unless ← isDefEq v.type q(Nat → Char) do fail
   | ``String.ofList =>

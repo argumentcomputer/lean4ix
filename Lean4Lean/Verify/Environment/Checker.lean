@@ -495,6 +495,32 @@ theorem checkSafeNatShiftRightDefinition.WF
     (ty' := v'.type) (value' := v'.value)
     hname rfl htype hvalue hvalueT'
 
+/-- Direct type-boundary certificate for the safe `Char.ofNat` definition
+path. Checked inference establishes that `Char` is a safe type before the
+recognizer compares the declared type with `Nat → Char`. -/
+theorem checkSafeCharOfNatDefinition.WF
+    {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (hname : v.name = ``Char.ofNat)
+    (hsafety : v.safety = .safe) :
+    ((do
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) :
+      TypeChecker.M Unit).WF (.mk' wf .safe v.levelParams) {} fun _ _ =>
+        ∃ v' : VDefVal,
+          TrDefVal .safe (ves.venv .safe) (.defnInfo v) v' ∧
+          v'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
+          v.levelParams = [] ∧
+          (ves.venv .safe).contains ``Nat ∧
+          (ves.venv .safe).IsDefEqU v.levelParams.length [] v'.type
+            (.forallE .nat .char) := by
+  refine checkSafePrimitiveDefinition.WF wf v hname hsafety (by
+    simp [Environment.primitives, NameSet.contains, NameSet.ofList]) ?_
+  intro state' v' _ htype _ _
+  exact Environment.checkPrimitiveDef.charOfNat.WF_typed
+    (c := .mk' wf .safe v.levelParams) (s := state')
+    (ty' := v'.type) hname hsafety rfl htype
+
 /-- Direct typed checker evidence for the safe `Nat.mod` definition path.
 The retained certificate includes the zero equation, both fuel-recursion
 equations, the checked `Nat.modCore.go` type, and the reflected selector. -/

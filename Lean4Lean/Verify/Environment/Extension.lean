@@ -135,7 +135,10 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
       (oldContains (hprims (by simp)))
   · exact H.natShiftRight.mono_of_contains le
       (oldContains (hprims (by simp)))
-  · intro ci h; apply H.charOfNat; rwa [← same (hprims (by simp))]
+  · intro ci h
+    obtain ⟨hu, hty⟩ := H.charOfNat (by
+      rwa [← same (hprims (by simp))])
+    exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
   · intro ci h
     obtain ⟨rfl, h2, h3⟩ := H.stringOfList (by rwa [← same (hprims (by simp))])
     exact ⟨rfl, h2.mono le, h3.mono le⟩
@@ -163,6 +166,9 @@ theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
       (fun h => h)
     natShiftRight := H.natShiftRight.mono_of_contains VEnv.addDefEq_le
       (fun h => h)
+    charOfNat h :=
+      let ⟨hu, hty⟩ := H.charOfNat h
+      ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addDefEq_le⟩
     stringOfList h :=
       let ⟨h1, h2, h3⟩ := H.stringOfList h
       ⟨h1, h2.mono VEnv.addDefEq_le, h3.mono VEnv.addDefEq_le⟩ }
@@ -194,6 +200,9 @@ theorem VEnv.HasPrimitives.addStructEta {env : VEnv}
       (fun h => h)
     natShiftRight := H.natShiftRight.mono_of_contains VEnv.addStructEta_le
       (fun h => h)
+    charOfNat h :=
+      let ⟨hu, hty⟩ := H.charOfNat h
+      ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addStructEta_le⟩
     stringOfList h :=
       let ⟨h1, h2, h3⟩ := H.stringOfList h
       ⟨h1, h2.mono VEnv.addStructEta_le,
@@ -1170,9 +1179,11 @@ theorem VEnv.HasPrimitives.of_addBool
     natShiftRight := pre.natShiftRight.mono_of_contains hle fun found =>
       oldContains ``Nat.shiftRight (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found
-    charOfNat := fun found => pre.charOfNat
-      (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found)
+    charOfNat := fun found => by
+      obtain ⟨hu, hty⟩ := pre.charOfNat
+        (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
+          (by simp) (by simp) (by simp) found)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun found =>
       let ⟨typeEq, nilType, consType⟩ := pre.stringOfList
         (oldLookup ``String.ofList
@@ -1273,9 +1284,11 @@ theorem VEnv.HasPrimitives.of_addNat
     natShiftRight := pre.natShiftRight.mono_of_contains hle fun found =>
       oldContains ``Nat.shiftRight (by simp [VEnv.reflectedPrimitiveNames])
         (by simp) (by simp) (by simp) found
-    charOfNat := fun found => pre.charOfNat
-      (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
-        (by simp) (by simp) (by simp) found)
+    charOfNat := fun found => by
+      obtain ⟨hu, hty⟩ := pre.charOfNat
+        (oldLookup ``Char.ofNat (by simp [VEnv.reflectedPrimitiveNames])
+          (by simp) (by simp) (by simp) found)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun found =>
       let ⟨typeEq, nilType, consType⟩ := pre.stringOfList
         (oldLookup ``String.ofList

@@ -252,7 +252,8 @@ structure VEnv.HasPrimitives (env : VEnv) : Prop where
   natShiftLeft : env.ReflectsNatNatNat ``Nat.shiftLeft Nat.shiftLeft
   natShiftRight : env.ReflectsNatNatNat ``Nat.shiftRight Nat.shiftRight
   charOfNat : env.constants ``Char.ofNat = some ci →
-    ci = { uvars := 0, type := .forallE .nat .char }
+    ci.uvars = 0 ∧
+    ∀ U Γ, env.HasType U Γ .charOfNat (.forallE .nat .char)
   stringOfList : env.constants ``String.ofList = some ci →
     ci = { uvars := 0, type := .forallE .listChar .string } ∧
     env.HasType 0 [] .listCharNil .listChar ∧
@@ -482,9 +483,11 @@ theorem VEnv.HasPrimitives.addConst
     natShiftRight := fun h => liftBinary H.natShiftRight
       (oldContains ``Nat.shiftRight
         (by simp [VEnv.reflectedPrimitiveNames]) h)
-    charOfNat := fun h => H.charOfNat (by
-      simpa only [lookup ``Char.ofNat
-        (by simp [VEnv.reflectedPrimitiveNames])] using h)
+    charOfNat := fun h => by
+      obtain ⟨hu, hty⟩ := H.charOfNat (by
+        simpa only [lookup ``Char.ofNat
+          (by simp [VEnv.reflectedPrimitiveNames])] using h)
+      exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun h => by
       obtain ⟨hconstant, hnil, hcons⟩ := H.stringOfList (by
         simpa only [lookup ``String.ofList
@@ -693,7 +696,10 @@ end VEnv.PreludeReady
 theorem VEnv.HasPrimitives.nat_of_charOfNat (wf : Ordered env)
     (henv : env.HasPrimitives) (H : env.contains ``Char.ofNat) : env.contains ``Nat := by
   let ⟨_, H⟩ := H
-  have ⟨_, H⟩ := wf.constWF (henv.charOfNat H ▸ H)
+  let ⟨_, hty⟩ := henv.charOfNat H
+  have hfun : env.HasType 0 [] .charOfNat (.forallE .nat .char) :=
+    hty 0 []
+  have ⟨_, H⟩ := hfun.isType wf (by trivial)
   let ⟨⟨_, H⟩, _⟩ := H.forallE_inv wf
   let ⟨_, H, _⟩ := H.const_inv (Γ := []) wf (by trivial)
   exact ⟨_, H⟩

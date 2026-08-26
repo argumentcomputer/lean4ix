@@ -2669,8 +2669,8 @@ theorem TrExprS.charOfNat (henv : env.HasPrimitives) (H : env.contains ``Char.of
     TrExprS env Us Δ (.const ``Char.ofNat []) .charOfNat ∧
     env.HasType Us.length Δ.toCtx .charOfNat (.forallE .nat .char) := by
   let ⟨_, H⟩ := H
-  cases henv.charOfNat H
-  exact ⟨.const H rfl rfl, .const H nofun rfl⟩
+  let ⟨hu, hty⟩ := henv.charOfNat H
+  exact ⟨.const H rfl hu.symm, hty _ _⟩
 
 theorem TrExprS.listChar (wf : env.Ordered) (henv : env.HasPrimitives)
     (H : env.contains ``String.ofList) :
