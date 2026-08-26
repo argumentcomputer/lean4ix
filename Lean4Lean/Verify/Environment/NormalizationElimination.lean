@@ -2313,6 +2313,27 @@ private theorem telDefEqEvidence_takeDirect
       | zero => exact .nil
       | succ count => exact .cons head (ih count)
 
+private theorem telDefEqEvidence_length_eqDirect
+    (run : TypeChecker.TelDefEqEvidence env U Γ As As') :
+    As.length = As'.length := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih => exact congrArg Nat.succ ih
+
+private theorem telDefEqEvidence_dropDirect
+    (run : TypeChecker.TelDefEqEvidence env U Γ As As') (count : Nat) :
+    TypeChecker.TelDefEqEvidence env U
+      ((As.take count).reverse ++ Γ)
+      (As.drop count) (As'.drop count) := by
+  induction run generalizing count with
+  | nil =>
+      cases count <;> exact .nil
+  | cons head tail ih =>
+      cases count with
+      | zero => exact .cons head tail
+      | succ count =>
+          simpa [List.reverse_cons, List.append_assoc] using ih count
+
 /-- Exact parameter-prefix equality retained from the second family's full
 raw/annotation telescope.  Both endpoints are producer-selected; callers do
 not choose a parallel semantic telescope. -/
@@ -2337,6 +2358,154 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.paramete
   rw [telN_take_of_le annotation.secondRaw.type
     annotation.nparams_le_rawSpineLength] at parameterPrefix
   exact parameterPrefix
+
+/-- The exact post-parameter suffix of the second-family annotation
+telescope.  Its base context is the raw shared-parameter telescope, matching
+the convention required by dependent spine specialization. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.indexTelescope
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    TypeChecker.TelDefEqEvidence env Us.length
+      (VExpr.telN source.nparams annotation.secondRaw.type).reverse
+      ((VExpr.telN
+        (VInductDecl.ctorFields annotation.secondRaw.type).length
+        annotation.secondRaw.type).drop source.nparams)
+      (annotation.storedBinders.drop source.nparams) := by
+  have indexSuffix :=
+    telDefEqEvidence_dropDirect annotation.telescope source.nparams
+  rw [telN_take_of_le annotation.secondRaw.type
+    annotation.nparams_le_rawSpineLength] at indexSuffix
+  simpa using indexSuffix
+
+/-- The raw shared-parameter telescope selected by the second candidate has
+exactly the source-declared parameter count. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawParameterTelescope_length
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    (VExpr.telN source.nparams annotation.secondRaw.type).length =
+      source.nparams := by
+  have fullLength :
+      (VExpr.telN
+        (VInductDecl.ctorFields annotation.secondRaw.type).length
+        annotation.secondRaw.type).length =
+      (VInductDecl.ctorFields annotation.secondRaw.type).length :=
+    (telDefEqEvidence_length_eqDirect annotation.telescope).trans
+      annotation.stored_length
+  rw [← telN_take_of_le annotation.secondRaw.type
+    annotation.nparams_le_rawSpineLength]
+  rw [List.length_take_of_le]
+  rw [fullLength]
+  exact annotation.nparams_le_rawSpineLength
+
+/-- Exact first raw/annotation-consumed index node after the declared shared
+parameter prefix.  The suffix equations retain its position in the complete
+producer telescope. -/
+structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.RawFirstIndexDomain
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) where
+  rawDomain : VExpr
+  consumedDomain : VExpr
+  rawTail : List VExpr
+  consumedTail : List VExpr
+  sort : VLevel
+  raw_suffix_eq :
+    (VExpr.telN
+      (VInductDecl.ctorFields annotation.secondRaw.type).length
+      annotation.secondRaw.type).drop source.nparams =
+      rawDomain :: rawTail
+  consumed_suffix_eq :
+    annotation.storedBinders.drop source.nparams =
+      consumedDomain :: consumedTail
+  annotation_evidence : TypeChecker.DefEqEvidence env Us.length
+    (VExpr.telN source.nparams annotation.secondRaw.type).reverse
+    rawDomain consumedDomain (.sort sort)
+
+/-- A genuine post-parameter raw binder selects the exact first index-domain
+equality from the producer-owned annotation suffix. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawFirstIndexDomain
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic)
+    (hasIndex : source.nparams <
+      (VInductDecl.ctorFields annotation.secondRaw.type).length) :
+    Nonempty annotation.RawFirstIndexDomain := by
+  have fullLength :
+      (VExpr.telN
+        (VInductDecl.ctorFields annotation.secondRaw.type).length
+        annotation.secondRaw.type).length =
+      (VInductDecl.ctorFields annotation.secondRaw.type).length :=
+    (telDefEqEvidence_length_eqDirect annotation.telescope).trans
+      annotation.stored_length
+  have rawSuffixNonempty :
+      (VExpr.telN
+        (VInductDecl.ctorFields annotation.secondRaw.type).length
+        annotation.secondRaw.type).drop source.nparams ≠ [] := by
+    intro empty
+    have emptyLength := congrArg List.length empty
+    simp only [List.length_drop, List.length_nil] at emptyLength
+    rw [fullLength] at emptyLength
+    omega
+  have indexSuffix := annotation.indexTelescope
+  generalize rawSuffixEq :
+      (VExpr.telN
+        (VInductDecl.ctorFields annotation.secondRaw.type).length
+        annotation.secondRaw.type).drop source.nparams = rawSuffix
+      at indexSuffix rawSuffixNonempty
+  generalize consumedSuffixEq :
+      annotation.storedBinders.drop source.nparams = consumedSuffix
+      at indexSuffix
+  cases indexSuffix with
+  | nil => exact (rawSuffixNonempty rfl).elim
+  | @cons rawContext rawDomain consumedDomain sort rawTail consumedTail head
+      tail =>
+      exact ⟨{
+        rawDomain := rawDomain
+        consumedDomain := consumedDomain
+        rawTail := rawTail
+        consumedTail := consumedTail
+        sort := sort
+        raw_suffix_eq := rawSuffixEq
+        consumed_suffix_eq := consumedSuffixEq
+        annotation_evidence := head }⟩
 
 /-- The first two producer-selected candidates allocate the same exact shared
 parameter free variables.  Both lower bounds and the root name-generator
@@ -2419,6 +2588,34 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnn
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.parameterTelescope
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.indexTelescope' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.indexTelescope
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawParameterTelescope_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawParameterTelescope_length
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawFirstIndexDomain' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.rawFirstIndexDomain
+
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.parameterLists_eq' depends on axioms: [propext,
@@ -2510,6 +2707,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
             produced.kernelSources_nonempty).secondTelescope? =
           some position ∧
         position.stats.params.size = source.nparams ∧
+        position.i = 0 ∧
+        position.nindices = 0 ∧
         ∃ currentRun : TypeChecker.CandidateContextRun position.context,
           Nonempty
             (TypeChecker.FamilyParameterIndexBoundary position.trace
@@ -2529,6 +2728,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
     ∃ position,
       comparisonTrace.secondTelescope? = some position ∧
       position.stats.params.size = source.nparams ∧
+      position.i = 0 ∧
+      position.nindices = 0 ∧
       ∃ currentRun : TypeChecker.CandidateContextRun position.context,
         Nonempty
           (TypeChecker.FamilyParameterIndexBoundary position.trace currentRun)
@@ -2675,6 +2876,7 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                     trace := secondTelescope }
                   refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
                     secondRuns, secondPosition, (by rfl), paramsSize,
+                    (by rfl), (by rfl),
                     currentRun,
                     ?_⟩
                   · simp only [
@@ -2776,6 +2978,8 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
         (produced.execution.normalization_run produced.producedExecution)
         produced.kernelSources_nonempty).secondTelescope? = some position
   position_params_size : position.stats.params.size = source.nparams
+  position_i_eq : position.i = 0
+  position_nindices_eq : position.nindices = 0
   currentRun : TypeChecker.CandidateContextRun position.context
   boundary : TypeChecker.FamilyParameterIndexBoundary position.trace
     currentRun
@@ -2799,8 +3003,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
   obtain ⟨annotation⟩ :=
     produced.semanticSecondFamilyAnnotationSpine semantic
   obtain ⟨secondComparisons, remainingComparisons, comparisonsEq,
-      comparisonRuns, position, positionEq, positionParamsSize, currentRun,
-      ⟨boundary⟩⟩ :=
+      comparisonRuns, position, positionEq, positionParamsSize, positionIEq,
+      positionNindicesEq, currentRun, ⟨boundary⟩⟩ :=
     produced.semanticSecondFamilyParameterComparisons semantic
       context_lctx_eq
   exact ⟨{
@@ -2812,8 +3016,67 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     position := position
     position_eq := positionEq
     position_params_size := positionParamsSize
+    position_i_eq := positionIEq
+    position_nindices_eq := positionNindicesEq
     currentRun := currentRun
     boundary := boundary }⟩
+
+/-- The boundary's strict kernel/Theory parameter inventory covers the exact
+declared shared-parameter prefix from initial position zero. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterPairs_length
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic) :
+    staging.boundary.parameters.length = source.nparams := by
+  rw [staging.boundary.parameters_length, staging.position_i_eq,
+    Nat.sub_zero]
+
+/-- The kernel half of the retained parameter inventory is exactly the
+validator position's producer-owned parameter array. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_positionParams
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic) :
+    staging.boundary.parameters.map Prod.fst =
+      staging.position.stats.params.toList := by
+  rw [staging.boundary.parameter_sources_eq, staging.position_i_eq,
+    List.drop_zero]
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterPairs_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterPairs_length
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_positionParams' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_positionParams
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging' depends on axioms: [propext,
@@ -3101,6 +3364,28 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.position_pa
           source.nparams :=
       staging.annotation.parameterLists_eq context_lctx_eq
 
+/-- The retained kernel inventory is the exact main-spine prefix of the
+producer-selected second candidate. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_secondParameterList
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (context_lctx_eq : context.lctx = {}) :
+    staging.boundary.parameters.map Prod.fst =
+      staging.annotation.secondCandidate.familyType.type.trace.parameterList
+        source.nparams :=
+  staging.parameterSources_eq_positionParams.trans
+    (staging.position_params_eq_secondParameterList context_lctx_eq)
+
 /-- Consequently, the exact second candidate parameter list also has the
 validator-selected declared length. -/
 theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.secondParameterList_length
@@ -3136,6 +3421,15 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.position_params_eq_secondParameterList
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_secondParameterList' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterSources_eq_secondParameterList
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.secondParameterList_length' depends on axioms: [propext,

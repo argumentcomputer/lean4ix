@@ -887,6 +887,13 @@ structure FamilyParameterIndexBoundary
     context source nparams nindices fuel
   source' : VExpr
   source_tr : contextRun.context.TrExprS source source'
+  parameters : List (Expr × VExpr)
+  parameter_tr : ∀ parameter ∈ parameters,
+    contextRun.context.TrExprS parameter.1 parameter.2
+  parameters_length : parameters.length = nparams - i
+  params_size : stats.params.size = nparams
+  parameter_sources_eq : parameters.map Prod.fst =
+    stats.params.toList.drop i
   localState : FamilyParameterLocalState stats context
   result_eq : trace.result = outer.result
   comparisons_eq_nil : trace.comparisons = []
@@ -990,6 +997,28 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := boundary.trace
           source' := boundary.source'
           source_tr := boundary.source_tr
+          parameters :=
+            (stats.params[i]!, fvValue) :: boundary.parameters
+          parameter_tr := by
+            intro parameter member
+            simp only [List.mem_cons] at member
+            rcases member with rfl | member
+            · rw [parameterEq]
+              exact fv_tr
+            · exact boundary.parameter_tr parameter member
+          parameters_length := by
+            simp only [List.length_cons, boundary.parameters_length]
+            omega
+          params_size := paramsSize
+          parameter_sources_eq := by
+            simp only [List.map_cons, boundary.parameter_sources_eq]
+            have indexBound : i < stats.params.size := by
+              simpa only [paramsSize] using isParameter
+            have listIndexBound : i < stats.params.toList.length := by
+              simpa using indexBound
+            rw [List.drop_eq_getElem_cons listIndexBound]
+            congr 1
+            simp [indexBound]
           localState := boundary.localState
           result_eq := by
             simpa only [
@@ -1028,6 +1057,17 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := current
           source' := source'
           source_tr := source_tr
+          parameters := []
+          parameter_tr := by
+            intro parameter member
+            simp at member
+          parameters_length := by simp
+          params_size := paramsSize
+          parameter_sources_eq := by
+            simp only [List.map_nil]
+            symm
+            apply List.drop_of_length_le
+            simpa using Nat.le_of_eq paramsSize
           localState := localState
           result_eq := rfl
           comparisons_eq_nil := currentEmpty }⟩
@@ -1048,6 +1088,17 @@ theorem familyTypeParameterComparison_semanticPrefix_of_later
           trace := current
           source' := source'
           source_tr := source_tr
+          parameters := []
+          parameter_tr := by
+            intro parameter member
+            simp at member
+          parameters_length := by simp
+          params_size := paramsSize
+          parameter_sources_eq := by
+            simp only [List.map_nil]
+            symm
+            apply List.drop_of_length_le
+            simpa using Nat.le_of_eq paramsSize
           localState := localState
           result_eq := rfl
           comparisons_eq_nil := rfl }⟩
@@ -2142,6 +2193,17 @@ def FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary
   trace := advance.tail
   source' := advance.view'
   source_tr := advance.view_tr
+  parameters := []
+  parameter_tr := by
+    intro parameter member
+    simp at member
+  parameters_length := by simp
+  params_size := boundary.params_size
+  parameter_sources_eq := by
+    simp only [List.map_nil]
+    symm
+    apply List.drop_of_length_le
+    simpa using Nat.le_of_eq boundary.params_size
   localState := advance.localState
   result_eq := rfl
   comparisons_eq_nil := advance.comparisons_eq_nil
@@ -2175,7 +2237,9 @@ theorem FamilyParameterIndexBoundary.IndexDomainRun.advance
   obtain ⟨body', body_tr⟩ := run.instantiatedBodyTranslation
   rcases boundary with
     ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
-      boundarySourceTr, boundaryLocalState, boundaryResultEq,
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryLocalState, boundaryResultEq,
       boundaryComparisons⟩
   cases boundaryTrace with
   | freshParameter stats context i nindices fuel name domain body view
