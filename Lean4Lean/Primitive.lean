@@ -87,6 +87,14 @@ def Condition.bool : Condition where
   dec := q(fun x => Bool.decEq x true)
   impl := .bool
 
+/-- The closed Boolean selector used by well-founded primitive certificates.
+Naming this expression lets the executable checker and its verification pin
+the same selector equations without depending on local binder identities. -/
+def Condition.boolNatITE (cond : Condition) : Expr :=
+  .lam0 q(Bool) <| mkApp2 q(@_root_.ite Nat)
+    (mkApp cond.prop (.bvar 0))
+    (mkApp cond.dec (.bvar 0))
+
 def Reflection.ite (r : Reflection) : Expr :=
   .lam0 q(Prop) <| .lam0 q(Bool) <| .lam0 (mkApp2 r.type (.bvar 1) (.bvar 0)) <|
     .lam0 q(Type) <| mkApp3 q(@_root_.ite.{1}) (.bvar 0) (.bvar 3)
@@ -313,57 +321,545 @@ def forallTelescope (e : Expr) (k : Array Expr → Expr → M α) : M α := loop
       loop fvars body
   | e => k fvars (e.instantiateRev fvars)
 
-def unfoldNatWellFounded (e : Expr) (fvs : Array Expr) (eq_def : Expr) (fail : ∀ {α}, M α) : M Expr := do
+def withLambda (e : Expr) (fail : ∀ {α}, M α)
+    (k : Expr → Expr → M α) : M α :=
+  match e with
+  | .lam name dom body bi =>
+    withLocalDecl name bi dom fun fv => k fv (body.instantiate1 fv)
+  | _ => fail
+
+def withForall (e : Expr) (fail : ∀ {α}, M α)
+    (k : Expr → Expr → M α) : M α :=
+  match e with
+  | .forallE name dom body bi =>
+    withLocalDecl name bi dom fun fv => k fv (body.instantiate1 fv)
+  | _ => fail
+
+/-- Transparent expression alpha-equivalence for checked certificate shapes.
+Unlike the opaque runtime `Expr.eqv`, this relation has a proof-relevant model
+counterpart in the verification layer. -/
+def exprShapeEq : Expr → Expr → Bool
+  | .bvar i, .bvar j => i == j
+  | .fvar i, .fvar j => i == j
+  | .mvar i, .mvar j => i == j
+  | .sort u, .sort v => u == v
+  | .const n us, .const n' us' => n == n' && us == us'
+  | .app f a, .app f' a' => exprShapeEq f f' && exprShapeEq a a'
+  | .lam _ ty body _, .lam _ ty' body' _ =>
+    exprShapeEq ty ty' && exprShapeEq body body'
+  | .forallE _ ty body _, .forallE _ ty' body' _ =>
+    exprShapeEq ty ty' && exprShapeEq body body'
+  | .letE _ ty val body _, .letE _ ty' val' body' _ =>
+    exprShapeEq ty ty' && exprShapeEq val val' && exprShapeEq body body'
+  | .lit l, .lit l' => l == l'
+  | .mdata _ e, .mdata _ e' => exprShapeEq e e'
+  | .proj s i e, .proj s' i' e' =>
+    s == s' && i == i' && exprShapeEq e e'
+  | _, _ => false
+
+/-- Structural loose-binder range used at the executable certificate
+boundary. Unlike `Expr.hasLooseBVars`, this does not trust the packed cached
+range stored in expression metadata. -/
+def exprLooseBVarRange : Expr → Nat
+  | .bvar i => i + 1
+  | .const ..
+  | .sort _
+  | .fvar _
+  | .mvar _
+  | .lit _ => 0
+  | .mdata _ e
+  | .proj _ _ e => exprLooseBVarRange e
+  | .app f a => max (exprLooseBVarRange f) (exprLooseBVarRange a)
+  | .lam _ ty body _
+  | .forallE _ ty body _ =>
+    max (exprLooseBVarRange ty) (exprLooseBVarRange body - 1)
+  | .letE _ ty val body _ =>
+    max (max (exprLooseBVarRange ty) (exprLooseBVarRange val))
+      (exprLooseBVarRange body - 1)
+
+/-- Closed evidence recovered from a compiled `WellFounded.Nat.fix`.
+`stateFn` is the compiler-selected packing function for the public arguments;
+retaining it is what keeps the certificate generic in `PSigma`, `Prod`, or
+any other definitionally valid state representation. -/
+structure NatWellFoundedCoreResult where
+  equation : Expr
+  fixFn : Expr
+  fixGo : Expr
+  goFn : Expr
+  measure : Expr
+  functional : Expr
+  state : Expr
+  stateFn : Expr
+  callLhs : Expr
+  callRhs : Expr
+  entryLhs : Expr
+  entryRhs : Expr
+  topLhs : Expr
+  topRhs : Expr
+  eagerFn : Expr
+  eagerLhs : Expr
+  eagerRhs : Expr
+  boolTrueLhs : Expr
+  boolTrueRhs : Expr
+  boolFalseLhs : Expr
+  boolFalseRhs : Expr
+  stepLhs : Expr
+  stepRhs : Expr
+  specStepLhs : Expr
+  specStepRhs : Expr
+
+def unfoldNatWellFoundedCore (e : Expr) (fvs : Array Expr)
+    (eq_def : Expr) (fail : ∀ {α}, M α) : M NatWellFoundedCoreResult := do
   let succ := mkApp q(Nat.succ)
-  let defeq1 a b := isDefEq (.arrow q(Nat) a) (.arrow q(Nat) b)
-  let x := .bvar 0
-  let .app (.app _ lhs) rhs := eq_def.getForallBody.instantiateRev fvs | fail
+  let x : Expr := .bvar 0
+  let .app (.app _ lhs) rhs := eq_def.getForallBody.instantiateRev fvs
+    | fail
   let orig := lhs.getAppFn
   let rhs := rhs.replace fun e' => if e' == orig then some e else none
-  let e1 ← whnfCore (mkAppN e fvs) -- get _unary
-  let e1 ← unfoldDefinition e1 -- get fix
+  let e1 ← whnfCore (mkAppN e fvs)
+  let e1 ← unfoldDefinition e1
   (← whnfCore e1).withApp fun fix args => do
   let .const ``WellFounded.Nat.fix [_, _] := fix | fail
-  let #[α,motive,f,F,a₀] := args | fail
-  let fixFn := mkAppN fix #[α,motive,f,F]
+  let #[α, motive, f, F, a₀] := args | fail
+  let fixFn := mkAppN fix #[α, motive, f, F]
+  let stateFn := (← getLCtx).mkLambda fvs a₀
+  let call ← unfoldDefinition (.app fixFn a₀)
+  let call ← whnfCore call
+  let fixGo₀ ← call.withApp fun fixGo args => do
+    let #[α', motive', f', F', fuel, a', _] := args | fail
+    unless (α, motive, f, F, a₀) == (α', motive', f', F', a') do fail
+    let .app _ _ := fuel | fail
+    return fixGo
+  let callLhs := (← getLCtx).mkLambda fvs (mkAppN e fvs)
+  let callRhs := (← getLCtx).mkLambda fvs call
+  unless ← isDefEq callLhs callRhs do fail
+  let goFn := (← getLCtx).mkLambda fvs (mkAppN fixGo₀ #[α, motive, f, F])
+  let entryLhs := (← getLCtx).mkLambda fvs (mkAppN e fvs)
+  let entryRhs := (← getLCtx).mkLambda fvs (mkAppN fix args)
+  unless ← isDefEq entryLhs entryRhs do fail
   withLocalDecl `a .default (← inferType a₀) fun a => do
-  -- prove |- fix α motive f F a ≡ go α motive f F (eager (f a)) a [proof]
-  let e1 ← unfoldDefinition (.app fixFn a) -- get fix.go
+  let e1 ← unfoldDefinition (.app fixFn a)
   let e1 ← whnfCore e1
-  e1.withApp fun fixGo args => do
-    let #[α',motive',f',F',fuel,a',_] := args | fail
+  let topLhs := (← getLCtx).mkLambda (fvs.push a) (.app fixFn a)
+  let topRhs := (← getLCtx).mkLambda (fvs.push a) e1
+  unless ← isDefEq topLhs topRhs do fail
+  let (fixGo, eagerFn, eagerLhs, eagerRhs, boolTrueLhs, boolTrueRhs,
+      boolFalseLhs, boolFalseRhs, stepLhs, stepRhs) ←
+    e1.withApp fun fixGo args => do
+    let #[α', motive', f', F', fuel, a', _] := args | fail
     unless (α, motive, f, F, a) == (α', motive', f', F', a') do fail
+    unless fixGo == fixGo₀ do fail
     let .app eager n := fuel | fail
     unless ← isDefEq n (succ (.app f a)) do fail
-    -- prove |- eager n = if beq n n = true then n else n
     unless (← getEnv).contains ``Nat.beq do fail
-    let c := Condition.bool; c.check (fail) (ite := true)
-    unless ← defeq1 (mkApp eager x) (c.ite q(Nat) #[mkApp2 (.const ``Nat.beq []) x x] x x) do fail
-    -- prove |- go α motive f F (succ t) x hfuel ≡ F x fun y hy => go α motive f F t y [proof]
-    let go' ← unfoldDefinition fixGo -- get fix
-    lambdaTelescope go' fun fvs go' => do
-    let #[_,_,_,F,t] := fvs | fail
+    let c := Condition.bool
+    c.check fail (ite := true)
+    let boolTrueLhs := mkApp c.boolNatITE q(true)
+    let boolTrueRhs := .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 1
+    let boolFalseLhs := mkApp c.boolNatITE q(false)
+    let boolFalseRhs := .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 0
+    unless ← isDefEq boolTrueLhs boolTrueRhs do fail
+    unless ← isDefEq boolFalseLhs boolFalseRhs do fail
+    let eagerLhs := .lam0 q(Nat) (mkApp eager x)
+    let eagerRhs := .lam0 q(Nat)
+      (mkApp3 c.boolNatITE (mkApp2 (.const ``Nat.beq []) x x) x x)
+    unless ← isDefEq eagerLhs eagerRhs do fail
+    let go' ← unfoldDefinition fixGo
+    withLambda go' fail fun αv go' =>
+    withLambda go' fail fun motivev go' =>
+    withLambda go' fail fun fv go' =>
+    withLambda go' fail fun F go' =>
+    withLambda go' fail fun t go' => do
     let .app natRec t' := go' | fail
     unless !natRec.containsFVar t.fvarId! && t == t' do fail
     _ ← checkType (succ t)
     let gor ← whnfCore (.app natRec (succ t))
-    lambdaTelescope gor fun fvs gor => do
-    let #[x,_] := fvs | fail
+    let stepLhs := (← getLCtx).mkLambda #[αv, motivev, fv, F, t]
+      (mkAppN fixGo #[αv, motivev, fv, F, succ t])
+    let goPred := mkAppN fixGo #[αv, motivev, fv, F, t]
+    let gor' := gor.replace fun e' =>
+      if e' == .app natRec t then some goPred else none
+    let stepRhs := (← getLCtx).mkLambda #[αv, motivev, fv, F, t] gor'
+    unless ← isDefEq stepLhs stepRhs do fail
+    withLambda gor fail fun x gor =>
+    withLambda gor fail fun _ gor => do
     let .app Fx ih := gor | fail
     unless .app F x == Fx do fail
-    lambdaTelescope ih fun fvs ih => do
-    let #[y,_] := fvs | fail
+    withLambda ih fail fun y ih =>
+    withLambda ih fail fun _ ih => do
     let .app ih _ := ih | fail
     unless ih == .app (.app natRec t) y do fail
-  -- prove |- rhs ≡ F x fun y _ => fix α motive f F y
+    return (fixGo, eager, eagerLhs, eagerRhs, boolTrueLhs, boolTrueRhs,
+      boolFalseLhs, boolFalseRhs, stepLhs, stepRhs)
+  let specStepLhs ← whnfCore (mkAppN stepLhs #[α, motive, f, F])
+  let specStepRhs ← whnfCore (mkAppN stepRhs #[α, motive, f, F])
+  let specStepLhs := (← getLCtx).mkLambda fvs specStepLhs
+  let specStepRhs := (← getLCtx).mkLambda fvs specStepRhs
+  unless ← isDefEq specStepLhs specStepRhs do fail
   let .forallE _ dom _ _ ← inferType (.app F a₀) | fail
-  let ih' ← forallTelescope dom fun fvs _ => do
-    let #[y,_] := fvs | fail
-    return (← getLCtx).mkLambda fvs (.app fixFn y)
+  let ih' ← withForall dom fail fun y dom =>
+    withForall dom fail fun h _ => do
+    return (← getLCtx).mkLambda #[y, h] (.app fixFn y)
   have rhs' := mkApp2 F a₀ ih'
   _ ← checkType rhs'
   unless ← isDefEq rhs rhs' do fail
-  return (← getLCtx).mkLambda fvs rhs
+  return {
+    equation := (← getLCtx).mkLambda fvs rhs
+    fixFn
+    fixGo
+    goFn
+    measure := f
+    functional := F
+    state := a₀
+    stateFn
+    callLhs
+    callRhs
+    entryLhs
+    entryRhs
+    topLhs
+    topRhs
+    eagerFn
+    eagerLhs
+    eagerRhs
+    boolTrueLhs
+    boolTrueRhs
+    boolFalseLhs
+    boolFalseRhs
+    stepLhs
+    stepRhs
+    specStepLhs
+    specStepRhs }
+
+@[irreducible] def checkNatWellFoundedEquation
+    (lhs rhs : Expr) : M Unit := do
+  let fail {α} : M α :=
+    throw <| .other "invalid well-founded recursion certificate"
+  unless !lhs.hasFVar && !lhs.hasMVar &&
+      !rhs.hasFVar && !rhs.hasMVar do fail
+  _ ← checkType lhs
+  _ ← checkType rhs
+  unless ← isDefEq lhs rhs do fail
+
+def NatWellFoundedCoreResult.expectedEagerLhs
+    (r : NatWellFoundedCoreResult) : Expr :=
+  let x : Expr := .bvar 0
+  .lam0 q(Nat) <| mkApp r.eagerFn x
+
+def NatWellFoundedCoreResult.expectedEagerRhs
+    (_r : NatWellFoundedCoreResult) : Expr :=
+  let x : Expr := .bvar 0
+  .lam0 q(Nat) <| mkApp3 Condition.bool.boolNatITE
+    (mkApp2 (.const ``Nat.beq []) x x) x x
+
+def NatWellFoundedCoreResult.expectedBoolTrueLhs
+    (_r : NatWellFoundedCoreResult) : Expr :=
+  mkApp Condition.bool.boolNatITE q(true)
+
+def NatWellFoundedCoreResult.expectedBoolTrueRhs
+    (_r : NatWellFoundedCoreResult) : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 1
+
+def NatWellFoundedCoreResult.expectedBoolFalseLhs
+    (_r : NatWellFoundedCoreResult) : Expr :=
+  mkApp Condition.bool.boolNatITE q(false)
+
+def NatWellFoundedCoreResult.expectedBoolFalseRhs
+    (_r : NatWellFoundedCoreResult) : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <| .bvar 0
+
+def NatWellFoundedCoreResult.auxShape
+    (r : NatWellFoundedCoreResult) : Bool :=
+  exprShapeEq r.eagerLhs r.expectedEagerLhs &&
+  exprShapeEq r.eagerRhs r.expectedEagerRhs &&
+  exprShapeEq r.boolTrueLhs r.expectedBoolTrueLhs &&
+  exprShapeEq r.boolTrueRhs r.expectedBoolTrueRhs &&
+  exprShapeEq r.boolFalseLhs r.expectedBoolFalseLhs &&
+  exprShapeEq r.boolFalseRhs r.expectedBoolFalseRhs &&
+  exprShapeEq r.eagerFn q(WellFounded.Nat.eager) &&
+  exprLooseBVarRange r.goFn == 0 && exprLooseBVarRange r.stateFn == 0
+
+@[irreducible] def checkNatWellFoundedCertificate
+    (r : NatWellFoundedCoreResult) : M Unit := do
+  unless r.auxShape do
+    throw <| .other "invalid well-founded recursion auxiliary certificate"
+  checkNatWellFoundedEquation r.callLhs r.callRhs
+  checkNatWellFoundedEquation r.entryLhs r.entryRhs
+  checkNatWellFoundedEquation r.topLhs r.topRhs
+  checkNatWellFoundedEquation r.eagerLhs r.eagerRhs
+  checkNatWellFoundedEquation r.boolTrueLhs r.boolTrueRhs
+  checkNatWellFoundedEquation r.boolFalseLhs r.boolFalseRhs
+  checkNatWellFoundedEquation r.stepLhs r.stepRhs
+  checkNatWellFoundedEquation r.specStepLhs r.specStepRhs
+
+/-- Close the equation theorem's telescope and replace its original function
+head by the candidate implementation. -/
+def natWellFoundedEquation (e : Expr) : Expr → Option Expr
+  | .forallE name dom body bi =>
+    (natWellFoundedEquation e body).map fun body => .lam name dom body bi
+  | .app (.app _ lhs) rhs =>
+    some <| rhs.replace fun e' =>
+      if e' == lhs.getAppFn then some e else none
+  | _ => none
+
+/-- Transactionally discover a compiled fixpoint and then independently
+check every closed equation retained in its certificate. -/
+def unfoldNatWellFoundedCert (e : Expr) (fvs : Array Expr)
+    (eq_def : Expr) (fail : ∀ {α}, M α) : M NatWellFoundedCoreResult := do
+  let some equation := natWellFoundedEquation e eq_def | fail
+  let cert ← M.sandbox (unfoldNatWellFoundedCore e fvs eq_def fail)
+  unless cert.equation == equation do
+    throw <| .other "invalid well-founded recursion equation"
+  checkNatWellFoundedCertificate cert
+  return cert
+
+/-- Compatibility projection for the still equation-only bitwise branch. -/
+def unfoldNatWellFounded (e : Expr) (fvs : Array Expr)
+    (eq_def : Expr) (fail : ∀ {α}, M α) : M Expr := do
+  let some equation := natWellFoundedEquation e eq_def | fail
+  _ ← unfoldNatWellFoundedCert e fvs eq_def fail
+  return equation
+
+def unfoldNatWellFoundedNat2Cert (e eq_def : Expr)
+    (fail : ∀ {α}, M α) : M NatWellFoundedCoreResult := do
+  let some equation := natWellFoundedEquation e eq_def | fail
+  let cert ← withLocalDecl `m .default q(Nat) fun m =>
+    withLocalDecl `n .default q(Nat) fun n =>
+      M.sandbox (unfoldNatWellFoundedCore e #[m, n] eq_def fail)
+  unless cert.equation == equation do
+    throw <| .other "invalid well-founded recursion equation"
+  checkNatWellFoundedCertificate cert
+  return cert
+
+/-- GCD specialization of a generic fixpoint certificate. The packed state is
+always reconstructed by applying `core.stateFn`; no concrete pair encoding is
+part of the accepted boundary. -/
+structure NatGcdFixCertificate where
+  core : NatWellFoundedCoreResult
+  topLhs : Expr
+  topRhs : Expr
+  topProof : Expr
+  zeroLhs : Expr
+  zeroRhs : Expr
+  zeroProofType : Expr
+  succLhs : Expr
+  succRhs : Expr
+  succProofType : Expr
+  succProof : Expr
+
+def NatGcdFixCertificate.stateExpr (r : NatGcdFixCertificate)
+    (a b : Expr) : Expr :=
+  mkApp2 r.core.stateFn a b
+
+private def natGcdCall (gcd : Expr) : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <|
+    mkApp2 gcd (.bvar 1) (.bvar 0)
+
+def NatGcdFixCertificate.expectedTopLhs
+    (_r : NatGcdFixCertificate) (gcd : Expr) : Expr :=
+  natGcdCall gcd
+
+def NatGcdFixCertificate.expectedTopRhs
+    (r : NatGcdFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  .lam0 q(Nat) <| .lam0 q(Nat) <| mkAppN r.core.goFn
+    #[zero, zero, mkApp q(WellFounded.Nat.eager) (succ (.bvar 1)),
+      r.stateExpr (.bvar 1) (.bvar 0), r.topProof]
+
+def NatGcdFixCertificate.expectedZeroLhs
+    (r : NatGcdFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let go := mkApp2 r.core.goFn zero zero
+  .lam0 q(Nat) <| .lam0 q(Nat) <| .lam0 r.zeroProofType <|
+    mkAppN go #[succ (.bvar 2), r.stateExpr zero (.bvar 1), .bvar 0]
+
+def NatGcdFixCertificate.expectedZeroRhs
+    (r : NatGcdFixCertificate) : Expr :=
+  .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.zeroProofType <| .bvar 1
+
+def NatGcdFixCertificate.expectedSuccLhs
+    (r : NatGcdFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let go := mkApp2 r.core.goFn zero zero
+  let sa := succ (.bvar 2)
+  .lam0 q(Nat) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.succProofType <| mkAppN go
+      #[succ (.bvar 3), r.stateExpr sa (.bvar 1), .bvar 0]
+
+def NatGcdFixCertificate.expectedSuccRhs
+    (r : NatGcdFixCertificate) : Expr :=
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let go := mkApp2 r.core.goFn zero zero
+  let sa := succ (.bvar 2)
+  .lam0 q(Nat) <| .lam0 q(Nat) <| .lam0 q(Nat) <|
+    .lam0 r.succProofType <| mkAppN go #[.bvar 3,
+      r.stateExpr (mkApp2 q(Nat.mod) (.bvar 1) sa) sa, r.succProof]
+
+def NatGcdFixCertificate.shape
+    (r : NatGcdFixCertificate) (gcd : Expr) : Bool :=
+  exprShapeEq r.topLhs (r.expectedTopLhs gcd) &&
+  exprShapeEq r.topRhs r.expectedTopRhs &&
+  exprShapeEq r.zeroLhs r.expectedZeroLhs &&
+  exprShapeEq r.zeroRhs r.expectedZeroRhs &&
+  exprShapeEq r.succLhs r.expectedSuccLhs &&
+  exprShapeEq r.succRhs r.expectedSuccRhs
+
+def specializeNatGcdFixCertificate (core : NatWellFoundedCoreResult)
+    (_fail : ∀ {α}, M α) : M NatGcdFixCertificate := do
+  let reject {α} (message : String) : M α :=
+    throw <| .other s!"invalid Nat.gcd specialization: {message}"
+  let zero := q(Nat.zero)
+  let succ := mkApp q(Nat.succ)
+  let stateExpr a b := mkApp2 core.stateFn a b
+  let go := mkApp2 core.goFn zero zero
+  let topRhs ← withLambda core.callRhs
+      (reject "top equation lacks its first lambda") fun m body =>
+    withLambda body (reject "top equation lacks its second lambda") fun n body => do
+      let args := body.getAppArgs
+      unless body.getAppFn == core.fixGo && args.size == 7 do
+        reject "top equation does not call the retained fixpoint"
+      let .app eager _ := args[4]!
+        | reject "top equation has malformed eager fuel"
+      return (← getLCtx).mkLambda #[m, n]
+        (mkAppN go #[mkApp eager (succ m), stateExpr m n, args[6]!])
+  let topLhs := core.callLhs
+  let (zeroLhs, zeroRhs) ← withLocalDecl `fuel .default q(Nat) fun fuel =>
+    withLocalDecl `b .default q(Nat) fun b => do
+      let stepR := mkApp3 core.specStepRhs zero zero fuel
+      let state := stateExpr zero b
+      let lhsFn := mkApp2 go (succ fuel) state
+      let .forallE _ hpTy _ _ ← inferType lhsFn
+        | reject "zero call has no proof binder"
+      withLocalDecl `hp .default hpTy fun hp => do
+        let lhs := mkApp lhsFn hp
+        _ ← whnfCore (mkApp (mkApp stepR state) hp)
+        return ((← getLCtx).mkLambda #[fuel, b, hp] lhs,
+          (← getLCtx).mkLambda #[fuel, b, hp] b)
+  let (succLhs, succRhs) ← withLocalDecl `fuel .default q(Nat) fun fuel =>
+    withLocalDecl `a .default q(Nat) fun a =>
+      withLocalDecl `b .default q(Nat) fun b => do
+        let sa := succ a
+        let stepR := mkApp3 core.specStepRhs zero zero fuel
+        let state := stateExpr sa b
+        let lhsFn := mkApp2 go (succ fuel) state
+        let .forallE _ hpTy _ _ ← inferType lhsFn
+          | reject "successor call has no proof binder"
+        withLocalDecl `hp .default hpTy fun hp => do
+          let lhs := mkApp lhsFn hp
+          let rhs ← whnfCore (mkApp (mkApp stepR state) hp)
+          let rhs ← unfoldDefinition rhs
+          let rhs ← whnfCore rhs
+          let rhs ← unfoldDefinition rhs
+          let rhs ← whnfCore rhs
+          let rhs ← if rhs.getAppFn == core.fixGo then
+            pure rhs
+          else
+            rhs.withApp fun decCases args => do
+              let .const ``Decidable.casesOn _ := decCases
+                | throw <| .other
+                    s!"invalid Nat.gcd specialization: successor branch head is {decCases} in {rhs}"
+              unless args.size == 5 do
+                reject "successor Decidable.casesOn has the wrong arity"
+              let isFalse := args[3]!
+              whnfCore (mkApp isFalse (mkApp q(Nat.succ_ne_zero) a))
+          let args := rhs.getAppArgs
+          unless rhs.getAppFn == core.fixGo && args.size == 7 do
+            throw <| .other s!"invalid gcd recursive call: {rhs}"
+          let recState := stateExpr (mkApp2 q(Nat.mod) b sa) sa
+          let rhs := mkAppN go #[fuel, recState, args[6]!]
+          return ((← getLCtx).mkLambda #[fuel, a, b, hp] lhs,
+            (← getLCtx).mkLambda #[fuel, a, b, hp] rhs)
+  let .lam _ _ (.lam _ _ topBody _) _ := topRhs
+    | reject "closed top equation has the wrong shape"
+  let topProof := topBody.getAppArgs[4]!
+  let .lam _ _ (.lam _ _ (.lam _ zeroProofType _ _) _) _ := zeroLhs
+    | reject "closed zero equation has the wrong shape"
+  let .lam _ _ (.lam _ _ (.lam _ _ (.lam _ succProofType _ _) _) _) _ :=
+    succLhs | reject "closed successor LHS has the wrong shape"
+  let .lam _ _ (.lam _ _ (.lam _ _ (.lam _ _ succBody _) _) _) _ :=
+    succRhs | reject "closed successor RHS has the wrong shape"
+  let succProof := succBody.getAppArgs[4]!
+  return {
+    core
+    topLhs
+    topRhs
+    topProof
+    zeroLhs
+    zeroRhs
+    zeroProofType
+    succLhs
+    succRhs
+    succProofType
+    succProof }
+
+def checkNatGcdFixCertificate (core : NatWellFoundedCoreResult)
+    (gcd : Expr) (fail : ∀ {α}, M α) : M NatGcdFixCertificate := do
+  let cert ← M.sandbox (specializeNatGcdFixCertificate core fail)
+  unless cert.shape gcd do
+    throw <| .other "invalid Nat.gcd well-founded recursion certificate"
+  checkNatWellFoundedCertificate cert.core
+  checkNatWellFoundedEquation cert.topLhs cert.topRhs
+  checkNatWellFoundedEquation cert.zeroLhs cert.zeroRhs
+  checkNatWellFoundedEquation cert.succLhs cert.succRhs
+  return cert
+
+/-- Expose one definitional reduction step under a lambda. This preserves the
+legacy GCD zero-case acceptance check alongside the stronger certificate. -/
+def reduceNatWellFoundedLam1 (e : Expr)
+    (fail : ∀ {α}, M α) : M Expr :=
+  withLambda e fail fun fv body => do
+    let body ← whnfCore body
+    let body ← unfoldDefinition body
+    let body ← whnfCore body
+    let body ← unfoldDefinition body
+    let body ← whnfCore body
+    return (← getLCtx).mkLambda #[fv] body
+
+/-- Validate `Nat.gcd` while retaining a generic-state, independently checked
+well-founded certificate. -/
+def checkNatGcdPrimitive (env : Environment) (v : DefinitionVal)
+    (fail : ∀ {α}, M α) : M NatGcdFixCertificate := do
+  let reject {α} (message : String) : M α :=
+    throw <| .other s!"invalid Nat.gcd certificate: {message}"
+  unless env.contains ``Nat.mod && env.contains ``Nat.beq &&
+      v.levelParams.isEmpty do fail
+  unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
+  let some gcd' := natWellFoundedEquation v.value
+    q(type_of% Nat.gcd.eq_def) | reject "malformed public equation"
+  unless !gcd'.hasFVar && !gcd'.hasMVar do
+    reject "public equation is not closed"
+  let gcdCore ← unfoldNatWellFoundedNat2Cert v.value
+    q(type_of% Nat.gcd.eq_def) (reject "generic fixpoint discovery failed")
+  let cert ← checkNatGcdFixCertificate gcdCore v.value
+    (reject "GCD fixpoint specialization failed")
+  _ ← M.sandbox do
+    unless ← isDefEq (← checkType gcd') q(Nat → Nat → Nat) do
+      reject "public equation has the wrong type"
+    let zero := q(Nat.zero)
+    let succ := mkApp q(Nat.succ)
+    let mod := mkApp2 q(Nat.mod)
+    let gcd' := mkApp2 gcd'
+    let gcd := mkApp2 v.value
+    let x := .bvar 0
+    let y := .bvar 1
+    let defeq1 a b := isDefEq (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+    let defeq2 a b := defeq1 (.lam0 q(Nat) a) (.lam0 q(Nat) b)
+    unless ← defeq1 (gcd' zero x) x do
+      reject "public zero equation failed"
+    unless ← defeq2
+      (gcd' (succ y) x)
+      (gcd (mod x (succ y)) (succ y)) do
+      reject "public successor equation failed"
+    let gz₁ ← reduceNatWellFoundedLam1
+      (.lam0 q(Nat) <| gcd zero (.bvar 0))
+      (reject "direct zero reduction failed")
+    unless ← isDefEq gz₁ (.lam0 q(Nat) <| .bvar 0) do
+      reject "direct zero result failed"
+  return cert
 
 /-- Validate the closed type and defining equations for the elementary
 `Nat.add` primitive. Keeping this branch separate gives its verification
@@ -793,16 +1289,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   | ``Nat.div =>
     checkNatDivPrimitive env v fail
   | ``Nat.gcd =>
-    unless env.contains ``Nat.mod && v.levelParams.isEmpty do fail
-    -- gcd : Nat → Nat → Nat
-    unless ← isDefEq v.type q(Nat → Nat → Nat) do fail
-    withLocalDecl `m .default q(Nat) fun m => do
-    withLocalDecl `n .default q(Nat) fun n => do
-    let gcd' ← unfoldNatWellFounded v.value #[m, n] q(type_of% Nat.gcd.eq_def) fail
-    let gcd' := mkApp2 gcd'
-    let gcd := mkApp2 v.value
-    unless ← isDefEq (gcd' zero m) m do fail
-    unless ← isDefEq (gcd' (succ n) m) (gcd (mod m (succ n)) (succ n)) do fail
+    _ ← checkNatGcdPrimitive env v fail
   | ``Nat.beq =>
     checkNatBEqPrimitive env v fail
   | ``Nat.ble =>

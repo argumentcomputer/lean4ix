@@ -2008,6 +2008,55 @@ to the replacement.
   five-constant safety/arity boundary, semantic declaration contract,
   readiness transaction, and trust pins.
 
+## D041 — generic-state Nat.gcd well-founded certificate
+
+- **Status:** implemented as the sixteenth bounded UP6 slice; the live safe
+  definition path now has a direct `Nat.gcd` certificate. `Nat.bitwise`, the
+  final finite dispatch, and the generic V4 disposition remain open.
+- **Owner:** Argument Computer Corporation; review with the remaining
+  well-founded primitive work and any upstream revision of PR #32.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally executable
+  certificate commit `2fc4f84` and reflection commit `27304be`; no whole-PR
+  merge, generic-dispatch admission, or concrete-state contract was imported.
+- **Executable delta:** `checkNatGcdPrimitive` returns a proof-relevant
+  `NatGcdFixCertificate`. Fixpoint discovery runs transactionally, closes and
+  rechecks the retained call, entry, fuel, Boolean selector, generic step, and
+  GCD zero/successor equations, and still enforces the legacy public-equation
+  and direct-zero checks. The generic certificate retains the discovered
+  `stateFn` and constructs every state through it instead of matching a
+  particular pair constructor.
+- **Acceptance repair:** PR #32 specializes the recursive state to the
+  compiler's current `PSigma` encoding. This fork deliberately accepts any
+  definitionally valid packing function exposed by the same checked
+  well-founded fixpoint. Both the shipped `PSigma`-based `Nat.gcd` and an
+  independently compiled `Prod (Nat × Nat)` implementation pass the checker.
+- **Verification delta:** transparent expression-shape evidence and the
+  generic checker certificate feed Euclidean zero/successor semantics,
+  literal GCD reflection, preservation of the readiness-aware
+  `VEnv.HasPrimitives` contract, typed safe checking, and the direct
+  `addDefinition.WF_safe_natGcd` transaction for every safety model receiving
+  the definition.
+- **Trust decision:** auxiliary closure is checked by a structural
+  loose-binder traversal whose equality with the proof-side model is proved by
+  recursion. Packed `Expr.hasLooseBVars` metadata is not semantic authority.
+  The slice adds no custom axiom, `native_decide` proof, or source `sorry`;
+  its direct root reaches exactly the same six inherited sorry carriers as
+  the previous thirteen roots.
+- **Ix impact:** Ix may choose a performance-oriented recursive-state layout
+  without changing the verified primitive contract, while the certificate
+  still exposes the exact equations needed to transport `Nat.gcd` semantics
+  into the specialized kernel and circuit models.
+- **Tests:** `Lean4Lean.Tests.NatGcd` pins the semantic and checker axiom
+  closures; `Lean4Lean.Tests.NatGcdProdState` pins alternate-state executable
+  acceptance; and `Lean4Lean.Tests.Primitive` checks all fourteen direct live
+  roots for dispatch reachability, exclusion of `checkPrimitiveDef.WF`, and
+  the exact inherited sorry closure. The global source frontier remains 15.
+- **Removal condition:** upstream adopts a proof-relevant certificate generic
+  in the discovered state packer, structural rather than cache-authoritative
+  closure checks, and an equivalent direct safe-definition transaction; or
+  reconciliation explicitly retains this Ix acceptance boundary.
+
 ## Review checklist
 
 At each publish or ix pin boundary:
