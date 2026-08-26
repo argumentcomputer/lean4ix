@@ -1407,6 +1407,37 @@ to the replacement.
   APIs. Upstream can satisfy this by promoting `26f9838` or an equivalent
   stdlib/kernel convergence fix.
 
+## D025 — safe definition bodies precede primitive recognition
+
+- **Status:** implemented as the UP6 foundation; upstream-contribution
+  candidate already represented by lean4lean PR #32.
+- **Owner:** Argument Computer Corporation; remove or revise with the primitive
+  certificate pipeline.
+- **Source:** manually extracted from upstream PR #32 commit
+  `19a18e5dd143386cd9485728878b9944850bc9c1`; its unrelated unsafe and mutual
+  definition refactors were not imported.
+- **Delta:** a checked safe definition now validates and translates its header
+  and body before running `checkPrimitiveDef`, then calls `checkName` with the
+  recognizer result. Accepted declarations are unchanged, but a declaration
+  that would fail in more than one phase can report a body error before a
+  primitive-shape, reserved-name, or duplicate-name error. The named
+  `checkConstantValBody` and `checkDefinitionBody` helpers expose the exact
+  successful prefix needed by per-primitive `isDefEq` certificates.
+- **Ix impact:** this is verification infrastructure for proving primitive
+  declarations preserve `VEnv.HasPrimitives`. Ix consumers should not depend
+  on the old ordering of errors for invalid declarations.
+- **Tests:** `Lean4Lean.Tests.Environment` pins the phase order with a malformed
+  duplicate `Nat.add` whose header references a missing constant; the full
+  Verify environment proves that the new successful prefix supplies the
+  translated, well-typed `VDefVal` consumed by primitive checking.
+- **Axiom note:** no admission was added. The existing
+  `checkPrimitiveDef.WF` boundary remains one allowlisted sorry, but its domain
+  is narrower: callers must now supply translations and a typing derivation
+  for the candidate body, and it accepts the post-body checker state.
+- **Removal condition:** upstream lands PR #32 or an equivalent body-first
+  certificate architecture and this fork reconciles to that implementation;
+  the named helpers may remain if they are part of the shared API.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

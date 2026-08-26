@@ -424,4 +424,25 @@ run_meta
   | .ok true => throwError "a partial definition was accepted as a primitive"
   | .error _ => throwError "the partial primitive check failed unexpectedly"
 
+/- UP6 checks an ordinary safe definition's header and body before primitive
+recognition and the reserved-name check. Make the order observable by reusing
+the already-declared primitive name with an unknown header constant: the body
+phase must report that constant rather than the later name/primitive phases. -/
+private def missingDefinitionType : Name :=
+  `Lean4Lean.Tests.Environment.missingDefinitionType
+
+run_meta
+  let env ← Lean.getEnv
+  let some (.defnInfo natAdd) := env.toKernelEnv.find? ``Nat.add
+    | throwError "Nat.add is not a definition"
+  let malformed := { natAdd with type := .const missingDefinitionType [] }
+  match Lean4Lean.addDefinition env.toKernelEnv malformed with
+  | .error (.unknownConstant _ name) =>
+    unless name == missingDefinitionType do
+      throwError "body-first definition checking reported the wrong unknown constant"
+  | .error _ =>
+    throwError "safe addDefinition did not check the malformed body before primitive/name checks"
+  | .ok _ =>
+    throwError "safe addDefinition accepted a malformed duplicate primitive"
+
 end Lean4Lean.Tests.Environment

@@ -2608,6 +2608,62 @@ Use four bounded stages:
    statement, or keep V4 explicitly open. Merely making the final root avoid
    the theorem does not eliminate the source sorry and is not V4 completion.
 
+###### UP6.0 live certificate inventory (started 2026-08-26)
+
+The extraction baseline is fork revision `aec5fdc9`. The upstream pull-request
+head was refreshed from `refs/pull/32/head` and is still
+`6cfd43a48d17be85c76414638655c12ef9a7ee23`, based directly on upstream
+`e0e3f6bcccb840cb0ea6f11c2b274ada93a12e00`. Its eight commits touch 33 files
+with 24,247 insertions and 1,264 deletions. This pin is the provenance source;
+the branch is not a merge or cherry-pick source.
+
+| Upstream slice | Local disposition | Dependency / reason |
+|---|---|---|
+| `72cef8e`, small Theory helpers | extract on demand | `List.Forall₂.forall_left/right`, `VEnv.LE.contains`, `VExpr.lift_bvar`, and `VLevel.params_zero` have no exact local equivalent; the same commit's mutual-declaration rewrites do not fit the retained local transaction model |
+| `2fc4f84`, executable certificates | adapt by primitive family | the certificate idea and exact checker trace are reusable; `Nat.gcd` and `Nat.bitwise` must not hard-code the PR's `PSigma` state representation because that narrows acceptance of otherwise valid alternative preludes |
+| `19a18e5`, body-before-primitive checking | extract the safe-definition core first | primitive `isDefEq` certificates require the candidate type and body translations; the local safe checker currently calls `checkPrimitiveDef` before it has those facts; unrelated unsafe/mutual refactors stay out |
+| `5801732`, checker verification infrastructure | adapt minimally | supplies the shared typed checker evidence and per-name proofs, but its monolithic environment module conflicts with local projection, structure-eta, normalization-readiness, and proof-carrying transaction modules |
+| `b2d9169`, per-primitive conservation | adapt one family at a time | mathematical endpoint is useful; local `VEnv.HasPrimitives` lives in `Theory/Literals.lean` and has a different, readiness-aware contract, so upstream statements are not copied verbatim |
+| `27304be`, mod/div and bitwise reflection | defer until elementary Nat families are green | roughly 9,800 lines of specialized support; needed for `mod`, `div`, `gcd`, and `bitwise`, but not for the first `Nat.add` slice |
+| `5aaa700`, final `addDecl` dispatch | reimplement last | its case split is the model for removing the opaque boundary from the live safe-definition path, but it must target the local `PrimitiveResult`, `AddDef`, readiness, and inductive transaction APIs |
+| `6cfd43a`, design document | retain as upstream reference | accurately documents the certificate strategy and also records the `PSigma` specialization limitation; no executable content to import |
+
+The minimal dependency graph is:
+
+```text
+safe definition body checked and translated
+  -> shared typed primitive-checker evidence
+    -> one primitive's exact recognition/equation certificate
+      -> that primitive's HasPrimitives conservation theorem
+        -> safe addDefinition case for that name
+          -> repeat by dependency order
+            -> final exhaustive name dispatch
+              -> delete/prove/narrow generic checkPrimitiveDef.WF
+```
+
+Primitive work proceeds in dependency order, not source-file order:
+
+1. `Nat.add` is the pilot slice and exercises the common binary-Nat evidence
+   without the mod/div or well-founded-recursion toolboxes.
+2. `Nat.pred`, `Nat.sub`, `Nat.mul`, and `Nat.pow` reuse the elementary Nat
+   spine, respecting their checker dependencies.
+3. `Nat.beq`, `Nat.ble`, shifts, and the small wrappers around bitwise
+   operations follow once their exact local Bool/Nat reflection requirements
+   are mapped.
+4. `Nat.mod` and `Nat.div` introduce the condition-reflection toolbox.
+5. `Nat.gcd` and `Nat.bitwise` introduce well-founded certificates only after
+   their state representation has been generalized enough to preserve the
+   executable checker's accepted domain.
+6. `Char.ofNat`, `String.ofList`, and any remaining non-Nat names close the
+   finite dispatch.
+
+The first green UP6 foundation therefore contains only the two named
+executable helpers `checkConstantValBody` and `checkDefinitionBody`, the safe
+definition execution-order change, and matching verification lemmas. It may
+narrow the existing `checkPrimitiveDef.WF` assumptions to accept the body
+evidence, but it does not count V4 complete and must not add another admission.
+The first semantic certificate commit after that foundation is `Nat.add`.
+
 Every stage is a separate green commit or short series. If a PR #32 helper
 requires rolling back the fork's proof-carrying transaction/readiness design,
 extract the mathematical lemma instead of the surrounding architecture.

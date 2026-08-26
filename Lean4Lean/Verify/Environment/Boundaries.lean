@@ -309,9 +309,18 @@ info: 'Lean4Lean.ElimNestedInductive.Result.canonicalPrimitive_noop' depends on 
 #print axioms ElimNestedInductive.Result.canonicalPrimitive_noop
 
 set_option warn.sorry false in
-/-- Verification boundary for Lean4Lean's syntactic primitive-definition recognizer. -/
+/-- Verification boundary for Lean4Lean's syntactic primitive-definition recognizer.
+
+The recognizer performs definitional-equality checks on the candidate type and
+body, so its remaining semantic assumption is exposed only after ordinary
+definition checking has supplied translations and a typing derivation. UP6
+replaces uses of this generic boundary with proved per-primitive certificates. -/
 theorem checkPrimitiveDef.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
-    (v : DefinitionVal) :
-    (Environment.checkPrimitiveDef v).WF (.mk' wf .safe v.levelParams) {} fun allow _ =>
+    (v : DefinitionVal) {type' value' : VExpr}
+    (htype : TrExprS (ves.venv .safe) v.levelParams [] v.type type')
+    (hvalue : TrExprS (ves.venv .safe) v.levelParams [] v.value value')
+    (hvalueType : (ves.venv .safe).HasType v.levelParams.length [] value' type')
+    (state : TypeChecker.VState := {}) :
+    (Environment.checkPrimitiveDef v).WF (.mk' wf .safe v.levelParams) state fun allow _ =>
       PrimitiveResult (ves.venv .safe) v allow := by
   sorry

@@ -74,20 +74,16 @@ private theorem TypeChecker.M.WF.pureBind {c : TypeChecker.VContext}
     {s : TypeChecker.VState} {f : β → TypeChecker.M α} {Q} {x : β}
     (H : (f x).WF c s Q) : ((Pure.pure x : TypeChecker.M β) >>= f).WF c s Q := H
 
-theorem checkConstantValCore.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
-    (ci : ConstantInfo) (allowPrimitive : Bool) (state : TypeChecker.VState := {}) :
-    (checkConstantVal env ci.toConstantVal allowPrimitive).WF
+theorem checkConstantValBodyCore.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (ci : ConstantInfo) (state : TypeChecker.VState := {}) :
+    (checkConstantValBody env ci.toConstantVal).WF
       (.mk' wf safety ci.levelParams) state fun _ _ =>
         ∃ ci' : VConstVal,
           ci.levelParams.length = ci'.uvars ∧
           TrExprS (ves.venv safety) ci.levelParams [] ci.type ci'.type ∧
           ci.name = ci'.name ∧
-          ci'.toVConstant.WF (ves.venv safety) ∧ env.find? ci.name = none ∧
-          (allowPrimitive = false → Environment.primitives.contains ci.name = false) := by
-  unfold checkConstantVal
-  refine (TypeChecker.M.WF.liftExcept
-    (checkName.WF (wf.tr (safety := safety)).map_wf ci.name allowPrimitive)).bind
-    fun _ _ _ hname => ?_
+          ci'.toVConstant.WF (ves.venv safety) := by
+  unfold checkConstantValBody
   -- Duplicate level parameters are rejected operationally; no later proof needs that fact.
   refine (TypeChecker.M.WF.liftExcept (Except.WF.trivial _)).bind fun _ _ _ _ => ?_
   refine (TypeChecker.M.WF.liftExcept
@@ -102,8 +98,26 @@ theorem checkConstantValCore.WF {env : Environment} {ves : VEnvs} (wf : ves.WF e
   cases hsort' with
   | sort hu =>
     refine ⟨{ name := ci.name, uvars := ci.levelParams.length, type := type' },
-      rfl, htype, rfl, ?_, hname⟩
+      rfl, htype, rfl, ?_⟩
     exact ⟨_, hhasType.defeqU_r (wf.tr (safety := safety)).wf (by trivial) hdefeq.symm⟩
+
+theorem checkConstantValCore.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (ci : ConstantInfo) (allowPrimitive : Bool) (state : TypeChecker.VState := {}) :
+    (checkConstantVal env ci.toConstantVal allowPrimitive).WF
+      (.mk' wf safety ci.levelParams) state fun _ _ =>
+        ∃ ci' : VConstVal,
+          ci.levelParams.length = ci'.uvars ∧
+          TrExprS (ves.venv safety) ci.levelParams [] ci.type ci'.type ∧
+          ci.name = ci'.name ∧
+          ci'.toVConstant.WF (ves.venv safety) ∧ env.find? ci.name = none ∧
+          (allowPrimitive = false → Environment.primitives.contains ci.name = false) := by
+  unfold checkConstantVal
+  refine (TypeChecker.M.WF.liftExcept
+    (checkName.WF (wf.tr (safety := safety)).map_wf ci.name allowPrimitive)).bind
+    fun _ state' _ hname => ?_
+  exact (checkConstantValBodyCore.WF (safety := safety) wf ci state').mono
+    fun _ _ _ ⟨ci', hu, htype, hciName, hci⟩ =>
+      ⟨ci', hu, htype, hciName, hci, hname⟩
 
 theorem checkConstantVal.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (ci : ConstantInfo) (allowPrimitive : Bool) (hs : safety ≤ ci.safety)
@@ -165,6 +179,28 @@ theorem checkBody.WF {env : Environment} {venv : VEnv} (wf : VEnvAt env safety v
     (checkNoMVarNoFVar.WF env name value)).bind fun _ _ _ hclosed =>
   checkBodyCore.WF wf decl levelParams type value type' hdeclType hclosed _
 
+theorem checkDefinitionBody.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
+    (v : DefinitionVal) (state : TypeChecker.VState := {}) :
+    (checkDefinitionBody env v).WF
+      (.mk' wf .safe v.levelParams) state fun _ _ =>
+        ∃ ci' : VDefVal,
+          v.levelParams.length = ci'.uvars ∧
+          TrExprS (ves.venv .safe) v.levelParams [] v.type ci'.type ∧
+          v.name = ci'.name ∧
+          TrExprS (ves.venv .safe) v.levelParams [] v.value ci'.value ∧
+          ci'.WF (ves.venv .safe) := by
+  unfold checkDefinitionBody
+  refine (checkConstantValBodyCore.WF (safety := .safe) wf (.defnInfo v) state).bind
+    fun _ state' _ ⟨ci', hu, htype, hname, _⟩ => ?_
+  exact (checkBody.WF (wf.toVEnvAt .safe) (.defnDecl v) v.name v.levelParams
+    v.type v.value ci'.type htype state').mono
+      fun _ _ _ ⟨value', hvalue, hvalueType⟩ => by
+        let ci'' : VDefVal := { ci' with value := value' }
+        refine ⟨ci'', hu, htype, hname, hvalue, ?_⟩
+        change (ves.venv .safe).HasType ci'.uvars [] value' ci'.type
+        rw [← hu]
+        exact hvalueType
+
 theorem checkTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : TheoremVal) :
     ((do
@@ -201,11 +237,9 @@ theorem checkTheorem.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
 theorem checkDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     (v : DefinitionVal) :
     ((do
-      checkConstantVal env v.toConstantVal (← Environment.checkPrimitiveDef v)
-      Environment.checkNoMVarNoFVar env v.name v.value
-      let valueType ← TypeChecker.checkType v.value
-      if !(← TypeChecker.isDefEq valueType v.type) then
-        throw <| Exception.declTypeMismatch env (.defnDecl v) valueType) : TypeChecker.M Unit).WF
+      checkDefinitionBody env v
+      let allowPrimitive ← Environment.checkPrimitiveDef v
+      Environment.checkName env v.name allowPrimitive) : TypeChecker.M Unit).WF
       (.mk' wf .safe v.levelParams) {} fun _ _ =>
         ∃ allow : Bool, ∃ ci' : VDefVal, PrimitiveResult (ves.venv .safe) v allow ∧
           v.levelParams.length = ci'.uvars ∧
@@ -214,16 +248,18 @@ theorem checkDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
           TrExprS (ves.venv .safe) v.levelParams [] v.value ci'.value ∧
           ci'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
           (allow = false → Environment.primitives.contains v.name = false) := by
-  refine (checkPrimitiveDef.WF wf v).bind fun allow state _ hp => ?_
-  refine (checkConstantValCore.WF (safety := .safe) wf (.defnInfo v) allow state).bind
-    fun _ state' _ ⟨ci', hu, ht, hname, hci, hfresh, hnonprim⟩ => ?_
-  exact (checkBody.WF (wf.toVEnvAt .safe) (.defnDecl v) v.name v.levelParams v.type v.value
-    ci'.type ht state').mono fun _ _ _ ⟨value', hvalue, hvalueType⟩ => by
-      let ci'' : VDefVal := { ci' with value := value' }
-      refine ⟨allow, ci'', hp, hu, ht, hname, hvalue, ?_, hfresh, hnonprim⟩
-      change (ves.venv .safe).HasType ci'.uvars [] value' ci'.type
-      rw [← hu]
-      exact hvalueType
+  refine (checkDefinitionBody.WF wf v).bind fun _ state _ hbody => ?_
+  obtain ⟨ci', hu, htype, hname, hvalue, hci⟩ := hbody
+  have hvalueType : (ves.venv .safe).HasType v.levelParams.length [] ci'.value ci'.type := by
+    rw [hu]
+    exact hci
+  refine (checkPrimitiveDef.WF wf v htype hvalue hvalueType state).bind
+    fun allow _ _ hp => ?_
+  exact (TypeChecker.M.WF.liftExcept
+    (checkName.WF (wf.tr (safety := .safe)).map_wf v.name allow)).mono
+      fun _ _ _ hcheckedName =>
+        ⟨allow, ci', hp, hu, htype, hname, hvalue, hci,
+          hcheckedName.1, hcheckedName.2⟩
 
 /-- Verify the complete opaque-declaration check. The body is checked, so it is packaged into
 the resulting `VDefVal`; `TrEnv'.opaque` consumes it. An opaque body still contributes no

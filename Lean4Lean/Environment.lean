@@ -1,3 +1,9 @@
+/-
+This file is derived from lean4lean and has been modified by Argument Computer Corporation.
+Modifications Copyright (c) 2026 Argument Computer Corporation.
+SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
+-/
+
 import Lean4Lean.TypeChecker
 import Lean4Lean.Quot
 import Lean4Lean.Inductive.Add
@@ -9,12 +15,22 @@ open TypeChecker Kernel Environment
 
 open private Lean.Kernel.Environment.add from Lean.Environment
 
-def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
-  checkName env v.name allowPrimitive
+def checkConstantValBody (env : Environment) (v : ConstantVal) : M Unit := do
   checkDuplicatedUnivParams v.levelParams
   checkNoMVarNoFVar env v.name v.type
   let sort ← checkType v.type
   _ ← ensureSort sort v.type
+
+def checkConstantVal (env : Environment) (v : ConstantVal) (allowPrimitive := false) : M Unit := do
+  checkName env v.name allowPrimitive
+  checkConstantValBody env v
+
+def checkDefinitionBody (env : Environment) (v : DefinitionVal) : M Unit := do
+  checkConstantValBody env v.toConstantVal
+  checkNoMVarNoFVar env v.name v.value
+  let valType ← TypeChecker.checkType v.value
+  if !(← isDefEq valType v.type) then
+    throw <| .declTypeMismatch env (.defnDecl v) valType
 
 def addAxiom (env : Environment) (v : AxiomVal) (check := true) (fuel : FuelConfig := {}) :
     Except Exception Environment := do
@@ -40,11 +56,9 @@ def addDefinition (env : Environment) (v : DefinitionVal)
           throw <| .declTypeMismatch env' (.defnDecl v) valType
   else if check then
     M.run env (safety := .safe) (lctx := {}) (lparams := v.levelParams) (fuel := fuel) do
-      checkConstantVal env v.toConstantVal (← checkPrimitiveDef v)
-      checkNoMVarNoFVar env v.name v.value
-      let valType ← TypeChecker.checkType v.value
-      if !(← isDefEq valType v.type) then
-        throw <| .declTypeMismatch env (.defnDecl v) valType
+      checkDefinitionBody env v
+      let allowPrimitive ← checkPrimitiveDef v
+      checkName env v.name allowPrimitive
   return env.add (.defnInfo v)
 
 def addTheorem (env : Environment) (v : TheoremVal) (check := true) (fuel : FuelConfig := {}) :
