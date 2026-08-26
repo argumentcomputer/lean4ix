@@ -3712,6 +3712,69 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPat
 #print axioms
   AddInductive.FamilyTypeParameterComparisonTrace.SharedPrefixPath.annotationAt_root_eq
 
+/-- Two verified translations of the same kernel local-context inventory use
+the same free-variable slots and definitionally equal local declarations. -/
+private theorem trLCtx_isDefEqFVars_aux
+    (henv : VEnv.WF env)
+    (hds : (ds.map (·.fvarId)).Nodup)
+    (left : TrLCtx' env Us ds Δ₁)
+    (right : TrLCtx' env Us ds Δ₂) :
+    VLCtx.IsDefEqFVars env Us.length Δ₁ Δ₂ := by
+  induction left generalizing Δ₂ with
+  | nil =>
+      cases right
+      exact .nil
+  | @cons ds Δ₁ d d₁ left declaration ih =>
+      cases right with
+      | @cons _ Δ₂ _ d₂ right declaration₂ =>
+          have tailNodup : (ds.map (·.fvarId)).Nodup := by
+            change (d.fvarId :: ds.map (·.fvarId)).Nodup at hds
+            exact hds.tail
+          have tailEq := ih tailNodup right
+          have tailWF := left.wf tailNodup
+          cases declaration with
+          | vlam typeTr typeType =>
+              cases declaration₂ with
+              | vlam typeTr₂ typeType₂ =>
+                  obtain ⟨u, typeHas⟩ := typeType
+                  have typeEq :=
+                    (typeTr.uniqFVars henv tailEq tailWF typeTr₂).of_l
+                      henv tailWF.toCtx typeHas
+                  exact .cons_fvar tailEq (.vlam typeEq)
+          | vlet typeTr valueTr valueType =>
+              cases declaration₂ with
+              | vlet typeTr₂ valueTr₂ valueType₂ =>
+                  obtain ⟨u, typeHas⟩ :=
+                    valueType.isType henv tailWF.toCtx
+                  have typeEq :=
+                    (typeTr.uniqFVars henv tailEq tailWF typeTr₂).of_l
+                      henv tailWF.toCtx typeHas
+                  have valueEq :=
+                    (valueTr.uniqFVars henv tailEq tailWF valueTr₂).of_l
+                      henv tailWF.toCtx valueType
+                  exact .cons_fvar tailEq (.vlet valueEq typeEq)
+
+/-- Verified implementations of one exact kernel `LocalContext` are unique
+up to definitional equality while retaining its free-variable identifiers. -/
+theorem _root_.Lean4Lean.TrLCtx.isDefEqFVars
+    (henv : VEnv.WF env)
+    (left : TrLCtx env Us lctx Δ₁)
+    (right : TrLCtx env Us lctx Δ₂) :
+    VLCtx.IsDefEqFVars env Us.length Δ₁ Δ₂ :=
+  trLCtx_isDefEqFVars_aux henv left.1.nodup left.2 right.2
+
+/--
+info: 'Lean4Lean.TrLCtx.isDefEqFVars' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TrLCtx.isDefEqFVars
+
 namespace TypeChecker
 
 /-- Semantic snapshot of one exact candidate annotation node.  The kernel
@@ -3734,6 +3797,26 @@ structure CandidateAnnotationSnapshot (env : VEnv) (Us : List Name)
   consumed_tr : TrExprS env Us Δ consumed consumed'
   domain_type : env.HasType Us.length Δ.toCtx domain' (.sort sort)
   annotation_run : IsDefEqRun env Us Δ domain consumed domain' consumed'
+
+/-- The recursive checker execution owns a well-formed context for every
+retained annotation snapshot. -/
+theorem CandidateAnnotationSnapshot.context_wf
+    (snapshot : CandidateAnnotationSnapshot env Us root) :
+    VLCtx.WF env Us.length snapshot.Δ := by
+  simpa only [snapshot.annotation_run.venv_eq,
+    snapshot.annotation_run.lparams_eq,
+    snapshot.annotation_run.vlctx_eq] using
+    snapshot.annotation_run.context.Δwf
+
+/-- Candidate annotation contexts contain only the free-variable declarations
+allocated by the producer's local-context traversal. -/
+theorem CandidateAnnotationSnapshot.context_noBV
+    (snapshot : CandidateAnnotationSnapshot env Us root) :
+    snapshot.Δ.NoBV := by
+  have noBV := snapshot.annotation_run.context.mlctx.noBV
+  change snapshot.annotation_run.context.vlctx.NoBV at noBV
+  rw [snapshot.annotation_run.vlctx_eq] at noBV
+  exact noBV
 
 /-- Interpret a structural annotation position through the same recursive
 semantic run that produced the candidate telescope. -/
@@ -3785,9 +3868,9 @@ projected from the normalization execution. -/
 inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
     {candidateContext : AddInductive.Context} → {source : Expr} →
       AddInductive.CandidateExprTrace candidateContext source →
-      VLCtx → List VExpr → Prop where
+      VLCtx → VLCtx → List VExpr → Prop where
   | terminal : CandidateAnnotationSpine env Us
-      (.terminal context source inferred result checked normalized) Δ []
+      (.terminal context source inferred result checked normalized) Δ Δ []
   | forallE
       (domainCandidate : AddInductive.CandidateExprTrace context domain)
       (bodyCandidate : AddInductive.CandidateExprTrace
@@ -3800,12 +3883,79 @@ inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
           snapshot.Δ = Δ ∧ snapshot.consumed' = storedDomain')
       (tail : CandidateAnnotationSpine env Us bodyCandidate
         ((some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam storedDomain') :: Δ) domains) :
+          .vlam storedDomain') :: Δ) terminalΔ domains) :
       CandidateAnnotationSpine env Us
         (.forallE context source inferred name domain body binderInfo fresh
           annotations annotationsEq checked normalized domainCandidate
           bodyCandidate)
-        Δ (storedDomain' :: domains)
+        Δ terminalΔ (storedDomain' :: domains)
+
+/-- The exact annotation prefix context embeds into the exact terminal
+context by skipping precisely the remaining producer-owned binder slots. -/
+theorem CandidateAnnotationSpine.terminalLift
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains) :
+    VLCtx.FVLift' Δ terminalΔ 0
+      (.skipN .refl domains.length) 0 := by
+  induction spine with
+  | terminal => exact .refl
+  | forallE domainCandidate bodyCandidate storedDomain' domains head tail ih =>
+      have combined :=
+        (VLCtx.FVLift'.skip_fvar _ _
+          VLCtx.FVLift'.refl).comp ih
+      simpa only [List.length_cons, Lift.comp_skipN, Lift.comp,
+        Lift.skipN_skipN, VLocalDecl.depth, Nat.one_add] using combined
+
+/-- Recover the exact verified context after any bounded prefix of a
+producer-owned annotation telescope.
+
+Unlike `snapshotAt`, this projection is also available at the terminal
+position.  It therefore exposes the shared-parameter boundary even when the
+candidate has no following index annotation. -/
+theorem CandidateAnnotationSpine.prefixContext
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (hcount : count ≤ domains.length) :
+    ∃ prefixΔ : VLCtx,
+      prefixΔ.toCtx = (domains.take count).reverse ++ Δ.toCtx ∧
+      prefixΔ.fvars.map Expr.fvar =
+        (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar ∧
+      VLCtx.FVLift' prefixΔ terminalΔ 0
+        (.skipN .refl (domains.drop count).length) 0 := by
+  induction spine generalizing count with
+  | terminal =>
+      have countEq : count = 0 := by simpa using hcount
+      subst count
+      exact ⟨_, rfl, rfl, VLCtx.FVLift'.refl⟩
+  | forallE domainCandidate bodyCandidate storedDomain' domains head tail ih =>
+      cases count with
+      | zero =>
+          have combined :=
+            (VLCtx.FVLift'.skip_fvar _ _
+              VLCtx.FVLift'.refl).comp tail.terminalLift
+          refine ⟨_, rfl, rfl, ?_⟩
+          simpa only [List.drop_zero, List.length_cons,
+            Lift.comp_skipN, Lift.comp, Lift.skipN_skipN,
+            VLocalDecl.depth, Nat.one_add] using combined
+      | succ count =>
+          have tailBound : count ≤ domains.length := by
+            simpa only [List.length_cons, Nat.succ_le_succ_iff] using hcount
+          obtain ⟨prefixΔ, contextEq, fvarsEq, terminalLift⟩ :=
+            ih tailBound
+          refine ⟨prefixΔ, ?_, ?_, ?_⟩
+          · simpa only [List.take_succ_cons, List.reverse_cons,
+              List.singleton_append, List.append_assoc, VLCtx.toCtx] using
+              contextEq
+          · simpa [VLCtx.fvars, List.append_assoc,
+              AddInductive.Context.freshExpr,
+              AddInductive.CandidateExprTrace.parameterList] using fvarsEq
+          · simpa only [List.drop_succ_cons] using terminalLift
 
 /-- Select the semantic snapshot and exact stored-domain suffix at one
 producer-owned structural annotation position.
@@ -3818,32 +3968,41 @@ theorem CandidateAnnotationSpine.snapshotAt
     {env : VEnv} {Us : List Name}
     {candidateContext : AddInductive.Context} {source : Expr}
     {trace : AddInductive.CandidateExprTrace candidateContext source}
-    {Δ : VLCtx} {domains : List VExpr}
-    (spine : CandidateAnnotationSpine env Us trace Δ domains)
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
     (position : trace.AnnotationAt count) :
     ∃ snapshot : CandidateAnnotationSnapshot env Us position.root,
       ∃ tail, domains.drop count = snapshot.consumed' :: tail ∧
         snapshot.Δ.toCtx =
           (domains.take count).reverse ++ Δ.toCtx ∧
         snapshot.Δ.fvars.map Expr.fvar =
-          (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar := by
-  induction position generalizing Δ domains with
+          (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar ∧
+        VLCtx.FVLift' snapshot.Δ terminalΔ 0
+          (.skipN .refl (domains.drop count).length) 0 := by
+  induction position generalizing Δ terminalΔ domains with
   | zero annotationMatch =>
       cases spine with
       | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
           obtain ⟨snapshot, snapshotContext, snapshotEq⟩ :=
             head annotationMatch
           subst snapshotContext
-          refine ⟨snapshot, domains, ?_, ?_, ?_⟩
+          refine ⟨snapshot, domains, ?_, ?_, ?_, ?_⟩
           · simp only [List.drop_zero, snapshotEq]
           · rfl
           · rfl
+          · have combined :=
+              (VLCtx.FVLift'.skip_fvar _ _
+                VLCtx.FVLift'.refl).comp tail.terminalLift
+            simpa only [List.drop_zero, List.length_cons,
+              Lift.comp_skipN, Lift.comp, Lift.skipN_skipN,
+              VLocalDecl.depth, Nat.one_add] using combined
   | succ bodyCandidate position ih =>
       cases spine with
       | forallE domainCandidate bodyCandidate storedDomain' domains head tail =>
-          obtain ⟨snapshot, suffix, suffixEq, contextEq, fvarsEq⟩ :=
+          obtain ⟨snapshot, suffix, suffixEq, contextEq, fvarsEq,
+              terminalLift⟩ :=
             ih tail
-          refine ⟨snapshot, suffix, ?_, ?_, ?_⟩
+          refine ⟨snapshot, suffix, ?_, ?_, ?_, ?_⟩
           · simpa only [List.drop_succ_cons,
               AddInductive.CandidateExprTrace.AnnotationAt.root] using
               suffixEq
@@ -3856,6 +4015,9 @@ theorem CandidateAnnotationSpine.snapshotAt
               AddInductive.CandidateExprTrace.parameterList,
               AddInductive.CandidateExprTrace.AnnotationAt.root] using
               fvarsEq
+          · simpa only [List.drop_succ_cons,
+              AddInductive.CandidateExprTrace.AnnotationAt.root] using
+              terminalLift
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.snapshotAt' depends on axioms: [propext, Classical.choice, Quot.sound]
@@ -4565,7 +4727,8 @@ private theorem CandidateExprRun.annotationSpineContextAux
       terminalRun.context.lparams = Us ∧
       terminalRun.context.vlctx.toCtx =
         storedBinders.reverse ++ Δ.toCtx ∧
-      CandidateAnnotationSpine env Us trace Δ storedBinders := by
+      CandidateAnnotationSpine env Us trace Δ
+        terminalRun.context.vlctx storedBinders := by
   induction run generalizing rawΔ rawSource' with
   | @terminal Δ context source inferred result source' result' inferred'
       checked normalized node =>
@@ -4574,10 +4737,15 @@ private theorem CandidateExprRun.annotationSpineContextAux
           context source inferred result checked normalized).terminalContext := by
       simpa only [AddInductive.CandidateExprTrace.terminalContext] using
         contextRun
+    have terminalVlctx : terminalRun.context.vlctx = Δ := by
+      change contextRun.context.vlctx = Δ
+      exact vlctx_eq
     refine ⟨[], [], rawSource', terminalRun, rfl, .nil, rfl,
-      venv_eq, lparams_eq, ?_, .terminal⟩
+      venv_eq, lparams_eq, ?_, ?_⟩
     change contextRun.context.vlctx.toCtx = Δ.toCtx
     rw [vlctx_eq]
+    rw [terminalVlctx]
+    exact .terminal
   | @forallE domain context name binderInfo Δ source inferred body
       source' domain' body' inferred' domainView' domainInferred'
       storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
@@ -4683,7 +4851,8 @@ private theorem CandidateExprRun.annotationSpineContextAux
         annotation_run := annotationsRun }, rfl, rfl⟩
     have annotationTail' : CandidateAnnotationSpine env Us bodyCandidate
         ((some (context.freshFVarId, annotations.consumed.fvarsList),
-          .vlam storedDomain') :: Δ) storedBinders := by
+          .vlam storedDomain') :: Δ) terminalRun.context.vlctx
+        storedBinders := by
       rw [← bodyContext]
       exact annotationTail
     refine ⟨rawDomain :: rawBinders, storedDomain' :: storedBinders,
@@ -4732,7 +4901,8 @@ theorem CandidateExprRun.annotationSpineContext
       storedBinders.length = trace.spineLength ∧
       terminalRun.context.vlctx.toCtx =
         storedBinders.reverse ++ Δ.toCtx ∧
-      CandidateAnnotationSpine env Us trace Δ storedBinders := by
+      CandidateAnnotationSpine env Us trace Δ
+        terminalRun.context.vlctx storedBinders := by
   have henv : VEnv.WF env := by
     simpa only [venv_eq] using contextRun.context.Ewf
   obtain ⟨rawBinders, storedBinders, rawResult, terminalRun,
@@ -5398,7 +5568,8 @@ theorem CandidateExprSemanticRootRun.annotationSpineContext
         (VExpr.telN candidate.trace.spineLength source') storedBinders ∧
       storedBinders.length = candidate.trace.spineLength ∧
       terminalRun.context.vlctx.toCtx = storedBinders.reverse ∧
-      CandidateAnnotationSpine env Us candidate.trace [] storedBinders := by
+      CandidateAnnotationSpine env Us candidate.trace []
+        terminalRun.context.vlctx storedBinders := by
   obtain ⟨inferred, recursive⟩ := run.recursive
   obtain ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
       telescope, storedLength, terminalContextEq, annotationSpine⟩ :=
