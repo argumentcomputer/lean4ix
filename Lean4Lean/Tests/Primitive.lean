@@ -48,6 +48,7 @@ run_cmd do
   let shiftLeftRoot := ``Lean4Lean.addDefinition.WF_safe_natShiftLeft
   let shiftRightRoot := ``Lean4Lean.addDefinition.WF_safe_natShiftRight
   let charOfNatRoot := ``Lean4Lean.addDefinition.WF_safe_charOfNat
+  let stringOfListRoot := ``Lean4Lean.addDefinition.WF_safe_stringOfList
   let beqRoot := ``Lean4Lean.addDefinition.WF_safe_natBEq
   let bleRoot := ``Lean4Lean.addDefinition.WF_safe_natBLE
   let modRoot := ``Lean4Lean.addDefinition.WF_safe_natMod
@@ -61,6 +62,7 @@ run_cmd do
   let shiftLeftClosure := dependencyClosure env [shiftLeftRoot] {}
   let shiftRightClosure := dependencyClosure env [shiftRightRoot] {}
   let charOfNatClosure := dependencyClosure env [charOfNatRoot] {}
+  let stringOfListClosure := dependencyClosure env [stringOfListRoot] {}
   let beqClosure := dependencyClosure env [beqRoot] {}
   let bleClosure := dependencyClosure env [bleRoot] {}
   let modClosure := dependencyClosure env [modRoot] {}
@@ -81,6 +83,8 @@ run_cmd do
     throwError "the direct Nat.shiftRight declaration certificate regressed through checkPrimitiveDef.WF"
   if charOfNatClosure.contains genericBoundary then
     throwError "the direct Char.ofNat declaration certificate regressed through checkPrimitiveDef.WF"
+  if stringOfListClosure.contains genericBoundary then
+    throwError "the direct String.ofList declaration certificate regressed through checkPrimitiveDef.WF"
   if beqClosure.contains genericBoundary then
     throwError "the direct Nat.beq declaration certificate regressed through checkPrimitiveDef.WF"
   if bleClosure.contains genericBoundary then
@@ -107,6 +111,8 @@ run_cmd do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.shiftRight certificate"
   unless (directConstants liveInfo).contains charOfNatRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Char.ofNat certificate"
+  unless (directConstants liveInfo).contains stringOfListRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the String.ofList certificate"
   unless (directConstants liveInfo).contains beqRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.beq certificate"
   unless (directConstants liveInfo).contains bleRoot do
@@ -224,6 +230,21 @@ run_cmd do
     expectedSorryCarriers.filter (!charOfNatObservedSet.contains ·)
   unless charOfNatAdded.isEmpty && charOfNatRemoved.isEmpty do
     throwError m!"Char.ofNat direct-certificate sorry closure changed; added: {charOfNatAdded}; removed: {charOfNatRemoved}"
+  let stringOfListSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if stringOfListClosure.contains name &&
+        (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let stringOfListObservedSet : Lean.NameSet :=
+    stringOfListSorryCarriers.foldl (·.insert ·) {}
+  let stringOfListAdded :=
+    stringOfListSorryCarriers.filter (!expectedSet.contains ·)
+  let stringOfListRemoved :=
+    expectedSorryCarriers.filter (!stringOfListObservedSet.contains ·)
+  unless stringOfListAdded.isEmpty && stringOfListRemoved.isEmpty do
+    throwError m!"String.ofList direct-certificate sorry closure changed; added: {stringOfListAdded}; removed: {stringOfListRemoved}"
   let beqSorryCarriers := env.constants.toList.foldl (init := #[])
       fun found (name, info) =>
     if beqClosure.contains name && (directConstants info).contains ``sorryAx then
@@ -272,4 +293,4 @@ run_cmd do
   let divRemoved := expectedSorryCarriers.filter (!divObservedSet.contains ·)
   unless divAdded.isEmpty && divRemoved.isEmpty do
     throwError m!"Nat.div direct-certificate sorry closure changed; added: {divAdded}; removed: {divRemoved}"
-  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Char.ofNat, Nat.beq, Nat.ble, Nat.mod, and Nat.div direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  logInfo "Nat.add, Nat.pred, Nat.sub, Nat.mul, Nat.pow, Nat.shiftLeft, Nat.shiftRight, Char.ofNat, String.ofList, Nat.beq, Nat.ble, Nat.mod, and Nat.div direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"

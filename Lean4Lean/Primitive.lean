@@ -703,6 +703,66 @@ def checkNatDivPrimitive (env : Environment) (v : DefinitionVal)
   _ ← checkType goR
   unless ← isDefEq goL goR do fail
 
+def primitiveGuard (p : Bool) (fail : M Unit) : M Unit :=
+  if p then pure () else fail
+
+def getRequiredConstant (env : Environment) (name : Name)
+    (fail : M ConstantInfo) : M ConstantInfo :=
+  match env.find? name with
+  | some ci => pure ci
+  | none => fail
+
+/-- Validate the finite prelude boundary used by `String.ofList`. Every
+referenced constant is pinned for universe arity and, on the safe path, for
+safety before its checked type is compared with the canonical shape. -/
+def checkStringOfListPrimitive (env : Environment)
+    (v : DefinitionVal) : M Unit := do
+  let fail {α} : M α :=
+    throw <| .other s!"invalid form for primitive def {v.name}"
+  primitiveGuard v.levelParams.isEmpty fail
+  let charInfo ← getRequiredConstant env ``Char fail
+  let listInfo ← getRequiredConstant env ``List fail
+  let nilInfo ← getRequiredConstant env ``List.nil fail
+  let consInfo ← getRequiredConstant env ``List.cons fail
+  let stringInfo ← getRequiredConstant env ``String fail
+  primitiveGuard charInfo.levelParams.isEmpty fail
+  primitiveGuard (listInfo.levelParams.length == 1) fail
+  primitiveGuard (nilInfo.levelParams.length == 1) fail
+  primitiveGuard (consInfo.levelParams.length == 1) fail
+  primitiveGuard stringInfo.levelParams.isEmpty fail
+  primitiveGuard (v.safety != .safe ||
+    (!charInfo.isUnsafe && !charInfo.isPartial)) fail
+  primitiveGuard (v.safety != .safe ||
+    (!listInfo.isUnsafe && !listInfo.isPartial)) fail
+  primitiveGuard (v.safety != .safe ||
+    (!nilInfo.isUnsafe && !nilInfo.isPartial)) fail
+  primitiveGuard (v.safety != .safe ||
+    (!consInfo.isUnsafe && !consInfo.isPartial)) fail
+  primitiveGuard (v.safety != .safe ||
+    (!stringInfo.isUnsafe && !stringInfo.isPartial)) fail
+  -- Char : Type
+  unless ← isDefEq (← checkType q(Char)) q(Type) do fail
+  -- List.{0} : Type → Type
+  unless ← isDefEq (← checkType q(List.{0})) q(Type → Type) do fail
+  -- List Char : Type
+  unless ← isDefEq (← checkType q(List Char)) q(Type) do fail
+  -- @List.nil.{0} : (α : Type) → List α
+  unless ← isDefEq (← checkType q(@List.nil.{0}))
+    q((α : Type) → List α) do fail
+  -- @List.nil.{0} Char : List Char
+  unless ← isDefEq (← checkType q(List.nil (α := Char)))
+    q(List Char) do fail
+  -- @List.cons.{0} : (α : Type) → α → List α → List α
+  unless ← isDefEq (← checkType q(@List.cons.{0}))
+    q((α : Type) → α → List α → List α) do fail
+  -- @List.cons.{0} Char : Char → List Char → List Char
+  unless ← isDefEq (← checkType q(List.cons (α := Char)))
+    q(Char → List Char → List Char) do fail
+  -- String : Type
+  unless ← isDefEq (← checkType q(String)) q(Type) do fail
+  -- String.ofList : List Char → String
+  unless ← isDefEq v.type q(List Char → String) do fail
+
 def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
   let fail {α} : M α := throw <| .other s!"invalid form for primitive def {v.name}"
   let tru := q(true)
@@ -807,17 +867,7 @@ def checkPrimitiveDefCore (v : DefinitionVal) : M Bool := do
     -- @Char.ofNat : Nat → Char
     unless ← isDefEq v.type q(Nat → Char) do fail
   | ``String.ofList =>
-    unless v.levelParams.isEmpty do fail
-    -- Char : Type
-    _ ← ensureType q(Char)
-    -- List Char : Type
-    _ ← ensureType q(List Char)
-    -- @List.nil.{0} Char : List Char
-    unless ← isDefEq (← checkType q(List.nil (α := Char))) q(List Char) do fail
-    -- @List.cons.{0} Char : Char → List Char → List Char
-    unless ← isDefEq (← checkType q(List.cons (α := Char))) q(Char → List Char → List Char) do fail
-    -- String.ofList : List Char → String
-    unless ← isDefEq v.type q(List Char → String) do fail
+    checkStringOfListPrimitive env v
   | _ => return false
   return true
 

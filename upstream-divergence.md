@@ -1962,6 +1962,52 @@ to the replacement.
   stronger malformed-prelude rejection, readiness transaction, and trust
   pins.
 
+## D040 — checked String.ofList prelude boundary and semantic contract
+
+- **Status:** implemented as the fifteenth bounded UP6 slice; the live safe
+  definition path has a direct `String.ofList` certificate, completing the
+  finite literal-primitive pair before the Nat.gcd/bitwise track.
+- **Owner:** Argument Computer Corporation; review with the well-founded
+  primitive slices and any upstream revision of literal-prelude checking.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its finite
+  `checkStringOfListPrimitive` boundary, typed certificate, and semantic
+  `HasPrimitives` repair; no whole-PR merge or admitted generic dispatch was
+  imported.
+- **Executable delta:** the old inline branch used inference-only type checks
+  for part of the prelude. The extracted recognizer now requires `Char`,
+  `List`, `List.nil`, `List.cons`, and `String`; pins their universe arities;
+  rejects unsafe or partial dependencies on the safe path; and checks the
+  canonical types of both unspecialized and `Char`-specialized list
+  constructors before comparing the candidate declaration type.
+- **Verification delta:** source lookups and guards produce strict Theory
+  translations for the five checked constants. Closed-Pi helpers construct
+  the exact `List.nil`, `List.cons`, and `List Char → String` target shapes;
+  `checkPrimitiveDef.stringOfList.WF_typed`,
+  `checkSafeStringOfListDefinition.WF`, `addStringOfList`, and
+  `addDefinition.WF_safe_stringOfList` carry their typing evidence through
+  every readiness safety model and the live dispatch.
+- **Contract repair:** the retained local `HasPrimitives.stringOfList` field
+  used to require syntactic equality of the stored declaration type even
+  though the executable checker accepts definitional equality. It now records
+  zero universe parameters, canonical typing in every context, and the two
+  specialized constructor typings. Every environment transport and literal
+  translation consumer was updated monotonically.
+- **Trust decision:** no definitional-equality-to-syntax principle was added.
+  The slice adds no custom axiom, `native_decide` proof, or source `sorry`;
+  its direct root reaches exactly the same six inherited sorry carriers as
+  the other finite primitive roots.
+- **Ix impact:** the verified kernel now installs the complete checked
+  character-list boundary used to translate Lean string literals, with the
+  dependency safety and arity assumptions explicit in the executable model.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks all thirteen direct live roots,
+  including `String.ofList`, for dispatch reachability, exclusion of
+  `checkPrimitiveDef.WF`, and the exact inherited sorry closure. The global
+  source frontier remains 15.
+- **Removal condition:** reconciliation with upstream preserves the explicit
+  five-constant safety/arity boundary, semantic declaration contract,
+  readiness transaction, and trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:

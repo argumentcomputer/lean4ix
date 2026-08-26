@@ -140,8 +140,10 @@ theorem VEnv.HasPrimitives.addConst_of_not_primitive {env env' : VEnv} (H : env.
       rwa [← same (hprims (by simp))])
     exact ⟨hu, fun U Γ => (hty U Γ).mono le⟩
   · intro ci h
-    obtain ⟨rfl, h2, h3⟩ := H.stringOfList (by rwa [← same (hprims (by simp))])
-    exact ⟨rfl, h2.mono le, h3.mono le⟩
+    obtain ⟨hu, hty, hnil, hcons⟩ := H.stringOfList
+      (by rwa [← same (hprims (by simp))])
+    exact ⟨hu, fun U Γ => (hty U Γ).mono le,
+      hnil.mono le, hcons.mono le⟩
 
 theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
     (env.addDefEq df).HasPrimitives :=
@@ -170,8 +172,9 @@ theorem VEnv.HasPrimitives.addDefEq {env : VEnv} (H : env.HasPrimitives) :
       let ⟨hu, hty⟩ := H.charOfNat h
       ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addDefEq_le⟩
     stringOfList h :=
-      let ⟨h1, h2, h3⟩ := H.stringOfList h
-      ⟨h1, h2.mono VEnv.addDefEq_le, h3.mono VEnv.addDefEq_le⟩ }
+      let ⟨hu, hty, hnil, hcons⟩ := H.stringOfList h
+      ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addDefEq_le,
+        hnil.mono VEnv.addDefEq_le, hcons.mono VEnv.addDefEq_le⟩ }
 
 /-- Theory-only structure-eta registration leaves primitive constants
 unchanged and transports every reflected computation along the model
@@ -204,9 +207,10 @@ theorem VEnv.HasPrimitives.addStructEta {env : VEnv}
       let ⟨hu, hty⟩ := H.charOfNat h
       ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addStructEta_le⟩
     stringOfList h :=
-      let ⟨h1, h2, h3⟩ := H.stringOfList h
-      ⟨h1, h2.mono VEnv.addStructEta_le,
-        h3.mono VEnv.addStructEta_le⟩ }
+      let ⟨hu, hty, hnil, hcons⟩ := H.stringOfList h
+      ⟨hu, fun U Γ => (hty U Γ).mono VEnv.addStructEta_le,
+        hnil.mono VEnv.addStructEta_le,
+        hcons.mono VEnv.addStructEta_le⟩ }
 
 /-! ## Certified Theory-only readiness completion -/
 
@@ -1185,11 +1189,12 @@ theorem VEnv.HasPrimitives.of_addBool
           (by simp) (by simp) (by simp) found)
       exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun found =>
-      let ⟨typeEq, nilType, consType⟩ := pre.stringOfList
+      let ⟨hu, hty, nilType, consType⟩ := pre.stringOfList
         (oldLookup ``String.ofList
           (by simp [VEnv.reflectedPrimitiveNames])
           (by simp) (by simp) (by simp) found)
-      ⟨typeEq, nilType.mono hle, consType.mono hle⟩ }
+      ⟨hu, fun U Γ => (hty U Γ).mono hle,
+        nilType.mono hle, consType.mono hle⟩ }
 
 /-- Installing the canonical natural-number family and constructors preserves
 all previously reflected primitives and establishes the new natural literal
@@ -1290,11 +1295,12 @@ theorem VEnv.HasPrimitives.of_addNat
           (by simp) (by simp) (by simp) found)
       exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun found =>
-      let ⟨typeEq, nilType, consType⟩ := pre.stringOfList
+      let ⟨hu, hty, nilType, consType⟩ := pre.stringOfList
         (oldLookup ``String.ofList
           (by simp [VEnv.reflectedPrimitiveNames])
           (by simp) (by simp) (by simp) found)
-      ⟨typeEq, nilType.mono hle, consType.mono hle⟩ }
+      ⟨hu, fun U Γ => (hty U Γ).mono hle,
+        nilType.mono hle, consType.mono hle⟩ }
 
 /-! ## Canonical primitive-inductive inventories -/
 

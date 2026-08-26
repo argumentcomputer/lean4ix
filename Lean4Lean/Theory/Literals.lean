@@ -255,7 +255,9 @@ structure VEnv.HasPrimitives (env : VEnv) : Prop where
     ci.uvars = 0 ∧
     ∀ U Γ, env.HasType U Γ .charOfNat (.forallE .nat .char)
   stringOfList : env.constants ``String.ofList = some ci →
-    ci = { uvars := 0, type := .forallE .listChar .string } ∧
+    ci.uvars = 0 ∧
+    (∀ U Γ, env.HasType U Γ .stringOfList
+      (.forallE .listChar .string)) ∧
     env.HasType 0 [] .listCharNil .listChar ∧
     env.HasType 0 [] .listCharCons (.forallE .char <| .forallE .listChar .listChar)
 
@@ -489,10 +491,11 @@ theorem VEnv.HasPrimitives.addConst
           (by simp [VEnv.reflectedPrimitiveNames])] using h)
       exact ⟨hu, fun U Γ => (hty U Γ).mono hle⟩
     stringOfList := fun h => by
-      obtain ⟨hconstant, hnil, hcons⟩ := H.stringOfList (by
+      obtain ⟨hu, hty, hnil, hcons⟩ := H.stringOfList (by
         simpa only [lookup ``String.ofList
           (by simp [VEnv.reflectedPrimitiveNames])] using h)
-      exact ⟨hconstant, hnil.mono hle, hcons.mono hle⟩ }
+      exact ⟨hu, fun U Γ => (hty U Γ).mono hle,
+        hnil.mono hle, hcons.mono hle⟩ }
 
 variable! {env env' : VEnv} (henv : env ≤ env') in
 theorem VEnv.ContainsLits.mono : ∀ {l}, env.ContainsLits l → env'.ContainsLits l
