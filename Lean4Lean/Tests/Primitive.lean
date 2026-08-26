@@ -42,19 +42,25 @@ run_cmd do
   let env ← getEnv
   let root := ``Lean4Lean.addDefinition.WF_safe_natAdd
   let predRoot := ``Lean4Lean.addDefinition.WF_safe_natPred
+  let subRoot := ``Lean4Lean.addDefinition.WF_safe_natSub
   let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
+  let subClosure := dependencyClosure env [subRoot] {}
   if closure.contains genericBoundary then
     throwError "the direct Nat.add declaration certificate regressed through checkPrimitiveDef.WF"
   if predClosure.contains genericBoundary then
     throwError "the direct Nat.pred declaration certificate regressed through checkPrimitiveDef.WF"
+  if subClosure.contains genericBoundary then
+    throwError "the direct Nat.sub declaration certificate regressed through checkPrimitiveDef.WF"
   let some liveInfo := env.find? ``Lean4Lean.addDefinition.WF
     | throwError "addDefinition.WF is missing"
   unless (directConstants liveInfo).contains root do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.add certificate"
   unless (directConstants liveInfo).contains predRoot do
     throwError "addDefinition.WF no longer dispatches directly to the Nat.pred certificate"
+  unless (directConstants liveInfo).contains subRoot do
+    throwError "addDefinition.WF no longer dispatches directly to the Nat.sub certificate"
   let sorryCarriers := env.constants.toList.foldl (init := #[]) fun found (name, info) =>
     if closure.contains name && (directConstants info).contains ``sorryAx then
       found.push name
@@ -85,4 +91,16 @@ run_cmd do
   let predRemoved := expectedSorryCarriers.filter (!predObservedSet.contains ·)
   unless predAdded.isEmpty && predRemoved.isEmpty do
     throwError m!"Nat.pred direct-certificate sorry closure changed; added: {predAdded}; removed: {predRemoved}"
-  logInfo "Nat.add and Nat.pred direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"
+  let subSorryCarriers := env.constants.toList.foldl (init := #[])
+      fun found (name, info) =>
+    if subClosure.contains name && (directConstants info).contains ``sorryAx then
+      found.push name
+    else
+      found
+  let subObservedSet : Lean.NameSet :=
+    subSorryCarriers.foldl (·.insert ·) {}
+  let subAdded := subSorryCarriers.filter (!expectedSet.contains ·)
+  let subRemoved := expectedSorryCarriers.filter (!subObservedSet.contains ·)
+  unless subAdded.isEmpty && subRemoved.isEmpty do
+    throwError m!"Nat.sub direct-certificate sorry closure changed; added: {subAdded}; removed: {subRemoved}"
+  logInfo "Nat.add, Nat.pred, and Nat.sub direct certificates exclude checkPrimitiveDef.WF and each retain exactly six known upstream proof dependencies"

@@ -105,6 +105,35 @@ theorem TrExprS.natType_of_contains
   exact ⟨.const hnatLookup rfl hnatUvars,
     ⟨u.inst [], hnatSortU'.weak0 wf (Γ := Δ.toCtx)⟩⟩
 
+/-- Translate a reflected unary Nat primitive in an arbitrary verified local
+context. -/
+private theorem TrExprS.reflectedNatUnary
+    {env : VEnv} (wf : env.WF) {name : Name} {f : Nat → Nat}
+    (hreflect : env.ReflectsNatNat name f)
+    (hcontains : env.contains name) (Us : List Name) (Δ : VLCtx)
+    (hΔ : Δ.WF env Us.length) :
+    TrExprS env Us Δ (.const name []) (.const name []) ∧
+      env.HasType Us.length Δ.toCtx (.const name [])
+        (.forallE .nat .nat) := by
+  have hcontains' := hcontains
+  obtain ⟨ci, hci⟩ := hcontains
+  have htype := (hreflect hcontains').1 Us.length Δ.toCtx
+  obtain ⟨ci', hci', _, hlen⟩ := htype.const_inv wf hΔ.toCtx
+  have hc : ci' = ci := by rw [hci] at hci'; cases hci'; rfl
+  subst ci'
+  exact ⟨.const hci rfl hlen, htype⟩
+
+/-- Presence of a certified Nat.pred constant entails presence of the Nat
+type named by its reflected domain. -/
+private theorem VEnv.HasPrimitives.nat_of_pred_contains
+    {env : VEnv} (h : env.HasPrimitives) (wf : env.WF)
+    (hpred : env.contains ``Nat.pred) : env.contains ``Nat := by
+  have hfun := (h.natPred hpred).1 0 []
+  have ⟨_, hfunType⟩ := hfun.isType wf trivial
+  obtain ⟨⟨_, hnatType⟩, _⟩ := hfunType.forallE_inv wf
+  obtain ⟨_, hnat, _⟩ := hnatType.const_inv wf trivial
+  exact ⟨_, hnat⟩
+
 /-- Typed translations shared by the elementary binary `Nat` primitive
 branches. -/
 structure NatBinaryEvidence (c : VContext) (value : Expr) (value' : VExpr) :
@@ -489,6 +518,57 @@ theorem checkPrimitiveDef.natPred.WF_typed {c : VContext} {s : VState}
       · rw [if_neg hb]
         exact .throw
     ).bind fun _ _ _ h => .pure fun _ => h
+  · exact .throw
+
+/-- Exact typed certificate for the public `Nat.sub` recognizer branch. -/
+theorem checkPrimitiveDef.natSub.WF_typed {c : VContext} {s : VState}
+    (hname : v.name = ``Nat.sub)
+    (hvlctx : c.vlctx = [])
+    (hty : c.TrExprS v.type ty')
+    (hvalue : c.TrExprS v.value value')
+    (hvalueT : c.HasType value' ty') :
+    M.WF c s (checkPrimitiveDef v) fun b _ => b →
+      v.levelParams = [] ∧
+      c.venv.contains ``Nat.pred ∧
+      c.venv.IsDefEqU c.lparams.length [] ty'
+        (.forallE .nat <| .forallE .nat .nat) ∧
+      c.venv.IsDefEqU c.lparams.length []
+        (.lam .nat <| .app (.app value' (.bvar 0)) .natZero)
+        (.lam .nat <| .bvar 0) ∧
+      c.venv.IsDefEqU c.lparams.length []
+        (.lam .nat <| .lam .nat <|
+          .app (.app value' (.bvar 1)) (.app .natSucc (.bvar 0)))
+        (.lam .nat <| .lam .nat <|
+          .app (.const ``Nat.pred [])
+            (.app (.app value' (.bvar 1)) (.bvar 0))) := by
+  apply checkPrimitiveDef.WF_of_core (by simp)
+  simp only [checkPrimitiveDefCore, hname, checkNatSubPrimitive]
+  refine getEnv.WF.bind ?_
+  intro _ _ _ ⟨rfl, rfl⟩
+  split
+  · rename_i hdeps
+    have hdeps' : c.env.contains ``Nat.pred = true ∧
+        v.levelParams.isEmpty = true := by simpa using hdeps
+    have hlevels : v.levelParams = [] := by simpa using hdeps'.2
+    have hpred : c.venv.contains ``Nat.pred :=
+      VContext.contains_safe_primitive c hdeps'.1 (by
+        simp [Lean.Kernel.Environment.primitives,
+          NameSet.contains, NameSet.ofList])
+    have hnat := VEnv.HasPrimitives.nat_of_pred_contains
+      c.hasPrimitives c.Ewf hpred
+    have hvalue0 := hvalue
+    change TrExprS c.venv c.lparams c.vlctx v.value value' at hvalue0
+    rw [hvlctx] at hvalue0
+    have hvalueT0 := hvalueT
+    change c.venv.HasType c.lparams.length c.vlctx.toCtx value' ty' at hvalueT0
+    rw [hvlctx] at hvalueT0
+    exact (checkNatBinaryTyped.WF hlevels hpred hnat hvlctx hty hvalue0
+        hvalueT0 (fun ev => ev.hx1S)
+        (fun ev =>
+          have hpredS := TrExprS.reflectedNatUnary c.Ewf
+            c.hasPrimitives.natPred hpred c.lparams _ ev.hΔ2
+          .app hpredS.2 ev.hrecT hpredS.1 ev.hrecS)).bind
+      fun _ _ _ h => .pure fun _ => h
   · exact .throw
 
 end Environment
@@ -894,6 +974,31 @@ theorem VEnv.ReflectsNatNatNat.of_add_equations (henv : VEnv.WF env)
   intro k
   exact ⟨_, VEnv.natLit_hasType hzeroT hsuccT (k + 1) []⟩
 
+/-- The concrete recurrence certificate used for `Nat.sub`, consuming the
+retained unary reflection for `Nat.pred`. -/
+theorem VEnv.ReflectsNatNatNat.of_sub_equations (henv : VEnv.WF env)
+    (hzeroT : ∀ Γ, env.HasType 0 Γ .natZero .nat)
+    (hsuccT : ∀ Γ, env.HasType 0 Γ .natSucc (.forallE .nat .nat))
+    (hpred : env.ReflectsNatNat ``Nat.pred Nat.pred)
+    (hpredC : env.contains ``Nat.pred)
+    (hf : ∀ U Γ, env.HasType U Γ (.const ``Nat.sub [])
+      (.forallE .nat <| .forallE .nat .nat))
+    (hcf : env.IsDefEqU 0 [] (.const ``Nat.sub []) f)
+    (hz : env.IsDefEqU 0 []
+      (.lam .nat <| .app (.app f (.bvar 0)) .natZero)
+      (.lam .nat <| .bvar 0))
+    (hs : env.IsDefEqU 0 []
+      (.lam .nat <| .lam .nat <|
+        .app (.app f (.bvar 1)) (.app .natSucc (.bvar 0)))
+      (.lam .nat <| .lam .nat <|
+        .app (.const ``Nat.pred [])
+          (.app (.app f (.bvar 1)) (.bvar 0)))) :
+    env.ReflectsNatNatNat ``Nat.sub Nat.sub := by
+  obtain ⟨hpredT, hpredEval⟩ := hpred hpredC
+  exact VEnv.ReflectsNatNatNat.of_unary_step_equations henv Nat.pred
+    hzeroT hsuccT (hpredT 0) trivial hpredEval
+    (fun _ => rfl) (fun _ _ => rfl) hf hcf hz hs
+
 /-- Replace the vacuous/old `Nat.add` reflection field after inserting a
 checked `Nat.add` definition, while transporting every unrelated primitive
 fact through the extension. -/
@@ -958,8 +1063,106 @@ theorem VEnv.HasPrimitives.addNatAdd {env env' : VEnv}
       obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
       exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
 
-/-- Common bookkeeping needed to turn the checked Nat.add equations for a
-fresh definition into an updated primitive-reflection contract. -/
+/-- Replace the vacuous/old `Nat.sub` reflection field after inserting a
+checked definition, while transporting all unrelated primitive facts. -/
+theorem VEnv.HasPrimitives.addNatSub {env env' : VEnv}
+    (h : env.HasPrimitives)
+    (hadd : env.addConst ``Nat.sub ci = some env')
+    (href : (env'.addDefEq df).ReflectsNatNatNat ``Nat.sub Nat.sub) :
+    (env'.addDefEq df).HasPrimitives := by
+  let env'' := env'.addDefEq df
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have same (p : Name) (hne : ``Nat.sub ≠ p) :
+      env''.constants p = env.constants p := by
+    change env'.constants p = env.constants p
+    exact VEnv.addConst_other hadd hne
+  have oldContains {p : Name} (hne : ``Nat.sub ≠ p)
+      (H : env''.contains p) : env.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, by rwa [same p hne] at hpci⟩
+  have newContains {p : Name} (H : env.contains p) : env''.contains p := by
+    obtain ⟨pci, hpci⟩ := H
+    exact ⟨pci, le.constants hpci⟩
+  exact {
+    bool := fun H => by
+      obtain ⟨hfalse, htrue⟩ := h.bool (oldContains (by decide) H)
+      exact ⟨newContains hfalse, newContains htrue⟩
+    boolFalse := fun H => h.boolFalse (by
+      change env''.constants ``Bool.false = some _ at H
+      rwa [same ``Bool.false (by decide)] at H)
+    boolTrue := fun H => h.boolTrue (by
+      change env''.constants ``Bool.true = some _ at H
+      rwa [same ``Bool.true (by decide)] at H)
+    nat := fun H => by
+      obtain ⟨hzero, hsucc⟩ := h.nat (oldContains (by decide) H)
+      exact ⟨newContains hzero, newContains hsucc⟩
+    natZero := fun H => h.natZero (by
+      change env''.constants ``Nat.zero = some _ at H
+      rwa [same ``Nat.zero (by decide)] at H)
+    natSucc := fun H => h.natSucc (by
+      change env''.constants ``Nat.succ = some _ at H
+      rwa [same ``Nat.succ (by decide)] at H)
+    natPred := (h.natPred.addConst hadd (by decide)).addDefEq
+    natAdd := (h.natAdd.addConst hadd (by decide)).addDefEq
+    natSub := href
+    natMul := (h.natMul.addConst hadd (by decide)).addDefEq
+    natPow := (h.natPow.addConst hadd (by decide)).addDefEq
+    natGcd := (h.natGcd.addConst hadd (by decide)).addDefEq
+    natMod := (h.natMod.addConst hadd (by decide)).addDefEq
+    natDiv := (h.natDiv.addConst hadd (by decide)).addDefEq
+    natBEq := (h.natBEq.addConst hadd (by decide)).addDefEq
+    natBLE := (h.natBLE.addConst hadd (by decide)).addDefEq
+    natLAnd := (h.natLAnd.addConst hadd (by decide)).addDefEq
+    natLOr := (h.natLOr.addConst hadd (by decide)).addDefEq
+    natXor := (h.natXor.addConst hadd (by decide)).addDefEq
+    natShiftLeft := (h.natShiftLeft.addConst hadd (by decide)).addDefEq
+    natShiftRight := (h.natShiftRight.addConst hadd (by decide)).addDefEq
+    charOfNat := fun H => h.charOfNat (by
+      change env''.constants ``Char.ofNat = some _ at H
+      rwa [same ``Char.ofNat (by decide)] at H)
+    stringOfList := fun H => by
+      change env''.constants ``String.ofList = some _ at H
+      rw [same ``String.ofList (by decide)] at H
+      obtain ⟨hshape, hnil, hcons⟩ := h.stringOfList H
+      exact ⟨hshape, hnil.mono le, hcons.mono le⟩ }
+
+/-- Shared bookkeeping for a checked Nat primitive definition: recover the
+new constant typing, its definition equation, and the constructor typings in
+the extended environment. -/
+theorem VEnv.HasPrimitives.natDefKit {env env' : VEnv} {v : VDefVal}
+    {n : Name} {ty : VExpr}
+    (h : env.HasPrimitives) (hnat : env.contains ``Nat)
+    (hname : v.name = n)
+    (hadd : env.addConst n v.toVConstant = some env')
+    (hwf : (env'.addDefEq v.toDefEq).WF)
+    (hu : v.uvars = 0)
+    (hty : env.IsDefEqU 0 [] v.type ty)
+    (hnext :
+      env ≤ env'.addDefEq v.toDefEq →
+      (∀ U Γ, (env'.addDefEq v.toDefEq).HasType U Γ
+        (.const n []) ty) →
+      (env'.addDefEq v.toDefEq).IsDefEqU 0 []
+        (.const n []) v.value →
+      (∀ Γ, (env'.addDefEq v.toDefEq).HasType 0 Γ .natZero .nat) →
+      (∀ Γ, (env'.addDefEq v.toDefEq).HasType 0 Γ .natSucc
+        (.forallE .nat .nat)) →
+      (env'.addDefEq v.toDefEq).HasPrimitives) :
+    (env'.addDefEq v.toDefEq).HasPrimitives := by
+  let env'' := env'.addDefEq v.toDefEq
+  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
+  have hf (U Γ) : env''.HasType U Γ (.const n []) ty :=
+    VEnv.HasType.const_of_type_defeq hwf (by
+      change env'.constants n = some v.toVConstant
+      exact VEnv.addConst_self hadd) hu (hty.mono le) U Γ
+  have hcf := VDefVal.const_defeq_value hwf hu
+  rw [hname] at hcf
+  have hzero (Γ) : env''.HasType 0 Γ .natZero .nat :=
+    (TrExprS.natZero h hnat (Us := []) (Δ := [])).2.mono le |>.weak0 hwf
+  have hsucc (Γ) : env''.HasType 0 Γ .natSucc (.forallE .nat .nat) :=
+    (TrExprS.natSucc h hnat (Us := []) (Δ := [])).2.mono le |>.weak0 hwf
+  exact hnext le hf hcf hzero hsucc
+
+/-- Nat.add-specialized compatibility wrapper around `natDefKit`. -/
 theorem VEnv.HasPrimitives.natAddDefKit {env env' : VEnv} {v : VDefVal}
     (h : env.HasPrimitives) (hnat : env.contains ``Nat)
     (hname : v.name = ``Nat.add)
@@ -978,21 +1181,8 @@ theorem VEnv.HasPrimitives.natAddDefKit {env env' : VEnv} {v : VDefVal}
       (∀ Γ, (env'.addDefEq v.toDefEq).HasType 0 Γ .natSucc
         (.forallE .nat .nat)) →
       (env'.addDefEq v.toDefEq).HasPrimitives) :
-    (env'.addDefEq v.toDefEq).HasPrimitives := by
-  let env'' := env'.addDefEq v.toDefEq
-  have le : env ≤ env'' := (VEnv.addConst_le hadd).trans VEnv.addDefEq_le
-  have hf (U Γ) : env''.HasType U Γ (.const ``Nat.add [])
-      (.forallE .nat <| .forallE .nat .nat) :=
-    VEnv.HasType.const_of_type_defeq hwf (by
-      change env'.constants ``Nat.add = some v.toVConstant
-      exact VEnv.addConst_self hadd) hu (hty.mono le) U Γ
-  have hcf := VDefVal.const_defeq_value hwf hu
-  rw [hname] at hcf
-  have hzero (Γ) : env''.HasType 0 Γ .natZero .nat :=
-    (TrExprS.natZero h hnat (Us := []) (Δ := [])).2.mono le |>.weak0 hwf
-  have hsucc (Γ) : env''.HasType 0 Γ .natSucc (.forallE .nat .nat) :=
-    (TrExprS.natSucc h hnat (Us := []) (Δ := [])).2.mono le |>.weak0 hwf
-  exact hnext le hf hcf hzero hsucc
+    (env'.addDefEq v.toDefEq).HasPrimitives :=
+  h.natDefKit hnat hname hadd hwf hu hty hnext
 
 /-- A checked, well-typed Nat.add definition with the two canonical recurrence
 equations preserves `HasPrimitives` after installing its declaration equation. -/
@@ -1018,5 +1208,44 @@ theorem VEnv.HasPrimitives.addNatAddDef {env env' : VEnv} {v : VDefVal}
   have href := VEnv.ReflectsNatNatNat.of_add_equations hwf hzero hsucc hf hcf
     (hz.mono le) (hs.mono le)
   exact h.addNatAdd hadd href
+
+/-- A checked, well-typed Nat.sub definition with the canonical recurrence
+equations preserves `HasPrimitives`. -/
+theorem VEnv.HasPrimitives.addNatSubDef {env env' : VEnv} {v : VDefVal}
+    (h : env.HasPrimitives) (henv : env.WF)
+    (hpredC : env.contains ``Nat.pred)
+    (hname : v.name = ``Nat.sub)
+    (hadd : env.addConst ``Nat.sub v.toVConstant = some env')
+    (hwf : (env'.addDefEq v.toDefEq).WF)
+    (hu : v.uvars = 0)
+    (hty : env.IsDefEqU 0 [] v.type
+      (.forallE .nat <| .forallE .nat .nat))
+    (hz : env.IsDefEqU 0 []
+      (.lam .nat <| .app (.app v.value (.bvar 0)) .natZero)
+      (.lam .nat <| .bvar 0))
+    (hs : env.IsDefEqU 0 []
+      (.lam .nat <| .lam .nat <|
+        .app (.app v.value (.bvar 1)) (.app .natSucc (.bvar 0)))
+      (.lam .nat <| .lam .nat <|
+        .app (.const ``Nat.pred [])
+          (.app (.app v.value (.bvar 1)) (.bvar 0)))) :
+    (env'.addDefEq v.toDefEq).HasPrimitives := by
+  have hnat : env.contains ``Nat := by
+    have hfun := (h.natPred hpredC).1 0 []
+    have ⟨_, hfunType⟩ := hfun.isType henv trivial
+    obtain ⟨⟨_, hnatType⟩, _⟩ := hfunType.forallE_inv henv
+    obtain ⟨_, hnat, _⟩ := hnatType.const_inv henv trivial
+    exact ⟨_, hnat⟩
+  refine h.natDefKit hnat hname hadd hwf hu hty ?_
+  intro le hf hcf hzero hsucc
+  have hpred : (env'.addDefEq v.toDefEq).ReflectsNatNat
+      ``Nat.pred Nat.pred :=
+    (h.natPred.addConst hadd (by decide)).addDefEq
+  have hpredC' : (env'.addDefEq v.toDefEq).contains ``Nat.pred := by
+    obtain ⟨predCi, hpredLookup⟩ := hpredC
+    exact ⟨predCi, le.constants hpredLookup⟩
+  have href := VEnv.ReflectsNatNatNat.of_sub_equations hwf hzero hsucc
+    hpred hpredC' hf hcf (hz.mono le) (hs.mono le)
+  exact h.addNatSub hadd href
 
 end Lean4Lean

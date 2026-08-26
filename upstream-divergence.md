@@ -1513,6 +1513,38 @@ to the replacement.
   needed by Nat.sub together with the fork's readiness transaction and trust
   pins.
 
+## D028 — direct Nat.sub certificate consumes retained Nat.pred reflection
+
+- **Status:** implemented as the third semantic UP6 slice; upstream-derived
+  specialization with the remaining primitive families still open.
+- **Owner:** Argument Computer Corporation; extend next through Nat.mul and
+  Nat.pow, then review with the complete primitive dispatch.
+- **Source:** manually adapted from lean4lean PR #32 at
+  `6cfd43a48d17be85c76414638655c12ef9a7ee23`, principally its Nat.sub
+  recognizer certificate, recurrence conservation, and live dispatch; no
+  whole-PR merge or unrelated mod/div infrastructure.
+- **Executable delta:** `checkNatSubPrimitive` extracts the Nat.sub branch and
+  closes both binary equations with `Expr.lam0`. Its successor recurrence
+  explicitly calls the already-installed `Nat.pred`; unported branches retain
+  their existing helpers until their own bounded slices land.
+- **Verification delta:** the typed recognizer translates the exact binary
+  checker trace and obtains the successor right-hand side from the retained
+  unary Nat.pred reflection. `ReflectsNatNatNat.of_sub_equations` converts
+  those equations into Nat.sub literal reflection, `addNatSubDef` preserves
+  the full readiness-aware primitive contract, and the safe checker plus live
+  `AddDef` path install that evidence without the generic recognizer theorem.
+- **Ix impact:** Nat.sub now has a concrete end-to-end declaration certificate
+  whose dependency on Nat.pred is semantic, not merely a name-presence check.
+  Ix transports can select this narrow arithmetic chain without importing the
+  later mod/div or well-founded-recursion certificate machinery.
+- **Tests:** `Lean4Lean.Tests.Primitive` checks that all three direct
+  elementary-Nat roots are named by live dispatch, exclude
+  `checkPrimitiveDef.WF`, and each reach exactly the same six inherited
+  sorry-carrying dependencies. The global source frontier remains unchanged.
+- **Removal condition:** upstream lands the corresponding PR #32 slice (or a
+  stronger generic proof) and reconciliation preserves the retained Nat.pred
+  dependency, readiness transaction, and exact trust pins.
+
 ## Review checklist
 
 At each publish or ix pin boundary:
