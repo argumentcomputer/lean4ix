@@ -1572,6 +1572,42 @@ theorem factor
           ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
           MonadExceptOf.throw]
 
+/-- A retained first-family telescope and the independently retained
+normalization candidate reach the same terminal payload when they start from
+the same root and replay the same fresh-parameter/index split.
+
+Both proofs factor the unchanged executable loop.  Choosing the continuation
+to return every argument therefore identifies the terminal type, statistics,
+index count, and reader context at once; no reconstruction from local names is
+needed. -/
+theorem result_eq_candidate
+    (candidate : CandidateExprTrace context candidateSource)
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context
+      candidate.rootWhnf i nindices fuel)
+    (remaining : Nat)
+    (hi : i + remaining = nparams)
+    (hcount : remaining ≤ candidate.spineLength)
+    (hfuel : candidate.spineLength < fuel)
+    (hempty : stats.indConsts.isEmpty = true)
+    (hannotations : candidate.validationAnnotations)
+    (hterminal : candidate.terminalResult.isForall = false) :
+    trace.result = {
+      type := candidate.terminalResult
+      stats := { stats with
+        params := stats.params ++
+          (candidate.parameterList remaining).toArray }
+      nindices := nindices + (candidate.spineLength - remaining)
+      context := candidate.terminalContext } := by
+  let k : Expr → InductiveStats → Nat → M Result :=
+    fun type stats nindices => fun context =>
+      .ok { type, stats, nindices, context }
+  have factor := trace.factor k
+  have replay := candidate.checkInductiveTypes_loop_of_candidate
+    stats nparams i nindices fuel remaining k hi hcount hfuel hempty
+      hannotations hterminal
+  rw [replay] at factor
+  exact (Except.ok.inj factor).symm
+
 /-- Every successful executable family-telescope traversal determines the
 source-indexed comparison trace above.  The continuation result is used only
 to rule out failed branches; it is not stored as an independently selectable
@@ -1807,6 +1843,20 @@ def result :
   | .terminal _ stats context _ =>
     { stats := familyValidationTerminalStats nparams indTypes stats context
       validationContext := context }
+
+/-- Reader context reached after the current family's complete telescope.
+
+For an initial nonempty block this is the first-family terminal context.  The
+later-family and terminal clauses keep the projection total for recursive
+consumers; producer theorems rule those clauses out at the initial index. -/
+def firstContext :
+    FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats context →
+      Context
+  | .firstFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ =>
+    telescope.result.context
+  | .laterFamily _ _ _ _ _ _ _ _ _ telescope _ _ _ _ _ =>
+    telescope.result.context
+  | .terminal _ _ context _ => context
 
 /-- Exact kernel parameter-comparison executions, grouped in source family
 order.  The first family normally contributes an empty list; every later
@@ -3746,6 +3796,82 @@ noncomputable def NormalizationCandidateExecution.familyParameterComparisonTrace
       (InductiveStats.initial (context.lparams.map .param)) context :=
   (execution.familyValidationBlockRun produced nonempty).parameterComparisonTrace
 
+/-- The first family validator and the first family normalization candidate
+reach the same exact terminal reader context.
+
+The detailed producer independently retains both traversals.  Root WHNF
+determinism aligns their starting expressions, and
+`FamilyTypeParameterComparisonTrace.result_eq_candidate` then aligns the
+whole parameter/index telescope in one step. -/
+theorem NormalizationCandidateExecution.firstFamilyComparisonContext_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {}) :
+    (execution.familyParameterComparisonTrace produced (by simp)).firstContext =
+      execution.familyTypes.candidates.head.type.trace.terminalContext := by
+  have hcount := execution.firstFamilyType_nparams_le_spineLength produced
+    context_lctx_eq
+  have hfuel := execution.firstFamilyType_spineLength_lt_inductiveFuel
+    produced context_lctx_eq
+  cases hCandidates : execution.familyTypes.candidates with
+  | cons candidate candidates =>
+      rw [hCandidates] at hcount hfuel
+      simp only [CandidateList.head] at hcount hfuel
+      simp only [CandidateList.head]
+      have producedFamilies := execution.familyTypes.produced
+      rw [hCandidates] at producedFamilies
+      have candidateRun := producedFamilies.head
+      have candidateContext_eq : { context with lctx := {} } = context := by
+        cases context
+        simp_all
+      rw [candidateContext_eq] at candidateRun
+      have annotations :=
+        candidate.validationAnnotations_of_normalize candidateRun
+      have candidate_context :=
+        candidate.context_eq_of_normalize candidateRun
+      subst context
+      have terminals := execution.familyTerminals
+      rw [hCandidates] at terminals
+      cases terminals with
+      | cons terminal tail =>
+          have terminalForall :
+              candidate.type.trace.terminalResult.isForall = false := by
+            rw [terminal]
+            rfl
+          generalize execution.familyParameterComparisonTrace produced
+            (by simp) = trace
+          cases trace with
+          | firstFamily dIdx stats validationContext inBounds closed inferred
+              root checkType rootWhnf telescope sorted ensureSort isFirst tail =>
+              have candidateWhnf := candidate.type.trace.rootWhnf_valid
+              have candidateWhnf' : CandidateWhnfStep.Valid
+                  ⟨candidate.type.context,
+                    (source :: sources).toArray[0].type,
+                    candidate.type.trace.rootWhnf⟩ := by
+                simpa using candidateWhnf
+              have root_eq : root = candidate.type.trace.rootWhnf :=
+                Except.ok.inj (rootWhnf.symm.trans candidateWhnf')
+              subst root
+              have result_eq :=
+                FamilyTypeParameterComparisonTrace.result_eq_candidate
+                  candidate.type.trace telescope nparams (by omega) hcount
+                  hfuel rfl annotations terminalForall
+              exact congrArg FamilyTypeParameterComparisonTrace.Result.context
+                result_eq
+          | laterFamily dIdx stats validationContext inBounds closed inferred
+              root checkType rootWhnf telescope sorted ensureSort isLater
+              resultLevelCompatible tail =>
+              have first : telescope.result.stats.indConsts.isEmpty = true := by
+                rw [telescope.result_indConsts_eq]
+                rfl
+              rw [first] at isLater
+              contradiction
+          | terminal dIdx stats validationContext outOfBounds =>
+              simp at outOfBounds
+
 /-- Kernel equality executions grouped by source family, projected directly
 from the normalization producer. -/
 noncomputable def NormalizationCandidateExecution.familyParameterComparisons
@@ -4082,6 +4208,14 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.factor' depends
 #print axioms FamilyTypeParameterComparisonTrace.factor
 
 /--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_eq_candidate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.result_eq_candidate
+
+/--
 info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.exists_of_run' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -4120,6 +4254,14 @@ info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.factor' depend
 -/
 #guard_msgs in
 #print axioms FamilyParameterComparisonBlockTrace.factor
+
+/--
+info: 'Lean4Lean.AddInductive.NormalizationCandidateExecution.firstFamilyComparisonContext_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateExecution.firstFamilyComparisonContext_eq
 
 /--
 info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.exists_of_run' depends on axioms: [propext,

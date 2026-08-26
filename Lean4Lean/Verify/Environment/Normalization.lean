@@ -3530,14 +3530,10 @@ theorem CandidateExprRun.terminalContextRun
         annotations.consumed storedDomain' := by
       simpa only [VContext.TrExprS, venv_eq, lparams_eq, vlctx_eq] using
         annotationsRun.rhs_tr
-    have henv : VEnv.WF env := by
-      simpa only [venv_eq] using contextRun.context.Ewf
-    have hΔ : OnCtx Δ.toCtx (env.IsType Us.length) := by
-      simpa only [venv_eq, lparams_eq, vlctx_eq] using
-        contextRun.context.Δwf.toCtx
     have storedDomain_type : env.IsType Us.length Δ.toCtx storedDomain' := by
-      have annotationDef := annotationsRun.isDefEqU.of_l henv hΔ domainType
-      exact ⟨u, annotationDef.hasType.2⟩
+      have bodyWF := bodyRun.context_wf
+      rw [bodyContext] at bodyWF
+      exact bodyWF.2.2
     let nextContextRun := contextRun.pushLocalDecl name binderInfo
       annotations.consumed fresh storedDomain' storedDomain_tr (by
         change contextRun.context.venv.IsType
@@ -3560,6 +3556,20 @@ theorem CandidateExprRun.terminalContextRun
         simpa only [AddInductive.CandidateExprTrace.terminalContext] using
           terminalRun,
       terminalVenv, terminalLparams⟩
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprRun.terminalContextRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateExprRun.terminalContextRun
 
 private theorem candidateFVLift'_comp
     (left : VLCtx.FVLift' Δ₁ Δ₂ 0 (.skipN .refl n₁) 0)

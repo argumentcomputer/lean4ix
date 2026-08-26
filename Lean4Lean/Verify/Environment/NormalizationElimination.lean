@@ -1901,6 +1901,93 @@ theorem ProducedBlockRecursorShapeCandidate.semanticCanonicalBlockParams
       produced.kernelSources_nonempty)
     (produced.semanticViewParams_length semantic context_lctx_eq)
 
+/-- Construct the verified reader context reached after the first family's
+exact parameter/index traversal.
+
+The operational producer proves that the retained family-validation context
+is the terminal context of its first family candidate.  The dependent
+semantic family head supplies the corresponding verified candidate run, so
+the result is indexed by the validator's own comparison trace rather than by
+a caller-selected local context. -/
+theorem ProducedBlockRecursorShapeCandidate.semanticFirstFamilyContextRun
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context)
+    {env blockEnv : VEnv} {Us : List Name}
+    (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ contextRun : TypeChecker.CandidateContextRun
+        (produced.execution.eliminationExecution.normalization
+          |>.familyParameterComparisonTrace
+            (produced.execution.normalization_run produced.producedExecution)
+            produced.kernelSources_nonempty).firstContext,
+      contextRun.context.venv = env ∧
+      contextRun.context.lparams = Us := by
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  cases kernelSources with
+  | nil =>
+    have nonempty := produced.kernelSources_nonempty
+    simp at nonempty
+  | cons kernelSource remainingSources =>
+    let normalization :=
+      produced.execution.eliminationExecution.normalization
+    have roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+        normalization.families.candidates source.types := by
+      simpa only [ProducedBlockRecursorShapeCandidate.candidate,
+        AddInductive.NormalizationRecursorExecution.candidate,
+        AddInductive.NormalizationEliminationExecution.candidate,
+        AddInductive.NormalizationCandidateExecution.candidate] using
+        semantic.families
+    cases hCandidates : normalization.families.candidates with
+    | cons candidate candidates =>
+      rw [hCandidates] at roots
+      cases hRawTypes : source.types with
+      | nil =>
+        rw [hRawTypes] at roots
+        nomatch roots
+      | cons raw raws =>
+        rw [hRawTypes] at roots
+        cases roots with
+        | cons head tail =>
+          obtain ⟨inferred, recursive⟩ := head.type.recursive
+          obtain ⟨terminalRun, terminalVenv, terminalLparams⟩ :=
+            recursive.terminalContextRun head.type.contextRun
+              head.type.venv_eq head.type.lparams_eq head.type.vlctx_eq
+          have familyTypeEq :=
+            produced.execution.eliminationExecution.normalization
+              |>.families.produced.head_familyType
+          rw [hCandidates] at familyTypeEq
+          simp only [AddInductive.CandidateList.head] at familyTypeEq
+          have familyContextEq := congrArg
+            (fun familyType : AddInductive.CandidateFamilyType kernelSource =>
+              familyType.type.trace.terminalContext) familyTypeEq
+          have validationContextEq :=
+            produced.execution.eliminationExecution.normalization
+              |>.firstFamilyComparisonContext_eq normalizationProduced
+                context_lctx_eq
+          have contextEq := validationContextEq.trans familyContextEq.symm
+          rw [contextEq]
+          exact ⟨terminalRun, terminalVenv, terminalLparams⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticFirstFamilyContextRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.semanticFirstFamilyContextRun
+
 /-- The retained first-family validation and its exact semantic root determine
 the Theory representation of the block's common result universe.  The value
 is not selected by a caller: `VLevel.ofLevel` translates the precise kernel
