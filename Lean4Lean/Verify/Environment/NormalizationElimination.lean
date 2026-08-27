@@ -6054,6 +6054,1132 @@ theorem
     cursor.generationShapes
     staging.annotation.remainingValidationAnnotations
 
+/-- Recursion-ready state for an arbitrary suffix of the later families.
+Besides the dependent validator/semantic cursor, it retains every invariant
+needed to interpret the next family without reselecting a context, candidate,
+raw family, or shared-parameter reference. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {allLaterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: allLaterSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    {remainingSources : List InductiveType}
+    (candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources)
+    (raws : List VInductiveType)
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext) where
+  cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+    source.nparams (firstSource :: secondSource :: allLaterSources)
+    candidates raws trace
+  validation : CandidateFamilyValidationAnnotationList
+    { context with lctx := {} } candidates
+  parameterSpines : AddInductive.CandidateFamilyParameterSpineList
+    source.nparams candidates
+  generationShapes : CandidateBlockFamilySemanticGenerationShapeList source
+    env blockEnv Us cursor.semantics
+  annotations : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+    cursor.semantics generationShapes
+  parameterSources_eq_firstParameterList : cursor.parameterSources =
+    staging.annotation.firstCandidate.familyType.type.trace.parameterList
+      source.nparams
+  candidate_fuel_eq : candidateContext.fuel = context.fuel
+  firstTerminal_find : ∀ {fv : FVarId} {decl : LocalDecl},
+    staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+          fv = some decl →
+      candidateContext.lctx.find? fv = some decl
+  reference : VLCtx
+  rootLift : Lift
+  originLift : Lift
+  root_reference_lift : VLCtx.FVLift'
+    completion.prefixes.firstParameterΔ reference 0 rootLift 0
+  origin_reference_lift : VLCtx.FVLift'
+    staging.annotation.firstTerminalRun.context.vlctx reference 0
+      originLift 0
+  current_reference : VLCtx.IsDefEq env Us.length
+    cursor.contextRun.context.vlctx reference
+
+/-- Package the exact suffix handed off by the completed second family as
+the initial recursion-ready later-family state. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    Nonempty (completion.LaterFamilyIterationCursor
+      staging.annotation.remainingCandidates staging.annotation.remainingRaws
+      cursor.validation.continuation.tail) := by
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  exact ⟨{
+    cursor := cursor.cursor
+    validation := staging.annotation.remainingValidationAnnotations
+    parameterSpines := staging.annotation.remainingParameterSpines
+    generationShapes := cursor.generationShapes
+    annotations := annotations
+    parameterSources_eq_firstParameterList :=
+      cursor.parameterSources_eq_firstParameterList
+    candidate_fuel_eq := cursor.cursor_fuel_eq
+    firstTerminal_find := cursor.firstTerminal_find
+    reference := completion.alignment.reference
+    rootLift := completion.alignment.rootLift
+    originLift := completion.alignment.originLift
+    root_reference_lift := completion.alignment.root_reference_lift
+    origin_reference_lift := completion.alignment.origin_reference_lift
+    current_reference := by
+      rw [cursor.context_eq_terminal]
+      exact completion.current_reference }⟩
+
+namespace
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
+
+variable {source : VInductDecl}
+  {firstSource secondSource : InductiveType}
+  {allLaterSources : List InductiveType}
+  {numNested : Nat} {isUnsafe : Bool}
+  {context : AddInductive.Context}
+  {produced : ProducedBlockRecursorShapeCandidate source
+    (firstSource :: secondSource :: allLaterSources) numNested isUnsafe
+    context}
+  {env blockEnv : VEnv} {Us : List Name}
+  {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+    produced.candidate source}
+  {staging : produced.SecondFamilyIndexStaging semantic}
+  {raw : staging.annotation.RawFirstIndexDomain}
+  {completion : staging.TerminalIndexDomainCompletion raw}
+  {nextSource : InductiveType} {laterSources : List InductiveType}
+  {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+    (nextSource :: laterSources)}
+  {raws : List VInductiveType}
+  {dIdx : Nat} {stats : AddInductive.InductiveStats}
+  {candidateContext : AddInductive.Context}
+  {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+    (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+    candidateContext}
+
+/-- Canonical head staging for an arbitrary nonempty recursive later-family
+state. -/
+structure HeadStaging
+    (iteration : completion.LaterFamilyIterationCursor candidates raws trace)
+    where
+  continuation :
+    AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+      source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray
+  selected : trace.headContinuation? = some continuation
+  invariant : continuation.LaterInvariant
+
+/-- Select the exact head continuation of a nonempty recursive state. -/
+theorem headStaging
+    (iteration : completion.LaterFamilyIterationCursor candidates raws trace) :
+    Nonempty iteration.HeadStaging := by
+  obtain ⟨continuation, selected, invariant⟩ :=
+    iteration.cursor.headContinuation (by simp)
+  exact ⟨⟨continuation, selected, invariant⟩⟩
+
+/-- Canonical semantic family at the recursive state head. -/
+def HeadStaging.position
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (_head : iteration.HeadStaging) :=
+  iteration.cursor.semantics.headPosition
+
+/-- Exact verified reader context at the recursive state head. -/
+def HeadStaging.currentRun
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) :
+    TypeChecker.CandidateContextRun head.continuation.context :=
+  iteration.cursor.headContextRun head.continuation head.selected
+
+/-- The recursive head reader context has the producer-recorded WHNF depth. -/
+theorem HeadStaging.whnfDepth
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) :
+    head.continuation.context.fuel.recDepth =
+      head.position.semantic.type.whnfFuel + 1 := by
+  calc
+    head.continuation.context.fuel.recDepth =
+        candidateContext.fuel.recDepth :=
+      congrArg (fun currentContext => currentContext.fuel.recDepth)
+        (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+          head.selected)
+    _ = context.fuel.recDepth :=
+      congrArg (fun fuel => fuel.recDepth) iteration.candidate_fuel_eq
+    _ = ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth :=
+      rfl
+    _ = candidates.head.familyType.type.context.fuel.recDepth :=
+      (congrArg (fun currentContext => currentContext.fuel.recDepth)
+        iteration.validation.head_context_eq).symm
+    _ = head.position.semantic.type.whnfFuel + 1 :=
+      head.position.semantic.type.whnfDepth
+
+/-- Execute the retained root WHNF observation for an arbitrary recursive
+head. -/
+theorem HeadStaging.rootWhnf
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) :
+    let position := iteration.cursor.semantics.headPosition
+    let currentRun := iteration.cursor.headContextRun head.continuation
+      head.selected
+    ∃ root', currentRun.context.TrExprS head.continuation.source root' ∧
+      Nonempty (TypeChecker.WhnfRun currentRun.context.venv
+        currentRun.context.lparams currentRun.context.vlctx nextSource.type
+        head.continuation.source position.raw.type root') := by
+  let position := iteration.cursor.semantics.headPosition
+  let currentRun := iteration.cursor.headContextRun head.continuation
+    head.selected
+  have sourceTr : currentRun.context.TrExprS nextSource.type
+      position.raw.type := by
+    rw [iteration.cursor.headContextRun_context head.continuation
+      head.selected]
+    exact iteration.cursor.headSourceTranslation
+  exact TypeChecker.WhnfRun.exists_ofCandidateStep
+    ⟨head.continuation.context, nextSource.type, head.continuation.source⟩
+    (iteration.cursor.headRootWhnf head.continuation head.selected)
+    currentRun position.raw.type sourceTr position.semantic.type.whnfFuel
+    head.whnfDepth
+
+/-- Producer-owned shared-parameter boundary at an arbitrary recursive
+head. -/
+structure HeadParameterBoundary
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) where
+  root : VExpr
+  root_tr : head.currentRun.context.TrExprS head.continuation.source root
+  rawRoot_def : head.currentRun.context.venv.IsDefEqU
+    head.currentRun.context.lparams.length
+    head.currentRun.context.vlctx.toCtx head.position.raw.type root
+  comparisonRuns : ∀ step ∈ head.continuation.telescope.comparisons,
+    TypeChecker.FamilyComparisonSemanticRun step
+  boundary : TypeChecker.FamilyParameterIndexBoundary
+    head.continuation.telescope head.currentRun
+  parameterSpine : TypeChecker.FamilyParameterSemanticSpine
+    head.currentRun.context.venv head.currentRun.context.lparams.length
+    head.currentRun.context.vlctx.toCtx root
+    (boundary.parameters.map Prod.snd) boundary.source'
+
+/-- Interpret the exact shared-parameter prefix at an arbitrary recursive
+head. -/
+theorem HeadStaging.parameterBoundary
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) :
+    Nonempty (HeadParameterBoundary head) := by
+  obtain ⟨root, rootTr, ⟨rootRun⟩⟩ := head.rootWhnf
+  obtain ⟨comparisonRuns, boundary, parameterSpine⟩ :=
+    TypeChecker.familyTypeParameterComparison_semanticSpine_of_later
+      head.continuation.telescope
+      head.invariant.current_indConsts_nonempty
+      head.invariant.current_params_size
+      (iteration.cursor.headLocalState head.continuation head.selected)
+      head.currentRun root rootTr head.position.semantic.type.whnfFuel
+      head.whnfDepth
+  exact ⟨{
+    root := root
+    root_tr := rootTr
+    rawRoot_def := rootRun.isDefEqU
+    comparisonRuns := comparisonRuns
+    boundary := boundary
+    parameterSpine := parameterSpine }⟩
+
+/-- The recursive candidate exposes at least its complete parameter prefix. -/
+theorem HeadStaging.nparams_le_spineLength
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (_head : iteration.HeadStaging) :
+    source.nparams ≤ candidates.head.familyType.type.trace.spineLength :=
+  iteration.parameterSpines.head
+
+/-- The first and current recursive candidates share the producer root
+context. -/
+theorem HeadStaging.firstCandidate_context_eq
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (_head : iteration.HeadStaging) :
+    staging.annotation.firstCandidate.familyType.type.context =
+      candidates.head.familyType.type.context :=
+  (staging.annotation.candidate_context_eq.trans
+      staging.annotation.second_candidate_context_eq).trans
+    iteration.validation.head_context_eq.symm
+
+/-- Every recursive family allocates the first family's exact parameter free
+variables. -/
+theorem HeadStaging.parameterLists_eq
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (context_lctx_eq : context.lctx = {}) :
+    staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams =
+      candidates.head.familyType.type.trace.parameterList source.nparams :=
+  AddInductive.CandidateExprTrace.parameterList_eq_of_ngen_eq
+    staging.annotation.firstCandidate.familyType.type.trace
+    candidates.head.familyType.type.trace
+    (congrArg AddInductive.Context.ngen head.firstCandidate_context_eq)
+    (staging.annotation.first_nparams_le_spineLength context_lctx_eq)
+    head.nparams_le_spineLength
+
+/-- The recursive validator boundary names the current candidate's exact
+parameter prefix. -/
+theorem HeadParameterBoundary.parameterSources_eq_candidateParameterList
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    (parameter : HeadParameterBoundary head)
+    (context_lctx_eq : context.lctx = {}) :
+    parameter.boundary.parameters.map Prod.fst =
+      candidates.head.familyType.type.trace.parameterList source.nparams := by
+  calc
+    parameter.boundary.parameters.map Prod.fst =
+        head.continuation.stats.params.toList := by
+      simpa using parameter.boundary.parameter_sources_eq
+    _ = iteration.cursor.parameterSources := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+        head.selected]
+      exact iteration.cursor.current_parameterSources_eq
+    _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams := iteration.parameterSources_eq_firstParameterList
+    _ = candidates.head.familyType.type.trace.parameterList source.nparams :=
+      head.parameterLists_eq context_lctx_eq
+
+/-- The recursive validator boundary retains the first candidate's exact
+parameter prefix. -/
+theorem HeadParameterBoundary.parameterSources_eq_firstParameterList
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    (parameter : HeadParameterBoundary head) :
+    parameter.boundary.parameters.map Prod.fst =
+      staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams := by
+  calc
+    parameter.boundary.parameters.map Prod.fst =
+        head.continuation.stats.params.toList := by
+      simpa using parameter.boundary.parameter_sources_eq
+    _ = iteration.cursor.parameterSources := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+        head.selected]
+      exact iteration.cursor.current_parameterSources_eq
+    _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams := iteration.parameterSources_eq_firstParameterList
+
+/-- Terminal-inclusive producer suffix at an arbitrary recursive parameter
+boundary. -/
+structure HeadCandidateParameterSuffix
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) where
+  position : candidates.head.familyType.type.trace.MainSpineAt source.nparams
+  suffix : iteration.annotations.head.annotation_spine.MainPositionSuffix
+    position
+
+/-- Select the recursive candidate's literal parameter-boundary suffix. -/
+theorem HeadStaging.candidateParameterSuffix
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging) :
+    Nonempty (HeadCandidateParameterSuffix head) := by
+  obtain ⟨position⟩ :=
+    AddInductive.CandidateExprTrace.mainSpineAt
+      head.nparams_le_spineLength
+  obtain ⟨resultLevel, terminalEq⟩ := iteration.validation.head_terminal
+  obtain ⟨suffix⟩ :=
+    iteration.annotations.head.annotation_spine.mainPositionSuffix .nil
+      iteration.generationShapes.head.storedSpine
+      iteration.annotations.head.validation_annotations terminalEq position
+  exact ⟨⟨position, suffix⟩⟩
+
+/-- The retained recursive comparisons construct the exact shared-parameter
+telescope equality against the first family. -/
+theorem HeadStaging.parameterTelescopeDefEq
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head)
+    (candidate : HeadCandidateParameterSuffix head)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (iteration.annotations.head.storedBinders.take source.nparams) := by
+  have currentVenv : head.currentRun.context.venv = env :=
+    iteration.cursor.headContextRun_venv head.continuation head.selected
+  have currentLparams : head.currentRun.context.lparams = Us :=
+    iteration.cursor.headContextRun_lparams head.continuation head.selected
+  have firstRootLctx :
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+        ({} : LocalContext) := by
+    calc
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+          candidates.head.familyType.type.context.lctx :=
+        congrArg AddInductive.Context.lctx head.firstCandidate_context_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).lctx :=
+        congrArg AddInductive.Context.lctx
+          iteration.validation.head_context_eq
+      _ = {} := rfl
+  have firstTerminalFind : ∀ {fv : FVarId} {decl : LocalDecl},
+      staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+          fv = some decl →
+        head.continuation.context.lctx.find? fv = some decl := by
+    intro fv decl found
+    rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+      head.selected]
+    exact iteration.firstTerminal_find found
+  have currentReference : VLCtx.IsDefEq env Us.length
+      head.currentRun.context.vlctx iteration.reference := by
+    change VLCtx.IsDefEq env Us.length
+      (iteration.cursor.headContextRun head.continuation
+        head.selected).context.vlctx iteration.reference
+    rw [iteration.cursor.headContextRun_context head.continuation
+      head.selected]
+    exact iteration.current_reference
+  have validatorCandidateRoot : 0 < source.nparams →
+      head.continuation.source =
+        candidates.head.familyType.type.trace.rootWhnf := by
+    intro positive
+    have candidateIsForall : nextSource.type.isForall = true :=
+      candidate.position.traceSource_isForall positive
+        iteration.generationShapes.head.storedSpine
+    have validatorRootEq : head.continuation.source = nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        (iteration.cursor.headRootWhnf head.continuation head.selected)
+        head.position.semantic.type.whnfFuel head.whnfDepth
+        candidateIsForall
+    have candidateRootEq : candidates.head.familyType.type.trace.rootWhnf =
+        nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        candidates.head.familyType.type.trace.rootWhnf_valid
+        head.position.semantic.type.whnfFuel
+        head.position.semantic.type.whnfDepth candidateIsForall
+    exact validatorRootEq.trans candidateRootEq.symm
+  have evidence := sharedParameterTelescopeDefEqAux
+    parameter.boundary.prefix_path parameter.boundary.params_size
+    parameter.boundary.localState head.currentRun currentVenv currentLparams
+    parameter.root_tr head.position.semantic.type.whnfFuel head.whnfDepth
+    staging.annotation.first_annotation_spine
+    staging.annotation.first_validation_annotations
+    (TypeChecker.CandidateLocalContextRun.empty _ firstRootLctx)
+    firstTerminalFind iteration.annotations.head.annotation_spine
+    iteration.annotations.head.validation_annotations candidate.position
+    iteration.generationShapes.head.storedSpine
+    head.position.semantic.type.whnfDepth validatorCandidateRoot
+    parameter.parameterSources_eq_firstParameterList
+    (parameter.parameterSources_eq_candidateParameterList context_lctx_eq)
+    (.nil) iteration.origin_reference_lift currentReference
+  simpa only [VLCtx.toCtx] using evidence
+
+/-- Uniform completed index suffix at an arbitrary recursive family head. -/
+structure HeadDomainCompletion
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head) where
+  candidate : HeadCandidateParameterSuffix head
+  chain : parameter.boundary.IndexDomainChain
+  chain_length : chain.length =
+    (iteration.annotations.head.storedBinders.drop source.nparams).length
+  alignment : chain.EndpointAlignment env Us
+    iteration.annotations.head.terminalRun.context.vlctx
+    completion.prefixes.firstParameterΔ
+    staging.annotation.firstTerminalRun.context.vlctx
+
+/-- Complete an arbitrary recursive head, splitting faithfully between a
+genuine first index and the parameter-terminal endpoint. -/
+theorem HeadStaging.domainCompletion
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (HeadDomainCompletion head parameter) := by
+  obtain ⟨candidate⟩ := head.candidateParameterSuffix
+  rcases Nat.lt_or_eq_of_le head.nparams_le_spineLength with hasIndex |
+      noIndices
+  · obtain ⟨position⟩ :=
+      AddInductive.CandidateExprTrace.annotationAt
+        iteration.annotations.head.validation_annotations hasIndex
+    obtain ⟨resultLevel, terminalEq⟩ := iteration.validation.head_terminal
+    obtain ⟨suffix⟩ :=
+      iteration.annotations.head.annotation_spine.positionSuffix .nil
+        iteration.generationShapes.head.storedSpine
+        iteration.annotations.head.validation_annotations terminalEq position
+    have currentVenv : head.currentRun.context.venv = env :=
+      iteration.cursor.headContextRun_venv head.continuation head.selected
+    have currentLparams : head.currentRun.context.lparams = Us :=
+      iteration.cursor.headContextRun_lparams head.continuation head.selected
+    have candidateIsForall : nextSource.type.isForall = true :=
+      position.traceSource_isForall
+        iteration.generationShapes.head.storedSpine
+    have validatorRootEq : head.continuation.source = nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        (iteration.cursor.headRootWhnf head.continuation head.selected)
+        head.position.semantic.type.whnfFuel head.whnfDepth candidateIsForall
+    have candidateRootEq : candidates.head.familyType.type.trace.rootWhnf =
+        nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        candidates.head.familyType.type.trace.rootWhnf_valid
+        head.position.semantic.type.whnfFuel
+        head.position.semantic.type.whnfDepth candidateIsForall
+    have boundaryRootEq :=
+      parameter.boundary.prefix_path.annotationAt_root_eq
+        (parameter.parameterSources_eq_candidateParameterList context_lctx_eq)
+        position iteration.generationShapes.head.storedSpine
+        (validatorRootEq.trans candidateRootEq.symm)
+        head.position.semantic.type.whnfFuel head.whnfDepth
+        head.position.semantic.type.whnfDepth
+    have cursorContext : suffix.cursor.Δ.toCtx =
+        (iteration.annotations.head.storedBinders.take
+          source.nparams).reverse := by
+      simpa only [VLCtx.toCtx, List.append_nil] using suffix.context_eq
+    have parameterTelescope :=
+      head.parameterTelescopeDefEq parameter candidate context_lctx_eq
+    have parameterContext : env.IsDefEqCtx Us.length []
+        completion.prefixes.firstParameterΔ.toCtx suffix.cursor.Δ.toCtx := by
+      simpa only [List.append_nil, completion.prefixes.first_context,
+        cursorContext] using parameterTelescope.telDefEq.ctx
+    have relation : VLCtx.FVarAlpha env Us.length
+        completion.prefixes.firstParameterΔ suffix.cursor.Δ :=
+      VLCtx.FVarAlpha.of_defeqCtx completion.prefixes.first_shape
+        suffix.cursor.shape parameterContext
+    have mappedFVars :
+        completion.prefixes.firstParameterΔ.fvars.map Expr.fvar =
+          suffix.cursor.Δ.fvars.map Expr.fvar := by
+      calc
+        completion.prefixes.firstParameterΔ.fvars.map Expr.fvar =
+            (staging.annotation.firstCandidate.familyType.type.trace
+              |>.parameterList source.nparams).reverse :=
+          completion.prefixes.first_fvars
+        _ = (parameter.boundary.parameters.map Prod.fst).reverse :=
+          congrArg List.reverse
+            parameter.parameterSources_eq_firstParameterList.symm
+        _ = (candidates.head.familyType.type.trace.parameterList
+              source.nparams).reverse :=
+          congrArg List.reverse
+            (parameter.parameterSources_eq_candidateParameterList
+              context_lctx_eq)
+        _ = suffix.cursor.Δ.fvars.map Expr.fvar := by
+          have suffixFVars := suffix.fvars_eq
+          change suffix.cursor.Δ.fvars.map Expr.fvar =
+            (candidates.head.familyType.type.trace.parameterList
+              source.nparams).reverse ++ [] at suffixFVars
+          simpa only [List.append_nil] using suffixFVars.symm
+    have cursorFVars : completion.prefixes.firstParameterΔ.fvars =
+        suffix.cursor.Δ.fvars :=
+      list_map_fvar_injective mappedFVars
+    have currentReference : VLCtx.IsDefEq env Us.length
+        head.currentRun.context.vlctx iteration.reference := by
+      change VLCtx.IsDefEq env Us.length
+        (iteration.cursor.headContextRun head.continuation
+          head.selected).context.vlctx iteration.reference
+      rw [iteration.cursor.headContextRun_context head.continuation
+        head.selected]
+      exact iteration.current_reference
+    have sourceScope : parameter.boundary.source.FVarsIn
+        (· ∈ completion.prefixes.firstParameterΔ.fvars) := by
+      rw [boundaryRootEq, suffix.root_eq, cursorFVars]
+      exact suffix.cursor.root_fvars
+    have sourceAlpha :
+        Lean.Expr.abstractFVars completion.prefixes.firstParameterΔ
+            parameter.boundary.source =
+          Lean.Expr.abstractFVars suffix.cursor.Δ
+            suffix.cursor.trace.rootWhnf := by
+      rw [boundaryRootEq, suffix.root_eq]
+      simp only [Lean.Expr.abstractFVars, cursorFVars]
+    have terminalWF : VLCtx.WF env Us.length
+        iteration.annotations.head.terminalRun.context.vlctx := by
+      simpa only [iteration.annotations.head.terminal_venv,
+        iteration.annotations.head.terminal_lparams] using
+        iteration.annotations.head.terminalRun.context.Δwf
+    have candidateDepth : suffix.cursor.candidateContext.fuel.recDepth =
+        head.position.semantic.type.whnfFuel + 1 := by
+      calc
+        suffix.cursor.candidateContext.fuel.recDepth =
+            candidates.head.familyType.type.context.fuel.recDepth :=
+          congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
+        _ = head.position.semantic.type.whnfFuel + 1 :=
+          head.position.semantic.type.whnfDepth
+    obtain ⟨⟨chain, alignment⟩⟩ :=
+      suffix.cursor.indexDomainChainAligned terminalWF parameter.boundary
+        currentVenv currentLparams completion.prefixes.first_shape relation
+        iteration.root_reference_lift iteration.root_reference_lift
+        iteration.origin_reference_lift currentReference sourceScope
+        sourceAlpha head.position.semantic.type.whnfFuel head.whnfDepth
+        candidateDepth
+    exact ⟨{
+      candidate := candidate
+      chain := chain
+      chain_length := alignment.property.trans
+        (congrArg List.length suffix.domains_eq)
+      alignment := alignment.val }⟩
+  · have currentVenv : head.currentRun.context.venv = env :=
+      iteration.cursor.headContextRun_venv head.continuation head.selected
+    have currentLparams : head.currentRun.context.lparams = Us :=
+      iteration.cursor.headContextRun_lparams head.continuation head.selected
+    have henv : VEnv.WF env := by
+      simpa only [currentVenv] using head.currentRun.context.Ewf
+    have currentWF : VLCtx.WF env Us.length
+        head.currentRun.context.vlctx := by
+      simpa only [currentVenv, currentLparams] using
+        head.currentRun.context.Δwf
+    have currentReference : VLCtx.IsDefEq env Us.length
+        head.currentRun.context.vlctx iteration.reference := by
+      change VLCtx.IsDefEq env Us.length
+        (iteration.cursor.headContextRun head.continuation
+          head.selected).context.vlctx iteration.reference
+      rw [iteration.cursor.headContextRun_context head.continuation
+        head.selected]
+      exact iteration.current_reference
+    have binderCount : source.nparams =
+        (VInductDecl.ctorFields head.position.raw.type).length :=
+      noIndices.trans
+        iteration.generationShapes.head.spineLength_eq_ctorFields
+    have storedLength : iteration.annotations.head.storedBinders.length =
+        source.nparams := by
+      calc
+        iteration.annotations.head.storedBinders.length =
+            (VInductDecl.ctorFields head.position.raw.type).length :=
+          iteration.annotations.head.stored_length
+        _ = source.nparams := binderCount.symm
+    have takeAll :
+        iteration.annotations.head.storedBinders.take source.nparams =
+          iteration.annotations.head.storedBinders :=
+      List.take_of_length_le (by omega)
+    have parameterTelescope :=
+      head.parameterTelescopeDefEq parameter candidate context_lctx_eq
+    have terminalShape :
+        iteration.annotations.head.terminalRun.context.vlctx.FVarLamOnly :=
+      iteration.annotations.head.annotation_spine.terminalShape .nil
+    have parameterContext : env.IsDefEqCtx Us.length []
+        completion.prefixes.firstParameterΔ.toCtx
+        iteration.annotations.head.terminalRun.context.vlctx.toCtx := by
+      simpa only [List.append_nil, completion.prefixes.first_context,
+        iteration.annotations.head.terminal_vlctx, takeAll] using
+        parameterTelescope.telDefEq.ctx
+    have relation : VLCtx.FVarAlpha env Us.length
+        completion.prefixes.firstParameterΔ
+        iteration.annotations.head.terminalRun.context.vlctx :=
+      VLCtx.FVarAlpha.of_defeqCtx completion.prefixes.first_shape
+        terminalShape parameterContext
+    let rawBinders := VExpr.telN source.nparams head.position.raw.type
+    let arguments := parameter.boundary.parameters.map Prod.snd
+    have positionRawEq : head.position.raw.type =
+        iteration.cursor.semantics.headPosition.raw.type := rfl
+    have fullRawLength :
+        (VExpr.telN (VInductDecl.ctorFields head.position.raw.type).length
+          head.position.raw.type).length =
+          (VInductDecl.ctorFields head.position.raw.type).length :=
+      iteration.annotations.head.telescope.length_eq.trans
+        iteration.annotations.head.stored_length
+    have rawBindersLength : rawBinders.length = source.nparams := by
+      simpa only [rawBinders, binderCount] using fullRawLength
+    have argumentsLength : arguments.length = rawBinders.length := by
+      calc
+        arguments.length = parameter.boundary.parameters.length := by
+          simp only [arguments, List.length_map]
+        _ = source.nparams := by
+          simpa only [Nat.sub_zero] using
+            parameter.boundary.parameters_length
+        _ = rawBinders.length := rawBindersLength.symm
+    have rootDef : env.IsDefEqU Us.length head.currentRun.context.vlctx.toCtx
+        (VExpr.forallN rawBinders
+          (VExpr.dropN source.nparams head.position.raw.type))
+        parameter.root := by
+      simpa only [currentVenv, currentLparams, rawBinders,
+        VExpr.forallN_telN_dropN] using parameter.rawRoot_def
+    have parameterSpine : TypeChecker.FamilyParameterSemanticSpine env
+        Us.length head.currentRun.context.vlctx.toCtx parameter.root arguments
+        parameter.boundary.source' := by
+      simpa only [currentVenv, currentLparams, arguments] using
+        parameter.parameterSpine
+    have rawOnTel := iteration.annotations.head.telescope.telDefEq.raw_onTel
+    have rawContext : OnCtx rawBinders.reverse (env.IsType Us.length) := by
+      simpa only [rawBinders, positionRawEq, binderCount, List.append_nil] using
+        rawOnTel.onCtx
+          (show OnCtx ([] : List VExpr) (env.IsType Us.length) from trivial)
+    have rawClosed := VEnv.CtxWF.closed henv.ordered rawContext
+    obtain ⟨resultLevel, terminalEq⟩ := iteration.validation.head_terminal
+    obtain ⟨resultType, fullEvidence⟩ :=
+      iteration.annotations.head.recursive.spineEvidence
+        iteration.generationShapes.head.storedSpine
+    obtain ⟨viewLevel, _levelTr, viewResultEq⟩ :=
+      iteration.annotations.head.recursive.viewResult_of_terminalSort
+        terminalEq
+    have resultDef := fullEvidence.result.isDefEq
+    rw [viewResultEq] at resultDef
+    have resultDefAtRaw : env.IsDefEq Us.length rawBinders.reverse
+        (VExpr.dropN source.nparams head.position.raw.type)
+        (.sort viewLevel) resultType := by
+      simpa only [rawBinders, positionRawEq, noIndices, VLCtx.toCtx,
+        List.append_nil] using resultDef
+    have terminalDef : env.IsDefEq Us.length
+        (rawBinders.reverse ++ head.currentRun.context.vlctx.toCtx)
+        (VExpr.dropN source.nparams head.position.raw.type)
+        (.sort viewLevel) resultType :=
+      resultDefAtRaw.weakR henv.ordered rawClosed
+        head.currentRun.context.vlctx.toCtx
+    have specialized := parameterSpine.specializeTerminalDefEq henv
+      currentWF.toCtx rootDef argumentsLength terminalDef
+    rw [VExpr.instRev_closedN arguments (C := .sort viewLevel) trivial]
+      at specialized
+    have rawToSort : env.IsDefEqU Us.length
+        head.currentRun.context.vlctx.toCtx
+        (VExpr.instRev
+          (VExpr.dropN source.nparams head.position.raw.type) arguments)
+        (.sort viewLevel) := specialized.toU
+    have rawToBoundary := parameterSpine.rawTerminal_defeq henv
+      currentWF.toCtx rootDef argumentsLength
+    have endpointSort : env.IsDefEqU Us.length
+        head.currentRun.context.vlctx.toCtx parameter.boundary.source'
+        (.sort viewLevel) :=
+      rawToBoundary.symm.trans henv currentWF.toCtx rawToSort
+    let chain : parameter.boundary.IndexDomainChain := .done
+    exact ⟨{
+      candidate := candidate
+      chain := chain
+      chain_length := by
+        simp only [chain,
+          TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.length,
+          List.length_drop, storedLength]
+        omega
+      alignment := {
+        base := completion.prefixes.firstParameterΔ
+        reference := iteration.reference
+        lift := iteration.rootLift
+        rootLift := iteration.rootLift
+        originLift := iteration.originLift
+        base_shape := completion.prefixes.first_shape
+        terminal_shape := terminalShape
+        relation := relation
+        reference_lift := iteration.root_reference_lift
+        root_reference_lift := iteration.root_reference_lift
+        origin_reference_lift := iteration.origin_reference_lift
+        current_reference := by
+          simpa only [chain,
+            TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+            currentReference
+        sort := viewLevel
+        endpoint_sort := by
+          simpa only [chain,
+            TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+            endpointSort } }⟩
+
+/-- Generic recursive-head completion with its exact terminal witness. -/
+structure TerminalHeadDomainCompletion
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head)
+    extends HeadDomainCompletion head parameter where
+  terminal : toHeadDomainCompletion.chain.endpoint.boundary.Terminal
+
+/-- Attach the exact terminal constructor to a completed recursive head. -/
+theorem HeadStaging.terminalDomainCompletion
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (TerminalHeadDomainCompletion head parameter) := by
+  obtain ⟨domain⟩ := head.domainCompletion parameter context_lctx_eq
+  have currentVenv : head.currentRun.context.venv = env :=
+    iteration.cursor.headContextRun_venv head.continuation head.selected
+  have henv : VEnv.WF env := by
+    simpa only [currentVenv] using head.currentRun.context.Ewf
+  obtain ⟨terminal⟩ := domain.alignment.terminal henv
+  exact ⟨{
+    toHeadDomainCompletion := domain
+    terminal := terminal }⟩
+
+/-- Exact verified context reached after an arbitrary recursive head's
+complete telescope. -/
+def TerminalHeadDomainCompletion.terminalRun
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    TypeChecker.CandidateContextRun head.continuation.telescope.result.context :=
+  domain.chain.endpointContextRun domain.terminal
+
+/-- A generic completed head retains the semantic environment. -/
+theorem TerminalHeadDomainCompletion.terminal_venv
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    domain.terminalRun.context.venv = env := by
+  exact (domain.chain.endpointContextRun_venv domain.terminal).trans
+    (iteration.cursor.headContextRun_venv head.continuation head.selected)
+
+/-- A generic completed head retains the semantic universe parameters. -/
+theorem TerminalHeadDomainCompletion.terminal_lparams
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    domain.terminalRun.context.lparams = Us := by
+  exact (domain.chain.endpointContextRun_lparams domain.terminal).trans
+    (iteration.cursor.headContextRun_lparams head.continuation head.selected)
+
+/-- Reindexing a generic aligned endpoint preserves its exact evolving
+shared reference. -/
+theorem TerminalHeadDomainCompletion.current_reference
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    VLCtx.IsDefEq env Us.length domain.terminalRun.context.vlctx
+      domain.alignment.reference := by
+  have terminalContextEq : domain.terminalRun.context =
+      domain.chain.endpoint.contextRun.context := by
+    unfold terminalRun
+      TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun
+    apply TypeChecker.CandidateContextRun.cast_context_context
+  rw [terminalContextEq]
+  exact domain.alignment.current_reference
+
+/-- Advance the dependent validator and semantic cursor through an arbitrary
+completed recursive head. -/
+def TerminalHeadDomainCompletion.advance
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    CandidateBlockLaterFamilyValidationCursor env blockEnv Us source.nparams
+      (firstSource :: secondSource :: allLaterSources)
+      candidates.tail raws.tail head.continuation.tail :=
+  iteration.cursor.advanceHead head.continuation head.selected head.invariant
+    domain.terminalRun domain.terminal_venv domain.terminal_lparams
+
+/-- Thread every invariant through one arbitrary completed recursive family,
+yielding the exact source-order state for the remaining suffix. -/
+theorem TerminalHeadDomainCompletion.advanceIterationCursor
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    Nonempty (completion.LaterFamilyIterationCursor
+      candidates.tail raws.tail head.continuation.tail) := by
+  have parameterSources : domain.advance.parameterSources =
+      staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams := by
+    calc
+      domain.advance.parameterSources = iteration.cursor.parameterSources := by
+        unfold advance
+        exact iteration.cursor.advanceHead_parameterSources head.continuation
+          head.selected head.invariant domain.terminalRun
+          domain.terminal_venv domain.terminal_lparams
+      _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+            source.nparams := iteration.parameterSources_eq_firstParameterList
+  have candidateFuel :
+      head.continuation.telescope.result.context.fuel = context.fuel := by
+    calc
+      head.continuation.telescope.result.context.fuel =
+          head.continuation.context.fuel :=
+        head.continuation.telescope.result_context_fuel
+      _ = candidateContext.fuel :=
+        congrArg AddInductive.Context.fuel
+          (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+            head.selected)
+      _ = context.fuel := iteration.candidate_fuel_eq
+  have firstTerminalFind : ∀ {fv : FVarId} {decl : LocalDecl},
+      staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+            fv = some decl →
+        head.continuation.telescope.result.context.lctx.find? fv =
+          some decl := by
+    intro fv decl found
+    have currentFound : head.continuation.context.lctx.find? fv =
+        some decl := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+        head.selected]
+      exact iteration.firstTerminal_find found
+    have resultFound := parameter.boundary.trace.result_findOld
+      parameter.boundary.localState.localContext currentFound
+    simpa only [parameter.boundary.result_eq] using resultFound
+  have currentReference : VLCtx.IsDefEq env Us.length
+      domain.advance.contextRun.context.vlctx
+      domain.alignment.reference := by
+    unfold advance
+    rw [iteration.cursor.advanceHead_context head.continuation head.selected
+      head.invariant domain.terminalRun domain.terminal_venv
+      domain.terminal_lparams]
+    exact domain.current_reference
+  have advanceSemantics : domain.advance.semantics =
+      iteration.cursor.semantics.tailExact := by
+    unfold advance
+    exact iteration.cursor.advanceHead_semantics head.continuation head.selected
+      head.invariant domain.terminalRun domain.terminal_venv
+      domain.terminal_lparams
+  let tailPackage : Sigma fun shapes =>
+      CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+        domain.advance.semantics shapes := by
+    rw [advanceSemantics]
+    exact ⟨iteration.generationShapes.tailExact,
+      iteration.annotations.tailExact⟩
+  exact ⟨{
+    cursor := domain.advance
+    validation := iteration.validation.tail
+    parameterSpines := iteration.parameterSpines.tail
+    generationShapes := tailPackage.1
+    annotations := tailPackage.2
+    parameterSources_eq_firstParameterList := parameterSources
+    candidate_fuel_eq := candidateFuel
+    firstTerminal_find := firstTerminalFind
+    reference := domain.alignment.reference
+    rootLift := domain.alignment.rootLift
+    originLift := domain.alignment.originLift
+    root_reference_lift := domain.alignment.root_reference_lift
+    origin_reference_lift := domain.alignment.origin_reference_lift
+    current_reference := currentReference }⟩
+
+/-- Canonical recursion state selected from the exact one-head advancement
+proof.  Keeping this choice named makes the tail of a completion spine
+definitionally tied to the endpoint that produced it. -/
+noncomputable def TerminalHeadDomainCompletion.nextIteration
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    completion.LaterFamilyIterationCursor candidates.tail raws.tail
+      head.continuation.tail :=
+  Classical.choice domain.advanceIterationCursor
+
+/-- Complete every family in an arbitrary later-family suffix in source
+order.  Each recursive tail is the exact state produced by the preceding
+terminal endpoint. -/
+inductive CompletionSpine :
+    {remainingSources : List InductiveType} →
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources} →
+    {raws : List VInductiveType} →
+    {dIdx : Nat} →
+    {stats : AddInductive.InductiveStats} →
+    {candidateContext : AddInductive.Context} →
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext} →
+    completion.LaterFamilyIterationCursor candidates raws trace → Type where
+  | nil
+      {dIdx : Nat}
+      {stats : AddInductive.InductiveStats}
+      {candidateContext : AddInductive.Context}
+      {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+        (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+        candidateContext}
+      (iteration : completion.LaterFamilyIterationCursor .nil [] trace) :
+      CompletionSpine iteration
+  | cons
+      {nextSource : InductiveType}
+      {laterSources : List InductiveType}
+      {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+        (nextSource :: laterSources)}
+      {raws : List VInductiveType}
+      {dIdx : Nat}
+      {stats : AddInductive.InductiveStats}
+      {candidateContext : AddInductive.Context}
+      {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+        (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+        candidateContext}
+      {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+      (head : iteration.HeadStaging)
+      (parameter : HeadParameterBoundary head)
+      (domain : TerminalHeadDomainCompletion head parameter)
+      (tail : CompletionSpine domain.nextIteration) :
+      CompletionSpine iteration
+
+/-- The producer-owned recursive state admits a complete source-order spine
+for its entire remaining family suffix. -/
+theorem completionSpine
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext}
+    (iteration : completion.LaterFamilyIterationCursor candidates raws trace)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (CompletionSpine iteration) := by
+  induction remainingSources generalizing raws dIdx stats
+      candidateContext with
+  | nil =>
+      cases candidates with
+      | nil =>
+          cases iteration.cursor.semantics
+          exact ⟨.nil iteration⟩
+  | cons nextSource laterSources ih =>
+      obtain ⟨head⟩ := iteration.headStaging
+      obtain ⟨parameter⟩ := head.parameterBoundary
+      obtain ⟨domain⟩ :=
+        head.terminalDomainCompletion parameter context_lctx_eq
+      obtain ⟨tail⟩ := ih domain.nextIteration
+      exact ⟨.cons head parameter domain tail⟩
+
+end
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.parameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.parameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.domainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.domainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.advanceIterationCursor' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.advanceIterationCursor
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.completionSpine' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.completionSpine
+
 /-- Joint source-order staging for the next later family.  The annotation
 spine and outer continuation are both selected from the same recursive
 cursor, so downstream semantic interpretation cannot pair a family root with
@@ -7227,6 +8353,38 @@ theorem
   exact (domain.chain.endpointContextRun_lparams domain.terminal).trans
     (cursor.cursor.headContextRun_lparams next.continuation next.selected)
 
+/-- Reindexing the aligned endpoint onto the outer family result preserves
+its exact shared reference. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.current_reference
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    VLCtx.IsDefEq env Us.length domain.terminalRun.context.vlctx
+      domain.alignment.reference := by
+  have terminalContextEq : domain.terminalRun.context =
+      domain.chain.endpoint.contextRun.context := by
+    unfold terminalRun
+      TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun
+    apply TypeChecker.CandidateContextRun.cast_context_context
+  rw [terminalContextEq]
+  exact domain.alignment.current_reference
+
 /-- Advance the source-order validator/semantic cursor through one completed
 later family. -/
 def
@@ -7255,6 +8413,103 @@ def
       staging.annotation.remainingRaws.tail next.continuation.tail :=
   cursor.cursor.advanceHead next.continuation next.selected next.invariant
     domain.terminalRun domain.terminal_venv domain.terminal_lparams
+
+/-- Thread every recursion invariant through one completed later family and
+produce the exact source-order state for the remaining suffix. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.advanceIterationCursor
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    Nonempty (completion.LaterFamilyIterationCursor
+      staging.annotation.remainingCandidates.tail
+      staging.annotation.remainingRaws.tail next.continuation.tail) := by
+  have parameterSources : domain.advance.parameterSources =
+      staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams := by
+    calc
+      domain.advance.parameterSources = cursor.cursor.parameterSources := by
+        unfold advance
+        exact cursor.cursor.advanceHead_parameterSources next.continuation
+          next.selected next.invariant domain.terminalRun
+          domain.terminal_venv domain.terminal_lparams
+      _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+            source.nparams := cursor.parameterSources_eq_firstParameterList
+  have candidateFuel :
+      next.continuation.telescope.result.context.fuel = context.fuel := by
+    calc
+      next.continuation.telescope.result.context.fuel =
+          next.continuation.context.fuel :=
+        next.continuation.telescope.result_context_fuel
+      _ = cursor.validation.continuation.telescope.result.context.fuel :=
+        congrArg AddInductive.Context.fuel
+          (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+            next.selected)
+      _ = context.fuel := cursor.cursor_fuel_eq
+  have firstTerminalFind : ∀ {fv : FVarId} {decl : LocalDecl},
+      staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+            fv = some decl →
+        next.continuation.telescope.result.context.lctx.find? fv =
+          some decl := by
+    intro fv decl found
+    have currentFound : next.continuation.context.lctx.find? fv =
+        some decl := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+        next.selected]
+      exact cursor.firstTerminal_find found
+    have resultFound := parameter.boundary.trace.result_findOld
+      parameter.boundary.localState.localContext currentFound
+    simpa only [parameter.boundary.result_eq] using resultFound
+  have currentReference : VLCtx.IsDefEq env Us.length
+      domain.advance.contextRun.context.vlctx
+      domain.alignment.reference := by
+    unfold advance
+    rw [cursor.cursor.advanceHead_context next.continuation next.selected
+      next.invariant domain.terminalRun domain.terminal_venv
+      domain.terminal_lparams]
+    exact domain.current_reference
+  have advanceSemantics : domain.advance.semantics =
+      cursor.cursor.semantics.tailExact := by
+    unfold advance
+    exact cursor.cursor.advanceHead_semantics next.continuation next.selected
+      next.invariant domain.terminalRun domain.terminal_venv
+      domain.terminal_lparams
+  let tailPackage : Sigma fun shapes =>
+      CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+        domain.advance.semantics shapes := by
+    rw [advanceSemantics]
+    exact ⟨cursor.generationShapes.tailExact,
+      next.annotations.tailExact⟩
+  exact ⟨{
+    cursor := domain.advance
+    validation := next.validation.tail
+    parameterSpines := staging.annotation.remainingParameterSpines.tail
+    generationShapes := tailPackage.1
+    annotations := tailPackage.2
+    parameterSources_eq_firstParameterList := parameterSources
+    candidate_fuel_eq := candidateFuel
+    firstTerminal_find := firstTerminalFind
+    reference := domain.alignment.reference
+    rootLift := domain.alignment.rootLift
+    originLift := domain.alignment.originLift
+    root_reference_lift := domain.alignment.root_reference_lift
+    origin_reference_lift := domain.alignment.origin_reference_lift
+    current_reference := currentReference }⟩
 
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root

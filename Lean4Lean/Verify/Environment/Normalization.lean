@@ -9680,6 +9680,24 @@ def CandidateBlockFamilySemanticListRun.headPosition
       semantic := head
       tail := tail }
 
+/-- Projection-friendly semantic tail for a source-indexed nonempty list.
+The semantic proof rules out an empty raw list internally. -/
+def CandidateBlockFamilySemanticListRun.tailExact
+    {kernelSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (kernelSource :: remainingSources)}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws) :
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates.tail
+      raws.tail := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases run
+      | cons raw raws => exact run.tail
+
 /-- Translate the exact raw family selected by the canonical semantic head at
 an arbitrary verified validation context. -/
 theorem CandidateBlockFamilySemanticListRun.headSourceTranslation
@@ -9957,6 +9975,101 @@ def CandidateBlockLaterFamilyValidationCursor.advanceHead
       | cons raw raws =>
           exact cursor.advance continuation selected invariant nextRun
             next_venv next_lparams
+
+/-- The projection-friendly advance stores exactly the supplied endpoint
+run. -/
+theorem CandidateBlockLaterFamilyValidationCursor.advanceHead_context
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {source : InductiveType} {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: remainingSources)}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation)
+    (invariant : continuation.LaterInvariant)
+    (nextRun : TypeChecker.CandidateContextRun
+      continuation.telescope.result.context)
+    (next_venv : nextRun.context.venv = env)
+    (next_lparams : nextRun.context.lparams = Us) :
+    (cursor.advanceHead continuation selected invariant nextRun next_venv
+      next_lparams).contextRun.context = nextRun.context := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases cursor.semantics
+      | cons raw raws => rfl
+
+/-- Source-order advancement preserves the literal shared-parameter source
+inventory. -/
+theorem CandidateBlockLaterFamilyValidationCursor.advanceHead_parameterSources
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {source : InductiveType} {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: remainingSources)}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation)
+    (invariant : continuation.LaterInvariant)
+    (nextRun : TypeChecker.CandidateContextRun
+      continuation.telescope.result.context)
+    (next_venv : nextRun.context.venv = env)
+    (next_lparams : nextRun.context.lparams = Us) :
+    (cursor.advanceHead continuation selected invariant nextRun next_venv
+      next_lparams).parameterSources = cursor.parameterSources := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases cursor.semantics
+      | cons raw raws => rfl
+
+/-- Source-order advancement stores exactly the dependent semantic tail. -/
+theorem CandidateBlockLaterFamilyValidationCursor.advanceHead_semantics
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {source : InductiveType} {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: remainingSources)}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation)
+    (invariant : continuation.LaterInvariant)
+    (nextRun : TypeChecker.CandidateContextRun
+      continuation.telescope.result.context)
+    (next_venv : nextRun.context.venv = env)
+    (next_lparams : nextRun.context.lparams = Us) :
+    (cursor.advanceHead continuation selected invariant nextRun next_venv
+      next_lparams).semantics = cursor.semantics.tailExact := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases cursor.semantics
+      | cons raw raws => rfl
 
 /-- The semantic raw family at a nonempty cursor head is translated in the
 cursor's exact verified validator context. -/
@@ -14233,6 +14346,30 @@ def CandidateBlockFamilySemanticGenerationShapeList.tail
     cases shapes with
     | cons shape shapes => exact shapes
 
+/-- Projection-friendly structural-shape tail aligned with the exact raw-list
+tail. -/
+def CandidateBlockFamilySemanticGenerationShapeList.tailExact
+    {kernelSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (kernelSource :: remainingSources)}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots) :
+    CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
+      roots.tailExact := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases roots
+      | cons raw raws =>
+          cases roots with
+          | cons root roots =>
+              cases shapes with
+              | cons shape shapes => exact shapes
+
 /-- Exact source-order annotation ownership for every semantic family in a
 generation-shape spine. -/
 inductive CandidateBlockFamilyAnnotationSpineList
@@ -14299,6 +14436,34 @@ def CandidateBlockFamilyAnnotationSpineList.tail
     | cons shape shapes =>
       cases run with
       | cons head tail => exact tail
+
+/-- Projection-friendly annotation tail aligned with `tailExact` semantic and
+shape projections. -/
+def CandidateBlockFamilyAnnotationSpineList.tailExact
+    {kernelSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (kernelSource :: remainingSources)}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    (run : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      roots shapes) :
+    CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      roots.tailExact shapes.tailExact := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases roots
+      | cons raw raws =>
+          cases roots with
+          | cons root roots =>
+              cases shapes with
+              | cons shape shapes =>
+                  cases run with
+                  | cons head tail => exact tail
 
 /-- Build the complete generic annotation spine from the semantic roots,
 their source-indexed generation shapes, and the validator's exact annotation
@@ -19723,6 +19888,63 @@ info: 'Lean4Lean.VInductDecl.CandidateFamilyValidationAnnotationList.head_termin
 -/
 #guard_msgs in
 #print axioms CandidateFamilyValidationAnnotationList.head_terminal
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.tailExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.tailExact
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advanceHead_context' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.advanceHead_context
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advanceHead_parameterSources' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.advanceHead_parameterSources
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advanceHead_semantics' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.advanceHead_semantics
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticGenerationShapeList.tailExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticGenerationShapeList.tailExact
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyAnnotationSpineList.tailExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyAnnotationSpineList.tailExact
 
 
 end VInductDecl
