@@ -11374,6 +11374,45 @@ theorem
                   canonicalizeFamilyParams] using canonical,
                 ih tail terminalTail⟩
 
+/-- Compose each semantic raw/view family equality with the canonical
+parameter-prefix rewrite at the same dependent source position.  Constructor
+evidence is intentionally left untouched for its separate validation pass. -/
+theorem CandidateBlockFamilySemanticListRun.canonicalFamilyEvidence
+    {env blockEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    (henv : VEnv.WF env)
+    {nparams : Nat} {params : List VExpr}
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams nparams params family).type
+          (.sort resultLevel))
+      run.views) :
+    List.Forall₂
+      (fun raw family => ∃ resultType,
+        TypeChecker.DefEqEvidence env Us.length [] raw.type family.type
+          resultType)
+      raws (canonicalizeFamilyParamsList nparams params run.views) := by
+  induction run with
+  | nil =>
+      cases canonical
+      exact .nil
+  | cons head tail ih =>
+      cases canonical with
+      | intro viewCanonical tailCanonical =>
+          obtain ⟨resultType, rawView⟩ := head.type.root.evidence
+          obtain ⟨_, viewCanonical⟩ := viewCanonical
+          exact .cons
+            ⟨resultType, .ofDefEq
+              (rawView.isDefEq.transU_l henv trivial
+                viewCanonical.isDefEq.toU)⟩
+            (ih tailCanonical)
+
 /-- Executable shape check for the terminal-sort evidence of a complete
 source-indexed family list.  The result universe remains owned by each exact
 candidate trace; the check only recognizes its terminal constructor. -/
@@ -20433,6 +20472,39 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.canonica
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilyViewParameterDefEqList.canonicalFamilyTypeDefEqs
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.canonicalFamilyEvidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.canonicalFamilyEvidence
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.forall_views' depends on axioms: [propext,
