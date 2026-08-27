@@ -3688,6 +3688,29 @@ def headContinuation? :
       some ⟨dIdx, stats, context, _, telescope, _, tail⟩
   | .terminal .. => none
 
+/-- A selected head continuation retains the outer suffix's exact source
+index. -/
+theorem headContinuation?_dIdx
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation) :
+    continuation.dIdx = dIdx := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    exact (congrArg FamilyContinuation.dIdx selected').symm
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    exact (congrArg FamilyContinuation.dIdx selected').symm
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
 /-- Selecting a later-family head preserves both stable validation counters
 for the exact outer tail. -/
 theorem headContinuation?_laterInvariant
@@ -8971,6 +8994,22 @@ inductive CandidateBlockFamilySemanticListRun
       CandidateBlockFamilySemanticListRun env blockEnv Us
         (.cons candidate candidates) (raw :: raws)
 
+/-- Exact semantic family at the head of a nonempty dependent list. -/
+def CandidateBlockFamilySemanticListRun.head
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us
+      (.cons candidate candidates) (raw :: raws)) :
+    CandidateBlockFamilySemanticRun env blockEnv Us candidate raw := by
+  cases run with
+  | cons head tail => exact head
+
+/-- Exact semantic suffix after the head of a nonempty dependent list. -/
+def CandidateBlockFamilySemanticListRun.tail
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us
+      (.cons candidate candidates) (raw :: raws)) :
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws := by
+  cases run with
+  | cons head tail => exact tail
+
 /-- Exact normalized family views in source order. -/
 def CandidateBlockFamilySemanticListRun.views :
     CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
@@ -9100,6 +9139,53 @@ theorem CandidateBlockLaterFamilyValidationCursor.headContinuation
       simpa using outOfBounds
     simp only [List.length_drop] at sourceLength
     omega
+
+/-- Advance one nonempty later-family cursor after the caller has constructed
+the verified context at that family's exact telescope endpoint.
+
+The selected continuation fixes the next outer trace.  Taking one source
+from the cursor's `drop` equation fixes the dependent semantic tail, while
+the continuation invariant supplies the two counters for the recursive
+cursor.  Thus neither the next source list nor the next validator state can
+be chosen independently. -/
+def CandidateBlockLaterFamilyValidationCursor.advance
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {source : InductiveType} {remainingSources : List InductiveType}
+    {candidate : AddInductive.CandidateFamily source}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raw : VInductiveType} {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources (.cons candidate candidates) (raw :: raws) trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation)
+    (invariant : continuation.LaterInvariant)
+    (nextRun : TypeChecker.CandidateContextRun
+      continuation.telescope.result.context)
+    (next_venv : nextRun.context.venv = env)
+    (next_lparams : nextRun.context.lparams = Us) :
+    CandidateBlockLaterFamilyValidationCursor env blockEnv Us nparams
+      fullSources candidates raws continuation.tail := by
+  have dIdxEq :=
+    AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx
+      selected
+  refine {
+    sourceSuffix_eq := ?_
+    semantics := cursor.semantics.tail
+    contextRun := nextRun
+    venv_eq := next_venv
+    lparams_eq := next_lparams
+    current_indConsts_nonempty := invariant.next_indConsts_nonempty
+    current_params_size := invariant.next_params_size }
+  have suffixEq := congrArg (List.drop 1) cursor.sourceSuffix_eq
+  simpa [List.drop_drop, dIdxEq] using suffixEq
 
 /-- Every remaining semantic family root translates in the cursor's exact
 validator context. -/
@@ -16841,6 +16927,15 @@ info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.secondContinua
   AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_dIdx
 
 /--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx
+
+/--
 info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_params_size_of_later' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -18271,6 +18366,14 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.headConti
 -/
 #guard_msgs in
 #print axioms CandidateBlockLaterFamilyValidationCursor.headContinuation
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advance' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.advance
 
 
 end VInductDecl

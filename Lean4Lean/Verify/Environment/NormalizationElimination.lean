@@ -2022,6 +2022,8 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     secondCandidate secondRaw
   remainingSemantics : CandidateBlockFamilySemanticListRun env blockEnv Us
     remainingCandidates remainingRaws
+  remainingShapes : CandidateBlockFamilySemanticGenerationShapeList source
+    env blockEnv Us remainingSemantics
   firstSpineLength_eq :
     firstCandidate.familyType.type.trace.spineLength =
       (VInductDecl.ctorFields firstRaw.type).length
@@ -2175,6 +2177,7 @@ theorem
                     firstSemantic := firstRoot
                     secondSemantic := secondRoot
                     remainingSemantics := remainingRoots
+                    remainingShapes := remainingShapes
                     firstSpineLength_eq := firstSpineLength
                     firstStoredBinders := firstStoredBinders
                     firstTelescope := firstTelescope
@@ -5620,6 +5623,8 @@ structure
     source.nparams (firstSource :: secondSource :: remainingSources)
     staging.annotation.remainingCandidates
     staging.annotation.remainingRaws validation.continuation.tail
+  semantics_eq : cursor.semantics =
+    staging.annotation.remainingSemantics
   context_eq_terminal : cursor.contextRun.context =
     completion.terminalRun.context
 
@@ -5684,6 +5689,7 @@ theorem
       current_indConsts_nonempty :=
         laterInvariant.next_indConsts_nonempty
       current_params_size := laterInvariant.next_params_size }
+    semantics_eq := rfl
     context_eq_terminal :=
       completion.continuationRun_context validation }⟩
   simp [dIdxEq]
@@ -5709,6 +5715,30 @@ theorem
     (cursor : completion.RemainingFamilyValidationCursor) :
     cursor.cursor.contextRun.context = completion.terminalRun.context :=
   cursor.context_eq_terminal
+
+/-- Reindex the producer's complete generation-spine suffix onto the exact
+semantic proof object stored in the recursive validation cursor. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.generationShapes
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
+      cursor.cursor.semantics := by
+  rw [cursor.semantics_eq]
+  exact staging.annotation.remainingShapes
 
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root
@@ -6119,6 +6149,21 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_eq_terminal
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.generationShapes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.generationShapes
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
