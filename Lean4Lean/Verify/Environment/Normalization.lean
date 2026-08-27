@@ -1511,6 +1511,27 @@ theorem familyTypeParameterComparison_localResult_of_first
       Nat.sub_zero, and_self])
   exact ⟨result.1, result.2.1⟩
 
+/-- Thread the producer-owned local inventory through a later-family
+telescope whose shared-parameter array is already complete.
+
+Unlike the first-family specialization, no fresh parameter is allocated:
+shared-parameter nodes preserve the inventory and index nodes extend only
+the local context.  The result therefore owns the exact local state at the
+family telescope's terminal reader context. -/
+theorem familyTypeParameterComparison_localResult_of_later
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source 0 nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (paramsSize : stats.params.size = nparams)
+    (localState : FamilyParameterLocalState stats context) :
+    FamilyParameterLocalState trace.result.stats trace.result.context ∧
+      trace.result.stats.params.size = nparams := by
+  have result := familyTypeParameterComparison_localResult trace localState (by
+    unfold FamilyParameterCountInvariant
+    simp only [Nat.zero_le, later, Bool.false_eq_true, if_false, paramsSize,
+      and_self])
+  exact ⟨result.1, result.2.1⟩
+
 private def FamilyBlockParameterLocalInvariant (nparams : Nat)
     (stats : AddInductive.InductiveStats)
     (context : AddInductive.Context) : Prop :=
@@ -3638,6 +3659,28 @@ theorem result_params_size_of_later
   | terminal =>
     exact paramsSize
 
+/-- A later-family telescope preserves the literal shared-parameter array,
+not merely its size. -/
+theorem result_params_eq_of_later
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (later : stats.indConsts.isEmpty = false) :
+    trace.result.stats.params = stats.params := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    rw [later] at firstFamily
+    contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih later
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    exact ih later
+  | terminal =>
+    rfl
+
 end AddInductive.FamilyTypeParameterComparisonTrace
 
 namespace AddInductive.FamilyParameterComparisonBlockTrace
@@ -3751,6 +3794,29 @@ theorem headContinuation?_context
     simp only [headContinuation?] at selected
     contradiction
 
+/-- A selected head continuation retains the exact statistics at which the
+outer suffix begins. -/
+theorem headContinuation?_stats
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation) :
+    continuation.stats = stats := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    exact (congrArg FamilyContinuation.stats selected').symm
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    exact (congrArg FamilyContinuation.stats selected').symm
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
 /-- Selecting a later-family head preserves both stable validation counters
 for the exact outer tail. -/
 theorem headContinuation?_laterInvariant
@@ -3780,6 +3846,74 @@ theorem headContinuation?_laterInvariant
     refine ⟨later, paramsSize, ?_, ?_⟩
     · simp
     · exact telescope.result_params_size_of_later later paramsSize
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
+/-- Completing a selected later-family telescope produces the genuine local
+inventory expected by its dependent outer tail.  The block update changes
+family statistics but preserves the completed parameter array. -/
+theorem headContinuation?_nextLocalState
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (localState : TypeChecker.FamilyParameterLocalState continuation.stats
+      continuation.context)
+    (later : continuation.stats.indConsts.isEmpty = false)
+    (paramsSize : continuation.stats.params.size = nparams) :
+    TypeChecker.FamilyParameterLocalState continuation.nextStats
+      continuation.telescope.result.context := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    obtain ⟨terminalLocal, _⟩ :=
+      TypeChecker.familyTypeParameterComparison_localResult_of_later
+        telescope later paramsSize localState
+    exact ⟨terminalLocal.localContext, terminalLocal.parameters⟩
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
+/-- The dependent outer tail after a selected later family retains the
+literal shared-parameter array from that family's input statistics. -/
+theorem headContinuation?_nextParams_eq
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (later : continuation.stats.indConsts.isEmpty = false) :
+    continuation.nextStats.params = continuation.stats.params := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    exact telescope.result_params_eq_of_later later
   | terminal =>
     simp only [headContinuation?] at selected
     contradiction
@@ -9048,6 +9182,33 @@ theorem _root_.Lean4Lean.AddInductive.CandidateList.cons_eta
   cases candidates
   rfl
 
+/-- Parameter-prefix evidence at the head of a nonempty family candidate
+list. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.head
+    {nparams : Nat} {source : InductiveType}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: sources)}
+    (run : AddInductive.CandidateFamilyParameterSpineList nparams
+      candidates) :
+    nparams ≤ candidates.head.familyType.type.trace.spineLength := by
+  cases run with
+  | cons family tail => exact family
+
+/-- Parameter-prefix evidence after the head of a nonempty family candidate
+list. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.tail
+    {nparams : Nat} {source : InductiveType}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: sources)}
+    (run : AddInductive.CandidateFamilyParameterSpineList nparams
+      candidates) :
+    AddInductive.CandidateFamilyParameterSpineList nparams
+      candidates.tail := by
+  cases run with
+  | cons family tail => exact tail
+
 /-- Exact validator annotation provenance for every family candidate in
 source order. -/
 inductive CandidateFamilyValidationAnnotationList
@@ -9262,6 +9423,10 @@ structure CandidateBlockLaterFamilyValidationCursor
       fullSources.toArray dIdx stats candidateContext)
     extends CandidateBlockFamilyValidationCursor env blockEnv Us nparams
       fullSources candidates raws trace where
+  current_localState : TypeChecker.FamilyParameterLocalState stats
+    candidateContext
+  parameterSources : List Expr
+  current_parameterSources_eq : stats.params.toList = parameterSources
   current_indConsts_nonempty : stats.indConsts.isEmpty = false
   current_params_size : stats.params.size = nparams
 
@@ -9314,6 +9479,32 @@ theorem CandidateBlockLaterFamilyValidationCursor.headContinuation
     simp only [List.length_drop] at sourceLength
     omega
 
+/-- Reindex the cursor's genuine shared-parameter inventory onto the exact
+reader state stored by its selected head continuation. -/
+theorem CandidateBlockLaterFamilyValidationCursor.headLocalState
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation) :
+    TypeChecker.FamilyParameterLocalState continuation.stats
+      continuation.context := by
+  rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+    selected]
+  rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+    selected]
+  exact cursor.current_localState
+
 /-- Advance one nonempty later-family cursor after the caller has constructed
 the verified context at that family's exact telescope endpoint.
 
@@ -9356,6 +9547,23 @@ def CandidateBlockLaterFamilyValidationCursor.advance
     contextRun := nextRun
     venv_eq := next_venv
     lparams_eq := next_lparams
+    current_localState :=
+      AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextLocalState
+        selected (cursor.headLocalState continuation selected)
+        invariant.current_indConsts_nonempty invariant.current_params_size
+    parameterSources := cursor.parameterSources
+    current_parameterSources_eq := by
+      calc
+        continuation.nextStats.params.toList =
+            continuation.stats.params.toList :=
+          congrArg Array.toList
+            (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextParams_eq
+              selected invariant.current_indConsts_nonempty)
+        _ = stats.params.toList :=
+          congrArg (fun currentStats => currentStats.params.toList)
+            (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+              selected)
+        _ = cursor.parameterSources := cursor.current_parameterSources_eq
     current_indConsts_nonempty := invariant.next_indConsts_nonempty
     current_params_size := invariant.next_params_size }
   have suffixEq := congrArg (List.drop 1) cursor.sourceSuffix_eq
@@ -18876,6 +19084,36 @@ info: 'Lean4Lean.VInductDecl.Normalization.canonicalizeSharedParams' depends on 
 #print axioms Normalization.canonicalizeSharedParams
 
 /--
+info: 'Lean4Lean.TypeChecker.familyTypeParameterComparison_localResult_of_later' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.familyTypeParameterComparison_localResult_of_later
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextLocalState' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextLocalState
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextParams_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextParams_eq
+
+/--
 info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -18922,6 +19160,14 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.headConte
 #print axioms CandidateBlockLaterFamilyValidationCursor.headContextRun_context
 
 /--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.headLocalState' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.headLocalState
+
+/--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -18951,7 +19197,10 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.headConti
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advance' depends on axioms: [propext,
  Classical.choice,
- Quot.sound]
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
 -/
 #guard_msgs in
 #print axioms CandidateBlockLaterFamilyValidationCursor.advance
