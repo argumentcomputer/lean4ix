@@ -12202,6 +12202,86 @@ def NormalizationCandidateBlockStagingInput.postFamily
       _ = Us := input.preFamily.lparams_eq
   vlctx_eq := rfl
 
+/-- Rebase an arbitrary verified pre-staging context onto the shared
+post-family kernel/Theory environment pair while keeping its exact local
+telescope.
+
+This is the mutual-block counterpart of
+`CandidateFamilyStagedInput.validationContextRunFromPre`: constructor
+validation reuses the family validator's accumulated local context while
+replacing only the environments, and local-context verification is monotone
+along the staged raw-family fold. -/
+theorem NormalizationCandidateBlockStagingInput.validationContextRunFrom
+    {nparams : Nat} {sources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {execution : AddInductive.NormalizationCandidateExecution nparams
+      sources numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name} {rawDecl : VInductDecl}
+    (input : NormalizationCandidateBlockStagingInput context execution
+      env blockEnv Us rawDecl)
+    {validationContext : AddInductive.Context}
+    (terminalRun : TypeChecker.CandidateContextRun validationContext)
+    (terminalVenv : terminalRun.context.venv = env)
+    (terminalLparams : terminalRun.context.lparams = Us)
+    (safetyEq : validationContext.safety = context.safety) :
+    ∃ validationRun : TypeChecker.CandidateContextRun
+        { validationContext with env := execution.familyEnv },
+      validationRun.context.venv = blockEnv ∧
+      validationRun.context.lparams = Us ∧
+      validationRun.context.vlctx = terminalRun.context.vlctx := by
+  have terminalMLWF : terminalRun.context.mlctx.WF env Us := by
+    simpa only [terminalVenv, terminalLparams] using
+      terminalRun.context.mlctx_wf
+  have postMLWF : terminalRun.context.mlctx.WF blockEnv Us :=
+    terminalMLWF.mono (VEnv.stageInductiveTypes_le input.stage)
+  have validationSafety : terminalRun.context.safety =
+      input.postContext.safety := by
+    calc
+      terminalRun.context.safety = validationContext.safety :=
+        terminalRun.context_safety
+      _ = context.safety := safetyEq
+      _ = input.postContext.safety := rfl
+  let newContext : TypeChecker.VContext :=
+    { terminalRun.context with
+      env := execution.familyEnv
+      venv := blockEnv
+      hasPrimitives := input.postContext.hasPrimitives
+      safePrimitives := input.postContext.safePrimitives
+      trenv := by
+        have postEnv : input.postContext.env = execution.familyEnv := rfl
+        have postVenv : input.postContext.venv = blockEnv := rfl
+        simpa only [validationSafety, postEnv, postVenv] using
+          input.postContext.trenv
+      projectionReady := input.postContext.projectionReady
+      structureEtaReady := input.postContext.structureEtaReady
+      mlctx_wf := by
+        simpa only [terminalLparams] using postMLWF }
+  have newContextEq : newContext.toContext =
+      ({ validationContext with
+        env := execution.familyEnv } : AddInductive.Context).toTypeChecker := by
+    calc
+      newContext.toContext =
+          { terminalRun.context.toContext with
+            env := execution.familyEnv } := rfl
+      _ = { validationContext.toTypeChecker with
+            env := execution.familyEnv } :=
+        congrArg (fun c : TypeChecker.Context =>
+          { c with env := execution.familyEnv }) terminalRun.context_eq
+      _ = ({ validationContext with
+          env := execution.familyEnv } : AddInductive.Context).toTypeChecker :=
+        rfl
+  let validationRun : TypeChecker.CandidateContextRun
+      { validationContext with env := execution.familyEnv } :=
+    TypeChecker.CandidateContextRun.ofVContext _ newContext
+      newContextEq
+      (TypeChecker.VState.WF.empty_of_reserves newContext (by
+        intro fv hfv
+        exact terminalRun.state_wf.ngen_wf fv (by
+          simpa only [newContext] using hfv)))
+      terminalRun.namePrefix_ne
+  exact ⟨validationRun, rfl, terminalLparams, rfl⟩
+
 /-- Interpret every family and constructor input in lockstep. -/
 theorem CandidateBlockFamilySemanticListInput.exists
     (input : CandidateBlockFamilySemanticListInput env blockEnv Us
@@ -20890,6 +20970,39 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalNor
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateBlockSemanticRun.canonicalNormalizationRun
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockStagingInput.validationContextRunFrom' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateBlockStagingInput.validationContextRunFrom
 
 
 end VInductDecl
