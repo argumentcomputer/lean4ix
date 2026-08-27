@@ -285,443 +285,850 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
   unfold F1
   obtain ⟨familyInfo, hfamily, ⟨artifact⟩⟩ :=
     c.structureEtaReady.resolveConstructor hfind hnonrec
-  have ⟨head', hstack⟩ := AppStack.build <|
-    e₂.mkAppList_getAppArgsList ▸ he₂
-  have hheadTr := hstack.tr
-  rw [hhead] at hheadTr
-  let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
-  have hviewConstructor := artifact.projection.viewWF.constructor
-  rw [artifact.constructor_name_eq] at hviewConstructor
-  rw [hviewConstructor] at hconst
-  cases hconst
-  have hlevelsWF : ∀ level ∈ levels,
-      level.WF c.lparams.length :=
-    VLevel.WF.of_mapM_ofLevel hlevelsMap
-  have hrawCtorUvars : artifact.projection.view.constructor.raw.uvars =
-      artifact.projection.view.uvars :=
-    artifact.projection.view.generation.ctor_uvars_eq
-      (by simp [artifact.projection.view.constructor_eq])
-  have hlevelsLength : levels.length = artifact.projection.view.uvars :=
-    (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans <|
-      hlevelsHostLength.trans hrawCtorUvars
-  have hctorHead : c.HasType (.const ctorName levels)
-      (artifact.projection.view.constructor.raw.type.instL levels) :=
-    VEnv.HasType.const hviewConstructor hlevelsWF
-      (hlevelsLength.trans hrawCtorUvars.symm)
-  let ctorBinders :=
-    (artifact.projection.view.constructor.declaredBinders
-      artifact.projection.view.nparams).map (VExpr.instL levels)
-  let ctorResult :=
-    (artifact.projection.view.constructor.rawResult
-      artifact.projection.view.nparams).instL levels
-  have hctorHeadShape : c.HasType (.const ctorName levels)
-      (VExpr.forallN ctorBinders ctorResult) := by
-    rw [artifact.projection.view.constructor.rawType_eq] at hctorHead
-    simpa [ctorBinders, ctorResult, VExpr.instL_forallN] using hctorHead
-  have hhostArgsLength : e₂.getAppArgsList.length =
-      ctorInfo.numParams + ctorInfo.numFields := by
-    simpa [Expr.getAppNumArgs_eq, ← Expr.getAppArgsList_reverse] using hargs
-  have hnumParams : ctorInfo.numParams = artifact.projection.view.nparams := by
-    exact (congrArg ConstructorVal.numParams
-      artifact.constructor_info_eq).symm.trans
-        artifact.projection.constructor_numParams_eq
-  have hnumFields : ctorInfo.numFields = artifact.projection.view.fields.length := by
-    exact (congrArg ConstructorVal.numFields
-      artifact.constructor_info_eq).symm.trans
-        artifact.projection.constructor_numFields_eq
-  have hconstructorMem : artifact.projection.view.constructor ∈
-      artifact.projection.view.generation.block.ctorPairs := by
-    simp [artifact.projection.view.constructor_eq]
-  have hconstructorShape :=
-    artifact.projection.view.generation.shape.2.2.2.2.2
-      artifact.projection.view.constructor hconstructorMem
-  have hhostBinderLength : e₂.getAppArgsList.length = ctorBinders.length := by
-    simpa [ctorBinders, VInductDecl.NormalizedCtor.declaredBinders,
-      VStructureView.fields, hnumParams, hnumFields,
-      hconstructorShape.2.2.1] using hhostArgsLength
-  obtain ⟨args', hargsTr, hargsSpine, hfullTr⟩ :=
-    AppStack.toSpineWF hstack hctorHeadShape hhostBinderLength
-  rw [e₂.mkAppList_getAppArgsList] at hfullTr
-  have hargsLength : args'.length = artifact.projection.view.nparams +
-      artifact.projection.view.fields.length :=
-    hargsTr.length_eq.symm.trans <| by
-      simpa [hnumParams, hnumFields] using hhostArgsLength
-  let params := args'.take artifact.projection.view.nparams
-  let fields := args'.drop artifact.projection.view.nparams
-  have hargsSplit : args' = params ++ fields := by
-    simp [params, fields]
-  have hparamsLength : params.length = artifact.projection.view.nparams := by
-    simp [params, hargsLength]
-  have hfieldsLength : fields.length = artifact.projection.view.fields.length := by
-    simp [fields, hargsLength]
-  have hargsSpineSplit := hargsSpine
-  rw [hargsSplit] at hargsSpineSplit
-  obtain ⟨paramCursor, hparamRaw, hfieldsRaw⟩ :=
-    hargsSpineSplit.split
-  let ctorTail := VExpr.forallN
-    (artifact.projection.view.fields.map (VExpr.instL levels)) ctorResult
-  have hparamCtor : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
-      (VExpr.forallN
-        (artifact.projection.view.constructorParams.map
-          (VExpr.instL levels)) ctorTail)
-      params paramCursor := by
-    simpa [ctorBinders, ctorTail,
-      VInductDecl.NormalizedCtor.declaredBinders,
-      VStructureView.constructorParams, VStructureView.fields,
-      List.map_append, VExpr.forallN_append] using hparamRaw
-  obtain ⟨resultLevel, hrawResult⟩ := artifact.projection.rawResult_sort
-  have hparamsSpine :=
-    artifact.projection.viewWF.familyParamsSpine_of_constructor
-      c.Ewf.ordered levels hlevelsWF hlevelsLength params hparamsLength
-      hparamCtor resultLevel hrawResult
-  have hdeclResult₀ :=
-    artifact.projection.viewWF.generationSemantics.constructor.declaredResult
-  have hdeclResult₁ := hdeclResult₀.instL hlevelsWF
-  have hdeclResult : c.venv.IsDefEq c.lparams.length
-      ctorBinders.reverse ctorResult
-      ((VInductDecl.NormalizedCtor.resultTarget
-        artifact.projection.view.generation.block
-        artifact.projection.view.constructor).instL levels)
-      ((VExpr.sort
-        artifact.projection.view.generation.block.checked.resultLevel).instL
-        levels) := by
-    simpa [ctorBinders, ctorResult, List.map_reverse] using hdeclResult₁
-  have hdeclTel₀ :=
-    artifact.projection.viewWF.generationSemantics.constructor.declaredTel
-  have hdeclTel := hdeclTel₀.instL hlevelsWF
-  have hctorOnTel : c.venv.OnTel c.lparams.length [] ctorBinders := by
-    simpa [ctorBinders] using hdeclTel.raw_onTel
-  have hctorCtxClosed : CtxClosed ctorBinders.reverse :=
-    VEnv.CtxWF.closed c.Ewf.ordered <| by
-      simpa using hctorOnTel.toOnCtx (by trivial)
-  have hdeclResultΓ := hdeclResult.weakR c.Ewf.ordered hctorCtxClosed
-    c.vlctx.toCtx
-  have hargsTelLength : args'.length = ctorBinders.length :=
-    hargsTr.length_eq.symm.trans hhostBinderLength
-  have hresultEq := hargsSpine.instRev_defeq c.Ewf.ordered
-    hargsTelLength hdeclResultΓ
-  let S := artifact.projection.viewWF.toGenerationEnv c.Ewf.ordered
-  have hresultIndices :
-      artifact.projection.view.constructor.view.resultIndices = [] := by
-    apply List.length_eq_zero_iff.1
-    rw [S.viewResultIndices_length hconstructorMem]
-    simp [artifact.projection.view.checked_indices_eq]
-  have hrange := VExpr.map_instRev_bvarRevRange_seg args'
-    artifact.projection.view.nparams artifact.projection.view.fields.length
-    (by omega)
-  have hrange' :
-      (VExpr.bvarRevRange
-        (artifact.projection.view.constructor.rawFields
-          artifact.projection.view.source.nparams).length
-        artifact.projection.view.source.nparams).map (VExpr.instRev · args') =
-      params := by
-    simpa [VStructureView.fields, hargsLength, params] using hrange
-  have htarget :
-      ((VInductDecl.NormalizedCtor.resultTarget
-        artifact.projection.view.generation.block
-        artifact.projection.view.constructor).instL levels).instRev args' =
-      artifact.projection.view.structureType levels params := by
-    simp only [VInductDecl.NormalizedCtor.resultTarget, VExpr.instL_appN, VExpr.instL,
-      VExpr.instRev_appN, VExpr.bvarRevRange_map_instL, hresultIndices, List.append_nil]
-    rw [VLevel.inst_map_id hlevelsLength]
-    rw [VExpr.instRev_closedN args' (by trivial)]
-    rw [hrange']
-    rfl
-  rw [htarget] at hresultEq
-  have hcanonicalRaw := hargsSpine.hasType_appN hctorHeadShape
-  have hcanonical : c.HasType
-      ((VExpr.const ctorName levels).appN args')
-      (artifact.projection.view.structureType levels params) :=
-    hcanonicalRaw.defeqU_r c.Ewf c.Δwf ⟨_, hresultEq⟩
-  have hfullEq := hfullTr.uniq c.Ewf (.refl c.Ewf c.Δwf) he₂
-  have hbStruct := hcanonical.defeqU_l c.Ewf c.Δwf hfullEq
-  have hty₂Struct := bTyped.uniqU c.Ewf c.Δwf hbStruct
-  have hty₁Struct := VEnv.IsDefEqU.trans c.Ewf c.Δwf
-    (htypes htypesTrue) hty₂Struct
-  have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hty₁Struct
-  have heta := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
-    hparamsLength ⟨_, hparamsSpine⟩ haStruct
-  have hF1Size : F1.size = args'.length := by
-    calc
-      F1.size = F1.toList.length := by simp
-      _ = e₂.getAppArgsList.length := by simp [F1, Expr.getAppArgs_toList]
-      _ = args'.length := hargsTr.length_eq
-  have hfieldData : ∀ (j : Nat), j < fields.length →
-      ∃ code : VStructureView.ProjectionCode,
-        (artifact.projection.view.projectionCodes levels params)[j]? =
-          some code ∧
-        c.TrExprS (.proj ctorInfo.induct j e₁)
-          (.app code.projector e₁') ∧
-        ∀ (hi : ctorInfo.numParams + j < F1.size),
-          c.TrExprS F1[ctorInfo.numParams + j] fields[j] := by
-    intro j hj
-    have hcodeIdx : j <
-        (artifact.projection.view.projectionCodes levels params).length := by
-      simpa [VStructureView.specializedFields, hfieldsLength] using hj
-    let code := (artifact.projection.view.projectionCodes levels params)[j]
-    have hcode :
-        (artifact.projection.view.projectionCodes levels params)[j]? =
-          some code := List.getElem?_eq_getElem hcodeIdx
-    have hprojector := artifact.projection.programsWF c.Δwf hlevelsWF
-      hlevelsLength hparamsLength ⟨_, hparamsSpine⟩ hcode
-    have hprojSem : c.venv.TrProj c.lparams.length c.vlctx.toCtx
-        artifact.projection.view levels params j e₁'
-        (.app code.projector e₁') := {
-      viewWF := artifact.projection.viewWF
-      levelsWF := hlevelsWF
-      levels_length := hlevelsLength
-      params_length := hparamsLength
-      paramsSpine := ⟨_, hparamsSpine⟩
-      majorType := haStruct
-      program := ⟨code, hcode, rfl, hprojector⟩ }
-    have hprojTr : c.TrExprS (.proj ctorInfo.induct j e₁)
-        (.app code.projector e₁') :=
-      .proj he₁ ⟨artifact.projection.view, levels, params,
-        artifact.projection.name_eq, hprojSem⟩
-    refine ⟨code, hcode, hprojTr, ?_⟩
-    intro hi
-    have hselectedList :
-        e₂.getAppArgsList[ctorInfo.numParams + j]? =
-          some F1[ctorInfo.numParams + j] := by
-      rw [← Expr.getAppArgs_toList]
-      simp [F1]
-    obtain ⟨translated, htranslated, htr⟩ :=
-      Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
-    have hfieldGet : args'[ctorInfo.numParams + j]? = some fields[j] := by
-      rw [hargsSplit, List.getElem?_append_right]
-      · simp [hnumParams, hparamsLength]
-      · simp [hnumParams, hparamsLength]
-    have : translated = fields[j] :=
-      Option.some.inj (htranslated.symm.trans hfieldGet)
-    subst translated
-    exact htr
-  rw [Std.Legacy.Range.forIn'_eq_forIn'_range']
-  simp only [Std.Legacy.Range.size, Nat.add_sub_cancel, Nat.div_one]
-  let FieldEq := fun (j : Nat) => ∃ (field : VExpr)
-      (code : VStructureView.ProjectionCode),
-    fields[j]? = some field ∧
-    (artifact.projection.view.projectionCodes levels params)[j]? = some code ∧
-    c.IsDefEqU (.app code.projector e₁') field
-  let etaStep (indices : List Nat)
-      (hlow : ∀ i, i ∈ indices → ctorInfo.numParams ≤ i)
-      (hhigh : ∀ i, i ∈ indices → i < F1.size) :
-      (i : Nat) → i ∈ indices → Option Bool × PUnit →
-        RecM (ForInStep (Option Bool × PUnit)) :=
-    fun i hi r => tryEtaStructFieldStep e₁ ctorInfo.induct
-      ctorInfo.numParams F1 i
-      ⟨hlow i hi, hhigh i hi, by
-        change (i - ctorInfo.numParams) % 1 = 0
-        exact Nat.mod_one _⟩ r
-  have etaLoopWF : ∀ (all indices : List Nat)
-      (hsuffix : ∃ pre, pre ++ indices = all)
-      (hlow : ∀ i, i ∈ all → ctorInfo.numParams ≤ i)
-      (hhigh : ∀ i, i ∈ all → i < F1.size) {st : VState},
-      RecM.WF c st
-        (List.forIn'.loop all (etaStep all hlow hhigh) indices
-          ⟨none, PUnit.unit⟩ hsuffix)
-        fun r _ =>
-          (r.1 = none →
-            ∀ i, i ∈ indices → FieldEq (i - ctorInfo.numParams)) ∧
-          r.1 ≠ some true := by
-    intro all indices hsuffix hlow hhigh st
-    induction indices generalizing st with
-    | nil =>
-      simp only [List.forIn'.loop]
-      exact .pure (by simp)
-    | cons i indices ih =>
-      simp only [List.forIn'.loop]
-      simp only [etaStep, tryEtaStructFieldStep]
-      obtain ⟨pre, hprefix⟩ := hsuffix
-      have hiAll : i ∈ all := by
-        rw [← hprefix]
-        simp
-      have hlo := hlow i hiAll
-      have hhi := hhigh i hiAll
-      have hj : i - ctorInfo.numParams < fields.length := by
-        rw [hF1Size, hargsLength, ← hnumParams,
-          ← hfieldsLength] at hhi
-        omega
-      obtain ⟨code, hcode, hprojTr, hargTr⟩ :=
-        hfieldData (i - ctorInfo.numParams) hj
-      have hiEq : ctorInfo.numParams + (i - ctorInfo.numParams) = i :=
-        Nat.add_sub_of_le hlo
-      have hargBound :
-          ctorInfo.numParams + (i - ctorInfo.numParams) < F1.size := by
-        omega
-      have hargTr' : c.TrExprS F1[i] fields[i - ctorInfo.numParams] := by
-        simpa [hiEq] using hargTr hargBound
-      simp only [bind_assoc]
-      refine (isDefEq.WF hprojTr hargTr').bind fun b next _ hb => ?_
-      by_cases hbtrue : b = true
-      · simp only [hbtrue, if_pos, pure_bind]
-        have hcur : FieldEq (i - ctorInfo.numParams) :=
-          ⟨fields[i - ctorInfo.numParams], code,
-            List.getElem?_eq_getElem hj, hcode, hb hbtrue⟩
-        have hsuffixTail : ∃ pre, pre ++ indices = all := by
-          refine ⟨pre ++ [i], ?_⟩
-          simpa [List.append_assoc] using hprefix
-        have htail : RecM.WF c next
-            (List.forIn'.loop all (etaStep all hlow hhigh) indices
-              ⟨none, PUnit.unit⟩ hsuffixTail)
-            (fun r _ =>
-              (r.1 = none →
-                ∀ k, k ∈ i :: indices →
-                  FieldEq (k - ctorInfo.numParams)) ∧
-              r.1 ≠ some true) :=
-          (ih hsuffixTail (st := next)).mono
-          (fun r _ _ hrest => ⟨fun hnone k hk => by
-              rw [List.mem_cons] at hk
-              rcases hk with rfl | hk
-              · exact hcur
-              · exact hrest.1 hnone k hk,
-            hrest.2⟩)
-        simpa only [etaStep, tryEtaStructFieldStep, pure_bind] using htail
-      · simp only [hbtrue]
-        exact .pure (by simp)
-  have hparamsLe : ctorInfo.numParams ≤ F1.size := by
-    rw [hF1Size, hargsLength, ← hnumParams]
-    omega
-  have hlowRange : ∀ i,
-      i ∈ List.range' ctorInfo.numParams
-        (F1.size - ctorInfo.numParams) →
-      ctorInfo.numParams ≤ i := by
-    intro i hi
-    rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
-    omega
-  have hhighRange : ∀ i,
-      i ∈ List.range' ctorInfo.numParams
-        (F1.size - ctorInfo.numParams) →
-      i < F1.size := by
-    intro i hi
-    rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
-    omega
-  have etaForInWF : ∀ {st : VState}, RecM.WF c st
-      (List.forIn'
-        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
-        ⟨none, PUnit.unit⟩
-        (etaStep
-          (List.range' ctorInfo.numParams
-            (F1.size - ctorInfo.numParams)) hlowRange hhighRange))
-      (fun r _ => (r.1 = none → ∀ i,
-          i ∈ List.range' ctorInfo.numParams
-            (F1.size - ctorInfo.numParams) →
-          FieldEq (i - ctorInfo.numParams)) ∧
-        r.1 ≠ some true) := by
-    intro st
-    exact etaLoopWF
-      (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
-      (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
-      ⟨[], by simp⟩ hlowRange hhighRange
-  change RecM.WF c _
-    (do
-      let r ← List.forIn'
-        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
-        ⟨none, PUnit.unit⟩
-        (etaStep
-          (List.range' ctorInfo.numParams
-            (F1.size - ctorInfo.numParams)) hlowRange hhighRange)
-      match r.1 with
-      | none => pure true
-      | some a => pure a)
-    (fun b _ => b = true → c.IsDefEqU e₁' e₂')
-  refine etaForInWF.bind fun r next _ hr => ?_
-  cases hr₁ : r.1 with
-  | some b =>
-    simp only
-    refine .pure fun hbtrue => False.elim <|
-      hr.2 (hr₁.trans (congrArg some hbtrue))
-  | none =>
-    simp only
-    refine .pure fun _ => ?_
-    have hrangeCount :
-        F1.size - ctorInfo.numParams = fields.length := by
-      rw [hF1Size, hargsLength, hnumParams, hfieldsLength]
-      omega
-    have hfieldEq : ∀ j, j < fields.length → FieldEq j := by
-      intro j hj
-      have hjmem : ctorInfo.numParams + j ∈
-          List.range' ctorInfo.numParams
-            (F1.size - ctorInfo.numParams) := by
-        apply List.mem_range'.2
-        exact ⟨j, by simpa [hrangeCount] using hj, by simp⟩
-      simpa using hr.1 hr₁ (ctorInfo.numParams + j) hjmem
-    let projections := artifact.projection.view.projectionArgs levels params
-      (artifact.projection.view.specializedFields levels params).length e₁'
-    have hprojectionCount :
-        (artifact.projection.view.specializedFields levels params).length =
-          fields.length := by
-      simpa [VStructureView.specializedFields] using hfieldsLength.symm
-    have hprojectionsLength : projections.length = fields.length := by
-      dsimp [projections]
-      rw [artifact.projection.view.projectionArgs_length levels params
-        (artifact.projection.view.specializedFields levels params).length
-        e₁' (by simp)]
-      exact hprojectionCount
-    have hpointwise : List.Forall₂
-        (fun a a' => a = a' ∨ c.IsDefEqU a a') projections fields := by
-      apply forall₂_of_getElem? hprojectionsLength
-      intro j projection field hprojection hfield
-      have hj := (List.getElem?_eq_some_iff.mp hfield).1
-      obtain ⟨field', code, hfield', hcode, hdefeq⟩ := hfieldEq j hj
-      have hprojection' : projections[j]? =
-          some (.app code.projector e₁') := by
-        dsimp [projections, VStructureView.projectionArgs]
-        have hjspec : j <
-            (artifact.projection.view.specializedFields levels params).length :=
-          hprojectionCount.symm ▸ hj
-        rw [List.getElem?_map, List.getElem?_take_of_lt hjspec, hcode]
-        rfl
-      have hpEq : projection = .app code.projector e₁' :=
-        Option.some.inj (hprojection.symm.trans hprojection')
-      have hfEq : field = field' :=
-        Option.some.inj (hfield.symm.trans hfield')
-      subst projection
-      subst field
-      exact .inr hdefeq
-    let tailResult := VExpr.instRevAt ctorResult params
-      artifact.projection.view.fields.length
-    have hctorTailShape : VExpr.instRev ctorTail params =
-        VExpr.forallN
-          (artifact.projection.view.specializedFields levels params)
-          tailResult := by
-      simp only [ctorTail, tailResult, VExpr.instRev_forallN_projection,
-        VStructureView.specializedFields, List.length_map]
-      rw [VExpr.instRevAt_map_instL_zipIdx]
-    have hconstructorParamsLength : params.length =
-        artifact.projection.view.constructorParams.length := by
-      exact hparamsLength.trans <| by
-        simpa [VStructureView.constructorParams] using
-          hconstructorShape.2.2.1.symm
-    have hctorHeadPrefix : c.HasType (.const ctorName levels)
+  cases artifact with
+  | ordinary artifact =>
+    have hprograms : artifact.projection.view.ProgramsWF c.venv :=
+      artifact.projection.viewWF.toProgramsWF_of_large
+        c.Ewf.conversionRegular artifact.large
+    have ⟨head', hstack⟩ := AppStack.build <|
+      e₂.mkAppList_getAppArgsList ▸ he₂
+    have hheadTr := hstack.tr
+    rw [hhead] at hheadTr
+    let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
+    have hviewConstructor := artifact.projection.viewWF.constructor_registered
+    rw [artifact.constructor_name_eq] at hviewConstructor
+    rw [hviewConstructor] at hconst
+    cases hconst
+    have hlevelsWF : ∀ level ∈ levels,
+        level.WF c.lparams.length :=
+      VLevel.WF.of_mapM_ofLevel hlevelsMap
+    have hrawCtorUvars : artifact.projection.view.constructor.raw.uvars =
+        artifact.projection.view.uvars :=
+      artifact.projection.view.constructor_uvars_eq
+    have hlevelsLength : levels.length = artifact.projection.view.uvars :=
+      (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans <|
+        hlevelsHostLength.trans hrawCtorUvars
+    have hctorHead : c.HasType (.const ctorName levels)
+        (artifact.projection.view.constructor.raw.type.instL levels) :=
+      VEnv.HasType.const hviewConstructor hlevelsWF
+        (hlevelsLength.trans hrawCtorUvars.symm)
+    let ctorBinders :=
+      (artifact.projection.view.constructor.declaredBinders
+        artifact.projection.view.nparams).map (VExpr.instL levels)
+    let ctorResult :=
+      (artifact.projection.view.constructor.rawResult
+        artifact.projection.view.nparams).instL levels
+    have hctorHeadShape : c.HasType (.const ctorName levels)
+        (VExpr.forallN ctorBinders ctorResult) := by
+      rw [artifact.projection.view.constructor.rawType_eq] at hctorHead
+      simpa [ctorBinders, ctorResult, VProjectionView.nparams,
+        VProjectionView.source, VExpr.instL_forallN] using hctorHead
+    have hhostArgsLength : e₂.getAppArgsList.length =
+        ctorInfo.numParams + ctorInfo.numFields := by
+      simpa [Expr.getAppNumArgs_eq, ← Expr.getAppArgsList_reverse] using hargs
+    have hnumParams : ctorInfo.numParams = artifact.projection.view.nparams := by
+      exact (congrArg ConstructorVal.numParams
+        artifact.constructor_info_eq).symm.trans
+          artifact.projection.constructor_numParams_eq
+    have hnumFields : ctorInfo.numFields = artifact.projection.view.fields.length := by
+      exact (congrArg ConstructorVal.numFields
+        artifact.constructor_info_eq).symm.trans
+          artifact.projection.constructor_numFields_eq
+    have hctorBindersLength : ctorBinders.length =
+        artifact.projection.view.nparams +
+          artifact.projection.view.fields.length := by
+      calc
+        ctorBinders.length =
+            artifact.projection.view.constructorParams.length +
+              artifact.projection.view.fields.length := by
+          simp only [ctorBinders, List.length_map,
+            VInductDecl.NormalizedCtor.declaredBinders, List.length_append,
+            VProjectionView.constructorParams, VProjectionView.fields]
+        _ = artifact.projection.view.nparams +
+            artifact.projection.view.fields.length := by
+          rw [artifact.projection.view.constructorParams_length]
+    have hhostBinderLength : e₂.getAppArgsList.length = ctorBinders.length := by
+      have hhostArity : e₂.getAppArgsList.length =
+          artifact.projection.view.nparams +
+            artifact.projection.view.fields.length := by
+        simpa [hnumParams, hnumFields] using hhostArgsLength
+      exact hhostArity.trans hctorBindersLength.symm
+    obtain ⟨args', hargsTr, hargsSpine, hfullTr⟩ :=
+      AppStack.toSpineWF hstack hctorHeadShape hhostBinderLength
+    rw [e₂.mkAppList_getAppArgsList] at hfullTr
+    have hargsLength : args'.length = artifact.projection.view.nparams +
+        artifact.projection.view.fields.length :=
+      hargsTr.length_eq.symm.trans <| by
+        simpa [hnumParams, hnumFields] using hhostArgsLength
+    let params := args'.take artifact.projection.view.nparams
+    let fields := args'.drop artifact.projection.view.nparams
+    have hargsSplit : args' = params ++ fields := by
+      simp [params, fields]
+    have hparamsLength : params.length = artifact.projection.view.nparams := by
+      simp [params, hargsLength]
+    have hfieldsLength : fields.length = artifact.projection.view.fields.length := by
+      simp [fields, hargsLength]
+    have hargsSpineSplit := hargsSpine
+    rw [hargsSplit] at hargsSpineSplit
+    obtain ⟨paramCursor, hparamRaw, hfieldsRaw⟩ :=
+      hargsSpineSplit.split
+    let ctorTail := VExpr.forallN
+      (artifact.projection.view.fields.map (VExpr.instL levels)) ctorResult
+    have hparamCtor : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
         (VExpr.forallN
           (artifact.projection.view.constructorParams.map
-            (VExpr.instL levels)) ctorTail) := by
+            (VExpr.instL levels)) ctorTail)
+        params paramCursor := by
       simpa [ctorBinders, ctorTail,
         VInductDecl.NormalizedCtor.declaredBinders,
-        VStructureView.constructorParams, VStructureView.fields,
-        List.map_append, VExpr.forallN_append] using hctorHeadShape
-    have hprefixSpine := hparamCtor.retarget
-      (by simpa using hconstructorParamsLength) ctorTail
-    rw [hctorTailShape] at hprefixSpine
-    have hprefixType := hprefixSpine.hasType_appN hctorHeadPrefix
-    have hprojectionSpine :=
-      VStructureView.ProgramsWF.projectionArgsSpine
-        artifact.projection.programsWF
-        c.Ewf c.Δwf hlevelsWF hlevelsLength hparamsLength
-        ⟨_, hparamsSpine⟩ haStruct tailResult
-    have hprojectionDefEq := hprojectionSpine.defEq_of_pointwise
-      c.Ewf c.Δwf (by simpa [projections] using hpointwise)
-    have happEq := VEnv.IsDefEq.appN_defEq hprefixType
-      hprojectionDefEq
-    have happEqU : c.IsDefEqU
-        (artifact.projection.view.etaRebuild levels params e₁')
-        ((VExpr.const ctorName levels).appN args') := by
-      refine ⟨VExpr.instRev tailResult projections, ?_⟩
-      simpa [VStructureView.etaRebuild, VExpr.appN_append,
-        artifact.constructor_name_eq, hargsSplit] using happEq
-    exact VEnv.IsDefEqU.trans c.Ewf c.Δwf
-      ⟨artifact.projection.view.structureType levels params, heta.symm⟩
-      (VEnv.IsDefEqU.trans c.Ewf c.Δwf happEqU hfullEq)
+        VProjectionView.constructorParams, VProjectionView.fields,
+        List.map_append, VExpr.forallN_append] using hparamRaw
+    have hparamsSpine :=
+      artifact.projection.viewWF.familyParamsSpine_of_constructor
+        c.Ewf.ordered levels hlevelsWF hlevelsLength params hparamsLength
+        hparamCtor
+    obtain ⟨declResultLevel, hdeclResult₀⟩ :=
+      artifact.projection.viewWF.constructorDeclaredResult c.Ewf.ordered
+    have hdeclResult₁ := hdeclResult₀.instL hlevelsWF
+    have hdeclResult : c.venv.IsDefEq c.lparams.length
+        ctorBinders.reverse ctorResult
+        (artifact.projection.view.constructorTarget.instL levels)
+        ((VExpr.sort declResultLevel).instL levels) := by
+      simpa [ctorBinders, ctorResult, List.map_reverse] using hdeclResult₁
+    have hdeclTel :=
+      (artifact.projection.viewWF.constructorDeclared_onTel
+        c.Ewf.ordered).instL hlevelsWF
+    have hctorOnTel : c.venv.OnTel c.lparams.length [] ctorBinders := by
+      simpa [ctorBinders] using hdeclTel
+    have hctorCtxClosed : CtxClosed ctorBinders.reverse :=
+      VEnv.CtxWF.closed c.Ewf.ordered <| by
+        simpa using hctorOnTel.toOnCtx (by trivial)
+    have hdeclResultΓ := hdeclResult.weakR c.Ewf.ordered hctorCtxClosed
+      c.vlctx.toCtx
+    have hargsTelLength : args'.length = ctorBinders.length :=
+      hargsTr.length_eq.symm.trans hhostBinderLength
+    have hresultEq := hargsSpine.instRev_defeq c.Ewf.ordered
+      hargsTelLength hdeclResultΓ
+    have htarget :
+        (artifact.projection.view.constructorTarget.instL levels).instRev args' =
+        artifact.projection.view.structureType levels params := by
+      rw [hargsSplit]
+      exact artifact.projection.viewWF.constructorTarget_instRev
+        c.Ewf.ordered levels hlevelsLength params hparamsLength fields
+          hfieldsLength
+    rw [htarget] at hresultEq
+    have hcanonicalRaw := hargsSpine.hasType_appN hctorHeadShape
+    have hcanonical : c.HasType
+        ((VExpr.const ctorName levels).appN args')
+        (artifact.projection.view.structureType levels params) :=
+      hcanonicalRaw.defeqU_r c.Ewf c.Δwf ⟨_, hresultEq⟩
+    have hfullEq := hfullTr.uniq c.Ewf (.refl c.Ewf c.Δwf) he₂
+    have hbStruct := hcanonical.defeqU_l c.Ewf c.Δwf hfullEq
+    have hty₂Struct := bTyped.uniqU c.Ewf c.Δwf hbStruct
+    have hty₁Struct := VEnv.IsDefEqU.trans c.Ewf c.Δwf
+      (htypes htypesTrue) hty₂Struct
+    have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hty₁Struct
+    have heta := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsSpine⟩ haStruct
+    have hF1Size : F1.size = args'.length := by
+      calc
+        F1.size = F1.toList.length := by simp
+        _ = e₂.getAppArgsList.length := by simp [F1, Expr.getAppArgs_toList]
+        _ = args'.length := hargsTr.length_eq
+    have hfieldData : ∀ (j : Nat), j < fields.length →
+        ∃ code : VStructureView.ProjectionCode,
+          (artifact.projection.view.projectionCodes levels params)[j]? =
+            some code ∧
+          c.TrExprS (.proj ctorInfo.induct j e₁)
+            (.app code.projector e₁') ∧
+          ∀ (hi : ctorInfo.numParams + j < F1.size),
+            c.TrExprS F1[ctorInfo.numParams + j] fields[j] := by
+      intro j hj
+      have hcodeIdx : j <
+          (artifact.projection.view.projectionCodes levels params).length := by
+        simpa [hfieldsLength] using hj
+      let code := (artifact.projection.view.projectionCodes levels params)[j]
+      have hcode :
+          (artifact.projection.view.projectionCodes levels params)[j]? =
+            some code := List.getElem?_eq_getElem hcodeIdx
+      have hprojector := hprograms c.Δwf hlevelsWF
+        hlevelsLength hparamsLength ⟨_, hparamsSpine⟩ hcode
+      have hprojSem : VProjectionView.TrProj c.venv c.lparams.length
+          c.vlctx.toCtx artifact.projection.view levels params j e₁'
+          (.app code.projector e₁') := {
+        viewWF := artifact.projection.viewWF
+        levelsWF := hlevelsWF
+        levels_length := hlevelsLength
+        params_length := hparamsLength
+        paramsSpine := ⟨_, hparamsSpine⟩
+        majorType := haStruct
+        program := ⟨code, hcode, rfl, hprojector⟩ }
+      have hprojTr : c.TrExprS (.proj ctorInfo.induct j e₁)
+          (.app code.projector e₁') :=
+        .proj he₁ ⟨.ordinary artifact.projection.view, levels, params,
+          artifact.projection.name_eq, .ordinary hprojSem⟩
+      refine ⟨code, hcode, hprojTr, ?_⟩
+      intro hi
+      have hselectedList :
+          e₂.getAppArgsList[ctorInfo.numParams + j]? =
+            some F1[ctorInfo.numParams + j] := by
+        rw [← Expr.getAppArgs_toList]
+        simp [F1]
+      obtain ⟨translated, htranslated, htr⟩ :=
+        Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
+      have hfieldGet : args'[ctorInfo.numParams + j]? = some fields[j] := by
+        rw [hargsSplit, List.getElem?_append_right]
+        · simp [hnumParams, hparamsLength]
+        · simp [hnumParams, hparamsLength]
+      have : translated = fields[j] :=
+        Option.some.inj (htranslated.symm.trans hfieldGet)
+      subst translated
+      exact htr
+    rw [Std.Legacy.Range.forIn'_eq_forIn'_range']
+    simp only [Std.Legacy.Range.size, Nat.add_sub_cancel, Nat.div_one]
+    let FieldEq := fun (j : Nat) => ∃ (field : VExpr)
+        (code : VStructureView.ProjectionCode),
+      fields[j]? = some field ∧
+      (artifact.projection.view.projectionCodes levels params)[j]? = some code ∧
+      c.IsDefEqU (.app code.projector e₁') field
+    let etaStep (indices : List Nat)
+        (hlow : ∀ i, i ∈ indices → ctorInfo.numParams ≤ i)
+        (hhigh : ∀ i, i ∈ indices → i < F1.size) :
+        (i : Nat) → i ∈ indices → Option Bool × PUnit →
+          RecM (ForInStep (Option Bool × PUnit)) :=
+      fun i hi r => tryEtaStructFieldStep e₁ ctorInfo.induct
+        ctorInfo.numParams F1 i
+        ⟨hlow i hi, hhigh i hi, by
+          change (i - ctorInfo.numParams) % 1 = 0
+          exact Nat.mod_one _⟩ r
+    have etaLoopWF : ∀ (all indices : List Nat)
+        (hsuffix : ∃ pre, pre ++ indices = all)
+        (hlow : ∀ i, i ∈ all → ctorInfo.numParams ≤ i)
+        (hhigh : ∀ i, i ∈ all → i < F1.size) {st : VState},
+        RecM.WF c st
+          (List.forIn'.loop all (etaStep all hlow hhigh) indices
+            ⟨none, PUnit.unit⟩ hsuffix)
+          fun r _ =>
+            (r.1 = none →
+              ∀ i, i ∈ indices → FieldEq (i - ctorInfo.numParams)) ∧
+            r.1 ≠ some true := by
+      intro all indices hsuffix hlow hhigh st
+      induction indices generalizing st with
+      | nil =>
+        simp only [List.forIn'.loop]
+        exact .pure (by simp)
+      | cons i indices ih =>
+        simp only [List.forIn'.loop]
+        simp only [etaStep, tryEtaStructFieldStep]
+        obtain ⟨pre, hprefix⟩ := hsuffix
+        have hiAll : i ∈ all := by
+          rw [← hprefix]
+          simp
+        have hlo := hlow i hiAll
+        have hhi := hhigh i hiAll
+        have hj : i - ctorInfo.numParams < fields.length := by
+          rw [hF1Size, hargsLength, ← hnumParams,
+            ← hfieldsLength] at hhi
+          omega
+        obtain ⟨code, hcode, hprojTr, hargTr⟩ :=
+          hfieldData (i - ctorInfo.numParams) hj
+        have hiEq : ctorInfo.numParams + (i - ctorInfo.numParams) = i :=
+          Nat.add_sub_of_le hlo
+        have hargBound :
+            ctorInfo.numParams + (i - ctorInfo.numParams) < F1.size := by
+          omega
+        have hargTr' : c.TrExprS F1[i] fields[i - ctorInfo.numParams] := by
+          simpa [hiEq] using hargTr hargBound
+        simp only [bind_assoc]
+        refine (isDefEq.WF hprojTr hargTr').bind fun b next _ hb => ?_
+        by_cases hbtrue : b = true
+        · simp only [hbtrue, if_pos, pure_bind]
+          have hcur : FieldEq (i - ctorInfo.numParams) :=
+            ⟨fields[i - ctorInfo.numParams], code,
+              List.getElem?_eq_getElem hj, hcode, hb hbtrue⟩
+          have hsuffixTail : ∃ pre, pre ++ indices = all := by
+            refine ⟨pre ++ [i], ?_⟩
+            simpa [List.append_assoc] using hprefix
+          have htail : RecM.WF c next
+              (List.forIn'.loop all (etaStep all hlow hhigh) indices
+                ⟨none, PUnit.unit⟩ hsuffixTail)
+              (fun r _ =>
+                (r.1 = none →
+                  ∀ k, k ∈ i :: indices →
+                    FieldEq (k - ctorInfo.numParams)) ∧
+                r.1 ≠ some true) :=
+            (ih hsuffixTail (st := next)).mono
+            (fun r _ _ hrest => ⟨fun hnone k hk => by
+                rw [List.mem_cons] at hk
+                rcases hk with rfl | hk
+                · exact hcur
+                · exact hrest.1 hnone k hk,
+              hrest.2⟩)
+          simpa only [etaStep, tryEtaStructFieldStep, pure_bind] using htail
+        · simp only [hbtrue]
+          exact .pure (by simp)
+    have hparamsLe : ctorInfo.numParams ≤ F1.size := by
+      rw [hF1Size, hargsLength, ← hnumParams]
+      omega
+    have hlowRange : ∀ i,
+        i ∈ List.range' ctorInfo.numParams
+          (F1.size - ctorInfo.numParams) →
+        ctorInfo.numParams ≤ i := by
+      intro i hi
+      rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
+      omega
+    have hhighRange : ∀ i,
+        i ∈ List.range' ctorInfo.numParams
+          (F1.size - ctorInfo.numParams) →
+        i < F1.size := by
+      intro i hi
+      rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
+      omega
+    have etaForInWF : ∀ {st : VState}, RecM.WF c st
+        (List.forIn'
+          (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+          ⟨none, PUnit.unit⟩
+          (etaStep
+            (List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams)) hlowRange hhighRange))
+        (fun r _ => (r.1 = none → ∀ i,
+            i ∈ List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams) →
+            FieldEq (i - ctorInfo.numParams)) ∧
+          r.1 ≠ some true) := by
+      intro st
+      exact etaLoopWF
+        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+        ⟨[], by simp⟩ hlowRange hhighRange
+    change RecM.WF c _
+      (do
+        let r ← List.forIn'
+          (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+          ⟨none, PUnit.unit⟩
+          (etaStep
+            (List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams)) hlowRange hhighRange)
+        match r.1 with
+        | none => pure true
+        | some a => pure a)
+      (fun b _ => b = true → c.IsDefEqU e₁' e₂')
+    refine etaForInWF.bind fun r next _ hr => ?_
+    cases hr₁ : r.1 with
+    | some b =>
+      simp only
+      refine .pure fun hbtrue => False.elim <|
+        hr.2 (hr₁.trans (congrArg some hbtrue))
+    | none =>
+      simp only
+      refine .pure fun _ => ?_
+      have hrangeCount :
+          F1.size - ctorInfo.numParams = fields.length := by
+        rw [hF1Size, hargsLength, hnumParams, hfieldsLength]
+        omega
+      have hfieldEq : ∀ j, j < fields.length → FieldEq j := by
+        intro j hj
+        have hjmem : ctorInfo.numParams + j ∈
+            List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams) := by
+          apply List.mem_range'.2
+          exact ⟨j, by simpa [hrangeCount] using hj, by simp⟩
+        simpa using hr.1 hr₁ (ctorInfo.numParams + j) hjmem
+      let projections := artifact.projection.view.projectionArgs levels params
+        (artifact.projection.view.specializedFields levels params).length e₁'
+      have hprojectionCount :
+          (artifact.projection.view.specializedFields levels params).length =
+            fields.length := by
+        simpa using hfieldsLength.symm
+      have hprojectionsLength : projections.length = fields.length := by
+        dsimp [projections]
+        rw [artifact.projection.view.projectionArgs_length levels params
+          (artifact.projection.view.specializedFields levels params).length
+          e₁' (by simp)]
+        exact hprojectionCount
+      have hpointwise : List.Forall₂
+          (fun a a' => a = a' ∨ c.IsDefEqU a a') projections fields := by
+        apply forall₂_of_getElem? hprojectionsLength
+        intro j projection field hprojection hfield
+        have hj := (List.getElem?_eq_some_iff.mp hfield).1
+        obtain ⟨field', code, hfield', hcode, hdefeq⟩ := hfieldEq j hj
+        have hprojection' : projections[j]? =
+            some (.app code.projector e₁') := by
+          dsimp [projections, VProjectionView.projectionArgs]
+          have hjspec : j <
+              (artifact.projection.view.specializedFields levels params).length :=
+            hprojectionCount.symm ▸ hj
+          rw [List.getElem?_map, List.getElem?_take_of_lt hjspec, hcode]
+          rfl
+        have hpEq : projection = .app code.projector e₁' :=
+          Option.some.inj (hprojection.symm.trans hprojection')
+        have hfEq : field = field' :=
+          Option.some.inj (hfield.symm.trans hfield')
+        subst projection
+        subst field
+        exact .inr hdefeq
+      let tailResult := VExpr.instRevAt ctorResult params
+        artifact.projection.view.fields.length
+      have hctorTailShape : VExpr.instRev ctorTail params =
+          VExpr.forallN
+            (artifact.projection.view.specializedFields levels params)
+            tailResult := by
+        simp only [ctorTail, tailResult, VExpr.instRev_forallN_projection,
+          VProjectionView.specializedFields_eq, List.length_map]
+        rw [VExpr.instRevAt_map_instL_zipIdx]
+      have hconstructorParamsLength : params.length =
+          artifact.projection.view.constructorParams.length := by
+        exact hparamsLength.trans <| by
+          exact artifact.projection.view.constructorParams_length.symm
+      have hctorHeadPrefix : c.HasType (.const ctorName levels)
+          (VExpr.forallN
+            (artifact.projection.view.constructorParams.map
+              (VExpr.instL levels)) ctorTail) := by
+        simpa [ctorBinders, ctorTail,
+          VInductDecl.NormalizedCtor.declaredBinders,
+          VProjectionView.constructorParams, VProjectionView.fields,
+          List.map_append, VExpr.forallN_append] using hctorHeadShape
+      have hprefixSpine := hparamCtor.retarget
+        (by simpa using hconstructorParamsLength) ctorTail
+      rw [hctorTailShape] at hprefixSpine
+      have hprefixType := hprefixSpine.hasType_appN hctorHeadPrefix
+      have hprojectionSpine :=
+        VProjectionView.ProgramsWF.projectionArgsSpine
+          hprograms
+          c.Ewf c.Δwf hlevelsWF hlevelsLength hparamsLength
+          ⟨_, hparamsSpine⟩ haStruct tailResult
+      have hprojectionDefEq := hprojectionSpine.defEq_of_pointwise
+        c.Ewf c.Δwf (by simpa [projections] using hpointwise)
+      have happEq := VEnv.IsDefEq.appN_defEq hprefixType
+        hprojectionDefEq
+      have happEqU : c.IsDefEqU
+          (artifact.projection.view.etaRebuild levels params e₁')
+          ((VExpr.const ctorName levels).appN args') := by
+        refine ⟨VExpr.instRev tailResult projections, ?_⟩
+        simpa [VProjectionView.etaRebuild, VExpr.appN_append, projections,
+          artifact.constructor_name_eq, hargsSplit] using happEq
+      exact VEnv.IsDefEqU.trans c.Ewf c.Δwf
+        ⟨artifact.projection.view.structureType levels params, heta.symm⟩
+        (VEnv.IsDefEqU.trans c.Ewf c.Δwf happEqU hfullEq)
+  | restored artifact =>
+    have hprograms : artifact.projection.view.OperationalProgramsWF c.venv :=
+      artifact.projection.operationalProgramsWF_of_large
+        c.Ewf.conversionRegular artifact.large
+    have ⟨head', hstack⟩ := AppStack.build <|
+      e₂.mkAppList_getAppArgsList ▸ he₂
+    have hheadTr := hstack.tr
+    rw [hhead] at hheadTr
+    let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
+    have hviewConstructor := artifact.projection.viewWF.constructor
+    rw [artifact.constructor_name_eq] at hviewConstructor
+    rw [hviewConstructor] at hconst
+    cases hconst
+    have hlevelsWF : ∀ level ∈ levels,
+        level.WF c.lparams.length :=
+      VLevel.WF.of_mapM_ofLevel hlevelsMap
+    have hrawCtorUvars : artifact.projection.view.sourceConstructor.uvars =
+        artifact.projection.view.uvars :=
+      artifact.projection.view.constructor_uvars_eq
+    have hlevelsLength : levels.length = artifact.projection.view.uvars :=
+      (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans <|
+        hlevelsHostLength.trans hrawCtorUvars
+    have hctorHead : c.HasType (.const ctorName levels)
+        (artifact.projection.view.sourceConstructor.type.instL levels) :=
+      VEnv.HasType.const hviewConstructor hlevelsWF
+        (hlevelsLength.trans hrawCtorUvars.symm)
+    let ctorResult :=
+      (VExpr.dropN artifact.projection.view.nparams
+        artifact.projection.view.sourceConstructor.type).resultOf
+    let ctorBinders :=
+      (artifact.projection.view.constructorParams ++
+        artifact.projection.view.fields).map (VExpr.instL levels)
+    have hsourceCtorShape :
+        artifact.projection.view.sourceConstructor.type =
+          VExpr.forallN artifact.projection.view.constructorParams
+            (VExpr.forallN artifact.projection.view.fields ctorResult) := by
+      simp [VRestoredBlockStructureView.constructorParams,
+        VRestoredBlockStructureView.fields, ctorResult,
+        VInductDecl.forallN_ctorFields_resultOf,
+        VExpr.forallN_telN_dropN]
+    have hctorHeadShape : c.HasType (.const ctorName levels)
+        (VExpr.forallN ctorBinders (ctorResult.instL levels)) := by
+      rw [hsourceCtorShape] at hctorHead
+      simpa [ctorBinders, List.map_append, VExpr.forallN_append,
+        VExpr.instL_forallN] using hctorHead
+    have hhostArgsLength : e₂.getAppArgsList.length =
+        ctorInfo.numParams + ctorInfo.numFields := by
+      simpa [Expr.getAppNumArgs_eq, ← Expr.getAppArgsList_reverse] using hargs
+    have hnumParams : ctorInfo.numParams = artifact.projection.view.nparams := by
+      exact (congrArg ConstructorVal.numParams
+        artifact.constructor_info_eq).symm.trans
+          artifact.projection.constructor_numParams_eq
+    have hnumFields : ctorInfo.numFields = artifact.projection.view.fields.length := by
+      exact (congrArg ConstructorVal.numFields
+        artifact.constructor_info_eq).symm.trans
+          artifact.projection.constructor_numFields_eq
+    have hctorBindersLength : ctorBinders.length =
+        artifact.projection.view.nparams +
+          artifact.projection.view.fields.length := by
+      calc
+        ctorBinders.length =
+            artifact.projection.view.constructorParams.length +
+              artifact.projection.view.fields.length := by
+          simp only [ctorBinders, List.length_map, List.length_append]
+        _ = artifact.projection.view.nparams +
+            artifact.projection.view.fields.length := by
+          rw [artifact.projection.view.constructorParams_length]
+    have hhostBinderLength : e₂.getAppArgsList.length = ctorBinders.length := by
+      have hhostArity : e₂.getAppArgsList.length =
+          artifact.projection.view.nparams +
+            artifact.projection.view.fields.length := by
+        simpa [hnumParams, hnumFields] using hhostArgsLength
+      exact hhostArity.trans hctorBindersLength.symm
+    obtain ⟨args', hargsTr, hargsSpine, hfullTr⟩ :=
+      AppStack.toSpineWF hstack hctorHeadShape hhostBinderLength
+    rw [e₂.mkAppList_getAppArgsList] at hfullTr
+    have hargsLength : args'.length = artifact.projection.view.nparams +
+        artifact.projection.view.fields.length :=
+      hargsTr.length_eq.symm.trans <| by
+        simpa [hnumParams, hnumFields] using hhostArgsLength
+    let params := args'.take artifact.projection.view.nparams
+    let fields := args'.drop artifact.projection.view.nparams
+    have hargsSplit : args' = params ++ fields := by
+      simp [params, fields]
+    have hparamsLength : params.length = artifact.projection.view.nparams := by
+      simp [params, hargsLength]
+    have hfieldsLength : fields.length = artifact.projection.view.fields.length := by
+      simp [fields, hargsLength]
+    have hargsSpineSplit := hargsSpine
+    rw [hargsSplit] at hargsSpineSplit
+    obtain ⟨paramCursor, hparamRaw, hfieldsRaw⟩ :=
+      hargsSpineSplit.split
+    let ctorTail := VExpr.forallN
+      (artifact.projection.view.fields.map (VExpr.instL levels))
+        (ctorResult.instL levels)
+    have hparamCtor : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (VExpr.forallN
+          (artifact.projection.view.constructorParams.map
+            (VExpr.instL levels)) ctorTail)
+        params paramCursor := by
+      simpa [ctorBinders, ctorTail,
+        List.map_append, VExpr.forallN_append] using hparamRaw
+    have hparamsSpine :=
+      artifact.projection.parameterLayout.familyParamsSpine_of_constructor
+        c.Ewf.ordered levels hlevelsWF hlevelsLength params hparamsLength
+        hparamCtor
+    have hcanonicalRaw := hargsSpine.hasType_appN hctorHeadShape
+    have hconstructorPrefix :=
+      artifact.projection.parameterLayout.constructorPrefix_hasType
+        c.Ewf.conversionRegular artifact.projection.recEntriesClosed
+        levels hlevelsWF hlevelsLength params hparamsLength
+          ⟨_, hparamsSpine⟩
+    have hfieldsSpecializedLength : fields.length =
+        (artifact.projection.view.specializedFields levels params).length := by
+      simpa [VRestoredBlockStructureView.specializedFields] using hfieldsLength
+    have hcanonicalApplication : c.HasType
+        (VExpr.appN
+          (VExpr.appN
+            (.const artifact.projection.view.constructorName levels) params)
+          fields)
+        ((ctorResult.instL levels).instRev args') := by
+      simpa [artifact.constructor_name_eq, hargsSplit, VExpr.appN_append] using
+        hcanonicalRaw
+    have hcanonical₀ := VEnv.HasType.appN_canonical
+      c.Ewf.conversionRegular c.Δwf hfieldsSpecializedLength
+        hconstructorPrefix hcanonicalApplication
+    have hcanonicalResult :
+        VExpr.instRev
+          ((artifact.projection.view.structureType levels params).liftN
+            (artifact.projection.view.specializedFields levels params).length)
+          fields = artifact.projection.view.structureType levels params := by
+      rw [← hfieldsSpecializedLength]
+      exact VExpr.instRev_liftN_len fields _
+    rw [hcanonicalResult] at hcanonical₀
+    have hcanonical : c.HasType
+        ((VExpr.const ctorName levels).appN args')
+        (artifact.projection.view.structureType levels params) :=
+      by simpa [artifact.constructor_name_eq, hargsSplit,
+        VExpr.appN_append] using hcanonical₀
+    have hfullEq := hfullTr.uniq c.Ewf (.refl c.Ewf c.Δwf) he₂
+    have hbStruct := hcanonical.defeqU_l c.Ewf c.Δwf hfullEq
+    have hty₂Struct := bTyped.uniqU c.Ewf c.Δwf hbStruct
+    have hty₁Struct := VEnv.IsDefEqU.trans c.Ewf c.Δwf
+      (htypes htypesTrue) hty₂Struct
+    have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hty₁Struct
+    have heta := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsSpine⟩ haStruct
+    have hF1Size : F1.size = args'.length := by
+      calc
+        F1.size = F1.toList.length := by simp
+        _ = e₂.getAppArgsList.length := by simp [F1, Expr.getAppArgs_toList]
+        _ = args'.length := hargsTr.length_eq
+    have hrestoredFieldData : ∀ (j : Nat), j < fields.length →
+        ∃ code : VStructureView.ProjectionCode,
+          (artifact.projection.view.operationalProjectionCodes levels params)[j]? =
+            some code ∧
+          c.TrExprS (.proj ctorInfo.induct j e₁)
+            (.app code.projector e₁') ∧
+          ∀ (hi : ctorInfo.numParams + j < F1.size),
+            c.TrExprS F1[ctorInfo.numParams + j] fields[j] := by
+      intro j hj
+      have hcodeIdx : j <
+          (artifact.projection.view.operationalProjectionCodes levels params).length := by
+        simpa [hfieldsLength] using hj
+      let code :=
+        (artifact.projection.view.operationalProjectionCodes levels params)[j]
+      have hcode :
+          (artifact.projection.view.operationalProjectionCodes levels params)[j]? =
+            some code := List.getElem?_eq_getElem hcodeIdx
+      have hprojector := hprograms c.Δwf hlevelsWF
+        hlevelsLength hparamsLength ⟨_, hparamsSpine⟩ hcode
+      have hprojSem : VRestoredBlockStructureView.TrProj c.venv
+          c.lparams.length
+          c.vlctx.toCtx artifact.projection.view levels params j e₁'
+          (.app code.projector e₁') := {
+        viewWF := artifact.projection.viewWF
+        parameterLayout := artifact.projection.parameterLayout
+        codeNaturality := artifact.projection.codeNaturality
+        recEntriesClosed := artifact.projection.recEntriesClosed
+        levelsWF := hlevelsWF
+        levels_length := hlevelsLength
+        params_length := hparamsLength
+        paramsSpine := ⟨_, hparamsSpine⟩
+        majorType := haStruct
+        program := ⟨code, hcode, rfl, hprojector⟩ }
+      have hprojTr : c.TrExprS (.proj ctorInfo.induct j e₁)
+          (.app code.projector e₁') :=
+        .proj he₁ ⟨.restored artifact.projection.view, levels, params,
+          artifact.projection.name_eq, .restored hprojSem⟩
+      refine ⟨code, hcode, hprojTr, ?_⟩
+      intro hi
+      have hselectedList :
+          e₂.getAppArgsList[ctorInfo.numParams + j]? =
+            some F1[ctorInfo.numParams + j] := by
+        rw [← Expr.getAppArgs_toList]
+        simp [F1]
+      obtain ⟨translated, htranslated, htr⟩ :=
+        Lean4Lean.List.Forall₂.getElem?_left hargsTr hselectedList
+      have hfieldGet : args'[ctorInfo.numParams + j]? = some fields[j] := by
+        rw [hargsSplit, List.getElem?_append_right]
+        · simp [hnumParams, hparamsLength]
+        · simp [hnumParams, hparamsLength]
+      have : translated = fields[j] :=
+        Option.some.inj (htranslated.symm.trans hfieldGet)
+      subst translated
+      exact htr
+    rw [Std.Legacy.Range.forIn'_eq_forIn'_range']
+    simp only [Std.Legacy.Range.size, Nat.add_sub_cancel, Nat.div_one]
+    let FieldEq := fun (j : Nat) => ∃ (field : VExpr)
+        (code : VStructureView.ProjectionCode),
+      fields[j]? = some field ∧
+      (artifact.projection.view.operationalProjectionCodes levels params)[j]? = some code ∧
+      c.IsDefEqU (.app code.projector e₁') field
+    let etaStep (indices : List Nat)
+        (hlow : ∀ i, i ∈ indices → ctorInfo.numParams ≤ i)
+        (hhigh : ∀ i, i ∈ indices → i < F1.size) :
+        (i : Nat) → i ∈ indices → Option Bool × PUnit →
+          RecM (ForInStep (Option Bool × PUnit)) :=
+      fun i hi r => tryEtaStructFieldStep e₁ ctorInfo.induct
+        ctorInfo.numParams F1 i
+        ⟨hlow i hi, hhigh i hi, by
+          change (i - ctorInfo.numParams) % 1 = 0
+          exact Nat.mod_one _⟩ r
+    have etaLoopWF : ∀ (all indices : List Nat)
+        (hsuffix : ∃ pre, pre ++ indices = all)
+        (hlow : ∀ i, i ∈ all → ctorInfo.numParams ≤ i)
+        (hhigh : ∀ i, i ∈ all → i < F1.size) {st : VState},
+        RecM.WF c st
+          (List.forIn'.loop all (etaStep all hlow hhigh) indices
+            ⟨none, PUnit.unit⟩ hsuffix)
+          fun r _ =>
+            (r.1 = none →
+              ∀ i, i ∈ indices → FieldEq (i - ctorInfo.numParams)) ∧
+            r.1 ≠ some true := by
+      intro all indices hsuffix hlow hhigh st
+      induction indices generalizing st with
+      | nil =>
+        simp only [List.forIn'.loop]
+        exact .pure (by simp)
+      | cons i indices ih =>
+        simp only [List.forIn'.loop]
+        simp only [etaStep, tryEtaStructFieldStep]
+        obtain ⟨pre, hprefix⟩ := hsuffix
+        have hiAll : i ∈ all := by
+          rw [← hprefix]
+          simp
+        have hlo := hlow i hiAll
+        have hhi := hhigh i hiAll
+        have hj : i - ctorInfo.numParams < fields.length := by
+          rw [hF1Size, hargsLength, ← hnumParams,
+            ← hfieldsLength] at hhi
+          omega
+        obtain ⟨code, hcode, hprojTr, hargTr⟩ :=
+          hrestoredFieldData (i - ctorInfo.numParams) hj
+        have hiEq : ctorInfo.numParams + (i - ctorInfo.numParams) = i :=
+          Nat.add_sub_of_le hlo
+        have hargBound :
+            ctorInfo.numParams + (i - ctorInfo.numParams) < F1.size := by
+          omega
+        have hargTr' : c.TrExprS F1[i] fields[i - ctorInfo.numParams] := by
+          simpa [hiEq] using hargTr hargBound
+        simp only [bind_assoc]
+        refine (isDefEq.WF hprojTr hargTr').bind fun b next _ hb => ?_
+        by_cases hbtrue : b = true
+        · simp only [hbtrue, if_pos, pure_bind]
+          have hcur : FieldEq (i - ctorInfo.numParams) :=
+            ⟨fields[i - ctorInfo.numParams], code,
+              List.getElem?_eq_getElem hj, hcode, hb hbtrue⟩
+          have hsuffixTail : ∃ pre, pre ++ indices = all := by
+            refine ⟨pre ++ [i], ?_⟩
+            simpa [List.append_assoc] using hprefix
+          have htail : RecM.WF c next
+              (List.forIn'.loop all (etaStep all hlow hhigh) indices
+                ⟨none, PUnit.unit⟩ hsuffixTail)
+              (fun r _ =>
+                (r.1 = none →
+                  ∀ k, k ∈ i :: indices →
+                    FieldEq (k - ctorInfo.numParams)) ∧
+                r.1 ≠ some true) :=
+            (ih hsuffixTail (st := next)).mono
+            (fun r _ _ hrest => ⟨fun hnone k hk => by
+                rw [List.mem_cons] at hk
+                rcases hk with rfl | hk
+                · exact hcur
+                · exact hrest.1 hnone k hk,
+              hrest.2⟩)
+          simpa only [etaStep, tryEtaStructFieldStep, pure_bind] using htail
+        · simp only [hbtrue]
+          exact .pure (by simp)
+    have hparamsLe : ctorInfo.numParams ≤ F1.size := by
+      rw [hF1Size, hargsLength, ← hnumParams]
+      omega
+    have hlowRange : ∀ i,
+        i ∈ List.range' ctorInfo.numParams
+          (F1.size - ctorInfo.numParams) →
+        ctorInfo.numParams ≤ i := by
+      intro i hi
+      rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
+      omega
+    have hhighRange : ∀ i,
+        i ∈ List.range' ctorInfo.numParams
+          (F1.size - ctorInfo.numParams) →
+        i < F1.size := by
+      intro i hi
+      rcases List.mem_range'.mp hi with ⟨j, hj, rfl⟩
+      omega
+    have etaForInWF : ∀ {st : VState}, RecM.WF c st
+        (List.forIn'
+          (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+          ⟨none, PUnit.unit⟩
+          (etaStep
+            (List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams)) hlowRange hhighRange))
+        (fun r _ => (r.1 = none → ∀ i,
+            i ∈ List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams) →
+            FieldEq (i - ctorInfo.numParams)) ∧
+          r.1 ≠ some true) := by
+      intro st
+      exact etaLoopWF
+        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+        (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+        ⟨[], by simp⟩ hlowRange hhighRange
+    change RecM.WF c _
+      (do
+        let r ← List.forIn'
+          (List.range' ctorInfo.numParams (F1.size - ctorInfo.numParams))
+          ⟨none, PUnit.unit⟩
+          (etaStep
+            (List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams)) hlowRange hhighRange)
+        match r.1 with
+        | none => pure true
+        | some a => pure a)
+      (fun b _ => b = true → c.IsDefEqU e₁' e₂')
+    refine etaForInWF.bind fun r next _ hr => ?_
+    cases hr₁ : r.1 with
+    | some b =>
+      simp only
+      refine .pure fun hbtrue => False.elim <|
+        hr.2 (hr₁.trans (congrArg some hbtrue))
+    | none =>
+      simp only
+      refine .pure fun _ => ?_
+      have hrangeCount :
+          F1.size - ctorInfo.numParams = fields.length := by
+        rw [hF1Size, hargsLength, hnumParams, hfieldsLength]
+        omega
+      have hfieldEq : ∀ j, j < fields.length → FieldEq j := by
+        intro j hj
+        have hjmem : ctorInfo.numParams + j ∈
+            List.range' ctorInfo.numParams
+              (F1.size - ctorInfo.numParams) := by
+          apply List.mem_range'.2
+          exact ⟨j, by simpa [hrangeCount] using hj, by simp⟩
+        simpa using hr.1 hr₁ (ctorInfo.numParams + j) hjmem
+      let projections := artifact.projection.view.operationalProjectionArgs levels params
+        (artifact.projection.view.specializedFields levels params).length e₁'
+      have hprojectionCount :
+          (artifact.projection.view.specializedFields levels params).length =
+            fields.length := by
+        simpa using hfieldsLength.symm
+      have hprojectionsLength : projections.length = fields.length := by
+        dsimp [projections]
+        rw [artifact.projection.view.operationalProjectionArgs_length levels params
+          (artifact.projection.view.specializedFields levels params).length
+          e₁' (by simp)]
+        exact hprojectionCount
+      have hpointwise : List.Forall₂
+          (fun a a' => a = a' ∨ c.IsDefEqU a a') projections fields := by
+        apply forall₂_of_getElem? hprojectionsLength
+        intro j projection field hprojection hfield
+        have hj := (List.getElem?_eq_some_iff.mp hfield).1
+        obtain ⟨field', code, hfield', hcode, hdefeq⟩ := hfieldEq j hj
+        have hprojection' : projections[j]? =
+            some (.app code.projector e₁') := by
+          dsimp [projections, VRestoredBlockStructureView.operationalProjectionArgs]
+          have hjspec : j <
+              (artifact.projection.view.specializedFields levels params).length :=
+            hprojectionCount.symm ▸ hj
+          rw [List.getElem?_map, List.getElem?_take_of_lt hjspec, hcode]
+          rfl
+        have hpEq : projection = .app code.projector e₁' :=
+          Option.some.inj (hprojection.symm.trans hprojection')
+        have hfEq : field = field' :=
+          Option.some.inj (hfield.symm.trans hfield')
+        subst projection
+        subst field
+        exact .inr hdefeq
+      let restoredTailResult :=
+        (artifact.projection.view.structureType levels params).liftN
+          (artifact.projection.view.specializedFields levels params).length
+      have hprefixType : c.HasType
+          (VExpr.appN (.const ctorName levels) params)
+          (VExpr.forallN
+            (artifact.projection.view.specializedFields levels params)
+            restoredTailResult) := by
+        simpa [restoredTailResult, artifact.constructor_name_eq] using
+          hconstructorPrefix
+      have hprojectionSpine :=
+        hprograms.operationalProjectionArgsSpine
+          artifact.projection.parameterLayout.toLayoutWF
+          c.Ewf.conversionRegular artifact.projection.recEntriesClosed
+          c.Δwf hlevelsWF hlevelsLength hparamsLength
+          ⟨_, hparamsSpine⟩ haStruct restoredTailResult
+      have hprojectionDefEq := hprojectionSpine.defEq_of_pointwise
+        c.Ewf c.Δwf (by simpa [projections] using hpointwise)
+      have happEq := VEnv.IsDefEq.appN_defEq hprefixType
+        hprojectionDefEq
+      have happEqU : c.IsDefEqU
+          (artifact.projection.view.operationalEtaRebuild levels params e₁')
+          ((VExpr.const ctorName levels).appN args') := by
+        refine ⟨VExpr.instRev restoredTailResult projections, ?_⟩
+        simpa [VRestoredBlockStructureView.operationalEtaRebuild,
+          VExpr.appN_append, projections, artifact.constructor_name_eq,
+          hargsSplit] using happEq
+      exact VEnv.IsDefEqU.trans c.Ewf c.Δwf
+        ⟨artifact.projection.view.structureType levels params, heta.symm⟩
+        (VEnv.IsDefEqU.trans c.Ewf c.Δwf happEqU hfullEq)
 
 
 theorem tryEtaStructCore.WF {c : VContext} {s : VState}
@@ -1019,98 +1426,193 @@ theorem isDefEqUnitLike.WF_of_structureEta {c : VContext} {s : VState}
     isUnsafe := ctorUnsafe }
   obtain ⟨artifact⟩ := c.structureEtaReady.resolve familyName familyInfo ctorName
     constructorInfo hfamily hctor hstructure
-  have ⟨head', hstack⟩ := AppStack.build <|
-    normalizedType.mkAppList_getAppArgsList ▸ tTypeTr
-  have hheadTr := hstack.tr
-  rw [hhead] at hheadTr
-  let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
-  have hviewFamily := artifact.projection.viewWF.family
-  rw [artifact.projection.name_eq] at hviewFamily
-  rw [hviewFamily] at hconst
-  cases hconst
-  have hlevelsWF : ∀ level ∈ levels,
-      level.WF c.lparams.length :=
-    VLevel.WF.of_mapM_ofLevel hlevelsMap
-  have hsourceUvars :
-      artifact.projection.view.generation.block.sourceType.uvars =
-        artifact.projection.view.uvars :=
-    artifact.projection.view.generation.block.sourceType_uvars_eq
-  have hlevelsLength : levels.length = artifact.projection.view.uvars :=
-    (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
-      (hlevelsHostLength.trans hsourceUvars)
-  have hfamilyHead : c.HasType (.const familyName levels)
-      (artifact.projection.view.familyType.instL levels) :=
-    VEnv.HasType.const hviewFamily hlevelsWF
-      (hlevelsLength.trans hsourceUvars.symm)
-  obtain ⟨resultLevel, hrawResult⟩ := artifact.projection.rawResult_sort
-  let rawParams := artifact.projection.view.generation.block.rawParams.map
-    (VExpr.instL levels)
-  have hfamilyHeadShape : c.HasType (.const familyName levels)
-      (VExpr.forallN rawParams (.sort (resultLevel.inst levels))) := by
-    simpa [rawParams, VStructureView.familyType,
-      VInductDecl.NormalizedChecked.rawType_eq,
-      artifact.projection.view.raw_indices_eq, hrawResult,
-      VExpr.instL_forallN, VExpr.forallN, VExpr.instL] using hfamilyHead
-  have htTypeIsType : c.venv.IsType c.lparams.length c.vlctx.toCtx tType' :=
-    (aTyped.isType c.Ewf.ordered c.Δwf).defeqU_l c.Ewf c.Δwf
-      tTypeEq.symm
-  have normalizedTypeTr : c.TrExprS
-      (normalizedType.getAppFn.mkAppList normalizedType.getAppArgsList)
-      tType' := by
-    rw [normalizedType.mkAppList_getAppArgsList]
-    exact tTypeTr
-  obtain ⟨params, _hparamsTr, hparamsSpine, hfullTr⟩ :=
-    AppStack.toSpineWF_of_isType
-      (f := normalizedType.getAppFn)
-      (args := normalizedType.getAppArgsList)
-      (full' := tType') hstack hfamilyHeadShape
-      normalizedTypeTr htTypeIsType
-  have hparamsLength : params.length = artifact.projection.view.nparams :=
-    hparamsSpine.forallN_sort_length.trans <| by
-      simpa [rawParams] using
-        artifact.projection.view.generation.shape.1
-  have hfamilyShape : artifact.projection.view.familyType.instL levels =
-      VExpr.forallN rawParams (.sort (resultLevel.inst levels)) := by
-    simp [rawParams, VStructureView.familyType,
-      VInductDecl.NormalizedChecked.rawType_eq,
-      artifact.projection.view.raw_indices_eq, hrawResult,
-      VExpr.instL_forallN, VExpr.forallN, VExpr.instL]
-  have hparamsFamily : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
-      (artifact.projection.view.familyType.instL levels) params
-      (.sort (resultLevel.inst levels)) := by
-    rw [hfamilyShape]
-    exact hparamsSpine
-  have hfullStruct : c.TrExprS normalizedType
-      (artifact.projection.view.structureType levels params) := by
-    rw [← normalizedType.mkAppList_getAppArgsList]
-    simpa [VStructureView.structureType,
-      artifact.projection.name_eq] using hfullTr
-  have hfullEq := hfullStruct.uniq c.Ewf (.refl c.Ewf c.Δwf) tTypeTr
-  have hstructTy₁ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq tTypeEq
-  have hstructTy₂ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq (h hb)
-  have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hstructTy₁.symm
-  have hbStruct := bTyped.defeqU_r c.Ewf c.Δwf hstructTy₂.symm
-  have heta₁ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
-    hparamsLength ⟨_, hparamsFamily⟩ haStruct
-  have heta₂ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
-    hparamsLength ⟨_, hparamsFamily⟩ hbStruct
-  have hfieldsLength : artifact.projection.view.fields.length = 0 := by
-    calc
-      artifact.projection.view.fields.length =
-          artifact.projection.constructorInfo.numFields :=
-        artifact.projection.constructor_numFields_eq.symm
-      _ = constructorInfo.numFields :=
-        congrArg ConstructorVal.numFields artifact.constructor_info_eq
-      _ = 0 := rfl
-  have hfields : artifact.projection.view.fields = [] :=
-    List.length_eq_zero_iff.mp hfieldsLength
-  have hrebuild :
-      artifact.projection.view.etaRebuild levels params e₁' =
-        artifact.projection.view.etaRebuild levels params e₂' := by
-    simp [VStructureView.etaRebuild, VStructureView.projectionArgs,
-      VStructureView.specializedFields, hfields]
-  rw [hrebuild] at heta₁
-  exact VEnv.IsDefEqU.trans c.Ewf c.Δwf ⟨_, heta₁.symm⟩ ⟨_, heta₂⟩
+  cases artifact with
+  | ordinary artifact =>
+    have ⟨head', hstack⟩ := AppStack.build <|
+      normalizedType.mkAppList_getAppArgsList ▸ tTypeTr
+    have hheadTr := hstack.tr
+    rw [hhead] at hheadTr
+    let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
+    have hviewFamily := artifact.projection.viewWF.family
+    rw [artifact.projection.name_eq] at hviewFamily
+    rw [hviewFamily] at hconst
+    cases hconst
+    have hlevelsWF : ∀ level ∈ levels,
+        level.WF c.lparams.length :=
+      VLevel.WF.of_mapM_ofLevel hlevelsMap
+    have hsourceUvars :
+        artifact.projection.view.familyRaw.uvars =
+          artifact.projection.view.uvars :=
+      artifact.projection.view.family_uvars_eq
+    have hlevelsLength : levels.length = artifact.projection.view.uvars :=
+      (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
+        (hlevelsHostLength.trans hsourceUvars)
+    have hfamilyHead : c.HasType (.const familyName levels)
+        (artifact.projection.view.familyType.instL levels) :=
+      by
+        simpa [artifact.projection.name_eq] using
+          artifact.projection.viewWF.familyConst_hasType c.Ewf.ordered
+            (Γ := c.vlctx.toCtx) levels hlevelsWF hlevelsLength
+    let rawParams := artifact.projection.view.rawParams.map
+      (VExpr.instL levels)
+    have hfamilyHeadShape : c.HasType (.const familyName levels)
+        (VExpr.forallN rawParams
+          (.sort (artifact.projection.view.resultLevel.inst levels))) := by
+      simpa [rawParams, artifact.projection.view.familyType_eq_forallN,
+        VExpr.instL_forallN, VExpr.forallN,
+        VExpr.instL] using hfamilyHead
+    have htTypeIsType : c.venv.IsType c.lparams.length c.vlctx.toCtx tType' :=
+      (aTyped.isType c.Ewf.ordered c.Δwf).defeqU_l c.Ewf c.Δwf
+        tTypeEq.symm
+    have normalizedTypeTr : c.TrExprS
+        (normalizedType.getAppFn.mkAppList normalizedType.getAppArgsList)
+        tType' := by
+      rw [normalizedType.mkAppList_getAppArgsList]
+      exact tTypeTr
+    obtain ⟨params, _hparamsTr, hparamsSpine, hfullTr⟩ :=
+      AppStack.toSpineWF_of_isType
+        (f := normalizedType.getAppFn)
+        (args := normalizedType.getAppArgsList)
+        (full' := tType') hstack hfamilyHeadShape
+        normalizedTypeTr htTypeIsType
+    have hparamsLength : params.length = artifact.projection.view.nparams :=
+      hparamsSpine.forallN_sort_length.trans <| by
+        simpa [rawParams] using
+          artifact.projection.view.rawParams_length
+    have hfamilyShape : artifact.projection.view.familyType.instL levels =
+        VExpr.forallN rawParams
+          (.sort (artifact.projection.view.resultLevel.inst levels)) := by
+      simp [rawParams, artifact.projection.view.familyType_eq_forallN,
+        VExpr.instL_forallN, VExpr.forallN, VExpr.instL]
+    have hparamsFamily : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (artifact.projection.view.familyType.instL levels) params
+        (.sort (artifact.projection.view.resultLevel.inst levels)) := by
+      rw [hfamilyShape]
+      exact hparamsSpine
+    have hfullStruct : c.TrExprS normalizedType
+        (artifact.projection.view.structureType levels params) := by
+      rw [← normalizedType.mkAppList_getAppArgsList]
+      simpa [VProjectionView.structureType,
+        artifact.projection.name_eq] using hfullTr
+    have hfullEq := hfullStruct.uniq c.Ewf (.refl c.Ewf c.Δwf) tTypeTr
+    have hstructTy₁ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq tTypeEq
+    have hstructTy₂ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq (h hb)
+    have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hstructTy₁.symm
+    have hbStruct := bTyped.defeqU_r c.Ewf c.Δwf hstructTy₂.symm
+    have heta₁ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsFamily⟩ haStruct
+    have heta₂ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsFamily⟩ hbStruct
+    have hfieldsLength : artifact.projection.view.fields.length = 0 := by
+      calc
+        artifact.projection.view.fields.length =
+            artifact.projection.constructorInfo.numFields :=
+          artifact.projection.constructor_numFields_eq.symm
+        _ = constructorInfo.numFields :=
+          congrArg ConstructorVal.numFields artifact.constructor_info_eq
+        _ = 0 := rfl
+    have hfields : artifact.projection.view.fields = [] :=
+      List.length_eq_zero_iff.mp hfieldsLength
+    have hrebuild :
+        artifact.projection.view.etaRebuild levels params e₁' =
+          artifact.projection.view.etaRebuild levels params e₂' := by
+      simp [VProjectionView.etaRebuild, VProjectionView.projectionArgs,
+        VProjectionView.specializedFields_eq, hfields]
+    rw [hrebuild] at heta₁
+    exact VEnv.IsDefEqU.trans c.Ewf c.Δwf ⟨_, heta₁.symm⟩ ⟨_, heta₂⟩
+  | restored artifact =>
+    have ⟨head', hstack⟩ := AppStack.build <|
+      normalizedType.mkAppList_getAppArgsList ▸ tTypeTr
+    have hheadTr := hstack.tr
+    rw [hhead] at hheadTr
+    let .const (us' := levels) hconst hlevelsMap hlevelsHostLength := hheadTr
+    have hviewFamily := artifact.projection.viewWF.family
+    rw [artifact.projection.name_eq] at hviewFamily
+    rw [hviewFamily] at hconst
+    cases hconst
+    have hlevelsWF : ∀ level ∈ levels,
+        level.WF c.lparams.length :=
+      VLevel.WF.of_mapM_ofLevel hlevelsMap
+    have hsourceUvars :
+        artifact.projection.view.sourceFamily.uvars =
+          artifact.projection.view.uvars :=
+      artifact.projection.view.family_uvars_eq
+    have hlevelsLength : levels.length = artifact.projection.view.uvars :=
+      (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
+        (hlevelsHostLength.trans hsourceUvars)
+    have hfamilyHead : c.HasType (.const familyName levels)
+        (artifact.projection.view.familyType.instL levels) :=
+      by
+        simpa [artifact.projection.name_eq] using
+          artifact.projection.viewWF.familyConst_hasType c.Ewf.ordered
+            (Γ := c.vlctx.toCtx) levels hlevelsWF hlevelsLength
+    let rawParams := artifact.projection.view.rawParams.map
+      (VExpr.instL levels)
+    have hfamilyHeadShape : c.HasType (.const familyName levels)
+        (VExpr.forallN rawParams
+          (.sort (artifact.projection.view.resultLevel.inst levels))) := by
+      simpa [rawParams, artifact.projection.view.familyType_eq_forallN,
+        VExpr.instL_forallN, VExpr.forallN,
+        VExpr.instL] using hfamilyHead
+    have htTypeIsType : c.venv.IsType c.lparams.length c.vlctx.toCtx tType' :=
+      (aTyped.isType c.Ewf.ordered c.Δwf).defeqU_l c.Ewf c.Δwf
+        tTypeEq.symm
+    have normalizedTypeTr : c.TrExprS
+        (normalizedType.getAppFn.mkAppList normalizedType.getAppArgsList)
+        tType' := by
+      rw [normalizedType.mkAppList_getAppArgsList]
+      exact tTypeTr
+    obtain ⟨params, _hparamsTr, hparamsSpine, hfullTr⟩ :=
+      AppStack.toSpineWF_of_isType
+        (f := normalizedType.getAppFn)
+        (args := normalizedType.getAppArgsList)
+        (full' := tType') hstack hfamilyHeadShape
+        normalizedTypeTr htTypeIsType
+    have hparamsLength : params.length = artifact.projection.view.nparams :=
+      hparamsSpine.forallN_sort_length.trans <| by
+        simpa [rawParams] using
+          artifact.projection.view.rawParams_length
+    have hfamilyShape : artifact.projection.view.familyType.instL levels =
+        VExpr.forallN rawParams
+          (.sort (artifact.projection.view.resultLevel.inst levels)) := by
+      simp [rawParams, artifact.projection.view.familyType_eq_forallN,
+        VExpr.instL_forallN, VExpr.forallN, VExpr.instL]
+    have hparamsFamily : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (artifact.projection.view.familyType.instL levels) params
+        (.sort (artifact.projection.view.resultLevel.inst levels)) := by
+      rw [hfamilyShape]
+      exact hparamsSpine
+    have hfullStruct : c.TrExprS normalizedType
+        (artifact.projection.view.structureType levels params) := by
+      rw [← normalizedType.mkAppList_getAppArgsList]
+      simpa [VRestoredBlockStructureView.structureType,
+        artifact.projection.name_eq] using hfullTr
+    have hfullEq := hfullStruct.uniq c.Ewf (.refl c.Ewf c.Δwf) tTypeTr
+    have hstructTy₁ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq tTypeEq
+    have hstructTy₂ := VEnv.IsDefEqU.trans c.Ewf c.Δwf hfullEq (h hb)
+    have haStruct := aTyped.defeqU_r c.Ewf c.Δwf hstructTy₁.symm
+    have hbStruct := bTyped.defeqU_r c.Ewf c.Δwf hstructTy₂.symm
+    have heta₁ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsFamily⟩ haStruct
+    have heta₂ := artifact.eta c.Ewf c.Δwf hlevelsWF hlevelsLength
+      hparamsLength ⟨_, hparamsFamily⟩ hbStruct
+    have hfieldsLength : artifact.projection.view.fields.length = 0 := by
+      calc
+        artifact.projection.view.fields.length =
+            artifact.projection.constructorInfo.numFields :=
+          artifact.projection.constructor_numFields_eq.symm
+        _ = constructorInfo.numFields :=
+          congrArg ConstructorVal.numFields artifact.constructor_info_eq
+        _ = 0 := rfl
+    have hfields : artifact.projection.view.fields = [] :=
+      List.length_eq_zero_iff.mp hfieldsLength
+    have hrebuild :
+        artifact.projection.view.operationalEtaRebuild levels params e₁' =
+          artifact.projection.view.operationalEtaRebuild levels params e₂' := by
+      simp [VRestoredBlockStructureView.operationalEtaRebuild, VRestoredBlockStructureView.operationalProjectionArgs,
+        VRestoredBlockStructureView.specializedFields, hfields]
+    rw [hrebuild] at heta₁
+    exact VEnv.IsDefEqU.trans c.Ewf c.Δwf ⟨_, heta₁.symm⟩ ⟨_, heta₂⟩
 
 theorem isDefEqUnitLike.WF {c : VContext} {s : VState}
     (he₁ : c.TrExprS e₁ e₁') (he₂ : c.TrExprS e₂ e₂') :

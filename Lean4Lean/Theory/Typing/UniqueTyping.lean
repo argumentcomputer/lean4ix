@@ -189,33 +189,42 @@ instance : CoeOut (VEnv.WF env) (VEnv.ConversionRegular env) :=
   ⟨WF.conversionRegular⟩
 
 set_option warn.sorry false in
-variable! (henv : VEnv.WF env) (hΓ : OnCtx Γ' (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ : OnCtx Γ' (env.IsType U)) in
 theorem IsDefEqU.weakN_iff (W : Ctx.LiftN n k Γ Γ') :
     env.IsDefEqU U Γ' (e1.liftN n k) (e2.liftN n k) ↔ env.IsDefEqU U Γ e1 e2 := by
-  refine ⟨fun h => have := henv; have := hΓ; sorry, fun h => h.weakN henv W⟩
+  refine ⟨fun h => have := henv; have := hΓ; sorry,
+    fun h => h.weakN henv.ordered W⟩
 
-variable! (henv : VEnv.WF env) (hΓ : OnCtx Γ' (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ : OnCtx Γ' (env.IsType U)) in
 theorem _root_.Lean4Lean.VExpr.WF.weakN_iff (W : Ctx.LiftN n k Γ Γ') :
     VExpr.WF env U Γ' (e.liftN n k) ↔ VExpr.WF env U Γ e := IsDefEqU.weakN_iff henv hΓ W
 
-theorem IsDefEq.skips (henv : VEnv.WF env) (hΓ : OnCtx Γ' (env.IsType U))
+theorem IsDefEq.skips (henv : VEnv.ConversionRegular env)
+    (hΓ : OnCtx Γ' (env.IsType U))
     (W : Ctx.LiftN n k Γ Γ')
     (H : env.IsDefEq U Γ' e₁ e₂ A) (h1 : e₁.Skips n k) (h2 : e₂.Skips n k) :
     ∃ B, env.IsDefEq U Γ' e₁ e₂ B ∧ B.Skips n k := by
   obtain ⟨e₁, rfl⟩ := VExpr.skips_iff_exists.1 h1
   obtain ⟨e₂, rfl⟩ := VExpr.skips_iff_exists.1 h2
   have ⟨_, H⟩ := (IsDefEqU.weakN_iff henv hΓ W).1 ⟨_, H⟩
-  exact ⟨_, H.weakN henv W, .liftN⟩
+  exact ⟨_, H.weakN henv.ordered W, .liftN⟩
 
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) (hΓ : OnCtx Γ (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ' : OnCtx Γ' (env.IsType U))
+    (hΓ : OnCtx Γ (env.IsType U)) in
 theorem IsDefEq.weakN_iff' (W : Ctx.LiftN n k Γ Γ') :
     env.IsDefEq U Γ' (e1.liftN n k) (e2.liftN n k) (A.liftN n k) ↔ env.IsDefEq U Γ e1 e2 A := by
-  refine ⟨fun h => ?_, fun h => h.weakN henv W⟩
+  refine ⟨fun h => ?_, fun h => h.weakN henv.ordered W⟩
   have ⟨_, H⟩ := (IsDefEqU.weakN_iff henv hΓ' W).1 ⟨_, h⟩
-  refine IsDefEqU.defeqDF henv hΓ ?_ H
-  exact (IsDefEqU.weakN_iff henv hΓ' W).1 <| (H.weakN henv W).uniqU henv hΓ' h.symm
+  have liftedTypeEq := henv.hasType_uniqU hΓ'
+    (H.weakN henv.ordered W).hasType.1 h.hasType.1
+  have typeEq := (IsDefEqU.weakN_iff henv hΓ' W).1 liftedTypeEq
+  obtain ⟨_, hB⟩ := H.isType henv.ordered hΓ
+  exact .defeqDF (henv.isDefEqU_of_l hΓ typeEq hB) H
 
-variable! (henv : VEnv.WF env) in
+variable! (henv : VEnv.ConversionRegular env) in
 theorem _root_.Lean4Lean.OnCtx.weakN_inv
     (W : Ctx.LiftN n k Γ Γ') (H : OnCtx Γ' (env.IsType U)) : OnCtx Γ (env.IsType U) := by
   induction W with
@@ -228,17 +237,20 @@ theorem _root_.Lean4Lean.OnCtx.weakN_inv
     let ⟨H1, _, H2⟩ := H
     exact ⟨ih H1, _, (IsDefEq.weakN_iff' henv H1 (ih H1) W).1 H2⟩
 
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ' : OnCtx Γ' (env.IsType U)) in
 theorem IsDefEq.weakN_iff (W : Ctx.LiftN n k Γ Γ') :
     env.IsDefEq U Γ' (e1.liftN n k) (e2.liftN n k) (A.liftN n k) ↔ env.IsDefEq U Γ e1 e2 A :=
   IsDefEq.weakN_iff' henv hΓ' (hΓ'.weakN_inv henv W) W
 
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ' : OnCtx Γ' (env.IsType U)) in
 theorem HasType.weakN_iff (W : Ctx.LiftN n k Γ Γ') :
     env.HasType U Γ' (e.liftN n k) (A.liftN n k) ↔ env.HasType U Γ e A :=
   IsDefEq.weakN_iff henv hΓ' W
 
-variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) in
+variable! (henv : VEnv.ConversionRegular env)
+    (hΓ' : OnCtx Γ' (env.IsType U)) in
 theorem IsType.weakN_iff (W : Ctx.LiftN n k Γ Γ') :
     env.IsType U Γ' (A.liftN n k) ↔ env.IsType U Γ A :=
   exists_congr fun _ => HasType.weakN_iff henv hΓ' W (A := .sort _)

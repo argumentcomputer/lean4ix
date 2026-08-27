@@ -2570,7 +2570,7 @@ private theorem outParamVEnvs_wf : outParamVEnvs.WF outParamKernelEnv where
   hasPrimitives := outParam_hasPrimitives
   safePrimitives := outParam_safePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name _info h
     change outParamMap.find?' name = some (.ctorInfo _info) at h
     rw [outParamMap_wf.find?'_eq_find?] at h
@@ -3486,7 +3486,7 @@ private theorem aliasFormerNormalizationVEnvs_wf :
   hasPrimitives := aliasFormerNormalization_hasPrimitives
   safePrimitives := aliasFormerNormalization_safePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name _info h
     change typeFamilyAliasMap.find?' name = some (.ctorInfo _info) at h
     rw [typeFamilyAliasMap_wf.find?'_eq_find?] at h
@@ -3614,7 +3614,7 @@ private theorem aliasRecNormalizationVEnvs_wf :
   hasPrimitives := aliasRecNormalization_hasPrimitives
   safePrimitives := aliasRecNormalization_safePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name _info h
     change aliasRecTypeMap.find?' name = some (.ctorInfo _info) at h
     rw [aliasRecTypeMap_wf.find?'_eq_find?] at h
@@ -7442,7 +7442,7 @@ private def aliasFormerFamilyStage :
   validation := aliasFormerFamilyValidationRun
   typeEnv := aliasFormerTypeEnv
   addInduct := aliasFormerCtorNormalizationAddType
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name _info h
     change aliasFormerTypeMap.find?' name = some (.ctorInfo _info) at h
     rw [aliasFormerTypeMap_wf.find?'_eq_find?] at h
@@ -8445,7 +8445,7 @@ private def annotatedPiFamilyStage :
   validation := annotatedPiFamilyValidationRun
   typeEnv := annotatedPiTypeEnv
   addInduct := annotatedPiAddType
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name _info h
     change annotatedPiTypeMap.find?' name = some (.ctorInfo _info) at h
     rw [annotatedPiTypeMap_wf.find?'_eq_find?] at h

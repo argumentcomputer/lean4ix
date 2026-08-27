@@ -1585,19 +1585,113 @@ theorem treeListConsGenerationWF :
       · exact ⟨.app (.const ``TreeList [.param 0]) (.bvar 1), rfl, rfl⟩
       · exact ⟨trivial, .nil⟩
 
+theorem treeIdentityGeneration :
+    treeDecl.identityBlockGeneration? = some treeGeneration :=
+  (Option.some_get (x := treeDecl.identityBlockGeneration?)
+    (by decide)).symm
+
+theorem treeGeneratedParams_eq :
+    treeGeneration.generatedParams = [.sort (.succ (.param 0))] := by
+  rw [(treeGeneration.identity_generatedSurfaces
+    treeIdentityGeneration).1]
+  rfl
+
+theorem treeGeneratedIndices_eq :
+    treeGeneration.generatedIndices =
+      fun family => family.rawIndices treeDecl.nparams :=
+  (treeGeneration.identity_generatedSurfaces treeIdentityGeneration).2.1
+
+theorem treeGeneratedFields_eq :
+    treeGeneration.generatedFields =
+      fun constructor => constructor.ctor.rawFields treeDecl.nparams :=
+  (treeGeneration.identity_generatedSurfaces treeIdentityGeneration).2.2
+
+theorem treeGenerationBlock_eq :
+    treeGeneration.block = treeNormalizedBlock := by
+  apply Option.some.inj
+  exact (treeGeneration.identity_checkBlock? treeIdentityGeneration).symm.trans
+    treeNormalizedBlock.checkBlock?
+
+theorem treeGenerationCheckedParams_eq :
+    treeGeneration.block.checked.params =
+      [.sort (.succ (.param 0))] := by
+  rw [treeGenerationBlock_eq]
+  rfl
+
 theorem treeBlockGenerationWF :
     treeGeneration.WF VEnv.empty treeBlockEnv := by
+  have hparams : VEnv.empty.OnTel 1 []
+      [.sort (.succ (.param 0))] :=
+    ⟨⟨_, VEnv.HasType.sort (by decide)⟩, trivial⟩
   refine {
     blockWF := treeValidationCertificate.wf
     resultLevelWF := by decide
     paramsTel := ?_
+    generatedParamsTel := ?_
+    generatedIndicesTel := ?_
+    generatedFieldsTel := ?_
     families := ?_
     constructors := ?_ }
   · change VEnv.empty.TelDefEq 1 []
       [.sort (.succ (.param 0))] [.sort (.succ (.param 0))]
-    exact (show VEnv.empty.OnTel 1 []
-      [.sort (.succ (.param 0))] from
-        ⟨⟨_, VEnv.HasType.sort (by decide)⟩, trivial⟩).telDefEq_refl
+    exact hparams.telDefEq_refl
+  · change VEnv.empty.TelDefEq 1 []
+      [.sort (.succ (.param 0))] [.sort (.succ (.param 0))]
+    exact hparams.telDefEq_refl
+  · intro family hfamily
+    have hfamilies : treeGeneration.families =
+        [treeGeneration.families[0], treeGeneration.families[1]] := rfl
+    rw [hfamilies] at hfamily
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hfamily
+    rcases hfamily with rfl | rfl <;> change True <;> trivial
+  · intro constructor hconstructor
+    have hconstructors : treeGeneration.flatCtors =
+        [treeGeneration.flatCtors[0], treeGeneration.flatCtors[1],
+          treeGeneration.flatCtors[2], treeGeneration.flatCtors[3],
+          treeGeneration.flatCtors[4]] := rfl
+    rw [hconstructors] at hconstructor
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hconstructor
+    rcases hconstructor with rfl | rfl | rfl | rfl | rfl
+    · rw [treeGeneratedParams_eq,
+        congrFun treeGeneratedFields_eq treeGeneration.flatCtors[0]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := treeLeafGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := treeGeneration.block.checked.params) emitted).2
+      rw [treeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [treeGeneratedParams_eq,
+        congrFun treeGeneratedFields_eq treeGeneration.flatCtors[1]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := treeNodeGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := treeGeneration.block.checked.params) emitted).2
+      rw [treeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [treeGeneratedParams_eq,
+        congrFun treeGeneratedFields_eq treeGeneration.flatCtors[2]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := treeBranchGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := treeGeneration.block.checked.params) emitted).2
+      rw [treeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [treeGeneratedParams_eq,
+        congrFun treeGeneratedFields_eq treeGeneration.flatCtors[3]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := treeListNilGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := treeGeneration.block.checked.params) emitted).2
+      rw [treeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [treeGeneratedParams_eq,
+        congrFun treeGeneratedFields_eq treeGeneration.flatCtors[4]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := treeListConsGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := treeGeneration.block.checked.params) emitted).2
+      rw [treeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
   · intro family hfamily
     have hfamilies : treeGeneration.families =
         [treeGeneration.families[0], treeGeneration.families[1]] := rfl
@@ -1905,6 +1999,57 @@ theorem indexedTreeListConsGenerationWF :
       · refine ⟨trivial, ?_⟩
         exact .cons (VEnv.HasType.bvar (.succ .zero)) .nil
 
+theorem indexedTreeIdentityGeneration :
+    indexedTreeDecl.identityBlockGeneration? = some indexedTreeGeneration :=
+  (Option.some_get (x := indexedTreeDecl.identityBlockGeneration?)
+    (by decide)).symm
+
+theorem indexedTreeGeneratedParams_eq :
+    indexedTreeGeneration.generatedParams =
+      [.sort (.succ (.param 0))] := by
+  rw [(indexedTreeGeneration.identity_generatedSurfaces
+    indexedTreeIdentityGeneration).1]
+  rfl
+
+theorem indexedTreeGeneratedIndices_eq :
+    indexedTreeGeneration.generatedIndices =
+      fun family => family.rawIndices indexedTreeDecl.nparams :=
+  (indexedTreeGeneration.identity_generatedSurfaces
+    indexedTreeIdentityGeneration).2.1
+
+theorem indexedTreeGeneratedFields_eq :
+    indexedTreeGeneration.generatedFields =
+      fun constructor => constructor.ctor.rawFields indexedTreeDecl.nparams :=
+  (indexedTreeGeneration.identity_generatedSurfaces
+    indexedTreeIdentityGeneration).2.2
+
+theorem indexedTreeGenerationBlock_eq :
+    indexedTreeGeneration.block = indexedTreeNormalizedBlock := by
+  apply Option.some.inj
+  exact (indexedTreeGeneration.identity_checkBlock?
+    indexedTreeIdentityGeneration).symm.trans
+      indexedTreeNormalizedBlock.checkBlock?
+
+theorem indexedTreeGenerationCheckedParams_eq :
+    indexedTreeGeneration.block.checked.params =
+      [.sort (.succ (.param 0))] := by
+  rw [indexedTreeGenerationBlock_eq]
+  rfl
+
+theorem indexedTreeFirstRawIndices_eq :
+    indexedTreeGeneration.families[0].rawIndices
+      indexedTreeDecl.nparams = [.const ``Nat []] := by
+  unfold BlockGenerationChecked.families
+  simp only [indexedTreeGenerationBlock_eq]
+  rfl
+
+theorem indexedTreeSecondRawIndices_eq :
+    indexedTreeGeneration.families[1].rawIndices
+      indexedTreeDecl.nparams = [.const ``Nat []] := by
+  unfold BlockGenerationChecked.families
+  simp only [indexedTreeGenerationBlock_eq]
+  rfl
+
 theorem indexedTreeBlockGenerationWF :
     indexedTreeGeneration.WF natFinalEnv indexedTreeBlockEnv := by
   have hNat : natFinalEnv.constants ``Nat =
@@ -1920,8 +2065,77 @@ theorem indexedTreeBlockGenerationWF :
     blockWF := indexedTreeValidationCertificate.wf
     resultLevelWF := by decide
     paramsTel := hparams.telDefEq_refl
+    generatedParamsTel := hparams.telDefEq_refl
+    generatedIndicesTel := ?_
+    generatedFieldsTel := ?_
     families := ?_
     constructors := ?_ }
+  · intro family hfamily
+    have hfamilies : indexedTreeGeneration.families =
+        [indexedTreeGeneration.families[0],
+          indexedTreeGeneration.families[1]] := rfl
+    rw [hfamilies] at hfamily
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hfamily
+    rcases hfamily with rfl | rfl
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedIndices_eq
+          indexedTreeGeneration.families[0],
+        indexedTreeFirstRawIndices_eq]
+      change natFinalEnv.TelDefEq 1
+        [.sort (.succ (.param 0))] [.const ``Nat []] [.const ``Nat []]
+      exact hfamilyTel.telDefEq_refl.drop 1
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedIndices_eq
+          indexedTreeGeneration.families[1],
+        indexedTreeSecondRawIndices_eq]
+      change natFinalEnv.TelDefEq 1
+        [.sort (.succ (.param 0))] [.const ``Nat []] [.const ``Nat []]
+      exact hfamilyTel.telDefEq_refl.drop 1
+  · intro constructor hconstructor
+    have hconstructors : indexedTreeGeneration.flatCtors =
+        [indexedTreeGeneration.flatCtors[0],
+          indexedTreeGeneration.flatCtors[1],
+          indexedTreeGeneration.flatCtors[2],
+          indexedTreeGeneration.flatCtors[3]] := rfl
+    rw [hconstructors] at hconstructor
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hconstructor
+    rcases hconstructor with rfl | rfl | rfl | rfl
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedFields_eq
+          indexedTreeGeneration.flatCtors[0]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := indexedTreeLeafGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := indexedTreeGeneration.block.checked.params) emitted).2
+      rw [indexedTreeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedFields_eq
+          indexedTreeGeneration.flatCtors[1]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := indexedTreeNodeGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := indexedTreeGeneration.block.checked.params) emitted).2
+      rw [indexedTreeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedFields_eq
+          indexedTreeGeneration.flatCtors[2]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := indexedTreeListNilGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := indexedTreeGeneration.block.checked.params) emitted).2
+      rw [indexedTreeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
+    · rw [indexedTreeGeneratedParams_eq,
+        congrFun indexedTreeGeneratedFields_eq
+          indexedTreeGeneration.flatCtors[3]]
+      apply VEnv.OnTel.telDefEq_refl
+      have emitted := indexedTreeListConsGenerationWF.emittedTel.raw_onTel
+      have fields := (VEnv.OnTel.of_append
+        (As := indexedTreeGeneration.block.checked.params) emitted).2
+      rw [indexedTreeGenerationCheckedParams_eq] at fields
+      simpa only [List.append_nil] using fields
   · intro family hfamily
     have hfamilies : indexedTreeGeneration.families =
         [indexedTreeGeneration.families[0],
@@ -2433,7 +2647,7 @@ theorem treeCandidateVEnvsWF :
   hasPrimitives := treeCandidateHasPrimitives
   safePrimitives := treeCandidateSafePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name info found
     change ({} : ConstMap).find?' name = some (.ctorInfo info) at found
     rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at found
@@ -2590,6 +2804,74 @@ theorem treeListConsSourceTr :
     treeCandidateBlockEnvOrdered trivial
     (treeCtorWF treeListType.ctors[1] (.inr (by simp [treeListType])))
 
+/-- Concrete dependency masks for the hand-written ordinary mutual fixture.
+These mirror the producer-generated support now retained by candidate
+constructor sources. -/
+theorem treeLeafSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields treeType.ctors[0].type).length
+      treeKernelType.ctors[0].type treeType.ctors[0].type := by
+  dsimp [treeKernelType, treeType, treeLeafKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+    · exact .nil _ _
+
+theorem treeNodeSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields treeType.ctors[1].type).length
+      treeKernelType.ctors[1].type treeType.ctors[1].type := by
+  dsimp [treeKernelType, treeType, treeNodeKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+    · exact .nil _ _
+
+theorem treeBranchSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields treeType.ctors[2].type).length
+      treeKernelType.ctors[2].type treeType.ctors[2].type := by
+  dsimp [treeKernelType, treeType, treeBranchKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+    · exact .nil _ _
+
+theorem treeListNilSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields treeListType.ctors[0].type).length
+      treeListKernelType.ctors[0].type treeListType.ctors[0].type := by
+  dsimp [treeListKernelType, treeListType, treeListNilKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · exact .nil _ _
+
+theorem treeListConsSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields treeListType.ctors[1].type).length
+      treeListKernelType.ctors[1].type treeListType.ctors[1].type := by
+  dsimp [treeListKernelType, treeListType, treeListConsKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+    · apply ProjectionSpineSupport.cons
+      · intro _
+        exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+      · exact .nil _ _
+
 theorem treeCandidateFamilyEnvNoCtorInfo :
     ∀ name info, treeExecution.familyEnv.find? name ≠
       some (.ctorInfo info) := by
@@ -2643,7 +2925,7 @@ def treeCandidateStaging : NormalizationCandidateBlockStagingInput
       · simp [treeListType, VEnv.reflectedPrimitiveNames]
       · simp [treeListType, Kernel.Environment.primitives, NameSet.ofList,
           NameSet.contains]
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name info found
     exact treeCandidateFamilyEnvNoCtorInfo name info found
   structureEtaReady := StructureEtaReady.of_no_ctorInfo <| by
@@ -2657,25 +2939,35 @@ def treeCandidateConstructorSources :
     (.cons {
         name_eq := rfl
         uvars_eq := rfl
-        source_tr := treeLeafSourceTr }
+        source_tr := treeLeafSourceTr
+        sourceArity_eq := by decide
+        spineSupport := treeLeafSpineSupport }
       (.cons {
           name_eq := rfl
           uvars_eq := rfl
-          source_tr := treeNodeSourceTr }
+          source_tr := treeNodeSourceTr
+          sourceArity_eq := by decide
+          spineSupport := treeNodeSpineSupport }
         (.cons {
             name_eq := rfl
             uvars_eq := rfl
-            source_tr := treeBranchSourceTr }
+            source_tr := treeBranchSourceTr
+            sourceArity_eq := by decide
+            spineSupport := treeBranchSpineSupport }
           .nil)))
     (.cons
       (.cons {
           name_eq := rfl
           uvars_eq := rfl
-          source_tr := treeListNilSourceTr }
+          source_tr := treeListNilSourceTr
+          sourceArity_eq := by decide
+          spineSupport := treeListNilSpineSupport }
         (.cons {
             name_eq := rfl
             uvars_eq := rfl
-            source_tr := treeListConsSourceTr }
+            source_tr := treeListConsSourceTr
+            sourceArity_eq := by decide
+            spineSupport := treeListConsSpineSupport }
           .nil))
       .nil)
 
@@ -2731,6 +3023,15 @@ def treeExactProducedBlockGeneration : ExactProducedBlockGenerationRun
   analysis := treeCandidateIdentityAnalysis
   checked := treeCheckedBlockWF
   resultLevelWF := by decide
+  generatedParamsTel :=
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      treeBlockGenerationWF.generatedParamsTel
+  generatedIndicesTel := fun family member =>
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      (treeBlockGenerationWF.generatedIndicesTel family member)
+  generatedFieldsTel := fun constructor member =>
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      (treeBlockGenerationWF.generatedFieldsTel constructor member)
 
 /-- The ordinary exact semantic run paired with the constructor environment,
 elimination level, recursor universe layout, and K decision from the same
@@ -3762,6 +4063,69 @@ theorem indexedTreeListConsSourceTr :
     (indexedTreeCtorWF indexedTreeListType.ctors[1]
       (.inr (by simp [indexedTreeListType])))
 
+/-- Concrete dependency masks for the indexed mutual fixture. -/
+theorem indexedTreeLeafSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields indexedTreeType.ctors[0].type).length
+      indexedTreeKernelType.ctors[0].type indexedTreeType.ctors[0].type := by
+  dsimp [indexedTreeKernelType, indexedTreeType, indexedTreeLeafKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+    · exact .nil _ _
+
+theorem indexedTreeNodeSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields indexedTreeType.ctors[1].type).length
+      indexedTreeKernelType.ctors[1].type indexedTreeType.ctors[1].type := by
+  dsimp [indexedTreeKernelType, indexedTreeType, indexedTreeNodeKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro sourceClosed
+      simp [Expr.hasLooseBVar'] at sourceClosed
+    · apply ProjectionSpineSupport.cons
+      · intro _
+        exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+      · exact .nil _ _
+
+theorem indexedTreeListNilSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields indexedTreeListType.ctors[0].type).length
+      indexedTreeListKernelType.ctors[0].type
+      indexedTreeListType.ctors[0].type := by
+  dsimp [indexedTreeListKernelType, indexedTreeListType,
+    indexedTreeListNilKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · exact .nil _ _
+
+theorem indexedTreeListConsSpineSupport :
+    ProjectionSpineSupport
+      (VInductDecl.ctorFields indexedTreeListType.ctors[1].type).length
+      indexedTreeListKernelType.ctors[1].type
+      indexedTreeListType.ctors[1].type := by
+  dsimp [indexedTreeListKernelType, indexedTreeListType,
+    indexedTreeListConsKernelInfo]
+  apply ProjectionSpineSupport.cons
+  · intro sourceClosed
+    simp [Expr.hasLooseBVar'] at sourceClosed
+  · apply ProjectionSpineSupport.cons
+    · intro sourceClosed
+      simp [Expr.hasLooseBVar'] at sourceClosed
+    · apply ProjectionSpineSupport.cons
+      · intro _
+        exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+      · apply ProjectionSpineSupport.cons
+        · intro _
+          exact VExpr.skips_iff.2 (by simp [VExpr.Skips'])
+        · exact .nil _ _
+
 def indexedTreeCandidateFamilyTypes :
     CandidateBlockFamilyTypeStagedListInput indexedTreeCandidatePreStage
       indexedTreeExecution.candidate.families indexedTreeDecl.types :=
@@ -3794,7 +4158,8 @@ theorem indexedTreeCandidateNindicesSize :
 /-- The exact family declaration trace transports the Nat-backed projection
 and eta certificate across both multi-constructor indexed families. -/
 theorem indexedTreeCandidatePostReadiness :
-    ProjectionReady indexedTreeExecution.familyEnv indexedTreeBlockEnv ∧
+    ProjectionResolutionReady indexedTreeExecution.familyEnv
+        indexedTreeBlockEnv ∧
       StructureEtaReady indexedTreeExecution.familyEnv
         indexedTreeBlockEnv := by
   have metadata : List.Forall₂
@@ -3869,21 +4234,29 @@ def indexedTreeCandidateConstructorSources :
     (.cons {
         name_eq := rfl
         uvars_eq := rfl
-        source_tr := indexedTreeLeafSourceTr }
+        source_tr := indexedTreeLeafSourceTr
+        sourceArity_eq := by decide
+        spineSupport := indexedTreeLeafSpineSupport }
       (.cons {
           name_eq := rfl
           uvars_eq := rfl
-          source_tr := indexedTreeNodeSourceTr }
+          source_tr := indexedTreeNodeSourceTr
+          sourceArity_eq := by decide
+          spineSupport := indexedTreeNodeSpineSupport }
         .nil))
     (.cons
       (.cons {
           name_eq := rfl
           uvars_eq := rfl
-          source_tr := indexedTreeListNilSourceTr }
+          source_tr := indexedTreeListNilSourceTr
+          sourceArity_eq := by decide
+          spineSupport := indexedTreeListNilSpineSupport }
         (.cons {
             name_eq := rfl
             uvars_eq := rfl
-            source_tr := indexedTreeListConsSourceTr }
+            source_tr := indexedTreeListConsSourceTr
+            sourceArity_eq := by decide
+            spineSupport := indexedTreeListConsSpineSupport }
           .nil))
       .nil)
 
@@ -3946,6 +4319,15 @@ def indexedTreeExactProducedBlockGeneration :
   analysis := indexedTreeCandidateIdentityAnalysis
   checked := indexedTreeCheckedBlockWF
   resultLevelWF := by decide
+  generatedParamsTel :=
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      indexedTreeBlockGenerationWF.generatedParamsTel
+  generatedIndicesTel := fun family member =>
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      (indexedTreeBlockGenerationWF.generatedIndicesTel family member)
+  generatedFieldsTel := fun constructor member =>
+    TypeChecker.TelDefEqEvidence.ofTelDefEq
+      (indexedTreeBlockGenerationWF.generatedFieldsTel constructor member)
 
 /-- Indexed exact semantic generation paired with its retained ordinary
 post-constructor elimination decisions. -/

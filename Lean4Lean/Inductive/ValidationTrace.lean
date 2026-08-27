@@ -1813,6 +1813,30 @@ def FamilyEnsureSortStep.Valid (step : FamilyEnsureSortStep) : Prop :=
       (TypeChecker.ensureSort step.source) =
     .ok step.result
 
+/-- Recover the state-bearing checker execution erased by the family
+validator's terminal `ensureSort` observation. -/
+theorem FamilyEnsureSortStep.innerRun
+    (step : FamilyEnsureSortStep) (hvalid : step.Valid) :
+    ∃ state : TypeChecker.State,
+      (TypeChecker.ensureSort step.source) step.context.toTypeChecker
+          ({} : TypeChecker.State) = .ok (step.result, state) := by
+  unfold FamilyEnsureSortStep.Valid TypeChecker.M.run at hvalid
+  cases hrun : (TypeChecker.ensureSort step.source)
+      { env := step.context.env
+        lctx := step.context.lctx
+        safety := step.context.safety
+        lparams := step.context.lparams
+        fuel := step.context.fuel }
+      ({} : TypeChecker.State) with
+  | error err =>
+      simp [StateT.run', Functor.map, Except.map, hrun] at hvalid
+  | ok pair =>
+      rcases pair with ⟨result, state⟩
+      have result_eq : result = step.result := by
+        simpa [StateT.run', Functor.map, Except.map, hrun] using hvalid
+      subst result
+      exact ⟨state, by simpa [Context.toTypeChecker] using hrun⟩
+
 /-- The exact statistics value passed to the outer family-validation
 continuation.  Keeping the nested assertions in this transparent helper
 preserves even the executable's inhabited fallback behavior for an empty
@@ -2405,9 +2429,10 @@ private theorem familyValidationTelescope_sizes_of_run
     (success : observeFamilyValidationTelescope nparams stats type i nindices
       fuel context = .ok result) :
     result.stats.nindices = stats.nindices ∧
-      result.stats.indConsts = stats.indConsts ∧
+    result.stats.indConsts = stats.indConsts ∧
     result.stats.levels = stats.levels ∧
       result.stats.resultLevel = stats.resultLevel ∧
+      result.stats.isNotZero = stats.isNotZero ∧
       result.stats.params.size = nparams ∧
       result.context.lparams = context.lparams ∧
       result.context.env = context.env ∧
@@ -2537,7 +2562,7 @@ private theorem familyValidationTelescope_sizes_of_run
           simp [ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
             MonadExceptOf.throw] at success
           subst result
-          refine ⟨rfl, rfl, rfl, rfl, ?_, rfl, rfl, rfl⟩
+          refine ⟨rfl, rfl, rfl, rfl, rfl, ?_, rfl, rfl, rfl⟩
           unfold familyValidationTelescopeStatsInvariant at invariant
           simpa using invariant.2
         · simp [hi, ReaderT.bind, Bind.bind, Except.bind, throw, throwThe,
@@ -2664,8 +2689,11 @@ private def familyValidationOuterStatsInvariant
     stats.nindices.size = dIdx ∧
     stats.indConsts.size = dIdx ∧
     stats.levels.length = context.lparams.length ∧
-    if dIdx = 0 then stats.params.size = 0
-    else stats.params.size = nparams
+    (if dIdx = 0 then stats.params.size = 0
+    else stats.params.size = nparams) ∧
+    ∀ familyIdx, familyIdx < dIdx →
+      stats.indConsts[familyIdx]? =
+        some (.const indTypes[familyIdx]!.name stats.levels)
 
 /-- A successful outer-family observer reaches the exact terminal block
 counts.  Nonemptiness is essential: the implementation's terminal `assert!`
@@ -2684,7 +2712,11 @@ private theorem familyValidationOuter_sizes_of_run
     result.stats.params.size = nparams ∧
       result.validationContext.env = context.env ∧
       result.validationContext.lparams = context.lparams ∧
-      result.validationContext.allowPrimitive = context.allowPrimitive := by
+      result.validationContext.allowPrimitive = context.allowPrimitive ∧
+      (∀ familyIdx, familyIdx < indTypes.size →
+        result.stats.indConsts[familyIdx]? = some
+          (.const indTypes[familyIdx]!.name result.stats.levels)) ∧
+      result.stats.levels = stats.levels := by
   unfold observeFamilyValidationOuterLoop at success
   rw [checkInductiveTypes.loopInd.eq_1] at success
   by_cases hdIdx : dIdx < indTypes.size
@@ -2742,7 +2774,7 @@ private theorem familyValidationOuter_sizes_of_run
                           omega
                         have hparams : stats.params.size = 0 := by
                           simpa only [hdIdx_zero, if_true] using
-                            invariant.2.2.2.2
+                            invariant.2.2.2.2.1
                         simp [hempty, hparams]
                       · have hdIdx_ne : dIdx ≠ 0 := by
                           intro hdIdx_zero
@@ -2751,7 +2783,7 @@ private theorem familyValidationOuter_sizes_of_run
                           exact hempty (Array.size_eq_zero_iff.mp hsize)
                         have hparams : stats.params.size = nparams := by
                           simpa only [hdIdx_ne, if_false] using
-                            invariant.2.2.2.2
+                            invariant.2.2.2.2.1
                         have hempty' : stats.indConsts.isEmpty = false := by
                           cases h : stats.indConsts.isEmpty with
                           | false => rfl
@@ -2760,7 +2792,8 @@ private theorem familyValidationOuter_sizes_of_run
                         simp only [hempty', Bool.false_eq_true, if_false,
                           hparams]
                     obtain ⟨hnindices, hindConsts, hlevels, _hresultLevel,
-                        hparams, hlparams, henv, hallowPrimitive⟩ :=
+                        _hisNotZero, hparams, hlparams, henv,
+                        hallowPrimitive⟩ :=
                       familyValidationTelescope_sizes_of_run nparams stats
                         root 0 0 context.fuel.inductiveFuel context
                         telescopeResult telescopeInvariant htelescope
@@ -2800,7 +2833,7 @@ private theorem familyValidationOuter_sizes_of_run
                                 indTypes (dIdx + 1) nextStats
                                 telescopeResult.context := by
                             unfold familyValidationOuterStatsInvariant at invariant ⊢
-                            refine ⟨by omega, ?_, ?_, ?_, ?_⟩
+                            refine ⟨by omega, ?_, ?_, ?_, ?_, ?_⟩
                             · simp only [nextStats, Array.size_push]
                               rw [hnindices, invariant.2.1]
                             · simp only [nextStats, Array.size_push]
@@ -2811,7 +2844,20 @@ private theorem familyValidationOuter_sizes_of_run
                             · simp only [show dIdx + 1 ≠ 0 by omega,
                                 if_false, nextStats]
                               exact hparams
-                          rw [← henv, ← hlparams, ← hallowPrimitive]
+                            · intro familyIdx familyIdxLt
+                              simp only [nextStats, Array.getElem?_push]
+                              have oldSize :
+                                  telescopeResult.stats.indConsts.size =
+                                    dIdx := by
+                                rw [hindConsts, invariant.2.2.1]
+                              by_cases current : familyIdx = dIdx
+                              · subst familyIdx
+                                simp [oldSize, hdIdx]
+                              · rw [if_neg (by omega)]
+                                rw [hindConsts, hlevels]
+                                exact invariant.2.2.2.2.2 _ (by omega)
+                          rw [← henv, ← hlparams, ← hallowPrimitive,
+                            ← hlevels]
                           apply familyValidationOuter_sizes_of_run nparams
                             indTypes (dIdx + 1) nextStats
                             telescopeResult.context result nonempty nextInvariant
@@ -2840,7 +2886,7 @@ private theorem familyValidationOuter_sizes_of_run
                                   indTypes (dIdx + 1) nextStats
                                   telescopeResult.context := by
                               unfold familyValidationOuterStatsInvariant at invariant ⊢
-                              refine ⟨by omega, ?_, ?_, ?_, ?_⟩
+                              refine ⟨by omega, ?_, ?_, ?_, ?_, ?_⟩
                               · simp only [nextStats, Array.size_push]
                                 rw [hnindices, invariant.2.1]
                               · simp only [nextStats, Array.size_push]
@@ -2851,7 +2897,20 @@ private theorem familyValidationOuter_sizes_of_run
                               · simp only [show dIdx + 1 ≠ 0 by omega,
                                   if_false, nextStats]
                                 exact hparams
-                            rw [← henv, ← hlparams, ← hallowPrimitive]
+                              · intro familyIdx familyIdxLt
+                                simp only [nextStats, Array.getElem?_push]
+                                have oldSize :
+                                    telescopeResult.stats.indConsts.size =
+                                      dIdx := by
+                                  rw [hindConsts, invariant.2.2.1]
+                                by_cases current : familyIdx = dIdx
+                                · subst familyIdx
+                                  simp [oldSize, hdIdx]
+                                · rw [if_neg (by omega)]
+                                  rw [hindConsts, hlevels]
+                                  exact invariant.2.2.2.2.2 _ (by omega)
+                            rw [← henv, ← hlparams, ← hallowPrimitive,
+                              ← hlevels]
                             apply familyValidationOuter_sizes_of_run nparams
                               indTypes (dIdx + 1) nextStats
                               telescopeResult.context result nonempty
@@ -2863,7 +2922,7 @@ private theorem familyValidationOuter_sizes_of_run
     have hdIdx_eq : dIdx = indTypes.size := by omega
     have hparams : stats.params.size = nparams := by
       have hdIdx_ne : dIdx ≠ 0 := by omega
-      simpa only [hdIdx_ne, if_false] using invariant.2.2.2.2
+      simpa only [hdIdx_ne, if_false] using invariant.2.2.2.2.1
     have hnindices : stats.nindices.size = indTypes.size := by
       omega
     have hindConsts : stats.indConsts.size = indTypes.size := by
@@ -2875,17 +2934,20 @@ private theorem familyValidationOuter_sizes_of_run
       Except.bind] at success
     simp [hlevels, hnindices, hindConsts, hparams] at success
     subst result
-    exact ⟨hnindices, hindConsts, hparams, rfl, rfl, rfl⟩
+    exact ⟨hnindices, hindConsts, hparams, rfl, rfl, rfl,
+      fun familyIdx familyIdxLt =>
+        invariant.2.2.2.2.2 familyIdx (by omega), rfl⟩
 termination_by indTypes.size - dIdx
 decreasing_by
   all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
 
 /-- Once at least one family has been accepted, the outer mutual-family loop
-never replaces the common result level selected by that first family.  Every
-later family may only pass the executable `isEquiv` comparison against it.
-The counter invariant is retained so the terminal `assert!` values are known
-to be the actual statistics rather than their inhabited fallbacks. -/
-private theorem familyValidationOuter_resultLevel_of_run
+never replaces either the common result level or its cached nonzero decision
+selected by that first family.  Every later family may only pass the
+executable `isEquiv` comparison against the common level.  The counter
+invariant is retained so the terminal `assert!` values are known to be the
+actual statistics rather than their inhabited fallbacks. -/
+private theorem familyValidationOuter_resultState_of_run
     (nparams : Nat) (indTypes : Array InductiveType)
     (dIdx : Nat) (stats : InductiveStats) (context : Context)
     (result : FamilyValidationBlockResult)
@@ -2894,7 +2956,8 @@ private theorem familyValidationOuter_resultLevel_of_run
       stats context)
     (success : observeFamilyValidationOuterLoop nparams indTypes dIdx stats
       context = .ok result) :
-    result.stats.resultLevel = stats.resultLevel := by
+    result.stats.resultLevel = stats.resultLevel ∧
+      result.stats.isNotZero = stats.isNotZero := by
   unfold observeFamilyValidationOuterLoop at success
   rw [checkInductiveTypes.loopInd.eq_1] at success
   by_cases hdIdx : dIdx < indTypes.size
@@ -2950,7 +3013,7 @@ private theorem familyValidationOuter_resultLevel_of_run
                           omega
                     have paramsSize : stats.params.size = nparams := by
                       simpa only [dIdx_ne, if_false] using
-                        invariant.2.2.2.2
+                            invariant.2.2.2.2.1
                     have telescopeInvariant :
                         familyValidationTelescopeStatsInvariant nparams 0
                           stats := by
@@ -2958,7 +3021,8 @@ private theorem familyValidationOuter_resultLevel_of_run
                       simp only [Nat.zero_le, statsEmpty, Bool.false_eq_true,
                         if_false, paramsSize, and_self]
                     obtain ⟨hnindices, hindConsts, hlevels, hresultLevel,
-                        hparams, hlparams, henv, hallowPrimitive⟩ :=
+                        hisNotZero, hparams, hlparams, henv,
+                        hallowPrimitive⟩ :=
                       familyValidationTelescope_sizes_of_run nparams stats
                         root 0 0 context.fuel.inductiveFuel context
                         telescopeResult telescopeInvariant htelescope
@@ -3004,7 +3068,7 @@ private theorem familyValidationOuter_resultLevel_of_run
                                 telescopeResult.context := by
                             unfold familyValidationOuterStatsInvariant
                               at invariant ⊢
-                            refine ⟨by omega, ?_, ?_, ?_, ?_⟩
+                            refine ⟨by omega, ?_, ?_, ?_, ?_, ?_⟩
                             · simp only [nextStats, Array.size_push]
                               rw [hnindices, invariant.2.1]
                             · simp only [nextStats, Array.size_push]
@@ -3015,18 +3079,31 @@ private theorem familyValidationOuter_resultLevel_of_run
                             · simp only [show dIdx + 1 ≠ 0 by omega,
                                 if_false, nextStats]
                               exact hparams
-                          have tail := familyValidationOuter_resultLevel_of_run
+                            · intro familyIdx familyIdxLt
+                              simp only [nextStats, Array.getElem?_push]
+                              have oldSize :
+                                  telescopeResult.stats.indConsts.size =
+                                    dIdx := by
+                                rw [hindConsts, invariant.2.2.1]
+                              by_cases current : familyIdx = dIdx
+                              · subst familyIdx
+                                simp [oldSize, hdIdx]
+                              · rw [if_neg (by omega)]
+                                rw [hindConsts, hlevels]
+                                exact invariant.2.2.2.2.2 _ (by omega)
+                          have tail := familyValidationOuter_resultState_of_run
                             nparams indTypes (dIdx + 1) nextStats
                             telescopeResult.context result (by omega)
                             nextInvariant (by
                               simpa only [observeFamilyValidationOuterLoop,
                                 nextStats] using success)
-                          exact tail.trans hresultLevel
+                          exact ⟨tail.1.trans hresultLevel,
+                            tail.2.trans hisNotZero⟩
   · rw [dif_neg hdIdx] at success
     unfold familyValidationOuterStatsInvariant at invariant
     have hdIdx_eq : dIdx = indTypes.size := by omega
     have hparams : stats.params.size = nparams := by
-      simpa only [dIdx_ne, if_false] using invariant.2.2.2.2
+      simpa only [dIdx_ne, if_false] using invariant.2.2.2.2.1
     have hnindices : stats.nindices.size = indTypes.size := by omega
     have hindConsts : stats.indConsts.size = indTypes.size := by omega
     have hlevels : stats.levels.length = context.lparams.length :=
@@ -3036,7 +3113,7 @@ private theorem familyValidationOuter_resultLevel_of_run
       Except.bind] at success
     simp [hlevels, hnindices, hindConsts, hparams] at success
     subst result
-    rfl
+    exact ⟨rfl, rfl⟩
 termination_by indTypes.size - dIdx
 decreasing_by
   all_goals exact Nat.sub_lt_sub_left hdIdx (Nat.lt_succ_self dIdx)
@@ -3131,7 +3208,20 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
           executeCandidateFamilyList
               { candidateContext with env := familyEnv, lctx := {} }
               familyTypes.candidates = .ok families →
-            CandidateFamilyParameterSpineList nparams families.candidates) :
+            CandidateFamilyParameterSpineList nparams families.candidates)
+    (indexCounts :
+      ∀ (familyTypes : CandidateFamilyTypeListExecution
+          { candidateContext with lctx := {} } types)
+        (families : CandidateFamilyListExecution
+          { candidateContext with env := familyEnv, lctx := {} }
+          familyTypes.candidates),
+        executeCandidateFamilyTypeList
+            { candidateContext with lctx := {} } types = .ok familyTypes →
+          executeCandidateFamilyList
+              { candidateContext with env := familyEnv, lctx := {} }
+              familyTypes.candidates = .ok families →
+            CandidateFamilyIndexCountList validation.stats nparams 0
+              families.candidates) :
     ∃ execution : NormalizationCandidateExecution nparams types numNested
         isUnsafe candidateContext,
       buildNormalizationCandidateExecution nparams types numNested isUnsafe
@@ -3184,7 +3274,13 @@ theorem NormalizationCandidateExecution.build_ok_of_candidateObservers
               split
               next _ =>
                 split
-                next _ => exact ⟨_, rfl⟩
+                next _ =>
+                  split
+                  next _ => exact ⟨_, rfl⟩
+                  next notCounts =>
+                    exact (notCounts
+                      (indexCounts familyTypes families familyTypesRun
+                        familiesRun).check_eq_true).elim
                 next notParameters =>
                   exact (notParameters
                     (parameterSpines familyTypes families familyTypesRun
@@ -3210,7 +3306,11 @@ theorem FamilyValidationBlockResult.invariants_of_run
     result.stats.indConsts.size = indTypes.length ∧
       result.validationContext.env = context.env ∧
       result.validationContext.lparams = context.lparams ∧
-      result.validationContext.allowPrimitive = context.allowPrimitive := by
+      result.validationContext.allowPrimitive = context.allowPrimitive ∧
+      (∀ familyIdx, familyIdx < indTypes.length →
+        result.stats.indConsts[familyIdx]? = some
+          (.const indTypes[familyIdx]!.name result.stats.levels)) ∧
+      result.stats.levels = context.lparams.map .param := by
   have indTypes_ne : indTypes ≠ [] := by
     intro hempty
     subst indTypes
@@ -3238,7 +3338,8 @@ theorem FamilyValidationBlockResult.invariants_of_run
     size_pos initialInvariant outerRun
   exact ⟨sizes.2.2.1, by simpa using sizes.1,
     by simpa using sizes.2.1, sizes.2.2.2.1, sizes.2.2.2.2.1,
-    sizes.2.2.2.2.2⟩
+    sizes.2.2.2.2.2.1, by simpa using sizes.2.2.2.2.2.2.1,
+    by simpa [InductiveStats.initial] using sizes.2.2.2.2.2.2.2⟩
 
 /-- Terminal counter invariants exposed by any successful nonempty arbitrary-
 block family-validation run. -/
@@ -3281,7 +3382,30 @@ theorem FamilyValidationBlockResult.validationContext_allowPrimitive_of_run
     (run : observeFamilyValidationBlock nparams indTypes context =
       .ok result) :
     result.validationContext.allowPrimitive = context.allowPrimitive :=
-  (result.invariants_of_run nonempty run).2.2.2.2.2
+  (result.invariants_of_run nonempty run).2.2.2.2.2.1
+
+/-- Every terminal family-constant slot is exactly the corresponding source
+family constant at the validator's retained declaration universes. -/
+theorem FamilyValidationBlockResult.indConsts_getElem?_of_run
+    (result : FamilyValidationBlockResult)
+    (nonempty : indTypes.isEmpty = false)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result)
+    (familyIdxLt : familyIdx < indTypes.length) :
+    result.stats.indConsts[familyIdx]? = some
+      (.const indTypes[familyIdx]!.name result.stats.levels) :=
+  (result.invariants_of_run nonempty run).2.2.2.2.2.2.1
+    familyIdx familyIdxLt
+
+/-- The validator's terminal family statistics retain the caller's exact
+universe-parameter list, not just its length. -/
+theorem FamilyValidationBlockResult.stats_levels_of_run
+    (result : FamilyValidationBlockResult)
+    (nonempty : indTypes.isEmpty = false)
+    (run : observeFamilyValidationBlock nparams indTypes context =
+      .ok result) :
+    result.stats.levels = context.lparams.map .param :=
+  (result.invariants_of_run nonempty run).2.2.2.2.2.2.2
 
 /-- Family validation never changes the kernel environment in its reader
 context.  The empty block is handled directly; nonempty blocks use the retained
@@ -3596,11 +3720,12 @@ theorem
               (fuel := candidate.type.context.fuel.inductiveFuel) _ fuel_le
               rfl annotations () validation
 
-/-- The common result universe retained by a successful nonempty block is
-exactly the terminal sort selected by its first source-indexed family
-candidate.  Later families only compare their levels against this value and
-the outer validation loop preserves it to the final statistics record. -/
-theorem NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
+/-- The common result universe and its cached nonzero decision retained by a
+successful nonempty block are exactly the terminal sort and syntactic
+`isNeverZero` decision selected by its first source-indexed family candidate.
+Later families only compare their levels against this value, and the outer
+validation loop preserves both fields to the final statistics record. -/
+theorem NormalizationCandidateExecution.firstFamilyType_resultState_eq
     {source : InductiveType} {sources : List InductiveType}
     (execution : NormalizationCandidateExecution nparams
       (source :: sources) numNested isUnsafe context)
@@ -3610,7 +3735,8 @@ theorem NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
     (resultLevel : Level)
     (terminal : execution.familyTypes.candidates.head.type.trace.terminalResult =
       .sort resultLevel) :
-    execution.stats.resultLevel = resultLevel := by
+    execution.stats.resultLevel = resultLevel ∧
+      execution.stats.isNotZero = resultLevel.isNeverZero := by
   have hcount := execution.firstFamilyType_nparams_le_spineLength produced
     context_lctx_eq
   have hfuel :=
@@ -3725,16 +3851,58 @@ theorem NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
                 candidate.type.trace.terminalContext := by
             unfold familyValidationOuterStatsInvariant
             simp [firstStats, terminalLparams, parameterLength]
-          have finalLevel := familyValidationOuter_resultLevel_of_run
+          have finalState := familyValidationOuter_resultState_of_run
             nparams (source :: sources).toArray 1 firstStats
             candidate.type.trace.terminalContext
             execution.familyValidationResult (by omega) firstInvariant
             validation'
-          simpa only [NormalizationCandidateExecution.familyValidationResult,
-            firstStats] using finalLevel
+          exact ⟨
+            by
+              simpa only [
+                NormalizationCandidateExecution.familyValidationResult,
+                firstStats] using finalState.1,
+            by
+              simpa only [
+                NormalizationCandidateExecution.familyValidationResult,
+                firstStats] using finalState.2⟩
 
-/-- Reindex the first-family result-level theorem onto the complete assembled
+/-- Result-level projection of `firstFamilyType_resultState_eq`. -/
+theorem NormalizationCandidateExecution.firstFamilyType_resultLevel_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {})
+    (resultLevel : Level)
+    (terminal : execution.familyTypes.candidates.head.type.trace.terminalResult =
+      .sort resultLevel) :
+    execution.stats.resultLevel = resultLevel :=
+  (execution.firstFamilyType_resultState_eq produced context_lctx_eq
+    resultLevel terminal).1
+
+/-- Reindex the first-family result-state theorem onto the complete assembled
 candidate stored by the detailed execution. -/
+theorem NormalizationCandidateExecution.firstFamily_resultState_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {})
+    (resultLevel : Level)
+    (terminal : execution.candidate.families.head.familyType.type.trace.terminalResult =
+      .sort resultLevel) :
+    execution.stats.resultLevel = resultLevel ∧
+      execution.stats.isNotZero = resultLevel.isNeverZero := by
+  apply execution.firstFamilyType_resultState_eq produced context_lctx_eq
+    resultLevel
+  change execution.families.candidates.head.familyType.type.trace.terminalResult =
+    .sort resultLevel at terminal
+  rw [execution.families.produced.head_familyType] at terminal
+  exact terminal
+
+/-- Result-level projection of `firstFamily_resultState_eq`. -/
 theorem NormalizationCandidateExecution.firstFamily_resultLevel_eq
     {source : InductiveType} {sources : List InductiveType}
     (execution : NormalizationCandidateExecution nparams
@@ -3745,13 +3913,24 @@ theorem NormalizationCandidateExecution.firstFamily_resultLevel_eq
     (resultLevel : Level)
     (terminal : execution.candidate.families.head.familyType.type.trace.terminalResult =
       .sort resultLevel) :
-    execution.stats.resultLevel = resultLevel := by
-  apply execution.firstFamilyType_resultLevel_eq produced context_lctx_eq
-    resultLevel
-  change execution.families.candidates.head.familyType.type.trace.terminalResult =
-    .sort resultLevel at terminal
-  rw [execution.families.produced.head_familyType] at terminal
-  exact terminal
+    execution.stats.resultLevel = resultLevel :=
+  (execution.firstFamily_resultState_eq produced context_lctx_eq resultLevel
+    terminal).1
+
+/-- Cached nonzero-decision projection of `firstFamily_resultState_eq`. -/
+theorem NormalizationCandidateExecution.firstFamily_isNotZero_eq
+    {source : InductiveType} {sources : List InductiveType}
+    (execution : NormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context)
+    (produced : buildNormalizationCandidateExecution nparams
+      (source :: sources) numNested isUnsafe context = .ok execution)
+    (context_lctx_eq : context.lctx = {})
+    (resultLevel : Level)
+    (terminal : execution.candidate.families.head.familyType.type.trace.terminalResult =
+      .sort resultLevel) :
+    execution.stats.isNotZero = resultLevel.isNeverZero :=
+  (execution.firstFamily_resultState_eq produced context_lctx_eq resultLevel
+    terminal).2
 
 /-- Erase a successful detailed execution back to the ordinary candidate
 producer without rerunning or independently selecting family validation. -/

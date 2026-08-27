@@ -1635,6 +1635,29 @@ def EnvironmentInductiveInputClosed (types : List InductiveType) : Prop :=
     indType.type.FVarsIn (fun _ => False) ∧
       ∀ ctor ∈ indType.ctors, ctor.type.FVarsIn (fun _ => False)
 
+/-- Every original family and constructor head, and every original
+constructor source, passed the public reserved-prefix precheck.  The property
+deliberately names the transparent executable test, so it remains tied to the
+exact host syntax consumed by nested elimination. -/
+def EnvironmentInductiveInputNoNestedAux
+  (types : List InductiveType) : Prop :=
+  ∀ indType ∈ types,
+    hasNestedAux (.const indType.name []) = false ∧
+      ∀ ctor ∈ indType.ctors,
+        hasNestedAux (.const ctor.name []) = false ∧
+          hasNestedAux ctor.type = false
+
+/-- Successful execution of the reserved-prefix check retains the exact
+negative result of its transparent structural scan. -/
+theorem checkNoNestedAux.WF (name : Name) (expression : Expr) :
+    (checkNoNestedAux name expression).WF fun _ =>
+      hasNestedAux expression = false := by
+  unfold checkNoNestedAux
+  split
+  · exact Except.WF.throw
+  · rename_i absent
+    exact .pure (by simpa using absent)
+
 /-- The retained public precheck supplies the syntactic free-variable premise
 needed by the candidate interpreter, rather than leaving source translations
 as a parallel semantic input. -/
@@ -1645,15 +1668,42 @@ theorem Environment.checkInductiveInput.WF
   unfold Environment.checkInductiveInput
   refine (Except.WF.forInYieldAll fun indType => ?_).bind fun _ closed =>
     .pure closed
+  refine (Except.WF.any
+    (checkNoNestedAux indType.name (.const indType.name []))).bind fun _ _ => ?_
   refine (checkNoMVarNoFVar.WF env indType.name indType.type).bind
     fun _ familyClosed => ?_
   refine (Except.WF.forInYieldAll fun ctor => ?_).bind
     fun _ constructorsClosed =>
       .pure ⟨⟨familyClosed, constructorsClosed⟩, rfl⟩
+  refine (Except.WF.any
+    (checkNoNestedAux ctor.name (.const ctor.name []))).bind fun _ _ => ?_
   refine (checkNoMVarNoFVar.WF env ctor.name ctor.type).bind
     fun _ constructorClosed => ?_
   refine (Except.WF.any (checkNoNestedAux ctor.name ctor.type)).bind
     fun _ _ => .pure ⟨constructorClosed, rfl⟩
+
+/-- The retained public precheck also supplies reserved-prefix freedom for
+every original family and constructor head and constructor source, without
+rerunning or abstracting over the scan. -/
+theorem Environment.checkInductiveInput.noNestedAux
+    (env : Environment) (types : List InductiveType) :
+    (Environment.checkInductiveInput env types).WF fun _ =>
+      EnvironmentInductiveInputNoNestedAux types := by
+  unfold Environment.checkInductiveInput
+  refine (Except.WF.forInYieldAll fun indType => ?_).bind
+    fun _ families => .pure families
+  refine (checkNoNestedAux.WF
+    indType.name (.const indType.name [])).bind fun _ familyNameAbsent => ?_
+  refine (Except.WF.any
+    (env.checkNoMVarNoFVar indType.name indType.type)).bind fun _ _ => ?_
+  refine (Except.WF.forInYieldAll fun ctor => ?_).bind
+    fun _ constructors => .pure ⟨⟨familyNameAbsent, constructors⟩, rfl⟩
+  refine (checkNoNestedAux.WF
+    ctor.name (.const ctor.name [])).bind fun _ constructorNameAbsent => ?_
+  refine (Except.WF.any
+    (env.checkNoMVarNoFVar ctor.name ctor.type)).bind fun _ _ => ?_
+  refine (checkNoNestedAux.WF ctor.name ctor.type).bind fun _ absent => ?_
+  exact .pure ⟨⟨constructorNameAbsent, absent⟩, rfl⟩
 
 /-- Every constructor source in one retained list-validation trace is closed;
 this interprets the exact `checkNoMVarNoFVar` equation stored at each source
@@ -1739,6 +1789,19 @@ theorem AddInductive.EnvironmentInductiveExecution.inputClosed
     EnvironmentInductiveInputClosed types :=
   Environment.checkInductiveInput.WF env types () execution.inputCheck
 
+/-- The exact public precheck stored by an outer execution retains
+reserved-prefix freedom of every original family and constructor head and
+constructor source. -/
+theorem AddInductive.EnvironmentInductiveExecution.inputNoNestedAux
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv) :
+    EnvironmentInductiveInputNoNestedAux types :=
+  Environment.checkInductiveInput.noNestedAux env types ()
+    execution.inputCheck
+
 /-- The retained ordinary normalization prefix certifies syntactic closure of
 every flattened family source, including auxiliary families introduced by
 genuine nested elimination. -/
@@ -1785,7 +1848,7 @@ structure AddInductive.EnvironmentInductiveExecution.VEnvsExtension
   mono : ∀ {safety safety'}, safety ≤ safety' →
     output.venv safety' ≤ output.venv safety
   projectionReady : ∀ safety,
-    ProjectionReady finalEnv (output.venv safety)
+    ProjectionResolutionReady finalEnv (output.venv safety)
   structureEtaReady : ∀ safety,
     StructureEtaReady finalEnv (output.venv safety)
   old_le : ∀ safety, ves.venv safety ≤ output.venv safety
@@ -1958,21 +2021,20 @@ structure AddInductConstants.Replay
 /-- Replay an exact metadata fold against any larger aligned input model.
 Freshness is recovered from host/Theory name-domain alignment; translations
 are transported monotonically from the original fold. -/
-noncomputable def AddInductConstants.replay
+def AddInductConstants.replay
     {kind : InductConstantKind} {C₁ C₂ : ConstMap}
     {env₁ env₂ target : VEnv} {raws : List VConstVal}
     (original : AddInductConstants kind C₁ env₁ raws C₂ env₂)
     (input_le : env₁ ≤ target) (input_aligned : Aligned safety C₁ target) :
-    original.Replay safety target := by
-  induction original generalizing target with
-  | nil =>
-      exact {
-        output := target
-        trace := .nil
-        le := input_le
-        aligned := input_aligned
-        nestedConstsWF := fun _ => trivial }
-  | @cons C₁ env₁ raw Cmid envMid raws C₂ env₂ head tail ih =>
+    original.Replay safety target :=
+  match original with
+  | .nil => {
+      output := target
+      trace := .nil
+      le := input_le
+      aligned := input_aligned
+      nestedConstsWF := fun _ => trivial }
+  | @AddInductConstants.cons _ C₁ env₁ raw Cmid envMid raws C₂ env₂ head tail => by
       have targetFresh : target.constants raw.name = none := by
         cases found : target.constants raw.name with
         | none => rfl
@@ -1997,7 +2059,7 @@ noncomputable def AddInductConstants.replay
         map_add := head.map_add }
       have next_le : envMid ≤ next :=
         VEnv.addConst_mono input_le head.env_add added
-      let replayedTail := ih next_le
+      let replayedTail := replay tail next_le
         (input_aligned.addInductConstant replayedHead)
       exact {
         output := replayedTail.output
@@ -2049,7 +2111,7 @@ structure AddInductBlockTrace.Replay
 All three constant phases are rebuilt from the original translations, and
 the generated-rule endpoint is the deterministic fold over the replayed
 recursor environment. -/
-noncomputable def AddInductBlockTrace.replay
+def AddInductBlockTrace.replay
     {C₁ C₂ : ConstMap} {env₁ env₂ target : VEnv}
     {source : VInductDecl}
     (original : AddInductBlockTrace C₁ env₁ source C₂ env₂)
@@ -2195,7 +2257,7 @@ structure AddInductBlockTrace.CoherentReplay
 
 /-- Replay an ordinary safe trace at `.partial` and `.unsafe`, retaining the
 original trace itself at `.safe`. -/
-noncomputable def AddInductBlockTrace.coherentReplay
+def AddInductBlockTrace.coherentReplay
     {C₁ C₂ : ConstMap} {input : VEnvs} {source : VInductDecl}
     {safeOutput : VEnv}
     (original : AddInductBlockTrace C₁ (input.venv .safe) source C₂
@@ -2375,7 +2437,7 @@ structure SafeReplay
 /-- An ordinary exact trace need only be constructed in the `.safe` model.
 Input coherence and alignment replay it at the other safety levels while
 preserving one shared checked generation. -/
-noncomputable def ofOrdinarySafeTrace
+def ofOrdinarySafeTrace
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
     {fuel : FuelConfig} {finalEnv : Environment}
@@ -2491,7 +2553,7 @@ structure AddInductive.EnvironmentInductiveExecution.TransactionalVEnvsExtension
   mono : ∀ {safety safety'}, safety ≤ safety' →
     output.venv safety' ≤ output.venv safety
   projectionReady : ∀ safety,
-    ProjectionReady finalEnv (output.venv safety)
+    ProjectionResolutionReady finalEnv (output.venv safety)
   structureEtaReady : ∀ safety,
     StructureEtaReady finalEnv (output.venv safety)
 
@@ -2644,7 +2706,7 @@ theorem VInductDecl.BlockGenerationChecked.recursor_of_family
   obtain ⟨family, family_member, family_raw_eq⟩ :=
     List.mem_map.mp normalized_member
   let recursor : VConstVal :=
-    ⟨generation.recursor family, .str family.raw.name "rec"⟩
+    ⟨generation.generatedRecursor family, .str family.raw.name "rec"⟩
   refine ⟨recursor, ?_, ?_⟩
   · exact List.mem_map.mpr ⟨family, family_member, rfl⟩
   · simp [recursor, mkRecName, family_raw_eq]
@@ -2919,7 +2981,7 @@ theorem
     {ves : VEnvs}
     (family : execution.FlattenedFamilySourceStagingResult ves)
     (wf : ves.WF env) :
-    ProjectionReady
+    ProjectionResolutionReady
         execution.flattened.eliminationExecution.normalization.familyEnv
         family.staging.familyInsertion.blockEnv ∧
       StructureEtaReady
@@ -2955,7 +3017,7 @@ theorem
       nparams types false false {} finalEnv}
     {ves : VEnvs}
     (family : execution.FlattenedFamilySourceStagingResult ves)
-    (projectionReady : ProjectionReady
+    (projectionReady : ProjectionResolutionReady
       execution.flattened.eliminationExecution.normalization.familyEnv
       family.staging.familyInsertion.blockEnv)
     (structureEtaReady : StructureEtaReady
@@ -2989,7 +3051,7 @@ theorem
 execution.  Default safe nonprimitive execution fixes the candidate root's
 fresh-name namespace, positive recursion depth, safety, and primitive mode, so
 none remains a caller-selected semantic premise. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.flattenedFamilySourceStaging
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3120,7 +3182,7 @@ structure
 
 /-- The complete raw Theory block selected by exact family extraction and
 constructor enrichment. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.source
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3145,8 +3207,24 @@ theorem
     VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
     staged.family.nparams_eq
 
+/-- Constructor enrichment preserves the family declaration's universe
+count, so the selected raw block is indexed by the retained outer universe
+parameter inventory. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.source_uvars_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves) :
+    staged.source.uvars = lparams.length := by
+  simpa only [FlattenedEnrichedStagingResult.source,
+    VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+    staged.family.staging.uvars_eq
+
 /-- The complete semantic input carried by the enriched staging owner. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.semanticInput
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3193,7 +3271,7 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedSta
 /-- Reindex the retained ordinary recursor execution onto the enriched raw
 Theory source.  The preceding theorem derives the required generation shape
 from the outer producer and dependent staging owner. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3209,6 +3287,205 @@ noncomputable def
   VInductDecl.ProducedBlockRecursorShapeCandidate.ofExecution execution.flattened
     execution.flattenedRun execution.nested.types_nonempty
       staged.source_nparams_eq shape
+
+/-- The retained recursor producer passes the universe audit against the
+exact enriched Theory source selected by this staging owner. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape_recUniverseRun
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    AddInductive.checkBlockRecursorUniverseSemantics staged.source.uvars
+      (staged.recursorShape shape).execution.eliminationExecution = .ok () := by
+  exact (staged.recursorShape shape).execution
+    |>.checkBlockRecursorUniverseSemantics_eq_ok
+      (staged.recursorShape shape).producedExecution
+      (staged.recursorShape shape).kernelSources_nonempty
+      (by
+        simpa only [AddInductive.Context.forInductive] using
+          staged.source_uvars_eq)
+
+/-- The same retained producer supplies the positional source-universe gate
+shared by both constructor Stage-3 audit variants. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape_stage3LevelsTranslation
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    (staged.recursorShape shape).execution.eliminationExecution.normalization.stats.levels.mapM
+        (VLevel.ofLevel lparams) =
+      some (VLevel.params staged.source.uvars) := by
+  rw [staged.source_uvars_eq]
+  exact (staged.recursorShape shape).execution.stage3LevelsTranslation
+    (staged.recursorShape shape).producedExecution
+    (staged.recursorShape shape).kernelSources_nonempty
+
+/-- Reindexing the retained recursor producer along the source parameter-count
+equality does not change its positional family index-count inventory.  This
+nondependent projection is the useful boundary for consumers which relate the
+semantic raw source back to host declaration metadata. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorShape_nindices_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    (staged.recursorShape shape).execution.eliminationExecution.normalization.stats.nindices =
+      execution.flattened.eliminationExecution.normalization.stats.nindices := by
+  cases staged with
+  | mk family enriched =>
+      cases family with
+      | mk familyDecl nparams_eq familyStaging =>
+          cases familyDecl with
+          | mk uvars familyNparams familyTypes =>
+              simp only at nparams_eq
+              subst familyNparams
+              rfl
+
+/-- Execute the strengthened constructor and recursor audits against the
+exact recursor producer retained by this outer staging value.  The producer
+itself is not recomputed, so a successful result can feed the canonical
+semantic assembly without an equality transport between parallel runs. -/
+def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorAudit?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    Except Exception (VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :=
+  (staged.recursorShape shape).auditStage3? lparams
+
+/-- Execute the accepted-execution audit whose Stage-3 and pre-family
+structural traces permit resolved projection syntax. -/
+def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorResolvedAudit?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    Except Exception (VInductDecl.ProducedBlockRecursorResolvedAuditRun
+      (staged.recursorShape shape) lparams) :=
+  (staged.recursorShape shape).auditResolved? lparams
+
+/-- Execute only the projection-aware audit surface consumed by ordinary
+semantic assembly.  The stronger raw-parameter checks remain separate for
+nested restoration. -/
+def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorResolvedCoreAudit?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    Except Exception (VInductDecl.ProducedBlockRecursorResolvedCoreAuditRun
+      (staged.recursorShape shape) lparams) :=
+  (staged.recursorShape shape).auditResolvedCore? lparams
+
+/-- Once the three structural constructor checks have been recovered from
+retained staging, the two universe fields and the successful core-audit
+transaction require no additional premise.  Constructor-universe evidence is
+projected from the retained validation trace, and recursor-universe evidence
+is projected from the retained recursor execution. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorResolvedCoreAudit?_success_of_structural
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (alignmentRun :
+      AddInductive.ConstructorBlockCandidateAlignmentTrace.check
+        ((staged.recursorShape shape).execution.eliminationExecution.normalization
+          |>.constructorValidation.traces)
+        (staged.recursorShape shape).candidate.families = .ok ())
+    (stage3Run :
+      AddInductive.ConstructorBlockStage3ResolvedTraces.check
+        (staged.recursorShape shape).execution.eliminationExecution.normalization.stats
+        lparams staged.source.uvars
+        (staged.recursorShape shape).candidate.families = .ok ())
+    (preFamilyRun :
+      AddInductive.checkConstructorMutualBlockResolvedPreFamilySafety
+        (staged.recursorShape shape).execution.eliminationExecution.normalization.stats
+        (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext
+        (staged.recursorShape shape).candidate.families = .ok ()) :
+    ∃ audit : VInductDecl.ProducedBlockRecursorResolvedCoreAuditRun
+        (staged.recursorShape shape) lparams,
+      staged.recursorResolvedCoreAudit? shape = .ok audit := by
+  let produced := staged.recursorShape shape
+  have universeRun := produced.constructorUniverseRun
+  have recUniverseRun := staged.recursorShape_recUniverseRun shape
+  simpa only [FlattenedEnrichedStagingResult.recursorResolvedCoreAudit?,
+    produced] using
+    produced.auditResolvedCore?_success lparams alignmentRun stage3Run
+      preFamilyRun universeRun recUniverseRun
+
+/-- Execute only the producer-owned raw host-parameter trace consumed by
+nested restoration.  The result remains indexed by the exact reindexed
+recursor producer retained by this outer staging value. -/
+def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorRawHostParameterAudit?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) :
+    Except Lean.Kernel.Exception
+      (VInductDecl.ProducedBlockRawHostParameterAuditRun
+        (staged.recursorShape shape)) :=
+  (staged.recursorShape shape).rawHostParameterAudit?
+
+/-- Project Stage-3 success through the outer staging reindexing to the exact
+narrow raw-host executable.  The returned witness is indexed by
+`staged.recursorShape shape`, so no equality to a parallel recursor producer
+is needed downstream. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorRawHostParameterAudit?_success
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    ∃ rawAudit : VInductDecl.ProducedBlockRawHostParameterAuditRun
+        (staged.recursorShape shape),
+      staged.recursorRawHostParameterAudit? shape = .ok rawAudit := by
+  exact audit.rawHostParameterAudit?_success
 
 /-- The reindexed recursor producer retains the nonprimitive validation mode
 of the safe outer execution. -/
@@ -3233,7 +3510,7 @@ theorem
 /-- The complete family/constructor staging value reindexed to the recursor
 shape owner above.  This is proof-only transport along the parameter-count
 equality; no verifier phase is rerun. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorStaging
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3261,7 +3538,7 @@ noncomputable def
 /-- The enriched semantic input reindexed to the same recursor-shape owner.
 As with `recursorStaging`, this eliminates only the source-header equality and
 does not repeat normalization or translation. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorSemanticInput
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3343,6 +3620,19 @@ theorem
     (checked : generation.block.checked.WF (ves.venv .safe)
       generation.validated.resultLevel)
     (resultLevelWF : generation.validated.resultLevel.WF staged.source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence (ves.venv .safe)
+      staged.source.uvars [] generation.generatedParams
+        generation.block.checked.params)
+    (generatedIndicesTel : ∀ family ∈ generation.families,
+      TypeChecker.TelDefEqEvidence (ves.venv .safe) staged.source.uvars
+        generation.generatedParams.reverse
+        (family.rawIndices staged.source.nparams)
+        (generation.generatedIndices family))
+    (generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+      TypeChecker.TelDefEqEvidence staged.enriched.blockEnv staged.source.uvars
+        generation.generatedParams.reverse
+        (constructor.ctor.rawFields staged.source.nparams)
+        (generation.generatedFields constructor))
     (elimination : AddInductive.CheckerBlockEliminationRun generation
       (staged.recursorShape shape).execution.eliminationExecution) :
     Nonempty
@@ -3360,7 +3650,7 @@ theorem
   obtain ⟨block⟩ :=
     produced.eliminationBase.base.exactBlockGenerationRun_nonempty
       (staged.recursorSemanticInput shape) generation analysis checked
-      resultLevelWF
+      resultLevelWF generatedParamsTel generatedIndicesTel generatedFieldsTel
   exact ⟨{
     run := {
       elimination := {
@@ -3401,6 +3691,120 @@ noncomputable def
     VInductDecl.ExactProducedBlockMetadataPrefixRun result.run :=
   result.run.metadataPrefix (staged.recursorStaging shape) evidence rawsWF
 
+/-- One canonical semantic generation run attached to the source and
+normalization candidate retained by enriched outer staging.  Unlike
+`FlattenedExactRecursorStagingResult`, this package permits the canonical
+mixed raw/view block produced by the semantic analyzer; the generation is a
+field owned by that run rather than a parallel index selected by a caller. -/
+structure
+    AddInductive.EnvironmentInductiveExecution.FlattenedSemanticRecursorStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) where
+  semantic : VInductDecl.NormalizationCandidateBlockSemanticRun
+    (ves.venv .safe) staged.enriched.blockEnv lparams
+    (staged.recursorShape shape).candidate staged.source
+  generation : VInductDecl.BlockGenerationChecked staged.source
+  run : VInductDecl.ProducedBlockSemanticEliminationRun
+    (ves.venv .safe) staged.enriched.blockEnv lparams
+    (staged.recursorShape shape).eliminationBase semantic generation
+
+/-- Lift one producer-owned semantic recursor result into the retained outer
+execution.  The source, candidate, semantic interpretation, generation, and
+elimination proof are all fixed by dependent indices; this constructor does
+not rerun analysis or accept a parallel generation witness. -/
+def
+    AddInductive.EnvironmentInductiveExecution.FlattenedSemanticRecursorStagingResult.ofProduced
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {semantic : VInductDecl.NormalizationCandidateBlockSemanticRun
+      (ves.venv .safe) staged.enriched.blockEnv lparams
+      (staged.recursorShape shape).candidate staged.source}
+    (producer : VInductDecl.ProducedBlockSemanticRecursorRun
+      (ves.venv .safe) staged.enriched.blockEnv lparams
+      (staged.recursorShape shape) semantic) :
+    execution.FlattenedSemanticRecursorStagingResult staged shape where
+  semantic := semantic
+  generation := producer.generation
+  run := producer.run
+
+/-- Construct the canonical semantic recursor transaction selected by an
+enriched outer execution and its exact Stage-3 audit.  The semantic
+interpretation is obtained from the staging value itself; callers cannot
+choose a parallel raw view, generation result, or recursor endpoint. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.canonicalSemanticRecursorStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    execution.FlattenedSemanticRecursorStagingResult staged shape :=
+  let semantic := Classical.choice (staged.recursorSemanticInput shape).exists
+  .ofProduced <|
+    (staged.recursorShape shape)
+      |>.canonicalProducedBlockSemanticRecursorRunOfAudit semantic rfl
+        (staged.recursorStaging shape) audit
+
+/-- Construct the semantic recursor transaction selected by the
+projection-aware accepted-execution audit.  Constructor semantics are chosen
+internally from the construction-owned endpoint matrix. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.canonicalResolvedSemanticRecursorStagingResult
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true)
+    (audit : VInductDecl.ProducedBlockRecursorResolvedCoreAuditRun
+      (staged.recursorShape shape) lparams) :
+    execution.FlattenedSemanticRecursorStagingResult staged shape :=
+  let semantic := Classical.choice (staged.recursorSemanticInput shape).exists
+  let selection := (staged.recursorShape shape)
+    |>.canonicalProducedBlockSemanticRecursorSelectionOfResolvedAudit semantic
+      rfl (staged.recursorStaging shape) audit
+  .ofProduced selection.2
+
+/-- Execute the proof-producing recursor representation check for the
+canonical semantic generation owned by the outer staging result.  Success
+returns the complete family/constructor/recursor metadata prefix at the
+producer's exact endpoints. -/
+noncomputable def
+    AddInductive.EnvironmentInductiveExecution.FlattenedSemanticRecursorStagingResult.metadataPrefix?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape) :
+    Option (VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run) :=
+  (staged.recursorShape shape).semanticMetadataPrefix? result.semantic
+    result.generation result.run (staged.recursorStaging shape)
+
 /-- An original Theory declaration and checked nested artifact whose
 flattened block is exactly the enriched source selected by the retained outer
 execution.  The auxiliary-count equation ties the Theory transformation to
@@ -3417,10 +3821,14 @@ structure
   nested : source.NestedBlockChecked
   flat_eq : nested.elim.flat = staged.source
   numNested_eq : nested.elim.numNested = execution.nested.aux2nested.size
+  /-- The exact target-block copies consulted by the Theory elimination are
+  the well-formed constants already present in the safe input model. -/
+  targetsWF : VInductDecl.NestedTargetsWF (ves.venv .safe)
+    nested.elim.targets
 
 /-- The exact flattened generation is determined by the aligned nested
 artifact; it is not another analyzer output supplied beside that artifact. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.generation
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3436,7 +3844,7 @@ noncomputable def
 Only its stored flat field is re-presented; `flat_eq` proves that this value is
 equal to the original artifact while making the exact flattened source and
 generation reduce without casts in downstream dependent APIs. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.alignedNested
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3445,11 +3853,23 @@ noncomputable def
     {ves : VEnvs}
     {staged : execution.FlattenedEnrichedStagingResult ves}
     (artifact : execution.FlattenedNestedArtifact staged) :
-    artifact.source.NestedBlockChecked where
+  artifact.source.NestedBlockChecked where
   elim := {
+    targets := artifact.nested.elim.targets
+    fuel := artifact.nested.elim.fuel
+    state := artifact.nested.elim.state
+    run_eq := artifact.nested.elim.run_eq
     flat := staged.source
-    specs := artifact.nested.elim.specs }
+    flat_eq := by
+      rw [← artifact.flat_eq]
+      exact artifact.nested.elim.flat_eq
+    specs := artifact.nested.elim.specs
+    specs_eq := artifact.nested.elim.specs_eq
+    nparams_eq := by
+      rw [← artifact.flat_eq]
+      exact artifact.nested.elim.nparams_eq }
   generation := artifact.generation
+  source_restore_safe := artifact.nested.source_restore_safe
 
 /-- The aligned presentation is propositionally the exact checked artifact
 supplied by the Theory nested analyzer. -/
@@ -3464,14 +3884,126 @@ theorem
     (artifact : execution.FlattenedNestedArtifact staged) :
     artifact.alignedNested = artifact.nested := by
   cases artifact with
-  | mk source nested flat_eq numNested_eq =>
+  | mk source nested flat_eq numNested_eq targetsWF =>
       cases nested with
-      | mk elim generation =>
+      | mk elim generation source_restore_safe =>
           cases elim with
-          | mk flat specs =>
-              simp only at flat_eq
-              subst flat
+          | mk targets fuel state run_eq flat flat_state_eq specs specs_eq
+              nparams_eq =>
+              cases flat_eq
               rfl
+
+/-- The original Theory declaration aligned with a retained nested execution
+has the exact shared parameter count supplied to the public host pipeline.
+This now follows from the flattening invariant itself, rather than from an
+extra caller-owned equality. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.source_nparams_eq
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged) :
+    artifact.source.nparams = nparams := by
+  calc
+    artifact.source.nparams = artifact.nested.elim.flat.nparams :=
+      artifact.nested.elim.nparams_eq.symm
+    _ = staged.source.nparams := congrArg VInductDecl.nparams artifact.flat_eq
+    _ = nparams := staged.source_nparams_eq
+
+/-- The execution-owned flattened declaration retains the complete original
+nested source inventory as an exact header prefix.  This is the producer
+alignment used to select a restored source family from the same generated
+mutual block, rather than reconstructing a parallel family list. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.source_headers_prefix
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged) :
+    artifact.source.types.map VInductDecl.VInductiveType.nestedHeader <+:
+      staged.source.types.map VInductDecl.VInductiveType.nestedHeader := by
+  rw [← artifact.flat_eq]
+  exact artifact.nested.elim.source_headers_prefix
+
+/-- Select the flattened family at an exact original-source offset while
+retaining equality of every restoration-stable header component. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.flat_family_header_at
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged)
+    {i : Nat} {sourceFamily : VInductiveType}
+    (source_at : artifact.source.types[i]? = some sourceFamily) :
+    ∃ flatFamily,
+      staged.source.types[i]? = some flatFamily ∧
+      VInductDecl.VInductiveType.nestedHeader flatFamily =
+        VInductDecl.VInductiveType.nestedHeader sourceFamily := by
+  obtain ⟨flatFamily, flat_at, header⟩ :=
+    artifact.nested.elim.flat_family_header_at source_at
+  exact ⟨flatFamily, by simpa only [artifact.flat_eq] using flat_at, header⟩
+
+/-- Constructor offsets within an original source family select the exact
+flattened producer constructor and preserve its name/universe header. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.flat_constructor_header_at
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged)
+    {familyIndex constructorIndex : Nat}
+    {sourceFamily : VInductiveType} {sourceConstructor : VConstVal}
+    (family_at : artifact.source.types[familyIndex]? = some sourceFamily)
+    (constructor_at : sourceFamily.ctors[constructorIndex]? =
+      some sourceConstructor) :
+    ∃ flatFamily flatConstructor,
+      staged.source.types[familyIndex]? = some flatFamily ∧
+      flatFamily.ctors[constructorIndex]? = some flatConstructor ∧
+      VInductDecl.VConstVal.nestedHeader flatConstructor =
+        VInductDecl.VConstVal.nestedHeader sourceConstructor := by
+  obtain ⟨flatFamily, flatConstructor, flat_at, constructor_at,
+      header⟩ := artifact.nested.elim.flat_constructor_header_at family_at
+        constructor_at
+  exact ⟨flatFamily, flatConstructor,
+    by simpa only [artifact.flat_eq] using flat_at, constructor_at, header⟩
+
+/-- Select the exact normalized flattened producer for a structure-shaped
+original family through the definitionally aligned nested artifact.  In this
+presentation the selected generation is literally `artifact.generation` over
+`staged.source`, while every restored source fact remains owned by the same
+successful transformation run. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.selectStructure
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    (artifact : execution.FlattenedNestedArtifact staged)
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (source_at : artifact.source.types[familyIndex]? = some sourceFamily)
+    (source_constructors_eq : sourceFamily.ctors = [sourceConstructor])
+    (source_raw_indices_eq :
+      VInductDecl.ctorFields
+        (VExpr.dropN artifact.source.nparams sourceFamily.type) = []) :
+    Nonempty (VInductDecl.NestedStructureSelection artifact.alignedNested
+      familyIndex sourceFamily sourceConstructor) :=
+  artifact.alignedNested.selectStructure source_at source_constructors_eq
+    source_raw_indices_eq
 
 /-- Exact Theory-side semantic restoration for the nested artifact attached
 to one flattened staging owner.  Its deterministic transaction endpoint is
@@ -3492,7 +4024,7 @@ structure
 
 /-- Erase the execution-owned wrapper to the generic completed nested
 certificate consumed by restored-rule transport. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestorationResult.certificate
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -3509,11 +4041,32 @@ noncomputable def
   success := restoration.success
   beforeWF := restoration.before_wf
 
+/-- The exact execution-owned restoration closes every recursor-world
+replacement entry.  Target-copy alignment is retained by the nested artifact,
+so no projection consumer supplies a separate syntactic closure premise. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestorationResult.recEntriesClosed
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after) :
+    VInductDecl.RestoreEntriesClosed artifact.alignedNested.recEntries := by
+  have targetsWF : VInductDecl.NestedTargetsWF (ves.venv .safe)
+      artifact.alignedNested.elim.targets := by
+    simpa [AddInductive.EnvironmentInductiveExecution.FlattenedNestedArtifact.alignedNested]
+      using artifact.targetsWF
+  exact restoration.certificate.recEntriesClosed targetsWF
+
 /-- Pair the exact execution-owned flattened transaction with its exact
 Theory nested restoration.  The flat rule endpoint is deterministic, and the
 flat declaration and generation are both inherited from `artifact`; no
 alignment equality is exposed to downstream certificate consumers. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult.nestedStagedCertificate
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -4640,7 +5193,7 @@ theorem AddInductive.EnvironmentInductiveExecution.flattenedEnv_eq_final
     (numNested_eq : execution.nested.aux2nested.size = 0) :
     execution.flattened.recursors.env = finalEnv := by
   cases execution with
-  | mk inputCheck nested nestedRun flattened flattenedRun completion =>
+  | mk inputCheck _uniformityCheck nested nestedRun flattened flattenedRun completion =>
       cases completion with
       | ordinary _ => rfl
       | nested numNested_ne restoration restorationRun =>
@@ -4747,7 +5300,7 @@ structure
 fold.  Uniqueness of `addInductNested` identifies that fold with the semantic
 restoration endpoint, while the retained outer completion identifies the host
 map with `finalEnv.constants`. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestoredMetadataPrefixRun.addInductNestedTrace
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -4816,12 +5369,14 @@ structure
     (ves.venv .safe)
     (artifact.generation.generatedRules.foldl VEnv.addDefEq
       metadata.recursors.recEnv) after
+  stagedCertificate_nested_eq :
+    stagedCertificate.restored.nested = artifact.alignedNested
   safeTrace : AddInductNestedTrace env.constants (ves.venv .safe)
     artifact.source finalEnv.constants after
 
 /-- Assemble the paired flat/restored certificate and the exact safe nested
 trace from their two execution-indexed metadata prefixes. -/
-noncomputable def
+def
     AddInductive.EnvironmentInductiveExecution.FlattenedExactRecursorStagingResult.nestedTransaction
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -4844,10 +5399,52 @@ noncomputable def
     execution.FlattenedExactNestedTransactionResult flat metadata restoration
       numNested_ne restoredMetadata where
   stagedCertificate := flat.nestedStagedCertificate metadata restoration
+  stagedCertificate_nested_eq := rfl
   safeTrace := restoredMetadata.addInductNestedTrace
 
+/-- The exact nested transaction owns the sound canonical interpretation
+from its common dependency model into its restored endpoint.  Target-copy
+well-formedness comes from the aligned nested artifact itself, so consumers
+do not reselect a restoration inventory or supply an interpretation witness.
+
+This deliberately starts at the dependency boundary, not at the completed
+flattened environment: generated flattened constants and rules require their
+own operational restoration argument. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.restoreInterpBeforeConstInterp
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata) :
+    VEnv.ConstInterp (ves.venv .safe) after
+      artifact.alignedNested.restoreInterp := by
+  have targetsWF : VInductDecl.NestedTargetsWF (ves.venv .safe)
+      transaction.stagedCertificate.restored.nested.elim.targets := by
+    rw [transaction.stagedCertificate_nested_eq, artifact.alignedNested_eq]
+    exact artifact.targetsWF
+  have transported :=
+    transaction.stagedCertificate.restoreInterp_beforeConstInterp targetsWF
+  rw [transaction.stagedCertificate_nested_eq] at transported
+  exact transported
+
 /-- The exact family fold and the actual nonprimitive restoration trace imply
-the primitive-name side conditions for every restored source family. -/
+    the primitive-name side conditions for every restored source family. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.typeNames
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -5057,7 +5654,7 @@ namespace AddInductive.EnvironmentInductiveExecution
 fold.  The trace starts at the public input constant map and ends at the public
 host environment selected by the outer execution; no rule-output environment
 remains caller chosen. -/
-noncomputable def FlattenedExactRecursorStagingResult.ordinaryAddInductBlockTrace
+def FlattenedExactRecursorStagingResult.ordinaryAddInductBlockTrace
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
     {execution : AddInductive.EnvironmentInductiveExecution env lparams
@@ -5218,7 +5815,7 @@ theorem FlattenedExactRecursorStagingResult.ordinaryRecNames
 /-- Replay the exact ordinary safe transaction coherently at every safety
 level.  The retained host declaration traces now supply every primitive-name
 condition, so input `VEnvs.WF` is the only replay premise. -/
-noncomputable def FlattenedExactRecursorStagingResult.ordinarySafeReplay
+def FlattenedExactRecursorStagingResult.ordinarySafeReplay
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
     {execution : AddInductive.EnvironmentInductiveExecution env lparams
@@ -5245,16 +5842,204 @@ noncomputable def FlattenedExactRecursorStagingResult.ordinarySafeReplay
   apply result.ordinaryRecNames metadata wf ci
   exact member
 
-/-- The retained ordinary declaration folds preserve constant-map
-well-formedness through the public final environment. -/
-theorem ordinaryFinalMapWF
+/-- Retarget the canonical semantic transaction from its producer-owned
+validation/recursor endpoints to the public input and final host maps of the
+ordinary outer execution. -/
+def
+    FlattenedSemanticRecursorStagingResult.ordinaryAddInductBlockTrace
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0) :
+    AddInductBlockTrace env.constants (ves.venv .safe) staged.source
+      finalEnv.constants
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  let trace := metadata.addInductBlockTrace
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have finalEnvEq := staged.recursorEnv_eq_final shape numNested_eq
+  have traceGenerationEq : trace.generation = result.generation := by
+    rfl
+  exact {
+    generation := result.generation
+    blockEnv := trace.blockEnv
+    generation_wf := by
+      simpa only [traceGenerationEq] using trace.generation_wf
+    typeMap := trace.typeMap
+    typeEnv := trace.typeEnv
+    ctorMap := trace.ctorMap
+    ctorEnv := trace.ctorEnv
+    recEnv := trace.recEnv
+    addTypes := by
+      simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+        trace.addTypes
+    addCtors := trace.addCtors
+    addRecs := by
+      simpa only [finalEnvEq, traceGenerationEq] using trace.addRecs
+    recK := by
+      simpa only [finalEnvEq, traceGenerationEq] using trace.recK
+    addRules := by
+      simpa only [traceGenerationEq] using trace.addRules }
+
+/-- The semantic transaction inherits the exact nonprimitive family-name
+checks from its retained host declaration fold. -/
+theorem FlattenedSemanticRecursorStagingResult.ordinaryTypeNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ staged.source.blockTypeConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.allowPrimitive =
+        false := staged.recursorShape_validationAllowPrimitive_eq shape
+  exact metadata.declarations.families.raw_names_not_primitive
+    allowPrimitiveEq validationMapWF
+
+/-- The semantic transaction inherits the exact nonprimitive constructor-name
+checks from its retained host declaration fold. -/
+theorem FlattenedSemanticRecursorStagingResult.ordinaryCtorNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ staged.source.blockConstructorConstants,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have familyMapWF :=
+    metadata.declarations.families.kernelTrace.map_wf validationMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.eliminationExecution.constructorContext.allowPrimitive =
+        false := by
+    simpa only [AddInductive.NormalizationEliminationExecution.constructorContext]
+      using staged.recursorShape_validationAllowPrimitive_eq shape
+  exact metadata.declarations.constructors.raw_names_not_primitive
+    allowPrimitiveEq familyMapWF
+
+/-- The semantic transaction inherits the exact nonprimitive recursor-name
+checks from its retained host declaration fold. -/
+theorem FlattenedSemanticRecursorStagingResult.ordinaryRecNames
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (wf : ves.WF env) :
+    ∀ ci ∈ result.generation.recursors,
+      ci.name ∉ VEnv.reflectedPrimitiveNames ∧
+        Environment.primitives.contains ci.name = false := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have initialEnvEq :=
+    (staged.recursorStaging shape).validation_env_eq
+  have validationMapWF :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [initialEnvEq, AddInductive.Context.forInductive] using
+      inputMapWF
+  have familyMapWF :=
+    metadata.declarations.families.kernelTrace.map_wf validationMapWF
+  have constructorMapWF :=
+    metadata.declarations.constructors.kernelTrace.map_wf familyMapWF
+  have allowPrimitiveEq :
+      (staged.recursorShape shape).execution.recursors.allowPrimitive =
+        false := by
+    exact (staged.recursorShape shape).execution.recursor_allowPrimitive_eq.trans
+      (staged.recursorShape_validationAllowPrimitive_eq shape)
+  have recursorInitialMapWF :
+      (staged.recursorShape shape).execution.recursors.initialEnv.constants.WF := by
+    rw [(staged.recursorShape shape).execution.recursor_initialEnv_eq]
+    exact constructorMapWF
+  exact metadata.recursors.raw_names_not_primitive allowPrimitiveEq
+    recursorInitialMapWF
+
+/-- Replay the canonical semantic ordinary transaction coherently at every
+safety level.  All source, generation, metadata, endpoint, and primitive-name
+choices are projections of the retained dependent result. -/
+def FlattenedSemanticRecursorStagingResult.ordinarySafeReplay
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) :
+    CoherentPrimitivePreservingTransactions.SafeReplay execution
+      staged.source ves
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  let trace := result.ordinaryAddInductBlockTrace metadata numNested_eq
+  apply CoherentPrimitivePreservingTransactions.ofOrdinarySafeTrace wf
+    numNested_eq trace (result.ordinaryTypeNames metadata wf)
+      (result.ordinaryCtorNames metadata wf)
+  intro ci member
+  exact result.ordinaryRecNames metadata wf ci member
+
+/-- The retained flattened family, constructor, and recursor folds preserve
+constant-map well-formedness at their exact internal endpoint. -/
+theorem flattenedFinalMapWF
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
     {fuel : FuelConfig} {finalEnv : Environment}
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe allowPrimitive fuel finalEnv)
-    (numNested_eq : execution.nested.aux2nested.size = 0)
-    (inputMapWF : env.constants.WF) : finalEnv.constants.WF := by
+    (inputMapWF : env.constants.WF) :
+    execution.flattened.recursors.env.constants.WF := by
   have validationMapWF :
       execution.flattened.eliminationExecution.normalization.validationContext.env.constants.WF := by
     simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
@@ -5270,21 +6055,34 @@ theorem ordinaryFinalMapWF
       constructorMapWF
   have recursorMapWF :=
     execution.flattened.recursors.trace.map_wf recursorInitialMapWF
-  simpa only [execution.flattenedEnv_eq_final numNested_eq] using
-    recursorMapWF
+  exact recursorMapWF
 
-/-- Classify a family record in an ordinary final environment using the exact
-host declaration folds.  A new record retains both membership in the emitted
-family inventory and the queried name. -/
-theorem ordinaryFamilyLookupCases
+/-- The retained ordinary declaration folds preserve constant-map
+well-formedness through the public final environment. -/
+theorem ordinaryFinalMapWF
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
     {fuel : FuelConfig} {finalEnv : Environment}
     (execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe allowPrimitive fuel finalEnv)
     (numNested_eq : execution.nested.aux2nested.size = 0)
+    (inputMapWF : env.constants.WF) : finalEnv.constants.WF := by
+  have recursorMapWF := execution.flattenedFinalMapWF inputMapWF
+  simpa only [execution.flattenedEnv_eq_final numNested_eq] using
+    recursorMapWF
+
+/-- Classify a family lookup at the exact flattened-block endpoint, before
+the ordinary/nested outer branch chooses whether that endpoint is public or
+is subsequently restored. -/
+theorem flattenedFamilyLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
     (inputMapWF : env.constants.WF) {name : Name} {info : InductiveVal}
-    (found : finalEnv.constants.find? name = some (.inductInfo info)) :
+    (found : execution.flattened.recursors.env.constants.find? name =
+      some (.inductInfo info)) :
     env.constants.find? name = some (.inductInfo info) ∨
       info ∈ execution.flattened.eliminationExecution.normalization.declaredInfos ∧
         info.name = name := by
@@ -5301,12 +6099,9 @@ theorem ordinaryFamilyLookupCases
       execution.flattened.recursors.initialEnv.constants.WF := by
     simpa only [execution.flattened.recursor_initialEnv_eq] using
       constructorMapWF
-  have finalLookup : execution.flattened.recursors.env.constants.find? name =
-      some (.inductInfo info) := by
-    simpa only [execution.flattenedEnv_eq_final numNested_eq] using found
   rcases execution.flattened.recursors.trace.constant_lookup_cases
-      recursorInitialMapWF finalLookup with recursorInput |
-        ⟨recursor, _member, taggedEq, _nameEq⟩
+      recursorInitialMapWF found with recursorInput |
+        ⟨_recursor, _member, taggedEq, _nameEq⟩
   · have constructorLookup :
         execution.flattened.eliminationExecution.constructorEnv.constants.find?
           name = some (.inductInfo info) := by
@@ -5314,7 +6109,7 @@ theorem ordinaryFamilyLookupCases
         recursorInput
     rcases execution.flattened.eliminationExecution.declareConstructorTrace
         |>.constant_lookup_cases familyMapWF constructorLookup with
-      constructorInput | ⟨constructor, _member, taggedEq, _nameEq⟩
+      constructorInput | ⟨_constructor, _member, taggedEq, _nameEq⟩
     · rcases execution.flattened.eliminationExecution.normalization
           |>.declareTrace.map_lookup_cases validationMapWF constructorInput with
         old | inserted
@@ -5323,6 +6118,26 @@ theorem ordinaryFamilyLookupCases
       · exact .inr inserted
     · cases taggedEq
   · cases taggedEq
+
+/-- Classify a family record in an ordinary final environment using the exact
+host declaration folds.  A new record retains both membership in the emitted
+family inventory and the queried name. -/
+theorem ordinaryFamilyLookupCases
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : InductiveVal}
+    (found : finalEnv.constants.find? name = some (.inductInfo info)) :
+    env.constants.find? name = some (.inductInfo info) ∨
+      info ∈ execution.flattened.eliminationExecution.normalization.declaredInfos ∧
+        info.name = name := by
+  have finalLookup : execution.flattened.recursors.env.constants.find? name =
+      some (.inductInfo info) := by
+    simpa only [execution.flattenedEnv_eq_final numNested_eq] using found
+  exact execution.flattenedFamilyLookupCases inputMapWF finalLookup
 
 /-- Classify a constructor record in an ordinary final environment using the
 exact host declaration folds. -/
@@ -5442,6 +6257,171 @@ theorem ordinaryDeclaredFamilySource
       execution.flattened.eliminationExecution.normalization.validationContext
       member
 
+/-- Every source family traversed by a successful ordinary declaration was
+absent from the public input map.  The proof follows the validator's exact
+source-order metadata relation, rather than recovering a family from its
+name after the declaration folds have completed. -/
+theorem ordinarySourceFamilyFresh
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (inputMapWF : env.constants.WF) {indType : InductiveType}
+    (member : indType ∈ execution.nested.types) :
+    env.constants.find? indType.name = none := by
+  have normalizationRun := execution.flattened.normalization_run
+    execution.flattenedRun
+  have familyRun :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult_run normalizationRun
+  have familySizes :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult.sizes_of_run
+        execution.nested.types_nonempty familyRun
+  have paramsSize :
+      execution.flattened.eliminationExecution.normalization.stats.params.size =
+        nparams := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.1
+  have nindicesSize :
+      execution.flattened.eliminationExecution.normalization.stats.nindices.size =
+        execution.nested.types.length := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.2.1
+  have alignment : List.Forall₂
+      (fun source info => ∃ numIndices,
+        info = AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray source numIndices
+          execution.nested.aux2nested.size isUnsafe
+          execution.flattened.eliminationExecution.normalization.validationContext)
+      execution.nested.types
+      execution.flattened.eliminationExecution.normalization.declaredInfos := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size
+        isUnsafe
+        execution.flattened.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  obtain ⟨offset, sourceAt⟩ := List.mem_iff_getElem?.1 member
+  obtain ⟨info, infoAt, numIndices, infoEq⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_left alignment sourceAt
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext.env.constants.WF := by
+    simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
+  have infoMember : info ∈
+      execution.flattened.eliminationExecution.normalization.declaredInfos :=
+    List.mem_iff_getElem?.2 ⟨offset, infoAt⟩
+  have fresh :=
+    execution.flattened.eliminationExecution.normalization.declareTrace
+      |>.names_fresh validationMapWF info infoMember
+  have infoName : info.name = indType.name := by
+    rw [infoEq]
+    rfl
+  simpa only [execution.flattenedValidationEnv_eq, infoName] using fresh
+
+/-- A projection-ready family whose complete observation was not already
+present at the ordinary input is one of the exact family records emitted by
+the retained validation fold.  Constructor ownership and canonical recursor
+naming rule out activating an old family with a newly inserted artifact. -/
+theorem ordinaryProjectionDeltaFamily
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    info ∈ execution.flattened.eliminationExecution.normalization.declaredInfos ∧
+      info.name = name := by
+  have finalMapWF := execution.ordinaryFinalMapWF numNested_eq inputMapWF
+  have foundMap : finalEnv.constants.find? name =
+      some (.inductInfo info) := by
+    change finalEnv.constants.find?' name = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  obtain ⟨constructorName, constructorInfo, recursorInfo, ctorsEq,
+      numIndicesEq, constructorFound, recursorFound, owner, familyRecursor⟩ :=
+    Kernel.Environment.isProjectionReadyStructure_info found ready
+  have constructorFoundMap :
+      finalEnv.constants.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+    change finalEnv.constants.find?' constructorName = _ at constructorFound
+    rwa [finalMapWF.find?'_eq_find?] at constructorFound
+  have recursorFoundMap :
+      finalEnv.constants.find? (mkRecName name) =
+        some (.recInfo recursorInfo) := by
+    change finalEnv.constants.find?' (mkRecName name) = _ at recursorFound
+    rwa [finalMapWF.find?'_eq_find?] at recursorFound
+  have familyFoundMap :
+      finalEnv.constants.find? name = some (.inductInfo info) := by
+    change finalEnv.constants.find?' name = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  rcases execution.ordinaryFamilyLookupCases numNested_eq inputMapWF foundMap
+      with oldFamily | newFamily
+  · rcases execution.ordinaryConstructorLookupCases numNested_eq inputMapWF
+        constructorFoundMap with oldConstructor | newConstructor
+    · rcases execution.ordinaryRecursorLookupCases numNested_eq inputMapWF
+          recursorFoundMap with oldRecursor | newRecursor
+      · have oldFamilyFind :
+            env.find? name = some (.inductInfo info) := by
+          change env.constants.find?' name = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldFamily
+        have oldConstructorFind :
+            env.find? constructorName = some (.ctorInfo constructorInfo) := by
+          change env.constants.find?' constructorName = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldConstructor
+        have oldRecursorFind :
+            env.find? (mkRecName name) = some (.recInfo recursorInfo) := by
+          change env.constants.find?' (mkRecName name) = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldRecursor
+        have oldReady : env.isProjectionReadyStructure name = true :=
+          Kernel.Environment.isProjectionReadyStructure_of_info
+            oldFamilyFind ctorsEq numIndicesEq oldConstructorFind
+              oldRecursorFind owner familyRecursor
+        exact (notOld ⟨oldFamilyFind, oldReady⟩).elim
+      · have recursorNameMember : recursorInfo.name ∈
+            execution.flattened.recursors.infos.map (·.name) :=
+          List.mem_map.mpr ⟨recursorInfo, newRecursor.1, rfl⟩
+        rw [AddInductive.declareRecursors_infos_names
+          execution.flattened.recursorsRun] at recursorNameMember
+        obtain ⟨indType, sourceMember, sourceRecursorNameEq⟩ :=
+          List.mem_map.mp recursorNameMember
+        have familyNameEq : indType.name = name := by
+          have nameEq := sourceRecursorNameEq.trans newRecursor.2
+          simpa [mkRecName] using nameEq
+        have fresh := execution.ordinarySourceFamilyFresh inputMapWF
+          sourceMember
+        rw [familyNameEq, oldFamily] at fresh
+        contradiction
+    · obtain ⟨indType, sourceMember, constructorOwner⟩ := by
+        simpa only [
+          AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+          List.toList_toArray] using
+          AddInductive.declaredConstructorInfos_induct
+            execution.flattened.eliminationExecution.normalization.stats
+            execution.nested.types.toArray isUnsafe
+            execution.flattened.eliminationExecution.constructorContext
+            newConstructor.1
+      have familyNameEq : indType.name = name :=
+        constructorOwner.symm.trans owner
+      have fresh := execution.ordinarySourceFamilyFresh inputMapWF sourceMember
+      rw [familyNameEq, oldFamily] at fresh
+      contradiction
+  · exact newFamily
+
 /-- Every newly declared ordinary constructor record retains the name of one
 flattened source family as its owner. -/
 theorem ordinaryDeclaredConstructorSource
@@ -5509,6 +6489,32 @@ theorem nestedFinalMapWF
     execution.restoration_of_numNested_ne numNested_ne
   have restoredMapWF := restoration.trace.map_wf inputMapWF
   simpa only [finalEq] using restoredMapWF
+
+/-- Every original source-family name is fresh before a successful genuine
+nested restoration.  The witness is the exact family record retained by the
+restoration inventory, so this fact does not depend on reconstructing a
+parallel name list. -/
+theorem nestedSourceFamilyFresh
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {indType : InductiveType}
+    (sourceMember : indType ∈ types) :
+    env.constants.find? indType.name = none := by
+  obtain ⟨restoration, _restorationRun, _finalEq⟩ :=
+    execution.restoration_of_numNested_ne numNested_ne
+  obtain ⟨info, inventoryMember, nameEq⟩ :=
+    restoredNestedInfos_family_of_source
+      (res := execution.nested)
+      (flatEnv := execution.flattened.recursors.env) sourceMember
+  have restorationMember : (.inductInfo info : ConstantInfo) ∈
+      restoration.infos := by
+    simpa only [restoration.infos_eq] using inventoryMember
+  have fresh := restoration.trace.map_fresh inputMapWF restorationMember
+  simpa only [ConstantInfo.name, ConstantInfo.toConstantVal, nameEq] using fresh
 
 /-- Classify a family record in a genuinely nested final environment using
 the exact mixed restoration inventory. -/
@@ -5591,6 +6597,94 @@ theorem nestedRecursorLookupCases
   · exact .inr ⟨by simpa only [restoration.infos_eq] using inserted.1,
       inserted.2⟩
 
+/-- A projection-ready family newly activated by a genuine nested
+restoration is the exact restored family record of one source family.  The
+constructor-owner check excludes activation by a restored constructor from
+another family, while the recursor's `all` inventory excludes activation by
+an unrelated restored auxiliary recursor. -/
+theorem nestedProjectionDeltaFamily
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (inputMapWF : env.constants.WF) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ indType ∈ types,
+      (.inductInfo info : ConstantInfo) ∈
+        restoredNestedInfos execution.nested
+          execution.flattened.recursors.env types ∧
+      info.name = indType.name ∧ info.name = name := by
+  have finalMapWF := execution.nestedFinalMapWF numNested_ne inputMapWF
+  have foundMap : finalEnv.constants.find? name =
+      some (.inductInfo info) := by
+    change finalEnv.constants.find?' name = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  obtain ⟨constructorName, constructorInfo, recursorInfo, ctorsEq,
+      numIndicesEq, constructorFound, recursorFound, owner,
+      familyRecursor⟩ :=
+    Kernel.Environment.isProjectionReadyStructure_info found ready
+  have constructorFoundMap :
+      finalEnv.constants.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+    change finalEnv.constants.find?' constructorName = _ at constructorFound
+    rwa [finalMapWF.find?'_eq_find?] at constructorFound
+  have recursorFoundMap :
+      finalEnv.constants.find? (mkRecName name) =
+        some (.recInfo recursorInfo) := by
+    change finalEnv.constants.find?' (mkRecName name) = _ at recursorFound
+    rwa [finalMapWF.find?'_eq_find?] at recursorFound
+  rcases execution.nestedFamilyLookupCases numNested_ne inputMapWF foundMap with
+    oldFamily | newFamily
+  · rcases execution.nestedConstructorLookupCases numNested_ne inputMapWF
+        constructorFoundMap with oldConstructor | newConstructor
+    · rcases execution.nestedRecursorLookupCases numNested_ne inputMapWF
+          recursorFoundMap with oldRecursor | newRecursor
+      · have oldFamilyFind :
+            env.find? name = some (.inductInfo info) := by
+          change env.constants.find?' name = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldFamily
+        have oldConstructorFind :
+            env.find? constructorName = some (.ctorInfo constructorInfo) := by
+          change env.constants.find?' constructorName = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldConstructor
+        have oldRecursorFind :
+            env.find? (mkRecName name) = some (.recInfo recursorInfo) := by
+          change env.constants.find?' (mkRecName name) = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldRecursor
+        have oldReady : env.isProjectionReadyStructure name = true :=
+          Kernel.Environment.isProjectionReadyStructure_of_info
+            oldFamilyFind ctorsEq numIndicesEq oldConstructorFind
+              oldRecursorFind owner familyRecursor
+        exact (notOld ⟨oldFamilyFind, oldReady⟩).elim
+      · have allEq : recursorInfo.all = types.map (·.name) :=
+          restoredNestedInfos_recursor_all newRecursor.1
+        have sourceNameMember : name ∈ types.map (·.name) := by
+          simpa only [allEq] using familyRecursor
+        obtain ⟨indType, sourceMember, familyNameEq⟩ :=
+          List.mem_map.mp sourceNameMember
+        have fresh := execution.nestedSourceFamilyFresh numNested_ne inputMapWF
+          sourceMember
+        rw [familyNameEq, oldFamily] at fresh
+        contradiction
+    · obtain ⟨indType, sourceMember, constructorOwner⟩ :=
+        restoredNestedInfos_constructor_cases newConstructor.1
+      have familyNameEq : indType.name = name := constructorOwner.symm.trans owner
+      have fresh := execution.nestedSourceFamilyFresh numNested_ne inputMapWF
+        sourceMember
+      rw [familyNameEq, oldFamily] at fresh
+      contradiction
+  · obtain ⟨indType, sourceMember, familyNameEq⟩ :=
+      restoredNestedInfos_family_cases newFamily.1
+    exact ⟨indType, sourceMember, newFamily.1, familyNameEq, newFamily.2⟩
+
 /-- Every source family has its canonical main recursor in a genuinely
 nested public final environment. -/
 theorem nestedRecursorLookupOfSourceFamily
@@ -5620,6 +6714,2838 @@ theorem nestedRecursorLookupOfSourceFamily
   rw [nameEq] at namedLookup
   refine ⟨info, ?_⟩
   simpa only [finalEq] using namedLookup
+
+/-- Exact host-source ownership retained behind one restored projection
+layout.  The public layout intentionally contains only metadata and Theory
+family facts; this producer-side package additionally remembers the host
+family/constructor positions audited before normalization and the exact
+nested-restoration rewrite of the final constructor record. -/
+structure RestoredProjectionParameterSource
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (artifact : execution.FlattenedNestedArtifact staged)
+    {name : Name} {info : InductiveVal} {after : VEnv}
+    (layout : RestoredProjectionArtifactLayout finalEnv name info after) where
+  source_eq : layout.view.source = artifact.source
+  source_uvars_eq : layout.view.uvars = lparams.length
+  nested_eq : HEq layout.view.nested artifact.alignedNested
+  selection : Nonempty (VInductDecl.NestedStructureSelection
+    artifact.alignedNested layout.view.familyIndex layout.view.sourceFamily
+      layout.view.sourceConstructor)
+  hostFamily : InductiveType
+  hostFamily_at : execution.nested.types[layout.view.familyIndex]? =
+    some hostFamily
+  hostConstructor : Constructor
+  hostConstructor_at : hostFamily.ctors[0]? = some hostConstructor
+  rawConstructor : VConstVal
+  sourceInput : VInductDecl.CandidateConstructorSourceInput
+    staged.enriched.blockEnv lparams hostConstructor rawConstructor
+  rawConstructor_eq : rawConstructor = layout.view.selection.flatConstructor
+  restored_type_eq : layout.constructorInfo.type =
+    execution.nested.restoreNested execution.flattened.recursors.env
+      hostConstructor.type
+  constructor_levelParams_eq : layout.constructorInfo.levelParams = lparams
+
+/-- The exact raw host-source audit and completed shared-parameter basis
+needed by restored projection construction.  This package is deliberately
+indexed by the retained recursor producer and nested generation; it cannot
+be paired with a parallel source, analyzer result, or parameter telescope. -/
+structure RestoredProjectionParameterAuditSupport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (artifact : execution.FlattenedNestedArtifact staged)
+    (shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true) where
+  basis : VInductDecl.ConstructorRawPreFamilyParameterAuditBasis
+    (ves.venv .safe) lparams
+    (staged.recursorShape shape).execution.eliminationExecution.normalization.stats
+    (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext
+    staged.source.nparams artifact.generation.block.checked.params
+  rawAudit : VInductDecl.ProducedBlockRawHostParameterAuditRun
+    (staged.recursorShape shape)
+
+/-- Assemble the restored parameter-audit handoff from a producer-owned,
+shape-neutral basis and the single raw host-source audit owned by the same
+recursor producer. -/
+theorem
+    RestoredProjectionParameterAuditSupport.nonempty_ofParameterAuditBasis
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (parameterBasis :
+      flat.run.elimination.block.ParameterAuditBasisSupport)
+    (rawAudit : VInductDecl.ProducedBlockRawHostParameterAuditRun
+      (staged.recursorShape shape)) :
+    Nonempty (execution.RestoredProjectionParameterAuditSupport staged
+      artifact shape) :=
+  ⟨{ basis := parameterBasis.basis, rawAudit := rawAudit }⟩
+
+/-- Compatibility constructor for the currently implemented indexed-mutual
+producer.  The restored handoff itself no longer exposes this source-list
+restriction. -/
+theorem
+    RestoredProjectionParameterAuditSupport.nonempty_of_secondFamilyIndex
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (secondFamily :
+      flat.run.elimination.block.HasSecondFamilyIndexSupport)
+    (rawAudit : VInductDecl.ProducedBlockRawHostParameterAuditRun
+      (staged.recursorShape shape)) :
+    Nonempty (execution.RestoredProjectionParameterAuditSupport staged
+      artifact shape) := by
+  exact nonempty_ofParameterAuditBasis
+    (.ofSecondFamilyIndex secondFamily (by rfl)) rawAudit
+
+/-- Assemble restored parameter-layout support directly from a complete
+audit of the retained recursor producer.  This proof-facing constructor does
+not execute the raw-host builder again: it projects the exact dependent trace
+already selected by `audit` and pairs it with the producer-owned canonical
+parameter basis. -/
+noncomputable def
+    RestoredProjectionParameterAuditSupport.ofParameterAuditBasis
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (parameterBasis :
+      flat.run.elimination.block.ParameterAuditBasisSupport)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    execution.RestoredProjectionParameterAuditSupport staged artifact shape :=
+  { basis := parameterBasis.basis
+    rawAudit := audit.rawHostParameterAudit }
+
+/-- Compatibility wrapper for the indexed-mutual producer. -/
+noncomputable def
+    RestoredProjectionParameterAuditSupport.ofSecondFamilyIndexAudit
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (secondFamily :
+      flat.run.elimination.block.HasSecondFamilyIndexSupport)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    execution.RestoredProjectionParameterAuditSupport staged artifact shape :=
+  ofParameterAuditBasis
+    (.ofSecondFamilyIndex secondFamily (by rfl)) audit
+
+/-- Execute the remaining narrow raw-host audit and assemble the complete
+restored parameter-layout support at the same producer.  The executable
+result owns the exact source-indexed audit trace rather than exposing its
+success equation as a consumer premise. -/
+noncomputable def
+    RestoredProjectionParameterAuditSupport.ofParameterAuditBasis?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (parameterBasis :
+      flat.run.elimination.block.ParameterAuditBasisSupport) :
+    Except Lean.Kernel.Exception
+      (execution.RestoredProjectionParameterAuditSupport staged artifact
+        shape) :=
+  match staged.recursorRawHostParameterAudit? shape with
+  | .error error => .error error
+  | .ok rawAudit =>
+      .ok {
+        basis := parameterBasis.basis
+        rawAudit := rawAudit }
+
+/-- Compatibility wrapper for the indexed-mutual producer. -/
+noncomputable def
+    RestoredProjectionParameterAuditSupport.ofSecondFamilyIndex?
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (secondFamily :
+      flat.run.elimination.block.HasSecondFamilyIndexSupport) :
+    Except Lean.Kernel.Exception
+      (execution.RestoredProjectionParameterAuditSupport staged artifact
+        shape) :=
+  ofParameterAuditBasis? (.ofSecondFamilyIndex secondFamily (by rfl))
+
+/-- A complete Stage-3 audit of the retained recursor producer guarantees
+that the narrow restored-support executable succeeds.  Thus callers already
+holding the canonical broad producer run never need to rerun or restate its
+raw-host checker equation. -/
+theorem
+    RestoredProjectionParameterAuditSupport.ofParameterAuditBasis?_success
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (parameterBasis :
+      flat.run.elimination.block.ParameterAuditBasisSupport)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    ∃ support : execution.RestoredProjectionParameterAuditSupport staged
+        artifact shape,
+      RestoredProjectionParameterAuditSupport.ofParameterAuditBasis?
+        parameterBasis = .ok support := by
+  obtain ⟨rawAudit, auditRun⟩ :=
+    staged.recursorRawHostParameterAudit?_success shape audit
+  refine ⟨{
+    basis := parameterBasis.basis
+    rawAudit := rawAudit }, ?_⟩
+  unfold RestoredProjectionParameterAuditSupport.ofParameterAuditBasis?
+  rw [auditRun]
+
+/-- Compatibility success theorem for the indexed-mutual producer. -/
+theorem
+    RestoredProjectionParameterAuditSupport.ofSecondFamilyIndex?_success
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    (secondFamily :
+      flat.run.elimination.block.HasSecondFamilyIndexSupport)
+    (audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    ∃ support : execution.RestoredProjectionParameterAuditSupport staged
+        artifact shape,
+      RestoredProjectionParameterAuditSupport.ofSecondFamilyIndex?
+        secondFamily = .ok support := by
+  simpa only [RestoredProjectionParameterAuditSupport.ofSecondFamilyIndex?]
+    using ofParameterAuditBasis?_success
+      (.ofSecondFamilyIndex secondFamily (by rfl)) audit
+
+/-- Every exact flattened generation owns its canonical shared-parameter
+audit basis.  The source-list case split is internal to the retained block
+producer, so nested restoration cannot reselect a singleton or mutual
+traversal. -/
+noncomputable def
+    FlattenedExactRecursorStagingResult.parameterAuditBasisSupport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {generation : VInductDecl.BlockGenerationChecked staged.source}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (flat : execution.FlattenedExactRecursorStagingResult staged generation
+      shape) :
+    flat.run.elimination.block.ParameterAuditBasisSupport :=
+  flat.run.elimination.block.parameterAuditBasisSupport (by rfl)
+
+/-- Exact nested replay together with the two producer-owned facts consumed
+by restored constructor-parameter layout.  Keeping these witnesses beside
+the transaction avoids reconstructing a parallel recursor producer after
+the flattened and restored endpoints have already been fixed. -/
+structure
+    FlattenedExactNestedProjectionParameterRun
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape)
+    (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run)
+    {after : VEnv}
+    (restoration : execution.FlattenedNestedRestorationResult artifact after)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne) where
+  transaction : execution.FlattenedExactNestedTransactionResult flat
+    metadata restoration numNested_ne restoredMetadata
+  parameterBasis :
+    flat.run.elimination.block.ParameterAuditBasisSupport
+  stage3Audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+    (staged.recursorShape shape) lparams
+
+/-- Assemble the projection-parameter owner from the exact nested
+transaction and its producer audit.  Shared-parameter ownership is projected
+from `flat`; callers no longer supply a traversal-dependent basis. -/
+noncomputable def FlattenedExactNestedProjectionParameterRun.ofTransaction
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (stage3Audit : VInductDecl.ProducedBlockRecursorStage3AuditRun
+      (staged.recursorShape shape) lparams) :
+    execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata where
+  transaction := transaction
+  parameterBasis := flat.parameterAuditBasisSupport
+  stage3Audit := stage3Audit
+
+/-- Project the complete restored parameter support from the witnesses
+retained by one exact nested projection run. -/
+noncomputable def
+    FlattenedExactNestedProjectionParameterRun.parameterAuditSupport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata) :
+    execution.RestoredProjectionParameterAuditSupport staged artifact shape :=
+  RestoredProjectionParameterAuditSupport.ofParameterAuditBasis
+    run.parameterBasis run.stage3Audit
+
+/-- Construct the exact restored metadata layout behind a newly
+projection-ready family in a genuine nested transaction.  The host family is
+first inverted through the mixed restoration inventory to its exact flattened
+record.  The flattened declaration alignment then identifies one raw Theory
+position; checked family-name uniqueness identifies that position with the
+source family selected from the nested replay trace.  The same retained
+constructor position aligns the restored cached metadata with the checked
+flattened telescope, so every non-operational field of the projection artifact
+is a producer fact rather than a projection-consumer premise. -/
+theorem
+    FlattenedExactNestedTransactionResult.restoredProjectionArtifactLayoutSource
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ layout : RestoredProjectionArtifactLayout finalEnv name info after,
+      Nonempty (RestoredProjectionParameterSource execution staged artifact
+        layout) := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  have finalMapWF := execution.nestedFinalMapWF numNested_ne inputMapWF
+  have foundMap : finalEnv.constants.find? name =
+      some (.inductInfo info) := by
+    change finalEnv.constants.find?' name = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  obtain ⟨constructorName, constructorInfo, recursorInfo, ctorsEq,
+      numIndicesEq, constructorFound, recursorFound, _owner,
+      _familyRecursor⟩ :=
+    Kernel.Environment.isProjectionReadyStructure_info found ready
+  have constructorFoundMap :
+      finalEnv.constants.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+    change finalEnv.constants.find?' constructorName = _ at constructorFound
+    rwa [finalMapWF.find?'_eq_find?] at constructorFound
+  have recursorFoundMap :
+      finalEnv.constants.find? (mkRecName name) =
+        some (.recInfo recursorInfo) := by
+    change finalEnv.constants.find?' (mkRecName name) = _ at recursorFound
+    rwa [finalMapWF.find?'_eq_find?] at recursorFound
+  obtain ⟨_classifiedSource, _classifiedMember, restoredMember,
+      _classifiedName, _infoName⟩ :=
+    execution.nestedProjectionDeltaFamily numNested_ne inputMapWF found ready
+      notOld
+  obtain ⟨restoredSource, restoredSourceMember, infoRestoredEq⟩ :=
+    restoredNestedInfos_family_exact restoredMember
+  have restoredSourceName : restoredSource.name = name := by
+    calc
+      restoredSource.name = info.name := by
+        rw [infoRestoredEq]
+        rfl
+      _ = name := by
+        simpa only [infoRestoredEq] using _infoName
+  have inputFresh : env.constants.find? name = none := by
+    have fresh := execution.nestedSourceFamilyFresh numNested_ne inputMapWF
+      restoredSourceMember
+    simpa only [restoredSourceName] using fresh
+  obtain ⟨sourceFamily, sourceFamilyMember, sourceFamilyName⟩ :=
+    transaction.safeTrace.sourceFamily_of_fresh_final_lookup inputMapWF
+      inputFresh foundMap
+  obtain ⟨familyIndex, sourceFamilyAt⟩ :=
+    List.mem_iff_getElem?.1 sourceFamilyMember
+
+  have restoredCtorsEq :
+      (execution.nested.restoreSourceInductiveInfo
+        execution.flattened.recursors.env (types.map (·.name))
+        restoredSource).ctors = [constructorName] := by
+    rw [← infoRestoredEq]
+    exact ctorsEq
+  have restoredCtorsNonempty :
+      (execution.nested.restoreSourceInductiveInfo
+        execution.flattened.recursors.env (types.map (·.name))
+        restoredSource).ctors ≠ [] := by
+    rw [restoredCtorsEq]
+    simp
+  obtain ⟨flatInfo, flatFound, restoredRecordEq⟩ :=
+    execution.nested.restoreSourceInductiveInfo_of_ctors_ne_nil
+      execution.flattened.recursors.env (types.map (·.name))
+      restoredSource restoredCtorsNonempty
+  have infoFlatEq : info = {
+      flatInfo with
+      name := restoredSource.name
+      all := types.map (·.name) } :=
+    infoRestoredEq.trans restoredRecordEq
+  have flatMapWF := execution.flattenedFinalMapWF inputMapWF
+  have flatFoundMap :
+      execution.flattened.recursors.env.constants.find? restoredSource.name =
+        some (.inductInfo flatInfo) := by
+    change execution.flattened.recursors.env.constants.find?'
+      restoredSource.name = _ at flatFound
+    rwa [flatMapWF.find?'_eq_find?] at flatFound
+  have flatDeclared :
+      flatInfo ∈
+          execution.flattened.eliminationExecution.normalization.declaredInfos ∧
+        flatInfo.name = restoredSource.name := by
+    rcases execution.flattenedFamilyLookupCases inputMapWF flatFoundMap with
+      old | declared
+    · have fresh := execution.nestedSourceFamilyFresh numNested_ne inputMapWF
+        restoredSourceMember
+      rw [old] at fresh
+      contradiction
+    · exact declared
+
+  have normalizationRun := execution.flattened.normalization_run
+    execution.flattenedRun
+  have familyRun :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult_run normalizationRun
+  have familySizes :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult.sizes_of_run
+        execution.nested.types_nonempty familyRun
+  have nindicesSize :
+      execution.flattened.eliminationExecution.normalization.stats.nindices.size =
+        execution.nested.types.length := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.2.1
+  have paramsSize :
+      execution.flattened.eliminationExecution.normalization.stats.params.size =
+        nparams := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.1
+  have familyAlignment : List.Forall₂
+      (fun source familyInfo => ∃ numIndices,
+        familyInfo = AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray source numIndices
+          execution.nested.aux2nested.size false
+          execution.flattened.eliminationExecution.normalization.validationContext)
+      execution.nested.types
+      execution.flattened.eliminationExecution.normalization.declaredInfos := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size false
+        execution.flattened.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  obtain ⟨offset, flatInfoAt⟩ := List.mem_iff_getElem?.1 flatDeclared.1
+  obtain ⟨flatSource, flatSourceAt, _flatSourceAlignment⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_right familyAlignment flatInfoAt
+  obtain ⟨rawFamily, rawFamilyAt, familySource, constructorSources⟩ :=
+    staged.enriched.enrichment.input.getElem? flatSourceAt
+  have stagedRawFamilyAt : staged.source.types[offset]? =
+      some rawFamily := by
+    simpa only [FlattenedEnrichedStagingResult.source,
+      VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+      rawFamilyAt.down
+  have rawCountAt := flat.run.rawIndexCounts.getElem? stagedRawFamilyAt
+  change (staged.recursorShape shape).execution.eliminationExecution.normalization.stats.nindices[
+    0 + offset]? = _ at rawCountAt
+  rw [staged.recursorShape_nindices_eq shape] at rawCountAt
+  have countAt :
+      execution.flattened.eliminationExecution.normalization.stats.nindices[offset]? =
+        some (VInductDecl.ctorFields
+          (VExpr.dropN staged.source.nparams rawFamily.type)).length := by
+    change
+      execution.flattened.eliminationExecution.normalization.stats.nindices[
+        0 + offset]? = _ at rawCountAt
+    simpa only [Nat.zero_add] using rawCountAt
+  have expectedFlatInfoAt :
+      execution.flattened.eliminationExecution.normalization.declaredInfos[offset]? =
+        some (AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray flatSource
+          (VInductDecl.ctorFields
+            (VExpr.dropN staged.source.nparams rawFamily.type)).length
+          execution.nested.aux2nested.size false
+          execution.flattened.eliminationExecution.normalization.validationContext) := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_getElem?
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size false
+        execution.flattened.eliminationExecution.normalization.validationContext
+        flatSourceAt countAt
+  have flatInfoEq : flatInfo = AddInductive.declaredInductiveInfo
+      execution.flattened.eliminationExecution.normalization.stats nparams
+      execution.nested.types.toArray flatSource
+      (VInductDecl.ctorFields
+        (VExpr.dropN staged.source.nparams rawFamily.type)).length
+      execution.nested.aux2nested.size false
+      execution.flattened.eliminationExecution.normalization.validationContext :=
+    Option.some.inj (flatInfoAt.symm.trans expectedFlatInfoAt)
+  have flatNumIndicesEq : flatInfo.numIndices = 0 := by
+    simpa only [infoFlatEq] using numIndicesEq
+  have rawIndicesLength :
+      (VInductDecl.ctorFields
+        (VExpr.dropN staged.source.nparams rawFamily.type)).length = 0 := by
+    rw [flatInfoEq] at flatNumIndicesEq
+    simpa only [AddInductive.declaredInductiveInfo] using flatNumIndicesEq
+  have rawIndicesEq :
+      VInductDecl.ctorFields
+        (VExpr.dropN staged.source.nparams rawFamily.type) = [] :=
+    List.length_eq_zero_iff.mp rawIndicesLength
+  have flatInfoCtorsEq : flatInfo.ctors = [constructorName] := by
+    simpa only [infoFlatEq] using ctorsEq
+  have flatSourceConstructorNames :
+      flatSource.ctors.map (·.name) = [constructorName] := by
+    rw [flatInfoEq] at flatInfoCtorsEq
+    simpa only [AddInductive.declaredInductiveInfo] using flatInfoCtorsEq
+  have flatSourceConstructorsLength : flatSource.ctors.length = 1 := by
+    have lengths := congrArg List.length flatSourceConstructorNames
+    simpa only [List.length_map, List.length_cons, List.length_nil] using lengths
+  obtain ⟨flatSourceConstructor, flatSourceConstructorsEq⟩ :=
+    List.length_eq_one_iff.mp flatSourceConstructorsLength
+  have flatSourceConstructorName :
+      flatSourceConstructor.name = constructorName := by
+    have selected : flatSourceConstructor.name = constructorName ∧ True := by
+      simpa only [flatSourceConstructorsEq, List.map_cons, List.map_nil,
+        List.cons.injEq] using flatSourceConstructorNames
+    exact selected.1
+  have flatSourceConstructorAt : flatSource.ctors[0]? =
+      some flatSourceConstructor := by
+    simp only [flatSourceConstructorsEq, List.getElem?_cons_zero]
+  obtain ⟨translatedConstructor, translatedConstructorAt,
+      constructorSource⟩ := constructorSources.getElem? flatSourceConstructorAt
+  have rawConstructorsLength : rawFamily.ctors.length = 1 := by
+    rw [← constructorSources.length_eq]
+    exact flatSourceConstructorsLength
+  obtain ⟨rawConstructor, rawConstructorsEq⟩ :=
+    List.length_eq_one_iff.mp rawConstructorsLength
+  have translatedConstructorEq : translatedConstructor = rawConstructor := by
+    rw [rawConstructorsEq] at translatedConstructorAt
+    simpa only [List.getElem?_cons_zero, Option.some.injEq] using
+      translatedConstructorAt.down.symm
+
+  obtain ⟨sourceFlatFamily, sourceFlatFamilyAt, sourceFamilyHeader⟩ :=
+    artifact.flat_family_header_at sourceFamilyAt
+  have sourceFlatFamilyName : sourceFlatFamily.name = name := by
+    have headerName := congrArg VInductDecl.NestedFamilyHeader.name
+      sourceFamilyHeader
+    have flatSourceName : sourceFlatFamily.name = sourceFamily.name := by
+      simpa [VInductDecl.VInductiveType.nestedHeader] using headerName
+    exact flatSourceName.trans sourceFamilyName
+  have rawFamilyName : rawFamily.name = name := by
+    calc
+      rawFamily.name = flatSource.name := familySource.down.name_eq.symm
+      _ = flatInfo.name := by
+        simpa only [AddInductive.declaredInductiveInfo] using
+          (congrArg (fun value : InductiveVal => value.name) flatInfoEq).symm
+      _ = restoredSource.name := flatDeclared.2
+      _ = name := restoredSourceName
+  have stagedNamesNodup :
+      (staged.source.types.map fun family => family.name).Nodup := by
+    simpa only [artifact.flat_eq] using
+      artifact.nested.flat_family_names_nodup
+  have sourceNameAt :
+      (staged.source.types.map fun family => family.name)[familyIndex]? =
+        some name := by
+    simp only [List.getElem?_map, sourceFlatFamilyAt, Option.map_some,
+      sourceFlatFamilyName]
+  have rawNameAt :
+      (staged.source.types.map fun family => family.name)[offset]? =
+        some name := by
+    simp only [List.getElem?_map, stagedRawFamilyAt, Option.map_some,
+      rawFamilyName]
+  have sourceIndexUpper :
+      familyIndex < (staged.source.types.map fun family => family.name).length := by
+    simpa using (List.getElem?_eq_some_iff.1 sourceNameAt).1
+  have indexEq : familyIndex = offset :=
+    (List.getElem?_inj sourceIndexUpper stagedNamesNodup).1
+      (sourceNameAt.trans rawNameAt.symm)
+  subst offset
+  have sourceFlatFamilyEq : sourceFlatFamily = rawFamily :=
+    Option.some.inj (sourceFlatFamilyAt.symm.trans stagedRawFamilyAt)
+  have sourceRawTypeEq : rawFamily.type = sourceFamily.type := by
+    calc
+      rawFamily.type = sourceFlatFamily.type :=
+        congrArg (fun value : VInductiveType => value.type)
+          sourceFlatFamilyEq.symm
+      _ = sourceFamily.type := by
+        simpa [VInductDecl.VInductiveType.nestedHeader] using
+          congrArg VInductDecl.NestedFamilyHeader.type sourceFamilyHeader
+  have sourceConstructorsLength : sourceFamily.ctors.length = 1 := by
+    have headerLengths := congrArg
+      (fun header : VInductDecl.NestedFamilyHeader =>
+        header.constructors.length) sourceFamilyHeader
+    have sourceFlatLength : sourceFlatFamily.ctors.length =
+        sourceFamily.ctors.length := by
+      simpa [VInductDecl.VInductiveType.nestedHeader] using headerLengths
+    calc
+      sourceFamily.ctors.length = sourceFlatFamily.ctors.length :=
+        sourceFlatLength.symm
+      _ = rawFamily.ctors.length :=
+        congrArg (fun family : VInductiveType => family.ctors.length)
+          sourceFlatFamilyEq
+      _ = 1 := rawConstructorsLength
+  obtain ⟨sourceConstructor, sourceConstructorsEq⟩ :=
+    List.length_eq_one_iff.mp sourceConstructorsLength
+  have constructorHeaderEq :
+      VInductDecl.VConstVal.nestedHeader rawConstructor =
+        VInductDecl.VConstVal.nestedHeader sourceConstructor := by
+    have headers := congrArg VInductDecl.NestedFamilyHeader.constructors
+      sourceFamilyHeader
+    rw [sourceFlatFamilyEq] at headers
+    simp only [VInductDecl.VInductiveType.nestedHeader] at headers
+    rw [rawConstructorsEq, sourceConstructorsEq] at headers
+    simp only [List.map_cons, List.map_nil, List.cons.injEq] at headers
+    exact headers.1
+  have sourceConstructorName : sourceConstructor.name = constructorName := by
+    calc
+      sourceConstructor.name = rawConstructor.name := by
+        simpa [VInductDecl.VConstVal.nestedHeader] using
+          congrArg VInductDecl.NestedCtorHeader.name constructorHeaderEq.symm
+      _ = translatedConstructor.name :=
+        congrArg VConstVal.name translatedConstructorEq.symm
+      _ = flatSourceConstructor.name := constructorSource.down.name_eq.symm
+      _ = constructorName := flatSourceConstructorName
+  have sourceNparamsEq : artifact.source.nparams = staged.source.nparams :=
+    artifact.source_nparams_eq.trans staged.source_nparams_eq.symm
+  have sourceRawIndicesEq :
+      VInductDecl.ctorFields
+        (VExpr.dropN artifact.source.nparams sourceFamily.type) = [] := by
+    rw [sourceNparamsEq, ← sourceRawTypeEq]
+    exact rawIndicesEq
+  obtain ⟨selection⟩ := artifact.selectStructure sourceFamilyAt
+    sourceConstructorsEq sourceRawIndicesEq
+
+  have sourceConstructorBlockMember : sourceConstructor ∈
+      artifact.source.blockConstructorConstants := by
+    simp only [VInductDecl.blockConstructorConstants, List.mem_flatMap]
+    exact ⟨sourceFamily, sourceFamilyMember, by
+      rw [sourceConstructorsEq]
+      simp⟩
+  have typeMapWF := transaction.safeTrace.addTypes.map_wf inputMapWF
+  have sourceConstructorInputFresh :
+      env.constants.find? sourceConstructor.name = none := by
+    have typeFresh := transaction.safeTrace.addCtors.map_fresh typeMapWF
+      sourceConstructorBlockMember
+    exact transaction.safeTrace.addTypes.input_map_none_of_output_none
+      inputMapWF typeFresh
+  have restoredConstructor :
+      (.ctorInfo constructorInfo : ConstantInfo) ∈
+          restoredNestedInfos execution.nested
+            execution.flattened.recursors.env types ∧
+        constructorInfo.name = constructorName := by
+    rcases execution.nestedConstructorLookupCases numNested_ne inputMapWF
+        constructorFoundMap with old | inserted
+    · have oldAtSource : env.constants.find? sourceConstructor.name =
+          some (.ctorInfo constructorInfo) := by
+        simpa only [sourceConstructorName] using old
+      rw [oldAtSource] at sourceConstructorInputFresh
+      contradiction
+    · exact inserted
+
+  let expectedFlatConstructorInfo := AddInductive.declaredConstructorInfo
+    execution.flattened.eliminationExecution.normalization.stats
+    flatSource.name flatSourceConstructor 0 false
+    execution.flattened.eliminationExecution.constructorContext
+  have expectedFlatConstructorMember : expectedFlatConstructorInfo ∈
+      execution.flattened.eliminationExecution.declaredConstructorInfos := by
+    simp only [
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+      AddInductive.declaredConstructorInfos_toArray, List.mem_flatMap]
+    refine ⟨flatSource, List.mem_of_getElem? flatSourceAt, ?_⟩
+    rw [flatSourceConstructorsEq]
+    simp [expectedFlatConstructorInfo,
+      AddInductive.declaredConstructorInfosFor]
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext
+        |>.env.constants.WF := by
+    simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
+  have hostFamilyMapWF :=
+    execution.flattened.eliminationExecution.normalization.declareTrace.map_wf
+      validationMapWF
+  have hostConstructorMapWF :=
+    execution.flattened.eliminationExecution.declareConstructorTrace.map_wf
+      hostFamilyMapWF
+  have recursorInitialMapWF :
+      execution.flattened.recursors.initialEnv.constants.WF := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      hostConstructorMapWF
+  have expectedFlatConstructorLookup₀ :=
+    execution.flattened.eliminationExecution.declareConstructorTrace.map_lookup
+      hostFamilyMapWF expectedFlatConstructorMember
+  have expectedFlatConstructorLookup₁ :
+      execution.flattened.recursors.initialEnv.constants.find?
+          expectedFlatConstructorInfo.name =
+        some (.ctorInfo expectedFlatConstructorInfo) := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      expectedFlatConstructorLookup₀
+  have expectedFlatConstructorLookup :=
+    execution.flattened.recursors.trace.preserve_map_lookup
+      recursorInitialMapWF expectedFlatConstructorLookup₁
+  have expectedFlatConstructorName :
+      expectedFlatConstructorInfo.name = constructorName := by
+    simp [expectedFlatConstructorInfo,
+      AddInductive.declaredConstructorInfo, flatSourceConstructorName]
+  have flatConstructorLookupMap :
+      execution.flattened.recursors.env.constants.find? constructorInfo.name =
+        some (.ctorInfo expectedFlatConstructorInfo) := by
+    simpa only [restoredConstructor.2, expectedFlatConstructorName] using
+      expectedFlatConstructorLookup
+  have flatConstructorLookup :
+      execution.flattened.recursors.env.find? constructorInfo.name =
+        some (.ctorInfo expectedFlatConstructorInfo) := by
+    change execution.flattened.recursors.env.constants.find?'
+      constructorInfo.name = _
+    rw [flatMapWF.find?'_eq_find?]
+    exact flatConstructorLookupMap
+  have restoredCachedFields : constructorInfo.numFields =
+      expectedFlatConstructorInfo.numFields :=
+    restoredNestedInfos_constructor_numFields_of_flat_lookup
+      restoredConstructor.1 flatConstructorLookup
+
+  have selectionFlatFamilyEq : selection.flatFamily = rawFamily :=
+    Option.some.inj (selection.flat_at.symm.trans stagedRawFamilyAt)
+  have selectionFlatConstructorEq :
+      selection.flatConstructor = rawConstructor := by
+    have constructorsEq := congrArg
+      (fun family : VInductiveType => family.ctors) selectionFlatFamilyEq
+    rw [selection.flat_constructors_eq, rawConstructorsEq] at constructorsEq
+    have selected : selection.flatConstructor = rawConstructor ∧ True := by
+      simpa only [List.cons.injEq] using constructorsEq
+    exact selected.1
+  have selectionConstructorRawEq :
+      selection.constructor.raw = rawConstructor :=
+    selection.constructor_raw_eq.trans selectionFlatConstructorEq
+  have selectionFamilyMember : selection.family ∈
+      artifact.generation.families :=
+    List.mem_iff_getElem?.2 ⟨familyIndex, selection.family_at⟩
+  have selectionConstructorMember : selection.constructor ∈
+      selection.family.ctorPairs := by
+    rw [selection.constructors_eq]
+    simp
+  have selectionConstructorParamLength :
+      (VExpr.telN staged.source.nparams
+        selection.constructor.raw.type).length = staged.source.nparams :=
+    ((artifact.generation.shape.2.2.2.2 selection.family
+      selectionFamilyMember).2.2.2.2.2.2 selection.constructor
+        selectionConstructorMember).2.2.1
+  have selectionConstructorAritySplit :
+      staged.source.nparams +
+          (selection.constructor.rawFields staged.source.nparams).length =
+        (VInductDecl.ctorFields selection.constructor.raw.type).length := by
+    simpa only [selectionConstructorParamLength,
+      VInductDecl.NormalizedCtor.rawFields] using
+      VExpr.telN_length_add_ctorFields_dropN_length
+        staged.source.nparams selection.constructor.raw.type
+  have rawConstructorAritySplit :
+      (VInductDecl.ctorFields rawConstructor.type).length =
+        staged.source.nparams +
+          (selection.constructor.rawFields staged.source.nparams).length := by
+    rw [← selectionConstructorRawEq]
+    exact selectionConstructorAritySplit.symm
+  have translatedConstructorAritySplit :
+      (VInductDecl.ctorFields translatedConstructor.type).length =
+        staged.source.nparams +
+          (selection.constructor.rawFields staged.source.nparams).length := by
+    simpa only [translatedConstructorEq] using rawConstructorAritySplit
+  have flatSourceConstructorArity :
+      AddInductive.constructorArity flatSourceConstructor.type 0 =
+        staged.source.nparams +
+          (selection.constructor.rawFields staged.source.nparams).length :=
+    constructorSource.down.sourceArity_eq.trans
+      translatedConstructorAritySplit
+  have expectedFlatConstructorFields :
+      expectedFlatConstructorInfo.numFields =
+        (selection.constructor.rawFields staged.source.nparams).length := by
+    simp [expectedFlatConstructorInfo,
+      AddInductive.declaredConstructorInfo, paramsSize,
+      flatSourceConstructorArity, staged.source_nparams_eq]
+
+  let view := restoration.certificate.restoredStructureView selection
+  have viewLayout : view.LayoutWF after :=
+    restoration.certificate.restoredStructureView_layoutWF selection
+  have selectionFamilyMember : selection.family ∈
+      artifact.alignedNested.generation.families :=
+    List.mem_iff_getElem?.2 ⟨familyIndex, selection.family_at⟩
+  have selectionFamilyWF := transaction.stagedCertificate.flatWF.families
+    selection.family (by
+      rw [transaction.stagedCertificate_nested_eq]
+      exact selectionFamilyMember)
+  have selectionFamilyWFAfter := selectionFamilyWF.mono
+    transaction.stagedCertificate.restored.envLE
+  rw [transaction.stagedCertificate_nested_eq] at selectionFamilyWFAfter
+  have viewFamilyLayout : view.FamilyLayoutWF after := {
+    toLayoutWF := viewLayout
+    familyWF := by
+      simpa [view,
+        VInductDecl.NestedBlockCertificate.restoredStructureView,
+        AddInductive.EnvironmentInductiveExecution.FlattenedNestedRestorationResult.certificate] using
+        selectionFamilyWFAfter }
+  have viewName : view.name = name := by
+    change sourceFamily.name = name
+    exact sourceFamilyName
+  have viewConstructorName : view.constructorName = constructorName := by
+    change sourceConstructor.name = constructorName
+    exact sourceConstructorName
+  have viewRecursorName : view.recursorName = mkRecName name := by
+    rw [VRestoredBlockStructureView.recursorName, viewName]
+    simp only [mkRecName]
+  have viewFieldsLength : view.fields.length =
+      (selection.constructor.rawFields staged.source.nparams).length := by
+    change (VInductDecl.ctorFields
+      (VExpr.dropN artifact.source.nparams sourceConstructor.type)).length = _
+    have alignedFlatNparams :
+        artifact.alignedNested.elim.flat.nparams = staged.source.nparams := rfl
+    simpa only [alignedFlatNparams] using
+      selection.source_flat_fields_length_eq
+  have constructorNumFields :
+      constructorInfo.numFields = view.fields.length :=
+    restoredCachedFields.trans <|
+      expectedFlatConstructorFields.trans viewFieldsLength.symm
+  have constructorNumParams :
+      constructorInfo.numParams = artifact.source.nparams :=
+    (restoredNestedInfos_constructor_numParams restoredConstructor.1).trans <|
+      (ElimNestedInductive.runAt_nparams_eq execution.nestedRun).trans
+        artifact.source_nparams_eq.symm
+  have infoNumParams : info.numParams = artifact.source.nparams := by
+    rw [infoFlatEq, flatInfoEq]
+    simp only [AddInductive.declaredInductiveInfo]
+    exact artifact.source_nparams_eq.symm
+
+  obtain ⟨translatedFamily, translatedFamilyLookup,
+      _translatedFamilyKind, translatedFamilyTr⟩ :=
+    transaction.safeTrace.family_translated_lookup inputMapWF
+      sourceFamilyMember
+  have translatedFamilyLookup' :
+      finalEnv.constants.find? name = some translatedFamily := by
+    simpa only [sourceFamilyName] using translatedFamilyLookup
+  have translatedFamilyEq : translatedFamily = .inductInfo info :=
+    Option.some.inj (translatedFamilyLookup'.symm.trans foundMap)
+  subst translatedFamily
+  have infoLevelParamsLength :
+      info.levelParams.length = artifact.source.uvars := by
+    have translatedLength := translatedFamilyTr.1.2.1
+    change info.levelParams.length = sourceFamily.uvars at translatedLength
+    have familyUvars : sourceFamily.uvars = artifact.source.uvars := by
+      simpa [view, VInductDecl.NestedBlockCertificate.restoredStructureView]
+        using view.family_uvars_eq
+    exact translatedLength.trans familyUvars
+
+  have viewRecursorRestoredMember :
+      view.recursor ∈ artifact.alignedNested.recursors := by
+    exact view.recursor_mem
+  have restoredTypeMapWF := restoredMetadata.addTypes.map_wf inputMapWF
+  have restoredCtorMapWF := restoredMetadata.addCtors.map_wf
+    restoredTypeMapWF
+  obtain ⟨translatedRecursor, translatedRecursorLookup,
+      _translatedRecursorKind, translatedRecursorTr⟩ :=
+    restoredMetadata.addRecs.translated_lookup restoredCtorMapWF
+      viewRecursorRestoredMember
+  have viewRecursorValueName : view.recursor.name = mkRecName name := by
+    simpa [VRestoredBlockStructureView.recursor] using viewRecursorName
+  have translatedRecursorLookup' :
+      finalEnv.constants.find? (mkRecName name) = some translatedRecursor := by
+    simpa only [execution.selectedNestedRestoration_finalEnv_eq numNested_ne,
+      viewRecursorValueName] using translatedRecursorLookup
+  have translatedRecursorEq : translatedRecursor = .recInfo recursorInfo :=
+    Option.some.inj (translatedRecursorLookup'.symm.trans recursorFoundMap)
+  subst translatedRecursor
+  have recursorLevelParamsLength :
+      recursorInfo.levelParams.length = view.nested.generation.recUvars := by
+    have translatedLength := translatedRecursorTr.1.2.1
+    change recursorInfo.levelParams.length = view.recursor.uvars at translatedLength
+    simpa [VRestoredBlockStructureView.recursor,
+      VRestoredBlockStructureView.flatRecursor,
+      VInductDecl.BlockGenerationChecked.generatedRecursor] using
+        translatedLength
+
+  let layout : RestoredProjectionArtifactLayout finalEnv name info after := {
+    view := view
+    name_eq := viewName
+    viewWF := viewFamilyLayout
+    constructorInfo := constructorInfo
+    constructor_find := by
+      simpa only [viewConstructorName] using constructorFound
+    recursorInfo := recursorInfo
+    recursor_find := by
+      simpa only [viewRecursorName] using recursorFound
+    recursor_levelParams_length := recursorLevelParamsLength
+    constructor_numParams_eq := by
+      simpa [view, VInductDecl.NestedBlockCertificate.restoredStructureView]
+        using constructorNumParams
+    constructor_numFields_eq := constructorNumFields
+    levelParams_length := by
+      simpa [view, VInductDecl.NestedBlockCertificate.restoredStructureView]
+        using infoLevelParamsLength
+    numParams_eq := by
+      simpa [view, VInductDecl.NestedBlockCertificate.restoredStructureView]
+        using infoNumParams
+    numIndices_eq := numIndicesEq
+    ctors_eq := by
+      simpa only [viewConstructorName] using ctorsEq }
+  have rawConstructorSource : VInductDecl.CandidateConstructorSourceInput
+      staged.enriched.blockEnv lparams flatSourceConstructor rawConstructor := by
+    simpa only [translatedConstructorEq] using constructorSource.down
+  have stagedSourceUvars : staged.source.uvars = lparams.length := by
+    simpa only [FlattenedEnrichedStagingResult.source,
+      VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+      staged.family.staging.uvars_eq
+  have restoredViewUvars : view.uvars = lparams.length := by
+    change artifact.source.uvars = lparams.length
+    calc
+      artifact.source.uvars = artifact.alignedNested.elim.flat.uvars := by
+        simpa using (congrArg VInductDecl.uvars
+          artifact.alignedNested.elim.flat_eq).symm
+      _ = staged.source.uvars := rfl
+      _ = lparams.length := stagedSourceUvars
+  have restoredConstructorType : constructorInfo.type =
+      execution.nested.restoreNested execution.flattened.recursors.env
+        flatSourceConstructor.type := by
+    have restored := restoredNestedInfos_constructor_type_of_flat_lookup
+      restoredConstructor.1 flatConstructorLookup
+    simpa [expectedFlatConstructorInfo,
+      AddInductive.declaredConstructorInfo] using restored
+  have restoredConstructorLevelParams : constructorInfo.levelParams =
+      lparams := by
+    have restored :=
+      restoredNestedInfos_constructor_levelParams_of_flat_lookup
+        restoredConstructor.1 flatConstructorLookup
+    calc
+      constructorInfo.levelParams = expectedFlatConstructorInfo.levelParams :=
+        restored
+      _ = execution.flattened.eliminationExecution.constructorContext.lparams :=
+        by rfl
+      _ = lparams := by
+        simpa only [
+          AddInductive.NormalizationEliminationExecution.constructorContext]
+          using execution.flattenedValidationLparams_eq
+  refine ⟨layout, ⟨{
+    source_eq := by
+      change artifact.source = artifact.source
+      rfl
+    source_uvars_eq := by
+      simpa [layout] using restoredViewUvars
+    nested_eq := by
+      change HEq view.nested artifact.alignedNested
+      rfl
+    selection := by
+      change Nonempty (VInductDecl.NestedStructureSelection
+        artifact.alignedNested familyIndex sourceFamily sourceConstructor)
+      exact ⟨selection⟩
+    hostFamily := flatSource
+    hostFamily_at := by
+      simpa [layout, view,
+        VInductDecl.NestedBlockCertificate.restoredStructureView] using
+        flatSourceAt
+    hostConstructor := flatSourceConstructor
+    hostConstructor_at := flatSourceConstructorAt
+    rawConstructor := rawConstructor
+    sourceInput := rawConstructorSource
+    rawConstructor_eq := by
+      simpa [layout, view,
+        VInductDecl.NestedBlockCertificate.restoredStructureView] using
+        selectionFlatConstructorEq.symm
+    restored_type_eq := restoredConstructorType
+    constructor_levelParams_eq := restoredConstructorLevelParams }⟩⟩
+
+/-- The exact nested transaction translates the public restored constructor
+record selected by a layout, at the layout's retained host universe names.
+This fact is intentionally separated from parameter auditing and runtime
+dependency support: it comes solely from the final constructor insertion
+trace and uniqueness of the public host lookup. -/
+theorem RestoredProjectionParameterSource.finalConstructorTr
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    {name : Name} {info : InductiveVal}
+    {layout : RestoredProjectionArtifactLayout finalEnv name info after}
+    (source : execution.RestoredProjectionParameterSource staged artifact
+      layout) :
+    TrExprS after lparams [] layout.constructorInfo.type
+      layout.view.sourceConstructor.type := by
+  have sourceConstructorMember : layout.view.sourceConstructor ∈
+      artifact.source.blockConstructorConstants := by
+    have member : layout.view.sourceConstructor ∈
+        layout.view.source.blockConstructorConstants := by
+      simp only [VInductDecl.blockConstructorConstants, List.mem_flatMap]
+      exact ⟨layout.view.sourceFamily, layout.view.sourceFamily_mem,
+        layout.view.sourceConstructor_mem⟩
+    simpa only [source.source_eq] using member
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  obtain ⟨translated, translatedLookup, _translatedKind, translatedTr⟩ :=
+    transaction.safeTrace.constructor_translated_lookup inputMapWF
+      sourceConstructorMember
+  have finalMapWF := execution.nestedFinalMapWF numNested_ne inputMapWF
+  have layoutConstructorLookup :
+      finalEnv.constants.find? layout.view.constructorName =
+        some (.ctorInfo layout.constructorInfo) := by
+    have found := layout.constructor_find
+    change finalEnv.constants.find?' layout.view.constructorName = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  have translatedLookup' :
+      finalEnv.constants.find? layout.view.constructorName =
+        some translated :=
+    translatedLookup
+  have translatedEq : translated = .ctorInfo layout.constructorInfo :=
+    Option.some.inj (translatedLookup'.symm.trans layoutConstructorLookup)
+  subst translated
+  have translatedTypeTr := translatedTr.1.2.2
+  change TrExprS after layout.constructorInfo.levelParams []
+    layout.constructorInfo.type layout.view.sourceConstructor.type at translatedTypeTr
+  rw [source.constructor_levelParams_eq] at translatedTypeTr
+  exact translatedTypeTr
+
+/-- Retain the flattened projector algebra from the exact generation
+transaction without claiming that its registrations survive at the restored
+public endpoint.  The dependent transport aligns the layout-selected nested
+descriptor with the producer-owned artifact before forgetting the staging
+environment. -/
+theorem RestoredProjectionParameterSource.flatOperationalCodeNaturality
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    {name : Name} {info : InductiveVal}
+    {layout : RestoredProjectionArtifactLayout finalEnv name info after}
+    (source : execution.RestoredProjectionParameterSource staged artifact
+      layout) :
+    layout.view.flatView.OperationalCodeNaturality := by
+  let flatAfter := artifact.generation.generatedRules.foldl VEnv.addDefEq
+    metadata.recursors.recEnv
+  have pairEq :
+      (⟨layout.view.source, layout.view.nested⟩ :
+        Sigma VInductDecl.NestedBlockChecked) =
+      ⟨artifact.source, artifact.alignedNested⟩ :=
+    Sigma.ext source.source_eq source.nested_eq
+  let GenerationEnvAt := fun
+      pair : Sigma VInductDecl.NestedBlockChecked =>
+    VInductDecl.BlockGenerationEnv pair.2.generation flatAfter
+  have artifactGenerationEnv : GenerationEnvAt
+      ⟨artifact.source, artifact.alignedNested⟩ := by
+    change VInductDecl.BlockGenerationEnv
+      artifact.alignedNested.generation flatAfter
+    rw [← transaction.stagedCertificate_nested_eq]
+    exact transaction.stagedCertificate.flatCertificate.generationEnv
+  have viewGenerationEnv : GenerationEnvAt
+      ⟨layout.view.source, layout.view.nested⟩ :=
+    pairEq.symm ▸ artifactGenerationEnv
+  let syntaxWF : layout.view.flatView.ProjectionSyntaxWF flatAfter := {
+    generationEnv := by
+      change VInductDecl.BlockGenerationEnv
+        layout.view.nested.generation flatAfter
+      exact viewGenerationEnv }
+  exact syntaxWF.operationalCodeNaturality
+
+/-- Fold the producer's exact raw constructor audit through nested
+restoration and the final constructor translation.  The resulting telescope
+equality is precisely the extra parameter-layout contract required by the
+restored projection backend; no raw constructor, family position, or final
+endpoint is reselected by the consumer. -/
+theorem RestoredProjectionParameterSource.constructorParameterLayoutWF
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    {name : Name} {info : InductiveVal}
+    {layout : RestoredProjectionArtifactLayout finalEnv name info after}
+    (source : execution.RestoredProjectionParameterSource staged artifact
+      layout)
+    (basis : VInductDecl.ConstructorRawPreFamilyParameterAuditBasis
+      (ves.venv .safe) lparams
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.stats
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.validationContext
+      staged.source.nparams artifact.generation.block.checked.params)
+    (rawAudit : VInductDecl.ProducedBlockRawHostParameterAuditRun
+      (staged.recursorShape shape)) :
+    layout.view.ConstructorParameterLayoutWF after := by
+  obtain ⟨blockSemantic⟩ := rawAudit.semanticRuns basis.contextRun
+  obtain ⟨⟨constructorTrace, constructorSemantic⟩⟩ :=
+    blockSemantic.constructor_getElem?_nonempty source.hostFamily_at
+      source.hostConstructor_at
+  have statsParamsEq :
+      (staged.recursorShape shape).execution.eliminationExecution.normalization.stats.params.size =
+        execution.nested.nparams :=
+    basis.params_size.trans <|
+      staged.source_nparams_eq.trans
+        (ElimNestedInductive.runAt_nparams_eq execution.nestedRun).symm
+  have flatShape := constructorTrace.forallPrefixEq_self basis.localState
+  rw [statsParamsEq] at flatShape
+  have hostConstructorFVars : source.hostConstructor.type.FVarsIn
+      (fun _ => False) := by
+    simpa using source.sourceInput.source_tr.fvarsIn
+  have restoredShape := execution.nested.restoreNested_forallPrefixEq
+    execution.flattened.recursors.env flatShape hostConstructorFVars
+  rw [← source.restored_type_eq] at restoredShape
+  have restoredShape' : AddInductive.ConstructorForallPrefixEq
+      ((staged.recursorShape shape).execution.eliminationExecution.normalization.stats.params.size - 0)
+      source.hostConstructor.type layout.constructorInfo.type := by
+    simpa only [Nat.sub_zero, statsParamsEq] using restoredShape
+  obtain ⟨⟨_restoredTrace, restoredSemantic⟩⟩ :=
+    constructorSemantic.reindex_nonempty restoredShape'
+  have finalConstructorTr := source.finalConstructorTr transaction wf
+  have folded := basis.foldInTarget
+    transaction.stagedCertificate.restored.envLE
+    transaction.stagedCertificate.restored.afterWF finalConstructorTr
+      restoredSemantic
+  have viewNparamsEq : layout.view.nparams = staged.source.nparams := by
+    exact (congrArg VInductDecl.nparams source.source_eq).trans <|
+      artifact.source_nparams_eq.trans staged.source_nparams_eq.symm
+  have pairEq :
+      (⟨layout.view.source, layout.view.nested⟩ :
+        Sigma VInductDecl.NestedBlockChecked) =
+      ⟨artifact.source, artifact.alignedNested⟩ :=
+    Sigma.ext source.source_eq source.nested_eq
+  let flatAfter := artifact.generation.generatedRules.foldl VEnv.addDefEq
+    metadata.recursors.recEnv
+  let GenerationEnvAt := fun
+      pair : Sigma VInductDecl.NestedBlockChecked =>
+    VInductDecl.BlockGenerationEnv pair.2.generation flatAfter
+  have artifactGenerationEnv : GenerationEnvAt
+      ⟨artifact.source, artifact.alignedNested⟩ := by
+    change VInductDecl.BlockGenerationEnv
+      artifact.alignedNested.generation flatAfter
+    rw [← transaction.stagedCertificate_nested_eq]
+    exact transaction.stagedCertificate.flatCertificate.generationEnv
+  have viewGenerationEnv : GenerationEnvAt
+      ⟨layout.view.source, layout.view.nested⟩ :=
+    pairEq.symm ▸ artifactGenerationEnv
+  have viewRecEntriesClosed :
+      VInductDecl.RestoreEntriesClosed layout.view.nested.recEntries := by
+    have closed := restoration.recEntriesClosed
+    have entriesEq := congrArg
+      (fun packed : Sigma VInductDecl.NestedBlockChecked =>
+        packed.2.recEntries) pairEq
+    rw [entriesEq]
+    exact closed
+  have generationParamsEq :
+      layout.view.nested.generation.block.checked.params =
+        artifact.generation.block.checked.params := by
+    have aligned := congrArg
+      (fun pair : Sigma VInductDecl.NestedBlockChecked =>
+        pair.2.generation.block.checked.params) pairEq
+    exact aligned.trans (by rfl)
+  apply layout.viewWF.withFlatConstructorParameters
+  rw [layout.view.flatView_constructorParams,
+    VRestoredBlockStructureView.constructorParams, source.source_uvars_eq,
+    viewNparamsEq, generationParamsEq]
+  exact folded.telDefEq
+  exact layout.viewWF.restoredRecType_generated_defeq
+    transaction.stagedCertificate.restored.afterWF (by
+      change VInductDecl.BlockGenerationEnv
+        layout.view.nested.generation flatAfter
+      exact viewGenerationEnv) viewRecEntriesClosed
+
+/-- Restore the Theory side of the exact flattened constructor dependency
+witness retained by the producer.  This is the complete target-side runtime
+handoff: its count is the public restored parameter/field boundary and its
+target is the literal registered source constructor.  The host source remains
+the flattened constructor type on purpose; transporting that source through
+`ElimNestedInductive.Result.restoreNested` is the sole remaining operational
+restoration obligation. -/
+theorem RestoredProjectionParameterSource.flatHostProjectionSpineSupport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    {name : Name} {info : InductiveVal}
+    {layout : RestoredProjectionArtifactLayout finalEnv name info after}
+    (source : execution.RestoredProjectionParameterSource staged artifact
+      layout) :
+    ProjectionSpineSupport
+      (layout.view.nparams + layout.view.fields.length)
+      source.hostConstructor.type layout.view.sourceConstructor.type := by
+  have pairEq :
+      (⟨layout.view.source, layout.view.nested⟩ :
+        Sigma VInductDecl.NestedBlockChecked) =
+      ⟨artifact.source, artifact.alignedNested⟩ :=
+    Sigma.ext source.source_eq source.nested_eq
+  let CertificateAt := fun
+      pair : Sigma VInductDecl.NestedBlockChecked =>
+    Sigma fun certificate : VInductDecl.NestedBlockCertificate pair.1
+        (ves.venv .safe) after =>
+      PLift (certificate.nested = pair.2)
+  let artifactCertificate : CertificateAt
+      ⟨artifact.source, artifact.alignedNested⟩ :=
+    ⟨transaction.stagedCertificate.restored,
+      ⟨transaction.stagedCertificate_nested_eq⟩⟩
+  let viewCertificate : CertificateAt
+      ⟨layout.view.source, layout.view.nested⟩ :=
+    pairEq.symm ▸ artifactCertificate
+  have viewCertificateNested :
+      viewCertificate.1.nested = layout.view.nested := by
+    simpa only using viewCertificate.2.down
+  let certificate : VInductDecl.NestedBlockCertificate layout.view.source
+      (ves.venv .safe) after := {
+    nested := layout.view.nested
+    semantic := by
+      rw [← viewCertificateNested]
+      exact viewCertificate.1.semantic
+    success := by
+      rw [← viewCertificateNested]
+      exact viewCertificate.1.success
+    beforeWF := viewCertificate.1.beforeWF }
+  have flatSupport := source.sourceInput.spineSupport
+  rw [source.rawConstructor_eq] at flatSupport
+  let TargetsAt := fun pair : Sigma VInductDecl.NestedBlockChecked =>
+    VInductDecl.NestedTargetsWF (ves.venv .safe) pair.2.elim.targets
+  have artifactTargetsWF : TargetsAt
+      ⟨artifact.source, artifact.alignedNested⟩ := by
+    rw [artifact.alignedNested_eq]
+    exact artifact.targetsWF
+  have targetsWF : TargetsAt
+      ⟨layout.view.source, layout.view.nested⟩ :=
+    pairEq.symm ▸ artifactTargetsWF
+  have restoredSupport :=
+    certificate.restoreProjectionSpineSupport targetsWF
+      layout.view.selection flatSupport
+  have countEq :
+      (VInductDecl.ctorFields
+        layout.view.selection.flatConstructor.type).length =
+        layout.view.nparams + layout.view.fields.length := by
+    calc
+      (VInductDecl.ctorFields
+          layout.view.selection.flatConstructor.type).length =
+          VInductDecl.VExpr.nestedArity
+            layout.view.selection.flatConstructor.type :=
+        (VInductDecl.VExpr.nestedArity_eq_ctorFields_length _).symm
+      _ = VInductDecl.VExpr.nestedArity
+          layout.view.sourceConstructor.type := by
+        simpa [VInductDecl.VConstVal.nestedHeader] using
+          congrArg VInductDecl.NestedCtorHeader.arity
+            layout.view.selection.constructor_header_eq
+      _ = (VInductDecl.ctorFields
+          layout.view.sourceConstructor.type).length :=
+        VInductDecl.VExpr.nestedArity_eq_ctorFields_length _
+      _ = layout.view.nparams + layout.view.fields.length :=
+        layout.view.constructorSpine_length.symm
+  rw [countEq] at restoredSupport
+  exact restoredSupport
+
+/-- Producer-complete restored projection handoff immediately before the
+host-source dependency transport.  Every selectable component is indexed by
+the exact nested transaction: the public metadata layout, its audited raw
+host constructor, the restored constructor parameter telescope, the final
+strict constructor translation, and the dependency witness whose Theory
+target has already been restored.  The only datum deliberately absent is a
+`ProjectionFieldSpineSupport` witness with `layout.constructorInfo.type` as
+its host source. -/
+structure RestoredProjectionRuntimeHandoff
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    (execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv)
+    {ves : VEnvs}
+    (staged : execution.FlattenedEnrichedStagingResult ves)
+    (artifact : execution.FlattenedNestedArtifact staged)
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (name : Name) (info : InductiveVal) where
+  layout : RestoredProjectionArtifactLayout finalEnv name info after
+  source : execution.RestoredProjectionParameterSource staged artifact layout
+  recEntriesClosed :
+    VInductDecl.RestoreEntriesClosed layout.view.nested.recEntries
+  codeNaturality : layout.view.flatView.OperationalCodeNaturality
+  parameterLayout : layout.view.ConstructorParameterLayoutWF after
+  finalConstructorTr : TrExprS after lparams [] layout.constructorInfo.type
+    layout.view.sourceConstructor.type
+  flatHostSpineSupport : ProjectionFieldSpineSupport
+    layout.view.nparams layout.view.fields.length
+    source.hostConstructor.type layout.view.sourceConstructor.type
+
+/-- The sole missing producer transformation at a restored runtime handoff:
+the host kernel's `restoreNested` rewrite must retain the common parameter Pi
+shape and reflect field independence back to the flattened host constructor.
+This structural contract contains exactly the information needed to
+transport the already-restored Theory dependency witness. -/
+def RestoredProjectionRuntimeHandoff.HostSourceDependencyTransport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info) : Prop :=
+  ProjectionFieldSourceTransport
+    handoff.layout.view.nparams handoff.layout.view.fields.length
+    handoff.source.hostConstructor.type handoff.layout.constructorInfo.type
+
+/-- Generator-facing form of the remaining restoration obligation.  Unlike
+the derived telescope transport, this proposition follows the actual public
+`restoreNested` execution: it opens the exact shared-parameter prefix with
+the kernel's fresh FVars and requires dependency-reflecting callback nodes in
+the terminal generated constructor body. -/
+def RestoredProjectionRuntimeHandoff.HostSourceRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info) : Prop :=
+  execution.nested.RestoreNestedDependencySafe
+    execution.flattened.recursors.env handoff.source.hostConstructor.type
+
+/-- Every transaction-indexed handoff inherits restoration safety from the
+successful public nested-elimination execution.  The handoff's exact family
+and constructor positions select the corresponding entry of the checked
+emitted inventory; no additional generator premise remains. -/
+theorem RestoredProjectionRuntimeHandoff.hostSourceRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info) :
+    handoff.HostSourceRestorationSafety :=
+  execution.nested.restoreNestedDependencySafe_ofInventoryCheck
+    execution.flattened.recursors.env
+    (ElimNestedInductive.runAt_restorationDependencyCheck execution.nestedRun)
+    handoff.source.hostFamily_at handoff.source.hostConstructor_at
+
+/-- The exact public restoration-safety trace constructs the handoff's sole
+host-source transport field.  Parameter-count alignment comes from the same
+nested execution and semantic source retained by the handoff; constructor
+closedness comes from its exact strict source translation. -/
+theorem RestoredProjectionRuntimeHandoff.hostSourceDependencyTransport_ofRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info)
+    (safe : handoff.HostSourceRestorationSafety) :
+    handoff.HostSourceDependencyTransport := by
+  have viewNparamsEq :
+      handoff.layout.view.nparams = execution.nested.nparams :=
+    (congrArg VInductDecl.nparams handoff.source.source_eq).trans <|
+      artifact.source_nparams_eq.trans
+        (ElimNestedInductive.runAt_nparams_eq execution.nestedRun).symm
+  have closed : handoff.source.hostConstructor.type.FVarsIn
+      (fun _ => False) := by
+    simpa using handoff.source.sourceInput.source_tr.fvarsIn
+  have support : ProjectionFieldSpineSupport execution.nested.nparams
+      handoff.layout.view.fields.length handoff.source.hostConstructor.type
+      handoff.layout.view.sourceConstructor.type := by
+    rw [← viewNparamsEq]
+    exact handoff.flatHostSpineSupport
+  have transport := execution.nested.restoreNested_fieldSourceTransport
+    execution.flattened.recursors.env support closed safe
+  rw [← handoff.source.restored_type_eq] at transport
+  change ProjectionFieldSourceTransport handoff.layout.view.nparams
+    handoff.layout.view.fields.length handoff.source.hostConstructor.type
+    handoff.layout.constructorInfo.type
+  rw [viewNparamsEq]
+  exact transport
+
+/-- Complete a transaction-indexed restored handoff once host nested
+restoration is known to preserve the exact dependency spine.  This method
+accepts no alternate layout, constructor, transaction, or endpoint. -/
+def RestoredProjectionRuntimeHandoff.completeRuntime
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info)
+    (transport : handoff.HostSourceDependencyTransport) :
+    RestoredProjectionArtifact finalEnv name info after :=
+  RestoredProjectionArtifact.ofRuntime handoff.layout
+    handoff.recEntriesClosed handoff.codeNaturality handoff.parameterLayout
+      (handoff.flatHostSpineSupport.transportSource transport)
+
+/-- Complete the restored runtime artifact directly from the executable
+public-restoration safety trace.  The telescope transport consumed by the
+runtime constructor is derived rather than exposed to the producer. -/
+def RestoredProjectionRuntimeHandoff.completeRuntime_ofRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info)
+    (safe : handoff.HostSourceRestorationSafety) :
+    RestoredProjectionArtifact finalEnv name info after :=
+  handoff.completeRuntime
+    (handoff.hostSourceDependencyTransport_ofRestorationSafety safe)
+
+/-- Complete a restored runtime handoff solely from its exact producer
+execution and transaction indexes. -/
+def RestoredProjectionRuntimeHandoff.completeRuntimeChecked
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    {transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata}
+    {name : Name} {info : InductiveVal}
+    (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+      transaction name info) :
+    RestoredProjectionArtifact finalEnv name info after :=
+  handoff.completeRuntime_ofRestorationSafety
+    handoff.hostSourceRestorationSafety
+
+/-- Construct the restored metadata layout together with its exact
+constructor-parameter telescope contract from one transaction-indexed audit
+support package.  This is the producer-facing handoff immediately preceding
+operational restored projector construction. -/
+theorem
+    FlattenedExactNestedTransactionResult.restoredProjectionArtifactParameterLayout
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (support : execution.RestoredProjectionParameterAuditSupport staged
+      artifact shape)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ layout : RestoredProjectionArtifactLayout finalEnv name info after,
+      Nonempty (execution.RestoredProjectionParameterSource staged artifact
+        layout) ∧
+      layout.view.ConstructorParameterLayoutWF after := by
+  obtain ⟨layout, ⟨source⟩⟩ :=
+    transaction.restoredProjectionArtifactLayoutSource wf found ready notOld
+  have parameterLayout := source.constructorParameterLayoutWF transaction wf
+    support.basis support.rawAudit
+  exact ⟨layout, ⟨source⟩, parameterLayout⟩
+
+/-- The projection-parameter wrapper feeds its retained producer witnesses
+directly into restored layout construction.  No audit support value remains
+as a caller-selectable argument at this handoff. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionArtifactParameterLayout
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ layout : RestoredProjectionArtifactLayout finalEnv name info after,
+      Nonempty (execution.RestoredProjectionParameterSource staged artifact
+        layout) ∧
+      layout.view.ConstructorParameterLayoutWF after :=
+  run.transaction.restoredProjectionArtifactParameterLayout
+    run.parameterAuditSupport wf found ready notOld
+
+/-- A newly projection-ready source family in the exact nested replay
+constructs the complete runtime handoff up to host-source dependency
+transport.  In particular, the caller supplies only the final host lookup
+facts used to identify a newly activated family; all layout, audit,
+translation, and flattened-producer witnesses come from `run`. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionRuntimeHandoff
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    Nonempty (execution.RestoredProjectionRuntimeHandoff staged artifact
+      run.transaction name info) := by
+  obtain ⟨layout, ⟨source⟩, parameterLayout⟩ :=
+    run.restoredProjectionArtifactParameterLayout wf found ready notOld
+  exact ⟨{
+    layout := layout
+    source := source
+    recEntriesClosed := by
+      have closed := restoration.recEntriesClosed
+      let selected : Σ declaration : VInductDecl,
+          declaration.NestedBlockChecked :=
+        ⟨layout.view.source, layout.view.nested⟩
+      let aligned : Σ declaration : VInductDecl,
+          declaration.NestedBlockChecked :=
+        ⟨artifact.source, artifact.alignedNested⟩
+      have pairEq : selected = aligned :=
+        Sigma.ext source.source_eq source.nested_eq
+      have entriesEq := congrArg
+        (fun packed : Σ declaration : VInductDecl,
+          declaration.NestedBlockChecked => packed.2.recEntries) pairEq
+      change VInductDecl.RestoreEntriesClosed selected.2.recEntries
+      rw [entriesEq]
+      exact closed
+    codeNaturality := source.flatOperationalCodeNaturality run.transaction
+    parameterLayout := parameterLayout
+    finalConstructorTr := source.finalConstructorTr run.transaction wf
+    flatHostSpineSupport :=
+      (source.flatHostProjectionSpineSupport run.transaction)
+        |>.toFieldSpineSupport }⟩
+
+/-- The exact nested producer owns the complete runtime-handoff delta for
+every newly activated projection-ready family. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionRuntimeHandoffDeltaReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ∀ name info, finalEnv.find? name = some (.inductInfo info) →
+      finalEnv.isProjectionReadyStructure name = true →
+      ¬ (env.find? name = some (.inductInfo info) ∧
+        env.isProjectionReadyStructure name = true) →
+      Nonempty (execution.RestoredProjectionRuntimeHandoff staged artifact
+        run.transaction name info) := by
+  intro name info found ready notOld
+  exact run.restoredProjectionRuntimeHandoff wf found ready notOld
+
+/-- Once the single host-source dependency transformation is proved for
+transaction-indexed handoffs, the exact nested producer constructs the
+restored artifact delta required by resolution-aware readiness. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionArtifactDeltaReady_ofHostSourceDependencyTransport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    (transport : ∀ {name info}
+      (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+        run.transaction name info),
+      handoff.HostSourceDependencyTransport) :
+    RestoredProjectionArtifactDeltaReady env finalEnv after := by
+  intro name info found ready notOld
+  obtain ⟨handoff⟩ :=
+    run.restoredProjectionRuntimeHandoff wf found ready notOld
+  exact ⟨handoff.completeRuntime (transport handoff)⟩
+
+/-- The same transaction-indexed host-source transformation supplies the
+consumer-facing migration delta directly.  This is the contract consumed by
+resolution-aware projection inference: every newly ready family resolves to
+the restored backend, without first being misclassified as an ordinary block
+artifact at the public endpoint. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.projectionArtifactResolutionDeltaReady_ofHostSourceDependencyTransport
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    (transport : ∀ {name info}
+      (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+        run.transaction name info),
+      handoff.HostSourceDependencyTransport) :
+    ProjectionArtifactResolutionDeltaReady env finalEnv after :=
+  (run.restoredProjectionArtifactDeltaReady_ofHostSourceDependencyTransport
+    wf transport).toResolution
+
+/-- The exact nested producer constructs its restored artifact delta once its
+generated constructor bodies satisfy the public `restoreNested` execution
+trace.  No caller-provided telescope transport remains in this interface. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionArtifactDeltaReady_ofHostSourceRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    (safe : ∀ {name info}
+      (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+        run.transaction name info),
+      handoff.HostSourceRestorationSafety) :
+    RestoredProjectionArtifactDeltaReady env finalEnv after := by
+  intro name info found ready notOld
+  obtain ⟨handoff⟩ :=
+    run.restoredProjectionRuntimeHandoff wf found ready notOld
+  exact ⟨handoff.completeRuntime_ofRestorationSafety (safe handoff)⟩
+
+/-- Consumer-facing resolution delta derived from the same exact public
+restoration-safety trace. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.projectionArtifactResolutionDeltaReady_ofHostSourceRestorationSafety
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env)
+    (safe : ∀ {name info}
+      (handoff : execution.RestoredProjectionRuntimeHandoff staged artifact
+        run.transaction name info),
+      handoff.HostSourceRestorationSafety) :
+    ProjectionArtifactResolutionDeltaReady env finalEnv after :=
+  (run.restoredProjectionArtifactDeltaReady_ofHostSourceRestorationSafety
+    wf safe).toResolution
+
+/-- The exact nested producer unconditionally constructs the restored
+artifact delta for every newly projection-ready family. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.restoredProjectionArtifactDeltaReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    RestoredProjectionArtifactDeltaReady env finalEnv after :=
+  run.restoredProjectionArtifactDeltaReady_ofHostSourceRestorationSafety wf
+    fun handoff => handoff.hostSourceRestorationSafety
+
+/-- Consumer-facing resolution delta supplied unconditionally by the exact
+nested producer. -/
+theorem
+    FlattenedExactNestedProjectionParameterRun.projectionArtifactResolutionDeltaReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ProjectionArtifactResolutionDeltaReady env finalEnv after :=
+  (run.restoredProjectionArtifactDeltaReady wf).toResolution
+
+/-- Forget the exact host constructor/audit source while retaining the
+metadata-only restored projection layout API. -/
+theorem
+    FlattenedExactNestedTransactionResult.restoredProjectionArtifactLayout
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ layout : RestoredProjectionArtifactLayout finalEnv name info after,
+      layout.view.source = artifact.source ∧
+      HEq layout.view.nested artifact.alignedNested ∧
+      Nonempty (VInductDecl.NestedStructureSelection artifact.alignedNested
+        layout.view.familyIndex layout.view.sourceFamily
+          layout.view.sourceConstructor) := by
+  obtain ⟨layout, ⟨source⟩⟩ :=
+    FlattenedExactNestedTransactionResult.restoredProjectionArtifactLayoutSource
+      transaction wf found ready notOld
+  exact ⟨layout, source.source_eq, source.nested_eq, source.selection⟩
+
+/-- Forgetting the host metadata fields of the restored layout recovers the
+exact source-family structure selection owned by the nested producer. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedTransactionResult.projectionStructureSelection
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (transaction : execution.FlattenedExactNestedTransactionResult flat
+      metadata restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (notOld : ¬ (env.find? name = some (.inductInfo info) ∧
+      env.isProjectionReadyStructure name = true)) :
+    ∃ familyIndex sourceFamily sourceConstructor,
+      sourceFamily.name = name ∧
+      info.ctors = [sourceConstructor.name] ∧
+      Nonempty (VInductDecl.NestedStructureSelection
+        artifact.alignedNested familyIndex sourceFamily sourceConstructor) := by
+  obtain ⟨layout, _sourceEq, _nestedEq, selection⟩ :=
+    FlattenedExactNestedTransactionResult.restoredProjectionArtifactLayout
+      transaction wf found ready notOld
+  exact ⟨layout.view.familyIndex, layout.view.sourceFamily,
+    layout.view.sourceConstructor, layout.name_eq, layout.ctors_eq,
+    selection⟩
+
+/-- Construct the block-backed projection artifact for one newly emitted
+ordinary family.  The selected family, constructor, validator index count,
+source translation spine, host metadata, and final Theory endpoint all come
+from one retained semantic producer. -/
+def
+    FlattenedSemanticRecursorStagingResult.projectionArtifactOfDeclaredFamily
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) {name : Name} {info : InductiveVal}
+    (found : finalEnv.find? name = some (.inductInfo info))
+    (ready : finalEnv.isProjectionReadyStructure name = true)
+    (declared : info ∈
+      execution.flattened.eliminationExecution.normalization.declaredInfos ∧
+      info.name = name) :
+    ProjectionArtifact finalEnv name info
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  let trace := result.ordinaryAddInductBlockTrace metadata numNested_eq
+  have typeMapWF := trace.addTypes.map_wf inputMapWF
+  have ctorMapWF := trace.addCtors.map_wf typeMapWF
+  have finalMapWF := trace.addRecs.map_wf ctorMapWF
+  have hostDataSome :=
+    Kernel.Environment.ProjectionReadyStructureObservationData.find?_isSome
+      found ready
+  let hostData :=
+    (Kernel.Environment.ProjectionReadyStructureObservationData.find? finalEnv
+      name).get
+      hostDataSome
+  have hostDataFound :
+      Kernel.Environment.ProjectionReadyStructureObservationData.find? finalEnv
+        name = some hostData :=
+    (Option.some_get hostDataSome).symm
+  let host :=
+    Kernel.Environment.ProjectionReadyStructureObservationData.toObservation
+      finalEnv name hostData hostDataFound
+  obtain ⟨observedInfo, constructorName, constructorInfo, recursorInfo,
+      observedFound, ctorsEq, numIndicesEq, constructorFound, recursorFound,
+      owner, _familyRecursor⟩ := host
+  have observedInfoEq : observedInfo = info := by
+    have taggedEq : (.inductInfo observedInfo : ConstantInfo) =
+        .inductInfo info :=
+      Option.some.inj (observedFound.symm.trans found)
+    exact ConstantInfo.inductInfo.inj taggedEq
+  subst observedInfo
+  have constructorFoundMap :
+      finalEnv.constants.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+    change finalEnv.constants.find?' constructorName = _ at constructorFound
+    rwa [finalMapWF.find?'_eq_find?] at constructorFound
+  have recursorFoundMap :
+      finalEnv.constants.find? (mkRecName name) =
+        some (.recInfo recursorInfo) := by
+    change finalEnv.constants.find?' (mkRecName name) = _ at recursorFound
+    rwa [finalMapWF.find?'_eq_find?] at recursorFound
+  have familyFoundMap :
+      finalEnv.constants.find? name = some (.inductInfo info) := by
+    change finalEnv.constants.find?' name = _ at found
+    rwa [finalMapWF.find?'_eq_find?] at found
+  have normalizationRun := execution.flattened.normalization_run
+    execution.flattenedRun
+  have familyRun :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult_run normalizationRun
+  have familySizes :=
+    execution.flattened.eliminationExecution.normalization
+      |>.familyValidationResult.sizes_of_run
+        execution.nested.types_nonempty familyRun
+  have paramsSize :
+      execution.flattened.eliminationExecution.normalization.stats.params.size =
+        nparams := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.1
+  have nindicesSize :
+      execution.flattened.eliminationExecution.normalization.stats.nindices.size =
+        execution.nested.types.length := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+      familySizes.2.1
+  have familyAlignment : List.Forall₂
+      (fun source familyInfo => ∃ numIndices,
+        familyInfo = AddInductive.declaredInductiveInfo
+          execution.flattened.eliminationExecution.normalization.stats nparams
+          execution.nested.types.toArray source numIndices
+          execution.nested.aux2nested.size false
+          execution.flattened.eliminationExecution.normalization.validationContext)
+      execution.nested.types
+      execution.flattened.eliminationExecution.normalization.declaredInfos := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray] using
+      AddInductive.declaredInductiveInfos_matches
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size false
+        execution.flattened.eliminationExecution.normalization.validationContext
+        (by simpa using nindicesSize)
+  let declaredNames :=
+    execution.flattened.eliminationExecution.normalization.declaredInfos.map
+      (·.name)
+  have declaredNameMem : name ∈ declaredNames := by
+    exact List.mem_map.2 ⟨info, declared.1, declared.2⟩
+  let offset := declaredNames.idxOf name
+  have offsetNameBound : offset < declaredNames.length := by
+    simpa only [offset] using List.idxOf_lt_length_iff.2 declaredNameMem
+  have declaredNameAt : declaredNames[offset]? = some name := by
+    rw [List.getElem?_eq_getElem offsetNameBound]
+    exact congrArg some (by
+      simpa only [offset] using List.getElem_idxOf offsetNameBound)
+  have sourceOffsetBound : offset < execution.nested.types.length := by
+    have lengths := Lean4Lean.List.Forall₂.length_eq familyAlignment
+    have declaredOffsetBound : offset <
+        execution.flattened.eliminationExecution.normalization.declaredInfos.length := by
+      simpa only [declaredNames, List.length_map] using offsetNameBound
+    omega
+  let sourceFamily := execution.nested.types[offset]'sourceOffsetBound
+  have sourceAt : execution.nested.types[offset]? = some sourceFamily :=
+    List.getElem?_eq_getElem sourceOffsetBound
+  obtain ⟨rawFamily, rawFamilyAt, _familySource, constructorSources⟩ :=
+    staged.enriched.enrichment.input.getElem? sourceAt
+  have sourceRawAt : staged.source.types[offset]? = some rawFamily := by
+    simpa only [FlattenedEnrichedStagingResult.source,
+      VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+      rawFamilyAt.down
+  have rawCountAt := result.run.rawIndexCounts.getElem? sourceRawAt
+  change (staged.recursorShape shape).execution.eliminationExecution.normalization.stats.nindices[
+    0 + offset]? = _ at rawCountAt
+  rw [staged.recursorShape_nindices_eq shape] at rawCountAt
+  have countAt :
+      execution.flattened.eliminationExecution.normalization.stats.nindices[offset]? =
+        some (VInductDecl.ctorFields
+          (VExpr.dropN staged.source.nparams rawFamily.type)).length := by
+    change
+      execution.flattened.eliminationExecution.normalization.stats.nindices[
+        0 + offset]? = _ at rawCountAt
+    simpa only [Nat.zero_add] using rawCountAt
+  let expectedInfo := AddInductive.declaredInductiveInfo
+    execution.flattened.eliminationExecution.normalization.stats nparams
+    execution.nested.types.toArray sourceFamily
+    (VInductDecl.ctorFields
+      (VExpr.dropN staged.source.nparams rawFamily.type)).length
+    execution.nested.aux2nested.size false
+    execution.flattened.eliminationExecution.normalization.validationContext
+  have expectedInfoAt :
+      execution.flattened.eliminationExecution.normalization.declaredInfos[offset]? =
+        some expectedInfo := by
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.declaredInfos,
+      List.toList_toArray, expectedInfo] using
+      AddInductive.declaredInductiveInfos_getElem?
+        execution.flattened.eliminationExecution.normalization.stats nparams
+        execution.nested.types.toArray execution.nested.aux2nested.size false
+        execution.flattened.eliminationExecution.normalization.validationContext
+        sourceAt countAt
+  have expectedInfoName : expectedInfo.name = name := by
+    simpa only [declaredNames, List.getElem?_map, expectedInfoAt,
+      Option.map_some, Option.some.injEq] using declaredNameAt
+  have sourceFamilyName : sourceFamily.name = name := by
+    simpa only [expectedInfo, AddInductive.declaredInductiveInfo] using
+      expectedInfoName
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext
+        |>.env.constants.WF := by
+    simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
+  have expectedInfoMember : expectedInfo ∈
+      execution.flattened.eliminationExecution.normalization.declaredInfos :=
+    List.mem_of_getElem? expectedInfoAt
+  have expectedInfoLookup₀ :=
+    execution.flattened.eliminationExecution.normalization.declareTrace.map_lookup
+      validationMapWF expectedInfoMember
+  have expectedInfoFamilyMapWF :=
+    execution.flattened.eliminationExecution.normalization.declareTrace.map_wf
+      validationMapWF
+  have expectedInfoLookup₁ :=
+    execution.flattened.eliminationExecution.declareConstructorTrace
+      |>.preserve_map_lookup expectedInfoFamilyMapWF expectedInfoLookup₀
+  have expectedInfoConstructorMapWF :=
+    execution.flattened.eliminationExecution.declareConstructorTrace.map_wf
+      expectedInfoFamilyMapWF
+  have expectedInfoRecursorInitialMapWF :
+      execution.flattened.recursors.initialEnv.constants.WF := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      expectedInfoConstructorMapWF
+  have expectedInfoLookup₁' :
+      execution.flattened.recursors.initialEnv.constants.find?
+          expectedInfo.name = some (.inductInfo expectedInfo) := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      expectedInfoLookup₁
+  have expectedInfoLookup₂ :=
+    execution.flattened.recursors.trace.preserve_map_lookup
+      expectedInfoRecursorInitialMapWF expectedInfoLookup₁'
+  have expectedInfoLookup :
+      finalEnv.constants.find? name = some (.inductInfo expectedInfo) := by
+    simpa only [execution.flattenedEnv_eq_final numNested_eq,
+      expectedInfoName] using expectedInfoLookup₂
+  have infoEq : info = expectedInfo := by
+    have taggedEq : (.inductInfo info : ConstantInfo) =
+        .inductInfo expectedInfo :=
+      Option.some.inj (familyFoundMap.symm.trans expectedInfoLookup)
+    exact ConstantInfo.inductInfo.inj taggedEq
+  have rawIndicesLength :
+      (VInductDecl.ctorFields
+        (VExpr.dropN staged.source.nparams rawFamily.type)).length = 0 := by
+    rw [infoEq] at numIndicesEq
+    simpa only [expectedInfo, AddInductive.declaredInductiveInfo] using
+      numIndicesEq
+  have rawIndicesEq :
+      VInductDecl.ctorFields
+        (VExpr.dropN staged.source.nparams rawFamily.type) = [] :=
+    List.length_eq_zero_iff.mp rawIndicesLength
+  have sourceConstructorNames :
+      sourceFamily.ctors.map (·.name) = [constructorName] := by
+    rw [infoEq] at ctorsEq
+    simpa only [expectedInfo, AddInductive.declaredInductiveInfo] using ctorsEq
+  have sourceConstructorsLength : sourceFamily.ctors.length = 1 := by
+    have lengths := congrArg List.length sourceConstructorNames
+    simpa only [List.length_map, List.length_cons, List.length_nil] using lengths
+  have sourceConstructorBound : 0 < sourceFamily.ctors.length := by omega
+  let sourceConstructor :=
+    sourceFamily.ctors[0]'sourceConstructorBound
+  have sourceConstructorsEq : sourceFamily.ctors = [sourceConstructor] := by
+    simpa only [sourceConstructor] using
+      List.eq_getElem_of_length_eq_one sourceFamily.ctors
+        sourceConstructorsLength
+  have sourceConstructorName : sourceConstructor.name = constructorName := by
+    have selected : sourceConstructor.name = constructorName ∧ True := by
+      simpa only [sourceConstructorsEq, List.map_cons, List.map_nil,
+        List.cons.injEq] using sourceConstructorNames
+    exact selected.1
+  have sourceConstructorAt : sourceFamily.ctors[0]? =
+      some sourceConstructor :=
+    List.getElem?_eq_getElem sourceConstructorBound
+  obtain ⟨rawConstructor, rawConstructorAt, constructorSource⟩ :=
+    constructorSources.getElem? sourceConstructorAt
+  have rawConstructorsLength : rawFamily.ctors.length = 1 := by
+    rw [← constructorSources.length_eq]
+    exact sourceConstructorsLength
+  have rawConstructorBound : 0 < rawFamily.ctors.length := by omega
+  have rawConstructorHead : rawFamily.ctors[0]'rawConstructorBound =
+      rawConstructor := by
+    exact Option.some.inj ((List.getElem?_eq_getElem rawConstructorBound).symm.trans
+      rawConstructorAt.down)
+  have rawConstructorsEq : rawFamily.ctors = [rawConstructor] := by
+    have singleton := List.eq_getElem_of_length_eq_one rawFamily.ctors
+      rawConstructorsLength
+    simpa only [rawConstructorHead] using singleton
+  have familyOffsetBound : offset < result.generation.families.length := by
+    have lengths := congrArg List.length result.generation.families_map_raw
+    simp only [List.length_map] at lengths
+    have rawBound := (List.getElem?_eq_some_iff.mp sourceRawAt).1
+    omega
+  let family := result.generation.families[offset]'familyOffsetBound
+  have familyAt : result.generation.families[offset]? = some family :=
+    List.getElem?_eq_getElem familyOffsetBound
+  have familyMember : family ∈ result.generation.families :=
+    List.mem_iff_getElem?.2 ⟨offset, familyAt⟩
+  have familyRawEq : family.raw = rawFamily := by
+    have mappedAt : (result.generation.families.map (·.raw))[offset]? =
+        some family.raw := by
+      simp only [List.getElem?_map, familyAt, Option.map_some]
+    rw [result.generation.families_map_raw] at mappedAt
+    exact Option.some.inj (mappedAt.symm.trans sourceRawAt)
+  have familyRawAt : family.raw.ctors[0]? = some rawConstructor := by
+    rw [familyRawEq, rawConstructorsEq]
+    rfl
+  have constructorPairsLength : family.ctorPairs.length = 1 := by
+    calc
+      family.ctorPairs.length = family.raw.ctors.length :=
+        (result.generation.shape.2.2.2.2 family familyMember).2.2.2.2.1
+      _ = rawFamily.ctors.length :=
+        congrArg (fun raw => raw.ctors.length) familyRawEq
+      _ = 1 := rawConstructorsLength
+  have constructorBound : 0 < family.ctorPairs.length := by omega
+  let constructor := family.ctorPairs[0]'constructorBound
+  have constructorAt : family.ctorPairs[0]? = some constructor :=
+    List.getElem?_eq_getElem constructorBound
+  have constructorRawEq : constructor.raw = rawConstructor := by
+    have mappedAt : (family.ctorPairs.map (·.raw))[0]? =
+        some constructor.raw := by
+      simp only [List.getElem?_map, constructorAt, Option.map_some]
+    rw [family.ctorPairs_map_raw familyMember] at mappedAt
+    exact Option.some.inj (mappedAt.symm.trans familyRawAt)
+  have constructorPairsEq : family.ctorPairs = [constructor] := by
+    simpa only [constructor] using
+      List.eq_getElem_of_length_eq_one family.ctorPairs constructorPairsLength
+  have checkedIndicesLength : family.view.indices.length = 0 := by
+    rw [← (result.generation.shape.2.2.2.2 family familyMember).2.2.2.1]
+    simpa only [VInductDecl.NormalizedFamily.rawIndices, familyRawEq] using
+      rawIndicesLength
+  have checkedIndicesEq : family.view.indices = [] :=
+    List.length_eq_zero_iff.mp checkedIndicesLength
+  let expectedConstructorInfo := AddInductive.declaredConstructorInfo
+    execution.flattened.eliminationExecution.normalization.stats
+    sourceFamily.name sourceConstructor 0 false
+    execution.flattened.eliminationExecution.constructorContext
+  have expectedConstructorMember : expectedConstructorInfo ∈
+      execution.flattened.eliminationExecution.declaredConstructorInfos := by
+    simp only [
+      AddInductive.NormalizationEliminationExecution.declaredConstructorInfos,
+      AddInductive.declaredConstructorInfos_toArray, List.mem_flatMap]
+    refine ⟨sourceFamily, List.mem_of_getElem? sourceAt, ?_⟩
+    rw [sourceConstructorsEq]
+    simp [expectedConstructorInfo,
+      AddInductive.declaredConstructorInfosFor]
+  have validationMapWF :
+      execution.flattened.eliminationExecution.normalization.validationContext
+        |>.env.constants.WF := by
+    simpa only [execution.flattenedValidationEnv_eq] using inputMapWF
+  have hostFamilyMapWF :=
+    execution.flattened.eliminationExecution.normalization.declareTrace.map_wf
+      validationMapWF
+  have hostConstructorMapWF :=
+    execution.flattened.eliminationExecution.declareConstructorTrace.map_wf
+      hostFamilyMapWF
+  have recursorInitialMapWF :
+      execution.flattened.recursors.initialEnv.constants.WF := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      hostConstructorMapWF
+  have expectedConstructorLookup₀ :=
+    execution.flattened.eliminationExecution.declareConstructorTrace.map_lookup
+      hostFamilyMapWF expectedConstructorMember
+  have expectedConstructorLookup₁ :
+      execution.flattened.recursors.initialEnv.constants.find?
+          expectedConstructorInfo.name =
+        some (.ctorInfo expectedConstructorInfo) := by
+    simpa only [execution.flattened.recursor_initialEnv_eq] using
+      expectedConstructorLookup₀
+  have expectedConstructorLookup₂ :=
+    execution.flattened.recursors.trace.preserve_map_lookup
+      recursorInitialMapWF expectedConstructorLookup₁
+  have expectedConstructorLookup :
+      finalEnv.constants.find? expectedConstructorInfo.name =
+        some (.ctorInfo expectedConstructorInfo) := by
+    simpa only [execution.flattenedEnv_eq_final numNested_eq] using
+      expectedConstructorLookup₂
+  have expectedConstructorName :
+      expectedConstructorInfo.name = constructorName := by
+    simp [expectedConstructorInfo, AddInductive.declaredConstructorInfo,
+      sourceConstructorName]
+  have constructorInfoEq : constructorInfo = expectedConstructorInfo := by
+    have taggedEq : (.ctorInfo constructorInfo : ConstantInfo) =
+        .ctorInfo expectedConstructorInfo :=
+      Option.some.inj (constructorFoundMap.symm.trans (by
+        simpa only [expectedConstructorName] using expectedConstructorLookup))
+    exact ConstantInfo.ctorInfo.inj taggedEq
+  have familyName : family.raw.name = name := by
+    calc
+      family.raw.name = rawFamily.name :=
+        congrArg (fun value : VInductiveType => value.name) familyRawEq
+      _ = sourceFamily.name := _familySource.down.name_eq.symm
+      _ = name := sourceFamilyName
+  have selectedConstructorName : constructor.raw.name = constructorName := by
+    calc
+      constructor.raw.name = rawConstructor.name :=
+        congrArg VConstVal.name constructorRawEq
+      _ = sourceConstructor.name := constructorSource.down.name_eq.symm
+      _ = constructorName := sourceConstructorName
+  let expectedRecursor : VConstVal :=
+    ⟨result.generation.generatedRecursor family,
+      .str family.raw.name "rec"⟩
+  have expectedRecursorMember :
+      expectedRecursor ∈ result.generation.recursors := by
+    rw [VInductDecl.BlockGenerationChecked.recursors]
+    exact List.mem_map.2 ⟨family, familyMember, rfl⟩
+  have expectedRecursorName : expectedRecursor.name = mkRecName name := by
+    simp [expectedRecursor, mkRecName, familyName]
+  have translatedRecursorTr : TrConstVal .safe
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv)
+      (.recInfo recursorInfo) expectedRecursor := by
+    obtain ⟨translatedRecursor, translatedRecursorLookup,
+        _translatedRecursorKind, translatedRecursorTr⟩ :=
+      trace.recursor_translated_lookup inputMapWF expectedRecursorMember
+    have translatedRecursorLookup' :
+        finalEnv.constants.find? (mkRecName name) = some translatedRecursor := by
+      simpa only [expectedRecursorName] using translatedRecursorLookup
+    have translatedRecursorEq :
+        translatedRecursor = .recInfo recursorInfo :=
+      Option.some.inj (translatedRecursorLookup'.symm.trans recursorFoundMap)
+    subst translatedRecursor
+    exact translatedRecursorTr
+  have recursorLevelParamsLength :
+      recursorInfo.levelParams.length = result.generation.recUvars := by
+    have translatedLength := translatedRecursorTr.1.2.1
+    change recursorInfo.levelParams.length = expectedRecursor.uvars at translatedLength
+    simpa [expectedRecursor,
+      VInductDecl.BlockGenerationChecked.generatedRecursor] using
+        translatedLength
+  have constructorMember : constructor ∈ family.ctorPairs := by
+    rw [constructorPairsEq]
+    simp
+  let blockConstructor : VInductDecl.NormalizedBlockCtor := {
+    owner := family.view.ordinal
+    familyName := family.raw.name
+    familyIndices := family.view.indices
+    ctor := constructor }
+  have blockConstructorMember :
+      blockConstructor ∈ result.generation.flatCtors := by
+    simp only [VInductDecl.BlockGenerationChecked.flatCtors,
+      VInductDecl.NormalizedCheckedBlock.flatCtors, List.mem_flatMap]
+    refine ⟨family, familyMember, ?_⟩
+    simp only [VInductDecl.NormalizedFamily.blockCtors, List.mem_map]
+    exact ⟨constructor, constructorMember, rfl⟩
+  have sourceUvars : staged.source.uvars = lparams.length := by
+    simpa only [FlattenedEnrichedStagingResult.source,
+      VInductDecl.CandidateBlockSourceListEnrichment.toRawDecl] using
+      staged.family.staging.uvars_eq
+  have familyViewAt :
+      result.generation.block.checked.families.data[offset]? =
+        some family.view := by
+    rw [← result.generation.families_map_view,
+      List.getElem?_map, familyAt]
+    rfl
+  have familyConstructorsAt :
+      result.generation.block.checked.families.constructors[offset]? =
+        some family.view.constructors :=
+    VInductDecl.CheckedFamilies.constructors_getElem?_of_data
+      result.generation.block.checked.families familyViewAt
+  have familyOffsetBound : offset < result.run.fieldSorts.length := by
+    have leftBound := (List.getElem?_eq_some_iff.mp familyConstructorsAt).1
+    have lengths := Lean4Lean.List.Forall₂.length_eq
+      result.run.fieldSorts_telescopes
+    omega
+  let constructorSorts := result.run.fieldSorts[offset]'familyOffsetBound
+  have constructorSortsAt : result.run.fieldSorts[offset]? =
+      some constructorSorts :=
+    List.getElem?_eq_getElem familyOffsetBound
+  have constructorSortRelation : List.Forall₂
+      (fun checkedConstructor sorts =>
+        staged.enriched.blockEnv.OnSortTel lparams.length
+          result.generation.block.checked.params.reverse
+          checkedConstructor.fields sorts)
+      family.view.constructors constructorSorts := by
+    obtain ⟨constructors, constructorsAt, related⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_right
+        result.run.fieldSorts_telescopes constructorSortsAt
+    have constructorsEq : constructors = family.view.constructors :=
+      Option.some.inj (constructorsAt.symm.trans familyConstructorsAt)
+    subst constructors
+    exact related
+  have constructorViewsEq : family.ctorPairs.map (fun current => current.view) =
+      family.view.constructors := by
+    apply VInductDecl.pairNormalizedCtors_map_view
+    exact (result.generation.shape.2.2.2.2 family familyMember).2.2.2.2.1.symm.trans
+      (result.generation.shape.2.2.2.2 family familyMember).2.2.2.2.2.1
+  have constructorViewAt : family.view.constructors[0]? =
+      some constructor.view := by
+    rw [← constructorViewsEq, List.getElem?_map, constructorAt]
+    rfl
+  have constructorOffsetBound : 0 < constructorSorts.length := by
+    rw [← Lean4Lean.List.Forall₂.length_eq constructorSortRelation]
+    exact (List.getElem?_eq_some_iff.mp constructorViewAt).1
+  let fieldSorts := constructorSorts[0]'constructorOffsetBound
+  have fieldSortsAt : constructorSorts[0]? = some fieldSorts :=
+    List.getElem?_eq_getElem constructorOffsetBound
+  have checkedFieldTelescope : staged.enriched.blockEnv.OnSortTel
+      lparams.length result.generation.block.checked.params.reverse
+      constructor.view.fields fieldSorts := by
+    obtain ⟨checkedConstructor, checkedConstructorAt, related⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_right constructorSortRelation
+        fieldSortsAt
+    have checkedConstructorEq : checkedConstructor = constructor.view :=
+      Option.some.inj (checkedConstructorAt.symm.trans constructorViewAt)
+    subst checkedConstructor
+    exact related
+  have emittedDefEq :=
+    (result.run.block.wf.constructors blockConstructor
+      blockConstructorMember).emittedTel
+  have rawViewFieldDefEq : staged.enriched.blockEnv.TelDefEq lparams.length
+      result.generation.block.checked.params.reverse
+      (constructor.rawFields staged.source.nparams)
+      constructor.view.fields := by
+    have dropped := emittedDefEq.drop
+      result.generation.block.checked.params.length
+    simpa [sourceUvars, blockConstructor,
+      VInductDecl.NormalizedBlockCtor.emittedBinders,
+      VInductDecl.NormalizedBlockCtor.viewBinders] using dropped
+  have emittedOnTel := emittedDefEq.raw_onTel
+  have parameterOnTel := (VEnv.OnTel.of_append
+    (As := result.generation.block.checked.params) emittedOnTel).1
+  have parameterCtx : OnCtx result.generation.block.checked.params.reverse
+      (staged.enriched.blockEnv.IsType lparams.length) := by
+    simpa [sourceUvars] using parameterOnTel.toOnCtx (by trivial)
+  have rawFieldTelescope : staged.enriched.blockEnv.OnSortTel lparams.length
+      result.generation.block.checked.params.reverse
+      (constructor.rawFields staged.source.nparams) fieldSorts :=
+    rawViewFieldDefEq.raw_onSortTel result.run.blockEnv_wf parameterCtx
+      checkedFieldTelescope
+  have traceGenerationEq : trace.generation = result.generation := rfl
+  have generationWF : result.generation.WF (ves.venv .safe) trace.blockEnv := by
+    simpa only [traceGenerationEq] using trace.generation_wf
+  have generationTrace' : VEnv.AddInductBlockGenerationTrace
+      (ves.venv .safe)
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) result.generation := by
+    simpa only [traceGenerationEq] using trace.toGenerationTrace
+  have inputOrdered := (wf.tr (safety := .safe)).wf.ordered
+  have blockEnvLe : staged.enriched.blockEnv ≤
+      result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv :=
+    trace.addCtors.le.trans (trace.addRecs.le.trans trace.addRules.le)
+  have fieldSortTelescope :
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv).OnSortTel staged.source.uvars
+        result.generation.block.checked.params.reverse
+        (constructor.rawFields staged.source.nparams) fieldSorts := by
+    rw [sourceUvars]
+    exact rawFieldTelescope.mono blockEnvLe
+  let selected : VBlockStructureView := {
+    source := staged.source
+    generation := result.generation
+    family := family
+    family_mem := familyMember
+    constructor := constructor
+    constructor_eq := constructorPairsEq
+    raw_indices_eq := by
+      simpa only [VInductDecl.NormalizedFamily.rawIndices, familyRawEq] using
+        rawIndicesEq
+    checked_indices_eq := checkedIndicesEq
+    fieldSorts := fieldSorts
+    fieldSorts_length :=
+      VEnv.OnSortTel.length_eq fieldSortTelescope |>.symm }
+  have selectedLayout : selected.LayoutWF
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) :=
+    VBlockStructureView.LayoutWF.ofTrace inputOrdered generationWF
+      generationTrace' (by
+        simpa [selected, VBlockStructureView.fields] using fieldSortTelescope)
+  have constructorParamLength :
+      (VExpr.telN staged.source.nparams constructor.raw.type).length =
+        staged.source.nparams :=
+    ((result.generation.shape.2.2.2.2 family familyMember).2.2.2.2.2.2
+      constructor constructorMember).2.2.1
+  have constructorAritySplit :
+      staged.source.nparams +
+          (constructor.rawFields staged.source.nparams).length =
+        (VInductDecl.ctorFields constructor.raw.type).length := by
+    simpa only [constructorParamLength,
+      VInductDecl.NormalizedCtor.rawFields] using
+      VExpr.telN_length_add_ctorFields_dropN_length
+        staged.source.nparams constructor.raw.type
+  have rawConstructorAritySplit :
+      (VInductDecl.ctorFields rawConstructor.type).length =
+        staged.source.nparams +
+          (constructor.rawFields staged.source.nparams).length := by
+    rw [← constructorRawEq]
+    exact constructorAritySplit.symm
+  have sourceConstructorArity :
+      AddInductive.constructorArity sourceConstructor.type 0 =
+        staged.source.nparams +
+          (constructor.rawFields staged.source.nparams).length :=
+    constructorSource.down.sourceArity_eq.trans rawConstructorAritySplit
+  have constructorSpineSupport : ProjectionSpineSupport
+      (staged.source.nparams +
+        (constructor.rawFields staged.source.nparams).length)
+      constructorInfo.type constructor.raw.type := by
+    have support := constructorSource.down.spineSupport
+    rw [rawConstructorAritySplit] at support
+    simpa [constructorInfoEq, expectedConstructorInfo,
+      AddInductive.declaredConstructorInfo, constructorRawEq] using support
+  have constructorNumParams :
+      constructorInfo.numParams = staged.source.nparams := by
+    simp [constructorInfoEq, expectedConstructorInfo,
+      AddInductive.declaredConstructorInfo, paramsSize,
+      staged.source_nparams_eq]
+  have constructorNumFields :
+      constructorInfo.numFields =
+        (constructor.rawFields staged.source.nparams).length := by
+    simp [constructorInfoEq, expectedConstructorInfo,
+      AddInductive.declaredConstructorInfo, paramsSize,
+      sourceConstructorArity, staged.source_nparams_eq]
+  have infoLevelParamsLength :
+      info.levelParams.length = staged.source.uvars := by
+    rw [infoEq]
+    simp only [expectedInfo, AddInductive.declaredInductiveInfo]
+    rw [execution.flattenedValidationLparams_eq, sourceUvars]
+  have infoNumParams : info.numParams = staged.source.nparams := by
+    rw [infoEq]
+    simp only [expectedInfo, AddInductive.declaredInductiveInfo]
+    exact staged.source_nparams_eq.symm
+  exact {
+    view := .block selected
+    name_eq := by
+      simpa [VProjectionView.name, VProjectionView.familyRaw, selected] using
+        familyName
+    viewWF := VProjectionView.LayoutWF.ofBlock selectedLayout
+    constructorInfo := constructorInfo
+    constructor_find := by
+      simpa [VProjectionView.constructorName, VProjectionView.constructor,
+        selected, selectedConstructorName] using constructorFound
+    recursorInfo := recursorInfo
+    recursor_find := by
+      simpa [VProjectionView.recursorName, VProjectionView.name,
+        VProjectionView.familyRaw, selected, familyName, mkRecName] using
+        recursorFound
+    recursor_levelParams_length := by
+      simpa [VProjectionView.recUvars, selected] using
+        recursorLevelParamsLength
+    constructor_numParams_eq := by
+      simpa [VProjectionView.nparams, VProjectionView.source, selected] using
+        constructorNumParams
+    constructor_numFields_eq := by
+      simpa [VProjectionView.fields, VProjectionView.constructor,
+        VProjectionView.nparams, VProjectionView.source, selected] using
+        constructorNumFields
+    levelParams_length := by
+      simpa [VProjectionView.uvars, VProjectionView.source, selected] using
+        infoLevelParamsLength
+    numParams_eq := by
+      simpa [VProjectionView.nparams, VProjectionView.source, selected] using
+        infoNumParams
+    numIndices_eq := numIndicesEq
+    ctors_eq := by
+      simpa [VProjectionView.constructorName, VProjectionView.constructor,
+        selected, selectedConstructorName] using ctorsEq
+    programs := .runtimeBlock selected rfl (by
+      simpa [selected, VBlockStructureView.fields] using
+        constructorSpineSupport) }
+
+/-- Data-bearing projection resolution for the exact ordinary source-family
+inventory.  Source names are fresh in the input map, so every successful host
+observation in this scan domain is discharged by the retained producer rather
+than by propositionally inherited readiness. -/
+def
+    FlattenedSemanticRecursorStagingResult.projectionArtifactInventoryResolver
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) :
+    ProjectionArtifactInventoryResolver finalEnv
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv)
+      (execution.nested.types.map (·.name)) where
+  infer familyName familyMember info found ready := by
+    have inputMapWF := (wf.tr (safety := .safe)).map_wf
+    have familyFresh : env.find? familyName = none := by
+      obtain ⟨sourceFamily, sourceMember, sourceName⟩ :=
+        List.mem_map.mp familyMember
+      have sourceFresh :=
+        execution.ordinarySourceFamilyFresh inputMapWF sourceMember
+      change env.constants.find?' familyName = none
+      rw [inputMapWF.find?'_eq_find?]
+      simpa only [sourceName] using sourceFresh
+    have notOld : ¬ (env.find? familyName = some (.inductInfo info) ∧
+        env.isProjectionReadyStructure familyName = true) := by
+      intro old
+      rw [familyFresh] at old
+      simp at old
+    exact .ordinary <| result.projectionArtifactOfDeclaredFamily metadata
+      numNested_eq wf found ready
+        (execution.ordinaryProjectionDeltaFamily numNested_eq inputMapWF found
+          ready notOld)
+
+/-- Newly projection-ready ordinary families inherit their complete runtime
+artifact directly from the retained semantic producer. -/
+theorem
+    FlattenedSemanticRecursorStagingResult.projectionArtifactDeltaReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) :
+    ProjectionArtifactDeltaReady env finalEnv
+      (result.generation.generatedRules.foldl VEnv.addDefEq
+        metadata.recursors.recEnv) := by
+  intro name info found ready notOld
+  exact ⟨result.projectionArtifactOfDeclaredFamily metadata numNested_eq wf
+    found ready
+    (execution.ordinaryProjectionDeltaFamily numNested_eq
+      (wf.tr (safety := .safe)).map_wf found ready notOld)⟩
 
 end AddInductive.EnvironmentInductiveExecution
 
@@ -6173,7 +10099,8 @@ theorem constructorHead
       true) (wf : input.WF env) (safety : DefinitionSafety)
     {name : Name} {info : ConstructorVal}
     (found : finalEnv.find? name = some (.ctorInfo info)) :
-    (replay.output.venv safety).ConstructorHead name := by
+    (replay.output.venv safety).ConstructorHeadArity name
+      info.numParams := by
   have inputMapWF := (wf.tr (safety := safety)).map_wf
   let pointwise := replay.replays safety
   have finalMapWF :=
@@ -6185,7 +10112,7 @@ theorem constructorHead
     change finalEnv.constants.find?' name = _ at found
     rwa [finalMapWF.find?'_eq_find?] at found
   rcases pointwise.constructorLookupCases primitiveResult inputMapWF foundMap
-      with old | ⟨_numParams, ⟨raw, member, nameEq⟩, _owner⟩
+      with old | ⟨numParamsZero, ⟨raw, member, nameEq⟩, _owner⟩
   · have oldFind : env.find? name = some (.ctorInfo info) := by
       change env.constants.find?' name = _
       rw [inputMapWF.find?'_eq_find?]
@@ -6196,9 +10123,14 @@ theorem constructorHead
       (show AddInductBlock env.constants (input.venv safety)
           (VPrimitiveInductive.canonicalDecl types) finalEnv.constants
           (replay.output.venv safety) from
-        ⟨pointwise.toTrace primitiveResult⟩).constructorHead
+        ⟨pointwise.toTrace primitiveResult⟩).constructorHeadArity
           (wf.tr (safety := safety)).wf member
-    simpa only [nameEq] using head
+    have canonicalNumParams :
+        (VPrimitiveInductive.canonicalDecl types).nparams = 0 := by
+      unfold VPrimitiveInductive.canonicalDecl
+      split <;> rfl
+    rw [nameEq, canonicalNumParams, ← numParamsZero] at head
+    exact head
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorHead' depends on axioms: [propext,
@@ -6211,96 +10143,6 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPri
 -/
 #guard_msgs in
 #print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorHead
-
-/-- The cached parameter count of every final constructor agrees with any
-nonempty registered view in a future extension of the replay output.  Old
-records use input readiness; a canonical Bool/Nat record has zero parameters
-on both the host and Theory sides. -/
-theorem constructorNumParams_mono
-    {env : Environment} {lparams : List Name} {nparams : Nat}
-    {types : List InductiveType} {isUnsafe : Bool}
-    {fuel : FuelConfig} {finalEnv : Environment}
-    {execution : AddInductive.EnvironmentInductiveExecution env lparams
-      nparams types isUnsafe true fuel finalEnv}
-    {input : VEnvs}
-    (replay : execution.CoherentCanonicalPrimitiveReplay input)
-    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true) (wf : input.WF env) (safety : DefinitionSafety)
-    {future : VEnv} (hle : replay.output.venv safety ≤ future)
-    (view : VStructureView) (info : ConstructorVal)
-    (hview : view.WF future) (hfields : view.fields ≠ [])
-    (found : finalEnv.find? view.constructorName = some (.ctorInfo info)) :
-    info.numParams = view.nparams := by
-  have inputMapWF := (wf.tr (safety := safety)).map_wf
-  let pointwise := replay.replays safety
-  have finalMapWF :=
-    (pointwise.toTrace primitiveResult).addRecs.map_wf <|
-      (pointwise.toTrace primitiveResult).addCtors.map_wf <|
-        (pointwise.toTrace primitiveResult).addTypes.map_wf inputMapWF
-  have foundMap :
-      finalEnv.constants.find? view.constructorName =
-        some (.ctorInfo info) := by
-    change finalEnv.constants.find?' view.constructorName = _ at found
-    rwa [finalMapWF.find?'_eq_find?] at found
-  rcases pointwise.constructorLookupCases primitiveResult inputMapWF foundMap
-      with old | ⟨numParamsZero, ⟨raw, member, nameEq⟩, _owner⟩
-  · have oldFind :
-        env.find? view.constructorName = some (.ctorInfo info) := by
-      change env.constants.find?' view.constructorName = _
-      rw [inputMapWF.find?'_eq_find?]
-      exact old
-    exact wf.projectionReady.constructorNumParams_mono
-      ((replay.old_le primitiveResult safety).trans hle)
-      view info hview hfields oldFind
-  · have constants := VPrimitiveInductive.canonicalDecl_constants
-      (primitiveResult.recognized rfl).2.2.2
-    have viewNumParamsZero :=
-      constants.constructorView_nparams_eq_zero
-        (pointwise.toTrace primitiveResult) hle hview hfields member nameEq
-    exact numParamsZero.trans viewNumParamsZero.symm
-
-/-- The current-output specialization of `constructorNumParams_mono`. -/
-theorem constructorNumParams
-    {env : Environment} {lparams : List Name} {nparams : Nat}
-    {types : List InductiveType} {isUnsafe : Bool}
-    {fuel : FuelConfig} {finalEnv : Environment}
-    {execution : AddInductive.EnvironmentInductiveExecution env lparams
-      nparams types isUnsafe true fuel finalEnv}
-    {input : VEnvs}
-    (replay : execution.CoherentCanonicalPrimitiveReplay input)
-    (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
-      true) (wf : input.WF env) (safety : DefinitionSafety)
-    (view : VStructureView) (info : ConstructorVal)
-    (hview : view.WF (replay.output.venv safety))
-    (hfields : view.fields ≠ [])
-    (found : finalEnv.find? view.constructorName = some (.ctorInfo info)) :
-    info.numParams = view.nparams :=
-  replay.constructorNumParams_mono primitiveResult wf safety VEnv.LE.rfl
-    view info hview hfields found
-
-/--
-info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorNumParams_mono' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- Expr.abstract_eq,
- PersistentHashMap.findAux_isSome,
- PersistentHashMap.WF.find?_eq,
- PersistentHashMap.WF.toList'_insert]
--/
-#guard_msgs in
-#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorNumParams_mono
-
-/--
-info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorNumParams' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- Expr.abstract_eq,
- PersistentHashMap.findAux_isSome,
- PersistentHashMap.WF.find?_eq,
- PersistentHashMap.WF.toList'_insert]
--/
-#guard_msgs in
-#print axioms AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.constructorNumParams
 
 /-- Canonical primitive insertion preserves projection readiness.  A final
 ready family cannot be newly inserted because Bool and Nat each have two
@@ -6317,7 +10159,7 @@ theorem projectionReady
     (replay : execution.CoherentCanonicalPrimitiveReplay input)
     (primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe
       true) (wf : input.WF env) (safety : DefinitionSafety) :
-    ProjectionReady finalEnv (replay.output.venv safety) where
+    ProjectionResolutionReady finalEnv (replay.output.venv safety) where
   infer name info found ready := by
     have inputMapWF := (wf.tr (safety := safety)).map_wf
     let pointwise := replay.replays safety
@@ -6330,7 +10172,7 @@ theorem projectionReady
       change finalEnv.constants.find?' name = _ at found
       rwa [finalMapWF.find?'_eq_find?] at found
     obtain ⟨ctor, ctorInfo, recInfo, ctorsEq, numIndicesEq,
-        ctorFound, recFound, ctorOwner⟩ :=
+        ctorFound, recFound, ctorOwner, familyRecursor⟩ :=
       Kernel.Environment.isProjectionReadyStructure_info found ready
     have ctorFoundMap :
         finalEnv.constants.find? ctor = some (.ctorInfo ctorInfo) := by
@@ -6365,30 +10207,30 @@ theorem projectionReady
           have inputReady : env.isProjectionReadyStructure name = true := by
             exact Kernel.Environment.isProjectionReadyStructure_of_info
               oldFamilyFind ctorsEq numIndicesEq oldCtorFind oldRecFind
-              ctorOwner
+              ctorOwner familyRecursor
           obtain ⟨artifact⟩ :=
             (wf.projectionReady (safety := safety)).infer name info
               oldFamilyFind inputReady
-          have artifactOldMap :
-              env.constants.find? artifact.view.constructorName =
-                some (.ctorInfo artifact.constructorInfo) := by
-            have artifactOldFind := artifact.constructor_find
-            change env.constants.find?' artifact.view.constructorName = _ at artifactOldFind
-            rwa [inputMapWF.find?'_eq_find?] at artifactOldFind
-          have artifactTypeMap :=
-            trace.addTypes.preserve_map_lookup inputMapWF artifactOldMap
-          have artifactCtorMap :=
-            trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
-          have artifactFinalMap :=
-            trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
-          have artifactFinalFind :
-              finalEnv.find? artifact.view.constructorName =
-                some (.ctorInfo artifact.constructorInfo) := by
-            change finalEnv.constants.find?' artifact.view.constructorName = _
+          have preserveArtifactLookup {artifactName : Name}
+              {artifactInfo : ConstantInfo}
+              (artifactFind : env.find? artifactName = some artifactInfo) :
+              finalEnv.find? artifactName = some artifactInfo := by
+            have artifactInputMap :
+                env.constants.find? artifactName = some artifactInfo := by
+              change env.constants.find?' artifactName = _ at artifactFind
+              rwa [inputMapWF.find?'_eq_find?] at artifactFind
+            have artifactTypeMap :=
+              trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+            have artifactCtorMap :=
+              trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
+            have artifactFinalMap :=
+              trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
+            change finalEnv.constants.find?' artifactName = _
             rw [finalMapWF.find?'_eq_find?]
             exact artifactFinalMap
-          exact ⟨artifact.retarget
-            (replay.old_le primitiveResult safety) artifactFinalFind⟩
+          exact ⟨artifact.retarget_of_preserved
+            (replay.old_le primitiveResult safety) preserveArtifactLookup
+              preserveArtifactLookup⟩
         · obtain ⟨familyRaw, familyMember, recOwner⟩ :=
             trace.generation.recursor_owner recMember
           have recNames : mkRecName familyRaw.name = mkRecName name :=
@@ -6407,12 +10249,6 @@ theorem projectionReady
       simp at familyLength
   constructorHead name info found :=
     replay.constructorHead primitiveResult wf safety found
-  constructorNumParams view info hview hfields found :=
-    replay.constructorNumParams primitiveResult wf safety view info hview
-      hfields found
-  constructorNumParams_mono hle view info hview hfields found :=
-    replay.constructorNumParams_mono primitiveResult wf safety hle view info
-      hview hfields found
 
 /--
 info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CoherentCanonicalPrimitiveReplay.projectionReady' depends on axioms: [propext,
@@ -6459,9 +10295,15 @@ theorem structureEtaReady
           some (.ctorInfo constructorInfo) := by
       change finalEnv.constants.find?' constructorName = _ at constructorFound
       rwa [finalMapWF.find?'_eq_find?] at constructorFound
-    obtain ⟨isRecEq, ctorsEq, numIndicesEq, owner⟩ :=
-      Kernel.Environment.isNonRecStructureConstructor_info familyFound
+    obtain ⟨recInfo, recFound, isRecEq, ctorsEq, numIndicesEq, owner,
+        levelParamsLt, familyRecursor⟩ :=
+      Kernel.Environment.isStructureEtaReadyConstructor_info familyFound
         constructorFound ready
+    have recFoundMap :
+        finalEnv.constants.find? (mkRecName familyName) =
+          some (.recInfo recInfo) := by
+      change finalEnv.constants.find?' (mkRecName familyName) = _ at recFound
+      rwa [finalMapWF.find?'_eq_find?] at recFound
     rcases pointwise.familyLookupCases primitiveResult inputMapWF
         familyFoundMap with
       oldFamily | ⟨familyLength, _familyRaw⟩
@@ -6470,48 +10312,64 @@ theorem structureEtaReady
         oldConstructor |
           ⟨_numParams, _constructorRaw, familyRaw, familyMember,
             constructorOwner⟩
-      · have oldFamilyFind :
-            env.find? familyName = some (.inductInfo familyInfo) := by
-          change env.constants.find?' familyName = _
-          rw [inputMapWF.find?'_eq_find?]
-          exact oldFamily
-        have oldConstructorFind :
-            env.find? constructorName = some (.ctorInfo constructorInfo) := by
-          change env.constants.find?' constructorName = _
-          rw [inputMapWF.find?'_eq_find?]
-          exact oldConstructor
-        have inputReady :
-            env.isNonRecStructureConstructor familyName constructorName =
-              true :=
-          Kernel.Environment.isNonRecStructureConstructor_of_info
-            oldFamilyFind oldConstructorFind isRecEq ctorsEq numIndicesEq owner
-        obtain ⟨artifact⟩ :=
-          (wf.structureEtaReady (safety := safety)).resolve familyName
-            familyInfo constructorName constructorInfo oldFamilyFind
-            oldConstructorFind inputReady
-        have artifactOldMap :
-            env.constants.find? artifact.projection.view.constructorName =
-              some (.ctorInfo artifact.projection.constructorInfo) := by
-          have artifactOldFind := artifact.projection.constructor_find
-          change env.constants.find?'
-            artifact.projection.view.constructorName = _ at artifactOldFind
-          rwa [inputMapWF.find?'_eq_find?] at artifactOldFind
-        have artifactTypeMap :=
-          trace.addTypes.preserve_map_lookup inputMapWF artifactOldMap
-        have artifactCtorMap :=
-          trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
-        have artifactFinalMap :=
-          trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
-        have artifactFinalFind :
-            finalEnv.find? artifact.projection.view.constructorName =
-              some (.ctorInfo artifact.projection.constructorInfo) := by
-          change finalEnv.constants.find?'
-            artifact.projection.view.constructorName = _
-          rw [finalMapWF.find?'_eq_find?]
-          exact artifactFinalMap
-        exact ⟨artifact.retarget (replay.old_le primitiveResult safety)
-          (replay.outputWF primitiveResult wf safety).ordered
-          artifactFinalFind⟩
+      · rcases trace.recursor_map_lookup_cases inputMapWF recFoundMap with
+          oldRecursor | ⟨rawRecursor, recursorMember, recursorNameEq⟩
+        · have oldFamilyFind :
+              env.find? familyName = some (.inductInfo familyInfo) := by
+            change env.constants.find?' familyName = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldFamily
+          have oldConstructorFind :
+              env.find? constructorName = some (.ctorInfo constructorInfo) := by
+            change env.constants.find?' constructorName = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldConstructor
+          have oldRecursorFind :
+              env.find? (mkRecName familyName) = some (.recInfo recInfo) := by
+            change env.constants.find?' (mkRecName familyName) = _
+            rw [inputMapWF.find?'_eq_find?]
+            exact oldRecursor
+          have inputReady :
+              env.isStructureEtaReadyConstructor familyName constructorName =
+                true :=
+            Kernel.Environment.isStructureEtaReadyConstructor_of_info
+              oldFamilyFind oldConstructorFind oldRecursorFind isRecEq ctorsEq
+                numIndicesEq owner levelParamsLt familyRecursor
+          obtain ⟨artifact⟩ :=
+            (wf.structureEtaReady (safety := safety)).resolve familyName
+              familyInfo constructorName constructorInfo oldFamilyFind
+              oldConstructorFind inputReady
+          have preserveArtifactLookup {artifactName : Name}
+              {artifactInfo : ConstantInfo}
+              (artifactFind : env.find? artifactName = some artifactInfo) :
+              finalEnv.find? artifactName = some artifactInfo := by
+            have artifactInputMap :
+                env.constants.find? artifactName = some artifactInfo := by
+              change env.constants.find?' artifactName = _ at artifactFind
+              rwa [inputMapWF.find?'_eq_find?] at artifactFind
+            have artifactTypeMap :=
+              trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+            have artifactCtorMap :=
+              trace.addCtors.preserve_map_lookup wfTypes artifactTypeMap
+            have artifactFinalMap :=
+              trace.addRecs.preserve_map_lookup wfCtors artifactCtorMap
+            change finalEnv.constants.find?' artifactName = _
+            rw [finalMapWF.find?'_eq_find?]
+            exact artifactFinalMap
+          exact ⟨artifact.retarget_of_preserved
+            (replay.old_le primitiveResult safety)
+            (replay.outputWF primitiveResult wf safety).ordered
+            preserveArtifactLookup preserveArtifactLookup⟩
+        · obtain ⟨familyRaw, familyMember, recursorOwner⟩ :=
+            trace.generation.recursor_owner recursorMember
+          have recursorNames :
+              mkRecName familyRaw.name = mkRecName familyName :=
+            recursorOwner.symm.trans recursorNameEq
+          have familyNameEq : familyRaw.name = familyName := by
+            simpa [mkRecName] using recursorNames
+          have fresh := trace.addTypes.map_fresh inputMapWF familyMember
+          rw [familyNameEq, oldFamily] at fresh
+          contradiction
       · have familyNameEq : familyRaw.name = familyName :=
           constructorOwner.symm.trans owner
         have fresh := trace.addTypes.map_fresh inputMapWF familyMember
@@ -6829,7 +10687,7 @@ structure AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTransacti
   primitiveResult : PrimitiveInductiveResult lparams nparams types isUnsafe true
   replay : execution.CoherentCanonicalPrimitiveReplay ves
   projectionReady : ∀ safety,
-    ProjectionReady finalEnv (replay.output.venv safety)
+    ProjectionResolutionReady finalEnv (replay.output.venv safety)
   structureEtaReady : ∀ safety,
     StructureEtaReady finalEnv (replay.output.venv safety)
 
@@ -6899,7 +10757,7 @@ def ofReplay
       true)
     (replay : execution.CoherentCanonicalPrimitiveReplay ves)
     (projectionReady : ∀ safety,
-      ProjectionReady finalEnv (replay.output.venv safety))
+      ProjectionResolutionReady finalEnv (replay.output.venv safety))
     (structureEtaReady : ∀ safety,
       StructureEtaReady finalEnv (replay.output.venv safety)) :
     execution.CanonicalPrimitiveTransactionalVEnvsExtension ves where
@@ -7074,6 +10932,344 @@ info: 'Lean4Lean.AddInductive.EnvironmentInductiveExecution.CanonicalPrimitiveTr
 
 namespace AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
 
+/-- Every final constructor in an ordinary coherent transaction carries a
+completed Theory head with the host metadata's exact cached parameter count.
+Old records reuse input readiness.  New records are identified by the exact
+constructor fold; the retained family-validation counters align the host
+count with the raw Theory source selected by outer staging. -/
+theorem ordinaryConstructorHeadArity
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (source_nparams_eq : source.nparams = nparams) :
+    ∀ name info, finalEnv.find? name = some (.ctorInfo info) →
+      (output.venv .safe).ConstructorHeadArity name info.numParams := by
+  intro name info found
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  let transaction := transactions.transaction .safe
+  cases transaction with
+  | nested numNested_ne _trace _typeNames _ctorNames _recNames =>
+      exact (numNested_ne numNested_eq).elim
+  | ordinary _traceNumNested trace _typeNames _ctorNames _recNames =>
+      have typeMapWF := trace.addTypes.map_wf inputMapWF
+      have ctorMapWF := trace.addCtors.map_wf typeMapWF
+      have finalMapWF := trace.addRecs.map_wf ctorMapWF
+      have foundMap :
+          finalEnv.constants.find? name = some (.ctorInfo info) := by
+        change finalEnv.constants.find?' name = _ at found
+        rwa [finalMapWF.find?'_eq_find?] at found
+      rcases trace.constructor_map_lookup_cases inputMapWF foundMap with
+        old | ⟨raw, rawMember, rawName⟩
+      · have oldFind : env.find? name = some (.ctorInfo info) := by
+          change env.constants.find?' name = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact old
+        exact ((wf.projectionReady (safety := .safe)).constructorHead
+          name info oldFind).mono trace.le
+      · have rawInputFresh : env.constants.find? raw.name = none := by
+          have typeFresh := trace.addCtors.map_fresh typeMapWF rawMember
+          exact trace.addTypes.input_map_none_of_output_none inputMapWF
+            typeFresh
+        have infoParams : info.numParams =
+            execution.flattened.eliminationExecution.normalization.stats.params.size := by
+          rcases execution.ordinaryConstructorLookupCases numNested_eq
+              inputMapWF foundMap with oldHost | inserted
+          · rw [rawName, oldHost] at rawInputFresh
+            contradiction
+          · simpa only [
+                AddInductive.NormalizationEliminationExecution.declaredConstructorInfos]
+              using AddInductive.declaredConstructorInfos_numParams
+                execution.flattened.eliminationExecution.normalization.stats
+                execution.nested.types.toArray isUnsafe
+                execution.flattened.eliminationExecution.constructorContext
+                inserted.1
+        have normalizationProduced := execution.flattened.normalization_run
+          execution.flattenedRun
+        have familyRun :=
+          execution.flattened.eliminationExecution.normalization
+            |>.familyValidationResult_run normalizationProduced
+        have paramsSize :
+            execution.flattened.eliminationExecution.normalization.stats.params.size =
+              nparams :=
+          (execution.flattened.eliminationExecution.normalization
+            |>.familyValidationResult.sizes_of_run
+              execution.nested.types_nonempty familyRun).1
+        have hostSourceParams : info.numParams = source.nparams :=
+          infoParams.trans (paramsSize.trans source_nparams_eq.symm)
+        have sourceHead :=
+          (show AddInductBlock env.constants (input.venv .safe) source
+              finalEnv.constants (output.venv .safe) from ⟨trace⟩)
+            |>.constructorHeadArity
+              (wf.tr (safety := .safe)).wf rawMember
+        simpa only [rawName, hostSourceParams] using sourceHead
+
+/-- Every final constructor in a genuinely nested coherent transaction
+carries a completed restored Theory head at the host metadata's exact cached
+parameter count.  Restoration now owns that count directly, so the new case
+does not depend on a caller-supplied metadata alignment. -/
+theorem nestedConstructorHeadArity
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (source_nparams_eq : source.nparams = nparams) :
+    ∀ name info, finalEnv.find? name = some (.ctorInfo info) →
+      (output.venv .safe).ConstructorHeadArity name info.numParams := by
+  intro name info found
+  have inputMapWF := (wf.tr (safety := .safe)).map_wf
+  let transaction := transactions.transaction .safe
+  cases transaction with
+  | ordinary numNested_eq _trace _typeNames _ctorNames _recNames =>
+      exact (numNested_ne numNested_eq).elim
+  | nested _traceNumNested trace _typeNames _ctorNames _recNames =>
+      have typeMapWF := trace.addTypes.map_wf inputMapWF
+      have ctorMapWF := trace.addCtors.map_wf typeMapWF
+      have finalMapWF := trace.addRecs.map_wf ctorMapWF
+      have foundMap :
+          finalEnv.constants.find? name = some (.ctorInfo info) := by
+        change finalEnv.constants.find?' name = _ at found
+        rwa [finalMapWF.find?'_eq_find?] at found
+      rcases trace.constructor_map_lookup_cases inputMapWF foundMap with
+        old | ⟨raw, rawMember, rawName⟩
+      · have oldFind : env.find? name = some (.ctorInfo info) := by
+          change env.constants.find?' name = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact old
+        exact ((wf.projectionReady (safety := .safe)).constructorHead
+          name info oldFind).mono
+            (show AddInductNested env.constants (input.venv .safe) source
+                finalEnv.constants (output.venv .safe) from ⟨trace⟩).le
+      · have rawInputFresh : env.constants.find? raw.name = none := by
+          have typeFresh := trace.addCtors.map_fresh typeMapWF rawMember
+          exact trace.addTypes.input_map_none_of_output_none inputMapWF
+            typeFresh
+        have restoredParams : info.numParams = execution.nested.nparams := by
+          rcases execution.nestedConstructorLookupCases numNested_ne
+              inputMapWF foundMap with oldHost | inserted
+          · rw [rawName, oldHost] at rawInputFresh
+            contradiction
+          · exact restoredNestedInfos_constructor_numParams inserted.1
+        have nestedParams : execution.nested.nparams = nparams :=
+          ElimNestedInductive.runAt_nparams_eq execution.nestedRun
+        have hostSourceParams : info.numParams = source.nparams :=
+          restoredParams.trans (nestedParams.trans source_nparams_eq.symm)
+        have sourceHead :=
+          (show AddInductNested env.constants (input.venv .safe) source
+              finalEnv.constants (output.venv .safe) from ⟨trace⟩)
+            |>.constructorHeadArity
+              (wf.tr (safety := .safe)).wf rawMember
+        simpa only [rawName, hostSourceParams] using sourceHead
+
+/-- Assemble projection readiness for an ordinary coherent transaction from
+only the newly activated projection artifacts.  A family that was already
+ready in the input model is retargeted through the exact family,
+constructor, and recursor folds; constructor arity is supplied by
+`ordinaryConstructorHeadArity`, not by the delta producer. -/
+theorem ordinaryProjectionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (source_nparams_eq : source.nparams = nparams)
+    (delta : ProjectionArtifactDeltaReady env finalEnv
+      (output.venv .safe)) :
+    ProjectionResolutionReady finalEnv (output.venv .safe) where
+  infer name info found ready := by
+    by_cases old : env.find? name = some (.inductInfo info) ∧
+        env.isProjectionReadyStructure name = true
+    · obtain ⟨artifact⟩ :=
+        (wf.projectionReady (safety := .safe)).infer name info old.1 old.2
+      have inputMapWF := (wf.tr (safety := .safe)).map_wf
+      let transaction := transactions.transaction .safe
+      cases transaction with
+      | nested numNested_ne _trace _typeNames _ctorNames _recNames =>
+          exact (numNested_ne numNested_eq).elim
+      | ordinary _traceNumNested trace _typeNames _ctorNames _recNames =>
+          have typeMapWF := trace.addTypes.map_wf inputMapWF
+          have ctorMapWF := trace.addCtors.map_wf typeMapWF
+          have finalMapWF := trace.addRecs.map_wf ctorMapWF
+          have preserveArtifactLookup {artifactName : Name}
+              {artifactInfo : ConstantInfo}
+              (artifactFind : env.find? artifactName = some artifactInfo) :
+              finalEnv.find? artifactName = some artifactInfo := by
+            have artifactInputMap :
+                env.constants.find? artifactName = some artifactInfo := by
+              change env.constants.find?' artifactName = _ at artifactFind
+              rwa [inputMapWF.find?'_eq_find?] at artifactFind
+            have artifactTypeMap :=
+              trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+            have artifactCtorMap :=
+              trace.addCtors.preserve_map_lookup typeMapWF artifactTypeMap
+            have artifactFinalMap :=
+              trace.addRecs.preserve_map_lookup ctorMapWF artifactCtorMap
+            change finalEnv.constants.find?' artifactName = _
+            rw [finalMapWF.find?'_eq_find?]
+            exact artifactFinalMap
+          exact ⟨artifact.retarget_of_preserved trace.le
+            preserveArtifactLookup preserveArtifactLookup⟩
+    · obtain ⟨artifact⟩ := delta name info found ready old
+      exact ⟨.ordinary artifact⟩
+  constructorHead name info found :=
+    transactions.ordinaryConstructorHeadArity wf numNested_eq
+      source_nparams_eq name info found
+
+/-- The ordinary readiness transaction is also a resolution-aware transaction;
+all of its newly produced artifacts select the ordinary backend. -/
+theorem ordinaryProjectionResolutionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (source_nparams_eq : source.nparams = nparams)
+    (delta : ProjectionArtifactDeltaReady env finalEnv
+      (output.venv .safe)) :
+    ProjectionResolutionReady finalEnv (output.venv .safe) :=
+  transactions.ordinaryProjectionReady wf numNested_eq source_nparams_eq delta
+
+/-- Assemble projection readiness for a genuinely nested coherent
+transaction from only newly activated family artifacts.  Old artifacts are
+retargeted through the restored transaction, while exact constructor arity is
+derived by `nestedConstructorHeadArity`. -/
+theorem nestedProjectionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (source_nparams_eq : source.nparams = nparams)
+    (delta : ProjectionArtifactDeltaReady env finalEnv
+      (output.venv .safe)) :
+    ProjectionResolutionReady finalEnv (output.venv .safe) where
+  infer name info found ready := by
+    by_cases old : env.find? name = some (.inductInfo info) ∧
+        env.isProjectionReadyStructure name = true
+    · obtain ⟨artifact⟩ :=
+        (wf.projectionReady (safety := .safe)).infer name info old.1 old.2
+      have inputMapWF := (wf.tr (safety := .safe)).map_wf
+      let transaction := transactions.transaction .safe
+      cases transaction with
+      | ordinary numNested_eq _trace _typeNames _ctorNames _recNames =>
+          exact (numNested_ne numNested_eq).elim
+      | nested _traceNumNested trace _typeNames _ctorNames _recNames =>
+          have typeMapWF := trace.addTypes.map_wf inputMapWF
+          have ctorMapWF := trace.addCtors.map_wf typeMapWF
+          have finalMapWF := trace.addRecs.map_wf ctorMapWF
+          have preserveArtifactLookup {artifactName : Name}
+              {artifactInfo : ConstantInfo}
+              (artifactFind : env.find? artifactName = some artifactInfo) :
+              finalEnv.find? artifactName = some artifactInfo := by
+            have artifactInputMap :
+                env.constants.find? artifactName = some artifactInfo := by
+              change env.constants.find?' artifactName = _ at artifactFind
+              rwa [inputMapWF.find?'_eq_find?] at artifactFind
+            have artifactTypeMap :=
+              trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+            have artifactCtorMap :=
+              trace.addCtors.preserve_map_lookup typeMapWF artifactTypeMap
+            have artifactFinalMap :=
+              trace.addRecs.preserve_map_lookup ctorMapWF artifactCtorMap
+            change finalEnv.constants.find?' artifactName = _
+            rw [finalMapWF.find?'_eq_find?]
+            exact artifactFinalMap
+          exact ⟨artifact.retarget_of_preserved
+            (show AddInductNested env.constants (input.venv .safe) source
+                finalEnv.constants (output.venv .safe) from ⟨trace⟩).le
+            preserveArtifactLookup preserveArtifactLookup⟩
+    · obtain ⟨artifact⟩ := delta name info found ready old
+      exact ⟨.ordinary artifact⟩
+  constructorHead name info found :=
+    transactions.nestedConstructorHeadArity wf numNested_ne
+      source_nparams_eq name info found
+
+/-- Assemble resolution-aware projection readiness for a genuinely nested
+coherent transaction.  Input families retain their ordinary artifact through
+the exact restored folds; a newly activated family is supplied by the
+resolution delta and may therefore select the restored backend honestly. -/
+theorem nestedProjectionResolutionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
+    {fuel : FuelConfig} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types isUnsafe allowPrimitive fuel finalEnv}
+    {source : VInductDecl} {input output : VEnvs}
+    (transactions : execution.CoherentPrimitivePreservingTransactions source
+      input output)
+    (wf : input.WF env)
+    (numNested_ne : execution.nested.aux2nested.size ≠ 0)
+    (source_nparams_eq : source.nparams = nparams)
+    (delta : ProjectionArtifactResolutionDeltaReady env finalEnv
+      (output.venv .safe)) :
+    ProjectionResolutionReady finalEnv (output.venv .safe) where
+  infer name info found ready := by
+    by_cases old : env.find? name = some (.inductInfo info) ∧
+        env.isProjectionReadyStructure name = true
+    · obtain ⟨artifact⟩ :=
+        (wf.projectionReady (safety := .safe)).infer name info old.1 old.2
+      have inputMapWF := (wf.tr (safety := .safe)).map_wf
+      let transaction := transactions.transaction .safe
+      cases transaction with
+      | ordinary numNested_eq _trace _typeNames _ctorNames _recNames =>
+          exact (numNested_ne numNested_eq).elim
+      | nested _traceNumNested trace _typeNames _ctorNames _recNames =>
+          have typeMapWF := trace.addTypes.map_wf inputMapWF
+          have ctorMapWF := trace.addCtors.map_wf typeMapWF
+          have finalMapWF := trace.addRecs.map_wf ctorMapWF
+          have preserveArtifactLookup {artifactName : Name}
+              {artifactInfo : ConstantInfo}
+              (artifactFind : env.find? artifactName = some artifactInfo) :
+              finalEnv.find? artifactName = some artifactInfo := by
+            have artifactInputMap :
+                env.constants.find? artifactName = some artifactInfo := by
+              change env.constants.find?' artifactName = _ at artifactFind
+              rwa [inputMapWF.find?'_eq_find?] at artifactFind
+            have artifactTypeMap :=
+              trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+            have artifactCtorMap :=
+              trace.addCtors.preserve_map_lookup typeMapWF artifactTypeMap
+            have artifactFinalMap :=
+              trace.addRecs.preserve_map_lookup ctorMapWF artifactCtorMap
+            change finalEnv.constants.find?' artifactName = _
+            rw [finalMapWF.find?'_eq_find?]
+            exact artifactFinalMap
+          exact ⟨artifact.retarget_of_preserved
+            (show AddInductNested env.constants (input.venv .safe) source
+                finalEnv.constants (output.venv .safe) from ⟨trace⟩).le
+            preserveArtifactLookup preserveArtifactLookup⟩
+    · exact delta name info found ready old
+  constructorHead name info found :=
+    transactions.nestedConstructorHeadArity wf numNested_ne
+      source_nparams_eq name info found
+
 /-- In an ordinary retained execution, the flattened host source-family list
 is a complete finite scan domain for structure-eta registration.  An accepted
 final structure whose family and constructor are both old is transported from
@@ -7093,9 +11289,9 @@ theorem ordinaryStructureEtaRegistrationCoverage
     ∀ familyName familyInfo constructorName constructorInfo,
       finalEnv.find? familyName = some (.inductInfo familyInfo) →
       finalEnv.find? constructorName = some (.ctorInfo constructorInfo) →
-      finalEnv.isNonRecStructureConstructor familyName constructorName =
+      finalEnv.isStructureEtaReadyConstructor familyName constructorName =
         true →
-      Nonempty (StructureEtaArtifact finalEnv familyName familyInfo
+      Nonempty (StructureEtaArtifactResolution finalEnv familyName familyInfo
         constructorName constructorInfo (output.venv .safe)) ∨
         familyName ∈ execution.nested.types.map (·.name) ∧
           ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
@@ -7114,9 +11310,15 @@ theorem ordinaryStructureEtaRegistrationCoverage
         some (.ctorInfo constructorInfo) := by
     change finalEnv.constants.find?' constructorName = _ at constructorFound
     rwa [finalMapWF.find?'_eq_find?] at constructorFound
-  obtain ⟨isRecEq, ctorsEq, numIndicesEq, owner⟩ :=
-    Kernel.Environment.isNonRecStructureConstructor_info familyFound
+  obtain ⟨recursorInfo, recursorFound, isRecEq, ctorsEq, numIndicesEq, owner,
+      levelParamsLt, familyRecursor⟩ :=
+    Kernel.Environment.isStructureEtaReadyConstructor_info familyFound
       constructorFound ready
+  have recursorFoundMap :
+      finalEnv.constants.find? (mkRecName familyName) =
+        some (.recInfo recursorInfo) := by
+    change finalEnv.constants.find?' (mkRecName familyName) = _ at recursorFound
+    rwa [finalMapWF.find?'_eq_find?] at recursorFound
   have registrationOfSource (indType : InductiveType)
       (sourceMember : indType ∈ execution.nested.types)
       (familyNameEq : indType.name = familyName) :
@@ -7145,25 +11347,66 @@ theorem ordinaryStructureEtaRegistrationCoverage
         change env.constants.find?' constructorName = _
         rw [inputMapWF.find?'_eq_find?]
         exact oldConstructor
-      have inputReady :
-          env.isNonRecStructureConstructor familyName constructorName = true :=
-        Kernel.Environment.isNonRecStructureConstructor_of_info oldFamilyFind
-          oldConstructorFind isRecEq ctorsEq numIndicesEq owner
-      obtain ⟨artifact⟩ :=
-        (wf.structureEtaReady (safety := .safe)).resolve familyName familyInfo
-          constructorName constructorInfo oldFamilyFind oldConstructorFind
-          inputReady
-      have outputWF : (output.venv .safe).WF :=
-        ((transactions.transaction .safe).toExact.trEnv
-          (wf.tr (safety := .safe))).wf
-      have artifactFinalFind :
-          finalEnv.find? artifact.projection.view.constructorName =
-            some (.ctorInfo artifact.projection.constructorInfo) := by
-        simpa only [artifact.constructor_name_eq,
-          artifact.constructor_info_eq] using constructorFound
-      exact .inl ⟨artifact.retarget
-        (transactions.transaction .safe).toExact.le outputWF.ordered
-          artifactFinalFind⟩
+      rcases execution.ordinaryRecursorLookupCases numNested_eq inputMapWF
+          recursorFoundMap with oldRecursor | newRecursor
+      · have oldRecursorFind :
+            env.find? (mkRecName familyName) =
+              some (.recInfo recursorInfo) := by
+          change env.constants.find?' (mkRecName familyName) = _
+          rw [inputMapWF.find?'_eq_find?]
+          exact oldRecursor
+        have inputReady :
+            env.isStructureEtaReadyConstructor familyName constructorName =
+              true :=
+          Kernel.Environment.isStructureEtaReadyConstructor_of_info
+            oldFamilyFind oldConstructorFind oldRecursorFind isRecEq ctorsEq
+              numIndicesEq owner levelParamsLt familyRecursor
+        obtain ⟨artifact⟩ :=
+          (wf.structureEtaReady (safety := .safe)).resolve familyName familyInfo
+            constructorName constructorInfo oldFamilyFind oldConstructorFind
+            inputReady
+        have outputWF : (output.venv .safe).WF :=
+          ((transactions.transaction .safe).toExact.trEnv
+            (wf.tr (safety := .safe))).wf
+        let transaction := transactions.transaction .safe
+        cases transaction with
+        | nested numNested_ne _trace _typeNames _ctorNames _recNames =>
+            exact (numNested_ne numNested_eq).elim
+        | ordinary _traceNumNested trace _typeNames _ctorNames _recNames =>
+            have typeMapWF := trace.addTypes.map_wf inputMapWF
+            have ctorMapWF := trace.addCtors.map_wf typeMapWF
+            have finalMapWF := trace.addRecs.map_wf ctorMapWF
+            have preserveArtifactLookup {artifactName : Name}
+                {artifactInfo : ConstantInfo}
+                (artifactFind : env.find? artifactName = some artifactInfo) :
+                finalEnv.find? artifactName = some artifactInfo := by
+              have artifactInputMap :
+                  env.constants.find? artifactName = some artifactInfo := by
+                change env.constants.find?' artifactName = _ at artifactFind
+                rwa [inputMapWF.find?'_eq_find?] at artifactFind
+              have artifactTypeMap :=
+                trace.addTypes.preserve_map_lookup inputMapWF artifactInputMap
+              have artifactCtorMap :=
+                trace.addCtors.preserve_map_lookup typeMapWF artifactTypeMap
+              have artifactFinalMap :=
+                trace.addRecs.preserve_map_lookup ctorMapWF artifactCtorMap
+              change finalEnv.constants.find?' artifactName = _
+              rw [finalMapWF.find?'_eq_find?]
+              exact artifactFinalMap
+            exact .inl ⟨artifact.retarget_of_preserved trace.le
+              outputWF.ordered preserveArtifactLookup preserveArtifactLookup⟩
+      · have recursorNameMember : recursorInfo.name ∈
+            execution.flattened.recursors.infos.map (·.name) :=
+          List.mem_map.mpr ⟨recursorInfo, newRecursor.1, rfl⟩
+        rw [AddInductive.declareRecursors_infos_names
+          execution.flattened.recursorsRun] at recursorNameMember
+        obtain ⟨indType, sourceMember, sourceRecursorNameEq⟩ :=
+          List.mem_map.mp recursorNameMember
+        have familyNameEq : indType.name = familyName := by
+          have nameEq := sourceRecursorNameEq.trans newRecursor.2
+          simpa [mkRecName] using nameEq
+        exact .inr <| registrationOfSource indType (by simpa using sourceMember)
+          familyNameEq
     · obtain ⟨indType, sourceMember, constructorOwner⟩ :=
         execution.ordinaryDeclaredConstructorSource newConstructor.1
       exact .inr <| registrationOfSource indType sourceMember
@@ -7173,11 +11416,12 @@ theorem ordinaryStructureEtaRegistrationCoverage
     exact .inr <| registrationOfSource indType sourceMember
       (sourceName.symm.trans newFamily.2)
 
-/-- In a genuinely nested retained execution, the original source-family
-list is a complete finite scan domain for structure-eta registration.  The
-mixed restoration trace classifies old metadata directly; every new family
-or constructor belongs to an exact source chunk whose canonical main recursor
-is restored in the same inventory. -/
+/-- In a genuinely nested retained execution, the completed constant map is
+a finite scan domain for structure-eta registration.  This is intentionally
+broader than the source-family list: restoring an auxiliary recursor can make
+an otherwise old family pass the recursor-sensitive eta gate, and the exact
+map inventory covers that case without assuming a string-level inverse for
+Lean's auxiliary-recursion naming scheme. -/
 theorem nestedStructureEtaRegistrationCoverage
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
@@ -7185,18 +11429,18 @@ theorem nestedStructureEtaRegistrationCoverage
     {execution : AddInductive.EnvironmentInductiveExecution env lparams
       nparams types isUnsafe allowPrimitive fuel finalEnv}
     {source : VInductDecl} {input output : VEnvs}
-    (transactions : execution.CoherentPrimitivePreservingTransactions source
+    (_transactions : execution.CoherentPrimitivePreservingTransactions source
       input output)
     (wf : input.WF env)
     (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
     ∀ familyName familyInfo constructorName constructorInfo,
       finalEnv.find? familyName = some (.inductInfo familyInfo) →
       finalEnv.find? constructorName = some (.ctorInfo constructorInfo) →
-      finalEnv.isNonRecStructureConstructor familyName constructorName =
+      finalEnv.isStructureEtaReadyConstructor familyName constructorName =
         true →
-      Nonempty (StructureEtaArtifact finalEnv familyName familyInfo
+      Nonempty (StructureEtaArtifactResolution finalEnv familyName familyInfo
         constructorName constructorInfo (output.venv .safe)) ∨
-        familyName ∈ types.map (·.name) ∧
+        familyName ∈ finalEnv.constants.toList'.map Prod.fst ∧
           ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
             some (.recInfo recursorInfo) := by
   intro familyName familyInfo constructorName constructorInfo familyFound
@@ -7208,71 +11452,61 @@ theorem nestedStructureEtaRegistrationCoverage
         some (.inductInfo familyInfo) := by
     change finalEnv.constants.find?' familyName = _ at familyFound
     rwa [finalMapWF.find?'_eq_find?] at familyFound
-  have constructorFoundMap :
-      finalEnv.constants.find? constructorName =
-        some (.ctorInfo constructorInfo) := by
-    change finalEnv.constants.find?' constructorName = _ at constructorFound
-    rwa [finalMapWF.find?'_eq_find?] at constructorFound
-  obtain ⟨isRecEq, ctorsEq, numIndicesEq, owner⟩ :=
-    Kernel.Environment.isNonRecStructureConstructor_info familyFound
+  have familyLookup : finalEnv.constants.toList'.lookup familyName =
+      some (.inductInfo familyInfo) := by
+    rw [← finalMapWF.find?_eq]
+    exact familyFoundMap
+  obtain ⟨front, back, listEq, _frontFresh⟩ :=
+    List.lookup_eq_some_iff.mp familyLookup
+  have familyMember :
+      familyName ∈ finalEnv.constants.toList'.map Prod.fst := by
+    rw [listEq]
+    simp
+  obtain ⟨recursorInfo, recursorFound, _isRecEq, _ctorsEq, _numIndicesEq,
+      _owner, _levelParamsLt, _familyRecursor⟩ :=
+    Kernel.Environment.isStructureEtaReadyConstructor_info familyFound
       constructorFound ready
-  have registrationOfSource (indType : InductiveType)
-      (sourceMember : indType ∈ types)
-      (familyNameEq : indType.name = familyName) :
-      familyName ∈ types.map (·.name) ∧
-        ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
-          some (.recInfo recursorInfo) := by
-    refine ⟨List.mem_map.mpr ⟨indType, sourceMember, familyNameEq⟩, ?_⟩
-    obtain ⟨recursorInfo, recursorLookup⟩ :=
-      execution.nestedRecursorLookupOfSourceFamily numNested_ne inputMapWF
-        sourceMember
-    refine ⟨recursorInfo, ?_⟩
-    change finalEnv.constants.find?' (mkRecName familyName) = _
-    rw [finalMapWF.find?'_eq_find?]
-    simpa only [familyNameEq] using recursorLookup
-  rcases execution.nestedFamilyLookupCases numNested_ne inputMapWF
-      familyFoundMap with oldFamily | newFamily
-  · rcases execution.nestedConstructorLookupCases numNested_ne inputMapWF
-        constructorFoundMap with oldConstructor | newConstructor
-    · have oldFamilyFind :
-          env.find? familyName = some (.inductInfo familyInfo) := by
-        change env.constants.find?' familyName = _
-        rw [inputMapWF.find?'_eq_find?]
-        exact oldFamily
-      have oldConstructorFind :
-          env.find? constructorName = some (.ctorInfo constructorInfo) := by
-        change env.constants.find?' constructorName = _
-        rw [inputMapWF.find?'_eq_find?]
-        exact oldConstructor
-      have inputReady :
-          env.isNonRecStructureConstructor familyName constructorName = true :=
-        Kernel.Environment.isNonRecStructureConstructor_of_info oldFamilyFind
-          oldConstructorFind isRecEq ctorsEq numIndicesEq owner
-      obtain ⟨artifact⟩ :=
-        (wf.structureEtaReady (safety := .safe)).resolve familyName familyInfo
-          constructorName constructorInfo oldFamilyFind oldConstructorFind
-          inputReady
-      have outputWF : (output.venv .safe).WF :=
-        ((transactions.transaction .safe).toExact.trEnv
-          (wf.tr (safety := .safe))).wf
-      have artifactFinalFind :
-          finalEnv.find? artifact.projection.view.constructorName =
-            some (.ctorInfo artifact.projection.constructorInfo) := by
-        simpa only [artifact.constructor_name_eq,
-          artifact.constructor_info_eq] using constructorFound
-      exact .inl ⟨artifact.retarget
-        (transactions.transaction .safe).toExact.le outputWF.ordered
-          artifactFinalFind⟩
-    · obtain ⟨indType, sourceMember, constructorOwner⟩ :=
-        restoredNestedInfos_constructor_cases newConstructor.1
-      exact .inr <| registrationOfSource indType sourceMember
-        (constructorOwner.symm.trans owner)
-  · obtain ⟨indType, sourceMember, sourceName⟩ :=
-      restoredNestedInfos_family_cases newFamily.1
-    exact .inr <| registrationOfSource indType sourceMember
-      (sourceName.symm.trans newFamily.2)
+  exact .inr ⟨familyMember, recursorInfo, recursorFound⟩
 
 end AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions
+
+/-- The exact nested producer closes resolution-aware projection readiness at
+its public restored endpoint.  Old ordinary artifacts are replayed through the
+transaction, while every newly ready family resolves to the restored artifact
+constructed by the exact producer. -/
+theorem
+    AddInductive.EnvironmentInductiveExecution.FlattenedExactNestedProjectionParameterRun.projectionResolutionReady
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {artifact : execution.FlattenedNestedArtifact staged}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    {flat : execution.FlattenedExactRecursorStagingResult staged
+      artifact.generation shape}
+    {metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun flat.run}
+    {after : VEnv}
+    {restoration : execution.FlattenedNestedRestorationResult artifact after}
+    {numNested_ne : execution.nested.aux2nested.size ≠ 0}
+    {restoredMetadata :
+      execution.FlattenedNestedRestoredMetadataPrefixRun restoration
+        numNested_ne}
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat metadata
+      restoration numNested_ne restoredMetadata)
+    (wf : ves.WF env) :
+    ProjectionResolutionReady finalEnv after := by
+  let replay := run.transaction.safeReplay wf
+  have delta : ProjectionArtifactResolutionDeltaReady env finalEnv
+      (replay.output.venv .safe) := by
+    simpa only [replay.safe_output_eq] using
+      run.projectionArtifactResolutionDeltaReady wf
+  have ready :=
+    replay.transactions.nestedProjectionResolutionReady wf numNested_ne
+      artifact.source_nparams_eq delta
+  simpa only [replay.safe_output_eq] using ready
 
 /-- Safety-indexed non-primitive transactions.  Compared with
 `TransactionalVEnvsExtension`, neither primitive contract nor cross-safety
@@ -7290,7 +11524,7 @@ structure AddInductive.EnvironmentInductiveExecution.NonprimitiveTransactionalVE
   transaction :
     execution.CoherentPrimitivePreservingTransactions source ves output
   projectionReady : ∀ safety,
-    ProjectionReady finalEnv (output.venv safety)
+    ProjectionResolutionReady finalEnv (output.venv safety)
   structureEtaReady : ∀ safety,
     StructureEtaReady finalEnv (output.venv safety)
 
@@ -7369,7 +11603,7 @@ structure AddInductive.EnvironmentInductiveExecution.ReadinessCompletedNonprimit
   /-- Projection artifacts are constructed once all generated constants and
   iota rules exist; subsequent eta registration transports them monotonically. -/
   projectionReadyBase : ∀ safety,
-    ProjectionReady finalEnv (transactionOutput.venv safety)
+    ProjectionResolutionReady finalEnv (transactionOutput.venv safety)
   /-- Every host nonrecursive structure is either already registered at the
   transaction boundary or is backed by an exact artifact in `etaRules`. -/
   structureEtaCoverage : ∀ safety,
@@ -7397,7 +11631,7 @@ def ofRules
     (etaRulesWF : ∀ safety rule, rule ∈ etaRules →
       rule.WF (transactionOutput.venv safety))
     (projectionReadyBase : ∀ safety,
-      ProjectionReady finalEnv (transactionOutput.venv safety))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv safety))
     (structureEtaCoverage : ∀ safety,
       StructureEtaRegistrationCoverage finalEnv
         (transactionOutput.venv safety) etaRules) :
@@ -7434,7 +11668,7 @@ def ofSafeRules
     (etaRulesWF : ∀ rule, rule ∈ etaRules →
       rule.WF (transactionOutput.venv .safe))
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe))
     (structureEtaCoverageSafe :
       StructureEtaRegistrationCoverage finalEnv
         (transactionOutput.venv .safe) etaRules) :
@@ -7457,7 +11691,7 @@ def ofSafeRules
 /-- Complete a coherent nonprimitive replay from one finite safe-model
 artifact plan.  Its common rule list, persistent rule certificates, and base
 coverage are all projections of the plan rather than parallel inputs. -/
-noncomputable def ofSafePlan
+def ofSafePlan
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
     {fuel : FuelConfig} {finalEnv : Environment}
@@ -7470,7 +11704,7 @@ noncomputable def ofSafePlan
     (transaction : execution.CoherentPrimitivePreservingTransactions source
       ves transactionOutput)
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe))
     (plan : StructureEtaRegistrationPlan finalEnv
       (transactionOutput.venv .safe)) :
     execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
@@ -7494,14 +11728,14 @@ noncomputable def ofSafeFamilyNames
     (transaction : execution.CoherentPrimitivePreservingTransactions source
       ves transactionOutput)
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe))
     (familyNames : List Name)
     (coverage : ∀ familyName familyInfo constructorName constructorInfo,
       finalEnv.find? familyName = some (.inductInfo familyInfo) →
       finalEnv.find? constructorName = some (.ctorInfo constructorInfo) →
-      finalEnv.isNonRecStructureConstructor familyName constructorName =
+      finalEnv.isStructureEtaReadyConstructor familyName constructorName =
         true →
-      Nonempty (StructureEtaArtifact finalEnv familyName familyInfo
+      Nonempty (StructureEtaArtifactResolution finalEnv familyName familyInfo
         constructorName constructorInfo (transactionOutput.venv .safe)) ∨
         familyName ∈ familyNames ∧
           ∃ recursorInfo, finalEnv.find? (mkRecName familyName) =
@@ -7532,7 +11766,7 @@ noncomputable def ofOrdinaryTransaction
     (transaction : execution.CoherentPrimitivePreservingTransactions source
       ves transactionOutput)
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe))
     (numNested_eq : execution.nested.aux2nested.size = 0) :
     execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
   ofSafeFamilyNames wf source transactionOutput transaction
@@ -7540,9 +11774,9 @@ noncomputable def ofOrdinaryTransaction
     (transaction.ordinaryStructureEtaRegistrationCoverage wf numNested_eq)
 
 /-- Complete a genuinely nested coherent nonprimitive replay without a
-separately supplied scan domain or coverage proof.  The retained original
-source-family names are the finite domain, and the exact restored inventory
-supplies family, constructor-owner, and canonical-recursor provenance. -/
+separately supplied scan domain or coverage proof.  The completed host map is
+the finite domain, covering both restored source recursors and any
+recursor-sensitive activation caused by the auxiliary restored inventory. -/
 noncomputable def ofNestedTransaction
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {isUnsafe allowPrimitive : Bool}
@@ -7556,11 +11790,11 @@ noncomputable def ofNestedTransaction
     (transaction : execution.CoherentPrimitivePreservingTransactions source
       ves transactionOutput)
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe))
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe))
     (numNested_ne : execution.nested.aux2nested.size ≠ 0) :
     execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
   ofSafeFamilyNames wf source transactionOutput transaction
-    projectionReadySafe (types.map (·.name))
+    projectionReadySafe (finalEnv.constants.toList'.map Prod.fst)
     (transaction.nestedStructureEtaRegistrationCoverage wf numNested_ne)
 
 /-- Complete either branch of a coherent nonprimitive replay directly from
@@ -7579,7 +11813,7 @@ noncomputable def ofTransaction
     (transaction : execution.CoherentPrimitivePreservingTransactions source
       ves transactionOutput)
     (projectionReadySafe :
-      ProjectionReady finalEnv (transactionOutput.venv .safe)) :
+      ProjectionResolutionReady finalEnv (transactionOutput.venv .safe)) :
     execution.ReadinessCompletedNonprimitiveVEnvsExtension ves := by
   by_cases numNested_eq : execution.nested.aux2nested.size = 0
   · exact ofOrdinaryTransaction wf source transactionOutput transaction
@@ -7602,14 +11836,15 @@ noncomputable def ofSafeReplay
     (replay :
       AddInductive.EnvironmentInductiveExecution.CoherentPrimitivePreservingTransactions.SafeReplay
         execution source ves safeOutput)
-    (projectionReadySafe : ProjectionReady finalEnv safeOutput) :
+    (projectionReadySafe : ProjectionResolutionReady finalEnv safeOutput) :
     execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
   ofTransaction wf source replay.output replay.transactions (by
     simpa only [replay.safe_output_eq] using projectionReadySafe)
 
 /-- Complete an exact ordinary flattened transaction at its named rule-fold
-endpoint.  Exact replay owns the common transaction family, so the remaining
-consumer-facing premise is precisely projection readiness of that endpoint. -/
+endpoint.  Exact replay transports old projection artifacts and derives
+constructor-head arity, so the producer supplies only artifacts for families
+whose projection-ready status is newly activated by this transaction. -/
 noncomputable def ofExactOrdinary
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -7625,16 +11860,71 @@ noncomputable def ofExactOrdinary
     (metadata : VInductDecl.ExactProducedBlockMetadataPrefixRun result.run)
     (numNested_eq : execution.nested.aux2nested.size = 0)
     (wf : ves.WF env)
-    (projectionReadySafe : ProjectionReady finalEnv
+    (projectionArtifactDeltaSafe : ProjectionArtifactDeltaReady env finalEnv
       (generation.generatedRules.foldl VEnv.addDefEq
         metadata.recursors.recEnv)) :
-    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
-  ofSafeReplay wf (result.ordinarySafeReplay metadata numNested_eq wf)
-    projectionReadySafe
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves := by
+  let replay := result.ordinarySafeReplay metadata numNested_eq wf
+  have delta : ProjectionArtifactDeltaReady env finalEnv
+      (replay.output.venv .safe) := by
+    simpa only [replay.safe_output_eq] using projectionArtifactDeltaSafe
+  have ready : ProjectionResolutionReady finalEnv
+      (replay.output.venv .safe) :=
+    replay.transactions.ordinaryProjectionReady wf numNested_eq
+      staged.source_nparams_eq delta
+  exact ofSafeReplay wf replay (by
+    simpa only [replay.safe_output_eq] using ready)
+
+/-- Complete a canonical semantic ordinary transaction at its named
+rule-fold endpoint.  This is the outer V3.5 handoff for the mixed raw/view
+generation route: coherent replay is derived from the dependent semantic
+result, while the remaining projection input contains only newly activated
+family artifacts at that exact computed endpoint. -/
+def ofSemanticOrdinary
+    {env : Environment} {lparams : List Name} {nparams : Nat}
+    {types : List InductiveType} {finalEnv : Environment}
+    {execution : AddInductive.EnvironmentInductiveExecution env lparams
+      nparams types false false {} finalEnv}
+    {ves : VEnvs}
+    {staged : execution.FlattenedEnrichedStagingResult ves}
+    {shape : VInductDecl.normalizationCandidateBlockGenerationShape staged.source
+      execution.flattened.candidate = true}
+    (result : execution.FlattenedSemanticRecursorStagingResult staged shape)
+    (metadata : VInductDecl.ProducedBlockSemanticMetadataPrefixRun
+      (staged.recursorShape shape) result.semantic result.generation
+      result.run)
+    (numNested_eq : execution.nested.aux2nested.size = 0)
+    (wf : ves.WF env) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves := by
+  let replay := result.ordinarySafeReplay metadata numNested_eq wf
+  have projectionArtifactDeltaSafe :=
+    result.projectionArtifactDeltaReady metadata numNested_eq wf
+  have delta : ProjectionArtifactDeltaReady env finalEnv
+      (replay.output.venv .safe) := by
+    simpa only [replay.safe_output_eq] using projectionArtifactDeltaSafe
+  have ready : ProjectionResolutionReady finalEnv
+      (replay.output.venv .safe) :=
+    replay.transactions.ordinaryProjectionReady wf numNested_eq
+      staged.source_nparams_eq delta
+  have resolver : ProjectionArtifactInventoryResolver finalEnv
+      (replay.output.venv .safe)
+      (execution.nested.types.map (·.name)) := by
+    simpa only [replay.safe_output_eq] using
+      result.projectionArtifactInventoryResolver metadata numNested_eq wf
+  have outputWF : (replay.output.venv .safe).WF :=
+    ((replay.transactions.transaction .safe).toExact.trEnv
+      (wf.tr (safety := .safe))).wf
+  let plan := StructureEtaRegistrationPlan.ofFamilyNamesWithInventoryResolver
+    resolver outputWF
+      (replay.transactions.ordinaryStructureEtaRegistrationCoverage wf
+        numNested_eq)
+  exact ofSafePlan wf staged.source replay.output replay.transactions ready plan
 
 /-- Complete an exact genuinely nested transaction at its restored Theory
 endpoint.  The aligned artifact, restoration, metadata, and cross-safety
-replay are retained by the dependent transaction itself. -/
+replay are retained by the dependent transaction itself.  Exact restoration
+retargets old projection artifacts and derives constructor-head arity, so the
+remaining input contains only newly activated family artifacts. -/
 noncomputable def ofExactNested
     {env : Environment} {lparams : List Name} {nparams : Nat}
     {types : List InductiveType} {finalEnv : Environment}
@@ -7654,12 +11944,16 @@ noncomputable def ofExactNested
     {restoredMetadata :
       execution.FlattenedNestedRestoredMetadataPrefixRun restoration
         numNested_ne}
-    (transaction : execution.FlattenedExactNestedTransactionResult flat
+    (run : execution.FlattenedExactNestedProjectionParameterRun flat
       metadata restoration numNested_ne restoredMetadata)
-    (wf : ves.WF env)
-    (projectionReadySafe : ProjectionReady finalEnv after) :
-    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves :=
-  ofSafeReplay wf (transaction.safeReplay wf) projectionReadySafe
+    (wf : ves.WF env) :
+    execution.ReadinessCompletedNonprimitiveVEnvsExtension ves := by
+  let replay := run.transaction.safeReplay wf
+  have ready : ProjectionResolutionReady finalEnv
+      (replay.output.venv .safe) := by
+    simpa only [replay.safe_output_eq] using run.projectionResolutionReady wf
+  exact ofSafeReplay wf replay (by
+    simpa only [replay.safe_output_eq] using ready)
 
 /-- Assemble the complete semantic extension.  Exact replay supplies the
 host-facing translation and primitive invariants; checked eta registration

@@ -60,7 +60,9 @@ run_cmd do
   let lorRoot := ``Lean4Lean.addDefinition.WF_safe_natLor
   let xorRoot := ``Lean4Lean.addDefinition.WF_safe_natXor
   let liveRoot := ``Lean4Lean.addDefinition.WF
-  let genericBoundary := ``Lean4Lean.checkPrimitiveDef.WF
+  let genericBoundary : Name := `Lean4Lean.checkPrimitiveDef.WF
+  if (env.find? genericBoundary).isSome then
+    throwError "the retired generic checkPrimitiveDef.WF boundary was reintroduced"
   let closure := dependencyClosure env [root] {}
   let predClosure := dependencyClosure env [predRoot] {}
   let subClosure := dependencyClosure env [subRoot] {}
@@ -164,7 +166,7 @@ run_cmd do
   let expectedSorryCarriers : Array Lean.Name := #[
     ``Lean4Lean.VEnv.IsDefEqU.sort_inv,
     ``Lean4Lean.VEnv.IsDefEqU.sort_forallE_inv,
-    ``Lean4Lean.VEnv.WF.registeredStructureHeadInversion,
+    ``Lean4Lean.VEnv.WF.resolvedRegisteredStructureHeadInversion,
     ``Lean4Lean.VEnv.IsDefEqU.weakN_iff,
     ``Lean4Lean.VEnv.IsDefEqU.forallE_inv_stratified,
     ``Lean4Lean.TypeChecker.Inner.reduceRecursor.WF]
@@ -405,4 +407,4 @@ run_cmd do
   let xorRemoved := expectedSorryCarriers.filter (!xorObservedSet.contains ·)
   unless xorAdded.isEmpty && xorRemoved.isEmpty do
     throwError m!"Nat.xor direct-certificate sorry closure changed; added: {xorAdded}; removed: {xorRemoved}"
-  logInfo "the exhaustive live addDefinition.WF path and all eighteen direct primitive certificates exclude checkPrimitiveDef.WF and retain exactly six known upstream proof dependencies"
+  logInfo "the generic checkPrimitiveDef.WF boundary is absent; the exhaustive live addDefinition.WF path and all eighteen direct primitive certificates retain exactly six known upstream proof dependencies"

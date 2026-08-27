@@ -389,6 +389,19 @@ end BlockCertificate
 
 /-! ## Completed nested transactions -/
 
+/-- The complete syntactic Pi telescope of a well-formed type is itself a
+well-formed telescope.  This deliberately stops at the first non-`forall`
+cursor, matching `ctorFields`. -/
+theorem VEnv.IsType.ctorFields_onTel {env : VEnv} {U : Nat}
+    {context : List VExpr} {expression : VExpr}
+    (henv : env.Ordered) (self : env.IsType U context expression) :
+    env.OnTel U context (ctorFields expression) := by
+  induction expression generalizing context with
+  | forallE domain body _ bodyIH =>
+      have parts := self.forallE_inv henv
+      exact ⟨parts.1, bodyIH parts.2⟩
+  | bvar | sort | const | app | lam => trivial
+
 /-- One successful proof-carrying nested transaction over an explicit
 dependency environment.  As with `BlockCertificate`, this package contains
 only Theory artifacts. -/
@@ -398,6 +411,227 @@ structure NestedBlockCertificate
   semantic : nested.WF before
   success : before.addInductNested nested = some after
   beforeWF : before.WF
+
+/-- The exact normalized flattened family/constructor selected by a
+one-constructor, unindexed family of the restored nested source.  Besides
+positional provenance, the package records the parameter and field boundaries
+transported back to the source constructor from restoration-stable total Pi
+arity.  No second normalization run or caller-owned flattened descriptor is
+accepted. -/
+structure NestedStructureSelection {source : VInductDecl}
+    (nested : source.NestedBlockChecked) (familyIndex : Nat)
+    (sourceFamily : VInductiveType) (sourceConstructor : VConstVal) where
+  source_at : source.types[familyIndex]? = some sourceFamily
+  source_constructors_eq : sourceFamily.ctors = [sourceConstructor]
+  source_raw_indices_eq :
+    ctorFields (VExpr.dropN source.nparams sourceFamily.type) = []
+  flatFamily : VInductiveType
+  flatConstructor : VConstVal
+  flat_at : nested.elim.flat.types[familyIndex]? = some flatFamily
+  flat_constructors_eq : flatFamily.ctors = [flatConstructor]
+  family_header_eq : VInductiveType.nestedHeader flatFamily =
+    VInductiveType.nestedHeader sourceFamily
+  constructor_header_eq :
+    VConstVal.nestedHeader flatConstructor =
+      VConstVal.nestedHeader sourceConstructor
+  family : NormalizedFamily
+  family_at : nested.generation.families[familyIndex]? = some family
+  family_raw_eq : family.raw = flatFamily
+  constructor : NormalizedCtor
+  constructors_eq : family.ctorPairs = [constructor]
+  constructor_raw_eq : constructor.raw = flatConstructor
+  flat_raw_indices_eq :
+    family.rawIndices nested.elim.flat.nparams = []
+  checked_indices_eq : family.view.indices = []
+  source_constructor_params_length :
+    (VExpr.telN source.nparams sourceConstructor.type).length = source.nparams
+  source_flat_fields_length_eq :
+    (ctorFields (VExpr.dropN source.nparams sourceConstructor.type)).length =
+      (constructor.rawFields nested.elim.flat.nparams).length
+
+/-- The source constructor selected through nested restoration has the same
+declaration universe arity as the checked flattened block. -/
+theorem NestedStructureSelection.source_constructor_uvars_eq
+    {source : VInductDecl} {nested : source.NestedBlockChecked}
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (selection : NestedStructureSelection nested familyIndex sourceFamily
+      sourceConstructor) :
+    sourceConstructor.uvars = source.uvars := by
+  have headerUvars := congrArg NestedCtorHeader.uvars
+    selection.constructor_header_eq
+  have flatUvars : selection.flatConstructor.uvars = nested.elim.flat.uvars := by
+    rw [← selection.constructor_raw_eq]
+    exact nested.generation.ctor_uvars
+      (List.mem_iff_getElem?.2 ⟨familyIndex, selection.family_at⟩)
+      (by rw [selection.constructors_eq]; simp)
+  have declarationUvars : nested.elim.flat.uvars = source.uvars := by
+    simpa using congrArg VInductDecl.uvars nested.elim.flat_eq
+  calc
+    sourceConstructor.uvars = selection.flatConstructor.uvars := by
+      simpa [VConstVal.nestedHeader] using headerUvars.symm
+    _ = nested.elim.flat.uvars := flatUvars
+    _ = source.uvars := declarationUvars
+
+/-- The selected flattened constructor retains the restored source
+constructor's literal shared-parameter prefix.  Nested elimination rewrites
+only the suffix after this boundary. -/
+theorem NestedStructureSelection.flat_constructor_params_eq
+    {source : VInductDecl} {nested : source.NestedBlockChecked}
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (selection : NestedStructureSelection nested familyIndex sourceFamily
+      sourceConstructor) :
+    VExpr.telN source.nparams selection.flatConstructor.type =
+      VExpr.telN source.nparams sourceConstructor.type := by
+  apply nested.elim.flat_constructor_params_eq (constructorIndex := 0)
+    selection.source_at selection.flat_at
+  · rw [selection.source_constructors_eq]
+    rfl
+  · rw [selection.flat_constructors_eq]
+    rfl
+
+/-- Select the normalized flattened producer at an exact restored source
+position.  Successful nested elimination preserves family/constructor
+headers, and the flattened generation shape supplies every remaining layout
+fact. -/
+theorem NestedBlockChecked.selectStructure
+    {source : VInductDecl} (nested : source.NestedBlockChecked)
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (source_at : source.types[familyIndex]? = some sourceFamily)
+    (source_constructors_eq : sourceFamily.ctors = [sourceConstructor])
+    (source_raw_indices_eq :
+      ctorFields (VExpr.dropN source.nparams sourceFamily.type) = []) :
+    Nonempty (NestedStructureSelection nested familyIndex sourceFamily
+      sourceConstructor) := by
+  have sourceConstructorAt : sourceFamily.ctors[0]? =
+      some sourceConstructor := by
+    simp [source_constructors_eq]
+  obtain ⟨flatFamily, flatAt, familyHeader⟩ :=
+    nested.elim.flat_family_header_at source_at
+  obtain ⟨flatFamily', flatConstructor, flatAt', flatConstructorAt,
+      constructorHeader⟩ :=
+    nested.elim.flat_constructor_header_at source_at sourceConstructorAt
+  have flatFamilyEq : flatFamily' = flatFamily :=
+    Option.some.inj (flatAt'.symm.trans flatAt)
+  subst flatFamily'
+  have flatConstructorsLength : flatFamily.ctors.length = 1 := by
+    have headersEq := congrArg NestedFamilyHeader.constructors familyHeader
+    have lengthsEq := congrArg List.length headersEq
+    simpa [VInductiveType.nestedHeader, source_constructors_eq] using lengthsEq
+  obtain ⟨onlyFlatConstructor, flatConstructorsEq⟩ :=
+    List.length_eq_one_iff.mp flatConstructorsLength
+  have flatConstructorEq : flatConstructor = onlyFlatConstructor := by
+    rw [flatConstructorsEq] at flatConstructorAt
+    have selectedEq : onlyFlatConstructor = flatConstructor := by
+      simpa only [List.getElem?_cons_zero, Option.some.injEq] using
+        flatConstructorAt
+    exact selectedEq.symm
+  subst onlyFlatConstructor
+  obtain ⟨family, familyAt, familyRawEq⟩ :=
+    nested.generation.exists_family_getElem?_of_raw flatAt
+  have familyMember : family ∈ nested.generation.families :=
+    List.mem_iff_getElem?.2 ⟨familyIndex, familyAt⟩
+  have familyRawConstructorAt : family.raw.ctors[0]? =
+      some flatConstructor := by
+    rw [familyRawEq, flatConstructorsEq]
+    rfl
+  obtain ⟨constructor, constructorAt, constructorRawEq⟩ :=
+    family.exists_ctor_getElem?_of_raw familyMember familyRawConstructorAt
+  have constructorPairsLength : family.ctorPairs.length = 1 := by
+    calc
+      family.ctorPairs.length = family.raw.ctors.length :=
+        (nested.generation.shape.2.2.2.2 family familyMember).2.2.2.2.1
+      _ = flatFamily.ctors.length :=
+        congrArg (fun raw => raw.ctors.length) familyRawEq
+      _ = 1 := flatConstructorsLength
+  obtain ⟨onlyConstructor, constructorsEq⟩ :=
+    List.length_eq_one_iff.mp constructorPairsLength
+  have constructorEq : constructor = onlyConstructor := by
+    rw [constructorsEq] at constructorAt
+    have selectedEq : onlyConstructor = constructor := by
+      simpa only [List.getElem?_cons_zero, Option.some.injEq] using
+        constructorAt
+    exact selectedEq.symm
+  subst onlyConstructor
+  have familyTypeEq : family.raw.type = sourceFamily.type := by
+    calc
+      family.raw.type = flatFamily.type :=
+        congrArg (fun raw : VInductiveType => raw.type) familyRawEq
+      _ = sourceFamily.type := by
+        simpa [VInductiveType.nestedHeader] using
+          congrArg NestedFamilyHeader.type familyHeader
+  have flatRawIndicesEq :
+      family.rawIndices nested.elim.flat.nparams = [] := by
+    unfold NormalizedFamily.rawIndices
+    rw [nested.elim.nparams_eq, familyTypeEq]
+    exact source_raw_indices_eq
+  have checkedIndicesLength : family.view.indices.length = 0 := by
+    rw [← (nested.generation.shape.2.2.2.2 family
+      familyMember).2.2.2.1]
+    simp [flatRawIndicesEq]
+  have checkedIndicesEq : family.view.indices = [] :=
+    List.length_eq_zero_iff.mp checkedIndicesLength
+  have constructorMember : constructor ∈ family.ctorPairs := by
+    rw [constructorsEq]
+    simp
+  have flatParamLength :
+      (VExpr.telN source.nparams constructor.raw.type).length =
+        source.nparams := by
+    have checked :=
+      ((nested.generation.shape.2.2.2.2 family familyMember).2.2.2.2.2.2
+        constructor constructorMember).2.2.1
+    simpa only [nested.elim.nparams_eq] using checked
+  have constructorArityEq :
+      VExpr.nestedArity constructor.raw.type =
+        VExpr.nestedArity sourceConstructor.type := by
+    calc
+      VExpr.nestedArity constructor.raw.type =
+          VExpr.nestedArity flatConstructor.type := by rw [constructorRawEq]
+      _ = VExpr.nestedArity sourceConstructor.type := by
+        simpa [VConstVal.nestedHeader] using
+          congrArg NestedCtorHeader.arity constructorHeader
+  have sourceParamLength :
+      (VExpr.telN source.nparams sourceConstructor.type).length =
+        source.nparams :=
+    VExpr.telN_length_eq_of_nestedArity_eq constructorArityEq.symm
+      flatParamLength
+  have sourceSplit := VExpr.telN_length_add_dropN_nestedArity
+    source.nparams sourceConstructor.type
+  have flatSplit := VExpr.telN_length_add_dropN_nestedArity
+    source.nparams constructor.raw.type
+  rw [sourceParamLength] at sourceSplit
+  rw [flatParamLength] at flatSplit
+  have fieldsLengthEq :
+      (ctorFields (VExpr.dropN source.nparams
+        sourceConstructor.type)).length =
+      (constructor.rawFields nested.elim.flat.nparams).length := by
+    unfold NormalizedCtor.rawFields
+    rw [nested.elim.nparams_eq]
+    rw [← VExpr.nestedArity_eq_ctorFields_length,
+      ← VExpr.nestedArity_eq_ctorFields_length]
+    omega
+  exact ⟨{
+    source_at
+    source_constructors_eq
+    source_raw_indices_eq
+    flatFamily
+    flatConstructor
+    flat_at := flatAt
+    flat_constructors_eq := flatConstructorsEq
+    family_header_eq := familyHeader
+    constructor_header_eq := constructorHeader
+    family
+    family_at := familyAt
+    family_raw_eq := familyRawEq
+    constructor
+    constructors_eq := constructorsEq
+    constructor_raw_eq := constructorRawEq
+    flat_raw_indices_eq := flatRawIndicesEq
+    checked_indices_eq := checkedIndicesEq
+    source_constructor_params_length := sourceParamLength
+    source_flat_fields_length_eq := fieldsLengthEq }⟩
 
 /-- The exact restoration of a flattened rule entry belongs to the nested
 transaction's restored rule inventory. -/
@@ -462,6 +696,55 @@ theorem constructorLookup
     after.constants constructor.name = some constructor.toVConstant := by
   rcases certificate.trace with ⟨trace⟩
   exact trace.ctor_lookup hfamily hconstructor
+
+/-- Registration in the completed nested environment exposes the complete
+dependent Pi telescope of every exact source constructor. -/
+theorem constructorTelescope
+    (certificate : NestedBlockCertificate source before after)
+    {family : VInductiveType} (hfamily : family ∈ source.types)
+    {constructor : VConstVal} (hconstructor : constructor ∈ family.ctors) :
+    after.OnTel constructor.uvars [] (ctorFields constructor.type) := by
+  have htype := certificate.afterWF.ordered.constWF
+    (certificate.constructorLookup hfamily hconstructor)
+  change after.IsType constructor.uvars [] constructor.type at htype
+  exact VEnv.IsType.ctorFields_onTel certificate.afterWF.ordered htype
+
+/-- The selected restored source constructor telescope is checked in the
+source declaration's universe context, not merely at its independently
+stored constant arity. -/
+theorem selectedSourceConstructorTelescope
+    (certificate : NestedBlockCertificate source before after)
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (selection : NestedStructureSelection certificate.nested familyIndex
+      sourceFamily sourceConstructor) :
+    after.OnTel source.uvars [] (ctorFields sourceConstructor.type) := by
+  have familyMember : sourceFamily ∈ source.types :=
+    List.mem_iff_getElem?.2 ⟨familyIndex, selection.source_at⟩
+  have constructorMember : sourceConstructor ∈ sourceFamily.ctors := by
+    rw [selection.source_constructors_eq]
+    simp
+  have telescope := certificate.constructorTelescope familyMember
+    constructorMember
+  rw [selection.source_constructor_uvars_eq] at telescope
+  exact telescope
+
+/-- After the exact source parameter prefix, the restored constructor field
+suffix remains a well-formed telescope in the corresponding parameter
+context. -/
+theorem selectedSourceConstructorFieldsTelescope
+    (certificate : NestedBlockCertificate source before after)
+    {familyIndex : Nat} {sourceFamily : VInductiveType}
+    {sourceConstructor : VConstVal}
+    (selection : NestedStructureSelection certificate.nested familyIndex
+      sourceFamily sourceConstructor) :
+    after.OnTel source.uvars
+      (VExpr.telN source.nparams sourceConstructor.type).reverse
+      (ctorFields (VExpr.dropN source.nparams sourceConstructor.type)) := by
+  have telescope := certificate.selectedSourceConstructorTelescope selection
+  rw [VExpr.ctorFields_eq_telN_append source.nparams
+    sourceConstructor.type] at telescope
+  simpa using (VEnv.OnTel.of_append telescope).2
 
 /-- Every restored recursor has its exact final value. -/
 theorem recursorLookup

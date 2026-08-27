@@ -22,7 +22,7 @@ structure VEnvs.WF (env : Environment) (ves : VEnvs) where
   safePrimitives : env.find? n = some ci →
     Environment.primitives.contains n → ci.safety = .safe ∧ ci.levelParams = []
   mono : safety ≤ safety' → ves.venv safety' ≤ ves.venv safety
-  projectionReady : ProjectionReady env (ves.venv safety)
+  projectionReady : ProjectionResolutionReady env (ves.venv safety)
   structureEtaReady : StructureEtaReady env (ves.venv safety)
 
 /-- Assemble a `VEnvs` from a pointwise existential. `DefinitionSafety` has three elements, so
@@ -43,7 +43,7 @@ structure VEnvAt (env : Environment) (safety : DefinitionSafety) (venv : VEnv) :
   hasPrimitives : VEnv.HasPrimitives venv
   safePrimitives : env.find? n = some ci →
     Environment.primitives.contains n → ci.safety = .safe ∧ ci.levelParams = []
-  projectionReady : ProjectionReady env venv
+  projectionReady : ProjectionResolutionReady env venv
   structureEtaReady : StructureEtaReady env venv
 
 theorem VEnvs.WF.toVEnvAt {env : Environment} {ves : VEnvs} (wf : ves.WF env)
@@ -62,12 +62,14 @@ theorem Methods.withFuel.WF : ∀ {n}, (withFuel n).WF
     { isDefEqCore _ _ := .throw
       whnfCore _ := .throw
       whnf _ := .throw
+      whnf_forall := .throw
       inferType _ _ := .throw }
   | n + 1 =>
     have := withFuel.WF (n := n)
     { isDefEqCore h1 h2 := isDefEqCore'.WF h1 h2 _ this
       whnfCore h1 := whnfCore'.WF h1 _ this
       whnf h1 := whnf'.WF h1 _ this
+      whnf_forall := whnf'.WF_forall _ this
       inferType h1 h2 := inferType'.WF h1 h2 _ this }
 
 theorem RecM.WF.run {x : RecM α} (H : x.WF c s Q) : (RecM.run x).WF c s Q :=
@@ -120,6 +122,34 @@ theorem M.WF.run {env : Environment} {ves : VEnvs} (wf : ves.WF env)
     {x : M α} {Q} (H : x.WF (.mk' wf safety lparams fuel) {} fun a _ => Q a) :
     (M.run env safety {} lparams fuel x).WF Q := by
   unfold VContext.mk' at H; exact M.WF.run1 _ H
+
+/-- Run a verified checker computation in an already assembled verified
+context.  Unlike `M.WF.run1`, this adapter does not require the implementation
+local context to be empty: its translation and well-formedness are supplied by
+the `VContext` itself.  This is the boundary needed by retained inductive
+guards, whose checks execute under the motive/minor/field locals synthesized
+by the kernel producer. -/
+theorem M.WF.runContext {c : VContext}
+    (eagerReduce_eq : c.eagerReduce = false)
+    (stateWF : VState.WF c {})
+    {x : M α} {Q} (H : x.WF c {} fun a _ => Q a) :
+    (M.run c.env c.safety c.lctx c.lparams c.fuel x).WF Q := by
+  intro a eq
+  simp [M.run, Functor.map, Except.map] at eq
+  split at eq <;> cases eq
+  rename_i eq
+  have context_eq :
+      (⟨c.env, c.lctx, c.safety, false, c.lparams, c.fuel⟩ : Context) =
+        c.toContext := by
+    cases hcontext : c.toContext with
+    | mk env lctx safety eagerReduce lparams fuel =>
+      have : eagerReduce = false := by
+        simpa [hcontext] using eagerReduce_eq
+      subst eagerReduce
+      simp
+  rw [context_eq] at eq
+  let ⟨_, _, _, _, result⟩ := H stateWF _ _ eq
+  exact result
 
 /-- Loop invariant rule for `for x in xs do ...`. `Inv` is indexed by the list still to be
 processed, so the conclusion `Inv []` records that every element was handled. The body must

@@ -14,7 +14,8 @@ based on [lean4lean](https://github.com/digama0/lean4lean).**
 > verification, a production security boundary, or a claim that every Lean
 > kernel feature is covered. Proof obligations, trusted implementation bridges,
 > and conditional research endpoints are tracked explicitly; consult the
-> [roadmap](plans/roadmap.md) and the compiled trust audit for the status of the
+> compiled trust audit and the
+> [upstream divergence ledger](upstream-divergence.md) for the status of the
 > exact revision you are using.
 
 Lean4Ix contains an implementation of the Lean 4 kernel written in mostly pure
@@ -71,8 +72,10 @@ either direction remain reviewable.
 | `Lean4Lean/Audit/` | Machine-checked sorry and axiom-frontier policy. |
 | `Lean4Lean/Tests/` | Regression, consumer-surface, replay, and differential fixtures. |
 | `docs/universe-levels.md` | Boundary between raw C++ level construction, Theory semantics, and Géran canonicalization. |
+| `docs/remaining-proof-experiments.md` | Implementer inventory of the workspaces, probes, refuted routes, and reusable results behind the eight supported proof obligations. |
+| `docs/digama0-branch-audit.md` | Branch-by-branch audit of upstream lean4lean work, including isolated replay results and port/reject guidance. |
 | `Main.lean` | Differential replay and kernel-checking command-line application. |
-| `plans/roadmap.md` | Authoritative current milestones, proof frontier, and release gates. |
+| `plans/` | Untracked local planning workspace (see `.gitignore`); maintainer status notes are deliberately not shipped with the repository. |
 | `upstream-divergence.md` | Durable differences between Lean4Ix and lean4lean, including removal conditions. |
 
 The central proof boundary is:
@@ -109,7 +112,10 @@ emphasis on:
   out-of-circuit and in-circuit kernels.
 
 This is only an overview. The divergence ledger is the authoritative record of
-intentional differences, and the roadmap is the authoritative status document.
+intentional differences, and the compiled audit
+([Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean)) is
+the authoritative machine-checked statement of the current proof and trust
+frontier.
 
 Universe levels deliberately have separate representation and semantic layers.
 The executable checker reproduces the C++ kernel's cheap constructor-time
@@ -220,8 +226,10 @@ an expected rejection at the `elaboration` phase.
 
 ## Documentation and project status
 
-- [plans/roadmap.md](plans/roadmap.md) is the authoritative statement of open
-  milestones, proof obligations, and release gates.
+- Open milestones and release planning live in a maintainer-local roadmap
+  (`plans/roadmap.md`, deliberately untracked — see `.gitignore`). The
+  repository-visible status record is the commit history plus the documents
+  below.
 - [upstream-divergence.md](upstream-divergence.md) records intentional Lean4Ix
   differences from lean4lean and the conditions under which they can disappear.
 - [Lean4Lean/Audit/SorryFrontier.lean](Lean4Lean/Audit/SorryFrontier.lean)
@@ -237,8 +245,8 @@ an expected rejection at the `elaboration` phase.
 
 Do not infer support or trust from a module merely compiling. In particular,
 `Lean4Lean.Experimental` may contain conditional results whose premises are the
-subject of current research. Use the roadmap and audit output to interpret a
-specific revision.
+subject of current research. Use the audit output and the divergence ledger
+to interpret a specific revision.
 
 ## License
 

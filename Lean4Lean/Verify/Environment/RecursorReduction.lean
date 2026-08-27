@@ -719,12 +719,13 @@ theorem ruleRecursorHeadHasType
       ((certificate.generation.recType family).instL m1) := by
   let gen := certificate.generation
   have hrecursor :
-      (⟨gen.recursor family, .str family.raw.name "rec"⟩ : VConstVal) ∈
+      (⟨gen.generatedRecursor family, .str family.raw.name "rec"⟩ :
+        VConstVal) ∈
         gen.recursors := by
     apply List.mem_map.2
     exact ⟨family, owner.member, rfl⟩
   have hlookup : after.constants (.str family.raw.name "rec") =
-      some (gen.recursor family) := by
+      some (gen.generatedRecursor family) := by
     simpa using certificate.recursorLookup hrecursor
   have hhead := certificate.generationEnv.recursor_hasType_instL
     owner.member hlookup m1 hm1 hlen1 (Γ := Γ)
@@ -2439,6 +2440,7 @@ theorem restoredRuleCaptureSpineOfConstInterp
     {interp : Name → Option VExpr}
     (hi : VEnv.ConstInterp flatAfter after interp)
     {univs : Nat} {Γ : List VExpr}
+    (hΓflat : OnCtx Γ (flatAfter.IsType univs))
     (hΓ : OnCtx (Γ.map (VExpr.substConst interp)) (after.IsType univs))
     {m1 : List VLevel} {captures : List VExpr} {B : VExpr}
     (hcaps : flatAfter.SpineWF univs Γ
@@ -2478,7 +2480,8 @@ theorem restoredRuleCaptureSpineOfConstInterp
   rw [hrestShape] at htype ⊢
   rw [hflatShape] at htype
   refine ⟨_, VEnv.SpineWF.substConst_forallN_of_defeq hi
-    certificate.restored.afterWF hΓ hcaps (by simpa using hcapsLen)
+    certificate.restored.afterWF hΓflat hΓ hcaps
+    (by simpa using hcapsLen)
     (by simp) htype⟩
 
 /-- Canonical-capture specialization of the σ̂ transport boundary.  Exact
@@ -2490,6 +2493,7 @@ theorem restoredRuleCanonicalCaptureSpineOfConstInterp
     {interp : Name → Option VExpr}
     (hi : VEnv.ConstInterp flatAfter after interp)
     {univs : Nat} {Γ : List VExpr}
+    (hΓflat : OnCtx Γ (flatAfter.IsType univs))
     (hΓ : OnCtx (Γ.map (VExpr.substConst interp)) (after.IsType univs))
     {m1 : List VLevel} {fArgs aArgs : List VExpr} {B : VExpr}
     (hMlen : fArgs.length =
@@ -2510,8 +2514,8 @@ theorem restoredRuleCanonicalCaptureSpineOfConstInterp
       (certificate.restored.nested.generation.ruleCaptureValues constructor
         (fArgs.map (VExpr.substConst interp))
         (aArgs.map (VExpr.substConst interp))) B' := by
-  have hout := certificate.restoredRuleCaptureSpineOfConstInterp hi hΓ hcaps
-    (certificate.restored.nested.generation.ruleCaptureValues_length
+  have hout := certificate.restoredRuleCaptureSpineOfConstInterp hi hΓflat
+    hΓ hcaps (certificate.restored.nested.generation.ruleCaptureValues_length
       constructor hMlen hNlen) htype
   rw [certificate.restored.nested.generation.ruleCaptureValues_map] at hout
   exact hout
@@ -2586,7 +2590,7 @@ theorem restoredRuleCanonicalCaptureSpineUnindexedOfMajorInjectivityOneParam
       facts owner hidx hone hΓflat hm1 hMlen hNlen hmajorInjective
       hrecspine hctorspine
   exact certificate.restoredRuleCanonicalCaptureSpineOfConstInterp hi
-    hΓrestored hMlen hNlen hcaps htype
+    hΓflat hΓrestored hMlen hNlen hcaps htype
 
 /-- Transport a certified flattened body/redex equality through σ̂ and join
 it to the two local restoration alignments.  This makes the remaining nested
@@ -2598,6 +2602,7 @@ theorem restoredRuleBodyMatchedOfFlat
     {interp : Name → Option VExpr}
     (hi : VEnv.ConstInterp flatAfter after interp)
     {univs : Nat} {Γ : List VExpr} {m1 : List VLevel}
+    (hΓflat : OnCtx Γ (flatAfter.IsType univs))
     (hΓ : OnCtx
       (Γ.map (VExpr.substConst interp)) (after.IsType univs))
     {captures : List VExpr} {redex B target : VExpr}
@@ -2627,7 +2632,7 @@ theorem restoredRuleBodyMatchedOfFlat
             constructor)).instL m1)
         (captures.map (VExpr.substConst interp)))
       target := by
-  have hσ := VEnv.IsDefEq.substConst_instRev hi hflat
+  have hσ := VEnv.IsDefEq.substConst_instRev hi hΓflat hflat
   exact VEnv.IsDefEqU.trans certificate.restored.afterWF hΓ hbody
     (VEnv.IsDefEqU.trans certificate.restored.afterWF hΓ ⟨_, hσ⟩ hredex)
 
@@ -2750,8 +2755,8 @@ theorem restoredRuleBodyAlignmentOfLhs
           constructor).substConst interp).instL m1)
         (captures.map (VExpr.substConst interp))) := by
   obtain ⟨B', hcapsRestored⟩ :=
-    certificate.restoredRuleCaptureSpineOfConstInterp hi hΓrestored hcaps
-      hcapsLen htype
+    certificate.restoredRuleCaptureSpineOfConstInterp hi hΓflat
+      hΓrestored hcaps hcapsLen htype
   have hrestoredCollapse := certificate.restoredRuleLhsApplied facts
     hΓrestored hm1 hcapsRestored (by simpa using hcapsLen)
   have hrestoredHead : after.HasType univs
@@ -2775,7 +2780,7 @@ theorem restoredRuleBodyAlignmentOfLhs
   obtain ⟨_, hflatCollapse⟩ :=
     certificate.flatCertificate.ruleLhsApplied facts.flat hΓflat hm1 hcaps
       hcapsLen
-  have hflatCollapseσ := hflatCollapse.substConst hi
+  have hflatCollapseσ := hflatCollapse.substConst hi hΓflat
   simp only [NestedStagedCertificate.flatCertificate,
     VExpr.substConst_appN,
     VExpr.substConst_instRev hi.closed,
@@ -2836,8 +2841,8 @@ theorem restoredRuleBodyMatchedOfFlatOfLhs
       target := by
   have hbody := certificate.restoredRuleBodyAlignmentOfLhs facts hi hΓflat
     hΓrestored hm1 hcaps hcapsLen htype hlhs
-  exact certificate.restoredRuleBodyMatchedOfFlat hi hΓrestored hflat
-    hbody hredex
+  exact certificate.restoredRuleBodyMatchedOfFlat hi hΓflat hΓrestored
+    hflat hbody hredex
 
 /-- Extend the complete restored-body/runtime-redex match through the
 arguments following the reducer's major premise.  The caller supplies the

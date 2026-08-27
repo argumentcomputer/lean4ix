@@ -2665,7 +2665,7 @@ theorem NormLevel.lt_eval {s : NormLevel} :
 theorem Node.lt_eval {n : Node} :
     m < Node.eval ls ρ n ↔ m < n.const ∨ ∃ v ∈ n.var, m < VarNode.eval ls ρ v := by
   refine ⟨fun h => ?_, fun h => ?_⟩
-  · refine Classical.byContradiction fun hc => ?_
+  · refine Decidable.byContradiction fun hc => ?_
     rw [not_or] at hc; obtain ⟨h₁, h₂⟩ := hc
     refine absurd (Node.eval_le.2 ⟨Nat.not_lt.1 h₁, fun v hv => Nat.not_lt.1 fun hlt => ?_⟩)
       (Nat.not_le.2 h)

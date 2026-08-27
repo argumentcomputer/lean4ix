@@ -33,15 +33,6 @@ namespace Lean4Lean
 
 open VExpr
 
-namespace VExpr
-
-@[simp] theorem bvarRevRange_length : ∀ (off m : Nat),
-    (bvarRevRange off m).length = m
-  | _, 0 => rfl
-  | off, m+1 => by simp [bvarRevRange, bvarRevRange_length off m]
-
-end VExpr
-
 /-- Extending a `HeadConstN` spine by an application spine. -/
 theorem HeadConstN.appN {c : Name} {ls : List VLevel} :
     ∀ (as : List VExpr) {n : Nat} {f : VExpr}, HeadConstN c ls n f →
@@ -313,11 +304,32 @@ def ruleLhsBody (constructor : NormalizedBlockCtor) : VExpr :=
   VExpr.appN (gen.recBase (gen.ruleFieldCount constructor) constructor.owner)
     (gen.ruleIdx constructor ++ [gen.ruleCtorApp constructor])
 
+/-- The exact right body of one generated mutual iota rule: the flattened
+minor at `minorIndex`, applied to the constructor fields and the recursively
+generated induction hypotheses. -/
+def ruleRhsBody (minorIndex : Nat)
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  let common := gen.familyCount + gen.minorCount
+  let m := gen.ruleFieldCount constructor
+  let recursiveArgs :=
+    constructor.ctor.recArgsR source.uvars gen.elimination
+  let ihs := recursiveArgs.map fun recursive =>
+    blockRuleCall common m (gen.recBase m recursive.targetType) recursive
+  VExpr.appN (.bvar (gen.minorCount - 1 - minorIndex + m))
+    (VExpr.bvarRevRange 0 m ++ ihs)
+
 /-- The generated rule's left side is exactly the shared binder telescope
 over the `SimplePattern.iota` spine. -/
 theorem rule_lhs (i : Nat) (constructor : NormalizedBlockCtor) :
     (gen.rule i constructor).lhs =
       VExpr.lamN (gen.ruleBinders constructor) (gen.ruleLhsBody constructor) := rfl
+
+/-- The generated rule's right side is the named mutual-minor body under the
+same shared binder telescope as its left side. -/
+theorem rule_rhs (i : Nat) (constructor : NormalizedBlockCtor) :
+    (gen.rule i constructor).rhs =
+      VExpr.lamN (gen.ruleBinders constructor)
+        (gen.ruleRhsBody i constructor) := rfl
 
 /-! ## The pattern of one generated iota rule -/
 

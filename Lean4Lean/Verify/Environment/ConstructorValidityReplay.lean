@@ -83,7 +83,7 @@ theorem cvmEmptyVEnvsWF :
   hasPrimitives := l4l05EmptyHasPrimitives
   safePrimitives := cvmEmptySafePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name info h
     change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
     rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
@@ -112,7 +112,7 @@ theorem prbEmptyVEnvsWF :
   hasPrimitives := l4l05EmptyHasPrimitives
   safePrimitives := prbEmptySafePrimitives
   mono := fun _ => .rfl
-  projectionReady := ProjectionReady.of_no_ctorInfo <| by
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo <| by
     intro name info h
     change ({} : ConstMap).find?' name = some (.ctorInfo info) at h
     rw [SMap.WF.find?'_eq_find? SMap.WF.empty] at h
@@ -727,7 +727,7 @@ def cvmFamilyStage :
   validation := cvmFamilyValidationRun
   typeEnv := cvmTypeEnv
   addInduct := cvmAddType
-  projectionReady := ProjectionReady.of_no_ctorInfo
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo
     cvmConstructorContext_noCtorInfo
   structureEtaReady := StructureEtaReady.of_no_ctorInfo
     cvmConstructorContext_noCtorInfo
@@ -2000,7 +2000,7 @@ def prbFamilyStage :
   validation := prbFamilyValidationRun
   typeEnv := prbTypeEnv
   addInduct := prbAddType
-  projectionReady := ProjectionReady.of_no_ctorInfo
+  projectionReady := ProjectionResolutionReady.of_no_ctorInfo
     prbConstructorContext_noCtorInfo
   structureEtaReady := StructureEtaReady.of_no_ctorInfo
     prbConstructorContext_noCtorInfo

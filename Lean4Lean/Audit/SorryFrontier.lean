@@ -191,10 +191,8 @@ private def allowlist : Array Lean.Name := #[
   -- remaining sorry (L4L-19B territory). Unsafe inductives are explicitly
   -- outside the supported declaration class.
   `Lean4Lean.addDecl.WF,
-  -- Upstream's front-end trust boundary for the syntactic primitive-definition
-  -- recognizer (Verify/Environment/Boundaries.lean), added by #28 at the
-  -- v4.33 reconciliation.
-  `Lean4Lean.checkPrimitiveDef.WF,
+  -- The unused generic primitive-definition boundary was retired after the
+  -- exhaustive live dispatch and all eighteen direct certificates landed.
   -- The five readiness transports and constructive quotient initialization
   -- closed together on 2026-08-21 (Lane V1/V2); the v4.33 alignment-run
   -- fixture repair (V6) closed later that day.
@@ -204,7 +202,7 @@ private def allowlist : Array Lean.Name := #[
   `Lean4Lean.VEnv.IsDefEqU.forallE_inv_stratified,
   `Lean4Lean.VEnv.IsDefEqU.sort_forallE_inv,
   `Lean4Lean.VEnv.IsDefEqU.weakN_iff,
-  `Lean4Lean.VEnv.WF.registeredStructureHeadInversion,
+  `Lean4Lean.VEnv.WF.resolvedRegisteredStructureHeadInversion,
   `Lean4Lean.VEnv.NormalEq.parRed,
   -- Tier F — deliberately kernel-rejected inductive fixtures. Elaborator error
   -- recovery admits the invalid `inductive` with `sorryAx`, so the constant

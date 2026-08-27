@@ -447,6 +447,39 @@ theorem AddInductNestedTrace.recursor_translated_lookup
     (H.addCtors.map_wf (H.addTypes.map_wf wf)) hrecursor
   exact ⟨info, hlookup, hkind, htr.mono H.addRules.le⟩
 
+/-- A fresh final family lookup in a completed nested transaction is owned
+by one exact source family.  Inverting the recursor and constructor folds by
+their metadata kinds rules out either later phase as the producer; inversion
+of the family fold then returns the raw source member and its exact name. -/
+theorem AddInductNestedTrace.sourceFamily_of_fresh_final_lookup
+    (H : AddInductNestedTrace C₁ env₁ decl C₂ env₂)
+    (wf : C₁.WF) {name : Name} {info : InductiveVal}
+    (fresh : C₁.find? name = none)
+    (found : C₂.find? name = some (.inductInfo info)) :
+    ∃ family ∈ decl.types, family.name = name := by
+  have typeMapWF := H.addTypes.map_wf wf
+  have ctorMapWF := H.addCtors.map_wf typeMapWF
+  have foundAfterCtors :
+      H.ctorMap.find? name = some (.inductInfo info) := by
+    rcases H.addRecs.map_lookup_cases_kind ctorMapWF found with
+      old | ⟨_raw, _member, _nameEq, kind⟩
+    · exact old
+    · simp [InductConstantKind.Matches] at kind
+  have foundAfterTypes :
+      H.typeMap.find? name = some (.inductInfo info) := by
+    rcases H.addCtors.map_lookup_cases_kind typeMapWF foundAfterCtors with
+      old | ⟨_raw, _member, _nameEq, kind⟩
+    · exact old
+    · simp [InductConstantKind.Matches] at kind
+  rcases H.addTypes.map_lookup_cases_kind wf foundAfterTypes with
+    old | ⟨raw, member, rawName, _kind⟩
+  · rw [fresh] at old
+    contradiction
+  · rw [VInductDecl.blockTypeConstants] at member
+    obtain ⟨family, familyMember, rawEq⟩ := List.mem_map.mp member
+    refine ⟨family, familyMember, ?_⟩
+    rw [← rawName, ← rawEq]
+
 theorem AddInduct.map_wf (H : AddInduct C₁ env₁ decl C₂ env₂)
     (wf : C₁.WF) : C₂.WF := by
   rcases H with ⟨H⟩

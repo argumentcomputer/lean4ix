@@ -660,7 +660,7 @@ completed List inductive transaction. -/
 theorem listMapConstructorHead07
     {name : Name} {info : ConstructorVal}
     (hfind : listMap07.find? name = some (.ctorInfo info)) :
-    listFinalEnv07.ConstructorHead name := by
+    listFinalEnv07.ConstructorHeadArity name info.numParams := by
   rw [listMap07, listCtorMapWF07.find?_insert] at hfind
   split at hfind
   · cases hfind
@@ -670,7 +670,9 @@ theorem listMapConstructorHead07
       have hname : name = ``List.cons :=
         (LawfulBEq.eq_of_beq hcons).symm
       subst name
-      exact listAddInduct07.constructorHead ⟨[], .empty⟩
+      simp [listConsInfo07] at hfind
+      subst info
+      exact listAddInduct07.constructorHeadArity ⟨[], .empty⟩
         (constructor := listType.ctors[1]) (by
           simp [VInductDecl.blockConstructorConstants, listDecl, listType])
     · rw [listNilMap07, listTypeMapWF07.find?_insert] at hfind
@@ -679,7 +681,9 @@ theorem listMapConstructorHead07
         have hname : name = ``List.nil :=
           (LawfulBEq.eq_of_beq hnil).symm
         subst name
-        exact listAddInduct07.constructorHead ⟨[], .empty⟩
+        simp [listNilInfo07] at hfind
+        subst info
+        exact listAddInduct07.constructorHeadArity ⟨[], .empty⟩
           (constructor := listType.ctors[0]) (by
             simp [VInductDecl.blockConstructorConstants, listDecl, listType])
       · rw [listTypeMap07,

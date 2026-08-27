@@ -341,6 +341,21 @@ theorem AddInductBlockTrace.to_addInductBlockGeneration
   simp [VEnv.addInductBlockGeneration, H.addTypes.to_foldlM,
     H.addCtors.to_foldlM, H.addRecs.to_foldlM, H.addRules.to_add]
 
+/-- Retain the executable Theory phase boundaries already carried by an
+implementation/Theory block replay.  This is the data-bearing counterpart of
+`to_addInductBlockGeneration`; it avoids re-extracting a trace from the
+successful transaction proposition. -/
+def AddInductBlockTrace.toGenerationTrace
+    (H : AddInductBlockTrace m₁ env₁ decl m₂ env₂) :
+    VEnv.AddInductBlockGenerationTrace env₁ env₂ H.generation where
+  typeEnv := H.typeEnv
+  ctorEnv := H.ctorEnv
+  recEnv := H.recEnv
+  addTypes := H.addTypes.to_foldlM
+  addCtors := H.addCtors.to_foldlM
+  addRecs := H.addRecs.to_foldlM
+  addRules := H.addRules.to_add
+
 theorem AddInductNestedTrace.to_addInductNested
     (H : AddInductNestedTrace m₁ env₁ decl m₂ env₂) :
     env₁.addInductNested H.nested = some env₂ := by
@@ -405,6 +420,17 @@ theorem AddInduct.constructorHead
   exact ⟨decl, env₁, env₂, constructor, hbefore,
     .induct hgeneration hadd, hconstructor, rfl, VEnv.LE.rfl⟩
 
+/-- A completed singleton replay retains the declaration parameter count at
+each source constructor head. -/
+theorem AddInduct.constructorHeadArity
+    (H : AddInduct m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHeadArity constructor.name decl.nparams := by
+  obtain ⟨generation, hgeneration, hadd⟩ := H.to_addInduct
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .induct hgeneration hadd, rfl, hconstructor, rfl, VEnv.LE.rfl⟩
+
 /-- A completed mutual replay classifies each source constructor as a
 genuine constructor head in its output Theory environment. -/
 theorem AddInductBlock.constructorHead
@@ -418,6 +444,19 @@ theorem AddInductBlock.constructorHead
     .inductBlock (blockEnv := blockEnv) hgeneration hadd,
     hconstructor, rfl, VEnv.LE.rfl⟩
 
+/-- A completed mutual replay retains the declaration's shared parameter
+count at every source constructor head. -/
+theorem AddInductBlock.constructorHeadArity
+    (H : AddInductBlock m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHeadArity constructor.name decl.nparams := by
+  obtain ⟨generation, blockEnv, hgeneration, hadd⟩ :=
+    H.to_addInductBlock
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .inductBlock (blockEnv := blockEnv) hgeneration hadd, rfl,
+    hconstructor, rfl, VEnv.LE.rfl⟩
+
 /-- A completed nested replay classifies each restored source constructor as
 a genuine constructor head in its output Theory environment. -/
 theorem AddInductNested.constructorHead
@@ -428,6 +467,17 @@ theorem AddInductNested.constructorHead
   obtain ⟨nested, hnested, hadd⟩ := H.to_addInductNested
   exact ⟨decl, env₁, env₂, constructor, hbefore,
     .inductNested hnested hadd, hconstructor, rfl, VEnv.LE.rfl⟩
+
+/-- A completed nested replay retains the restored declaration's shared
+parameter count at every source constructor head. -/
+theorem AddInductNested.constructorHeadArity
+    (H : AddInductNested m₁ env₁ decl m₂ env₂) (hbefore : env₁.WF)
+    {constructor : VConstVal}
+    (hconstructor : constructor ∈ decl.blockConstructorConstants) :
+    env₂.ConstructorHeadArity constructor.name decl.nparams := by
+  obtain ⟨nested, hnested, hadd⟩ := H.to_addInductNested
+  exact ⟨decl, env₁, env₂, constructor, hbefore,
+    .inductNested hnested hadd, rfl, hconstructor, rfl, VEnv.LE.rfl⟩
 
 /- The projection relation is now a concrete Theory proposition, so merely
 mentioning `TrExprS` no longer contaminates these projection-free roots with

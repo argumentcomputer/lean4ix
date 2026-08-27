@@ -122,6 +122,7 @@ private def canonicalBoolNestedResult : ElimNestedInductive.Result where
   lctx := {}
   params := #[]
   aux2nested := {}
+  auxCtor2Induct := {}
   types := canonicalBoolTypes
   types_nonempty := rfl
 
@@ -131,6 +132,12 @@ private theorem canonicalBoolNestedRun_succSucc (env : Environment)
       .ok canonicalBoolNestedResult := by
   simp (config := { maxSteps := 100000 }) [
     ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+    ElimNestedInductive.Result.restorationDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+    Expr.getAppFn,
     ElimNestedInductive.run, ElimNestedInductive.run.loop,
     ElimNestedInductive.withParams, ElimNestedInductive.withParams.loop,
     ElimNestedInductive.replaceAllNested,
@@ -155,6 +162,12 @@ private theorem canonicalBoolNested_of_run {env : Environment} {fuel : Nat}
   cases fuel with
   | zero =>
       simp [ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+        ElimNestedInductive.Result.restorationDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+        Expr.getAppFn,
         ElimNestedInductive.run, ElimNestedInductive.run.loop,
         ElimNestedInductive.withParams, ElimNestedInductive.withParams.loop,
         Bind.bind, Except.bind,
@@ -166,6 +179,12 @@ private theorem canonicalBoolNested_of_run {env : Environment} {fuel : Nat}
       | zero =>
           simp (config := { maxSteps := 100000 }) [
             ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+            ElimNestedInductive.Result.restorationDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+            Expr.getAppFn,
             ElimNestedInductive.run, ElimNestedInductive.run.loop,
             ElimNestedInductive.withParams,
             ElimNestedInductive.withParams.loop,
@@ -201,6 +220,7 @@ private def canonicalNatNestedResult (binderName : Name)
   lctx := {}
   params := #[]
   aux2nested := {}
+  auxCtor2Induct := {}
   types := canonicalNatTypes binderName binderInfo
   types_nonempty := rfl
 
@@ -211,6 +231,12 @@ private theorem canonicalNatNestedRun_succSucc (env : Environment)
       .ok (canonicalNatNestedResult binderName binderInfo) := by
   simp (config := { maxSteps := 100000 }) [
     ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+    ElimNestedInductive.Result.restorationDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+    ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+    Expr.getAppFn,
     ElimNestedInductive.run, ElimNestedInductive.run.loop,
     ElimNestedInductive.withParams, ElimNestedInductive.withParams.loop,
     ElimNestedInductive.replaceAllNested,
@@ -236,6 +262,12 @@ private theorem canonicalNatNested_of_run {env : Environment} {fuel : Nat}
   cases fuel with
   | zero =>
       simp [ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+        ElimNestedInductive.Result.restorationDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+        ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+        Expr.getAppFn,
         ElimNestedInductive.run, ElimNestedInductive.run.loop,
         ElimNestedInductive.withParams, ElimNestedInductive.withParams.loop,
         Bind.bind, Except.bind,
@@ -247,6 +279,12 @@ private theorem canonicalNatNested_of_run {env : Environment} {fuel : Nat}
       | zero =>
           simp (config := { maxSteps := 100000 }) [
             ElimNestedInductive.runAt, ElimNestedInductive.initialState,
+            ElimNestedInductive.Result.restorationDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedAuxDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedBodyDependencyCheck,
+            ElimNestedInductive.Result.restoreNestedBodyNodeDependencyCheck,
+            Expr.getAppFn,
             ElimNestedInductive.run, ElimNestedInductive.run.loop,
             ElimNestedInductive.withParams,
             ElimNestedInductive.withParams.loop,
@@ -307,20 +345,3 @@ info: 'Lean4Lean.ElimNestedInductive.Result.canonicalPrimitive_noop' depends on 
 -/
 #guard_msgs in
 #print axioms ElimNestedInductive.Result.canonicalPrimitive_noop
-
-set_option warn.sorry false in
-/-- Verification boundary for Lean4Lean's syntactic primitive-definition recognizer.
-
-The recognizer performs definitional-equality checks on the candidate type and
-body, so its remaining semantic assumption is exposed only after ordinary
-definition checking has supplied translations and a typing derivation. UP6
-replaces uses of this generic boundary with proved per-primitive certificates. -/
-theorem checkPrimitiveDef.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
-    (v : DefinitionVal) {type' value' : VExpr}
-    (htype : TrExprS (ves.venv .safe) v.levelParams [] v.type type')
-    (hvalue : TrExprS (ves.venv .safe) v.levelParams [] v.value value')
-    (hvalueType : (ves.venv .safe).HasType v.levelParams.length [] value' type')
-    (state : TypeChecker.VState := {}) :
-    (Environment.checkPrimitiveDef v).WF (.mk' wf .safe v.levelParams) state fun allow _ =>
-      PrimitiveResult (ves.venv .safe) v allow := by
-  sorry

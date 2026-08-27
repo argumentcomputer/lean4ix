@@ -120,6 +120,72 @@ theorem isNonRecStructureConstructor_isNonRecStructure
   unfold isNonRecStructure
   split at h <;> simp_all
 
+/-- The structure-eta fast path is enabled only when the exact generated
+recursor has a fresh motive universe.  Small recursors suffice for Prop via
+proof irrelevance, which is tried earlier by the checker, but cannot provide
+uniform projector programs for arbitrary fields. -/
+def isStructureEtaReadyConstructor (env : Environment)
+    (family constructor : Name) : Bool :=
+  env.isNonRecStructureConstructor family constructor &&
+    match env.find? family, env.find? (mkRecName family) with
+    | some (.inductInfo familyInfo), some (.recInfo recInfo) =>
+      decide (familyInfo.levelParams.length < recInfo.levelParams.length) &&
+        recInfo.all.contains family
+    | _, _ => false
+
+theorem isStructureEtaReadyConstructor_isNonRec
+    {env : Environment} {family constructor : Name}
+    (h : env.isStructureEtaReadyConstructor family constructor = true) :
+    env.isNonRecStructureConstructor family constructor = true := by
+  unfold isStructureEtaReadyConstructor at h
+  simp only [Bool.and_eq_true] at h
+  exact h.1
+
+/-- Decompose successful large-recursor structure-eta eligibility. -/
+theorem isStructureEtaReadyConstructor_info
+    {env : Environment} {family constructor : Name}
+    {familyInfo : InductiveVal} {constructorInfo : ConstructorVal}
+    (hfamily : env.find? family = some (.inductInfo familyInfo))
+    (hconstructor : env.find? constructor = some (.ctorInfo constructorInfo))
+    (hready : env.isStructureEtaReadyConstructor family constructor = true) :
+    ∃ recInfo,
+      env.find? (mkRecName family) = some (.recInfo recInfo) ∧
+      familyInfo.isRec = false ∧ familyInfo.ctors = [constructor] ∧
+      familyInfo.numIndices = 0 ∧ constructorInfo.induct = family ∧
+      familyInfo.levelParams.length < recInfo.levelParams.length ∧
+      family ∈ recInfo.all := by
+  unfold isStructureEtaReadyConstructor at hready
+  simp only [Bool.and_eq_true] at hready
+  obtain ⟨oldReady, recReady⟩ := hready
+  obtain ⟨isRec, ctors, indices, owner⟩ :=
+    isNonRecStructureConstructor_info hfamily hconstructor oldReady
+  rw [hfamily] at recReady
+  cases hrec : env.find? (mkRecName family) with
+  | none => simp [hrec] at recReady
+  | some found =>
+      cases found <;> simp_all
+
+/-- Reassemble large-recursor structure-eta eligibility from its exact host
+metadata observations. -/
+theorem isStructureEtaReadyConstructor_of_info
+    {env : Environment} {family constructor : Name}
+    {familyInfo : InductiveVal} {constructorInfo : ConstructorVal}
+    {recInfo : RecursorVal}
+    (hfamily : env.find? family = some (.inductInfo familyInfo))
+    (hconstructor : env.find? constructor = some (.ctorInfo constructorInfo))
+    (hrecursor : env.find? (mkRecName family) = some (.recInfo recInfo))
+    (hrec : familyInfo.isRec = false)
+    (hctors : familyInfo.ctors = [constructor])
+    (hindices : familyInfo.numIndices = 0)
+    (howner : constructorInfo.induct = family)
+    (hlarge : familyInfo.levelParams.length < recInfo.levelParams.length)
+    (hfamilyRecursor : family ∈ recInfo.all) :
+    env.isStructureEtaReadyConstructor family constructor = true := by
+  unfold isStructureEtaReadyConstructor
+  rw [isNonRecStructureConstructor_of_info hfamily hconstructor hrec hctors
+    hindices howner, hfamily, hrecursor]
+  simp [hlarge, hfamilyRecursor]
+
 /-- A one-constructor, unindexed structure whose constructor and generated
 recursor have both reached the host environment.  Family metadata is staged
 before either artifact is inserted; projection verification may only demand a
@@ -135,7 +201,8 @@ def isProjectionReadyStructure (env : Environment) (constName : Name) : Bool :=
   | some (.inductInfo { ctors := [ctor], numIndices := 0, .. }) =>
     match env.constants.find?' ctor,
         env.constants.find?' (mkRecName constName) with
-    | some (.ctorInfo info), some (.recInfo _) => info.induct == constName
+    | some (.ctorInfo info), some (.recInfo recInfo) =>
+      info.induct == constName && recInfo.all.contains constName
     | _, _ => false
   | _ => false
 
@@ -150,7 +217,7 @@ theorem isProjectionReadyStructure_info
       info.ctors = [ctor] ∧ info.numIndices = 0 ∧
       env.find? ctor = some (.ctorInfo ctorInfo) ∧
       env.find? (mkRecName name) = some (.recInfo recInfo) ∧
-      ctorInfo.induct = name := by
+      ctorInfo.induct = name ∧ name ∈ recInfo.all := by
   unfold isProjectionReadyStructure at hready
   change env.constants.find?' name = some (.inductInfo info) at hfind
   simp only [hfind] at hready
@@ -192,11 +259,16 @@ theorem isProjectionReadyStructure_info
               | inductInfo _ => simp [hctor, hrec] at hready
               | ctorInfo _ => simp [hctor, hrec] at hready
               | recInfo recInfo =>
-                have ownerBool : (ctorInfo.induct == name) = true := by
+                have readyParts :
+                    (ctorInfo.induct == name) = true ∧
+                      recInfo.all.contains name = true := by
                   simpa [hctor, hrec] using hready
+                have ownerBool : (ctorInfo.induct == name) = true := by
+                  exact readyParts.1
                 have owner : ctorInfo.induct = name :=
                   LawfulBEq.eq_of_beq ownerBool
-                exact ⟨ctor, ctorInfo, recInfo, rfl, rfl, hctor, hrec, owner⟩
+                exact ⟨ctor, ctorInfo, recInfo, rfl, rfl, hctor, hrec, owner,
+                  by simpa using readyParts.2⟩
 
 /-- Reassemble projection readiness from the exact observations exposed by
 `isProjectionReadyStructure_info`. -/
@@ -207,7 +279,8 @@ theorem isProjectionReadyStructure_of_info
     (hctors : info.ctors = [ctor]) (hindices : info.numIndices = 0)
     (hctor : env.find? ctor = some (.ctorInfo ctorInfo))
     (hrec : env.find? (mkRecName name) = some (.recInfo recInfo))
-    (howner : ctorInfo.induct = name) :
+    (howner : ctorInfo.induct = name)
+    (hfamilyRecursor : name ∈ recInfo.all) :
     env.isProjectionReadyStructure name = true := by
   unfold isProjectionReadyStructure
   change env.constants.find?' name = some (.inductInfo info) at hfind
@@ -219,6 +292,118 @@ theorem isProjectionReadyStructure_of_info
     isReflexive
   cases constant
   simp_all
+
+/-- Complete data observed by the executable projection-readiness test.  This
+unindexed form can be retained by constructive artifact producers. -/
+structure ProjectionReadyStructureObservationData where
+  familyInfo : InductiveVal
+  constructorName : Name
+  constructorInfo : ConstructorVal
+  recursorInfo : RecursorVal
+
+/-- Indexed proof companion to `ProjectionReadyStructureObservationData`. -/
+structure ProjectionReadyStructureObservation
+    (env : Environment) (familyName : Name) where
+  familyInfo : InductiveVal
+  constructorName : Name
+  constructorInfo : ConstructorVal
+  recursorInfo : RecursorVal
+  family_find : env.find? familyName = some (.inductInfo familyInfo)
+  constructors_eq : familyInfo.ctors = [constructorName]
+  numIndices_eq : familyInfo.numIndices = 0
+  constructor_find : env.find? constructorName =
+    some (.ctorInfo constructorInfo)
+  recursor_find : env.find? (mkRecName familyName) =
+    some (.recInfo recursorInfo)
+  constructor_owner : constructorInfo.induct = familyName
+  family_recursor : familyName ∈ recursorInfo.all
+
+namespace ProjectionReadyStructureObservationData
+
+/-- Compute the exact family, constructor, and recursor records inspected by
+projection readiness. -/
+def find? (env : Environment) (familyName : Name) :
+    Option ProjectionReadyStructureObservationData :=
+  match env.find? familyName with
+  | some (.inductInfo familyInfo) =>
+      match familyInfo.ctors, familyInfo.numIndices with
+      | [constructorName], 0 =>
+          match env.find? constructorName,
+              env.find? (mkRecName familyName) with
+          | some (.ctorInfo constructorInfo), some (.recInfo recursorInfo) =>
+              if constructorInfo.induct == familyName &&
+                  recursorInfo.all.contains familyName then
+                some ({
+                  familyInfo := familyInfo
+                  constructorName := constructorName
+                  constructorInfo := constructorInfo
+                  recursorInfo := recursorInfo } :
+                    ProjectionReadyStructureObservationData)
+              else none
+          | _, _ => none
+      | _, _ => none
+  | _ => none
+
+/-- Every successful readiness observation makes the executable scan
+available to `Option.get`. -/
+theorem find?_isSome
+    {env : Environment} {familyName : Name} {familyInfo : InductiveVal}
+    (found : env.find? familyName = some (.inductInfo familyInfo))
+    (ready : env.isProjectionReadyStructure familyName = true) :
+    (find? env familyName).isSome := by
+  obtain ⟨constructorName, constructorInfo, recursorInfo, constructors,
+      indices, constructorFound, recursorFound, owner, familyRecursor⟩ :=
+    isProjectionReadyStructure_info found ready
+  simp [find?, found, constructors, indices, constructorFound, recursorFound,
+    owner, familyRecursor]
+
+/-- A successful unindexed scan reconstructs its exact indexed observation. -/
+def toObservation
+    (env : Environment) (familyName : Name)
+    (data : ProjectionReadyStructureObservationData)
+    (found : find? env familyName = some data) :
+    ProjectionReadyStructureObservation env familyName := by
+  unfold find? at found
+  split at found <;> try contradiction
+  next familyInfo familyFound =>
+    split at found <;> try contradiction
+    next constructorName constructors indices =>
+      split at found <;> try contradiction
+      next constructorInfo recursorInfo constructorFound recursorFound =>
+        split at found <;> try contradiction
+        next accepted =>
+          cases found
+          simp only [Bool.and_eq_true, beq_iff_eq,
+            List.contains_iff_mem] at accepted
+          exact {
+            familyInfo
+            constructorName
+            constructorInfo
+            recursorInfo
+            family_find := familyFound
+            constructors_eq := constructors
+            numIndices_eq := indices
+            constructor_find := constructorFound
+            recursor_find := recursorFound
+            constructor_owner := accepted.1
+            family_recursor := accepted.2 }
+
+end ProjectionReadyStructureObservationData
+
+/-- Structure-eta eligibility is a strengthening of projection readiness for
+the same resolved family and constructor observations. -/
+theorem isProjectionReadyStructure_of_isStructureEtaReadyConstructor
+    {env : Environment} {family constructor : Name}
+    {familyInfo : InductiveVal} {constructorInfo : ConstructorVal}
+    (hfamily : env.find? family = some (.inductInfo familyInfo))
+    (hconstructor : env.find? constructor = some (.ctorInfo constructorInfo))
+    (hready : env.isStructureEtaReadyConstructor family constructor = true) :
+    env.isProjectionReadyStructure family = true := by
+  obtain ⟨recInfo, hrecursor, _isRec, constructors, indices, owner, _large,
+      familyRecursor⟩ :=
+    isStructureEtaReadyConstructor_info hfamily hconstructor hready
+  exact isProjectionReadyStructure_of_info hfamily constructors indices
+    hconstructor hrecursor owner familyRecursor
 
 theorem isProjectionReadyStructure_false_of_no_ctorInfo
     {env : Environment} {name : Name} {info : InductiveVal}

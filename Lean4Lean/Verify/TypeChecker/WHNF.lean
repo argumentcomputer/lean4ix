@@ -178,3 +178,13 @@ theorem whnf'.WF {c : VContext} {s : VState} (he : c.TrExprS e e') :
     · exact he.fvarsIn.mono wf.ngen_wf
     · exact h2.fvarsIn.mono wf.ngen_wf
   exact hP ▸ ⟨.rfl, { wf with whnf_wf := hic wf.whnf_wf }, h1, h2⟩
+
+/-- `whnf'` preserves an already exposed dependent function exactly.  This
+small operational law is stronger than semantic WHNF soundness and lets
+clients reason about the source binder dependency inspected by the checker. -/
+theorem whnf'.WF_forall {c : VContext} {s : VState} :
+    (whnf' (.forallE name dom body bi)).WF c s fun out _ =>
+      out = .forallE name dom body bi := by
+  unfold whnf' RecM.WF
+  intro m _
+  exact .pure rfl

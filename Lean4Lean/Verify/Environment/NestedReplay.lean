@@ -1874,6 +1874,20 @@ theorem roseFlatBlockEnvOrdered09 : roseFlatBlockEnv09.Ordered :=
   .const roseFlatFirstTypeOrdered09 roseFlatAuxFamilyWF09
     roseFlatBlockEnv09_eq
 
+theorem roseFlatFirstTypeEnvWF09 : VEnv.WF roseFlatFirstTypeEnv09 :=
+  by
+    rcases listTrEnv07.wf with ⟨declarations, declarationsWF⟩
+    exact ⟨.axiom roseFlatFamily09.toVConstVal :: declarations,
+      .decl (.axiom roseFlatFamilyWF09 roseFlatFirstTypeEnv09_eq)
+        declarationsWF⟩
+
+theorem roseFlatBlockEnvWF09 : VEnv.WF roseFlatBlockEnv09 :=
+  by
+    rcases roseFlatFirstTypeEnvWF09 with ⟨declarations, declarationsWF⟩
+    exact ⟨.axiom roseFlatAuxFamily09.toVConstVal :: declarations,
+      .decl (.axiom roseFlatAuxFamilyWF09 roseFlatBlockEnv09_eq)
+        declarationsWF⟩
+
 /-- The exact all-family staging fold consumed by the candidate semantic
 hierarchy. -/
 theorem roseFlatStage09 :
@@ -2300,6 +2314,53 @@ theorem roseFlatKernelAuxFamilyCtors09_eq :
   apply roseFlatConstructorListEq_sound
   native_decide
 
+/-- Concrete dependency-mask witness for the flattened main constructor. -/
+theorem roseFlatNodeSpineSupport09 :
+    ProjectionSpineSupport (VInductDecl.ctorFields roseFlatNode09.type).length
+      roseFlatKernelNode09.type roseFlatNode09.type := by
+  rw [roseFlatKernelNodeType09_eq]
+  dsimp [roseFlatSpecializeNode09, roseNodeInfo09, roseFlatNode09]
+  apply ProjectionSpineSupport.cons
+  · intro impossible
+    simp [Expr.hasLooseBVar'] at impossible
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      rfl
+    · apply ProjectionSpineSupport.cons
+      · intro _
+        rfl
+      · exact ProjectionSpineSupport.nil _ _
+
+/-- Concrete dependency-mask witness for the flattened auxiliary nil
+constructor. -/
+theorem roseFlatNilSpineSupport09 :
+    ProjectionSpineSupport (VInductDecl.ctorFields roseFlatNil09.type).length
+      roseFlatKernelNil09.type roseFlatNil09.type := by
+  rw [roseFlatKernelNilType09_eq]
+  dsimp [roseFlatSpecializeNil09, listNilInfo07, roseFlatNil09]
+  apply ProjectionSpineSupport.cons
+  · intro impossible
+    simp [Expr.hasLooseBVar'] at impossible
+  · exact ProjectionSpineSupport.nil _ _
+
+/-- Concrete dependency-mask witness for the flattened auxiliary cons
+constructor. -/
+theorem roseFlatConsSpineSupport09 :
+    ProjectionSpineSupport (VInductDecl.ctorFields roseFlatCons09.type).length
+      roseFlatKernelCons09.type roseFlatCons09.type := by
+  rw [roseFlatKernelConsType09_eq]
+  dsimp [roseFlatSpecializeCons09, listConsInfo07, roseFlatCons09]
+  apply ProjectionSpineSupport.cons
+  · intro impossible
+    simp [Expr.hasLooseBVar'] at impossible
+  · apply ProjectionSpineSupport.cons
+    · intro _
+      rfl
+    · apply ProjectionSpineSupport.cons
+      · intro _
+        rfl
+      · exact ProjectionSpineSupport.nil _ _
+
 theorem roseFlatFamilySourceTr09 :
     TrExprS listFinalEnv07 [`u] [] roseFlatKernelFamily09.type
       roseFlatFamily09.type := by
@@ -2398,7 +2459,11 @@ def roseFlatFamilyConstructorSources09 :
   exact .cons {
     name_eq := by native_decide
     uvars_eq := rfl
-    source_tr := roseFlatNodeSourceTr09 } .nil
+    source_tr := roseFlatNodeSourceTr09
+    sourceArity_eq := by
+      rw [roseFlatKernelNodeType09_eq]
+      decide
+    spineSupport := roseFlatNodeSpineSupport09 } .nil
 
 def roseFlatAuxConstructorSources09 :
     CandidateConstructorSourceListInput roseFlatBlockEnv09 [`u]
@@ -2407,11 +2472,19 @@ def roseFlatAuxConstructorSources09 :
   exact .cons {
       name_eq := by native_decide
       uvars_eq := rfl
-      source_tr := roseFlatNilSourceTr09 }
+      source_tr := roseFlatNilSourceTr09
+      sourceArity_eq := by
+        rw [roseFlatKernelNilType09_eq]
+        decide
+      spineSupport := roseFlatNilSpineSupport09 }
     (.cons {
       name_eq := by native_decide
       uvars_eq := rfl
-      source_tr := roseFlatConsSourceTr09 } .nil)
+      source_tr := roseFlatConsSourceTr09
+      sourceArity_eq := by
+        rw [roseFlatKernelConsType09_eq]
+        decide
+      spineSupport := roseFlatConsSpineSupport09 } .nil)
 
 def roseFlatCandidateConstructorSources09 :
     CandidateBlockConstructorSourceListInput roseFlatBlockEnv09 [`u]
@@ -2436,19 +2509,15 @@ abbrev roseFlatNormalizationExecution09 :=
 abbrev roseFlatProducedGeneration09 :=
   roseFlatRecursorShapeCandidate.eliminationBase.base
 
-/-- The exact residual readiness boundary for the flattened RoseTree
-candidate.  All current-model and host-staging obligations are derived below;
-only the positional `List` constructor invariant over arbitrary future Theory
-extensions remains explicit. -/
-structure RoseFlatCandidateReadiness09 where
-  constructorNumParams_mono :
-    ∀ {venv' : VEnv}, listFinalEnv07 ≤ venv' →
-      ∀ (view : VStructureView) (info : ConstructorVal),
-        view.WF venv' →
-        view.fields ≠ [] →
-        roseInputKernelEnv09.find? view.constructorName =
-          some (.ctorInfo info) →
-        info.numParams = view.nparams
+/-- The flattened RoseTree staging boundary is now fully constructible.
+Constructor parameter counts travel with completed constructor-head
+transactions, so no open-world `List` invariant remains to be supplied. -/
+structure RoseFlatCandidateReadiness09 : Prop where
+  available : True
+
+/-- Canonical witness for the now premise-free flattened readiness package. -/
+theorem roseFlatCandidateReadiness09 : RoseFlatCandidateReadiness09 :=
+  ⟨trivial⟩
 
 theorem roseFlatValidationEnv09 :
     roseFlatNormalizationExecution09.validationContext.env =
@@ -2556,7 +2625,7 @@ theorem roseListSafePrimitives09 :
         · simp [SMap.find?] at hfind
 
 theorem RoseFlatCandidateReadiness09.listProjectionReady
-    (self : RoseFlatCandidateReadiness09) :
+    (_self : RoseFlatCandidateReadiness09) :
     ProjectionReady roseInputKernelEnv09 listFinalEnv07 where
   infer name _info _hfind hready := by
     rw [roseInputKernelEnvNoProjectionReady09 name] at hready
@@ -2565,10 +2634,6 @@ theorem RoseFlatCandidateReadiness09.listProjectionReady
     change listMap07.find?' name = some (.ctorInfo info) at hfind
     rw [listMapWF07.find?'_eq_find?] at hfind
     exact listMapConstructorHead07 hfind
-  constructorNumParams view info hview hfields hfind :=
-    self.constructorNumParams_mono VEnv.LE.rfl view info hview hfields
-      hfind
-  constructorNumParams_mono := self.constructorNumParams_mono
 
 theorem roseListStructureEtaReady09 :
     StructureEtaReady roseInputKernelEnv09 listFinalEnv07 :=
@@ -2588,7 +2653,7 @@ theorem RoseFlatCandidateReadiness09.listVEnvsWF
   hasPrimitives := roseListHasPrimitives09
   safePrimitives := roseListSafePrimitives09
   mono := fun _ => .rfl
-  projectionReady := self.listProjectionReady
+  projectionReady := self.listProjectionReady.toResolution
   structureEtaReady := roseListStructureEtaReady09
 
 def RoseFlatCandidateReadiness09.preFamily
@@ -2823,7 +2888,7 @@ theorem roseListFinalToFlatBlock09 :
     (VEnv.addConst_le roseFlatBlockEnv09_eq)
 
 theorem RoseFlatCandidateReadiness09.projectionReady
-    (self : RoseFlatCandidateReadiness09) :
+    (_self : RoseFlatCandidateReadiness09) :
     ProjectionReady roseFlatNormalizationExecution09.familyEnv
       roseFlatBlockEnv09 where
   infer name _info _hfind hready := by
@@ -2834,12 +2899,6 @@ theorem RoseFlatCandidateReadiness09.projectionReady
     change listMap07.find?' name = some (.ctorInfo info) at hold
     rw [listMapWF07.find?'_eq_find?] at hold
     exact (listMapConstructorHead07 hold).mono roseListFinalToFlatBlock09
-  constructorNumParams view info hview hfields hfind :=
-    self.constructorNumParams_mono roseListFinalToFlatBlock09 view info
-      hview hfields (roseFlatFamilyEnvCtorFind09 hfind)
-  constructorNumParams_mono hle view info hview hfields hfind :=
-    self.constructorNumParams_mono (roseListFinalToFlatBlock09.trans hle)
-      view info hview hfields (roseFlatFamilyEnvCtorFind09 hfind)
 
 theorem RoseFlatCandidateReadiness09.structureEtaReady
     (_self : RoseFlatCandidateReadiness09) :
@@ -2891,7 +2950,7 @@ def roseFlatCandidateStaging09 (readiness : RoseFlatCandidateReadiness09) :
       · simp [roseFlatAuxFamily09, roseFlatAuxName09,
           Kernel.Environment.primitives, NameSet.ofList]
         simp +decide [NameSet.contains]
-  projectionReady := readiness.projectionReady
+  projectionReady := readiness.projectionReady.toResolution
   structureEtaReady := readiness.structureEtaReady
 
 def roseFlatCandidateConstructors09
@@ -2952,6 +3011,46 @@ theorem roseFlatCandidateIdentityAnalysis09
   apply NestedBlockChecked.generation_eq_of_check
   exact (Option.some_get (x := roseNestedC?) (by native_decide)).symm
 
+theorem roseFlatIdentityGeneration09 :
+    roseNestedC.elim.flat.identityBlockGeneration? =
+      some roseNestedC.generation := by
+  apply NestedBlockChecked.generation_eq_of_check
+  exact (Option.some_get (x := roseNestedC?) (by native_decide)).symm
+
+/-- Structural identity generation keeps the stored family-index surfaces.
+The equality is extracted from the successful analyzer equation because the
+`Option.get` in `roseNestedC` deliberately blocks definitional reduction. -/
+theorem roseFlatGeneratedIndices_eq09 :
+    roseNestedC.generation.generatedIndices =
+      fun family => family.rawIndices roseNestedC.elim.flat.nparams := by
+  have identityRun := roseFlatIdentityGeneration09
+  unfold VInductDecl.identityBlockGeneration? at identityRun
+  obtain ⟨block, _blockRun, generationRun⟩ :=
+    Option.bind_eq_some_iff.mp identityRun
+  unfold VInductDecl.ValidatedBlock.generation? at generationRun
+  dsimp only at generationRun
+  split at generationRun
+  · have generation_eq := Option.some.inj generationRun
+    rw [← generation_eq]
+  · contradiction
+
+/-- Structural identity generation also keeps the stored constructor-field
+surfaces. -/
+theorem roseFlatGeneratedFields_eq09 :
+    roseNestedC.generation.generatedFields =
+      fun constructor =>
+        constructor.ctor.rawFields roseNestedC.elim.flat.nparams := by
+  have identityRun := roseFlatIdentityGeneration09
+  unfold VInductDecl.identityBlockGeneration? at identityRun
+  obtain ⟨block, _blockRun, generationRun⟩ :=
+    Option.bind_eq_some_iff.mp identityRun
+  unfold VInductDecl.ValidatedBlock.generation? at generationRun
+  dsimp only at generationRun
+  split at generationRun
+  · have generation_eq := Option.some.inj generationRun
+    rw [← generation_eq]
+  · contradiction
+
 def roseFlatProducedCandidateIdentitySemantic09
     (readiness : RoseFlatCandidateReadiness09) :
     ProducedNormalizationCandidateBlockSemanticRun
@@ -2969,6 +3068,81 @@ def roseFlatProducedCandidateIdentitySemantic09
   familiesProduced :=
     roseFlatNormalizationExecution09.families.produced.reindex
 
+theorem roseFlatCandidateSemanticGenerationShape09
+    (readiness : RoseFlatCandidateReadiness09) :
+    (roseFlatCandidateIdentitySemantic09 readiness).generationShape = true := by
+  change normalizationCandidateBlockGenerationShape roseNestedC.elim.flat
+    roseFlatRecursorShapeCandidate.execution.candidate = true
+  exact roseFlatRecursorShapeCandidate.shape
+
+/-- The concrete identity fixture retains the raw parameter surface, so the
+candidate family's checker evidence is also the exact generated-parameter
+telescope consumed by recursor synthesis. -/
+theorem roseFlatGeneratedParamsTel09
+    (readiness : RoseFlatCandidateReadiness09) :
+    TypeChecker.TelDefEqEvidence listFinalEnv07 roseNestedC.elim.flat.uvars []
+      roseNestedC.generation.generatedParams
+      roseNestedC.generation.block.checked.params := by
+  let aligned := (roseFlatCandidateIdentitySemantic09 readiness).alignedFamilyRuns
+    roseNestedC.generation (roseFlatCandidateIdentityAnalysis09 readiness)
+    (roseFlatCandidateSemanticGenerationShape09 readiness)
+    roseFlatCheckedBlockWF09
+  have params := aligned.paramsTel roseFlatResultLevelWF
+  have generated_eq : roseNestedC.generation.generatedParams =
+      roseNestedC.generation.block.rawParams := by native_decide
+  rw [generated_eq]
+  exact params
+
+/-- Source-ordered generated index binders are the raw index binders for this
+closed structural fixture; reify their reflexive equality in the generated
+parameter context. -/
+theorem roseFlatGeneratedIndicesTel09
+    (readiness : RoseFlatCandidateReadiness09) :
+    ∀ family ∈ roseNestedC.generation.families,
+      TypeChecker.TelDefEqEvidence listFinalEnv07
+        roseNestedC.elim.flat.uvars
+        roseNestedC.generation.generatedParams.reverse
+        (family.rawIndices roseNestedC.elim.flat.nparams)
+        (roseNestedC.generation.generatedIndices family) := by
+  intro family member
+  let runs := (roseFlatCandidateIdentitySemantic09 readiness).familyRuns
+    roseNestedC.generation (roseFlatCandidateIdentityAnalysis09 readiness)
+    (roseFlatCandidateSemanticGenerationShape09 readiness)
+    roseFlatCheckedBlockWF09 roseFlatResultLevelWF
+  have raw := (runs.get family member).rawIndicesTel_refl member
+    listTrEnv07.wf (roseFlatGeneratedParamsTel09 readiness)
+  have generated_eq : roseNestedC.generation.generatedIndices family =
+      family.rawIndices roseNestedC.elim.flat.nparams :=
+    congrFun roseFlatGeneratedIndices_eq09 family
+  rw [generated_eq]
+  exact raw
+
+/-- The structural fixture likewise retains each raw constructor-field
+surface; the candidate constructor runs supply its well-formed reflexive
+telescope in the staged block environment. -/
+theorem roseFlatGeneratedFieldsTel09
+    (readiness : RoseFlatCandidateReadiness09) :
+    ∀ constructor ∈ roseNestedC.generation.flatCtors,
+      TypeChecker.TelDefEqEvidence roseFlatBlockEnv09
+        roseNestedC.elim.flat.uvars
+        roseNestedC.generation.generatedParams.reverse
+        (constructor.ctor.rawFields roseNestedC.elim.flat.nparams)
+        (roseNestedC.generation.generatedFields constructor) := by
+  intro constructor member
+  let runs := (roseFlatCandidateIdentitySemantic09 readiness).constructorRuns
+    roseNestedC.generation (roseFlatCandidateIdentityAnalysis09 readiness)
+    (roseFlatCandidateSemanticGenerationShape09 readiness)
+    roseFlatCheckedBlockWF09 roseFlatResultLevelWF
+  have params := (roseFlatGeneratedParamsTel09 readiness).mono
+    (VEnv.stageInductiveTypes_le roseFlatStage09)
+  have raw := (runs.get constructor member).rawFieldsTel_refl
+    roseFlatBlockEnvWF09 params
+  have generated_eq : roseNestedC.generation.generatedFields constructor =
+      constructor.ctor.rawFields roseNestedC.elim.flat.nparams :=
+    congrFun roseFlatGeneratedFields_eq09 constructor
+  rw [generated_eq]
+  exact raw
+
 /-- Exact flattened semantic generation from the real retained producer,
 conditional only on the isolated completed-`List` readiness package. -/
 def roseFlatExactProducedBlockGeneration09
@@ -2980,6 +3154,9 @@ def roseFlatExactProducedBlockGeneration09
   analysis := roseFlatCandidateIdentityAnalysis09 readiness
   checked := roseFlatCheckedBlockWF09
   resultLevelWF := roseFlatResultLevelWF
+  generatedParamsTel := roseFlatGeneratedParamsTel09 readiness
+  generatedIndicesTel := roseFlatGeneratedIndicesTel09 readiness
+  generatedFieldsTel := roseFlatGeneratedFieldsTel09 readiness
 
 /-- The existing outer execution and the newly closed flattened semantics
 jointly produce the exact recursor run, with no manually rebuilt candidate. -/
@@ -3223,7 +3400,7 @@ theorem roseFlatProducedRecTr09
   simp only [BlockGenerationChecked.recursors, List.mem_map] at recursorMember
   obtain ⟨family, familyMember, recursorEq⟩ := recursorMember
   obtain ⟨u, recWF⟩ :=
-    (roseFlatGenerationEnv09 readiness).recursor_wf familyMember
+    (roseFlatGenerationEnv09 readiness).generatedRecursor_wf familyMember
   have rawHasType : roseFlatCtorEnv09.HasType
       roseNestedC.generation.recursors[0]!.uvars []
       roseNestedC.generation.recursors[0]!.type (.sort u) := by
@@ -3301,7 +3478,7 @@ theorem roseFlatProducedAuxRecTr09
   simp only [BlockGenerationChecked.recursors, List.mem_map] at recursorMember
   obtain ⟨family, familyMember, recursorEq⟩ := recursorMember
   obtain ⟨u, recWF⟩ :=
-    (roseFlatGenerationEnv09 readiness).recursor_wf familyMember
+    (roseFlatGenerationEnv09 readiness).generatedRecursor_wf familyMember
   have rawHasType : roseFlatCtorEnv09.HasType
       roseNestedC.generation.recursors[1]!.uvars []
       roseNestedC.generation.recursors[1]!.type (.sort u) := by
@@ -3359,7 +3536,7 @@ theorem roseFlatGeneratedRecursorsWF09
   rw [roseFlatDeclarationCtorEnv09]
   simp only [BlockGenerationChecked.recursors, List.mem_map] at member
   obtain ⟨family, familyMember, rfl⟩ := member
-  exact (roseFlatGenerationEnv09 readiness).recursor_wf familyMember
+  exact (roseFlatGenerationEnv09 readiness).generatedRecursor_wf familyMember
 
 noncomputable def roseFlatMetadataPrefix09
     (readiness : RoseFlatCandidateReadiness09) :
@@ -5913,6 +6090,24 @@ theorem roseRestoreInterpKeep09
                         native_decide
                       · cases hflat
 
+/-- Semantic wrapper around the concrete fixture's exact retained lookup. -/
+theorem roseRestoreInterpKeepSemantic09
+    {c : Name} {ci : VConstant}
+    (hflat : roseFlatFinalEnv09.constants c = some ci)
+    (hinterp : roseRestoreInterp09 c = none) :
+    ∃ ci' sortLevel,
+      roseFinalEnv09.constants c = some ci' ∧
+        ci'.uvars = ci.uvars ∧
+        roseFinalEnv09.IsDefEq ci.uvars [] ci'.type
+          (ci.type.substConst roseRestoreInterp09) (.sort sortLevel) := by
+  let ci' : VConstant :=
+    ⟨ci.uvars, ci.type.substConst roseRestoreInterp09⟩
+  have lookup : roseFinalEnv09.constants c = some ci' :=
+    roseRestoreInterpKeep09 hflat hinterp
+  obtain ⟨sortLevel, typed⟩ :=
+    roseNestedCertificate09.afterWF.ordered.constWF lookup
+  exact ⟨ci', sortLevel, lookup, rfl, typed⟩
+
 /-- Complete flattened main-rule redexes restore to the exact main runtime
 head pair, with every captured argument restored pointwise. -/
 theorem roseRestoreMainRuleRedex09
@@ -7215,25 +7410,18 @@ theorem roseRestoreInterpDefEq09
 
 /-- The completed flattened Rose environment interprets into the completed
 nested environment under the six-point restoration substitution σ̂. -/
-theorem roseFlatFinalToFinalConstInterp09 :
+theorem roseFlatFinalToFinalConstInterp09
+    (ordered : roseFlatFinalEnv09.Ordered) :
     VEnv.ConstInterp roseFlatFinalEnv09 roseFinalEnv09
       roseRestoreInterp09 where
+  ordered := ordered
   ordered' := roseNestedCertificate09.afterWF.ordered
   closed := roseRestoreInterpClosed09
   value := roseRestoreInterpValue09
-  keep := roseRestoreInterpKeep09
+  keep := roseRestoreInterpKeepSemantic09
   defeq := roseRestoreInterpDefEq09
   structEta := by
-    intro rule h
-    exact (roseFlatNoStructEta09 rule h).elim
-  structEta_familyType := by
-    intro rule h
-    exact (roseFlatNoStructEta09 rule h).elim
-  structEta_structureType := by
-    intro rule h
-    exact (roseFlatNoStructEta09 rule h).elim
-  structEta_rebuild := by
-    intro rule h
+    intro rule _ _ _ _ _ _ h
     exact (roseFlatNoStructEta09 rule h).elim
 
 /-- Whole restored-rule type alignment at arbitrary well-formed universe
@@ -7366,7 +7554,9 @@ theorem roseRestoreInterpRule0BodyAlignment09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyAlignmentOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry0_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule0TypeAlignment09 hm1)
       (roseRestoreInterpRule0LhsAlignment09 hm1)
 
@@ -7403,7 +7593,9 @@ theorem roseRestoreInterpRule1BodyAlignment09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyAlignmentOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry1_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule1TypeAlignment09 hm1)
       (roseRestoreInterpRule1LhsAlignment09 hm1)
 
@@ -7440,7 +7632,9 @@ theorem roseRestoreInterpRule2BodyAlignment09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyAlignmentOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry2_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule2TypeAlignment09 hm1)
       (roseRestoreInterpRule2LhsAlignment09 hm1)
 
@@ -7508,7 +7702,10 @@ theorem roseRestoreInterpRule0BodyMatchedRuntime09
     simpa only [redex, target] using
       roseSubstMainRuleRuntimeRedex09 recLevels ctorLevels recArgs ctorArgs
         hrecLevels hctorLevels
-  have hσ := VEnv.IsDefEq.substConst roseFlatFinalToFinalConstInterp09 hflat
+  have hσ := VEnv.IsDefEq.substConst
+    (roseFlatFinalToFinalConstInterp09
+      (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+    hflat hΓflat
   have hredex : roseFinalEnv09.IsDefEqU univs
       (Γ.map (VExpr.substConst roseRestoreInterp09))
       (redex.substConst roseRestoreInterp09) target := by
@@ -7519,7 +7716,9 @@ theorem roseRestoreInterpRule0BodyMatchedRuntime09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyMatchedOfFlatOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry0_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule0TypeAlignment09 hm1)
       (roseRestoreInterpRule0LhsAlignment09 hm1)
       hflat hredex
@@ -7589,7 +7788,9 @@ theorem roseRestoreInterpRule1BodyMatchedRuntime09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyMatchedOfFlatOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry1_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule1TypeAlignment09 hm1)
       (roseRestoreInterpRule1LhsAlignment09 hm1) hflat hredex.toU
 
@@ -7657,7 +7858,9 @@ theorem roseRestoreInterpRule2BodyMatchedRuntime09
   exact (roseNestedStagedCertificate09 readiness)
     |>.restoredRuleBodyMatchedOfFlatOfLhs
       (roseNestedStagedRuleFacts09 readiness roseFlatRuleEntry2_09)
-      roseFlatFinalToFinalConstInterp09 hΓflat hΓrestored hm1 hcaps
+      (roseFlatFinalToFinalConstInterp09
+        (roseNestedStagedCertificate09 readiness).flatAfterWF.ordered)
+      hΓflat hΓrestored hm1 hcaps
       hcapsLen (roseRestoreInterpRule2TypeAlignment09 hm1)
       (roseRestoreInterpRule2LhsAlignment09 hm1) hflat hredex.toU
 

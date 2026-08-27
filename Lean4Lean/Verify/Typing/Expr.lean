@@ -6,7 +6,8 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 
 import Lean4Lean.Theory.Typing.Basic
 import Lean4Lean.Theory.Literals
-import Lean4Lean.Theory.Projection
+import Lean4Lean.Theory.ProjectionView
+import Lean4Lean.Theory.RestoredBlockProjection
 import Lean4Lean.Verify.NameGenerator
 import Lean4Lean.Verify.VLCtx
 import Lean4Lean.Verify.Axioms
@@ -71,12 +72,92 @@ theorem VLCtx.WF.fvwf : ∀ {Δ}, VLCtx.WF env U Δ → Δ.FVWF
 /-- Verify compatibility surface for Theory's environment-indexed projection
 semantics.  The view, universe instantiation, and parameter spine are hidden
 from existing expression-translation consumers, but each witness is fully
-constrained by `VEnv.TrProj`; no metadata is existentially invented. -/
+constrained by the honest singleton-or-block projection semantics; no
+metadata is existentially invented. -/
 def TrProj (env : VEnv) (U : Nat) (Γ : List VExpr)
     (structName : Name) (idx : Nat) (e result : VExpr) : Prop :=
-  ∃ view levels params,
+  ∃ view : VProjectionView, ∃ levels params,
     view.name = structName ∧
-      env.TrProj U Γ view levels params idx e result
+      VProjectionView.TrProj env U Γ view levels params idx e result
+
+/-- Explicit data-level sum of the two honest projection backends. -/
+inductive ResolvedProjectionView where
+  | ordinary (view : VProjectionView)
+  | restored (view : VRestoredBlockStructureView)
+
+namespace ResolvedProjectionView
+
+def name : ResolvedProjectionView → Name
+  | .ordinary view => view.name
+  | .restored view => view.name
+
+def constructorName : ResolvedProjectionView → Name
+  | .ordinary view => view.constructorName
+  | .restored view => view.constructorName
+
+def nparams : ResolvedProjectionView → Nat
+  | .ordinary view => view.nparams
+  | .restored view => view.nparams
+
+def structureType : ResolvedProjectionView → List VLevel →
+    List VExpr → VExpr
+  | .ordinary view => view.structureType
+  | .restored view => view.structureType
+
+def projectionCodes : ResolvedProjectionView → List VLevel →
+    List VExpr → List VStructureView.ProjectionCode
+  | .ordinary view => view.projectionCodes
+  | .restored view => view.operationalProjectionCodes
+
+/-- Backend-indexed constructor-spine evidence returned by registered-head
+inversion.  Each branch retains the concrete alignment package required by
+the backend that generated the selected projector. -/
+inductive ProjectionConstructorAlignment (env : VEnv) (U : Nat)
+    (Γ : List VExpr) :
+    (view : ResolvedProjectionView) → (levels : List VLevel) →
+      (params : List VExpr) → (idx : Nat) →
+      (code : VStructureView.ProjectionCode) →
+      (runtimeConstructorName : Name) →
+      (runtimeMajor runtimeField : VExpr) → Prop where
+  | ordinary
+      (alignment : VProjectionView.ProjectionConstructorAlignment env U Γ
+        view levels params idx code runtimeConstructorName runtimeMajor
+          runtimeField) :
+      ProjectionConstructorAlignment env U Γ (.ordinary view) levels
+        params idx code runtimeConstructorName runtimeMajor runtimeField
+  | restored
+      (alignment :
+        VRestoredBlockStructureView.ProjectionConstructorAlignment env U Γ
+          view levels params idx code runtimeConstructorName runtimeMajor
+            runtimeField) :
+      ProjectionConstructorAlignment env U Γ (.restored view) levels
+        params idx code runtimeConstructorName runtimeMajor runtimeField
+
+/-- Backend-indexed semantic witness over the common runtime arguments. -/
+inductive TrProj (env : VEnv) (U : Nat) (Γ : List VExpr) :
+    (view : ResolvedProjectionView) → (levels : List VLevel) →
+      (params : List VExpr) →
+      (idx : Nat) → (major result : VExpr) → Prop where
+  | ordinary
+      (semantic : VProjectionView.TrProj env U Γ view levels params idx
+        major result) :
+      TrProj env U Γ (.ordinary view) levels params idx major result
+  | restored
+      (semantic : VRestoredBlockStructureView.TrProj env U Γ view levels
+        params idx major result) :
+      TrProj env U Γ (.restored view) levels params idx major result
+
+end ResolvedProjectionView
+
+/-- Resolution-aware projection semantics used during migration of the
+checker-facing relation.  The explicit view remains visible to the shared
+head-inversion boundary while universe and parameter spines stay existential
+as in the established compatibility relation. -/
+def ResolvedTrProj (env : VEnv) (U : Nat) (Γ : List VExpr)
+    (structName : Name) (idx : Nat) (major result : VExpr) : Prop :=
+  ∃ view : ResolvedProjectionView, ∃ levels params,
+    view.name = structName ∧
+      ResolvedProjectionView.TrProj env U Γ view levels params idx major result
 
 variable (env : VEnv) (Us : List Name) in
 inductive TrExprS : VLCtx → Expr → VExpr → Prop
@@ -109,7 +190,7 @@ inductive TrExprS : VLCtx → Expr → VExpr → Prop
   | lit : env.ContainsLits l → TrExprS Δ l.toConstructor e → TrExprS Δ (.lit l) e
   | mdata : TrExprS Δ e e' → TrExprS Δ (.mdata d e) e'
   | proj : TrExprS Δ e e' →
-    TrProj env Us.length Δ.toCtx s i e' e'' →
+    ResolvedTrProj env Us.length Δ.toCtx s i e' e'' →
     TrExprS Δ (.proj s i e) e''
 
 def TrExpr (env : VEnv) (Us : List Name) (Δ : VLCtx) (e : Expr) (e' : VExpr) : Prop :=

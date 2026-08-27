@@ -275,6 +275,25 @@ theorem buildExecution_ok_of_run
     rw [refineResult_result]
     exact Except.ok.inj (ordinaryRun.symm.trans run)
 
+/-- With at least two families, the singleton exception is unreachable, so
+the kernel's large-elimination result is exactly the cached common-universe
+nonzero decision. -/
+theorem result_eq_isNotZero_of_two
+    (execution : LargeEliminatorExecution stats
+      (first :: second :: rest).toArray context) :
+    execution.result = stats.isNotZero := by
+  have run := execution.run_eq
+  unfold isLargeEliminator at run
+  cases h : stats.isNotZero with
+  | false =>
+      rw [h] at run
+      change (pure false : M Bool) context = .ok execution.result at run
+      exact Except.ok.inj run.symm
+  | true =>
+      rw [h] at run
+      change (pure true : M Bool) context = .ok execution.result at run
+      exact Except.ok.inj run.symm
+
 end LargeEliminatorExecution
 
 /-- Exact `getElimLevel` execution paired with the retained large-elimination
@@ -566,6 +585,17 @@ theorem buildExecution_ok_of_run
     rw [refineResult_result]
     exact Except.ok.inj (ordinaryRun.symm.trans run)
 
+/-- A genuinely mutual block can never receive the singleton-only K target
+flag. -/
+theorem result_eq_false_of_two
+    (execution : KTargetExecution stats
+      (first :: second :: rest).toArray context) :
+    execution.result = false := by
+  have run := execution.run_eq
+  unfold isKTarget at run
+  change (pure false : M Bool) context = .ok execution.result at run
+  exact Except.ok.inj run.symm
+
 end KTargetExecution
 
 /-- The normalization/validation execution extended through constructor
@@ -825,9 +855,8 @@ theorem NormalizationCandidateExecution.completeForRun_of_candidateObservers
   completeForRun isUnsafeEq
 
 /-- The retained normalization/elimination prefix extended through the exact
-recursor synthesis and declaration phase used by `run`.  `recursors.infos`
-owns the actual generated kernel records in family order, including their
-rules, while `recursors.trace` owns every name check and insertion. -/
+one-pass recursor synthesis, declaration, and generated-artifact verification
+used by `run`. -/
 structure NormalizationRecursorExecution
     (nparams : Nat) (types : List InductiveType)
     (numNested : Nat) (isUnsafe : Bool) (candidateContext : Context) where
@@ -836,7 +865,19 @@ structure NormalizationRecursorExecution
     Environment.checkDuplicatedUnivParams candidateContext.lparams = .ok ()
   eliminationExecution : NormalizationEliminationExecution nparams types numNested
     isUnsafe candidateContext
+  recursorCheck : CheckedRecursorDeclaration
+    eliminationExecution.normalization.stats types.toArray
+      eliminationExecution.elimination.level eliminationExecution.kTarget.result
+      { eliminationExecution.normalization.validationContext with
+        env := eliminationExecution.constructorEnv }
+  recursorCheckRun :
+    declareRecursorsCheckedAt eliminationExecution.normalization.stats
+      types.toArray eliminationExecution.elimination.level
+      eliminationExecution.kTarget.result
+      { eliminationExecution.normalization.validationContext with
+        env := eliminationExecution.constructorEnv } = .ok recursorCheck
   recursors : RecursorDeclarationResult
+  recursors_eq : recursors = recursorCheck.recursors
   recursorsRun :
     declareRecursors eliminationExecution.normalization.stats types.toArray
       eliminationExecution.elimination.level eliminationExecution.kTarget.result
@@ -889,17 +930,20 @@ def buildExecution
       let recursorContext : Context :=
         { eliminationExecution.normalization.validationContext with
           env := eliminationExecution.constructorEnv }
-      match hrecursors : declareRecursors
+      match hrecursors : declareRecursorsCheckedAt
           eliminationExecution.normalization.stats types.toArray
           eliminationExecution.elimination.level
           eliminationExecution.kTarget.result recursorContext with
       | .error error => .error error
-      | .ok recursors => .ok {
+      | .ok recursorCheck => .ok {
           isUnsafe_eq := hisUnsafe
           duplicatedUnivParamsRun := hlevels
           eliminationExecution
-          recursors
-          recursorsRun := by simpa [recursorContext] using hrecursors }
+          recursorCheck
+          recursorCheckRun := by simpa [recursorContext] using hrecursors
+          recursors := recursorCheck.recursors
+          recursors_eq := rfl
+          recursorsRun := recursorCheck.recursorsRun }
   else
     .error (.other "recursor execution safety disagrees with reader context")
 
@@ -925,35 +969,36 @@ theorem buildExecution_ok_of_runs
     (kRun : isKTarget normalization.stats types.toArray
       { normalization.validationContext with env := constructorEnv } =
         .ok kTarget)
-    {recursors : RecursorDeclarationResult}
-    (recursorsRun : declareRecursors normalization.stats types.toArray
-      elimLevel kTarget
+    {recursorCheck : CheckedRecursorDeclaration normalization.stats
+      types.toArray elimLevel kTarget
+      { normalization.validationContext with env := constructorEnv }}
+    (recursorsRun : declareRecursorsCheckedAt normalization.stats
+      types.toArray elimLevel kTarget
       { normalization.validationContext with env := constructorEnv } =
-        .ok recursors) :
+        .ok recursorCheck) :
     ∃ execution : NormalizationRecursorExecution nparams types numNested
         isUnsafe candidateContext,
       buildExecution nparams types numNested isUnsafe candidateContext =
           .ok execution ∧
-        execution.recursors = recursors := by
+        execution.recursors = recursorCheck.recursors := by
   obtain ⟨eliminationExecution, eliminationRun, normalizationEq,
       constructorEnvEq, elimLevelEq, kTargetEq⟩ :=
     NormalizationEliminationExecution.buildExecution_ok_of_runs
       normalizationRun declareRun elimRun kRun
-  have recursorsRun' : declareRecursors
-      eliminationExecution.normalization.stats types.toArray
-      eliminationExecution.elimination.level
-      eliminationExecution.kTarget.result
-      { eliminationExecution.normalization.validationContext with
-        env := eliminationExecution.constructorEnv } = .ok recursors := by
-    simpa only [normalizationEq, constructorEnvEq, elimLevelEq, kTargetEq] using
-      recursorsRun
+  subst normalization
+  subst constructorEnv
+  subst elimLevel
+  subst kTarget
   let execution : NormalizationRecursorExecution nparams types numNested
       isUnsafe candidateContext := {
     isUnsafe_eq := isUnsafeEq
     duplicatedUnivParamsRun := duplicatedRun
     eliminationExecution
-    recursors
-    recursorsRun := recursorsRun' }
+    recursorCheck
+    recursorCheckRun := recursorsRun
+    recursors := recursorCheck.recursors
+    recursors_eq := rfl
+    recursorsRun := recursorCheck.recursorsRun }
   refine ⟨execution, ?_, rfl⟩
   unfold buildExecution
   rw [dif_pos isUnsafeEq]
@@ -967,11 +1012,11 @@ theorem buildExecution_ok_of_runs
     simp only
     split
     · rename_i actualRecursors
-      rw [recursorsRun'] at actualRecursors
+      rw [recursorsRun] at actualRecursors
       contradiction
     · rename_i actualResult actualRecursors
-      have resultEq : actualResult = recursors :=
-        Except.ok.inj (actualRecursors.symm.trans recursorsRun')
+      have resultEq : actualResult = recursorCheck :=
+        Except.ok.inj (actualRecursors.symm.trans recursorsRun)
       subst actualResult
       rfl
 
@@ -1026,9 +1071,9 @@ theorem complete_of_normalization
               (fun elimLevel => ReaderT.bind
                 (isKTarget normalization.stats types.toArray)
                 (fun k => ReaderT.bind
-                  (declareRecursors normalization.stats types.toArray
+                  (declareRecursorsChecked normalization.stats types.toArray
                     elimLevel k)
-                  (fun recursors => pure recursors.env))))))
+                  (fun checked => pure checked.checked.recursors.env))))))
           ({ normalization.validationContext with
             env := normalization.familyEnv } : Context) =
         .ok finalEnv at publicRun'
@@ -1047,9 +1092,9 @@ theorem complete_of_normalization
               (fun elimLevel => ReaderT.bind
                 (isKTarget normalization.stats types.toArray)
                 (fun k => ReaderT.bind
-                  (declareRecursors normalization.stats types.toArray
+                  (declareRecursorsChecked normalization.stats types.toArray
                     elimLevel k)
-                  (fun recursors => pure recursors.env))))
+                  (fun checked => pure checked.checked.recursors.env))))
               ({ normalization.validationContext with
                 env := constructorEnv } : Context) =
             .ok finalEnv at publicRun'
@@ -1072,17 +1117,17 @@ theorem complete_of_normalization
               | ok kTarget =>
                   rw [kRun] at publicRun'
                   simp only at publicRun'
-                  cases recursorsRun : declareRecursors normalization.stats
+                  cases recursorsRun : declareRecursorsCheckedAt
+                      normalization.stats
                       types.toArray elimLevel kTarget
                       { normalization.validationContext with
                         env := constructorEnv } with
                   | error error =>
-                      rw [recursorsRun] at publicRun'
+                      simp [declareRecursorsChecked, recursorsRun] at publicRun'
                       contradiction
-                  | ok recursors =>
-                      rw [recursorsRun] at publicRun'
-                      simp only [Pure.pure] at publicRun'
-                      have recursorEnvEq : recursors.env = finalEnv :=
+                  | ok recursorCheck =>
+                      simp [declareRecursorsChecked, recursorsRun] at publicRun'
+                      have recursorEnvEq : recursorCheck.recursors.env = finalEnv :=
                         Except.ok.inj publicRun'
                       obtain ⟨execution, executionRun, recursorsEq⟩ :=
                         buildExecution_ok_of_runs rfl duplicatedRun
@@ -1164,10 +1209,10 @@ theorem addInductiveRun
             (isKTarget execution.eliminationExecution.normalization.stats
               types.toArray)
             (fun k => ReaderT.bind
-              (declareRecursors
+              (declareRecursorsChecked
                 execution.eliminationExecution.normalization.stats
                 types.toArray elimLevel k)
-              (fun recursors => pure recursors.env))))))
+              (fun checked => pure checked.checked.recursors.env))))))
       ({ execution.eliminationExecution.normalization.validationContext with
         env := execution.eliminationExecution.normalization.familyEnv } :
           Context) = _
@@ -1180,24 +1225,26 @@ theorem addInductiveRun
         (isKTarget execution.eliminationExecution.normalization.stats
           types.toArray)
         (fun k => ReaderT.bind
-          (declareRecursors execution.eliminationExecution.normalization.stats
+          (declareRecursorsChecked
+            execution.eliminationExecution.normalization.stats
             types.toArray elimLevel k)
-          (fun recursors => pure recursors.env))))
+          (fun checked => pure checked.checked.recursors.env))))
       ({ execution.eliminationExecution.normalization.validationContext with
         env := execution.eliminationExecution.constructorEnv } : Context) = _
   simp only [ReaderT.bind, Bind.bind]
   rw [execution.eliminationExecution.elimination.run_eq]
   simp only [Except.bind]
   rw [execution.eliminationExecution.kTarget.run_eq]
-  change (declareRecursors
+  change (declareRecursorsChecked
       execution.eliminationExecution.normalization.stats types.toArray
       execution.eliminationExecution.elimination.level
       execution.eliminationExecution.kTarget.result
       ({ execution.eliminationExecution.normalization.validationContext with
         env := execution.eliminationExecution.constructorEnv } : Context)).map
-      (·.env) = .ok execution.recursors.env
-  rw [execution.recursorsRun]
-  rfl
+      (fun checked => checked.checked.recursors.env) =
+        .ok execution.recursors.env
+  simp [declareRecursorsChecked, execution.recursorCheckRun,
+    execution.recursors_eq, Functor.map, Except.map]
 
 /-- The complete ordinary inductive transaction preserves quotient
 initialization from its input reader environment. -/
@@ -1252,6 +1299,8 @@ structure EnvironmentInductiveExecution
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool)
     (fuel : FuelConfig) (finalEnv : Environment) where
   inputCheck : Environment.checkInductiveInput env types = .ok ()
+  uniformityCheck : Environment.checkUniformInductiveOccurrences lparams
+    nparams types = .ok ()
   nested : ElimNestedInductive.Result
   nestedRun : ElimNestedInductive.runAt env fuel.inductiveFuel nparams
     lparams types = .ok nested
@@ -1304,36 +1353,42 @@ def buildExecution (env : Environment) (lparams : List Name) (nparams : Nat)
   match hinput : Environment.checkInductiveInput env types with
   | .error error => .error error
   | .ok () =>
-    match hnested : ElimNestedInductive.runAt env fuel.inductiveFuel nparams
-        lparams types with
+    match huniform : Environment.checkUniformInductiveOccurrences lparams
+        nparams types with
     | .error error => .error error
-    | .ok nested =>
-      let context := Context.forInductive env lparams isUnsafe allowPrimitive
-        fuel
-      match hflattened : NormalizationRecursorExecution.buildExecution nparams
-          nested.types nested.aux2nested.size isUnsafe context with
+    | .ok () =>
+      match hnested : ElimNestedInductive.runAt env fuel.inductiveFuel nparams
+          lparams types with
       | .error error => .error error
-      | .ok flattened =>
-        if hzero : nested.aux2nested.size = 0 then
-          .ok ⟨flattened.recursors.env, {
-            inputCheck := hinput
-            nested
-            nestedRun := hnested
-            flattened
-            flattenedRun := hflattened
-            completion := .ordinary hzero }⟩
-        else
-          match hrestore : restoreNestedEnvironment nested
-              flattened.recursors.env env types allowPrimitive
-              (if isUnsafe then .unsafe else .safe) lparams fuel with
-          | .error error => .error error
-          | .ok restoration => .ok ⟨restoration.env, {
+      | .ok nested =>
+        let context := Context.forInductive env lparams isUnsafe allowPrimitive
+          fuel
+        match hflattened : NormalizationRecursorExecution.buildExecution nparams
+            nested.types nested.aux2nested.size isUnsafe context with
+        | .error error => .error error
+        | .ok flattened =>
+          if hzero : nested.aux2nested.size = 0 then
+            .ok ⟨flattened.recursors.env, {
               inputCheck := hinput
+              uniformityCheck := huniform
               nested
               nestedRun := hnested
               flattened
               flattenedRun := hflattened
-              completion := .nested hzero restoration hrestore }⟩
+              completion := .ordinary hzero }⟩
+          else
+            match hrestore : restoreNestedEnvironment nested
+                flattened.recursors.env env types allowPrimitive
+                (if isUnsafe then .unsafe else .safe) lparams fuel with
+            | .error error => .error error
+            | .ok restoration => .ok ⟨restoration.env, {
+                inputCheck := hinput
+                uniformityCheck := huniform
+                nested
+                nestedRun := hnested
+                flattened
+                flattenedRun := hflattened
+                completion := .nested hzero restoration hrestore }⟩
 
 /-- Completeness of the full outer pipeline reduces to completeness of the
 flattened ordinary producer at the exact successful nested-elimination
@@ -1357,12 +1412,20 @@ theorem complete_of_flattened_of_nestedRun
   | ok _ =>
       rw [hinput] at success
       simp only [Bind.bind, Except.bind] at success
-      cases hnested : ElimNestedInductive.runAt env fuel.inductiveFuel
-          nparams lparams types with
+      cases huniform : Environment.checkUniformInductiveOccurrences lparams
+          nparams types with
       | error error =>
-          rw [hnested] at success
+          rw [huniform] at success
           contradiction
-      | ok nested =>
+      | ok _ =>
+        rw [huniform] at success
+        simp only [Bind.bind, Except.bind] at success
+        cases hnested : ElimNestedInductive.runAt env fuel.inductiveFuel
+            nparams lparams types with
+        | error error =>
+            rw [hnested] at success
+            contradiction
+        | ok nested =>
           rw [hnested] at success
           simp only at success
           let context := Context.forInductive env lparams isUnsafe
@@ -1387,6 +1450,7 @@ theorem complete_of_flattened_of_nestedRun
                 subst finalEnv
                 exact ⟨{
                   inputCheck := hinput
+                  uniformityCheck := huniform
                   nested
                   nestedRun := hnested
                   flattened
@@ -1406,6 +1470,7 @@ theorem complete_of_flattened_of_nestedRun
                     subst finalEnv
                     exact ⟨{
                       inputCheck := hinput
+                      uniformityCheck := huniform
                       nested
                       nestedRun := hnested
                       flattened
@@ -1500,9 +1565,9 @@ theorem addInductiveRun
     Environment.addInductive env lparams nparams types isUnsafe
       allowPrimitive fuel = .ok finalEnv := by
   cases execution with
-  | mk inputCheck nested nestedRun flattened flattenedRun completion =>
+  | mk inputCheck uniformityCheck nested nestedRun flattened flattenedRun completion =>
     unfold Environment.addInductive
-    rw [inputCheck, nestedRun]
+    rw [inputCheck, uniformityCheck, nestedRun]
     simp only [Bind.bind, Except.bind]
     rw [flattened.addInductiveRun flattenedRun]
     cases completion with
@@ -1520,7 +1585,7 @@ theorem quotInit_eq
       isUnsafe allowPrimitive fuel finalEnv) :
     finalEnv.quotInit = env.quotInit := by
   cases execution with
-  | mk inputCheck nested nestedRun flattened flattenedRun completion =>
+  | mk inputCheck _uniformityCheck nested nestedRun flattened flattenedRun completion =>
       cases completion with
       | ordinary _ =>
           simpa [Context.forInductive] using flattened.quotInit_eq flattenedRun
@@ -1553,7 +1618,7 @@ theorem restoration_of_numNested_ne
         .ok restoration ∧
       finalEnv = restoration.env := by
   cases execution with
-  | mk inputCheck nested nestedRun flattened flattenedRun completion =>
+  | mk inputCheck _uniformityCheck nested nestedRun flattened flattenedRun completion =>
     cases completion with
     | ordinary zero => contradiction
     | nested _ restoration restorationRun =>

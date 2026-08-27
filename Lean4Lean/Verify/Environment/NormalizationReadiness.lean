@@ -27,9 +27,9 @@ theorem declarationTraceMultiConstructorReadiness
     (multi : ∀ info ∈ infos, info.ctors.length ≠ 1)
     (mapWF : kernelEnv.constants.WF)
     (preOrd : env.Ordered)
-    (preProjection : ProjectionReady kernelEnv env)
+    (preProjection : ProjectionResolutionReady kernelEnv env)
     (preEta : StructureEtaReady kernelEnv env) :
-    ProjectionReady finalKernelEnv blockEnv ∧
+    ProjectionResolutionReady finalKernelEnv blockEnv ∧
       StructureEtaReady finalKernelEnv blockEnv := by
   induction declare generalizing env blockEnv raws with
   | nil =>
@@ -86,9 +86,9 @@ theorem declarationTraceConstructorAbsentReadiness
       finalKernelEnv.find? ctor = none)
     (mapWF : kernelEnv.constants.WF)
     (preOrd : env.Ordered)
-    (preProjection : ProjectionReady kernelEnv env)
+    (preProjection : ProjectionResolutionReady kernelEnv env)
     (preEta : StructureEtaReady kernelEnv env) :
-    ProjectionReady finalKernelEnv blockEnv ∧
+    ProjectionResolutionReady finalKernelEnv blockEnv ∧
       StructureEtaReady finalKernelEnv blockEnv := by
   induction declare generalizing env blockEnv raws with
   | nil =>
@@ -138,7 +138,8 @@ theorem declarationTraceConstructorAbsentReadiness
           have le : env ≤ nextEnv := VEnv.addConst_le added
           have nextOrd : nextEnv.Ordered := .const preOrd head added
           have postReadiness :
-              ProjectionReady (kernelEnv.add (.inductInfo info)) nextEnv ∧
+              ProjectionResolutionReady
+                  (kernelEnv.add (.inductInfo info)) nextEnv ∧
                 StructureEtaReady (kernelEnv.add (.inductInfo info))
                   nextEnv := by
             by_cases singleton : info.ctors.length = 1

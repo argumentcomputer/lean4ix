@@ -2208,7 +2208,7 @@ to the replacement.
 At each publish or ix pin boundary:
 
 1. Refresh both baseline hashes and
-   `git log upstream/master..jcb/formalization2`; do not use a detached `HEAD` as the
+   `git log upstream/master..jcb/formalization3`; do not use a detached `HEAD` as the
    published-fork baseline.
 2. Add an entry before landing any new semantic/API delta.
 3. Record the upstream issue or PR as soon as one exists.

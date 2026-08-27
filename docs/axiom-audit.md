@@ -164,7 +164,7 @@ At this audit baseline the compiled report is:
 The exact union has 325 leaves: 3 logical-baseline axioms, `sorryAx`, 6
 deliberately rejected fixture declarations, 28 custom project contracts, and
 287 compiler-generated `native_decide`/`bv_decide` certificates. The direct
-sorry frontier remains exactly 15 declarations, including the six recovered
+sorry frontier remains exactly 14 declarations, including the six recovered
 negative fixtures.
 
 These counts are descriptive. The build does not merely compare counts: it

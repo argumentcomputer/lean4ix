@@ -133,6 +133,34 @@ theorem ClosedN.liftN_eq (self : ClosedN e k) (h : k ≤ j) : liftN n e j = e :=
   | lam _ _ ih1 ih2 | forallE _ _ ih1 ih2 =>
     exact ⟨ih1 self.1 h, ih2 self.2 (Nat.succ_le_succ h)⟩
 
+/-- If inserting one variable above a cutoff leaves an expression unchanged,
+then every free de Bruijn index lies below that cutoff. -/
+theorem closedN_of_liftN_one_eq :
+    ∀ (expression : VExpr) (cutoff : Nat),
+      expression.liftN 1 cutoff = expression →
+        expression.ClosedN cutoff
+  | .bvar index, cutoff, equality => by
+      by_cases below : index < cutoff
+      · exact below
+      · simp [VExpr.liftN, liftVar, below] at equality
+  | .sort _, _, _ => trivial
+  | .const _ _, _, _ => trivial
+  | .app function argument, cutoff, equality => by
+      simp only [VExpr.liftN] at equality
+      injection equality with functionEq argumentEq
+      exact ⟨closedN_of_liftN_one_eq function cutoff functionEq,
+        closedN_of_liftN_one_eq argument cutoff argumentEq⟩
+  | .lam domain body, cutoff, equality => by
+      simp only [VExpr.liftN] at equality
+      injection equality with domainEq bodyEq
+      exact ⟨closedN_of_liftN_one_eq domain cutoff domainEq,
+        closedN_of_liftN_one_eq body (cutoff + 1) bodyEq⟩
+  | .forallE domain body, cutoff, equality => by
+      simp only [VExpr.liftN] at equality
+      injection equality with domainEq bodyEq
+      exact ⟨closedN_of_liftN_one_eq domain cutoff domainEq,
+        closedN_of_liftN_one_eq body (cutoff + 1) bodyEq⟩
+
 theorem ClosedN.lift_eq (self : ClosedN e) : lift e = e := self.liftN_eq (Nat.zero_le _)
 
 protected theorem ClosedN.liftN (self : ClosedN e k) : ClosedN (e.liftN n j) (k+n) := by

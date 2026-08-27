@@ -502,11 +502,128 @@ theorem inferProjParams.WF {c : VContext} {s : VState}
       | bvar | fvar | mvar | sort | const | app | lam | letE | lit |
           mdata | proj => exact invalidProj.WF
 
+/-- WHNF preserves a source Pi syntactically.  Projection support owns that
+source shape, so sparse runtime checking does not need to rediscover it from
+the translated expression. -/
+theorem whnf.WF_forall {c : VContext} {s : VState} :
+    (whnf (.forallE name domain body binderInfo)).WF c s fun out _ =>
+      out = .forallE name domain body binderInfo := by
+  intro methods methodsWF
+  exact methodsWF.whnf_forall
+
+/-- Consume constructor parameters in lockstep with a producer-owned
+projection spine. -/
+theorem inferProjParams.WF_support {c : VContext} {s : VState}
+    (hargs : args.Forall₂ (fun _ _ => True) args')
+    (support : ProjectionSpineSupport (args.length + remaining) r target) :
+    (inferProjParams proj args r).WF c s fun out _ =>
+      ∃ cursor, target.consumeForalls? args' = some cursor ∧
+        ProjectionSpineSupport remaining out cursor := by
+  induction hargs generalizing r target s with
+  | nil =>
+      simp only [List.length_nil, Nat.zero_add] at support
+      exact .pure ⟨target, rfl, support⟩
+  | @cons arg arg' args args' _ hargs ih =>
+      have support' : ProjectionSpineSupport
+          (args.length + remaining + 1) r target := by
+        have countEq : args.length + 1 + remaining =
+            args.length + remaining + 1 := by omega
+        exact countEq ▸ support
+      cases support' with
+      | @cons _ sourceBody targetBody sourceName sourceDomain
+          sourceBinderInfo targetDomain skip tail =>
+        simp only [inferProjParams]
+        refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+        subst out
+        have nextSupport := tail.instN
+          (sourceArgument := arg) (targetArgument := arg') (depth := 0)
+        simpa only [Expr.instantiate1_eq, VExpr.consumeForalls?] using
+          (ih (s := nextState) nextSupport)
+
+/-- Consume the typed constructor-parameter prefix of a split projection
+support witness.  Once all parameters have been instantiated, the exact
+field-only dependency spine is exposed. -/
+theorem inferProjParams.WF_fieldSupport {c : VContext} {s : VState}
+    (hargs : args.Forall₂ (fun _ _ => True) args')
+    (support : ProjectionFieldSpineSupport args.length fieldCount r target) :
+    (inferProjParams proj args r).WF c s fun out _ =>
+      ∃ cursor, target.consumeForalls? args' = some cursor ∧
+        ProjectionSpineSupport fieldCount out cursor := by
+  induction hargs generalizing r target s with
+  | nil =>
+      cases support with
+      | fields fieldSupport => exact .pure ⟨target, rfl, fieldSupport⟩
+  | @cons arg arg' args args' _ hargs ih =>
+      cases support with
+      | @param _ _ sourceBody targetBody sourceName sourceDomain
+          sourceBinderInfo targetDomain tail =>
+        simp only [inferProjParams]
+        refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+        subst out
+        have nextSupport := tail.instN
+          (sourceArgument := arg) (targetArgument := arg') (depth := 0)
+        simpa only [Expr.instantiate1_eq, VExpr.consumeForalls?] using
+          (ih (s := nextState) nextSupport)
+
+/-- The ordinary typing proof and the producer-owned projection support refer
+to the same deterministic parameter-consumption execution. -/
+theorem inferProjParams.WF_withSupport {c : VContext} {s : VState}
+    (hargs : args.Forall₂ (c.TrExprS · ·) args')
+    (hrBelow : c.FVarsBelow proj r)
+    (hargsBelow : ∀ arg ∈ args, c.FVarsBelow proj arg)
+    (hr : c.TrExpr r target)
+    (hspine : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+      target args' result)
+    (support : ProjectionSpineSupport
+      (args.length + remaining) r target) :
+    (inferProjParams proj args r).WF c s fun out _ =>
+      c.FVarsBelow proj out ∧ c.TrExpr out result ∧
+        ProjectionSpineSupport remaining out result := by
+  have erased : args.Forall₂ (fun _ _ => True) args' :=
+    Lean4Lean.List.Forall₂.imp (fun _ _ _ => trivial) hargs
+  refine ((inferProjParams.WF hargs hrBelow hargsBelow hr hspine).and_const
+    (inferProjParams.WF_support erased support)).mono
+      fun out finalState stateLE ⟨⟨below, translation⟩,
+        cursor, consumed, cursorSupport⟩ => ?_
+  have expected := hspine.toSparse.consumeForalls_eq
+  have cursorEq : cursor = result :=
+    Option.some.inj (consumed.symm.trans expected)
+  subst cursor
+  exact ⟨below, translation, cursorSupport⟩
+
+/-- Typed parameter inference and the split producer contract describe the
+same deterministic execution.  Parameter typing supplies the translated
+result; the split witness supplies dependency support only for the remaining
+field suffix. -/
+theorem inferProjParams.WF_withFieldSupport {c : VContext} {s : VState}
+    (hargs : args.Forall₂ (c.TrExprS · ·) args')
+    (hrBelow : c.FVarsBelow proj r)
+    (hargsBelow : ∀ arg ∈ args, c.FVarsBelow proj arg)
+    (hr : c.TrExpr r target)
+    (hspine : c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+      target args' result)
+    (support : ProjectionFieldSpineSupport
+      args.length fieldCount r target) :
+    (inferProjParams proj args r).WF c s fun out _ =>
+      c.FVarsBelow proj out ∧ c.TrExpr out result ∧
+        ProjectionSpineSupport fieldCount out result := by
+  have erased : args.Forall₂ (fun _ _ => True) args' :=
+    Lean4Lean.List.Forall₂.imp (fun _ _ _ => trivial) hargs
+  refine ((inferProjParams.WF hargs hrBelow hargsBelow hr hspine).and_const
+    (inferProjParams.WF_fieldSupport erased support)).mono
+      fun out finalState stateLE ⟨⟨below, translation⟩,
+        cursor, consumed, cursorSupport⟩ => ?_
+  have expected := hspine.toSparse.consumeForalls_eq
+  have cursorEq : cursor = result :=
+    Option.some.inj (consumed.symm.trans expected)
+  subst cursor
+  exact ⟨below, translation, cursorSupport⟩
+
 theorem inferProjFields.WF {c : VContext} {s : VState}
-    {view : VStructureView} {levels : List VLevel}
+    {view : VProjectionView} {levels : List VLevel}
     {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
     (hstruct : c.TrExprS struct major)
-    (hview : view.WF c.venv)
+    (hview : view.LayoutWF c.venv)
     (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
     (hlevelsLength : levels.length = view.uvars)
     (hparamsLength : params.length = view.nparams)
@@ -574,7 +691,8 @@ theorem inferProjFields.WF {c : VContext} {s : VState}
       subst field'
       have hprojector := hprograms c.Δwf hlevels hlevelsLength
         hparamsLength hparamsSpine hcode
-      have hprojSem : c.venv.TrProj c.lparams.length c.vlctx.toCtx
+      have hprojSem : VProjectionView.TrProj c.venv c.lparams.length
+          c.vlctx.toCtx
           view levels params fieldIdx major (.app code.projector major) := {
         viewWF := hview
         levelsWF := hlevels
@@ -585,7 +703,8 @@ theorem inferProjFields.WF {c : VContext} {s : VState}
         program := ⟨code, hcode, rfl, hprojector⟩ }
       have hprojStrict : c.TrExprS (.proj typeName fieldIdx struct)
           (.app code.projector major) :=
-        .proj hstruct ⟨view, levels, params, hname, hprojSem⟩
+        .proj hstruct ⟨.ordinary view, levels, params, hname,
+          .ordinary hprojSem⟩
       obtain ⟨r', hrS, hrEq⟩ := hr
       refine (whnf.WF hrS).bind fun out nextState _
         ⟨houtBelow, ⟨out', hout, houtEq⟩⟩ => ?_
@@ -636,6 +755,1545 @@ theorem inferProjFields.WF {c : VContext} {s : VState}
       | bvar | fvar | mvar | sort | const | app | lam | letE | lit |
           mdata | proj => exact invalidProj.WF
 
+/-- Dense restored counterpart of `inferProjFields.WF`.  The operational
+program family supplies every restored projector, while the retained
+constructor layout identifies its result with the corresponding source
+field. -/
+theorem inferProjFields.WF_restored {c : VContext} {s : VState}
+    {view : VRestoredBlockStructureView} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
+    (hstruct : c.TrExprS struct major)
+    (hview : view.ConstructorParameterLayoutWF c.venv)
+    (codeNaturality : view.flatView.OperationalCodeNaturality)
+    (recEntriesClosed :
+      VInductDecl.RestoreEntriesClosed view.nested.recEntries)
+    (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
+    (hlevelsLength : levels.length = view.uvars)
+    (hparamsLength : params.length = view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (view.familyType.instL levels) params (.sort resultLevel))
+    (hprograms : view.OperationalProgramsWF c.venv)
+    (hname : view.name = typeName)
+    (hmajor : c.HasType major (view.structureType levels params))
+    (hrBelow : c.FVarsBelow proj r)
+    (hstructBelow : c.FVarsBelow proj struct)
+    (hbound : fieldIdx + count <
+      (view.specializedFields levels params).length)
+    (hr : c.TrExpr r cursor)
+    (hcursor : VExpr.consumeForalls?
+      (VExpr.forallN (view.specializedFields levels params) tailResult)
+      (view.operationalProjectionArgs levels params fieldIdx major) =
+        some cursor) :
+    (inferProjFields proj typeName struct maybePropType fieldIdx count r).WF
+      c s fun out _ =>
+        ∃ cursor',
+          VExpr.consumeForalls?
+            (VExpr.forallN (view.specializedFields levels params) tailResult)
+            (view.operationalProjectionArgs levels params
+              (fieldIdx + count) major) = some cursor' ∧
+          c.FVarsBelow proj out ∧ c.TrExpr out cursor' := by
+  induction count generalizing s r cursor fieldIdx with
+  | zero =>
+      simp only [inferProjFields, Nat.add_zero]
+      exact .pure ⟨cursor, hcursor, hrBelow, hr⟩
+  | succ count ih =>
+      simp only [inferProjFields]
+      have hfieldIdx : fieldIdx <
+          (view.specializedFields levels params).length := by omega
+      have hcodeIdx : fieldIdx <
+          (view.operationalProjectionCodes levels params).length := by
+        simpa using hfieldIdx
+      let code := (view.operationalProjectionCodes levels params)[fieldIdx]
+      have hcode :
+          (view.operationalProjectionCodes levels params)[fieldIdx]? =
+            some code :=
+        List.getElem?_eq_getElem hcodeIdx
+      have hargsLength :
+          (view.operationalProjectionArgs levels params fieldIdx major).length =
+            fieldIdx :=
+        view.operationalProjectionArgs_length levels params fieldIdx major
+          (Nat.le_of_lt hcodeIdx)
+      obtain ⟨field, semanticBody, hfield, hconsume⟩ :=
+        VExpr.consumeForalls?_forallN_domain
+          (view.specializedFields levels params) tailResult
+          (view.operationalProjectionArgs levels params fieldIdx major)
+          (by simpa [hargsLength] using hfieldIdx)
+      rw [hargsLength] at hfield
+      have hcursorShape : cursor =
+          .forallE
+            (field.instRevAt
+              (view.operationalProjectionArgs levels params fieldIdx major) 0)
+            semanticBody :=
+        Option.some.inj (hcursor.symm.trans hconsume)
+      subst cursor
+      have hprojector := hprograms c.Δwf hlevels hlevelsLength
+        hparamsLength hparamsSpine hcode
+      obtain ⟨field', _projectorDomain, typeBody, hfield', htypeFn,
+          hprojectorField⟩ :=
+        hview.toLayoutWF.operationalProjector_hasType_field_of_type
+          c.Ewf.conversionRegular recEntriesClosed hlevelsLength c.Δwf
+          hcode hprojector hmajor
+      have hfieldEq : field' = field :=
+        Option.some.inj (hfield'.symm.trans hfield)
+      subst field'
+      have hprojSem : VRestoredBlockStructureView.TrProj c.venv
+          c.lparams.length c.vlctx.toCtx view levels params fieldIdx major
+          (.app code.projector major) := {
+        viewWF := hview.toFamilyLayoutWF
+        parameterLayout := hview
+        codeNaturality := codeNaturality
+        recEntriesClosed := recEntriesClosed
+        levelsWF := hlevels
+        levels_length := hlevelsLength
+        params_length := hparamsLength
+        paramsSpine := hparamsSpine
+        majorType := hmajor
+        program := ⟨code, hcode, rfl, hprojector⟩ }
+      have hprojStrict : c.TrExprS (.proj typeName fieldIdx struct)
+          (.app code.projector major) :=
+        .proj hstruct ⟨.restored view, levels, params, hname,
+          .restored hprojSem⟩
+      obtain ⟨r', hrS, hrEq⟩ := hr
+      refine (whnf.WF hrS).bind fun out nextState _
+        ⟨houtBelow, ⟨out', hout, houtEq⟩⟩ => ?_
+      have houtEq := houtEq.trans c.Ewf c.Δwf hrEq
+      cases out with
+      | forallE name dom body bi =>
+        let .forallE hdomTy hbodyTy hdom hbody := hout
+        have hforallEq := houtEq.forallE_inv c.Ewf c.Δwf
+        obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+        have hprojectorField' := hprojectorField.defeqU_r
+          c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
+        have hnext : c.TrExpr
+            (body.instantiate1 (.proj typeName fieldIdx struct))
+            (semanticBody.inst (.app code.projector major)) := by
+          simpa only [Expr.instantiate1_eq] using
+            (.inst c.Ewf c.Δwf hprojectorField'
+              ⟨_, hbody, _, hbodyEq⟩
+              (hprojStrict.trExpr c.Ewf.ordered c.Δwf))
+        have hnextBelow : c.FVarsBelow proj
+            (body.instantiate1 (.proj typeName fieldIdx struct)) := by
+          intro P hP hproj
+          have houtFVars := (hrBelow.trans houtBelow) P hP hproj
+          have hfieldProj : FVarsIn P
+              (.proj typeName fieldIdx struct) := by
+            simpa [FVarsIn] using hstructBelow P hP hproj
+          simpa only [Expr.instantiate1_eq] using
+            houtFVars.2.instantiate1 hfieldProj
+        have hconsumeNext : VExpr.consumeForalls?
+            (VExpr.forallN (view.specializedFields levels params) tailResult)
+            (view.operationalProjectionArgs levels params
+              (fieldIdx + 1) major) =
+              some (semanticBody.inst (.app code.projector major)) := by
+          rw [view.operationalProjectionArgs_succ levels params fieldIdx major
+            hcode]
+          rw [VExpr.consumeForalls?_append, hconsume]
+          rfl
+        have hbound' : fieldIdx + 1 + count <
+            (view.specializedFields levels params).length := by omega
+        have hrec (recState : VState) :=
+          ih (s := recState) hnextBelow hbound' hnext hconsumeNext
+        simp only
+        split
+        · refine (isProp.WF hdom).bind fun _ propState _ _ => ?_
+          split
+          · exact invalidProj.WF
+          · simpa only [pure_bind, Nat.add_assoc, Nat.add_left_comm,
+              Nat.add_comm] using hrec propState
+        · simpa only [pure_bind, Nat.add_assoc, Nat.add_left_comm,
+            Nat.add_comm] using hrec nextState
+      | bvar | fvar | mvar | sort | const | app | lam | letE | lit |
+          mdata | proj => exact invalidProj.WF
+
+theorem inferProjFields.WF_runtimeBlock {c : VContext} {s : VState}
+    {view : VBlockStructureView} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
+    {majorCursor constructorCursor : VExpr}
+    (hstruct : c.TrExprS struct major)
+    (hview : view.LayoutWF c.venv)
+    (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
+    (hlevelsLength : levels.length = view.uvars)
+    (hparamsLength : params.length = view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (view.familyType.instL levels) params (.sort resultLevel))
+    (hname : view.name = typeName)
+    (hmajor : c.HasType major (view.structureType levels params))
+    (hrBelow : c.FVarsBelow proj r)
+    (hstructBelow : c.FVarsBelow proj struct)
+    (hbound : fieldIdx + count <
+      (view.specializedFields levels params).length)
+    (hr : c.TrExpr r cursor)
+    (hcursor : VExpr.consumeForalls?
+      (VExpr.forallN (view.specializedFields levels params) tailResult)
+      (view.operationalProjectionArgs levels params fieldIdx major) =
+        some cursor)
+    (runtime : view.OperationalRuntimePrefix c.venv c.lparams.length
+      c.vlctx.toCtx levels params fieldIdx)
+    (semanticSupport : ProjectionSpineSupport (count + 1) r cursor)
+    (majorSupport : ProjectionSpineSupport (count + 1) r majorCursor)
+    (hmajorCursor :
+      (VExpr.forallN
+        (view.specializedFields levels (params.map (VExpr.liftN 1)))
+        (.sort .zero)).consumeForalls?
+          (view.operationalProjectionArgs levels
+            (params.map (VExpr.liftN 1)) fieldIdx (.bvar 0)) =
+        some majorCursor)
+    (constructorSupport :
+      ProjectionSpineSupport (count + 1) r constructorCursor)
+    (hconstructorCursor :
+      let fields := view.specializedFields levels params
+      let fieldCount := fields.length
+      (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+        (.sort .zero)).consumeForalls?
+          (((view.operationalProjectionCodes levels params).take fieldIdx).map
+            fun prior => .app (prior.projector.liftN fieldCount)
+              (view.projectionConstructorApp levels params fields)) =
+        some constructorCursor)
+    (hsmallMaybe : view.generation.elimination = .small →
+      maybePropType = true) :
+    (inferProjFields proj typeName struct maybePropType fieldIdx count r).WF
+      c s fun out _ =>
+        ∃ cursor' majorCursor' constructorCursor',
+          VExpr.consumeForalls?
+            (VExpr.forallN (view.specializedFields levels params) tailResult)
+            (view.operationalProjectionArgs levels params
+              (fieldIdx + count) major) = some cursor' ∧
+          (VExpr.forallN
+            (view.specializedFields levels (params.map (VExpr.liftN 1)))
+            (.sort .zero)).consumeForalls?
+              (view.operationalProjectionArgs levels
+                (params.map (VExpr.liftN 1)) (fieldIdx + count) (.bvar 0)) =
+            some majorCursor' ∧
+          (let fields := view.specializedFields levels params
+           let fieldCount := fields.length
+           (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+             (.sort .zero)).consumeForalls?
+               (((view.operationalProjectionCodes levels params).take
+                 (fieldIdx + count)).map fun prior =>
+                   .app (prior.projector.liftN fieldCount)
+                     (view.projectionConstructorApp levels params fields)) =
+             some constructorCursor') ∧
+          c.FVarsBelow proj out ∧ c.TrExpr out cursor' ∧
+          ProjectionSpineSupport 1 out cursor' ∧
+          ProjectionSpineSupport 1 out majorCursor' ∧
+          ProjectionSpineSupport 1 out constructorCursor' ∧
+          view.OperationalRuntimePrefix c.venv c.lparams.length
+            c.vlctx.toCtx levels params (fieldIdx + count) := by
+  induction count generalizing s r cursor majorCursor constructorCursor fieldIdx with
+  | zero =>
+      simp only [inferProjFields, Nat.add_zero]
+      exact .pure ⟨cursor, majorCursor, constructorCursor, hcursor,
+        hmajorCursor, hconstructorCursor, hrBelow, hr, semanticSupport,
+        majorSupport, constructorSupport, runtime⟩
+  | succ count ih =>
+      simp only [inferProjFields]
+      have hfieldIdx : fieldIdx <
+          (view.specializedFields levels params).length := by omega
+      have hcodeIdx : fieldIdx <
+          (view.operationalProjectionCodes levels params).length := by
+        simpa using hfieldIdx
+      let code := (view.operationalProjectionCodes levels params)[fieldIdx]
+      have hcode :
+          (view.operationalProjectionCodes levels params)[fieldIdx]? =
+            some code :=
+        List.getElem?_eq_getElem hcodeIdx
+      cases semanticSupport with
+      | @cons semanticRemaining sourceBody semanticBody sourceName sourceDomain
+          sourceBinderInfo semanticDomain semanticSkip semanticTail =>
+        cases majorSupport with
+        | @cons majorRemaining _ majorBody _ _ _ majorDomain majorSkip majorTail =>
+          cases constructorSupport with
+          | @cons constructorRemaining _ constructorBody _ _ _ constructorDomain
+              constructorSkip constructorTail =>
+            refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+            subst out
+            obtain ⟨strictTarget, strictTranslation, targetEq⟩ := hr
+            let .forallE hdomTy hbodyTy hdom hbody := strictTranslation
+            have hforallEq := targetEq.forallE_inv c.Ewf c.Δwf
+            obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+            have hbodyTranslation : TrExpr c.venv c.lparams
+                ((none, .vlam _) :: c.vlctx) sourceBody semanticBody :=
+              ⟨_, hbody, _, hbodyEq⟩
+            have bodyClosedOne : Closed sourceBody 1 := by
+              have closed := hbody.closed
+              simpa only [VLCtx.bvars, c.mlctx.noBV, Nat.zero_add] using closed
+            have hargsLength :
+                (view.operationalProjectionArgs levels params fieldIdx major).length =
+                  fieldIdx :=
+              view.operationalProjectionArgs_length levels params fieldIdx major
+                (Nat.le_of_lt hcodeIdx)
+            obtain ⟨field, semanticTailBody, hfield, hconsume⟩ :=
+              VExpr.consumeForalls?_forallN_domain
+                (view.specializedFields levels params) tailResult
+                (view.operationalProjectionArgs levels params fieldIdx major)
+                (by simpa [hargsLength] using hfieldIdx)
+            rw [hargsLength] at hfield
+            have hsemanticDomain : semanticDomain =
+                field.instRevAt
+                  (view.operationalProjectionArgs levels params fieldIdx major) 0 := by
+              have cursorShape :
+                  (.forallE semanticDomain semanticBody : VExpr) =
+                    .forallE
+                      (field.instRevAt
+                        (view.operationalProjectionArgs levels params fieldIdx major) 0)
+                      semanticTailBody :=
+                Option.some.inj (hcursor.symm.trans hconsume)
+              injection cursorShape
+            have hsemanticBody : semanticBody = semanticTailBody := by
+              have cursorShape :
+                  (.forallE semanticDomain semanticBody : VExpr) =
+                    .forallE
+                      (field.instRevAt
+                        (view.operationalProjectionArgs levels params fieldIdx major) 0)
+                      semanticTailBody :=
+                Option.some.inj (hcursor.symm.trans hconsume)
+              injection cursorShape
+            subst semanticTailBody
+            cases dependency : sourceBody.hasLooseBVar 0 with
+            | false =>
+              simp only [dependency, Bool.false_and, Bool.false_eq_true,
+                if_false]
+              have structuralClosed :
+                  sourceBody.hasLooseBVar' 0 = false := by
+                rw [← Expr.hasLooseBVar_eq]
+                exact dependency
+              have bodyClosedZero : Closed sourceBody 0 :=
+                bodyClosedOne.zero_of_one_of_hasLooseBVar_false structuralClosed
+              let sourceArgument : Expr :=
+                .proj typeName fieldIdx struct
+              let semanticArgument : VExpr := .app code.projector major
+              let majorArgument : VExpr :=
+                (code.liftN 1 0).projector.app (.bvar 0)
+              let fields := view.specializedFields levels params
+              let fieldCount := fields.length
+              let constructorArgument : VExpr :=
+                (code.liftN fieldCount 0).projector.app
+                  (view.projectionConstructorApp levels params fields)
+              have hnext : c.TrExpr
+                  (sourceBody.instantiate1 sourceArgument)
+                  (semanticBody.inst semanticArgument) := by
+                simpa only [Expr.instantiate1_eq] using
+                  Lean4Lean.TrExpr.instantiate1_skipped c.Ewf c.Δwf hdomTy
+                    hbodyTranslation bodyClosedZero
+                    (semanticSkip structuralClosed) sourceArgument semanticArgument
+              have hnextBelow : c.FVarsBelow proj
+                  (sourceBody.instantiate1 sourceArgument) := by
+                rw [Expr.instantiate1_eq,
+                  Expr.instantiate1_eq_self bodyClosedZero.looseBVarRange_zero]
+                intro P hP hproj
+                exact (hrBelow P hP hproj).2
+              have semanticSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (semanticBody.inst semanticArgument) := by
+                simpa only [sourceArgument, semanticArgument,
+                  Expr.instantiate1_eq] using
+                  semanticTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := semanticArgument) (depth := 0)
+              have majorSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (majorBody.inst majorArgument) := by
+                simpa only [sourceArgument, majorArgument,
+                  Expr.instantiate1_eq] using
+                  majorTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := majorArgument) (depth := 0)
+              have constructorSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (constructorBody.inst constructorArgument) := by
+                simpa only [sourceArgument, constructorArgument,
+                  Expr.instantiate1_eq] using
+                  constructorTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := constructorArgument) (depth := 0)
+              have runtimeNext := runtime.snocSkip hview hparamsLength
+                hmajorCursor (majorSkip structuralClosed)
+                hconstructorCursor (constructorSkip structuralClosed) hcode
+              have hcursorNext : VExpr.consumeForalls?
+                  (VExpr.forallN (view.specializedFields levels params) tailResult)
+                  (view.operationalProjectionArgs levels params
+                    (fieldIdx + 1) major) =
+                    some (semanticBody.inst semanticArgument) := by
+                rw [view.operationalProjectionArgs_succ levels params
+                  fieldIdx major hcode]
+                rw [VExpr.consumeForalls?_append, hcursor]
+                rfl
+              let paramsLift := params.map (VExpr.liftN 1)
+              have hcodesLift := hview.operationalProjectionCodes_liftN
+                levels params hparamsLength 1 0
+              have hcodeLift :
+                  (view.operationalProjectionCodes levels paramsLift)[fieldIdx]? =
+                    some (code.liftN 1 0) := by
+                rw [← hcodesLift, List.getElem?_map, hcode]
+                rfl
+              have hmajorCursorNext :
+                  (VExpr.forallN
+                    (view.specializedFields levels (params.map (VExpr.liftN 1)))
+                    (.sort .zero)).consumeForalls?
+                      (view.operationalProjectionArgs levels
+                        (params.map (VExpr.liftN 1)) (fieldIdx + 1) (.bvar 0)) =
+                    some (majorBody.inst majorArgument) := by
+                rw [view.operationalProjectionArgs_succ levels paramsLift
+                  fieldIdx (.bvar 0) hcodeLift]
+                rw [VExpr.consumeForalls?_append, hmajorCursor]
+                rfl
+              have hconstructorCursorNext :
+                  (let fields := view.specializedFields levels params
+                   let fieldCount := fields.length
+                   (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                     (.sort .zero)).consumeForalls?
+                       (((view.operationalProjectionCodes levels params).take
+                         (fieldIdx + 1)).map fun prior =>
+                           .app (prior.projector.liftN fieldCount)
+                             (view.projectionConstructorApp levels params fields)) =
+                     some (constructorBody.inst constructorArgument)) := by
+                simp only [List.take_add_one, hcode, Option.toList_some,
+                  List.map_append, List.map_singleton,
+                  VExpr.consumeForalls?_append, hconstructorCursor,
+                  constructorArgument, fields, fieldCount]
+                rfl
+              have hboundNext : fieldIdx + 1 + count <
+                  (view.specializedFields levels params).length := by omega
+              have hrec := ih (s := nextState) hnextBelow hboundNext hnext
+                hcursorNext runtimeNext semanticSupportNext majorSupportNext
+                hmajorCursorNext constructorSupportNext hconstructorCursorNext
+              simpa only [pure_bind, Nat.add_assoc, Nat.add_left_comm,
+                Nat.add_comm] using hrec
+            | true =>
+              let sourceArgument : Expr :=
+                .proj typeName fieldIdx struct
+              let semanticArgument : VExpr := .app code.projector major
+              let majorArgument : VExpr :=
+                (code.liftN 1 0).projector.app (.bvar 0)
+              let fields := view.specializedFields levels params
+              let fieldCount := fields.length
+              let constructorArgument : VExpr :=
+                (code.liftN fieldCount 0).projector.app
+                  (view.projectionConstructorApp levels params fields)
+              have continueWithProjector (continuationState : VState)
+                  (hprojector : c.HasType code.projector
+                    (.forallE (view.structureType levels params)
+                      (.app code.typeFn.lift (.bvar 0)))) :
+                  (inferProjFields proj typeName struct maybePropType
+                    (fieldIdx + 1) count
+                    (sourceBody.instantiate1 sourceArgument)).WF
+                    c continuationState fun out _ =>
+                      ∃ cursor' majorCursor' constructorCursor',
+                        VExpr.consumeForalls?
+                          (VExpr.forallN
+                            (view.specializedFields levels params) tailResult)
+                          (view.operationalProjectionArgs levels params
+                            (fieldIdx + 1 + count) major) = some cursor' ∧
+                        (VExpr.forallN
+                          (view.specializedFields levels
+                            (params.map (VExpr.liftN 1)))
+                          (.sort .zero)).consumeForalls?
+                            (view.operationalProjectionArgs levels
+                              (params.map (VExpr.liftN 1))
+                              (fieldIdx + 1 + count) (.bvar 0)) =
+                          some majorCursor' ∧
+                        (let fields := view.specializedFields levels params
+                         let fieldCount := fields.length
+                         (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                           (.sort .zero)).consumeForalls?
+                             (((view.operationalProjectionCodes levels params).take
+                               (fieldIdx + 1 + count)).map fun prior =>
+                                 .app (prior.projector.liftN fieldCount)
+                                   (view.projectionConstructorApp levels params fields)) =
+                           some constructorCursor') ∧
+                        c.FVarsBelow proj out ∧ c.TrExpr out cursor' ∧
+                        ProjectionSpineSupport 1 out cursor' ∧
+                        ProjectionSpineSupport 1 out majorCursor' ∧
+                        ProjectionSpineSupport 1 out constructorCursor' ∧
+                        view.OperationalRuntimePrefix c.venv c.lparams.length
+                          c.vlctx.toCtx levels params
+                            (fieldIdx + 1 + count) := by
+                obtain ⟨projectorField, typeBody, hprojectorField,
+                    htypeFn, hprojectorFieldType⟩ :=
+                  view.operationalProjector_hasType_field_of_type
+                    c.Ewf.conversionRegular c.Δwf hcode hprojector hmajor
+                have hprojectorFieldEq : projectorField = field :=
+                  Option.some.inj (hprojectorField.symm.trans hfield)
+                subst projectorField
+                rw [← hsemanticDomain] at hprojectorFieldType
+                have hprojectorFieldType' :=
+                  hprojectorFieldType.defeqU_r c.Ewf c.Δwf
+                    ⟨_, hdomEq.symm⟩
+                have hprojSem : VProjectionView.TrProj c.venv
+                    c.lparams.length c.vlctx.toCtx (.block view)
+                    levels params fieldIdx major semanticArgument := {
+                  viewWF := VProjectionView.LayoutWF.ofBlock hview
+                  levelsWF := hlevels
+                  levels_length := hlevelsLength
+                  params_length := hparamsLength
+                  paramsSpine := hparamsSpine
+                  majorType := hmajor
+                  program := ⟨code, hcode, rfl, hprojector⟩ }
+                have hprojStrict : c.TrExprS sourceArgument semanticArgument :=
+                  .proj hstruct ⟨.ordinary (.block view), levels, params,
+                    hname, .ordinary hprojSem⟩
+                have hnext : c.TrExpr
+                    (sourceBody.instantiate1 sourceArgument)
+                    (semanticBody.inst semanticArgument) := by
+                  simpa only [sourceArgument, semanticArgument,
+                    Expr.instantiate1_eq] using
+                    (.inst c.Ewf c.Δwf hprojectorFieldType'
+                      hbodyTranslation
+                      (hprojStrict.trExpr c.Ewf.ordered c.Δwf))
+                have hnextBelow : c.FVarsBelow proj
+                    (sourceBody.instantiate1 sourceArgument) := by
+                  intro P hP hproj
+                  have bodyFVars := (hrBelow P hP hproj).2
+                  have projectionFVars : FVarsIn P sourceArgument := by
+                    simpa [sourceArgument, FVarsIn] using
+                      hstructBelow P hP hproj
+                  simpa only [Expr.instantiate1_eq] using
+                    bodyFVars.instantiate1 projectionFVars
+                have semanticSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (semanticBody.inst semanticArgument) := by
+                  simpa only [sourceArgument, semanticArgument,
+                    Expr.instantiate1_eq] using
+                    semanticTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := semanticArgument) (depth := 0)
+                have majorSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (majorBody.inst majorArgument) := by
+                  simpa only [sourceArgument, majorArgument,
+                    Expr.instantiate1_eq] using
+                    majorTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := majorArgument) (depth := 0)
+                have constructorSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (constructorBody.inst constructorArgument) := by
+                  simpa only [sourceArgument, constructorArgument,
+                    Expr.instantiate1_eq] using
+                    constructorTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := constructorArgument) (depth := 0)
+                have runtimeNext := runtime.snocTyped hview c.Ewf c.Δwf
+                  hlevels hlevelsLength hparamsLength hparamsSpine hcode
+                  hprojector
+                have hcursorNext : VExpr.consumeForalls?
+                    (VExpr.forallN
+                      (view.specializedFields levels params) tailResult)
+                    (view.operationalProjectionArgs levels params
+                      (fieldIdx + 1) major) =
+                      some (semanticBody.inst semanticArgument) := by
+                  rw [view.operationalProjectionArgs_succ levels params
+                    fieldIdx major hcode]
+                  rw [VExpr.consumeForalls?_append, hcursor]
+                  rfl
+                let paramsLift := params.map (VExpr.liftN 1)
+                have hcodesLift := hview.operationalProjectionCodes_liftN
+                  levels params hparamsLength 1 0
+                have hcodeLift :
+                    (view.operationalProjectionCodes levels paramsLift)[fieldIdx]? =
+                      some (code.liftN 1 0) := by
+                  rw [← hcodesLift, List.getElem?_map, hcode]
+                  rfl
+                have hmajorCursorNext :
+                    (VExpr.forallN
+                      (view.specializedFields levels
+                        (params.map (VExpr.liftN 1)))
+                      (.sort .zero)).consumeForalls?
+                        (view.operationalProjectionArgs levels
+                          (params.map (VExpr.liftN 1))
+                          (fieldIdx + 1) (.bvar 0)) =
+                      some (majorBody.inst majorArgument) := by
+                  rw [view.operationalProjectionArgs_succ levels paramsLift
+                    fieldIdx (.bvar 0) hcodeLift]
+                  rw [VExpr.consumeForalls?_append, hmajorCursor]
+                  rfl
+                have hconstructorCursorNext :
+                    (let fields := view.specializedFields levels params
+                     let fieldCount := fields.length
+                     (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                       (.sort .zero)).consumeForalls?
+                         (((view.operationalProjectionCodes levels params).take
+                           (fieldIdx + 1)).map fun prior =>
+                             .app (prior.projector.liftN fieldCount)
+                               (view.projectionConstructorApp levels params fields)) =
+                       some (constructorBody.inst constructorArgument)) := by
+                  simp only [List.take_add_one, hcode, Option.toList_some,
+                    List.map_append, List.map_singleton,
+                    VExpr.consumeForalls?_append, hconstructorCursor,
+                    constructorArgument, fields, fieldCount]
+                  rfl
+                have hboundNext : fieldIdx + 1 + count <
+                    (view.specializedFields levels params).length := by omega
+                have hrec := ih (s := continuationState) hnextBelow hboundNext
+                  hnext hcursorNext runtimeNext semanticSupportNext
+                  majorSupportNext hmajorCursorNext constructorSupportNext
+                  hconstructorCursorNext
+                simpa only [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+                  using hrec
+              cases maybePropType with
+              | false =>
+                simp only [Bool.and_false, Bool.false_eq_true, if_false]
+                have large : view.generation.elimination = .large := by
+                  cases mode : view.generation.elimination with
+                  | large => rfl
+                  | small =>
+                    have impossible := hsmallMaybe mode
+                    contradiction
+                have motiveLevel :=
+                  view.motiveLevel_projectionLevels_of_large large
+                    code.fieldSort levels
+                have hprojector :=
+                  hview.operationalProgram_hasType_of_runtimePrefix c.Ewf
+                    runtime c.Δwf hlevels hlevelsLength hparamsLength
+                    hparamsSpine hcode motiveLevel
+                simpa only [sourceArgument, Nat.add_assoc, Nat.add_left_comm,
+                  Nat.add_comm] using
+                  (continueWithProjector nextState hprojector)
+              | true =>
+                simp only [dependency, Bool.and_true, if_true]
+                refine (isProp.WF hdom).bind fun propResult propState _ hprop => ?_
+                cases propResult with
+                | false =>
+                  simp only [Bool.not_false, Bool.true_eq_false, if_true]
+                  exact invalidProj.WF
+                | true =>
+                  simp only [Bool.not_true, Bool.false_eq_true, if_false]
+                  cases mode : view.generation.elimination with
+                  | large =>
+                    have motiveLevel :=
+                      view.motiveLevel_projectionLevels_of_large mode
+                        code.fieldSort levels
+                    have hprojector :=
+                      hview.operationalProgram_hasType_of_runtimePrefix c.Ewf
+                        runtime c.Δwf hlevels hlevelsLength hparamsLength
+                        hparamsSpine hcode motiveLevel
+                    simpa only [sourceArgument, Nat.add_assoc,
+                      Nat.add_left_comm, Nat.add_comm] using
+                      (continueWithProjector propState hprojector)
+                  | small =>
+                    have htypeFn :=
+                      hview.operationalProjectionTypeFn_hasType_of_sparse
+                        c.Ewf c.Δwf hlevels hlevelsLength hparamsLength
+                        hparamsSpine hcode runtime.1
+                    obtain ⟨typedField, htypedField, htyped⟩ :=
+                      view.operationalField_hasType_of_typeFn
+                        c.Ewf.conversionRegular c.Δwf hcode htypeFn hmajor
+                    have typedFieldEq : typedField = field :=
+                      Option.some.inj (htypedField.symm.trans hfield)
+                    subst typedField
+                    rw [← hsemanticDomain] at htyped
+                    have htypedStrict := htyped.defeqU_l c.Ewf c.Δwf
+                      ⟨_, hdomEq.symm⟩
+                    have hpropStrict := hprop rfl
+                    have hsortEq := htypedStrict.uniqU c.Ewf c.Δwf hpropStrict
+                    have fieldSortZero :=
+                      VEnv.IsDefEqU.sort_inv c.Ewf c.Δwf hsortEq
+                    have hprojector :=
+                      hview.operationalProgram_hasType_of_runtimePrefix_small
+                        c.Ewf runtime mode fieldSortZero c.Δwf hlevels
+                        hlevelsLength hparamsLength hparamsSpine hcode
+                    simpa only [sourceArgument, Nat.add_assoc,
+                      Nat.add_left_comm, Nat.add_comm] using
+                      (continueWithProjector propState hprojector)
+
+theorem inferProjFields.WF_runtimeRestored {c : VContext} {s : VState}
+    {view : VRestoredBlockStructureView} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
+    {majorCursor constructorCursor : VExpr}
+    (hstruct : c.TrExprS struct major)
+    (hview : view.ConstructorParameterLayoutWF c.venv)
+    (codeNaturality : view.flatView.OperationalCodeNaturality)
+    (recEntriesClosed :
+      VInductDecl.RestoreEntriesClosed view.nested.recEntries)
+    (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
+    (hlevelsLength : levels.length = view.uvars)
+    (hparamsLength : params.length = view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (view.familyType.instL levels) params (.sort resultLevel))
+    (hname : view.name = typeName)
+    (hmajor : c.HasType major (view.structureType levels params))
+    (hrBelow : c.FVarsBelow proj r)
+    (hstructBelow : c.FVarsBelow proj struct)
+    (hbound : fieldIdx + count <
+      (view.specializedFields levels params).length)
+    (hr : c.TrExpr r cursor)
+    (hcursor : VExpr.consumeForalls?
+      (VExpr.forallN (view.specializedFields levels params) tailResult)
+      (view.operationalProjectionArgs levels params fieldIdx major) =
+        some cursor)
+    (runtime : view.OperationalRuntimePrefix c.venv c.lparams.length
+      c.vlctx.toCtx levels params fieldIdx)
+    (semanticSupport : ProjectionSpineSupport (count + 1) r cursor)
+    (majorSupport : ProjectionSpineSupport (count + 1) r majorCursor)
+    (hmajorCursor :
+      (VExpr.forallN
+        (view.specializedFields levels (params.map (VExpr.liftN 1)))
+        (.sort .zero)).consumeForalls?
+          (view.operationalProjectionArgs levels
+            (params.map (VExpr.liftN 1)) fieldIdx (.bvar 0)) =
+        some majorCursor)
+    (constructorSupport :
+      ProjectionSpineSupport (count + 1) r constructorCursor)
+    (hconstructorCursor :
+      let fields := view.specializedFields levels params
+      let fieldCount := fields.length
+      (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+        (.sort .zero)).consumeForalls?
+          (((view.operationalProjectionCodes levels params).take fieldIdx).map
+            fun prior => .app (prior.projector.liftN fieldCount)
+              (view.projectionConstructorApp levels params fields)) =
+        some constructorCursor)
+    (hsmallMaybe : view.elimination = .small →
+      maybePropType = true) :
+    (inferProjFields proj typeName struct maybePropType fieldIdx count r).WF
+      c s fun out _ =>
+        ∃ cursor' majorCursor' constructorCursor',
+          VExpr.consumeForalls?
+            (VExpr.forallN (view.specializedFields levels params) tailResult)
+            (view.operationalProjectionArgs levels params
+              (fieldIdx + count) major) = some cursor' ∧
+          (VExpr.forallN
+            (view.specializedFields levels (params.map (VExpr.liftN 1)))
+            (.sort .zero)).consumeForalls?
+              (view.operationalProjectionArgs levels
+                (params.map (VExpr.liftN 1)) (fieldIdx + count) (.bvar 0)) =
+            some majorCursor' ∧
+          (let fields := view.specializedFields levels params
+           let fieldCount := fields.length
+           (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+             (.sort .zero)).consumeForalls?
+               (((view.operationalProjectionCodes levels params).take
+                 (fieldIdx + count)).map fun prior =>
+                   .app (prior.projector.liftN fieldCount)
+                     (view.projectionConstructorApp levels params fields)) =
+             some constructorCursor') ∧
+          c.FVarsBelow proj out ∧ c.TrExpr out cursor' ∧
+          ProjectionSpineSupport 1 out cursor' ∧
+          ProjectionSpineSupport 1 out majorCursor' ∧
+          ProjectionSpineSupport 1 out constructorCursor' ∧
+          view.OperationalRuntimePrefix c.venv c.lparams.length
+            c.vlctx.toCtx levels params (fieldIdx + count) := by
+  induction count generalizing s r cursor majorCursor constructorCursor fieldIdx with
+  | zero =>
+      simp only [inferProjFields, Nat.add_zero]
+      exact .pure ⟨cursor, majorCursor, constructorCursor, hcursor,
+        hmajorCursor, hconstructorCursor, hrBelow, hr, semanticSupport,
+        majorSupport, constructorSupport, runtime⟩
+  | succ count ih =>
+      simp only [inferProjFields]
+      have hfieldIdx : fieldIdx <
+          (view.specializedFields levels params).length := by omega
+      have hcodeIdx : fieldIdx <
+          (view.operationalProjectionCodes levels params).length := by
+        simpa using hfieldIdx
+      let code := (view.operationalProjectionCodes levels params)[fieldIdx]
+      have hcode :
+          (view.operationalProjectionCodes levels params)[fieldIdx]? =
+            some code :=
+        List.getElem?_eq_getElem hcodeIdx
+      cases semanticSupport with
+      | @cons semanticRemaining sourceBody semanticBody sourceName sourceDomain
+          sourceBinderInfo semanticDomain semanticSkip semanticTail =>
+        cases majorSupport with
+        | @cons majorRemaining _ majorBody _ _ _ majorDomain majorSkip majorTail =>
+          cases constructorSupport with
+          | @cons constructorRemaining _ constructorBody _ _ _ constructorDomain
+              constructorSkip constructorTail =>
+            refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+            subst out
+            obtain ⟨strictTarget, strictTranslation, targetEq⟩ := hr
+            let .forallE hdomTy hbodyTy hdom hbody := strictTranslation
+            have hforallEq := targetEq.forallE_inv c.Ewf c.Δwf
+            obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+            have hbodyTranslation : TrExpr c.venv c.lparams
+                ((none, .vlam _) :: c.vlctx) sourceBody semanticBody :=
+              ⟨_, hbody, _, hbodyEq⟩
+            have bodyClosedOne : Closed sourceBody 1 := by
+              have closed := hbody.closed
+              simpa only [VLCtx.bvars, c.mlctx.noBV, Nat.zero_add] using closed
+            have hargsLength :
+                (view.operationalProjectionArgs levels params fieldIdx major).length =
+                  fieldIdx :=
+              view.operationalProjectionArgs_length levels params fieldIdx major
+                (Nat.le_of_lt hcodeIdx)
+            obtain ⟨field, semanticTailBody, hfield, hconsume⟩ :=
+              VExpr.consumeForalls?_forallN_domain
+                (view.specializedFields levels params) tailResult
+                (view.operationalProjectionArgs levels params fieldIdx major)
+                (by simpa [hargsLength] using hfieldIdx)
+            rw [hargsLength] at hfield
+            have hsemanticDomain : semanticDomain =
+                field.instRevAt
+                  (view.operationalProjectionArgs levels params fieldIdx major) 0 := by
+              have cursorShape :
+                  (.forallE semanticDomain semanticBody : VExpr) =
+                    .forallE
+                      (field.instRevAt
+                        (view.operationalProjectionArgs levels params fieldIdx major) 0)
+                      semanticTailBody :=
+                Option.some.inj (hcursor.symm.trans hconsume)
+              injection cursorShape
+            have hsemanticBody : semanticBody = semanticTailBody := by
+              have cursorShape :
+                  (.forallE semanticDomain semanticBody : VExpr) =
+                    .forallE
+                      (field.instRevAt
+                        (view.operationalProjectionArgs levels params fieldIdx major) 0)
+                      semanticTailBody :=
+                Option.some.inj (hcursor.symm.trans hconsume)
+              injection cursorShape
+            subst semanticTailBody
+            cases dependency : sourceBody.hasLooseBVar 0 with
+            | false =>
+              simp only [dependency, Bool.false_and, Bool.false_eq_true,
+                if_false]
+              have structuralClosed :
+                  sourceBody.hasLooseBVar' 0 = false := by
+                rw [← Expr.hasLooseBVar_eq]
+                exact dependency
+              have bodyClosedZero : Closed sourceBody 0 :=
+                bodyClosedOne.zero_of_one_of_hasLooseBVar_false structuralClosed
+              let sourceArgument : Expr :=
+                .proj typeName fieldIdx struct
+              let semanticArgument : VExpr := .app code.projector major
+              let majorArgument : VExpr :=
+                (code.liftN 1 0).projector.app (.bvar 0)
+              let fields := view.specializedFields levels params
+              let fieldCount := fields.length
+              let constructorArgument : VExpr :=
+                (code.liftN fieldCount 0).projector.app
+                  (view.projectionConstructorApp levels params fields)
+              have hnext : c.TrExpr
+                  (sourceBody.instantiate1 sourceArgument)
+                  (semanticBody.inst semanticArgument) := by
+                simpa only [Expr.instantiate1_eq] using
+                  Lean4Lean.TrExpr.instantiate1_skipped c.Ewf c.Δwf hdomTy
+                    hbodyTranslation bodyClosedZero
+                    (semanticSkip structuralClosed) sourceArgument semanticArgument
+              have hnextBelow : c.FVarsBelow proj
+                  (sourceBody.instantiate1 sourceArgument) := by
+                rw [Expr.instantiate1_eq,
+                  Expr.instantiate1_eq_self bodyClosedZero.looseBVarRange_zero]
+                intro P hP hproj
+                exact (hrBelow P hP hproj).2
+              have semanticSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (semanticBody.inst semanticArgument) := by
+                simpa only [sourceArgument, semanticArgument,
+                  Expr.instantiate1_eq] using
+                  semanticTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := semanticArgument) (depth := 0)
+              have majorSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (majorBody.inst majorArgument) := by
+                simpa only [sourceArgument, majorArgument,
+                  Expr.instantiate1_eq] using
+                  majorTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := majorArgument) (depth := 0)
+              have constructorSupportNext : ProjectionSpineSupport (count + 1)
+                  (sourceBody.instantiate1 sourceArgument)
+                  (constructorBody.inst constructorArgument) := by
+                simpa only [sourceArgument, constructorArgument,
+                  Expr.instantiate1_eq] using
+                  constructorTail.instN
+                    (sourceArgument := sourceArgument)
+                    (targetArgument := constructorArgument) (depth := 0)
+              have runtimeNext := runtime.snocSkip codeNaturality recEntriesClosed hparamsLength
+                hmajorCursor (majorSkip structuralClosed)
+                hconstructorCursor (constructorSkip structuralClosed) hcode
+              have hcursorNext : VExpr.consumeForalls?
+                  (VExpr.forallN (view.specializedFields levels params) tailResult)
+                  (view.operationalProjectionArgs levels params
+                    (fieldIdx + 1) major) =
+                    some (semanticBody.inst semanticArgument) := by
+                rw [view.operationalProjectionArgs_succ levels params
+                  fieldIdx major hcode]
+                rw [VExpr.consumeForalls?_append, hcursor]
+                rfl
+              let paramsLift := params.map (VExpr.liftN 1)
+              have hcodesLift := view.operationalProjectionCodes_liftN codeNaturality recEntriesClosed
+                levels params hparamsLength 1 0
+              have hcodeLift :
+                  (view.operationalProjectionCodes levels paramsLift)[fieldIdx]? =
+                    some (code.liftN 1 0) := by
+                rw [← hcodesLift, List.getElem?_map, hcode]
+                rfl
+              have hmajorCursorNext :
+                  (VExpr.forallN
+                    (view.specializedFields levels (params.map (VExpr.liftN 1)))
+                    (.sort .zero)).consumeForalls?
+                      (view.operationalProjectionArgs levels
+                        (params.map (VExpr.liftN 1)) (fieldIdx + 1) (.bvar 0)) =
+                    some (majorBody.inst majorArgument) := by
+                rw [view.operationalProjectionArgs_succ levels paramsLift
+                  fieldIdx (.bvar 0) hcodeLift]
+                rw [VExpr.consumeForalls?_append, hmajorCursor]
+                rfl
+              have hconstructorCursorNext :
+                  (let fields := view.specializedFields levels params
+                   let fieldCount := fields.length
+                   (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                     (.sort .zero)).consumeForalls?
+                       (((view.operationalProjectionCodes levels params).take
+                         (fieldIdx + 1)).map fun prior =>
+                           .app (prior.projector.liftN fieldCount)
+                             (view.projectionConstructorApp levels params fields)) =
+                     some (constructorBody.inst constructorArgument)) := by
+                simp only [List.take_add_one, hcode, Option.toList_some,
+                  List.map_append, List.map_singleton,
+                  VExpr.consumeForalls?_append, hconstructorCursor,
+                  constructorArgument, fields, fieldCount]
+                rfl
+              have hboundNext : fieldIdx + 1 + count <
+                  (view.specializedFields levels params).length := by omega
+              have hrec := ih (s := nextState) hnextBelow hboundNext hnext
+                hcursorNext runtimeNext semanticSupportNext majorSupportNext
+                hmajorCursorNext constructorSupportNext hconstructorCursorNext
+              simpa only [pure_bind, Nat.add_assoc, Nat.add_left_comm,
+                Nat.add_comm] using hrec
+            | true =>
+              let sourceArgument : Expr :=
+                .proj typeName fieldIdx struct
+              let semanticArgument : VExpr := .app code.projector major
+              let majorArgument : VExpr :=
+                (code.liftN 1 0).projector.app (.bvar 0)
+              let fields := view.specializedFields levels params
+              let fieldCount := fields.length
+              let constructorArgument : VExpr :=
+                (code.liftN fieldCount 0).projector.app
+                  (view.projectionConstructorApp levels params fields)
+              have continueWithProjector (continuationState : VState)
+                  (hprojector : c.HasType code.projector
+                    (.forallE (view.structureType levels params)
+                      (.app code.typeFn.lift (.bvar 0)))) :
+                  (inferProjFields proj typeName struct maybePropType
+                    (fieldIdx + 1) count
+                    (sourceBody.instantiate1 sourceArgument)).WF
+                    c continuationState fun out _ =>
+                      ∃ cursor' majorCursor' constructorCursor',
+                        VExpr.consumeForalls?
+                          (VExpr.forallN
+                            (view.specializedFields levels params) tailResult)
+                          (view.operationalProjectionArgs levels params
+                            (fieldIdx + 1 + count) major) = some cursor' ∧
+                        (VExpr.forallN
+                          (view.specializedFields levels
+                            (params.map (VExpr.liftN 1)))
+                          (.sort .zero)).consumeForalls?
+                            (view.operationalProjectionArgs levels
+                              (params.map (VExpr.liftN 1))
+                              (fieldIdx + 1 + count) (.bvar 0)) =
+                          some majorCursor' ∧
+                        (let fields := view.specializedFields levels params
+                         let fieldCount := fields.length
+                         (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                           (.sort .zero)).consumeForalls?
+                             (((view.operationalProjectionCodes levels params).take
+                               (fieldIdx + 1 + count)).map fun prior =>
+                                 .app (prior.projector.liftN fieldCount)
+                                   (view.projectionConstructorApp levels params fields)) =
+                           some constructorCursor') ∧
+                        c.FVarsBelow proj out ∧ c.TrExpr out cursor' ∧
+                        ProjectionSpineSupport 1 out cursor' ∧
+                        ProjectionSpineSupport 1 out majorCursor' ∧
+                        ProjectionSpineSupport 1 out constructorCursor' ∧
+                        view.OperationalRuntimePrefix c.venv c.lparams.length
+                          c.vlctx.toCtx levels params
+                            (fieldIdx + 1 + count) := by
+                obtain ⟨projectorField, _projectorDomain, typeBody, hprojectorField,
+                    htypeFn, hprojectorFieldType⟩ :=
+                  hview.toLayoutWF.operationalProjector_hasType_field_of_type
+                    c.Ewf.conversionRegular recEntriesClosed hlevelsLength c.Δwf hcode hprojector hmajor
+                have hprojectorFieldEq : projectorField = field :=
+                  Option.some.inj (hprojectorField.symm.trans hfield)
+                subst projectorField
+                rw [← hsemanticDomain] at hprojectorFieldType
+                have hprojectorFieldType' :=
+                  hprojectorFieldType.defeqU_r c.Ewf c.Δwf
+                    ⟨_, hdomEq.symm⟩
+                have hprojSem : VRestoredBlockStructureView.TrProj c.venv
+                    c.lparams.length c.vlctx.toCtx view
+                    levels params fieldIdx major semanticArgument := {
+                  viewWF := hview.toFamilyLayoutWF
+                  parameterLayout := hview
+                  codeNaturality := codeNaturality
+                  recEntriesClosed := recEntriesClosed
+                  levelsWF := hlevels
+                  levels_length := hlevelsLength
+                  params_length := hparamsLength
+                  paramsSpine := hparamsSpine
+                  majorType := hmajor
+                  program := ⟨code, hcode, rfl, hprojector⟩ }
+                have hprojStrict : c.TrExprS sourceArgument semanticArgument :=
+                  .proj hstruct ⟨.restored view, levels, params, hname,
+                    .restored hprojSem⟩
+                have hnext : c.TrExpr
+                    (sourceBody.instantiate1 sourceArgument)
+                    (semanticBody.inst semanticArgument) := by
+                  simpa only [sourceArgument, semanticArgument,
+                    Expr.instantiate1_eq] using
+                    (.inst c.Ewf c.Δwf hprojectorFieldType'
+                      hbodyTranslation
+                      (hprojStrict.trExpr c.Ewf.ordered c.Δwf))
+                have hnextBelow : c.FVarsBelow proj
+                    (sourceBody.instantiate1 sourceArgument) := by
+                  intro P hP hproj
+                  have bodyFVars := (hrBelow P hP hproj).2
+                  have projectionFVars : FVarsIn P sourceArgument := by
+                    simpa [sourceArgument, FVarsIn] using
+                      hstructBelow P hP hproj
+                  simpa only [Expr.instantiate1_eq] using
+                    bodyFVars.instantiate1 projectionFVars
+                have semanticSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (semanticBody.inst semanticArgument) := by
+                  simpa only [sourceArgument, semanticArgument,
+                    Expr.instantiate1_eq] using
+                    semanticTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := semanticArgument) (depth := 0)
+                have majorSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (majorBody.inst majorArgument) := by
+                  simpa only [sourceArgument, majorArgument,
+                    Expr.instantiate1_eq] using
+                    majorTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := majorArgument) (depth := 0)
+                have constructorSupportNext : ProjectionSpineSupport (count + 1)
+                    (sourceBody.instantiate1 sourceArgument)
+                    (constructorBody.inst constructorArgument) := by
+                  simpa only [sourceArgument, constructorArgument,
+                    Expr.instantiate1_eq] using
+                    constructorTail.instN
+                      (sourceArgument := sourceArgument)
+                      (targetArgument := constructorArgument) (depth := 0)
+                have runtimeNext := runtime.snocTyped hview codeNaturality recEntriesClosed c.Ewf c.Δwf
+                  hlevels hlevelsLength hparamsLength hparamsSpine hcode
+                  hprojector
+                have hcursorNext : VExpr.consumeForalls?
+                    (VExpr.forallN
+                      (view.specializedFields levels params) tailResult)
+                    (view.operationalProjectionArgs levels params
+                      (fieldIdx + 1) major) =
+                      some (semanticBody.inst semanticArgument) := by
+                  rw [view.operationalProjectionArgs_succ levels params
+                    fieldIdx major hcode]
+                  rw [VExpr.consumeForalls?_append, hcursor]
+                  rfl
+                let paramsLift := params.map (VExpr.liftN 1)
+                have hcodesLift := view.operationalProjectionCodes_liftN codeNaturality recEntriesClosed
+                  levels params hparamsLength 1 0
+                have hcodeLift :
+                    (view.operationalProjectionCodes levels paramsLift)[fieldIdx]? =
+                      some (code.liftN 1 0) := by
+                  rw [← hcodesLift, List.getElem?_map, hcode]
+                  rfl
+                have hmajorCursorNext :
+                    (VExpr.forallN
+                      (view.specializedFields levels
+                        (params.map (VExpr.liftN 1)))
+                      (.sort .zero)).consumeForalls?
+                        (view.operationalProjectionArgs levels
+                          (params.map (VExpr.liftN 1))
+                          (fieldIdx + 1) (.bvar 0)) =
+                      some (majorBody.inst majorArgument) := by
+                  rw [view.operationalProjectionArgs_succ levels paramsLift
+                    fieldIdx (.bvar 0) hcodeLift]
+                  rw [VExpr.consumeForalls?_append, hmajorCursor]
+                  rfl
+                have hconstructorCursorNext :
+                    (let fields := view.specializedFields levels params
+                     let fieldCount := fields.length
+                     (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                       (.sort .zero)).consumeForalls?
+                         (((view.operationalProjectionCodes levels params).take
+                           (fieldIdx + 1)).map fun prior =>
+                             .app (prior.projector.liftN fieldCount)
+                               (view.projectionConstructorApp levels params fields)) =
+                       some (constructorBody.inst constructorArgument)) := by
+                  simp only [List.take_add_one, hcode, Option.toList_some,
+                    List.map_append, List.map_singleton,
+                    VExpr.consumeForalls?_append, hconstructorCursor,
+                    constructorArgument, fields, fieldCount]
+                  rfl
+                have hboundNext : fieldIdx + 1 + count <
+                    (view.specializedFields levels params).length := by omega
+                have hrec := ih (s := continuationState) hnextBelow hboundNext
+                  hnext hcursorNext runtimeNext semanticSupportNext
+                  majorSupportNext hmajorCursorNext constructorSupportNext
+                  hconstructorCursorNext
+                simpa only [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+                  using hrec
+              cases maybePropType with
+              | false =>
+                simp only [Bool.and_false, Bool.false_eq_true, if_false]
+                have large : view.elimination = .large := by
+                  cases mode : view.elimination with
+                  | large => rfl
+                  | small =>
+                    have impossible := hsmallMaybe mode
+                    contradiction
+                have motiveLevel :=
+                  view.motiveLevel_projectionLevels_of_large large
+                    code.fieldSort levels
+                have hprojector :=
+                  hview.operationalProjector_hasType_of_runtimePrefix c.Ewf codeNaturality recEntriesClosed
+                    runtime c.Δwf hlevels hlevelsLength hparamsLength
+                    hparamsSpine hcode motiveLevel
+                simpa only [sourceArgument, Nat.add_assoc, Nat.add_left_comm,
+                  Nat.add_comm] using
+                  (continueWithProjector nextState hprojector)
+              | true =>
+                simp only [dependency, Bool.and_true, if_true]
+                refine (isProp.WF hdom).bind fun propResult propState _ hprop => ?_
+                cases propResult with
+                | false =>
+                  simp only [Bool.not_false, Bool.true_eq_false, if_true]
+                  exact invalidProj.WF
+                | true =>
+                  simp only [Bool.not_true, Bool.false_eq_true, if_false]
+                  cases mode : view.elimination with
+                  | large =>
+                    have motiveLevel :=
+                      view.motiveLevel_projectionLevels_of_large mode
+                        code.fieldSort levels
+                    have hprojector :=
+                      hview.operationalProjector_hasType_of_runtimePrefix c.Ewf codeNaturality recEntriesClosed
+                        runtime c.Δwf hlevels hlevelsLength hparamsLength
+                        hparamsSpine hcode motiveLevel
+                    simpa only [sourceArgument, Nat.add_assoc,
+                      Nat.add_left_comm, Nat.add_comm] using
+                      (continueWithProjector propState hprojector)
+                  | small =>
+                    have htypeFn :=
+                      hview.operationalProjectionTypeFn_hasType_of_sparse
+                        c.Ewf codeNaturality recEntriesClosed c.Δwf hlevels hlevelsLength hparamsLength
+                        hparamsSpine hcode runtime.1
+                    obtain ⟨typedField, htypedField, htyped⟩ :=
+                      view.operationalField_hasType_of_typeFn hview.toLayoutWF
+                        c.Ewf.conversionRegular recEntriesClosed hlevelsLength c.Δwf hcode htypeFn hmajor
+                    have typedFieldEq : typedField = field :=
+                      Option.some.inj (htypedField.symm.trans hfield)
+                    subst typedField
+                    rw [← hsemanticDomain] at htyped
+                    have htypedStrict := htyped.defeqU_l c.Ewf c.Δwf
+                      ⟨_, hdomEq.symm⟩
+                    have hpropStrict := hprop rfl
+                    have hsortEq := htypedStrict.uniqU c.Ewf c.Δwf hpropStrict
+                    have fieldSortZero :=
+                      VEnv.IsDefEqU.sort_inv c.Ewf c.Δwf hsortEq
+                    have hprojector :=
+                      hview.operationalProjector_hasType_of_runtimePrefix_small
+                        c.Ewf codeNaturality recEntriesClosed runtime mode fieldSortZero c.Δwf hlevels
+                        hlevelsLength hparamsLength hparamsSpine hcode
+                    simpa only [sourceArgument, Nat.add_assoc,
+                      Nat.add_left_comm, Nat.add_comm] using
+                      (continueWithProjector propState hprojector)
+
+
+/-- Finish a runtime-backed projection after the source loop has consumed
+exactly the preceding fields.  The remaining source Pi and all three
+producer-aligned cursors select the requested field without constructing any
+earlier projector that the runtime skipped. -/
+theorem inferProjResult.WF_runtimeBlock {c : VContext} {s : VState}
+    {view : VBlockStructureView} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
+    {majorCursor constructorCursor : VExpr}
+    (hstruct : c.TrExprS struct major)
+    (hview : view.LayoutWF c.venv)
+    (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
+    (hlevelsLength : levels.length = view.uvars)
+    (hparamsLength : params.length = view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (view.familyType.instL levels) params (.sort resultLevel))
+    (hname : view.name = typeName)
+    (hmajor : c.HasType major (view.structureType levels params))
+    (hrBelow : c.FVarsBelow (.proj typeName fieldIdx struct) r)
+    (hbound : fieldIdx < (view.specializedFields levels params).length)
+    (hr : c.TrExpr r cursor)
+    (hcursor : VExpr.consumeForalls?
+      (VExpr.forallN (view.specializedFields levels params) tailResult)
+      (view.operationalProjectionArgs levels params fieldIdx major) =
+        some cursor)
+    (runtime : view.OperationalRuntimePrefix c.venv c.lparams.length
+      c.vlctx.toCtx levels params fieldIdx)
+    (semanticSupport : ProjectionSpineSupport 1 r cursor)
+    (majorSupport : ProjectionSpineSupport 1 r majorCursor)
+    (hmajorCursor :
+      (VExpr.forallN
+        (view.specializedFields levels (params.map (VExpr.liftN 1)))
+        (.sort .zero)).consumeForalls?
+          (view.operationalProjectionArgs levels
+            (params.map (VExpr.liftN 1)) fieldIdx (.bvar 0)) =
+        some majorCursor)
+    (constructorSupport : ProjectionSpineSupport 1 r constructorCursor)
+    (hconstructorCursor :
+      let fields := view.specializedFields levels params
+      let fieldCount := fields.length
+      (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+        (.sort .zero)).consumeForalls?
+          (((view.operationalProjectionCodes levels params).take fieldIdx).map
+            fun prior => .app (prior.projector.liftN fieldCount)
+              (view.projectionConstructorApp levels params fields)) =
+        some constructorCursor)
+    (hsmallMaybe : view.generation.elimination = .small →
+      maybePropType = true) :
+    (do
+      let .forallE _ dom _ _ ← whnf r | invalidProj proj
+      if maybePropType then
+        if !(← isProp dom) then invalidProj proj
+      pure dom).WF c s fun dom _ =>
+        ∃ proj' ty', c.TrTyping (.proj typeName fieldIdx struct)
+          dom proj' ty' := by
+  have hcodeIdx : fieldIdx <
+      (view.operationalProjectionCodes levels params).length := by
+    simpa using hbound
+  let code := (view.operationalProjectionCodes levels params)[fieldIdx]
+  have hcode :
+      (view.operationalProjectionCodes levels params)[fieldIdx]? = some code :=
+    List.getElem?_eq_getElem hcodeIdx
+  cases semanticSupport with
+  | @cons semanticRemaining sourceBody semanticBody sourceName sourceDomain
+      sourceBinderInfo semanticDomain semanticSkip semanticTail =>
+    cases majorSupport with
+    | @cons majorRemaining _ majorBody _ _ _ majorDomain majorSkip majorTail =>
+      cases constructorSupport with
+      | @cons constructorRemaining _ constructorBody _ _ _ constructorDomain
+          constructorSkip constructorTail =>
+        refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+        subst out
+        obtain ⟨strictTarget, strictTranslation, targetEq⟩ := hr
+        let .forallE hdomTy hbodyTy hdom hbody := strictTranslation
+        have hforallEq := targetEq.forallE_inv c.Ewf c.Δwf
+        obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+        have hargsLength :
+            (view.operationalProjectionArgs levels params fieldIdx major).length =
+              fieldIdx :=
+          view.operationalProjectionArgs_length levels params fieldIdx major
+            (Nat.le_of_lt hcodeIdx)
+        obtain ⟨field, semanticTailBody, hfield, hconsume⟩ :=
+          VExpr.consumeForalls?_forallN_domain
+            (view.specializedFields levels params) tailResult
+            (view.operationalProjectionArgs levels params fieldIdx major)
+            (by simpa [hargsLength] using hbound)
+        rw [hargsLength] at hfield
+        have hsemanticDomain : semanticDomain =
+            field.instRevAt
+              (view.operationalProjectionArgs levels params fieldIdx major) 0 := by
+          have cursorShape :
+              (.forallE semanticDomain semanticBody : VExpr) =
+                .forallE
+                  (field.instRevAt
+                    (view.operationalProjectionArgs levels params fieldIdx major)
+                    0)
+                  semanticTailBody :=
+            Option.some.inj (hcursor.symm.trans hconsume)
+          injection cursorShape
+        subst semanticDomain
+        have hdomBelow : c.FVarsBelow
+            (.proj typeName fieldIdx struct) sourceDomain := by
+          intro P hP hproj
+          exact (hrBelow P hP hproj).1
+        have resultOfProjector
+            (hprojector : c.venv.HasType c.lparams.length c.vlctx.toCtx
+              code.projector
+              (.forallE (view.structureType levels params)
+                (.app code.typeFn.lift (.bvar 0)))) :
+            ∃ proj' ty', c.TrTyping (.proj typeName fieldIdx struct)
+              sourceDomain proj' ty' := by
+          obtain ⟨field', typeBody, hfield', htypeFn,
+              hprojectorField⟩ :=
+            VBlockStructureView.operationalProjector_hasType_field_of_type
+              c.Ewf.conversionRegular c.Δwf hcode hprojector hmajor
+          have hfieldEq : field' = field :=
+            Option.some.inj (hfield'.symm.trans hfield)
+          subst field'
+          have hprojectorField' := hprojectorField.defeqU_r
+            c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
+          have hprojSem : VProjectionView.TrProj c.venv
+              c.lparams.length c.vlctx.toCtx (.block view) levels params
+              fieldIdx major (.app code.projector major) := {
+            viewWF := .ofBlock hview
+            levelsWF := hlevels
+            levels_length := hlevelsLength
+            params_length := hparamsLength
+            paramsSpine := hparamsSpine
+            majorType := hmajor
+            program := ⟨code, hcode, rfl, hprojector⟩ }
+          have hprojStrict : c.TrExprS (.proj typeName fieldIdx struct)
+              (.app code.projector major) :=
+            .proj hstruct ⟨.ordinary (.block view), levels, params, hname,
+              .ordinary hprojSem⟩
+          exact ⟨.app code.projector major, _, hdomBelow, hprojStrict,
+            hdom, hprojectorField'⟩
+        cases maybePropType with
+        | false =>
+          simp only [if_false]
+          have large : view.generation.elimination = .large := by
+            cases mode : view.generation.elimination with
+            | large => rfl
+            | small =>
+              have impossible := hsmallMaybe mode
+              contradiction
+          have motiveLevel :=
+            view.motiveLevel_projectionLevels_of_large large code.fieldSort
+              levels
+          have hprojector :=
+            hview.operationalProgram_hasType_of_runtimePrefix c.Ewf runtime
+              c.Δwf hlevels hlevelsLength hparamsLength hparamsSpine hcode
+              motiveLevel
+          exact .pure (resultOfProjector hprojector)
+        | true =>
+          simp only [if_true]
+          refine (isProp.WF hdom).bind fun propResult propState _ hprop => ?_
+          cases propResult with
+          | false =>
+            simp only [Bool.not_false, if_true]
+            exact invalidProj.WF
+          | true =>
+            simp only [Bool.not_true, Bool.false_eq_true, if_false]
+            cases mode : view.generation.elimination with
+            | large =>
+              have motiveLevel :=
+                view.motiveLevel_projectionLevels_of_large mode
+                  code.fieldSort levels
+              have hprojector :=
+                hview.operationalProgram_hasType_of_runtimePrefix c.Ewf
+                  runtime c.Δwf hlevels hlevelsLength hparamsLength
+                  hparamsSpine hcode motiveLevel
+              exact .pure (resultOfProjector hprojector)
+            | small =>
+              have htypeFn :=
+                hview.operationalProjectionTypeFn_hasType_of_sparse c.Ewf
+                  c.Δwf hlevels hlevelsLength hparamsLength hparamsSpine
+                  hcode runtime.1
+              obtain ⟨typedField, htypedField, htyped⟩ :=
+                view.operationalField_hasType_of_typeFn
+                  c.Ewf.conversionRegular c.Δwf hcode htypeFn hmajor
+              have typedFieldEq : typedField = field :=
+                Option.some.inj (htypedField.symm.trans hfield)
+              subst typedField
+              have htypedStrict := htyped.defeqU_l c.Ewf c.Δwf
+                ⟨_, hdomEq.symm⟩
+              have hpropStrict := hprop rfl
+              have hsortEq := htypedStrict.uniqU c.Ewf c.Δwf hpropStrict
+              have fieldSortZero :=
+                VEnv.IsDefEqU.sort_inv c.Ewf c.Δwf hsortEq
+              have hprojector :=
+                hview.operationalProgram_hasType_of_runtimePrefix_small
+                  c.Ewf runtime mode fieldSortZero c.Δwf hlevels
+                  hlevelsLength hparamsLength hparamsSpine hcode
+              exact .pure (resultOfProjector hprojector)
+
+/-- Restored counterpart of `inferProjResult.WF_runtimeBlock`, consuming
+the exact producer-owned restored runtime cursors. -/
+theorem inferProjResult.WF_runtimeRestored {c : VContext} {s : VState}
+    {view : VRestoredBlockStructureView} {levels : List VLevel}
+    {params : List VExpr} {major : VExpr} {tailResult cursor : VExpr}
+    {majorCursor constructorCursor : VExpr}
+    (hstruct : c.TrExprS struct major)
+    (hview : view.ConstructorParameterLayoutWF c.venv)
+    (codeNaturality : view.flatView.OperationalCodeNaturality)
+    (recEntriesClosed :
+      VInductDecl.RestoreEntriesClosed view.nested.recEntries)
+    (hlevels : ∀ level ∈ levels, level.WF c.lparams.length)
+    (hlevelsLength : levels.length = view.uvars)
+    (hparamsLength : params.length = view.nparams)
+    (hparamsSpine : ∃ resultLevel,
+      c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+        (view.familyType.instL levels) params (.sort resultLevel))
+    (hname : view.name = typeName)
+    (hmajor : c.HasType major (view.structureType levels params))
+    (hrBelow : c.FVarsBelow (.proj typeName fieldIdx struct) r)
+    (hbound : fieldIdx < (view.specializedFields levels params).length)
+    (hr : c.TrExpr r cursor)
+    (hcursor : VExpr.consumeForalls?
+      (VExpr.forallN (view.specializedFields levels params) tailResult)
+      (view.operationalProjectionArgs levels params fieldIdx major) =
+        some cursor)
+    (runtime : view.OperationalRuntimePrefix c.venv c.lparams.length
+      c.vlctx.toCtx levels params fieldIdx)
+    (semanticSupport : ProjectionSpineSupport 1 r cursor)
+    (majorSupport : ProjectionSpineSupport 1 r majorCursor)
+    (hmajorCursor :
+      (VExpr.forallN
+        (view.specializedFields levels (params.map (VExpr.liftN 1)))
+        (.sort .zero)).consumeForalls?
+          (view.operationalProjectionArgs levels
+            (params.map (VExpr.liftN 1)) fieldIdx (.bvar 0)) =
+        some majorCursor)
+    (constructorSupport : ProjectionSpineSupport 1 r constructorCursor)
+    (hconstructorCursor :
+      let fields := view.specializedFields levels params
+      let fieldCount := fields.length
+      (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+        (.sort .zero)).consumeForalls?
+          (((view.operationalProjectionCodes levels params).take fieldIdx).map
+            fun prior => .app (prior.projector.liftN fieldCount)
+              (view.projectionConstructorApp levels params fields)) =
+        some constructorCursor)
+    (hsmallMaybe : view.elimination = .small →
+      maybePropType = true) :
+    (do
+      let .forallE _ dom _ _ ← whnf r | invalidProj proj
+      if maybePropType then
+        if !(← isProp dom) then invalidProj proj
+      pure dom).WF c s fun dom _ =>
+        ∃ proj' ty', c.TrTyping (.proj typeName fieldIdx struct)
+          dom proj' ty' := by
+  have hcodeIdx : fieldIdx <
+      (view.operationalProjectionCodes levels params).length := by
+    simpa using hbound
+  let code := (view.operationalProjectionCodes levels params)[fieldIdx]
+  have hcode :
+      (view.operationalProjectionCodes levels params)[fieldIdx]? = some code :=
+    List.getElem?_eq_getElem hcodeIdx
+  cases semanticSupport with
+  | @cons semanticRemaining sourceBody semanticBody sourceName sourceDomain
+      sourceBinderInfo semanticDomain semanticSkip semanticTail =>
+    cases majorSupport with
+    | @cons majorRemaining _ majorBody _ _ _ majorDomain majorSkip majorTail =>
+      cases constructorSupport with
+      | @cons constructorRemaining _ constructorBody _ _ _ constructorDomain
+          constructorSkip constructorTail =>
+        refine whnf.WF_forall.bind fun out nextState _ outEq => ?_
+        subst out
+        obtain ⟨strictTarget, strictTranslation, targetEq⟩ := hr
+        let .forallE hdomTy hbodyTy hdom hbody := strictTranslation
+        have hforallEq := targetEq.forallE_inv c.Ewf c.Δwf
+        obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+        have hargsLength :
+            (view.operationalProjectionArgs levels params fieldIdx major).length =
+              fieldIdx :=
+          view.operationalProjectionArgs_length levels params fieldIdx major
+            (Nat.le_of_lt hcodeIdx)
+        obtain ⟨field, semanticTailBody, hfield, hconsume⟩ :=
+          VExpr.consumeForalls?_forallN_domain
+            (view.specializedFields levels params) tailResult
+            (view.operationalProjectionArgs levels params fieldIdx major)
+            (by simpa [hargsLength] using hbound)
+        rw [hargsLength] at hfield
+        have hsemanticDomain : semanticDomain =
+            field.instRevAt
+              (view.operationalProjectionArgs levels params fieldIdx major) 0 := by
+          have cursorShape :
+              (.forallE semanticDomain semanticBody : VExpr) =
+                .forallE
+                  (field.instRevAt
+                    (view.operationalProjectionArgs levels params fieldIdx major)
+                    0)
+                  semanticTailBody :=
+            Option.some.inj (hcursor.symm.trans hconsume)
+          injection cursorShape
+        subst semanticDomain
+        have hdomBelow : c.FVarsBelow
+            (.proj typeName fieldIdx struct) sourceDomain := by
+          intro P hP hproj
+          exact (hrBelow P hP hproj).1
+        have resultOfProjector
+            (hprojector : c.venv.HasType c.lparams.length c.vlctx.toCtx
+              code.projector
+              (.forallE (view.structureType levels params)
+                (.app code.typeFn.lift (.bvar 0)))) :
+            ∃ proj' ty', c.TrTyping (.proj typeName fieldIdx struct)
+              sourceDomain proj' ty' := by
+          obtain ⟨field', _projectorDomain, typeBody, hfield', htypeFn,
+              hprojectorField⟩ :=
+            hview.toLayoutWF.operationalProjector_hasType_field_of_type
+              c.Ewf.conversionRegular recEntriesClosed hlevelsLength c.Δwf
+                hcode hprojector hmajor
+          have hfieldEq : field' = field :=
+            Option.some.inj (hfield'.symm.trans hfield)
+          subst field'
+          have hprojectorField' := hprojectorField.defeqU_r
+            c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
+          have hprojSem : VRestoredBlockStructureView.TrProj c.venv
+              c.lparams.length c.vlctx.toCtx view levels params fieldIdx major
+              (.app code.projector major) := {
+            viewWF := hview.toFamilyLayoutWF
+            parameterLayout := hview
+            codeNaturality := codeNaturality
+            recEntriesClosed := recEntriesClosed
+            levelsWF := hlevels
+            levels_length := hlevelsLength
+            params_length := hparamsLength
+            paramsSpine := hparamsSpine
+            majorType := hmajor
+            program := ⟨code, hcode, rfl, hprojector⟩ }
+          have hprojStrict : c.TrExprS (.proj typeName fieldIdx struct)
+              (.app code.projector major) :=
+            .proj hstruct ⟨.restored view, levels, params, hname,
+              .restored hprojSem⟩
+          exact ⟨.app code.projector major, _, hdomBelow, hprojStrict,
+            hdom, hprojectorField'⟩
+        cases maybePropType with
+        | false =>
+          simp only [if_false]
+          have large : view.elimination = .large := by
+            cases mode : view.elimination with
+            | large => rfl
+            | small =>
+              have impossible := hsmallMaybe mode
+              contradiction
+          have motiveLevel :=
+            view.motiveLevel_projectionLevels_of_large large code.fieldSort
+              levels
+          have hprojector :=
+            hview.operationalProjector_hasType_of_runtimePrefix c.Ewf codeNaturality recEntriesClosed runtime
+              c.Δwf hlevels hlevelsLength hparamsLength hparamsSpine hcode
+              motiveLevel
+          exact .pure (resultOfProjector hprojector)
+        | true =>
+          simp only [if_true]
+          refine (isProp.WF hdom).bind fun propResult propState _ hprop => ?_
+          cases propResult with
+          | false =>
+            simp only [Bool.not_false, if_true]
+            exact invalidProj.WF
+          | true =>
+            simp only [Bool.not_true, Bool.false_eq_true, if_false]
+            cases mode : view.elimination with
+            | large =>
+              have motiveLevel :=
+                view.motiveLevel_projectionLevels_of_large mode
+                  code.fieldSort levels
+              have hprojector :=
+                hview.operationalProjector_hasType_of_runtimePrefix c.Ewf codeNaturality recEntriesClosed
+                  runtime c.Δwf hlevels hlevelsLength hparamsLength
+                  hparamsSpine hcode motiveLevel
+              exact .pure (resultOfProjector hprojector)
+            | small =>
+              have htypeFn :=
+                hview.operationalProjectionTypeFn_hasType_of_sparse c.Ewf
+                  codeNaturality recEntriesClosed c.Δwf hlevels hlevelsLength hparamsLength hparamsSpine
+                  hcode runtime.1
+              obtain ⟨typedField, htypedField, htyped⟩ :=
+                view.operationalField_hasType_of_typeFn hview.toLayoutWF
+                  c.Ewf.conversionRegular recEntriesClosed hlevelsLength c.Δwf hcode htypeFn hmajor
+              have typedFieldEq : typedField = field :=
+                Option.some.inj (htypedField.symm.trans hfield)
+              subst typedField
+              have htypedStrict := htyped.defeqU_l c.Ewf c.Δwf
+                ⟨_, hdomEq.symm⟩
+              have hpropStrict := hprop rfl
+              have hsortEq := htypedStrict.uniqU c.Ewf c.Δwf hpropStrict
+              have fieldSortZero :=
+                VEnv.IsDefEqU.sort_inv c.Ewf c.Δwf hsortEq
+              have hprojector :=
+                hview.operationalProjector_hasType_of_runtimePrefix_small
+                  c.Ewf codeNaturality recEntriesClosed runtime mode fieldSortZero c.Δwf hlevels
+                  hlevelsLength hparamsLength hparamsSpine hcode
+              exact .pure (resultOfProjector hprojector)
+
+
+
 theorem inferProj.WF
     (heBelow : c.FVarsBelow e ety)
     (he : c.TrExprS e e') (hty : c.TrExprS ety ety')
@@ -655,9 +2313,10 @@ theorem inferProj.WF
   split
   · rename_i familyName familyLevels hfamilyShape
     refine .getEnv ?_
-    split
-    · exact invalidProj.WF
-    · rename_i hname
+    by_cases hname : st = familyName
+    · subst st
+      have hnameTest : (familyName != familyName) = false := by simp
+      rw [hnameTest]
       refine (M.WF.liftExcept envGet.WF).lift.bind fun ci _ _ hfind => ?_
       split
       · rename_i info
@@ -668,317 +2327,1150 @@ theorem inferProj.WF
             split
             · exact invalidProj.WF
             · rename_i hargs
-              obtain ⟨artifact⟩ :=
+              obtain ⟨resolution⟩ :=
                 c.projectionReady.infer familyName info hfind hready
-              have hhead := hstack.tr
-              rw [hfamilyShape] at hhead
-              let .const (us' := levels') hfamilyConst hlevelsMap
-                hlevelsLength := hhead
-              have hviewFamily := artifact.viewWF.family
-              rw [artifact.name_eq] at hviewFamily
-              rw [hviewFamily] at hfamilyConst
-              cases hfamilyConst
-              have hlevelsWF : ∀ level ∈ levels',
-                  level.WF c.lparams.length :=
-                VLevel.WF.of_mapM_ofLevel hlevelsMap
-              have hlevelsSourceLength : levels'.length =
-                  artifact.view.generation.block.sourceType.uvars :=
-                (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
-                  hlevelsLength
-              have hlevelsLength' : levels'.length = artifact.view.uvars := by
-                exact hlevelsSourceLength.trans
-                    artifact.view.generation.block.sourceType_uvars_eq
-              have hargsSize : type.getAppArgs.size =
-                  info.numParams + info.numIndices := by
-                simpa using hargs
-              have hargsLength : type.getAppArgsList.length =
-                  artifact.view.nparams := by
-                rw [← Expr.getAppArgs_toList]
-                simp [hargsSize,
-                  artifact.numParams_eq, artifact.numIndices_eq]
-              have hfamilyType : c.HasType (.const familyName levels')
-                  (artifact.view.familyType.instL levels') := by
-                exact VEnv.HasType.const hviewFamily hlevelsWF
-                  hlevelsSourceLength
-              have hfamilyTypeShape : c.HasType (.const familyName levels')
-                  (VExpr.forallN
-                    (artifact.view.generation.block.rawParams.map
-                      (VExpr.instL levels'))
-                    (artifact.view.generation.block.rawResult.instL
-                      levels')) := by
-                simpa [VStructureView.familyType,
-                  VInductDecl.NormalizedChecked.rawType_eq,
-                  artifact.view.raw_indices_eq,
-                  VExpr.instL_forallN, VExpr.forallN] using hfamilyType
-              have hargsRawLength : type.getAppArgsList.length =
-                  (artifact.view.generation.block.rawParams.map
-                    (VExpr.instL levels')).length := by
-                simpa [artifact.view.generation.shape.1] using hargsLength
-              obtain ⟨params', hparamsTr, hparamsSpineRaw, htypeFull⟩ :=
-                AppStack.toSpineWF hstack hfamilyTypeShape hargsRawLength
-              rw [type.mkAppList_getAppArgsList] at htypeFull
-              have htypeAppliedEq := htypeFull.uniq c.Ewf
-                (.refl c.Ewf c.Δwf) htypeS
-              have hmajorType : c.HasType e'
-                  (artifact.view.structureType levels' params') := by
-                apply hasty.defeqU_r c.Ewf c.Δwf
-                have := (htypeAppliedEq.trans c.Ewf c.Δwf htypeEq).symm
-                simpa [VStructureView.structureType,
-                  artifact.name_eq] using this
-              have hparamsLength : params'.length =
-                  artifact.view.nparams :=
-                hparamsTr.length_eq.symm.trans hargsLength
-              have hparamsRawLength : params'.length =
-                  (artifact.view.generation.block.rawParams.map
-                    (VExpr.instL levels')).length :=
-                hparamsTr.length_eq.symm.trans hargsRawLength
-              have hparamsSpine : ∃ resultLevel,
-                  c.venv.SpineWF c.lparams.length c.vlctx.toCtx
-                    (artifact.view.familyType.instL levels') params'
-                    (.sort resultLevel) := by
-                obtain ⟨resultLevel, hresultLevel⟩ := artifact.rawResult_sort
-                refine ⟨resultLevel.inst levels', ?_⟩
-                rw [hresultLevel] at hparamsSpineRaw
-                rw [VExpr.instRev_closedN params' (by trivial)] at hparamsSpineRaw
-                simpa [VStructureView.familyType,
-                  VInductDecl.NormalizedChecked.rawType_eq,
-                  artifact.view.raw_indices_eq, hresultLevel,
-                  VExpr.instL_forallN, VExpr.forallN,
-                  VExpr.instRev, VExpr.instL] using hparamsSpineRaw
-              have hconstructorName :
-                  constructor = artifact.view.constructorName := by
-                have := hctors.symm.trans artifact.ctors_eq
-                simpa using this
-              refine (M.WF.liftExcept envGet.WF).lift.bind
-                fun c_info _ _ hctorFind => ?_
-              cases c_info with
-              | ctorInfo ctorInfo =>
-                simp only
-                split
-                · rename_i hidxHost
-                  have hctorInfoEq :
-                      ctorInfo = artifact.constructorInfo := by
-                    rw [hconstructorName, artifact.constructor_find] at hctorFind
-                    exact ConstantInfo.ctorInfo.inj
-                      (Option.some.inj hctorFind.symm)
-                  have hiFields : i <
-                      (artifact.view.specializedFields levels' params').length := by
-                    rw [hctorInfoEq,
-                      artifact.constructor_numFields_eq] at hidxHost
-                    simpa [VStructureView.specializedFields,
-                      VStructureView.fields] using hidxHost
-                  have hviewConstructor : c.venv.constants constructor =
-                      some artifact.view.constructor.raw.toVConstant := by
-                    simpa [hconstructorName] using
-                      artifact.viewWF.toRegistered.constructor
-                  obtain ⟨_, hctorTr⟩ :=
-                    c.trenv.find?_uniq hctorFind hviewConstructor
-                  have hrawCtorUvars :
-                      artifact.view.constructor.raw.uvars =
-                        artifact.view.uvars := by
-                    exact artifact.view.generation.ctor_uvars_eq
-                      (by simp [artifact.view.constructor_eq])
-                  have hctorLevelLength :
-                      ctorInfo.levelParams.length = familyLevels.length :=
-                    hctorTr.2.1.trans <| hrawCtorUvars.trans <|
-                      hlevelsLength'.symm.trans
-                        (List.mapM_eq_some.1 hlevelsMap).length_eq.symm
-                  have hctorType₀ := hctorTr.2.2.instLCpp c.Ewf
-                    (Us := c.lparams) (ls' := levels') (Δ := [])
-                    trivial hlevelsMap hctorLevelLength
-                  have hctorType := hctorType₀.weakFV c.Ewf
-                    (.from_nil c.mlctx.noBV) c.Δwf
-                  rw [(c.Ewf.ordered.closedC
-                    hviewConstructor).instL.liftN_eq
-                      (Nat.le_refl _)] at hctorType
-                  let ctorTail := VExpr.forallN
-                    (artifact.view.fields.map (VExpr.instL levels'))
-                    ((artifact.view.constructor.rawResult
-                      artifact.view.nparams).instL levels')
-                  rw [artifact.view.constructor.rawType_eq] at hctorType
-                  have hinstantiate :
-                      ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParamsCpp familyLevels) =
-                      ctorInfo.type.instantiateLevelParamsCpp
-                        ctorInfo.levelParams familyLevels := rfl
-                  have hctorTypeShape : c.TrExpr
-                      ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParamsCpp familyLevels)
-                      (VExpr.forallN
-                        (artifact.view.constructorParams.map
-                          (VExpr.instL levels')) ctorTail) := by
-                    simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
-                      ConstantInfo.type, ConstantInfo.levelParams,
-                      ConstantInfo.toConstantVal, ctorTail,
-                      VInductDecl.NormalizedCtor.declaredBinders,
-                      VStructureView.nparams,
-                      VStructureView.constructorParams,
-                      VStructureView.fields,
-                      VExpr.instL_forallN, VExpr.forallN_append,
-                      List.map_append] using hctorType
-                  have hctorTypeBelow : c.FVarsBelow (.proj st i e)
-                      ((.ctorInfo ctorInfo : ConstantInfo)
-                        |>.instantiateTypeLevelParamsCpp familyLevels) := by
-                    intro P _ _
-                    simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
-                      ConstantInfo.type, ConstantInfo.levelParams,
-                      ConstantInfo.toConstantVal] using
-                        hctorType₀.fvarsIn.mono nofun
-                  have hparamArgsEq :
-                      List.take info.numParams type.getAppArgs.toList =
-                        type.getAppArgsList := by
-                    simp [Expr.getAppArgs_toList, artifact.numParams_eq,
-                      ← hargsLength]
-                  have hparamArgsTr :
-                      (List.take info.numParams
-                        type.getAppArgs.toList).Forall₂
-                        (c.TrExprS · ·) params' := by
-                    simpa [hparamArgsEq] using hparamsTr
-                  have hparamArgsBelow : ∀ arg ∈
-                      List.take info.numParams type.getAppArgs.toList,
-                      c.FVarsBelow (.proj st i e) arg := by
-                    intro arg harg P hP hproj
-                    apply FVarsIn.getAppArgsList
-                      (hprojBelowType P hP hproj)
-                    simpa [hparamArgsEq] using harg
-                  have hctorParamsSpine :=
-                    artifact.viewWF.constructorParamsSpine c.Ewf.ordered
-                      levels' hlevelsWF hlevelsLength' params' hparamsLength
-                      hparamsSpine ctorTail
-                  refine (inferProjParams.WF hparamArgsTr hctorTypeBelow
-                    hparamArgsBelow hctorTypeShape hctorParamsSpine).bind
-                      fun r _ _ hr => ?_
-                  obtain ⟨hrBelow, hr⟩ := hr
-                  let tailResult :=
-                    ((artifact.view.constructor.rawResult
-                      artifact.view.nparams).instL levels').instRevAt
-                        params' artifact.view.fields.length
-                  have hctorTailInst : ctorTail.instRev params' =
-                      VExpr.forallN
-                        (artifact.view.specializedFields levels' params')
-                        tailResult := by
-                    simp [ctorTail, tailResult,
-                      VExpr.instRev_forallN_projection,
-                      VStructureView.specializedFields,
-                      VExpr.instRevAt_map_instL_zipIdx]
-                  rw [hctorTailInst] at hr
-                  refine (getSortLevel.WF htypeS).bind
-                    fun sortLevel nextState _ _ => ?_
-                  have hstructBelow : c.FVarsBelow (.proj st i e) e := by
-                    intro P _ hproj
-                    simpa [FVarsIn] using hproj
-                  have hcursorZero : VExpr.consumeForalls?
-                      (VExpr.forallN
-                        (artifact.view.specializedFields levels' params')
-                        tailResult)
-                      (artifact.view.projectionArgs levels' params' 0 e') =
-                        some (VExpr.forallN
-                          (artifact.view.specializedFields levels' params')
-                          tailResult) := by
-                    rfl
-                  refine (inferProjFields.WF he artifact.viewWF hlevelsWF
-                    hlevelsLength' hparamsLength hparamsSpine
-                    artifact.programsWF artifact.name_eq hmajorType
-                    hrBelow hstructBelow (by simpa using hiFields) hr
-                    hcursorZero).bind
-                      fun r _ _ hr => ?_
-                  obtain ⟨cursor, hcursor, hrBelow, hr⟩ := hr
-                  have hcursor' : VExpr.consumeForalls?
-                      (VExpr.forallN
-                        (artifact.view.specializedFields levels' params')
-                        tailResult)
-                      (artifact.view.projectionArgs levels' params' i e') =
-                        some cursor := by
-                    simpa using hcursor
-                  have hcodeIdx : i <
-                      (artifact.view.projectionCodes levels' params').length := by
-                    simpa using hiFields
-                  let code :=
-                    (artifact.view.projectionCodes levels' params')[i]
-                  have hcode :
-                      (artifact.view.projectionCodes levels' params')[i]? =
-                        some code :=
-                    List.getElem?_eq_getElem hcodeIdx
-                  have hprojectionArgsLength :
-                      (artifact.view.projectionArgs levels' params' i e').length =
-                        i :=
-                    artifact.view.projectionArgs_length levels' params' i e'
-                      (Nat.le_of_lt hcodeIdx)
-                  obtain ⟨field, semanticBody, hfield, hconsume⟩ :=
-                    VExpr.consumeForalls?_forallN_domain
-                      (artifact.view.specializedFields levels' params')
-                      tailResult
-                      (artifact.view.projectionArgs levels' params' i e')
-                      (by simpa [hprojectionArgsLength] using hiFields)
-                  rw [hprojectionArgsLength] at hfield
-                  have hcursorShape : cursor =
-                      .forallE
-                        (field.instRevAt
-                          (artifact.view.projectionArgs levels' params' i e') 0)
-                        semanticBody :=
-                    Option.some.inj (hcursor'.symm.trans hconsume)
-                  subst cursor
-                  have hprograms : artifact.view.ProgramsWF c.venv :=
-                    artifact.programsWF
-                  obtain ⟨field', typeBody, hfield', htypeFn,
-                      hprojectorField⟩ :=
-                    hprograms.projector_hasType_field
-                      c.Ewf c.Δwf hlevelsWF hlevelsLength' hparamsLength
-                      hparamsSpine hcode hmajorType
-                  have hfieldEq : field' = field :=
-                    Option.some.inj (hfield'.symm.trans hfield)
-                  subst field'
-                  have hprojector := hprograms c.Δwf hlevelsWF
-                    hlevelsLength' hparamsLength hparamsSpine hcode
-                  have hprojSem : c.venv.TrProj c.lparams.length
-                      c.vlctx.toCtx artifact.view levels' params' i e'
-                      (.app code.projector e') := {
-                    viewWF := artifact.viewWF
-                    levelsWF := hlevelsWF
-                    levels_length := hlevelsLength'
-                    params_length := hparamsLength
-                    paramsSpine := hparamsSpine
-                    majorType := hmajorType
-                    program := ⟨code, hcode, rfl, hprojector⟩ }
-                  have hst : st = familyName := by
-                    simpa using hname
-                  have hprojStrict : c.TrExprS (.proj st i e)
-                      (.app code.projector e') :=
-                    .proj he ⟨artifact.view, levels', params',
-                      artifact.name_eq.trans hst.symm, hprojSem⟩
-                  obtain ⟨r', hrS, hrEq⟩ := hr
-                  refine (whnf.WF hrS).bind fun out _ _
-                    ⟨houtBelow, ⟨out', hout, houtEq⟩⟩ => ?_
-                  have houtEq := houtEq.trans c.Ewf c.Δwf hrEq
-                  cases out with
-                  | forallE name dom body bi =>
-                    let .forallE hdomTy hbodyTy hdom hbody := hout
-                    have hforallEq := houtEq.forallE_inv c.Ewf c.Δwf
-                    obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
-                    have hprojectorField' := hprojectorField.defeqU_r
-                      c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
-                    have hdomBelow : c.FVarsBelow (.proj st i e) dom := by
-                      intro P hP hproj
-                      exact ((hrBelow.trans houtBelow) P hP hproj).1
-                    have hresult : ∃ proj' ty',
-                        c.TrTyping (.proj st i e) dom proj' ty' :=
-                      ⟨.app code.projector e', _, hdomBelow, hprojStrict,
-                        hdom, hprojectorField'⟩
-                    simp only
-                    split
-                    · refine (isProp.WF hdom).bind fun _ _ _ _ => ?_
-                      split
-                      · exact invalidProj.WF
-                      · exact .pure hresult
-                    · exact .pure hresult
-                  | bvar | fvar | mvar | sort | const | app | lam | letE |
-                      lit | mdata | proj => exact invalidProj.WF
-                · exact invalidProj.WF
-              | axiomInfo | defnInfo | thmInfo | opaqueInfo | quotInfo |
-                  inductInfo | recInfo => exact invalidProj.WF
+              cases resolution with
+              | ordinary artifact =>
+                have hhead := hstack.tr
+                rw [hfamilyShape] at hhead
+                let .const (us' := levels') hfamilyConst hlevelsMap
+                  hlevelsLength := hhead
+                have hviewFamily := artifact.viewWF.family
+                rw [artifact.name_eq] at hviewFamily
+                rw [hviewFamily] at hfamilyConst
+                cases hfamilyConst
+                have hlevelsWF : ∀ level ∈ levels',
+                    level.WF c.lparams.length :=
+                  VLevel.WF.of_mapM_ofLevel hlevelsMap
+                have hlevelsFamilyLength : levels'.length =
+                    artifact.view.familyRaw.uvars :=
+                  (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
+                    hlevelsLength
+                have hlevelsLength' : levels'.length = artifact.view.uvars := by
+                  exact hlevelsFamilyLength.trans artifact.view.family_uvars_eq
+                have hargsSize : type.getAppArgs.size =
+                    info.numParams + info.numIndices := by
+                  simpa using hargs
+                have hargsLength : type.getAppArgsList.length =
+                    artifact.view.nparams := by
+                  rw [← Expr.getAppArgs_toList]
+                  simp [hargsSize,
+                    artifact.numParams_eq, artifact.numIndices_eq]
+                have hfamilyType : c.HasType (.const familyName levels')
+                    (artifact.view.familyType.instL levels') := by
+                  simpa [artifact.name_eq] using
+                    artifact.viewWF.familyConst_hasType c.Ewf.ordered
+                      (Γ := c.vlctx.toCtx) levels' hlevelsWF hlevelsLength'
+                have hfamilyTypeShape : c.HasType (.const familyName levels')
+                    (VExpr.forallN
+                      (artifact.view.rawParams.map (VExpr.instL levels'))
+                      (.sort (artifact.view.resultLevel.inst levels'))) := by
+                  simpa [artifact.view.familyType_eq_forallN,
+                    VExpr.instL_forallN, VExpr.instL] using hfamilyType
+                have hargsRawLength : type.getAppArgsList.length =
+                    (artifact.view.rawParams.map
+                      (VExpr.instL levels')).length := by
+                  simpa [artifact.view.rawParams_length] using hargsLength
+                obtain ⟨params', hparamsTr, hparamsSpineRaw, htypeFull⟩ :=
+                  AppStack.toSpineWF hstack hfamilyTypeShape hargsRawLength
+                rw [type.mkAppList_getAppArgsList] at htypeFull
+                have htypeAppliedEq := htypeFull.uniq c.Ewf
+                  (.refl c.Ewf c.Δwf) htypeS
+                have hmajorType : c.HasType e'
+                    (artifact.view.structureType levels' params') := by
+                  apply hasty.defeqU_r c.Ewf c.Δwf
+                  have := (htypeAppliedEq.trans c.Ewf c.Δwf htypeEq).symm
+                  simpa [VProjectionView.structureType,
+                    artifact.name_eq] using this
+                have hparamsLength : params'.length =
+                    artifact.view.nparams :=
+                  hparamsTr.length_eq.symm.trans hargsLength
+                have hparamsRawLength : params'.length =
+                    (artifact.view.rawParams.map
+                      (VExpr.instL levels')).length :=
+                  hparamsTr.length_eq.symm.trans hargsRawLength
+                have hparamsSpine : ∃ resultLevel,
+                    c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+                      (artifact.view.familyType.instL levels') params'
+                      (.sort resultLevel) := by
+                  refine ⟨artifact.view.resultLevel.inst levels', ?_⟩
+                  rw [VExpr.instRev_closedN params' (by trivial)] at hparamsSpineRaw
+                  simpa [artifact.view.familyType_eq_forallN,
+                    VExpr.instL_forallN, VExpr.forallN,
+                    VExpr.instRev, VExpr.instL] using hparamsSpineRaw
+                have hconstructorName :
+                    constructor = artifact.view.constructorName := by
+                  have := hctors.symm.trans artifact.ctors_eq
+                  simpa using this
+                refine (M.WF.liftExcept envGet.WF).lift.bind
+                  fun c_info _ _ hctorFind => ?_
+                cases c_info with
+                | ctorInfo ctorInfo =>
+                  simp only
+                  split
+                  · rename_i hidxHost
+                    have hctorInfoEq :
+                        ctorInfo = artifact.constructorInfo := by
+                      rw [hconstructorName, artifact.constructor_find] at hctorFind
+                      exact ConstantInfo.ctorInfo.inj
+                        (Option.some.inj hctorFind.symm)
+                    have hiFields : i <
+                        (artifact.view.specializedFields levels' params').length := by
+                      rw [hctorInfoEq,
+                        artifact.constructor_numFields_eq] at hidxHost
+                      simpa using hidxHost
+                    have hviewConstructor : c.venv.constants constructor =
+                        some artifact.view.constructor.raw.toVConstant := by
+                      simpa [hconstructorName] using
+                        artifact.viewWF.constructor_registered
+                    obtain ⟨_, hctorTr⟩ :=
+                      c.trenv.find?_uniq hctorFind hviewConstructor
+                    have hrawCtorUvars :
+                        artifact.view.constructor.raw.uvars =
+                          artifact.view.uvars := by
+                      exact artifact.view.constructor_uvars_eq
+                    have hctorLevelLength :
+                        ctorInfo.levelParams.length = familyLevels.length :=
+                      hctorTr.2.1.trans <| hrawCtorUvars.trans <|
+                        hlevelsLength'.symm.trans
+                          (List.mapM_eq_some.1 hlevelsMap).length_eq.symm
+                    have hctorType₀ := hctorTr.2.2.instLCpp c.Ewf
+                      (Us := c.lparams) (ls' := levels') (Δ := [])
+                      trivial hlevelsMap hctorLevelLength
+                    have hctorType := hctorType₀.weakFV c.Ewf
+                      (.from_nil c.mlctx.noBV) c.Δwf
+                    rw [(c.Ewf.ordered.closedC
+                      hviewConstructor).instL.liftN_eq
+                        (Nat.le_refl _)] at hctorType
+                    let ctorTail := VExpr.forallN
+                      (artifact.view.fields.map (VExpr.instL levels'))
+                      ((artifact.view.constructor.rawResult
+                        artifact.view.nparams).instL levels')
+                    rw [artifact.view.constructor.rawType_eq] at hctorType
+                    have hinstantiate :
+                        ((.ctorInfo ctorInfo : ConstantInfo)
+                          |>.instantiateTypeLevelParamsCpp familyLevels) =
+                        ctorInfo.type.instantiateLevelParamsCpp
+                          ctorInfo.levelParams familyLevels := rfl
+                    have hctorTypeShape : c.TrExpr
+                        ((.ctorInfo ctorInfo : ConstantInfo)
+                          |>.instantiateTypeLevelParamsCpp familyLevels)
+                        (VExpr.forallN
+                          (artifact.view.constructorParams.map
+                            (VExpr.instL levels')) ctorTail) := by
+                      simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                        ConstantInfo.type, ConstantInfo.levelParams,
+                        ConstantInfo.toConstantVal, ctorTail,
+                        VInductDecl.NormalizedCtor.declaredBinders,
+                        VProjectionView.nparams,
+                        VProjectionView.source,
+                        VProjectionView.constructor,
+                        VProjectionView.constructorParams,
+                        VProjectionView.fields,
+                        VExpr.instL_forallN, VExpr.forallN_append,
+                        List.map_append] using hctorType
+                    have hctorTypeBelow : c.FVarsBelow (.proj familyName i e)
+                        ((.ctorInfo ctorInfo : ConstantInfo)
+                          |>.instantiateTypeLevelParamsCpp familyLevels) := by
+                      intro P _ _
+                      simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                        ConstantInfo.type, ConstantInfo.levelParams,
+                        ConstantInfo.toConstantVal] using
+                          hctorType₀.fvarsIn.mono nofun
+                    have hparamArgsEq :
+                        List.take info.numParams type.getAppArgs.toList =
+                          type.getAppArgsList := by
+                      simp [Expr.getAppArgs_toList, artifact.numParams_eq,
+                        ← hargsLength]
+                    have hparamArgsTr :
+                        (List.take info.numParams
+                          type.getAppArgs.toList).Forall₂
+                          (c.TrExprS · ·) params' := by
+                      simpa [hparamArgsEq] using hparamsTr
+                    have hparamArgsBelow : ∀ arg ∈
+                        List.take info.numParams type.getAppArgs.toList,
+                        c.FVarsBelow (.proj familyName i e) arg := by
+                      intro arg harg P hP hproj
+                      apply FVarsIn.getAppArgsList
+                        (hprojBelowType P hP hproj)
+                      simpa [hparamArgsEq] using harg
+                    have hctorParamsSpine :=
+                      artifact.viewWF.constructorParamsSpine c.Ewf.ordered
+                        levels' hlevelsWF hlevelsLength' params' hparamsLength
+                        hparamsSpine ctorTail
+                    refine (M.WF.liftExcept envGet.WF).lift.bind
+                      fun rec_info _ _ hrecFind => ?_
+                    cases rec_info with
+                    | recInfo recInfo =>
+                      obtain ⟨rawRecursor, hviewRecursor, hrawRecUvars⟩ :=
+                        artifact.viewWF.recursor_registered
+                      have hrecursorName : mkRecName familyName =
+                          artifact.view.recursorName := by
+                        simpa only [mkRecName, VProjectionView.recursorName] using
+                          congrArg (fun name => name.str "rec")
+                            artifact.name_eq.symm
+                      rw [← hrecursorName] at hviewRecursor
+                      obtain ⟨_, hrecTr⟩ :=
+                        c.trenv.find?_uniq hrecFind hviewRecursor
+                      have hrecLevelLength : recInfo.levelParams.length =
+                          artifact.view.recUvars :=
+                        hrecTr.2.1.trans hrawRecUvars
+                      cases artifact.programs with
+                      | dense programs =>
+                          refine (inferProjParams.WF hparamArgsTr hctorTypeBelow
+                            hparamArgsBelow hctorTypeShape hctorParamsSpine).bind
+                              fun r _ _ hr => ?_
+                          obtain ⟨hrBelow, hr⟩ := hr
+                          let tailResult :=
+                            ((artifact.view.constructor.rawResult
+                              artifact.view.nparams).instL levels').instRevAt
+                                params' artifact.view.fields.length
+                          have hctorTailInst : ctorTail.instRev params' =
+                              VExpr.forallN
+                                (artifact.view.specializedFields levels' params')
+                                tailResult := by
+                            simp [ctorTail, tailResult,
+                              VExpr.instRev_forallN_projection,
+                              VProjectionView.specializedFields_eq,
+                              VExpr.instRevAt_map_instL_zipIdx]
+                          rw [hctorTailInst] at hr
+                          refine (getSortLevel.WF htypeS).bind
+                            fun sortLevel nextState _ _ => ?_
+                          split
+                          · exact invalidProj.WF
+                          · rename_i hrecGate
+                            have hstructBelow : c.FVarsBelow
+                                (.proj familyName i e) e := by
+                              intro P _ hproj
+                              simpa [FVarsIn] using hproj
+                            have hcursorZero : VExpr.consumeForalls?
+                                (VExpr.forallN
+                                  (artifact.view.specializedFields levels' params')
+                                  tailResult)
+                                (artifact.view.projectionArgs levels' params' 0 e') =
+                                  some (VExpr.forallN
+                                    (artifact.view.specializedFields levels' params')
+                                    tailResult) := by
+                              rfl
+                            refine (inferProjFields.WF he artifact.viewWF hlevelsWF
+                              hlevelsLength' hparamsLength hparamsSpine
+                              programs.programsWF artifact.name_eq hmajorType
+                              hrBelow hstructBelow (by simpa using hiFields) hr
+                              hcursorZero).bind
+                                fun r _ _ hr => ?_
+                            obtain ⟨cursor, hcursor, hrBelow, hr⟩ := hr
+                            have hcursor' : VExpr.consumeForalls?
+                                (VExpr.forallN
+                                  (artifact.view.specializedFields levels' params')
+                                  tailResult)
+                                (artifact.view.projectionArgs levels' params' i e') =
+                                  some cursor := by
+                              simpa using hcursor
+                            have hcodeIdx : i <
+                                (artifact.view.projectionCodes levels' params').length := by
+                              simpa using hiFields
+                            let code :=
+                              (artifact.view.projectionCodes levels' params')[i]
+                            have hcode :
+                                (artifact.view.projectionCodes levels' params')[i]? =
+                                  some code :=
+                              List.getElem?_eq_getElem hcodeIdx
+                            have hprojectionArgsLength :
+                                (artifact.view.projectionArgs levels' params' i e').length =
+                                  i :=
+                              artifact.view.projectionArgs_length levels' params' i e'
+                                (Nat.le_of_lt hcodeIdx)
+                            obtain ⟨field, semanticBody, hfield, hconsume⟩ :=
+                              VExpr.consumeForalls?_forallN_domain
+                                (artifact.view.specializedFields levels' params')
+                                tailResult
+                                (artifact.view.projectionArgs levels' params' i e')
+                                (by simpa [hprojectionArgsLength] using hiFields)
+                            rw [hprojectionArgsLength] at hfield
+                            have hcursorShape : cursor =
+                                .forallE
+                                  (field.instRevAt
+                                    (artifact.view.projectionArgs levels' params' i e') 0)
+                                  semanticBody :=
+                              Option.some.inj (hcursor'.symm.trans hconsume)
+                            subst cursor
+                            have hprograms : artifact.view.ProgramsWF c.venv :=
+                              programs.programsWF
+                            obtain ⟨field', typeBody, hfield', htypeFn,
+                                hprojectorField⟩ :=
+                              hprograms.projector_hasType_field
+                                c.Ewf c.Δwf hlevelsWF hlevelsLength' hparamsLength
+                                hparamsSpine hcode hmajorType
+                            have hfieldEq : field' = field :=
+                              Option.some.inj (hfield'.symm.trans hfield)
+                            subst field'
+                            have hprojector := hprograms c.Δwf hlevelsWF
+                              hlevelsLength' hparamsLength hparamsSpine hcode
+                            have hprojSem : VProjectionView.TrProj c.venv
+                                c.lparams.length c.vlctx.toCtx artifact.view levels' params' i e'
+                                (.app code.projector e') := {
+                              viewWF := artifact.viewWF
+                              levelsWF := hlevelsWF
+                              levels_length := hlevelsLength'
+                              params_length := hparamsLength
+                              paramsSpine := hparamsSpine
+                              majorType := hmajorType
+                              program := ⟨code, hcode, rfl, hprojector⟩ }
+                            have hprojStrict : c.TrExprS (.proj familyName i e)
+                                (.app code.projector e') :=
+                              .proj he ⟨.ordinary artifact.view, levels', params',
+                                artifact.name_eq, .ordinary hprojSem⟩
+                            obtain ⟨r', hrS, hrEq⟩ := hr
+                            refine (whnf.WF hrS).bind fun out _ _
+                              ⟨houtBelow, ⟨out', hout, houtEq⟩⟩ => ?_
+                            have houtEq := houtEq.trans c.Ewf c.Δwf hrEq
+                            cases out with
+                            | forallE name dom body bi =>
+                              let .forallE hdomTy hbodyTy hdom hbody := hout
+                              have hforallEq := houtEq.forallE_inv c.Ewf c.Δwf
+                              obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+                              have hprojectorField' := hprojectorField.defeqU_r
+                                c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
+                              have hdomBelow : c.FVarsBelow
+                                  (.proj familyName i e) dom := by
+                                intro P hP hproj
+                                exact ((hrBelow.trans houtBelow) P hP hproj).1
+                              have hresult : ∃ proj' ty',
+                                  c.TrTyping (.proj familyName i e) dom proj' ty' :=
+                                ⟨.app code.projector e', _, hdomBelow, hprojStrict,
+                                  hdom, hprojectorField'⟩
+                              simp only
+                              split
+                              · refine (isProp.WF hdom).bind fun _ _ _ _ => ?_
+                                split
+                                · exact invalidProj.WF
+                                · exact .pure hresult
+                              · exact .pure hresult
+                            | bvar | fvar | mvar | sort | const | app | lam | letE |
+                                lit | mdata | proj => exact invalidProj.WF
+                      | runtimeBlock selected view_eq spineSupport =>
+                        have hselectedViewWF :
+                            (VProjectionView.block selected).LayoutWF c.venv := by
+                          simpa [view_eq] using artifact.viewWF
+                        have selectedLayout : selected.LayoutWF c.venv := by
+                          have checked :=
+                            hselectedViewWF.materialize c.Ewf.ordered
+                          cases checked with
+                          | block layout => exact layout
+                        have hlevelsLengthSelected : levels'.length =
+                            selected.uvars := by
+                          simpa [view_eq, VProjectionView.uvars,
+                            VProjectionView.source] using hlevelsLength'
+                        have hparamsLengthSelected : params'.length =
+                            selected.nparams := by
+                          simpa [view_eq, VProjectionView.nparams,
+                            VProjectionView.source] using hparamsLength
+                        have hparamsSpineSelected : ∃ resultLevel,
+                            c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+                              (selected.familyType.instL levels') params'
+                              (.sort resultLevel) := by
+                          simpa [view_eq, VProjectionView.familyType,
+                            VProjectionView.familyRaw] using hparamsSpine
+                        have hnameSelected : selected.name = familyName := by
+                          simpa [view_eq, VProjectionView.name,
+                            VProjectionView.familyRaw] using artifact.name_eq
+                        have hmajorTypeSelected : c.HasType e'
+                            (selected.structureType levels' params') := by
+                          simpa [view_eq, VProjectionView.structureType,
+                            VProjectionView.name,
+                            VProjectionView.familyRaw,
+                            VBlockStructureView.structureType] using hmajorType
+                        have hiFieldsSelected : i <
+                            (selected.specializedFields levels' params').length := by
+                          simpa [view_eq,
+                            VProjectionView.specializedFields] using hiFields
+                        have hrecLevelLengthSelected :
+                            recInfo.levelParams.length =
+                              selected.generation.recUvars := by
+                          simpa [view_eq, VProjectionView.recUvars] using
+                            hrecLevelLength
+                        have hinfoLevelLengthSelected :
+                            info.levelParams.length = selected.uvars := by
+                          simpa [view_eq, VProjectionView.uvars,
+                            VProjectionView.source] using
+                              artifact.levelParams_length
+                        rw [← hctorInfoEq] at spineSupport
+                        have semanticFull := spineSupport.blockSemanticInstL
+                          (parameters := ctorInfo.levelParams)
+                          (sourceLevels := familyLevels)
+                          (targetLevels := levels')
+                        have semanticFull' : ProjectionSpineSupport
+                            ((List.take info.numParams
+                              type.getAppArgs.toList).length +
+                                selected.fields.length)
+                            ((.ctorInfo ctorInfo : ConstantInfo)
+                              |>.instantiateTypeLevelParamsCpp familyLevels)
+                            (VExpr.forallN
+                              (selected.constructorParams.map
+                                (VExpr.instL levels'))
+                              (VExpr.forallN
+                                (selected.fields.map (VExpr.instL levels'))
+                                ((selected.constructor.rawResult
+                                  selected.nparams).instL levels'))) := by
+                          simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                            ConstantInfo.type, ConstantInfo.levelParams,
+                            ConstantInfo.toConstantVal,
+                            hparamArgsTr.length_eq,
+                            hparamsLengthSelected] using
+                              semanticFull
+                        let selectedTail := VExpr.forallN
+                          (selected.fields.map (VExpr.instL levels'))
+                          ((selected.constructor.rawResult selected.nparams).instL
+                            levels')
+                        have hctorTypeShapeSelected : c.TrExpr
+                            ((.ctorInfo ctorInfo : ConstantInfo)
+                              |>.instantiateTypeLevelParamsCpp familyLevels)
+                            (VExpr.forallN
+                              (selected.constructorParams.map
+                                (VExpr.instL levels')) selectedTail) := by
+                          simpa [view_eq, ctorTail, selectedTail,
+                            VProjectionView.constructorParams,
+                            VProjectionView.constructor,
+                            VProjectionView.nparams,
+                            VProjectionView.source,
+                            VProjectionView.fields,
+                            VBlockStructureView.constructorParams,
+                            VBlockStructureView.fields] using hctorTypeShape
+                        have hctorParamsSpineSelected :=
+                          selectedLayout.constructorParamsSpine c.Ewf.ordered
+                            levels' hlevelsWF hlevelsLengthSelected params'
+                            hparamsLengthSelected hparamsSpineSelected selectedTail
+                        refine (inferProjParams.WF_withSupport hparamArgsTr
+                          hctorTypeBelow hparamArgsBelow hctorTypeShapeSelected
+                          hctorParamsSpineSelected semanticFull').bind
+                            fun r _ _ hr => ?_
+                        obtain ⟨hrBelow, hr, semanticSupport⟩ := hr
+                        let tailResult :=
+                          ((selected.constructor.rawResult selected.nparams).instL
+                            levels').instRevAt params' selected.fields.length
+                        have hselectedTailInst : selectedTail.instRev params' =
+                            VExpr.forallN
+                              (selected.specializedFields levels' params')
+                              tailResult := by
+                          simp [selectedTail, tailResult,
+                            VExpr.instRev_forallN_projection,
+                            VBlockStructureView.specializedFields,
+                            VExpr.instRevAt_map_instL_zipIdx]
+                        rw [hselectedTailInst] at hr semanticSupport
+                        refine (getSortLevel.WF htypeS).bind
+                          fun sortLevel nextState _ _ => ?_
+                        split
+                        · exact invalidProj.WF
+                        · rename_i hrecGate
+                          have hstructBelow : c.FVarsBelow
+                              (.proj familyName i e) e := by
+                            intro P _ hproj
+                            simpa [FVarsIn] using hproj
+                          let fieldCount :=
+                            (selected.specializedFields levels' params').length
+                          have hfieldCount : fieldCount = selected.fields.length := by
+                            simp [fieldCount,
+                              VBlockStructureView.specializedFields]
+                          have semanticSupportFields : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (selected.specializedFields levels' params')
+                                tailResult) := by
+                            simpa [fieldCount, hfieldCount] using semanticSupport
+                          have hfieldsBound : i + 1 ≤ fieldCount := by
+                            dsimp only [fieldCount]
+                            omega
+                          have semanticPrefix :=
+                            semanticSupportFields.prefix hfieldsBound
+                          have runtimeSupport :=
+                            semanticSupportFields.retargetForallN
+                          have majorSupportAll₀ := runtimeSupport.liftN
+                            (amount := 1) (depth := 0)
+                          have hmajorFields :=
+                            selectedLayout.specializedFields_liftN levels' params'
+                              hparamsLengthSelected 1 0
+                          rw [VExpr.liftN_forallN, ← hmajorFields] at majorSupportAll₀
+                          have majorSupportAll : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (selected.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)) := by
+                            simpa [VExpr.liftN] using majorSupportAll₀
+                          have majorPrefix :=
+                            majorSupportAll.prefix hfieldsBound
+                          have constructorSupportAll₀ := runtimeSupport.liftN
+                            (amount := fieldCount) (depth := 0)
+                          rw [VExpr.liftN_forallN] at constructorSupportAll₀
+                          have constructorSupportAll : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (VExpr.liftTelN fieldCount
+                                  (selected.specializedFields levels' params') 0)
+                                (.sort .zero)) := by
+                            simpa [VExpr.liftN] using
+                              constructorSupportAll₀
+                          have constructorPrefix :=
+                            constructorSupportAll.prefix hfieldsBound
+                          have hsmallMaybe :
+                              selected.generation.elimination = .small →
+                                (!sortLevel.isNeverZero) = true := by
+                            intro mode
+                            have hrecEq : recInfo.levelParams.length =
+                                info.levelParams.length := by
+                              calc
+                                recInfo.levelParams.length =
+                                    selected.generation.recUvars :=
+                                  hrecLevelLengthSelected
+                                _ = selected.uvars := by
+                                  simp [VInductDecl.BlockGenerationChecked.recUvars,
+                                    mode]
+                                _ = info.levelParams.length :=
+                                  hinfoLevelLengthSelected.symm
+                            cases hmaybe : (!sortLevel.isNeverZero) with
+                            | true => rfl
+                            | false => simp [hmaybe, hrecEq] at hrecGate
+                          have hcursorZero :
+                              (VExpr.forallN
+                                (selected.specializedFields levels' params')
+                                tailResult).consumeForalls?
+                                  (selected.operationalProjectionArgs levels'
+                                    params' 0 e') =
+                                some (VExpr.forallN
+                                  (selected.specializedFields levels' params')
+                                  tailResult) := by
+                            rfl
+                          have hmajorCursorZero :
+                              (VExpr.forallN
+                                (selected.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)).consumeForalls?
+                                  (selected.operationalProjectionArgs levels'
+                                    (params'.map (VExpr.liftN 1)) 0 (.bvar 0)) =
+                                some (VExpr.forallN
+                                  (selected.specializedFields levels'
+                                    (params'.map (VExpr.liftN 1)))
+                                  (.sort .zero)) := by
+                            rfl
+                          have hconstructorCursorZero :
+                              (VExpr.forallN
+                                (VExpr.liftTelN fieldCount
+                                  (selected.specializedFields levels' params') 0)
+                                (.sort .zero)).consumeForalls? [] =
+                                some (VExpr.forallN
+                                  (VExpr.liftTelN fieldCount
+                                    (selected.specializedFields levels' params') 0)
+                                  (.sort .zero)) := by
+                            rfl
+                          refine (inferProjFields.WF_runtimeBlock he selectedLayout
+                            hlevelsWF hlevelsLengthSelected hparamsLengthSelected
+                            hparamsSpineSelected hnameSelected hmajorTypeSelected
+                            hrBelow hstructBelow (by simpa using hiFieldsSelected)
+                            hr hcursorZero
+                            (VBlockStructureView.OperationalRuntimePrefix.zero
+                              selected c.venv c.lparams.length c.vlctx.toCtx
+                              levels' params')
+                            semanticPrefix majorPrefix hmajorCursorZero
+                            constructorPrefix (by
+                              simpa [fieldCount] using hconstructorCursorZero)
+                            hsmallMaybe).bind fun r _ _ runtimeResult => ?_
+                          obtain ⟨cursor, majorCursor, constructorCursor,
+                            hcursor, hmajorCursor, hconstructorCursor, hrBelow, hr,
+                            semanticOne, majorOne, constructorOne, runtime⟩ :=
+                              runtimeResult
+                          have hcursor' :
+                              (VExpr.forallN
+                                (selected.specializedFields levels' params')
+                                tailResult).consumeForalls?
+                                  (selected.operationalProjectionArgs levels'
+                                    params' i e') = some cursor := by
+                            simpa only [Nat.zero_add] using hcursor
+                          have hmajorCursor' :
+                              (VExpr.forallN
+                                (selected.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)).consumeForalls?
+                                  (selected.operationalProjectionArgs levels'
+                                    (params'.map (VExpr.liftN 1)) i (.bvar 0)) =
+                                some majorCursor := by
+                            simpa only [Nat.zero_add] using hmajorCursor
+                          have hconstructorCursor' :
+                              let fields := selected.specializedFields levels' params'
+                              let fieldCount := fields.length
+                              (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                                (.sort .zero)).consumeForalls?
+                                  (((selected.operationalProjectionCodes levels'
+                                    params').take i).map fun prior =>
+                                      .app (prior.projector.liftN fieldCount)
+                                        (selected.projectionConstructorApp levels'
+                                          params' fields)) =
+                                some constructorCursor := by
+                            simpa only [Nat.zero_add] using hconstructorCursor
+                          have runtime' :
+                              selected.OperationalRuntimePrefix c.venv
+                                c.lparams.length c.vlctx.toCtx levels' params' i := by
+                            simpa only [Nat.zero_add] using runtime
+                          exact inferProjResult.WF_runtimeBlock
+                            (typeName := familyName) (fieldIdx := i)
+                            (struct := e) (major := e')
+                            (tailResult := tailResult)
+                            (maybePropType := !sortLevel.isNeverZero)
+                            he selectedLayout hlevelsWF hlevelsLengthSelected
+                            hparamsLengthSelected hparamsSpineSelected
+                            hnameSelected hmajorTypeSelected hrBelow
+                            hiFieldsSelected hr hcursor' runtime' semanticOne
+                            majorOne hmajorCursor' constructorOne
+                            hconstructorCursor' hsmallMaybe
+                    | axiomInfo | defnInfo | thmInfo | opaqueInfo | quotInfo |
+                        inductInfo | ctorInfo => exact invalidProj.WF
+                  · exact invalidProj.WF
+                | axiomInfo | defnInfo | thmInfo | opaqueInfo | quotInfo |
+                    inductInfo | recInfo => exact invalidProj.WF
+              | restored artifact =>
+                have hhead := hstack.tr
+                rw [hfamilyShape] at hhead
+                let .const (us' := levels') hfamilyConst hlevelsMap
+                  hlevelsLength := hhead
+                have hviewFamily := artifact.viewWF.family
+                rw [artifact.name_eq] at hviewFamily
+                rw [hviewFamily] at hfamilyConst
+                cases hfamilyConst
+                have hlevelsWF : ∀ level ∈ levels',
+                    level.WF c.lparams.length :=
+                  VLevel.WF.of_mapM_ofLevel hlevelsMap
+                have hlevelsFamilyLength : levels'.length =
+                    artifact.view.sourceFamily.uvars :=
+                  (List.mapM_eq_some.1 hlevelsMap).length_eq.symm.trans
+                    hlevelsLength
+                have hlevelsLength' : levels'.length = artifact.view.uvars := by
+                  exact hlevelsFamilyLength.trans artifact.view.family_uvars_eq
+                have hargsSize : type.getAppArgs.size =
+                    info.numParams + info.numIndices := by
+                  simpa using hargs
+                have hargsLength : type.getAppArgsList.length =
+                    artifact.view.nparams := by
+                  rw [← Expr.getAppArgs_toList]
+                  simp [hargsSize,
+                    artifact.numParams_eq, artifact.numIndices_eq]
+                have hfamilyType : c.HasType (.const familyName levels')
+                    (artifact.view.familyType.instL levels') := by
+                  simpa [artifact.name_eq] using
+                    artifact.viewWF.familyConst_hasType c.Ewf.ordered
+                      (Γ := c.vlctx.toCtx) levels' hlevelsWF hlevelsLength'
+                have hfamilyTypeShape : c.HasType (.const familyName levels')
+                    (VExpr.forallN
+                      (artifact.view.rawParams.map (VExpr.instL levels'))
+                      (.sort (artifact.view.resultLevel.inst levels'))) := by
+                  simpa [artifact.view.familyType_eq_forallN,
+                    VExpr.instL_forallN, VExpr.instL] using hfamilyType
+                have hargsRawLength : type.getAppArgsList.length =
+                    (artifact.view.rawParams.map
+                      (VExpr.instL levels')).length := by
+                  simpa [artifact.view.rawParams_length] using hargsLength
+                obtain ⟨params', hparamsTr, hparamsSpineRaw, htypeFull⟩ :=
+                  AppStack.toSpineWF hstack hfamilyTypeShape hargsRawLength
+                rw [type.mkAppList_getAppArgsList] at htypeFull
+                have htypeAppliedEq := htypeFull.uniq c.Ewf
+                  (.refl c.Ewf c.Δwf) htypeS
+                have hmajorType : c.HasType e'
+                    (artifact.view.structureType levels' params') := by
+                  apply hasty.defeqU_r c.Ewf c.Δwf
+                  have := (htypeAppliedEq.trans c.Ewf c.Δwf htypeEq).symm
+                  simpa [VRestoredBlockStructureView.structureType,
+                    artifact.name_eq] using this
+                have hparamsLength : params'.length =
+                    artifact.view.nparams :=
+                  hparamsTr.length_eq.symm.trans hargsLength
+                have hparamsSpine : ∃ resultLevel,
+                    c.venv.SpineWF c.lparams.length c.vlctx.toCtx
+                      (artifact.view.familyType.instL levels') params'
+                      (.sort resultLevel) := by
+                  refine ⟨artifact.view.resultLevel.inst levels', ?_⟩
+                  rw [VExpr.instRev_closedN params' (by trivial)] at hparamsSpineRaw
+                  simpa [artifact.view.familyType_eq_forallN,
+                    VExpr.instL_forallN, VExpr.forallN,
+                    VExpr.instRev, VExpr.instL] using hparamsSpineRaw
+                have hconstructorName :
+                    constructor = artifact.view.constructorName := by
+                  have := hctors.symm.trans artifact.ctors_eq
+                  simpa using this
+                refine (M.WF.liftExcept envGet.WF).lift.bind
+                  fun c_info _ _ hctorFind => ?_
+                cases c_info with
+                | ctorInfo ctorInfo =>
+                  simp only
+                  split
+                  · rename_i hidxHost
+                    have hctorInfoEq :
+                        ctorInfo = artifact.constructorInfo := by
+                      rw [hconstructorName, artifact.constructor_find] at hctorFind
+                      exact ConstantInfo.ctorInfo.inj
+                        (Option.some.inj hctorFind.symm)
+                    have hiFields : i <
+                        (artifact.view.specializedFields levels' params').length := by
+                      rw [hctorInfoEq,
+                        artifact.constructor_numFields_eq] at hidxHost
+                      simpa [VRestoredBlockStructureView.specializedFields] using
+                        hidxHost
+                    have hviewConstructor : c.venv.constants constructor =
+                        some artifact.view.sourceConstructor.toVConstant := by
+                      simpa [hconstructorName] using artifact.viewWF.constructor
+                    obtain ⟨_, hctorTr⟩ :=
+                      c.trenv.find?_uniq hctorFind hviewConstructor
+                    have hrawCtorUvars :
+                        artifact.view.sourceConstructor.uvars =
+                          artifact.view.uvars :=
+                      artifact.view.constructor_uvars_eq
+                    have hctorLevelLength :
+                        ctorInfo.levelParams.length = familyLevels.length :=
+                      hctorTr.2.1.trans <| hrawCtorUvars.trans <|
+                        hlevelsLength'.symm.trans
+                          (List.mapM_eq_some.1 hlevelsMap).length_eq.symm
+                    have hctorType₀ := hctorTr.2.2.instLCpp c.Ewf
+                      (Us := c.lparams) (ls' := levels') (Δ := [])
+                      trivial hlevelsMap hctorLevelLength
+                    have hctorType := hctorType₀.weakFV c.Ewf
+                      (.from_nil c.mlctx.noBV) c.Δwf
+                    rw [(c.Ewf.ordered.closedC
+                      hviewConstructor).instL.liftN_eq
+                        (Nat.le_refl _)] at hctorType
+                    let ctorResult :=
+                      (VExpr.dropN artifact.view.nparams
+                        artifact.view.sourceConstructor.type).resultOf
+                    let ctorTail := VExpr.forallN
+                      (artifact.view.fields.map (VExpr.instL levels'))
+                      (ctorResult.instL levels')
+                    have hsourceCtorShape :
+                        artifact.view.sourceConstructor.type =
+                          VExpr.forallN artifact.view.constructorParams
+                            (VExpr.forallN artifact.view.fields ctorResult) := by
+                      simp [VRestoredBlockStructureView.constructorParams,
+                        VRestoredBlockStructureView.fields, ctorResult,
+                        VInductDecl.forallN_ctorFields_resultOf,
+                        VExpr.forallN_telN_dropN]
+                    rw [hsourceCtorShape] at hctorType
+                    have hctorTypeShape : c.TrExpr
+                        ((.ctorInfo ctorInfo : ConstantInfo)
+                          |>.instantiateTypeLevelParamsCpp familyLevels)
+                        (VExpr.forallN
+                          (artifact.view.constructorParams.map
+                            (VExpr.instL levels')) ctorTail) := by
+                      simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                        ConstantInfo.type, ConstantInfo.levelParams,
+                        ConstantInfo.toConstantVal, ctorTail,
+                        VExpr.instL_forallN] using hctorType
+                    have hctorTypeBelow : c.FVarsBelow (.proj familyName i e)
+                        ((.ctorInfo ctorInfo : ConstantInfo)
+                          |>.instantiateTypeLevelParamsCpp familyLevels) := by
+                      intro P _ _
+                      simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                        ConstantInfo.type, ConstantInfo.levelParams,
+                        ConstantInfo.toConstantVal] using
+                          hctorType₀.fvarsIn.mono nofun
+                    have hparamArgsEq :
+                        List.take info.numParams type.getAppArgs.toList =
+                          type.getAppArgsList := by
+                      simp [Expr.getAppArgs_toList, artifact.numParams_eq,
+                        ← hargsLength]
+                    have hparamArgsTr :
+                        (List.take info.numParams
+                          type.getAppArgs.toList).Forall₂
+                          (c.TrExprS · ·) params' := by
+                      simpa [hparamArgsEq] using hparamsTr
+                    have hparamArgsBelow : ∀ arg ∈
+                        List.take info.numParams type.getAppArgs.toList,
+                        c.FVarsBelow (.proj familyName i e) arg := by
+                      intro arg harg P hP hproj
+                      apply FVarsIn.getAppArgsList
+                        (hprojBelowType P hP hproj)
+                      simpa [hparamArgsEq] using harg
+                    have hctorParamsSpine :=
+                      artifact.parameterLayout.constructorParamsSpine
+                        c.Ewf.ordered levels' hlevelsWF hlevelsLength' params'
+                        hparamsLength hparamsSpine ctorTail
+                    refine (M.WF.liftExcept envGet.WF).lift.bind
+                      fun rec_info _ _ hrecFind => ?_
+                    cases rec_info with
+                    | recInfo recInfo =>
+                      have hrecursorName : mkRecName familyName =
+                          artifact.view.recursorName := by
+                        simpa only [mkRecName,
+                          VRestoredBlockStructureView.recursorName] using
+                          congrArg (fun name => name.str "rec")
+                            artifact.name_eq.symm
+                      have hrecInfoEq : recInfo = artifact.recursorInfo := by
+                        rw [hrecursorName, artifact.recursor_find] at hrecFind
+                        exact ConstantInfo.recInfo.inj
+                          (Option.some.inj hrecFind.symm)
+                      have hrecLevelLength : recInfo.levelParams.length =
+                          artifact.view.recUvars := by
+                        rw [hrecInfoEq]
+                        exact artifact.recursor_levelParams_length
+                      cases artifact.programs with
+                      | dense programs =>
+                          refine (inferProjParams.WF hparamArgsTr hctorTypeBelow
+                            hparamArgsBelow hctorTypeShape hctorParamsSpine).bind
+                              fun r _ _ hr => ?_
+                          obtain ⟨hrBelow, hr⟩ := hr
+                          let tailResult := (ctorResult.instL levels').instRevAt
+                            params' artifact.view.fields.length
+                          have hctorTailInst : ctorTail.instRev params' =
+                              VExpr.forallN
+                                (artifact.view.specializedFields levels' params')
+                                tailResult := by
+                            simp [ctorTail, tailResult,
+                              VExpr.instRev_forallN_projection,
+                              VRestoredBlockStructureView.specializedFields,
+                              VExpr.instRevAt_map_instL_zipIdx]
+                          rw [hctorTailInst] at hr
+                          refine (getSortLevel.WF htypeS).bind
+                            fun sortLevel nextState _ _ => ?_
+                          split
+                          · exact invalidProj.WF
+                          · rename_i hrecGate
+                            have hstructBelow : c.FVarsBelow
+                                (.proj familyName i e) e := by
+                              intro P _ hproj
+                              simpa [FVarsIn] using hproj
+                            have hcursorZero : VExpr.consumeForalls?
+                                (VExpr.forallN
+                                  (artifact.view.specializedFields levels' params')
+                                  tailResult)
+                                (artifact.view.operationalProjectionArgs
+                                  levels' params' 0 e') =
+                                  some (VExpr.forallN
+                                    (artifact.view.specializedFields levels' params')
+                                    tailResult) := by
+                              rfl
+                            refine (inferProjFields.WF_restored he
+                              artifact.parameterLayout artifact.codeNaturality
+                              artifact.recEntriesClosed hlevelsWF hlevelsLength'
+                              hparamsLength hparamsSpine programs.programsWF
+                              artifact.name_eq hmajorType hrBelow hstructBelow
+                              (by simpa using hiFields) hr hcursorZero).bind
+                                fun r _ _ hr => ?_
+                            obtain ⟨cursor, hcursor, hrBelow, hr⟩ := hr
+                            have hcursor' : VExpr.consumeForalls?
+                                (VExpr.forallN
+                                  (artifact.view.specializedFields levels' params')
+                                  tailResult)
+                                (artifact.view.operationalProjectionArgs
+                                  levels' params' i e') = some cursor := by
+                              simpa using hcursor
+                            have hcodeIdx : i <
+                                (artifact.view.operationalProjectionCodes
+                                  levels' params').length := by
+                              simpa using hiFields
+                            let code :=
+                              (artifact.view.operationalProjectionCodes
+                                levels' params')[i]
+                            have hcode :
+                                (artifact.view.operationalProjectionCodes
+                                  levels' params')[i]? = some code :=
+                              List.getElem?_eq_getElem hcodeIdx
+                            have hprojectionArgsLength :
+                                (artifact.view.operationalProjectionArgs
+                                  levels' params' i e').length = i :=
+                              artifact.view.operationalProjectionArgs_length
+                                levels' params' i e' (Nat.le_of_lt hcodeIdx)
+                            obtain ⟨field, semanticBody, hfield, hconsume⟩ :=
+                              VExpr.consumeForalls?_forallN_domain
+                                (artifact.view.specializedFields levels' params')
+                                tailResult
+                                (artifact.view.operationalProjectionArgs
+                                  levels' params' i e')
+                                (by simpa [hprojectionArgsLength] using hiFields)
+                            rw [hprojectionArgsLength] at hfield
+                            have hcursorShape : cursor =
+                                .forallE
+                                  (field.instRevAt
+                                    (artifact.view.operationalProjectionArgs
+                                      levels' params' i e') 0)
+                                  semanticBody :=
+                              Option.some.inj (hcursor'.symm.trans hconsume)
+                            subst cursor
+                            have hprograms :
+                                artifact.view.OperationalProgramsWF c.venv :=
+                              programs.programsWF
+                            have hprojector := hprograms c.Δwf hlevelsWF
+                              hlevelsLength' hparamsLength hparamsSpine hcode
+                            obtain ⟨field', _projectorDomain, typeBody, hfield',
+                                htypeFn, hprojectorField⟩ :=
+                              artifact.parameterLayout.toLayoutWF
+                                |>.operationalProjector_hasType_field_of_type
+                                  c.Ewf.conversionRegular
+                                  artifact.recEntriesClosed hlevelsLength' c.Δwf
+                                  hcode hprojector hmajorType
+                            have hfieldEq : field' = field :=
+                              Option.some.inj (hfield'.symm.trans hfield)
+                            subst field'
+                            have hprojSem :
+                                VRestoredBlockStructureView.TrProj c.venv
+                                  c.lparams.length c.vlctx.toCtx artifact.view
+                                  levels' params' i e'
+                                  (.app code.projector e') := {
+                              viewWF := artifact.viewWF
+                              parameterLayout := artifact.parameterLayout
+                              codeNaturality := artifact.codeNaturality
+                              recEntriesClosed := artifact.recEntriesClosed
+                              levelsWF := hlevelsWF
+                              levels_length := hlevelsLength'
+                              params_length := hparamsLength
+                              paramsSpine := hparamsSpine
+                              majorType := hmajorType
+                              program := ⟨code, hcode, rfl, hprojector⟩ }
+                            have hprojStrict : c.TrExprS (.proj familyName i e)
+                                (.app code.projector e') :=
+                              .proj he ⟨.restored artifact.view, levels', params',
+                                artifact.name_eq, .restored hprojSem⟩
+                            obtain ⟨r', hrS, hrEq⟩ := hr
+                            refine (whnf.WF hrS).bind fun out _ _
+                              ⟨houtBelow, ⟨out', hout, houtEq⟩⟩ => ?_
+                            have houtEq := houtEq.trans c.Ewf c.Δwf hrEq
+                            cases out with
+                            | forallE name dom body bi =>
+                              let .forallE hdomTy hbodyTy hdom hbody := hout
+                              have hforallEq := houtEq.forallE_inv c.Ewf c.Δwf
+                              obtain ⟨⟨_, hdomEq⟩, _, hbodyEq⟩ := hforallEq
+                              have hprojectorField' := hprojectorField.defeqU_r
+                                c.Ewf c.Δwf ⟨_, hdomEq.symm⟩
+                              have hdomBelow : c.FVarsBelow
+                                  (.proj familyName i e) dom := by
+                                intro P hP hproj
+                                exact ((hrBelow.trans houtBelow) P hP hproj).1
+                              have hresult : ∃ proj' ty',
+                                  c.TrTyping (.proj familyName i e) dom proj' ty' :=
+                                ⟨.app code.projector e', _, hdomBelow, hprojStrict,
+                                  hdom, hprojectorField'⟩
+                              simp only
+                              split
+                              · refine (isProp.WF hdom).bind fun _ _ _ _ => ?_
+                                split
+                                · exact invalidProj.WF
+                                · exact .pure hresult
+                              · exact .pure hresult
+                            | bvar | fvar | mvar | sort | const | app | lam |
+                                letE | lit | mdata | proj => exact invalidProj.WF
+                      | runtime spineSupport =>
+                        rw [← hctorInfoEq] at spineSupport
+                        have semanticFull := spineSupport.instL
+                          (parameters := ctorInfo.levelParams)
+                          (sourceLevels := familyLevels)
+                          (targetLevels := levels')
+                        have semanticFull' : ProjectionFieldSpineSupport
+                            (List.take info.numParams
+                              type.getAppArgs.toList).length
+                            artifact.view.fields.length
+                            ((.ctorInfo ctorInfo : ConstantInfo)
+                              |>.instantiateTypeLevelParamsCpp familyLevels)
+                            (VExpr.forallN
+                              (artifact.view.constructorParams.map
+                                (VExpr.instL levels')) ctorTail) := by
+                          simpa [ConstantInfo.instantiateTypeLevelParamsCpp,
+                            ConstantInfo.type, ConstantInfo.levelParams,
+                            ConstantInfo.toConstantVal,
+                            hparamArgsTr.length_eq, hparamsLength,
+                            hsourceCtorShape, ctorTail,
+                            VExpr.instL_forallN] using semanticFull
+                        refine (inferProjParams.WF_withFieldSupport hparamArgsTr
+                          hctorTypeBelow hparamArgsBelow hctorTypeShape
+                          hctorParamsSpine semanticFull').bind
+                            fun r _ _ hr => ?_
+                        obtain ⟨hrBelow, hr, semanticSupport⟩ := hr
+                        let tailResult := (ctorResult.instL levels').instRevAt
+                          params' artifact.view.fields.length
+                        have hctorTailInst : ctorTail.instRev params' =
+                            VExpr.forallN
+                              (artifact.view.specializedFields levels' params')
+                              tailResult := by
+                          simp [ctorTail, tailResult,
+                            VExpr.instRev_forallN_projection,
+                            VRestoredBlockStructureView.specializedFields,
+                            VExpr.instRevAt_map_instL_zipIdx]
+                        rw [hctorTailInst] at hr semanticSupport
+                        refine (getSortLevel.WF htypeS).bind
+                          fun sortLevel nextState _ _ => ?_
+                        split
+                        · exact invalidProj.WF
+                        · rename_i hrecGate
+                          have hstructBelow : c.FVarsBelow
+                              (.proj familyName i e) e := by
+                            intro P _ hproj
+                            simpa [FVarsIn] using hproj
+                          let fieldCount :=
+                            (artifact.view.specializedFields levels' params').length
+                          have hfieldCount : fieldCount =
+                              artifact.view.fields.length := by
+                            simp [fieldCount,
+                              VRestoredBlockStructureView.specializedFields]
+                          have semanticSupportFields : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels' params')
+                                tailResult) := by
+                            simpa [fieldCount, hfieldCount] using semanticSupport
+                          have hfieldsBound : i + 1 ≤ fieldCount := by
+                            dsimp only [fieldCount]
+                            omega
+                          have semanticPrefix :=
+                            semanticSupportFields.prefix hfieldsBound
+                          have runtimeSupport :=
+                            semanticSupportFields.retargetForallN
+                          have majorSupportAll₀ := runtimeSupport.liftN
+                            (amount := 1) (depth := 0)
+                          have hmajorFields :=
+                            artifact.parameterLayout.toLayoutWF
+                              |>.specializedFields_liftN c.Ewf.ordered
+                                levels' params' hparamsLength 1 0
+                          rw [VExpr.liftN_forallN, ← hmajorFields] at majorSupportAll₀
+                          have majorSupportAll : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)) := by
+                            simpa [fieldCount, VExpr.liftN] using majorSupportAll₀
+                          have majorPrefix := majorSupportAll.prefix hfieldsBound
+                          have constructorSupportAll₀ := runtimeSupport.liftN
+                            (amount := fieldCount) (depth := 0)
+                          rw [VExpr.liftN_forallN] at constructorSupportAll₀
+                          have constructorSupportAll : ProjectionSpineSupport
+                              fieldCount r
+                              (VExpr.forallN
+                                (VExpr.liftTelN fieldCount
+                                  (artifact.view.specializedFields levels' params') 0)
+                                (.sort .zero)) := by
+                            simpa [fieldCount, VExpr.liftN] using
+                              constructorSupportAll₀
+                          have constructorPrefix :=
+                            constructorSupportAll.prefix hfieldsBound
+                          have hsmallMaybe : artifact.view.elimination = .small →
+                              (!sortLevel.isNeverZero) = true := by
+                            intro mode
+                            have hrecEq : recInfo.levelParams.length =
+                                info.levelParams.length := by
+                              calc
+                                recInfo.levelParams.length =
+                                    artifact.view.recUvars := hrecLevelLength
+                                _ = artifact.view.uvars := by
+                                  have flatUvars :
+                                      artifact.view.nested.elim.flat.uvars =
+                                        artifact.view.uvars := by
+                                    simpa using congrArg VInductDecl.uvars
+                                      artifact.view.nested.elim.flat_eq
+                                  simp [VRestoredBlockStructureView.recUvars,
+                                    VRestoredBlockStructureView.elimination,
+                                    VInductDecl.BlockGenerationChecked.recUvars,
+                                    mode, flatUvars]
+                                _ = info.levelParams.length :=
+                                  artifact.levelParams_length.symm
+                            cases hmaybe : (!sortLevel.isNeverZero) with
+                            | true => rfl
+                            | false => simp [hmaybe, hrecEq] at hrecGate
+                          have hcursorZero :
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels' params')
+                                tailResult).consumeForalls?
+                                  (artifact.view.operationalProjectionArgs
+                                    levels' params' 0 e') =
+                                some (VExpr.forallN
+                                  (artifact.view.specializedFields levels' params')
+                                  tailResult) := by
+                            rfl
+                          have hmajorCursorZero :
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)).consumeForalls?
+                                  (artifact.view.operationalProjectionArgs levels'
+                                    (params'.map (VExpr.liftN 1)) 0 (.bvar 0)) =
+                                some (VExpr.forallN
+                                  (artifact.view.specializedFields levels'
+                                    (params'.map (VExpr.liftN 1)))
+                                  (.sort .zero)) := by
+                            rfl
+                          have hconstructorCursorZero :
+                              (VExpr.forallN
+                                (VExpr.liftTelN fieldCount
+                                  (artifact.view.specializedFields levels' params') 0)
+                                (.sort .zero)).consumeForalls? [] =
+                                some (VExpr.forallN
+                                  (VExpr.liftTelN fieldCount
+                                    (artifact.view.specializedFields levels' params') 0)
+                                  (.sort .zero)) := by
+                            rfl
+                          refine (inferProjFields.WF_runtimeRestored he
+                            artifact.parameterLayout artifact.codeNaturality
+                            artifact.recEntriesClosed hlevelsWF hlevelsLength'
+                            hparamsLength hparamsSpine artifact.name_eq hmajorType
+                            hrBelow hstructBelow (by simpa using hiFields) hr
+                            hcursorZero
+                            (VRestoredBlockStructureView.OperationalRuntimePrefix.zero
+                              artifact.view c.venv c.lparams.length c.vlctx.toCtx
+                              levels' params')
+                            semanticPrefix majorPrefix hmajorCursorZero
+                            constructorPrefix (by
+                              simpa [fieldCount] using hconstructorCursorZero)
+                            hsmallMaybe).bind fun r _ _ runtimeResult => ?_
+                          obtain ⟨cursor, majorCursor, constructorCursor,
+                            hcursor, hmajorCursor, hconstructorCursor, hrBelow, hr,
+                            semanticOne, majorOne, constructorOne, runtime⟩ :=
+                              runtimeResult
+                          have hcursor' :
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels' params')
+                                tailResult).consumeForalls?
+                                  (artifact.view.operationalProjectionArgs
+                                    levels' params' i e') = some cursor := by
+                            simpa only [Nat.zero_add] using hcursor
+                          have hmajorCursor' :
+                              (VExpr.forallN
+                                (artifact.view.specializedFields levels'
+                                  (params'.map (VExpr.liftN 1)))
+                                (.sort .zero)).consumeForalls?
+                                  (artifact.view.operationalProjectionArgs levels'
+                                    (params'.map (VExpr.liftN 1)) i (.bvar 0)) =
+                                some majorCursor := by
+                            simpa only [Nat.zero_add] using hmajorCursor
+                          have hconstructorCursor' :
+                              let fields :=
+                                artifact.view.specializedFields levels' params'
+                              let fieldCount := fields.length
+                              (VExpr.forallN (VExpr.liftTelN fieldCount fields 0)
+                                (.sort .zero)).consumeForalls?
+                                  (((artifact.view.operationalProjectionCodes
+                                    levels' params').take i).map fun prior =>
+                                      .app (prior.projector.liftN fieldCount)
+                                        (artifact.view.projectionConstructorApp
+                                          levels' params' fields)) =
+                                some constructorCursor := by
+                            simpa only [Nat.zero_add] using hconstructorCursor
+                          have runtime' :
+                              artifact.view.OperationalRuntimePrefix c.venv
+                                c.lparams.length c.vlctx.toCtx levels' params' i := by
+                            simpa only [Nat.zero_add] using runtime
+                          exact inferProjResult.WF_runtimeRestored
+                            (typeName := familyName) (fieldIdx := i)
+                            (struct := e) (major := e')
+                            (tailResult := tailResult)
+                            (maybePropType := !sortLevel.isNeverZero)
+                            he artifact.parameterLayout artifact.codeNaturality
+                            artifact.recEntriesClosed hlevelsWF hlevelsLength'
+                            hparamsLength hparamsSpine artifact.name_eq hmajorType
+                            hrBelow hiFields hr hcursor' runtime' semanticOne
+                            majorOne hmajorCursor' constructorOne
+                            hconstructorCursor' hsmallMaybe
+                    | axiomInfo | defnInfo | thmInfo | opaqueInfo | quotInfo |
+                        inductInfo | ctorInfo => exact invalidProj.WF
+                  · exact invalidProj.WF
+                | axiomInfo | defnInfo | thmInfo | opaqueInfo | quotInfo |
+                    inductInfo | recInfo => exact invalidProj.WF
           · exact invalidProj.WF
         · exact invalidProj.WF
       · exact invalidProj.WF
+    · have hnameTest : (st != familyName) = true := by simp [hname]
+      rw [hnameTest]
+      exact invalidProj.WF
   · exact invalidProj.WF
 
 theorem literal_is_primitive (H : n = ``Nat ∨ n = ``Char.ofNat ∨ n = ``String.ofList)  :
@@ -1095,6 +3587,7 @@ info: 'Lean4Lean.TypeChecker.Inner.inferProj.WF' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
  Quot.sound,
+ Expr.hasLooseBVar_eq,
  Expr.instantiate1_eq,
  Expr.mkAppData_eq,
  Expr.mkData_eq,

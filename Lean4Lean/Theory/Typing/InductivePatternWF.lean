@@ -636,8 +636,218 @@ theorem VEnv.OnTel.onCtx {env : VEnv} {U : Nat} :
     simpa [List.append_assoc] using
       VEnv.OnTel.onCtx (As := As) (Γ := A :: Γ) ⟨hΓ, hA⟩ hT
 
+/-- A typed application spine has a typed head, independently of the
+observed result type of the complete application. -/
+theorem VEnv.HasType.appN_head_wf {env : VEnv} (henv : env.Ordered)
+    {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {arguments : List VExpr} {function result : VExpr},
+      env.HasType U Γ (VExpr.appN function arguments) result →
+      ∃ type, env.HasType U Γ function type
+  | [], _, _, typed => ⟨_, typed⟩
+  | argument :: arguments, function, _, typed => by
+      have application : env.HasType U Γ
+          (VExpr.appN (.app function argument) arguments) _ := typed
+      obtain ⟨_, applicationType⟩ :=
+        VEnv.HasType.appN_head_wf henv hΓ application
+      obtain ⟨domain, body, functionType, _⟩ :=
+        applicationType.app_inv henv hΓ
+      exact ⟨.forallE domain body, functionType⟩
+
+/-- If a function has a canonical Pi telescope and a complete application
+of the same arity is already well typed, replay the application against that
+canonical telescope.  The existing application supplies argument typing;
+type uniqueness aligns each observed domain with the canonical one. -/
+theorem VEnv.HasType.appN_canonical {env : VEnv}
+    (henv : env.ConversionRegular)
+    {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {binders arguments : List VExpr} {function body result : VExpr},
+      arguments.length = binders.length →
+      env.HasType U Γ function (VExpr.forallN binders body) →
+      env.HasType U Γ (VExpr.appN function arguments) result →
+      env.HasType U Γ (VExpr.appN function arguments)
+        (VExpr.instRev body arguments)
+  | [], [], _, _, _, _, functionType, _ => functionType
+  | [], _ :: _, _, _, _, lengthEq, _, _ => by simp at lengthEq
+  | _ :: _, [], _, _, _, lengthEq, _, _ => by simp at lengthEq
+  | binder :: binders, argument :: arguments, function, body, result,
+      lengthEq, functionType, applicationType => by
+      have tailApplication : env.HasType U Γ
+          (VExpr.appN (.app function argument) arguments) result :=
+        applicationType
+      obtain ⟨_, firstApplicationType⟩ :=
+        VEnv.HasType.appN_head_wf henv.ordered hΓ tailApplication
+      obtain ⟨observedDomain, observedBody, observedFunction,
+          observedArgument⟩ :=
+        firstApplicationType.app_inv henv.ordered hΓ
+      have functionTypeEq := henv.hasType_uniqU hΓ
+        observedFunction functionType
+      obtain ⟨⟨_, domainEq⟩, _⟩ :=
+        henv.forallE_inv hΓ functionTypeEq
+      have canonicalArgument := henv.hasType_defeqU_r hΓ
+        ⟨_, domainEq⟩ observedArgument
+      have firstCanonical := functionType.app canonicalArgument
+      have tailLength : arguments.length = binders.length := by
+        simpa using lengthEq
+      have recursive := VEnv.HasType.appN_canonical henv hΓ
+        (binders := VExpr.instTelN argument binders 0)
+        (arguments := arguments)
+        (function := .app function argument)
+        (body := body.inst argument binders.length)
+        (by simpa [VExpr.instTelN_length] using tailLength)
+        (by simpa [VExpr.instN_forallN] using firstCanonical)
+        tailApplication
+      simpa [VExpr.appN, VExpr.instRev, tailLength] using recursive
+
+/-- Replay a canonical Pi telescope as an explicit spine.  This is the
+spine-carrying form of `HasType.appN_canonical`: an independently typed
+application supplies every argument judgment, while type uniqueness aligns
+the observed domains with the canonical ones. -/
+theorem VEnv.HasType.appN_canonicalSpine {env : VEnv}
+    (henv : env.ConversionRegular)
+    {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U)) :
+    ∀ {binders arguments : List VExpr} {function body result : VExpr},
+      arguments.length = binders.length →
+      env.HasType U Γ function (VExpr.forallN binders body) →
+      env.HasType U Γ (VExpr.appN function arguments) result →
+      env.SpineWF U Γ (VExpr.forallN binders body) arguments
+        (VExpr.instRev body arguments)
+  | [], [], _, _, _, _, _, _ => .nil
+  | [], _ :: _, _, _, _, lengthEq, _, _ => by simp at lengthEq
+  | _ :: _, [], _, _, _, lengthEq, _, _ => by simp at lengthEq
+  | binder :: binders, argument :: arguments, function, body, result,
+      lengthEq, functionType, applicationType => by
+      have tailApplication : env.HasType U Γ
+          (VExpr.appN (.app function argument) arguments) result :=
+        applicationType
+      obtain ⟨_, firstApplicationType⟩ :=
+        VEnv.HasType.appN_head_wf henv.ordered hΓ tailApplication
+      obtain ⟨observedDomain, observedBody, observedFunction,
+          observedArgument⟩ :=
+        firstApplicationType.app_inv henv.ordered hΓ
+      have functionTypeEq := henv.hasType_uniqU hΓ
+        observedFunction functionType
+      obtain ⟨⟨_, domainEq⟩, _⟩ :=
+        henv.forallE_inv hΓ functionTypeEq
+      have canonicalArgument := henv.hasType_defeqU_r hΓ
+        ⟨_, domainEq⟩ observedArgument
+      have firstCanonical := functionType.app canonicalArgument
+      have tailLength : arguments.length = binders.length := by
+        simpa using lengthEq
+      have recursive := VEnv.HasType.appN_canonicalSpine henv hΓ
+        (binders := VExpr.instTelN argument binders 0)
+        (arguments := arguments)
+        (function := .app function argument)
+        (body := body.inst argument binders.length)
+        (by simpa [VExpr.instTelN_length] using tailLength)
+        (by simpa [VExpr.instN_forallN] using firstCanonical)
+        tailApplication
+      refine .cons canonicalArgument ?_
+      simpa [VExpr.instN_forallN, VExpr.instRev, tailLength] using recursive
+
+/-- Invert an iterated Pi type while retaining both its exact telescope and
+the terminal type judgment. -/
+theorem VEnv.IsType.forallN_inv {env : VEnv} (henv : env.Ordered) :
+    ∀ {U : Nat} {Γ binders : List VExpr} {body : VExpr},
+      env.IsType U Γ (VExpr.forallN binders body) →
+      env.OnTel U Γ binders ∧
+        env.IsType U (binders.reverse ++ Γ) body
+  | _, _, [], _, typed => ⟨trivial, by simpa [VExpr.forallN] using typed⟩
+  | _, Γ, binder :: binders, body, typed => by
+      obtain ⟨binderType, tailType⟩ := typed.forallE_inv henv
+      obtain ⟨tailTel, bodyType⟩ := VEnv.IsType.forallN_inv henv tailType
+      exact ⟨⟨binderType, tailTel⟩,
+        by simpa [List.reverse_cons, List.append_assoc] using bodyType⟩
+
+/-- Substituting the variable which replaces the outermost binder through a
+body weakened over that replacement removes exactly one unit of weakening. -/
+theorem VExpr.inst_liftN_succ_bvar (e : VExpr) (n : Nat) :
+    (e.liftN (n + 1) 1).inst (.bvar n) = e.liftN n := by
+  have h := VExpr.liftN_instN_hi
+    (e1 := e.liftN 1 1) (e2 := .bvar 0) (n := n) (k := 0) (j := 0)
+  rw [VExpr.instN_bvar0] at h
+  rw [VExpr.liftN'_liftN_hi] at h
+  simpa [Nat.add_comm, VExpr.liftN, liftVar] using h.symm
+
+/-- A full reverse-variable spine is the identity context substitution.
+Typing it against another telescope therefore recovers pointwise structural
+equality of that telescope with the ambient one. -/
+theorem VEnv.TelDefEq.of_bvarRevRange_spine
+    {env : VEnv} (henv : env.ConversionRegular) {U : Nat} :
+    ∀ {Γ As Bs : List VExpr},
+      OnCtx Γ (env.IsType U) →
+      env.OnTel U Γ As →
+      env.OnTel U Γ Bs →
+      As.length = Bs.length →
+      env.SpineWF U (As.reverse ++ Γ)
+        ((VExpr.forallN Bs (.sort .zero)).liftN As.length)
+        (VExpr.bvarRevRange 0 As.length) (.sort .zero) →
+      env.TelDefEq U Γ Bs As
+  | Γ, [], [], hΓ, _, _, _, _ => trivial
+  | Γ, [], _ :: _, _, _, _, lengthEq, _ => by simp at lengthEq
+  | Γ, _ :: _, [], _, _, _, lengthEq, _ => by simp at lengthEq
+  | Γ, A :: As, B :: Bs, hΓ, ⟨hA, hAs⟩, ⟨hB, hBs⟩,
+      lengthEq, spine => by
+      let n := As.length
+      have tailLength : As.length = Bs.length := by simpa using lengthEq
+      have fullCtx : OnCtx ((A :: As).reverse ++ Γ)
+          (env.IsType U) := by
+        exact VEnv.OnTel.onCtx (As := A :: As) hΓ ⟨hA, hAs⟩
+      have contextLift : Ctx.LiftN (n + 1) 0 Γ
+          ((A :: As).reverse ++ Γ) := by
+        have lifted := Ctx.LiftN.zero (n := n + 1) (Γ := Γ)
+          (As.reverse ++ [A]) (by simp [n])
+        simpa [List.reverse_cons, List.append_assoc] using lifted
+      have canonicalArgument : env.HasType U ((A :: As).reverse ++ Γ)
+          (.bvar n) (A.liftN (n + 1)) := by
+        apply VEnv.HasType.bvar
+        simpa [n, List.reverse_cons, List.append_assoc] using
+          (Lookup.append (A := A) As.reverse (Γ := Γ))
+      have spine' : env.SpineWF U ((A :: As).reverse ++ Γ)
+          (.forallE (B.liftN (n + 1))
+            ((VExpr.forallN Bs (.sort .zero)).liftN (n + 1) 1))
+          (.bvar n :: VExpr.bvarRevRange 0 n) (.sort .zero) := by
+        simpa [n, VExpr.forallN, VExpr.bvarRevRange,
+          VExpr.liftN] using spine
+      cases spine' with
+      | cons argument rest =>
+        have argumentTypeEq := henv.hasType_uniqU fullCtx
+          argument canonicalArgument
+        obtain ⟨uB, hBtyped⟩ := hB
+        have hBFull := hBtyped.weakN henv.ordered contextLift
+        have headFull := henv.isDefEqU_of_l fullCtx
+          argumentTypeEq hBFull
+        have head : env.IsDefEq U Γ B A (.sort uB) := by
+          apply (VEnv.IsDefEq.weakN_iff henv fullCtx contextLift).1
+          simpa [n] using headFull
+        have headCtx : env.IsDefEqCtx U Γ (B :: Γ) (A :: Γ) :=
+          .succ .zero head
+        have hBsA : env.OnTel U (A :: Γ) Bs :=
+          hBs.defeqDFC henv.ordered headCtx
+        have rest' : env.SpineWF U (As.reverse ++ (A :: Γ))
+            ((VExpr.forallN Bs (.sort .zero)).liftN As.length)
+            (VExpr.bvarRevRange 0 As.length) (.sort .zero) := by
+          rw [VExpr.inst_liftN_succ_bvar] at rest
+          simpa [n, List.reverse_cons, List.append_assoc] using rest
+        have tailA := VEnv.TelDefEq.of_bvarRevRange_spine henv
+          (Γ := A :: Γ) ⟨hΓ, hA⟩ hAs hBsA tailLength rest'
+        have tailB := tailA.defeqDFC henv.ordered
+          (headCtx.symm henv.ordered)
+        exact ⟨⟨uB, head⟩, tailB⟩
+
+/-- Inverting the terminal closedness obligation of a dependent Pi
+telescope exposes the body at the context depth contributed by its binders. -/
+theorem VExpr.ClosedN.forallN_body :
+    ∀ {binders : List VExpr} {body : VExpr} {depth : Nat},
+      (VExpr.forallN binders body).ClosedN depth →
+      body.ClosedN (depth + binders.length)
+  | [], _, _, closed => by simpa [VExpr.forallN] using closed
+  | _ :: binders, body, depth, closed => by
+      have tail := VExpr.ClosedN.forallN_body
+        (binders := binders) (body := body) (depth := depth + 1) closed.2
+      simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using tail
+
 /-- Every argument of a well-typed application spine is well-typed. -/
-theorem VEnv.HasType.appN_args_wf {env : VEnv} (henv : env.WF) {U : Nat}
+theorem VEnv.HasType.appN_args_wf {env : VEnv} (henv : env.Ordered) {U : Nat}
     {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U)) :
     ∀ (n : Nat) (es : List VExpr), es.length = n → ∀ {f B : VExpr},
       env.HasType U Γ (VExpr.appN f es) B →
@@ -778,7 +988,7 @@ levels and weaken it into an arbitrary local context. -/
 theorem recursor_hasType_instL
     {family : NormalizedFamily} (hfamily : family ∈ gen.families)
     (hrec : env.constants (.str family.raw.name "rec") =
-      some (gen.recursor family))
+      some (gen.generatedRecursor family))
     {U : Nat} (levels : List VLevel)
     (hlevels : ∀ level ∈ levels, level.WF U)
     (hlen : levels.length = gen.recUvars) {Γ : List VExpr} :
@@ -833,10 +1043,8 @@ theorem rule_uvars (i : Nat) (c : NormalizedBlockCtor) :
     (gen.rule i c).uvars = gen.recUvars := rfl
 
 theorem paramsTel_length : gen.paramsTel.length = source.nparams := by
-  show ((generationParams gen.block.rawParams gen.block.checked.params).map
-    (VExpr.instL gen.sourceLevels)).length = _
-  rw [List.length_map]
-  exact (generationParams_length_of_eq gen.shape.2.1).trans gen.shape.1
+  simpa [BlockGenerationChecked.paramsTel] using
+    gen.generatedParams_length
 
 theorem ruleBinders_length (c : NormalizedBlockCtor) :
     (gen.ruleBinders c).length =
@@ -1319,6 +1527,211 @@ theorem ruleCheck_ok_of_unindexed_spines
   apply gen.ruleCheck_ok_of_spines hMlen hNlen hm hparams
     (hcl := hcl) (hc := hc)
   exact gen.ruleIndexTargets_aligned_of_unindexed hidx hMlen
+
+/-- Applying a registered generated equation to a complete typed capture
+spine equates the two instantiated rule bodies.  This is the reusable typed
+β-collapse core of generated iota; matching and check semantics are not
+needed when a caller already owns the exact generated rule and captures. -/
+theorem ruleBodies_defeq_of_capture
+    {env : VEnv} (henv : env.ConversionRegular)
+    {U : Nat} {Γ : List VExpr} (hΓ : OnCtx Γ (env.IsType U))
+    {i : Nat} {c : NormalizedBlockCtor} {levels : List VLevel}
+    (hlevels : ∀ level ∈ levels, level.WF U)
+    (hlevelsLength : levels.length = gen.recUvars)
+    (hreg : env.defeqs (gen.rule i c))
+    {captures : List VExpr} {B : VExpr}
+    (hcaps : env.SpineWF U Γ ((gen.rule i c).type.instL levels)
+      captures B)
+    (hcapturesLength : captures.length = (gen.ruleBinders c).length) :
+    env.IsDefEqU U Γ
+      (VExpr.instRev ((gen.ruleLhsBody c).instL levels) captures)
+      (VExpr.instRev ((gen.ruleRhsBody i c).instL levels) captures) := by
+  have hruleWF := henv.ordered.defEqWF hreg
+  have hlhs : env.HasType U Γ
+      ((gen.rule i c).lhs.instL levels)
+      ((gen.rule i c).type.instL levels) :=
+    (hruleWF.1.instL hlevels).weak0 henv.ordered
+  have hrhs : env.HasType U Γ
+      ((gen.rule i c).rhs.instL levels)
+      ((gen.rule i c).type.instL levels) :=
+    (hruleWF.2.instL hlevels).weak0 henv.ordered
+  rw [gen.rule_lhs, VExpr.instL_lamN] at hlhs
+  rw [gen.rule_rhs, VExpr.instL_lamN] at hrhs
+  obtain ⟨hlhsTel, lhsType, hlhsBody⟩ :=
+    VEnv.HasType.lamN_wf henv.ordered hΓ hlhs
+  obtain ⟨hrhsTel, rhsType, hrhsBody⟩ :=
+    VEnv.HasType.lamN_wf henv.ordered hΓ hrhs
+  have htype : (gen.rule i c).type.instL levels =
+      VExpr.forallN ((gen.ruleBinders c).map (VExpr.instL levels))
+        ((gen.ruleResult c).instL levels) := by
+    rw [gen.rule_type, VExpr.instL_forallN]
+    rfl
+  have hcaps' := hcaps
+  rw [htype] at hcaps'
+  have hcapturesLength' : captures.length =
+      ((gen.ruleBinders c).map (VExpr.instL levels)).length := by
+    simpa using hcapturesLength
+  have hlhsSpine := hcaps'.retarget hcapturesLength' lhsType
+  have hrhsSpine := hcaps'.retarget hcapturesLength' rhsType
+  have hcollapseL := VEnv.IsDefEq.appN_lamN henv.ordered
+    hlhsTel hlhsBody hlhsSpine hcapturesLength'
+  have hcollapseR := VEnv.IsDefEq.appN_lamN henv.ordered
+    hrhsTel hrhsBody hrhsSpine hcapturesLength'
+  have hregisteredRule : env.IsDefEq U Γ
+      ((gen.rule i c).lhs.instL levels)
+      ((gen.rule i c).rhs.instL levels)
+      ((gen.rule i c).type.instL levels) :=
+    .extra hreg hlevels hlevelsLength
+  have happlied := VEnv.IsDefEq.appN_congr hregisteredRule hcaps
+  rw [gen.rule_lhs, gen.rule_rhs, VExpr.instL_lamN,
+    VExpr.instL_lamN] at happlied
+  exact henv.isDefEqU_trans hΓ ⟨_, hcollapseL.symm⟩
+    (henv.isDefEqU_trans hΓ ⟨_, happlied⟩ ⟨_, hcollapseR⟩)
+
+/-- For an unindexed rule, instantiating the named left body with a complete
+common prefix and constructor-field suffix produces the literal recursor
+redex on that constructor. -/
+theorem ruleLhsBody_instL_instRev_common_fields_of_unindexed
+    (c : NormalizedBlockCtor) (levels : List VLevel)
+    (hlevelsLength : levels.length = gen.recUvars)
+    (hidx : gen.ruleIdx c = [])
+    (commonArgs fields : List VExpr)
+    (hcommonLength : commonArgs.length =
+      source.nparams + gen.familyCount + gen.minorCount)
+    (hfieldsLength : fields.length = gen.ruleFieldCount c) :
+    VExpr.instRev ((gen.ruleLhsBody c).instL levels)
+        (commonArgs ++ fields) =
+      VExpr.appN (.const (gen.ruleRecName c) levels)
+        (commonArgs ++
+          [VExpr.appN (.const c.ctor.raw.name
+              (gen.sourceLevels.map (VLevel.inst levels)))
+            (commonArgs.take source.nparams ++ fields)]) := by
+  let captures := commonArgs ++ fields
+  have hcapturesLength : captures.length =
+      source.nparams + gen.familyCount + gen.minorCount +
+        gen.ruleFieldCount c := by
+    simp only [captures, List.length_append]
+    rw [hcommonLength, hfieldsLength]
+  have hsegCommon :
+      (VExpr.bvarRevRange (gen.ruleFieldCount c)
+          (source.nparams + gen.familyCount + gen.minorCount)).map
+          (VExpr.instRev · captures) = commonArgs := by
+    rw [VExpr.map_instRev_bvarRevRange_seg _ _ _ (by omega)]
+    rw [show captures.length - gen.ruleFieldCount c -
+        (source.nparams + gen.familyCount + gen.minorCount) = 0 by
+          rw [hcapturesLength]
+          omega,
+      List.drop_zero]
+    rw [← hcommonLength]
+    simp [captures]
+  have hsegParams :
+      (VExpr.bvarRevRange
+          (gen.ruleFieldCount c + (gen.familyCount + gen.minorCount))
+          source.nparams).map (VExpr.instRev · captures) =
+        commonArgs.take source.nparams := by
+    rw [VExpr.map_instRev_bvarRevRange_seg _ _ _ (by omega)]
+    rw [show captures.length -
+        (gen.ruleFieldCount c + (gen.familyCount + gen.minorCount)) -
+        source.nparams = 0 by
+          rw [hcapturesLength]
+          omega,
+      List.drop_zero]
+    rw [List.take_append_of_le_length]
+    rw [hcommonLength]
+    omega
+  have hsegFields :
+      (VExpr.bvarRevRange 0 (gen.ruleFieldCount c)).map
+          (VExpr.instRev · captures) = fields := by
+    rw [VExpr.map_instRev_bvarRevRange_seg _ _ _ (by omega)]
+    rw [show captures.length - 0 - gen.ruleFieldCount c =
+        commonArgs.length by
+          rw [hcapturesLength, hcommonLength]
+          omega]
+    rw [List.drop_left]
+    exact List.take_of_length_le (Nat.le_of_eq hfieldsLength)
+  rw [gen.ruleLhsBody_instL c hlevelsLength, VExpr.instRev_appN]
+  rw [VExpr.instRev_closedN _ (C := .const (gen.ruleRecName c) levels)
+    trivial]
+  simp only [hidx, List.map_append, List.map_nil, List.nil_append,
+    List.map_singleton, gen.ruleCtorApp_instL, VExpr.instRev_appN]
+  rw [VExpr.instRev_closedN _
+    (C := .const c.ctor.raw.name
+      (gen.sourceLevels.map (VLevel.inst levels))) trivial]
+  rw [hsegCommon, hsegParams, hsegFields]
+  simp only [List.append_nil]
+
+/-- Instantiating a named generated right body selects its flattened minor
+from the common prefix and applies it to the constructor fields plus the
+captured recursive hypotheses. -/
+theorem ruleRhsBody_instL_instRev_common_fields
+    (i : Nat) (c : NormalizedBlockCtor) (levels : List VLevel)
+    (commonArgs fields : List VExpr)
+    (hcommonLength : commonArgs.length =
+      source.nparams + gen.familyCount + gen.minorCount)
+    (hfieldsLength : fields.length = gen.ruleFieldCount c)
+    {minor : VExpr}
+    (hminor : commonArgs[source.nparams + gen.familyCount + i]? =
+      some minor)
+    (hi : i < gen.minorCount) :
+    let recursiveArgs :=
+      c.ctor.recArgsR source.uvars gen.elimination
+    let ihs := recursiveArgs.map fun recursive =>
+      blockRuleCall (gen.familyCount + gen.minorCount)
+        (gen.ruleFieldCount c)
+        (gen.recBase (gen.ruleFieldCount c) recursive.targetType) recursive
+    let capturedIHs := ihs.map fun expression =>
+      VExpr.instRev (expression.instL levels) (commonArgs ++ fields)
+    VExpr.instRev ((gen.ruleRhsBody i c).instL levels)
+        (commonArgs ++ fields) =
+      VExpr.appN minor (fields ++ capturedIHs) := by
+  let captures := commonArgs ++ fields
+  let recursiveArgs := c.ctor.recArgsR source.uvars gen.elimination
+  let ihs := recursiveArgs.map fun recursive =>
+    blockRuleCall (gen.familyCount + gen.minorCount)
+      (gen.ruleFieldCount c)
+      (gen.recBase (gen.ruleFieldCount c) recursive.targetType) recursive
+  let capturedIHs := ihs.map fun expression =>
+    VExpr.instRev (expression.instL levels) captures
+  have hcapturesLength : captures.length =
+      source.nparams + gen.familyCount + gen.minorCount +
+        gen.ruleFieldCount c := by
+    simp only [captures, List.length_append]
+    rw [hcommonLength, hfieldsLength]
+  have hheadLt : gen.minorCount - 1 - i + gen.ruleFieldCount c <
+      captures.length := by
+    rw [hcapturesLength]
+    omega
+  obtain ⟨hminorLt, hminorGet⟩ := List.getElem?_eq_some_iff.1 hminor
+  have hhead : VExpr.instRev
+      (.bvar (gen.minorCount - 1 - i + gen.ruleFieldCount c)) captures =
+      minor := by
+    rw [VExpr.instRev_bvar_lt captures hheadLt]
+    have hposition : captures.length - 1 -
+        (gen.minorCount - 1 - i + gen.ruleFieldCount c) =
+        source.nparams + gen.familyCount + i := by
+      rw [hcapturesLength]
+      omega
+    simpa only [hposition, captures,
+      List.getElem_append_left hminorLt] using hminorGet
+  have hsegFields :
+      (VExpr.bvarRevRange 0 (gen.ruleFieldCount c)).map
+          (VExpr.instRev · captures) = fields := by
+    rw [VExpr.map_instRev_bvarRevRange_seg _ _ _ (by omega)]
+    rw [show captures.length - 0 - gen.ruleFieldCount c =
+        commonArgs.length by
+          rw [hcapturesLength, hcommonLength]
+          omega]
+    rw [List.drop_left]
+    exact List.take_of_length_le (Nat.le_of_eq hfieldsLength)
+  change VExpr.instRev
+      ((VExpr.appN
+        (.bvar (gen.minorCount - 1 - i + gen.ruleFieldCount c))
+        (VExpr.bvarRevRange 0 (gen.ruleFieldCount c) ++ ihs)).instL levels)
+      captures = VExpr.appN minor (fields ++ capturedIHs)
+  rw [VExpr.instL_appN, VExpr.instRev_appN]
+  simp only [List.map_append, VExpr.bvarRevRange_map_instL,
+    VExpr.instL, List.map_map, Function.comp_def]
+  rw [hhead, hsegFields]
 
 /-- Pattern soundness for one certified block (`pat_wf`): a successful match
 of a rule's pattern whose checks hold is definitionally equal to the

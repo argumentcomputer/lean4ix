@@ -2894,28 +2894,17 @@ theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i
       · rename_i mkInfo
         refine .pure ?_
         intro selected hselected
-        have hconstructorHead : c.venv.ConstructorHead mkC :=
+        have hconstructorHeadArity :
+            c.venv.ConstructorHeadArity mkC mkInfo.numParams :=
           c.projectionReady.constructorHead mkC mkInfo hfind
+        have hconstructorHead : c.venv.ConstructorHead mkC :=
+          hconstructorHeadArity.toConstructorHead
         have hconstructorName : mkC = view.constructorName :=
-          c.Ewf.registeredStructureHeadInversion.constructor_name_inv
+          c.Ewf.resolvedRegisteredStructureHeadInversion.resolved_constructor_name_inv
             c.Δwf hsemantic hconstructorHead rfl hmajorEq
         have hnumParams : mkInfo.numParams = view.nparams :=
-          c.projectionReady.constructorNumParams view mkInfo
-            hsemantic.viewWF (by
-              intro hfields
-              have hspecialized :
-                  view.specializedFields levels params = [] := by
-                simp [VStructureView.specializedFields, hfields]
-              have hcodesLength :
-                  (view.projectionCodes levels params).length = 0 := by
-                rw [view.projectionCodes_length levels params, hspecialized]
-                rfl
-              have hcodesNil : view.projectionCodes levels params = [] :=
-                List.length_eq_zero_iff.mp hcodesLength
-              rw [hcodesNil] at hcode
-              contradiction) (by
-              rw [← hconstructorName]
-              exact hfind)
+          c.Ewf.resolvedRegisteredStructureHeadInversion.resolved_constructor_numParams_inv
+            c.Δwf hsemantic hconstructorHeadArity rfl hmajorEq
         have hselectedList :
             normal.getAppArgsList[mkInfo.numParams + i]? = some selected := by
           rw [← Expr.getAppArgs_toList, Array.getElem?_toList]
@@ -2927,7 +2916,7 @@ theorem reduceProjCore.WF {c : VContext} {s : VState} (he : c.TrExprS (.proj n i
           rw [← hnumParams]
           exact hfieldGet
         obtain ⟨alignment⟩ :=
-          c.Ewf.registeredStructureHeadInversion.constructor_inv
+          c.Ewf.resolvedRegisteredStructureHeadInversion.resolved_constructor_inv
             c.Δwf hsemantic hconstructorHead hcode rfl
               hfieldGetCanonical hmajorEq
         have hiota := hsemantic.projector_constructor_aligned

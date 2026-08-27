@@ -450,6 +450,7 @@ private theorem mkRecInfos_bool
   rw [AddInductive.mkRecInfos.loopInd1.eq_1]
   have hdone : ¬ 1 < #[boolSource].size := by decide
   rw [dif_neg hdone]
+  simp only
   rw [AddInductive.mkRecInfos.loopInd2.eq_1]
   rw [dif_pos hsize]
   rw [show #[boolSource][0] = boolSource by rfl]
@@ -1016,29 +1017,21 @@ theorem declareRecursors_bool_infos (root : AddInductive.Context)
         (boolTrueContext root).lctx root.lparams
         (root.safety != .safe) 0 boolSource
         (boolFinalRecInfos root)[0]! rules] := by
-  unfold AddInductive.declareRecursors at run
-  unfold AddInductive.declareRecursorsAt at run
-  rw [mkRecInfos_bool root hwhnf hinductive] at run
-  simp only [AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind] at run
-  simp only [Except.bind] at run
-  cases hloop : StateT.run'
-      (AddInductive.declareRecursors.loop boolStats #[boolSource]
-        (.param `u) false (boolFinalRecInfos root)
-        ((boolFinalRecInfos root).map (·.motive))
-        ((boolFinalRecInfos root).flatMap (·.minors))
-        (boolTrueContext root).lctx root.lparams
-        (root.safety != .safe) root.allowPrimitive 0 root.env)
-      0 (boolTrueContext root) with
-  | error error =>
-      rw [hloop] at run
-      contradiction
-  | ok tail =>
-      rw [hloop] at run
-      simp only [Except.bind, Pure.pure, Except.pure] at run
-      have result_eq := Except.ok.inj run
-      subst result
-      exact AddInductive.declareRecursors.loop_singleton_infos_eq
-        (by simp) (by simp) hloop
+  obtain ⟨synthesis, detailedRun, infos_eq⟩ :=
+    AddInductive.declareRecursors_synthesis run
+  have captureRun := synthesis.synthesisRun detailedRun
+  rw [mkRecInfos_bool root hwhnf hinductive] at captureRun
+  have capture_eq := Except.ok.inj captureRun
+  have recInfos_eq : synthesis.recInfos = boolFinalRecInfos root :=
+    (congrArg Prod.fst capture_eq).symm
+  have context_eq : synthesis.synthesisContext = boolTrueContext root :=
+    (congrArg Prod.snd capture_eq).symm
+  have loopRun := synthesis.run
+  rw [recInfos_eq, context_eq] at loopRun
+  obtain ⟨rules, tail_infos_eq⟩ :=
+    AddInductive.declareRecursors.loop_singleton_infos_eq
+      (by simp) (by simp) loopRun
+  exact ⟨rules, infos_eq.trans tail_infos_eq⟩
 
 /-- Transport the canonical Bool recursor translation to the exact record
 retained by a successful producer execution. -/
@@ -1066,29 +1059,7 @@ theorem declareRecursors_bool_evidence (root : AddInductive.Context)
         (boolTrueContext root).lctx root.lparams
         (root.safety != .safe) 0 boolSource
         (boolFinalRecInfos root)[0]! rules] from by
-    unfold AddInductive.declareRecursors at run
-    unfold AddInductive.declareRecursorsAt at run
-    rw [mkRecInfos_bool root hwhnf hinductive] at run
-    simp only [AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind,
-      Except.bind] at run
-    cases hloop : StateT.run'
-        (AddInductive.declareRecursors.loop boolStats #[boolSource]
-          (.param `u) false (boolFinalRecInfos root)
-          ((boolFinalRecInfos root).map (·.motive))
-          ((boolFinalRecInfos root).flatMap (·.minors))
-          (boolTrueContext root).lctx root.lparams
-          (root.safety != .safe) root.allowPrimitive 0 root.env)
-        0 (boolTrueContext root) with
-    | error error =>
-        rw [hloop] at run
-        contradiction
-    | ok tail =>
-        rw [hloop] at run
-        simp only [Pure.pure, Except.pure] at run
-        have result_eq := Except.ok.inj run
-        subst result
-        exact AddInductive.declareRecursors.loop_singleton_infos_eq
-          (by decide) (by decide) hloop
+    exact declareRecursors_bool_infos root hwhnf hinductive run
   rw [infos_eq]
   apply List.Forall₂.cons
   · apply VInductDecl.trConstVal_of_translation_header (tr := tr)
@@ -1154,10 +1125,10 @@ theorem boolExpectedRecursorTranslation {ctorEnv : VEnv}
               rfl
             · apply TrTypeExpr.bvar
               rfl
-  obtain ⟨sort, recursorType⟩ := generationEnv.recursor_wf
+  obtain ⟨sort, recursorType⟩ := generationEnv.generatedRecursor_wf
     (List.getElem_mem (l := VPrimitiveInductive.boolGeneration.families)
       (n := 0) (by decide))
-  rw [show (VPrimitiveInductive.boolGeneration.recursor
+  rw [show (VPrimitiveInductive.boolGeneration.generatedRecursor
       VPrimitiveInductive.boolGeneration.families[0]).uvars = 1 by rfl]
     at recursorType
   have rawWF : VPrimitiveInductive.boolGeneration.recursors[0].type.WF
@@ -2031,6 +2002,7 @@ private theorem mkRecInfos_nat
   rw [AddInductive.mkRecInfos.loopInd1.eq_1]
   have hdone : ¬ 1 < #[natSource binderName binderInfo].size := by simp
   rw [dif_neg hdone]
+  simp only
   rw [AddInductive.mkRecInfos.loopInd2.eq_1]
   rw [dif_pos hsize]
   rw [show #[natSource binderName binderInfo][0] =
@@ -2737,31 +2709,24 @@ theorem declareRecursors_nat_infos (root : AddInductive.Context)
         (natSuccContext root binderName binderInfo).lctx root.lparams
         (root.safety != .safe) 0 (natSource binderName binderInfo)
         (natFinalRecInfos root binderName binderInfo)[0]! rules] := by
-  unfold AddInductive.declareRecursors at run
-  unfold AddInductive.declareRecursorsAt at run
+  obtain ⟨synthesis, detailedRun, infos_eq⟩ :=
+    AddInductive.declareRecursors_synthesis run
+  have captureRun := synthesis.synthesisRun detailedRun
   rw [mkRecInfos_nat root binderName binderInfo rootRun familyInfo hfind
-    hwhnf hdepth hwhnfFuel hinductive] at run
-  simp only [AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind,
-    Except.bind] at run
-  cases hloop : StateT.run'
-      (AddInductive.declareRecursors.loop natStats
-        #[natSource binderName binderInfo] (.param `u) false
-        (natFinalRecInfos root binderName binderInfo)
-        ((natFinalRecInfos root binderName binderInfo).map (·.motive))
-        ((natFinalRecInfos root binderName binderInfo).flatMap (·.minors))
-        (natSuccContext root binderName binderInfo).lctx root.lparams
-        (root.safety != .safe) root.allowPrimitive 0 root.env)
-      0 (natSuccContext root binderName binderInfo) with
-  | error error =>
-      rw [hloop] at run
-      contradiction
-  | ok tail =>
-      rw [hloop] at run
-      simp only [Pure.pure, Except.pure] at run
-      have result_eq := Except.ok.inj run
-      subst result
-      exact AddInductive.declareRecursors.loop_singleton_infos_eq
-        (by simp) (by simp) hloop
+    hwhnf hdepth hwhnfFuel hinductive] at captureRun
+  have capture_eq := Except.ok.inj captureRun
+  have recInfos_eq : synthesis.recInfos =
+      natFinalRecInfos root binderName binderInfo :=
+    (congrArg Prod.fst capture_eq).symm
+  have context_eq : synthesis.synthesisContext =
+      natSuccContext root binderName binderInfo :=
+    (congrArg Prod.snd capture_eq).symm
+  have loopRun := synthesis.run
+  rw [recInfos_eq, context_eq] at loopRun
+  obtain ⟨rules, tail_infos_eq⟩ :=
+    AddInductive.declareRecursors.loop_singleton_infos_eq
+      (by simp) (by simp) loopRun
+  exact ⟨rules, infos_eq.trans tail_infos_eq⟩
 
 @[simp] private theorem pushLocalDecl_fuel
     (context : AddInductive.Context) (name : Name)
@@ -2786,125 +2751,128 @@ theorem declareRecursors_nat_fuel
       #[natSource binderName binderInfo] (.param `u) false root = .ok result) :
     (∃ whnfFuel, root.fuel.whnf = whnfFuel + 1) ∧
       ∃ inductiveFuel, root.fuel.inductiveFuel = inductiveFuel + 2 := by
+  obtain ⟨synthesis, detailedRun, _infosEq⟩ :=
+    AddInductive.declareRecursors_synthesis run
+  have synthesisRun := synthesis.synthesisRun detailedRun
   constructor
   · cases hw : root.fuel.whnf with
     | zero =>
-      unfold AddInductive.declareRecursors at run
-      unfold AddInductive.declareRecursorsAt at run
-      unfold AddInductive.mkRecInfos at run
-      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at run
-      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at run
+      have captureRun := synthesisRun
+      unfold AddInductive.mkRecInfos at captureRun
+      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at captureRun
+      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at captureRun
       simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
-        ReaderT.bind, Bind.bind] at run
+        ReaderT.bind, Bind.bind] at captureRun
       rw [show #[natSource binderName binderInfo][0].type =
-        (natSource binderName binderInfo).type by rfl] at run
-      simp only [AddInductive.liftTypeChecker_apply] at run
-      rw [hwhnf] at run
+        (natSource binderName binderInfo).type by rfl] at captureRun
+      simp only [AddInductive.liftTypeChecker_apply] at captureRun
+      rw [hwhnf] at captureRun
       simp only [Except.bind, AddInductive.mkRecInfos.loopArgs1,
         AddInductive.withLocalDecl_apply, AddInductive.getLCtx_apply,
-        ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure] at run
+        ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
       cases hi : root.fuel.inductiveFuel with
       | zero =>
-          rw [hi] at run
-          unfold AddInductive.mkRecInfos.loopArgs1 at run
-          simp [throw, throwThe, MonadExceptOf.throw] at run
+          rw [hi] at captureRun
+          unfold AddInductive.mkRecInfos.loopArgs1 at captureRun
+          simp [throw, throwThe, MonadExceptOf.throw] at captureRun
       | succ inductiveFuel =>
-          rw [hi] at run
-          unfold AddInductive.mkRecInfos.loopArgs1 at run
+          rw [hi] at captureRun
+          unfold AddInductive.mkRecInfos.loopArgs1 at captureRun
           simp only [AddInductive.withLocalDecl_apply,
             AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind,
-            Except.bind, Pure.pure, ReaderT.pure, Except.pure] at run
-          rw [AddInductive.mkRecInfos.loopInd1.eq_1] at run
-          rw [dif_neg (show ¬1 < #[natSource binderName binderInfo].size by simp)] at run
-          rw [AddInductive.mkRecInfos.loopInd2.eq_1] at run
-          rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at run
+            Except.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
+          rw [AddInductive.mkRecInfos.loopInd1.eq_1] at captureRun
+          rw [dif_neg (show ¬1 < #[natSource binderName binderInfo].size by simp)] at captureRun
+          simp only at captureRun
+          rw [AddInductive.mkRecInfos.loopInd2.eq_1] at captureRun
+          rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at captureRun
           rw [show #[natSource binderName binderInfo][0] =
-            natSource binderName binderInfo by rfl] at run
-          rw [show (natSource binderName binderInfo).name = ``Nat by rfl] at run
+            natSource binderName binderInfo by rfl] at captureRun
+          rw [show (natSource binderName binderInfo).name = ``Nat by rfl] at captureRun
           rw [show (natSource binderName binderInfo).ctors = [
             ⟨``Nat.zero, .const ``Nat []⟩,
             ⟨``Nat.succ, .forallE binderName (.const ``Nat [])
-              (.const ``Nat []) binderInfo⟩] by rfl] at run
+              (.const ``Nat []) binderInfo⟩] by rfl] at captureRun
           simp only [AddInductive.mkRecInfos.loopCtors,
             AddInductive.mkRecInfos.loopCtorArgs,
             readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
             ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
             Except.bind, pushLocalDecl_fuel, hi,
-            AddInductive.mkRecInfos.loopCtorArgs.loop] at run
-          rw [AddInductive.mkRecInfos.loopU.eq_1] at run
-          rw [dif_neg (show ¬0 < (#[] : Array Expr).size by decide)] at run
+            AddInductive.mkRecInfos.loopCtorArgs.loop] at captureRun
+          rw [AddInductive.mkRecInfos.loopU.eq_1] at captureRun
+          rw [dif_neg (show ¬0 < (#[] : Array Expr).size by decide)] at captureRun
           simp only [AddInductive.getLCtx_apply,
             AddInductive.withLocalDecl_apply, ReaderT.bind, Bind.bind,
-            Except.bind, Pure.pure, ReaderT.pure, Except.pure] at run
+            Except.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
           simp only [pushLocalDecl_fuel, hi,
-            AddInductive.mkRecInfos.loopCtorArgs.loop] at run
-          rw [show natStats.params[0]? = none by rfl] at run
+            AddInductive.mkRecInfos.loopCtorArgs.loop] at captureRun
+          rw [show natStats.params[0]? = none by rfl] at captureRun
           simp only [AddInductive.withLocalDecl_apply, ReaderT.bind,
-            Bind.bind, Except.bind] at run
-          unfold AddInductive.isRecArg at run
+            Bind.bind, Except.bind] at captureRun
+          unfold AddInductive.isRecArg at captureRun
           simp only [readThe, MonadReader.read, MonadReaderOf.read,
             ReaderT.read, ReaderT.bind, Bind.bind, Pure.pure,
-            ReaderT.pure, Except.pure, Except.bind] at run
-          simp only [pushLocalDecl_fuel] at run
-          rw [hi] at run
-          unfold AddInductive.isRecArg.loop at run
+            ReaderT.pure, Except.pure, Except.bind] at captureRun
+          simp only [pushLocalDecl_fuel] at captureRun
+          rw [hi] at captureRun
+          unfold AddInductive.isRecArg.loop at captureRun
           simp [AddInductive.liftTypeChecker_apply,
-            ReaderT.bind, Bind.bind] at run
-          rw [whnfConst_zero ``Nat recursionFuel hdepth hw] at run
-          simp only [Except.bind] at run
+            ReaderT.bind, Bind.bind] at captureRun
+          rw [whnfConst_zero ``Nat recursionFuel hdepth hw] at captureRun
+          simp only [Except.bind] at captureRun
           exfalso
           contradiction
     | succ whnfFuel => exact ⟨whnfFuel, rfl⟩
   · cases initialInductiveFuel with
     | zero =>
       have hone : root.fuel.inductiveFuel = 1 := by simpa using hpositive
-      unfold AddInductive.declareRecursors at run
-      unfold AddInductive.declareRecursorsAt at run
-      unfold AddInductive.mkRecInfos at run
-      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at run
-      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at run
+      have captureRun := synthesisRun
+      unfold AddInductive.mkRecInfos at captureRun
+      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at captureRun
+      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at captureRun
       simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
-        ReaderT.bind, Bind.bind] at run
+        ReaderT.bind, Bind.bind] at captureRun
       rw [show #[natSource binderName binderInfo][0].type =
-        (natSource binderName binderInfo).type by rfl] at run
-      simp only [AddInductive.liftTypeChecker_apply] at run
-      rw [hwhnf] at run
+        (natSource binderName binderInfo).type by rfl] at captureRun
+      simp only [AddInductive.liftTypeChecker_apply] at captureRun
+      rw [hwhnf] at captureRun
       simp only [Except.bind, AddInductive.mkRecInfos.loopArgs1,
         AddInductive.withLocalDecl_apply, AddInductive.getLCtx_apply,
-        ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure] at run
-      rw [hone] at run
-      unfold AddInductive.mkRecInfos.loopArgs1 at run
+        ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
+      rw [hone] at captureRun
+      unfold AddInductive.mkRecInfos.loopArgs1 at captureRun
       simp only [AddInductive.withLocalDecl_apply,
         AddInductive.getLCtx_apply, ReaderT.bind, Bind.bind,
-        Except.bind, Pure.pure, ReaderT.pure, Except.pure] at run
-      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at run
-      rw [dif_neg (show ¬1 < #[natSource binderName binderInfo].size by simp)] at run
-      rw [AddInductive.mkRecInfos.loopInd2.eq_1] at run
-      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at run
+        Except.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
+      rw [AddInductive.mkRecInfos.loopInd1.eq_1] at captureRun
+      rw [dif_neg (show ¬1 < #[natSource binderName binderInfo].size by simp)] at captureRun
+      simp only at captureRun
+      rw [AddInductive.mkRecInfos.loopInd2.eq_1] at captureRun
+      rw [dif_pos (show 0 < #[natSource binderName binderInfo].size by simp)] at captureRun
       rw [show #[natSource binderName binderInfo][0] =
-        natSource binderName binderInfo by rfl] at run
-      rw [show (natSource binderName binderInfo).name = ``Nat by rfl] at run
+        natSource binderName binderInfo by rfl] at captureRun
+      rw [show (natSource binderName binderInfo).name = ``Nat by rfl] at captureRun
       rw [show (natSource binderName binderInfo).ctors = [
         ⟨``Nat.zero, .const ``Nat []⟩,
         ⟨``Nat.succ, .forallE binderName (.const ``Nat [])
-          (.const ``Nat []) binderInfo⟩] by rfl] at run
+          (.const ``Nat []) binderInfo⟩] by rfl] at captureRun
       simp only [AddInductive.mkRecInfos.loopCtors,
         AddInductive.mkRecInfos.loopCtorArgs,
         readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
         ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
         Except.bind, pushLocalDecl_fuel, hone,
-        AddInductive.mkRecInfos.loopCtorArgs.loop] at run
-      rw [AddInductive.mkRecInfos.loopU.eq_1] at run
-      rw [dif_neg (show ¬0 < (#[] : Array Expr).size by decide)] at run
+        AddInductive.mkRecInfos.loopCtorArgs.loop] at captureRun
+      rw [AddInductive.mkRecInfos.loopU.eq_1] at captureRun
+      rw [dif_neg (show ¬0 < (#[] : Array Expr).size by decide)] at captureRun
       simp only [AddInductive.getLCtx_apply,
         AddInductive.withLocalDecl_apply, ReaderT.bind, Bind.bind,
-        Except.bind, Pure.pure, ReaderT.pure, Except.pure] at run
+        Except.bind, Pure.pure, ReaderT.pure, Except.pure] at captureRun
       simp only [pushLocalDecl_fuel, hone,
-        AddInductive.mkRecInfos.loopCtorArgs.loop] at run
-      rw [show natStats.params[0]? = none by rfl] at run
+        AddInductive.mkRecInfos.loopCtorArgs.loop] at captureRun
+      rw [show natStats.params[0]? = none by rfl] at captureRun
       simp only [AddInductive.withLocalDecl_apply, ReaderT.bind,
-        Bind.bind, Except.bind] at run
-      split at run <;>
+        Bind.bind, Except.bind] at captureRun
+      split at captureRun <;>
         simp_all [AddInductive.mkRecInfos.loopCtorArgs.loop,
           throw, throwThe, MonadExceptOf.throw]
       all_goals
@@ -3014,10 +2982,10 @@ theorem natExpectedRecursorTranslation {ctorEnv : VEnv}
               rfl
             · apply TrTypeExpr.bvar
               rfl
-  obtain ⟨sort, recursorType⟩ := generationEnv.recursor_wf
+  obtain ⟨sort, recursorType⟩ := generationEnv.generatedRecursor_wf
     (List.getElem_mem (l := VPrimitiveInductive.natGeneration.families)
       (n := 0) (by decide))
-  rw [show (VPrimitiveInductive.natGeneration.recursor
+  rw [show (VPrimitiveInductive.natGeneration.generatedRecursor
       VPrimitiveInductive.natGeneration.families[0]).uvars = 1 by rfl]
     at recursorType
   have rawWF : VPrimitiveInductive.natGeneration.recursors[0].type.WF

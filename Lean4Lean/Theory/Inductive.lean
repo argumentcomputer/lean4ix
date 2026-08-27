@@ -55,6 +55,12 @@ def VExpr.bvarRevRange (off : Nat) : Nat → List VExpr
   | 0 => []
   | m+1 => .bvar (off + m) :: bvarRevRange off m
 
+@[simp] theorem VExpr.bvarRevRange_length : ∀ (off m : Nat),
+    (VExpr.bvarRevRange off m).length = m
+  | _, 0 => rfl
+  | off, m+1 => by
+      simp [VExpr.bvarRevRange, VExpr.bvarRevRange_length off m]
+
 /-- Iterated lambda; the binder list is outermost first. -/
 def VExpr.lamN : List VExpr → VExpr → VExpr
   | [], e => e
@@ -137,6 +143,22 @@ def ctorFields : VExpr → List VExpr
   | .forallE B rest => B :: ctorFields rest
   | _ => []
 
+/-- Splitting after a binder prefix partitions the complete Pi telescope.
+This syntactic fact belongs with the inductive telescope primitives rather
+than any particular projection backend. -/
+theorem _root_.Lean4Lean.VExpr.ctorFields_eq_telN_append
+    (count : Nat) (expression : VExpr) :
+    ctorFields expression =
+      VExpr.telN count expression ++ ctorFields (VExpr.dropN count expression) := by
+  induction count generalizing expression with
+  | zero => simp [VExpr.telN, VExpr.dropN]
+  | succ count ih =>
+      cases expression <;> try rfl
+      case forallE domain body =>
+        simp only [ctorFields, VExpr.telN, VExpr.dropN,
+          List.cons_append, List.cons.injEq, true_and]
+        exact ih body
+
 /-- The block type applied to its parameters, seen from `off` binders past
 the parameter telescope (declaration universes). -/
 def recApp (off : Nat) : VExpr :=
@@ -175,6 +197,13 @@ recursive indices; checking only the current family would miss negative
 occurrences of its siblings. -/
 def _root_.Lean4Lean.VExpr.hasAnyConst (names : List Name) (e : VExpr) : Bool :=
   names.any e.hasConst
+
+/-- Context lifting preserves the block-wide constant-occurrence test. -/
+@[simp] theorem _root_.Lean4Lean.VExpr.hasAnyConst_lift'
+    (expression : VExpr) (lift : Lift) (names : List Name) :
+    (expression.lift' lift).hasAnyConst names =
+      expression.hasAnyConst names := by
+  simp only [VExpr.hasAnyConst, VExpr.hasConst_lift']
 
 /-- The part of a family declaration needed to recognize a recursive target.
 The position of a header in `familyHeaders` is the `RecArg.targetType` stored
@@ -396,6 +425,36 @@ def subsingletonOK (ni : Nat) (ct : VExpr) : Bool :=
         ridx.contains (.bvar (m-1-j))) &&
       loop (B :: Γ) (j+1) Bs
   loop (VExpr.telN np ct).reverse 0 Bs
+
+/-- The validator-refined singleton criterion.  Unlike the environment-free
+fallback above, this version consumes the exact sort universe inferred for
+each constructor field.  A field is proof-irrelevant precisely when its
+translated universe is structurally forced to zero; every remaining data
+field must occur in the constructor result's index spine. -/
+def subsingletonOKWithSorts (ni : Nat) (ct : VExpr)
+    (sorts : List VLevel) : Bool :=
+  let Bs := ctorFields (VExpr.dropN np ct)
+  let m := Bs.length
+  let ridx := recFieldIdxs np (VExpr.resultOf (VExpr.dropN np ct))
+  let rec loop (j : Nat) : List VExpr → List VLevel → Bool
+    | [], [] => true
+    | B :: Bs, u :: us =>
+      ((recArg? U T np ni j B).isSome || u.isDefinitelyZero ||
+        ridx.contains (.bvar (m-1-j))) &&
+      loop (j+1) Bs us
+    | _, _ => false
+  loop 0 Bs sorts
+
+/-- Large elimination using the exact validator-owned field universes for a
+singleton constructor.  The constructor and sort lists are consumed in
+lockstep, so malformed supplemental data is rejected rather than truncated. -/
+def largeElimWithSorts (ni : Nat) (ty : VInductiveType)
+    (constructorSorts : List (List VLevel)) : Bool :=
+  (sortLevel np ty).isNeverZero ||
+  match ty.ctors, constructorSorts with
+  | [], [] => true
+  | [c], [sorts] => subsingletonOKWithSorts U T np ni c.type sorts
+  | _, _ => false
 
 /-- Large elimination: a never-zero result sort, or the (syntactic)
 subsingleton criterion. -/
@@ -2156,17 +2215,76 @@ def NormalizedCheckedBlock.blockGenerationShape {source : VInductDecl}
       family.raw.uvars == source.uvars &&
         family.ctorPairs.all fun ctor => ctor.raw.uvars == source.uvars
 
+/-- The legacy generated parameter surface has the common block arity once
+the executable block-generation shape gate succeeds. -/
+theorem NormalizedCheckedBlock.generationParams_length_of_shape
+    {source : VInductDecl} (block : NormalizedCheckedBlock source)
+    (shape : block.blockGenerationShape = true) :
+    (VInductDecl.generationParams block.rawParams
+      block.checked.params).length = source.nparams := by
+  simp only [NormalizedCheckedBlock.blockGenerationShape,
+    Bool.and_eq_true, beq_iff_eq, List.all_eq_true] at shape
+  obtain ⟨shape, -⟩ := shape
+  obtain ⟨⟨⟨⟨hparams, hparams'⟩, -⟩, -⟩, -⟩ := shape
+  exact (VInductDecl.generationParams_length_of_eq hparams').trans hparams
+
 /-- A validator-owned mutual normalization whose raw/view positions are
 usable by artifact generation. -/
 structure BlockGenerationChecked (source : VInductDecl) where
   validated : ValidatedBlock source
   shape_eq : validated.block.blockGenerationShape = true
+  /-- Exact family/constructor/field universes retained by semantic checker
+  replay.  Pure structural analyzers leave this absent and use the legacy
+  environment-free singleton criterion. -/
+  fieldSorts? : Option (List (List (List VLevel))) := none
+  /-- Exact ordinary-checker large-elimination decision for semantic
+  singleton replay.  It is ignored for non-singleton blocks. -/
+  eliminationResult? : Option Bool := none
+  /-- Exact ordinary-checker K-target decision for semantic singleton replay.
+  It is ignored for non-singleton blocks. -/
+  kTargetResult? : Option Bool := none
+  /-- Exact parameter surface abstracted by the kernel recursor builder.
+
+  The legacy default can be computed from raw and normalized syntax for
+  closed Theory fixtures.  Verification producers override it with the
+  strict translations of the actual annotation-consumed local declarations.
+  This distinction matters when an annotation contains a reducible alias (or
+  when strict translation erases a metadata wrapper): the emitted parameter
+  is neither the raw annotated domain nor necessarily its WHNF. -/
+  generatedParams : List VExpr :=
+    VInductDecl.generationParams validated.block.rawParams
+      validated.block.checked.params
+  /-- The producer-owned parameter surface has the common block arity. -/
+  generatedParams_length : generatedParams.length = source.nparams
+  /-- Exact index-binder surface introduced by recursor synthesis for one
+  normalized family.
+
+  Structural Theory fixtures retain the stored raw syntax by default.
+  Verification producers may override this with strict translations of the
+  actual annotation-consumed local declarations created by `loopArgs1`.
+  Keeping this surface producer-owned is essential when strict translation
+  erases metadata which affected whether Lean consumed an annotation. -/
+  generatedIndices : NormalizedFamily → List VExpr :=
+    fun family => family.rawIndices source.nparams
+  /-- Exact constructor-field surface abstracted by generated minors and
+  iota rules.  The raw default preserves the legacy closed Theory fixtures;
+  verification producers override it with the locals retained by constructor
+  synthesis. -/
+  generatedFields : NormalizedBlockCtor → List VExpr :=
+    fun constructor => constructor.ctor.rawFields source.nparams
 
 def ValidatedBlock.generation? {source : VInductDecl}
     (validated : ValidatedBlock source) :
     Option (BlockGenerationChecked source) :=
   if h : validated.block.blockGenerationShape then
-    some ⟨validated, h⟩
+    some {
+      validated := validated
+      shape_eq := h
+      generatedParams :=
+        VInductDecl.generationParams validated.block.rawParams
+          validated.block.checked.params
+      generatedParams_length :=
+        validated.block.generationParams_length_of_shape h }
   else none
 
 /-- The common result level selected by an identity-normalized checked block.
@@ -2243,8 +2361,17 @@ def elimination {source : VInductDecl}
   else
     match gen.families with
     | [family] =>
-      if largeElim source.uvars family.raw.name source.nparams
-          family.view.indices.length family.view.value then .large else .small
+      match gen.eliminationResult?, gen.fieldSorts? with
+      | some result, _ => ElimMode.ofBool result
+      | none, some [constructorSorts] =>
+        if largeElimWithSorts source.uvars family.raw.name source.nparams
+            family.view.indices.length family.view.value constructorSorts then
+          .large
+        else .small
+      | none, none =>
+        if largeElim source.uvars family.raw.name source.nparams
+            family.view.indices.length family.view.value then .large else .small
+      | none, some _ => .small
     | _ => .small
 
 /-- K-like reduction is a singleton-only kernel flag. -/
@@ -2252,7 +2379,8 @@ def kTarget {source : VInductDecl}
     (gen : BlockGenerationChecked source) : Bool :=
   match gen.families with
   | [family] =>
-    isKTarget source.nparams gen.validated.resultLevel family.view.value
+    gen.kTargetResult?.getD
+      (isKTarget source.nparams gen.validated.resultLevel family.view.value)
   | _ => false
 
 abbrev recUvars {source : VInductDecl}
@@ -2274,8 +2402,7 @@ abbrev recLevels {source : VInductDecl}
 /-- Shared emitted parameters in recursor universes. -/
 def paramsTel {source : VInductDecl}
     (gen : BlockGenerationChecked source) : List VExpr :=
-  generationParams gen.block.rawParams gen.block.checked.params |>.map
-    (VExpr.instL gen.sourceLevels)
+  gen.generatedParams.map (VExpr.instL gen.sourceLevels)
 
 def familyNameAt {source : VInductDecl}
     (gen : BlockGenerationChecked source) (ordinal : Nat) : Name :=
@@ -2284,6 +2411,20 @@ def familyNameAt {source : VInductDecl}
 def idxTel {source : VInductDecl} (gen : BlockGenerationChecked source)
     (family : NormalizedFamily) : List VExpr :=
   (family.rawIndices source.nparams).map (VExpr.instL gen.sourceLevels)
+
+/-- Producer-owned index-binder telescope in recursor universes.  This is
+kept separate from `idxTel` until the raw/generated artifact equivalence
+layer has been established. -/
+def generatedIdxTel {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : List VExpr :=
+  (gen.generatedIndices family).map (VExpr.instL gen.sourceLevels)
+
+/-- Producer-owned constructor-field telescope in recursor universes. -/
+def generatedFieldsR {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : List VExpr :=
+  (gen.generatedFields constructor).map (VExpr.instL gen.sourceLevels)
 
 /-- One family motive before preceding motives have been inserted. -/
 def motiveType {source : VInductDecl}
@@ -2311,6 +2452,32 @@ def motiveTypesAux {source : VInductDecl}
 def motiveTypes {source : VInductDecl}
     (gen : BlockGenerationChecked source) : List VExpr :=
   gen.motiveTypesAux gen.families
+
+/-- One family motive over the producer-owned generated index surface. -/
+def generatedMotiveType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VExpr :=
+  let indices := gen.generatedIdxTel family
+  let ni := indices.length
+  VExpr.forallN indices
+    (.forallE
+      (VExpr.appN (.const family.raw.name gen.sourceLevels)
+        (VExpr.bvarRevRange ni source.nparams ++
+          VExpr.bvarRevRange 0 ni))
+      (.sort gen.motiveLevel))
+
+/-- Motives in kernel order over producer-owned index surfaces. -/
+def generatedMotiveTypesAux {source : VInductDecl}
+    (gen : BlockGenerationChecked source) :
+    List NormalizedFamily → (i : Nat := 0) → List VExpr
+  | [], _ => []
+  | family :: families, i =>
+    (gen.generatedMotiveType family).liftN i ::
+      gen.generatedMotiveTypesAux families (i + 1)
+
+def generatedMotiveTypes {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VExpr :=
+  gen.generatedMotiveTypesAux gen.families
 
 /-- Binder telescope of one mutual functional induction hypothesis. -/
 def blockMinorBinders (d m p : Nat) (r : RecArg) : List VExpr :=
@@ -2365,6 +2532,40 @@ def minorTypes {source : VInductDecl}
     (gen : BlockGenerationChecked source) : List VExpr :=
   gen.minorTypesAux gen.flatCtors
 
+/-- One constructor minor over the exact field locals retained by recursor
+synthesis.  Recursive classification and result indices remain owned by the
+checked view, exactly as in `minorType`. -/
+def generatedMinorType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  let d := gen.familyCount
+  let Bs := gen.generatedFieldsR constructor
+  let m := Bs.length
+  let rs := constructor.ctor.recArgsR source.uvars gen.elimination
+  let r := rs.length
+  VExpr.forallN (VExpr.liftTelN d Bs 0)
+    (VExpr.forallN (blockIHsFromRecArgs d m rs 0)
+      (VExpr.appN (.bvar (d - 1 - constructor.owner + m + r))
+        ((constructor.ctor.resultIndicesR source.uvars gen.elimination |>.map
+            fun e => (e.liftN d m).liftN r) ++
+          [VExpr.appN (.const constructor.ctor.raw.name gen.sourceLevels)
+            (VExpr.bvarRevRange (r + m + d) source.nparams ++
+              VExpr.bvarRevRange r m)])))
+
+/-- Globally flattened constructor minors over producer-owned field
+surfaces. -/
+def generatedMinorTypesAux {source : VInductDecl}
+    (gen : BlockGenerationChecked source) :
+    List NormalizedBlockCtor → (i : Nat := 0) → List VExpr
+  | [], _ => []
+  | constructor :: constructors, i =>
+    (gen.generatedMinorType constructor).liftN i ::
+      gen.generatedMinorTypesAux constructors (i + 1)
+
+def generatedMinorTypes {source : VInductDecl}
+    (gen : BlockGenerationChecked source) : List VExpr :=
+  gen.generatedMinorTypesAux gen.flatCtors
+
 /-- One recursor type for the selected family, sharing every motive and minor
 with the other family recursors. -/
 def recType {source : VInductDecl}
@@ -2388,16 +2589,48 @@ def recType {source : VInductDecl}
                 (VExpr.bvarRevRange 1 ni))
               (.bvar 0)
 
+/-- Exact recursor type assembled from producer-owned parameter, index, and
+constructor-field surfaces.  The legacy `recType` remains available as the
+raw-surface artifact while their semantic equivalence is established. -/
+def generatedRecType {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VExpr :=
+  let d := gen.familyCount
+  let k := gen.minorCount
+  let indices := gen.generatedIdxTel family
+  let ni := indices.length
+  VExpr.forallN gen.paramsTel <|
+    VExpr.forallN gen.generatedMotiveTypes <|
+      VExpr.forallN gen.generatedMinorTypes <|
+        VExpr.forallN (VExpr.liftTelN (d + k) indices 0) <|
+          .forallE
+            (VExpr.appN (.const family.raw.name gen.sourceLevels)
+              (VExpr.bvarRevRange (ni + d + k) source.nparams ++
+                VExpr.bvarRevRange 0 ni)) <|
+            .app
+              (VExpr.appN
+                (.bvar (d - 1 - family.view.ordinal + k + ni + 1))
+                (VExpr.bvarRevRange 1 ni))
+              (.bvar 0)
+
 def recursor {source : VInductDecl}
     (gen : BlockGenerationChecked source)
     (family : NormalizedFamily) : VConstant :=
   ⟨gen.recUvars, gen.recType family⟩
 
+/-- The recursor constant actually emitted by kernel synthesis.  Its type
+uses the producer-owned annotation-consumed binder surfaces; `recursor`
+remains the raw-surface semantic view used by the iota typing proofs. -/
+def generatedRecursor {source : VInductDecl}
+    (gen : BlockGenerationChecked source)
+    (family : NormalizedFamily) : VConstant :=
+  ⟨gen.recUvars, gen.generatedRecType family⟩
+
 /-- Named generated recursors in family order. -/
 def recursors {source : VInductDecl}
     (gen : BlockGenerationChecked source) : List VConstVal :=
   gen.families.map fun family =>
-    ⟨gen.recursor family, .str family.raw.name "rec"⟩
+    ⟨gen.generatedRecursor family, .str family.raw.name "rec"⟩
 
 /-- Telescope introduced around a mutual recursive rule call. -/
 def blockRuleBinders (common m : Nat) (r : RecArg) : List VExpr :=
@@ -2494,7 +2727,7 @@ def blockFieldsWF (source : VInductDecl) (env : VEnv)
         | none => False
       | none =>
         ∃ u, env.HasType source.uvars Γ B (.sort u) ∧
-          (resultLevel = .zero ∨ u ≤ resultLevel)) ∧
+          (resultLevel ≈ .zero ∨ u ≤ resultLevel)) ∧
       blockFieldsWF source env resultLevel familyIndices
         (B :: Γ) (j + 1) Bs
 
@@ -2515,7 +2748,7 @@ def checkedBlockFieldsWF (env : VEnv) (U : Nat)
           | none => False
       | none =>
         ∃ u, env.HasType U Γ B (.sort u) ∧
-          (resultLevel = .zero ∨ u ≤ resultLevel)) ∧
+          (resultLevel ≈ .zero ∨ u ≤ resultLevel)) ∧
       checkedBlockFieldsWF env U resultLevel familyIndices
         Bs classifications (B :: Γ) (j + 1)
   | _, _, _, _ => False
@@ -2613,7 +2846,7 @@ def fieldsWF (env : VEnv) (l : VLevel) (Is : List VExpr) :
       (∃ r, recArg? U T np Is.length j B = some r ∧ r.binders ≠ [] ∧
         r.WF U env l Is Γ) ∨
       recArg? U T np Is.length j B = none ∧
-        ∃ u, env.HasType U Γ B (.sort u) ∧ (l = .zero ∨ u ≤ l)) ∧
+        ∃ u, env.HasType U Γ B (.sort u) ∧ (l ≈ .zero ∨ u ≤ l)) ∧
     (isRecField U T np Is.length j B = true →
       env.SpineWF U Γ (VExpr.forallN (VExpr.liftTelN j Is 0) (.sort l))
         (recFieldIdxs np B) (.sort l)) ∧
@@ -2836,6 +3069,22 @@ structure BlockGenerationChecked.WF {source : VInductDecl}
   paramsTel :
     env.TelDefEq source.uvars [] gen.block.rawParams
       gen.block.checked.params
+  generatedParamsTel :
+    env.TelDefEq source.uvars [] gen.generatedParams
+      gen.block.checked.params
+  /-- Each raw family-index telescope is definitionally equal, over the exact
+  generated parameter context, to the local declarations actually abstracted
+  by recursor synthesis. -/
+  generatedIndicesTel : ∀ family ∈ gen.families,
+    env.TelDefEq source.uvars gen.generatedParams.reverse
+      (family.rawIndices source.nparams) (gen.generatedIndices family)
+  /-- Each raw constructor-field telescope is definitionally equal, after
+  family/constructor staging, to the local declarations abstracted by minor
+  and rule synthesis. -/
+  generatedFieldsTel : ∀ constructor ∈ gen.flatCtors,
+    blockEnv.TelDefEq source.uvars gen.generatedParams.reverse
+      (constructor.ctor.rawFields source.nparams)
+      (gen.generatedFields constructor)
   families : ∀ family ∈ gen.families, family.WF gen env
   constructors :
     ∀ constructor ∈ gen.flatCtors,

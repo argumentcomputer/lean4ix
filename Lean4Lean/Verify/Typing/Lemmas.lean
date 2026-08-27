@@ -62,6 +62,34 @@ theorem Closed.mono (H : k ≤ k') : ∀ {e}, Closed e k → Closed e k'
   | .letE .., ⟨h1, h2, h3⟩ => ⟨h1.mono H, h2.mono H, h3.mono (Nat.succ_le_succ H)⟩
   | .proj _ _ e, h | .mdata _ e, h => h.mono (e := e) H
 
+/-- Removing one available loose-bound-variable slot preserves closedness
+when the expression does not mention that exact slot. -/
+theorem Closed.pred_of_hasLooseBVar_false
+    (closed : Closed expression (depth + 1))
+    (unused : expression.hasLooseBVar' depth = false) :
+    Closed expression depth := by
+  induction expression generalizing depth with
+  | bvar index => simp_all [Closed, Expr.hasLooseBVar']; omega
+  | fvar | mvar | sort | const | lit => simp_all [Closed, Expr.hasLooseBVar']
+  | app function argument functionIH argumentIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+  | lam name domain body binderInfo domainIH bodyIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+  | forallE name domain body binderInfo domainIH bodyIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+  | letE name type value body nondep typeIH valueIH bodyIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+  | proj structName index expression expressionIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+  | mdata data expression expressionIH =>
+      simp_all [Closed, Expr.hasLooseBVar']
+
+theorem Closed.zero_of_one_of_hasLooseBVar_false
+    (closed : Closed expression 1)
+    (unused : expression.hasLooseBVar' 0 = false) :
+    Closed expression 0 :=
+  closed.pred_of_hasLooseBVar_false unused
+
 theorem FVarsIn.natLitToConstructor : FVarsIn P (.natLitToConstructor n) := by
   cases n <;> simp [FVarsIn, Expr.natLitToConstructor, Expr.natZero, Expr.natSucc]
 
@@ -701,6 +729,105 @@ theorem TrProj.weakN (henv : env.Ordered) (W : Ctx.LiftN n k Γ Γ')
   simpa [VExpr.lift'_consN_skipN] using
     H.weak' henv (Ctx.liftN_iff_lift'.1 W)
 
+/-! ## Resolution-aware projection weakening -/
+
+/-- Weakening at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.weak'
+    (henv : env.Ordered) (W : Ctx.Lift' lift Γ Γ')
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env U Γ' view levels
+      (params.map fun param => param.lift' lift) idx
+      (major.lift' lift) (result.lift' lift) := by
+  cases self with
+  | ordinary projected => exact .ordinary (projected.weak' henv W)
+  | restored projected => exact .restored (projected.weak' henv W)
+
+/-- Fixed-depth weakening at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.weakN
+    (henv : env.Ordered) (W : Ctx.LiftN count cutoff Γ Γ')
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env U Γ' view levels
+      (params.map fun param => param.liftN count cutoff) idx
+      (major.liftN count cutoff) (result.liftN count cutoff) := by
+  cases self with
+  | ordinary projected => exact .ordinary (projected.weakN henv W)
+  | restored projected => exact .restored (projected.weakN henv W)
+
+/-- The major type shared by both resolved projection backends. -/
+theorem ResolvedProjectionView.TrProj.majorType
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    env.HasType U Γ major (view.structureType levels params) := by
+  cases self with
+  | ordinary projected => exact projected.majorType
+  | restored projected => exact projected.majorType
+
+/-- The selected projector program shared by both resolved backends. -/
+theorem ResolvedProjectionView.TrProj.program
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    ∃ code : VStructureView.ProjectionCode,
+      (view.projectionCodes levels params)[idx]? = some code ∧
+        result = .app code.projector major ∧
+        env.HasType U Γ code.projector
+          (.forallE (view.structureType levels params)
+            (.app code.typeFn.lift (.bvar 0))) := by
+  cases self with
+  | ordinary projected => exact projected.program
+  | restored projected => exact projected.program
+
+/-- Registered constructor alignment computes through the backend that owns
+the selected resolved projector. -/
+theorem ResolvedProjectionView.TrProj.projector_constructor_aligned
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result)
+    (henv : env.WF) (hΓ : OnCtx Γ (env.IsType U))
+    {code : VStructureView.ProjectionCode}
+    (hcode : (view.projectionCodes levels params)[idx]? = some code)
+    (hprojector : env.HasType U Γ code.projector
+      (.forallE (view.structureType levels params)
+        (.app code.typeFn.lift (.bvar 0))))
+    {runtimeMajor runtimeField : VExpr}
+    {runtimeConstructorName : Name}
+    (alignment : ResolvedProjectionView.ProjectionConstructorAlignment
+      env U Γ view levels params idx code runtimeConstructorName
+        runtimeMajor runtimeField) :
+    env.IsDefEqU U Γ (.app code.projector runtimeMajor) runtimeField := by
+  cases self with
+  | ordinary projected =>
+      cases alignment with
+      | ordinary alignment =>
+          exact projected.projector_constructor_aligned henv hΓ hcode
+            hprojector alignment
+  | restored projected =>
+      cases alignment with
+      | restored alignment =>
+          exact projected.projector_constructor_aligned henv hΓ hcode
+            hprojector alignment
+
+/-- Weakening preserves either resolved projection backend. -/
+theorem ResolvedTrProj.weak'
+    (henv : env.Ordered) (W : Ctx.Lift' lift Γ Γ')
+    (self : ResolvedTrProj env U Γ name idx major result) :
+    ResolvedTrProj env U Γ' name idx
+      (major.lift' lift) (result.lift' lift) := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels, params.map (fun param => param.lift' lift),
+    ⟨nameEq, semantic.weak' henv W⟩⟩
+
+/-- Fixed-depth weakening preserves either resolved projection backend. -/
+theorem ResolvedTrProj.weakN
+    (henv : env.Ordered) (W : Ctx.LiftN count cutoff Γ Γ')
+    (self : ResolvedTrProj env U Γ name idx major result) :
+    ResolvedTrProj env U Γ' name idx
+      (major.liftN count cutoff) (result.liftN count cutoff) := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels,
+    params.map (fun param => param.liftN count cutoff),
+    ⟨nameEq, semantic.weakN henv W⟩⟩
+
 /-! ## Replaying closed metadata types -/
 
 variable (env : VEnv) (Us : List Name) in
@@ -728,6 +855,66 @@ inductive TrTypeExpr : VLCtx → Expr → VExpr → Prop where
   | forallE : TrTypeExpr Δ ty ty' →
       TrTypeExpr ((none, .vlam ty') :: Δ) body body' →
       TrTypeExpr Δ (.forallE name ty body bi) (.forallE ty' body')
+
+/-- Proof-producing structural translation for the metadata-type fragment.
+Unlike `trExprS?`, this checker also validates every target constant lookup
+and universe arity required by `TrTypeExpr.const`; it intentionally rejects
+source forms outside the normalized inductive-metadata grammar. -/
+def TrTypeExpr.build? (env : VEnv) (Us : List Name) :
+    (Δ : VLCtx) → (e : Expr) →
+      Option {e' : VExpr // TrTypeExpr env Us Δ e e'}
+  | Δ, .bvar i =>
+      match hfind : Δ.find? (.inl i) with
+      | some (e', _) => some ⟨e', .bvar hfind⟩
+      | none => none
+  | _Δ, .sort u =>
+      match hlevel : VLevel.ofLevel Us u with
+      | some u' => some ⟨.sort u', .sort hlevel⟩
+      | none => none
+  | _Δ, .const name levels =>
+      match hconst : env.constants name with
+      | none => none
+      | some ci =>
+          match hlevels : levels.mapM (VLevel.ofLevel Us) with
+          | none => none
+          | some levels' =>
+              if hlength : levels.length = ci.uvars then
+                some ⟨.const name levels', .const hconst hlevels hlength⟩
+              else none
+  | Δ, .app fn arg => do
+      let ⟨fn', hfn⟩ ← build? env Us Δ fn
+      let ⟨arg', harg⟩ ← build? env Us Δ arg
+      return ⟨.app fn' arg', .app hfn harg⟩
+  | Δ, .lam _name type body _binderInfo => do
+      let ⟨type', htype⟩ ← build? env Us Δ type
+      let ⟨body', hbody⟩ ←
+        build? env Us ((none, .vlam type') :: Δ) body
+      return ⟨.lam type' body', .lam htype hbody⟩
+  | Δ, .mdata _data value => do
+      let ⟨value', hvalue⟩ ← build? env Us Δ value
+      return ⟨value', .mdata hvalue⟩
+  | Δ, .forallE _name type body _binderInfo => do
+      let ⟨type', htype⟩ ← build? env Us Δ type
+      let ⟨body', hbody⟩ ←
+        build? env Us ((none, .vlam type') :: Δ) body
+      return ⟨.forallE type' body', .forallE htype hbody⟩
+  | _, _ => none
+
+/-- Type-valued wrapper for one exact structural translation certificate. -/
+structure TrTypeExpr.Exact (env : VEnv) (Us : List Name) (Δ : VLCtx)
+    (e : Expr) (target : VExpr) : Type where
+  proof : TrTypeExpr env Us Δ e target
+
+/-- Require the proof-producing structural translator to compute one exact
+target expression. -/
+def TrTypeExpr.buildExact? (env : VEnv) (Us : List Name) (Δ : VLCtx)
+    (e : Expr) (target : VExpr) : Option (TrTypeExpr.Exact env Us Δ e target) :=
+  match build? env Us Δ e with
+  | none => none
+  | some ⟨actual, proof⟩ =>
+      if equal : actual = target then
+        some ⟨equal ▸ proof⟩
+      else none
 
 /-- Add the `TrExprS` typing premises to a structural metadata translation.
 The source grammar is deliberately restricted to the forms that can occur in
@@ -837,6 +1024,300 @@ variable! (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U)) in
 theorem HasType.skips (W : Ctx.LiftN n k Γ Γ')
     (h1 : env.HasType U Γ' e A) (h2 : e.Skips n k) : ∃ B, env.HasType U Γ' e B ∧ B.Skips n k :=
   IsDefEq.skips henv hΓ' W h1 h2 h2
+
+namespace VEnv
+
+/-- One registered-head inversion boundary for both honest projection
+backends.  The inherited ordinary package preserves the established Theory
+API; the additional fields expose exactly the structural facts needed while
+Verify migrates projection consumers to the explicit resolved view. -/
+structure ResolvedRegisteredStructureHeadInversion (env : VEnv) : Prop
+    extends RegisteredStructureHeadInversion env where
+  resolved_weak'_inv :
+    ∀ {U : Nat} {Γ Γ' : List VExpr} {view : ResolvedProjectionView}
+      {levels : List VLevel} {params : List VExpr} {idx : Nat}
+      {major result : VExpr} {lift : Lift},
+      OnCtx Γ' (env.IsType U) →
+      Ctx.Lift' lift Γ Γ' →
+      ResolvedProjectionView.TrProj env U Γ' view levels params idx
+        (major.lift' lift) result →
+      ∃ params' result',
+        ResolvedProjectionView.TrProj env U Γ view levels params' idx
+          major result'
+  resolved_unique :
+    ∀ {U : Nat} {Γ₁ Γ₂ : List VExpr}
+      {view₁ view₂ : ResolvedProjectionView}
+      {levels₁ levels₂ : List VLevel} {params₁ params₂ : List VExpr}
+      {idx : Nat} {major₁ major₂ result₁ result₂ : VExpr},
+      env.IsDefEqCtx U [] Γ₁ Γ₂ →
+      ResolvedProjectionView.TrProj env U Γ₁ view₁ levels₁ params₁ idx
+        major₁ result₁ →
+      ResolvedProjectionView.TrProj env U Γ₂ view₂ levels₂ params₂ idx
+        major₂ result₂ →
+      env.IsDefEqU U Γ₁ major₁ major₂ →
+      env.IsDefEqU U Γ₁ result₁ result₂
+  resolved_constructor_name_inv :
+    ∀ {U : Nat} {Γ : List VExpr} {view : ResolvedProjectionView}
+      {levels : List VLevel} {params : List VExpr} {idx : Nat}
+      {major result runtimeMajor : VExpr}
+      {constructorName : Name} {constructorLevels : List VLevel}
+      {constructorArgs : List VExpr},
+      OnCtx Γ (env.IsType U) →
+      ResolvedProjectionView.TrProj env U Γ view levels params idx
+        major result →
+      env.ConstructorHead constructorName →
+      runtimeMajor = VExpr.appN
+        (.const constructorName constructorLevels) constructorArgs →
+      env.IsDefEqU U Γ runtimeMajor major →
+      constructorName = view.constructorName
+  resolved_constructor_numParams_inv :
+    ∀ {U : Nat} {Γ : List VExpr} {view : ResolvedProjectionView}
+      {levels : List VLevel} {params : List VExpr} {idx : Nat}
+      {major result runtimeMajor : VExpr}
+      {constructorName : Name} {numParams : Nat}
+      {constructorLevels : List VLevel}
+      {constructorArgs : List VExpr},
+      OnCtx Γ (env.IsType U) →
+      ResolvedProjectionView.TrProj env U Γ view levels params idx
+        major result →
+      env.ConstructorHeadArity constructorName numParams →
+      runtimeMajor = VExpr.appN
+        (.const constructorName constructorLevels) constructorArgs →
+      env.IsDefEqU U Γ runtimeMajor major →
+      numParams = view.nparams
+  resolved_constructor_inv :
+    ∀ {U : Nat} {Γ : List VExpr} {view : ResolvedProjectionView}
+      {levels : List VLevel} {params : List VExpr} {idx : Nat}
+      {major result : VExpr} {code : VStructureView.ProjectionCode}
+      {runtimeMajor runtimeField : VExpr}
+      {constructorName : Name} {constructorLevels : List VLevel}
+      {constructorArgs : List VExpr},
+      OnCtx Γ (env.IsType U) →
+      ResolvedProjectionView.TrProj env U Γ view levels params idx
+        major result →
+      env.ConstructorHead constructorName →
+      (view.projectionCodes levels params)[idx]? = some code →
+      runtimeMajor = VExpr.appN
+        (.const constructorName constructorLevels) constructorArgs →
+      constructorArgs[view.nparams + idx]? = some runtimeField →
+      env.IsDefEqU U Γ runtimeMajor major →
+      Nonempty (ResolvedProjectionView.ProjectionConstructorAlignment
+        env U Γ view levels params idx code constructorName runtimeMajor
+          runtimeField)
+
+set_option warn.sorry false in
+/-- Public Tier-R registered-head inversion statement.  Direct head
+injectivity will discharge this one boundary uniformly for ordinary and
+restored projections. -/
+theorem WF.resolvedRegisteredStructureHeadInversion
+    (self : VEnv.WF env) :
+    ResolvedRegisteredStructureHeadInversion env := by
+  sorry
+
+/-- Compatibility projection retaining the established ordinary API without
+introducing a second admitted proof. -/
+theorem WF.registeredStructureHeadInversion
+    (self : VEnv.WF env) : RegisteredStructureHeadInversion env :=
+  self.resolvedRegisteredStructureHeadInversion.toRegisteredStructureHeadInversion
+
+/--
+info: 'Lean4Lean.VEnv.WF.resolvedRegisteredStructureHeadInversion' depends on axioms: [propext, sorryAx, Quot.sound]
+-/
+#guard_msgs in
+#print axioms WF.resolvedRegisteredStructureHeadInversion
+
+/--
+info: 'Lean4Lean.VEnv.WF.registeredStructureHeadInversion' depends on axioms: [propext, sorryAx, Quot.sound]
+-/
+#guard_msgs in
+#print axioms WF.registeredStructureHeadInversion
+
+end VEnv
+
+/-! ## Resolution-aware projection structural laws -/
+
+/-- Context conversion at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.defeqDFC
+    (henv : VEnv.WF env) (contexts : env.IsDefEqCtx U [] Γ₁ Γ₂)
+    (majorEq : env.IsDefEqU U Γ₁ major₁ major₂)
+    (self : ResolvedProjectionView.TrProj env U Γ₁ view levels params idx
+      major₁ result) :
+    ∃ result', ResolvedProjectionView.TrProj env U Γ₂ view levels params idx
+      major₂ result' := by
+  cases self with
+  | ordinary projected =>
+      have majorType :=
+        (projected.majorType.defeqU_l henv contexts.isType majorEq).defeqDFC
+          henv.ordered contexts
+      obtain ⟨result', projected'⟩ :=
+        projected.defeqDFC henv.ordered contexts majorType
+      exact ⟨result', .ordinary projected'⟩
+  | restored projected =>
+      have majorType :=
+        (projected.majorType.defeqU_l henv contexts.isType majorEq).defeqDFC
+          henv.ordered contexts
+      obtain ⟨result', projected'⟩ :=
+        projected.defeqDFC henv.ordered contexts majorType
+      exact ⟨result', .restored projected'⟩
+
+/-- Context conversion can retain the literal projection program when the
+major expression itself is unchanged.  This is stronger than the general
+`defeqDFC` result only in its syntactic endpoint: it reuses the resolved view,
+levels, parameters, projector slot, and major already carried by `self`.
+Consequently no uniqueness claim between independently resolved projection
+witnesses is involved. -/
+theorem ResolvedProjectionView.TrProj.defeqDFC_same
+    (henv : VEnv.WF env) (contexts : env.IsDefEqCtx U [] Γ₁ Γ₂)
+    (self : ResolvedProjectionView.TrProj env U Γ₁ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env U Γ₂ view levels params idx
+      major result := by
+  have majorEq : env.IsDefEqU U Γ₁ major major :=
+    ⟨_, self.majorType⟩
+  obtain ⟨result', converted⟩ := self.defeqDFC henv contexts majorEq
+  obtain ⟨code, codeAt, resultEq, _⟩ := self.program
+  obtain ⟨code', codeAt', resultEq', _⟩ := converted.program
+  have codeEq : code' = code := by
+    exact Option.some.inj (codeAt'.symm.trans codeAt)
+  subst code'
+  have endpointEq : result' = result := resultEq'.trans resultEq.symm
+  simpa only [endpointEq] using converted
+
+/-- Environment growth at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.mono {env env' : VEnv}
+    (hle : env ≤ env')
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env' U Γ view levels params idx
+      major result := by
+  cases self with
+  | ordinary projected => exact .ordinary (projected.mono hle)
+  | restored projected => exact .restored (projected.mono hle)
+
+/-- A result at a fixed explicit resolved view is well formed. -/
+theorem ResolvedProjectionView.TrProj.wf
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result)
+    (_majorWF : VExpr.WF env U Γ major) : VExpr.WF env U Γ result := by
+  cases self with
+  | ordinary projected =>
+      obtain ⟨code, _, rfl, typed⟩ := projected.program
+      exact ⟨_, typed.app projected.majorType⟩
+  | restored projected =>
+      obtain ⟨code, _, rfl, typed⟩ := projected.program
+      exact ⟨_, typed.app projected.majorType⟩
+
+/-- Term substitution at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.instN
+    (henv : env.Ordered) (argumentType : env.HasType U Γ₀ argument domain)
+    (W : Ctx.InstN Γ₀ argument domain cutoff Γ₁ Γ)
+    (self : ResolvedProjectionView.TrProj env U Γ₁ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env U Γ view levels
+      (params.map fun param => param.inst argument cutoff) idx
+      (major.inst argument cutoff) (result.inst argument cutoff) := by
+  cases self with
+  | ordinary projected => exact .ordinary (projected.instN henv W argumentType)
+  | restored projected => exact .restored (projected.instN henv W argumentType)
+
+/-- Universe instantiation at a fixed explicit resolved view. -/
+theorem ResolvedProjectionView.TrProj.instL {extra : List VLevel}
+    (extraWF : ∀ level ∈ extra, level.WF U')
+    (self : ResolvedProjectionView.TrProj env U Γ view levels params idx
+      major result) :
+    ResolvedProjectionView.TrProj env U' (Γ.map (VExpr.instL extra)) view
+      (levels.map (VLevel.inst extra)) (params.map (VExpr.instL extra)) idx
+      (major.instL extra) (result.instL extra) := by
+  cases self with
+  | ordinary projected => exact .ordinary (projected.instL extraWF)
+  | restored projected => exact .restored (projected.instL extraWF)
+
+/-- Invert weakening without forgetting which resolved backend owns the
+projector. -/
+theorem ResolvedTrProj.weak'_inv
+    (henv : VEnv.WF env) (contextWF : OnCtx Γ' (env.IsType U))
+    (W : Ctx.Lift' lift Γ Γ')
+    (self : ResolvedTrProj env U Γ' name idx
+      (major.lift' lift) result) :
+    ∃ result', ResolvedTrProj env U Γ name idx major result' := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  obtain ⟨params', result', semantic'⟩ :=
+    henv.resolvedRegisteredStructureHeadInversion.resolved_weak'_inv
+      contextWF W semantic
+  refine ⟨result', view, levels, params', ?_⟩
+  exact ⟨nameEq, semantic'⟩
+
+/-- Context conversion and a definitionally equal major preserve either
+resolved backend. -/
+theorem ResolvedTrProj.defeqDFC
+    (henv : VEnv.WF env) (contexts : env.IsDefEqCtx U [] Γ₁ Γ₂)
+    (majorEq : env.IsDefEqU U Γ₁ major₁ major₂)
+    (self : ResolvedTrProj env U Γ₁ name idx major₁ result) :
+    ∃ result', ResolvedTrProj env U Γ₂ name idx major₂ result' := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  obtain ⟨result', semantic'⟩ := semantic.defeqDFC henv contexts majorEq
+  exact ⟨result', view, levels, params, ⟨nameEq, semantic'⟩⟩
+
+/-- Value-preserving context conversion keeps the exact resolved projection
+endpoint when its major syntax is unchanged.  The selected backend and
+projector witness come from the original derivation, so this theorem does not
+identify definitionally equal results from different resolutions. -/
+theorem ResolvedTrProj.defeqDFC_same
+    (henv : VEnv.WF env) (contexts : env.IsDefEqCtx U [] Γ₁ Γ₂)
+    (self : ResolvedTrProj env U Γ₁ name idx major result) :
+    ResolvedTrProj env U Γ₂ name idx major result := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels, params,
+    ⟨nameEq, semantic.defeqDFC_same henv contexts⟩⟩
+
+/-- Environment growth preserves either resolved projection backend. -/
+theorem ResolvedTrProj.mono {env env' : VEnv} (hle : env ≤ env')
+    (self : ResolvedTrProj env U Γ name idx major result) :
+    ResolvedTrProj env' U Γ name idx major result := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels, params, ⟨nameEq, semantic.mono hle⟩⟩
+
+/-- A resolved projection result is well formed whenever its major is. -/
+theorem ResolvedTrProj.wf
+    (self : ResolvedTrProj env U Γ name idx major result)
+    (_majorWF : VExpr.WF env U Γ major) : VExpr.WF env U Γ result := by
+  rcases self with ⟨_, _, _, ⟨_, semantic⟩⟩
+  exact semantic.wf _majorWF
+
+/-- Resolved projection is unique up to definitional equality, including
+when the two witnesses select different honest backends. -/
+theorem ResolvedTrProj.uniq
+    (henv : VEnv.WF env) (contexts : env.IsDefEqCtx U [] Γ₁ Γ₂)
+    (left : ResolvedTrProj env U Γ₁ name₁ idx major₁ result₁)
+    (right : ResolvedTrProj env U Γ₂ name₂ idx major₂ result₂)
+    (majorEq : env.IsDefEqU U Γ₁ major₁ major₂) :
+    env.IsDefEqU U Γ₁ result₁ result₂ := by
+  rcases left with ⟨view₁, levels₁, params₁, ⟨_, semantic₁⟩⟩
+  rcases right with ⟨view₂, levels₂, params₂, ⟨_, semantic₂⟩⟩
+  exact henv.resolvedRegisteredStructureHeadInversion.resolved_unique
+    contexts semantic₁ semantic₂ majorEq
+
+/-- Term substitution preserves either resolved projection backend. -/
+theorem ResolvedTrProj.instN
+    (henv : env.Ordered) (argumentType : env.HasType U Γ₀ argument domain)
+    (W : Ctx.InstN Γ₀ argument domain cutoff Γ₁ Γ)
+    (self : ResolvedTrProj env U Γ₁ name idx major result) :
+    ResolvedTrProj env U Γ name idx
+      (major.inst argument cutoff) (result.inst argument cutoff) := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels,
+    params.map (fun param => param.inst argument cutoff),
+    ⟨nameEq, semantic.instN henv argumentType W⟩⟩
+
+/-- Universe instantiation preserves either resolved projection backend. -/
+theorem ResolvedTrProj.instL {extra : List VLevel}
+    (extraWF : ∀ level ∈ extra, level.WF U')
+    (self : ResolvedTrProj env U Γ name idx major result) :
+    ResolvedTrProj env U' (Γ.map (VExpr.instL extra)) name idx
+      (major.instL extra) (result.instL extra) := by
+  rcases self with ⟨view, levels, params, ⟨nameEq, semantic⟩⟩
+  exact ⟨view, levels.map (VLevel.inst extra),
+    params.map (VExpr.instL extra), ⟨nameEq, semantic.instL extraWF⟩⟩
 
 theorem TrProj.weak'_inv (henv : VEnv.WF env) (hΓ' : OnCtx Γ' (env.IsType U))
     (W : Ctx.Lift' l Γ Γ') :
@@ -1449,7 +1930,7 @@ theorem TrExpr.mdata (h : TrExpr env Us Δ e e') : TrExpr env Us Δ (.mdata d e)
 
 theorem TrExpr.proj {env Us Δ e e' s i e''} (henv : VEnv.WF env) (hΔ : VLCtx.WF env Us.length Δ)
     (H : TrExpr env Us Δ e e')
-    (H2 : TrProj env Us.length Δ.toCtx s i e' e'') :
+    (H2 : ResolvedTrProj env Us.length Δ.toCtx s i e' e'') :
     TrExpr env Us Δ (.proj s i e) e'' :=
   let ⟨_, s2, h2⟩ := H
   have ⟨_, H2'⟩ := H2.defeqDFC henv (.refl hΔ) h2.symm
@@ -1535,6 +2016,179 @@ theorem TrExprS.weakFV_inv (henv : VEnv.WF env)
     (W : VLCtx.FVLift Δ Δ₂ dk n k) (hΔ : VLCtx.IsDefEq env Us.length Δ₁ Δ₂)
     (H : TrExprS env Us Δ₁ e e') (hc : Closed e dk) (hv : FVarsIn (· ∈ VLCtx.fvars Δ) e) :
     ∃ e', TrExprS env Us Δ e e' := H.weakFV'_inv henv W.toFVLift' hΔ hc hv
+
+private theorem Option.exists_of_exists_bind_eq_some
+    {x : Option α} {f : α → Option β}
+    (h : ∃ b, x.bind f = some b) : ∃ a, x = some a := by
+  obtain ⟨b, hb⟩ := h
+  obtain ⟨a, ha, _⟩ := Option.bind_eq_some_iff.1 hb
+  exact ⟨a, ha⟩
+
+/-- A lookup below the insertion point of a bound-variable lift already
+comes from the smaller context.  Free-variable lookups are always below that
+boundary because `BVLift` preserves the free-variable inventory. -/
+theorem VLCtx.BVLift.find?_exists_inv
+    (W : VLCtx.BVLift Δ Δ' dn dk n k)
+    (hv : match v with | .inl i => i < dk | .inr _ => True)
+    (H : ∃ p, Δ'.find? v = some p) : ∃ p, Δ.find? v = some p := by
+  induction W generalizing v with
+  | refl => exact H
+  | @skip Δ Δ' dn n d W ih =>
+      cases v with
+      | inl i => simp at hv
+      | inr fv =>
+          apply ih (v := .inr fv) (by simp)
+          change ∃ p, (Δ'.find? (.inr fv)).bind (fun x =>
+            some (x.1.liftN d.depth, x.2.liftN d.depth)) = some p at H
+          apply Option.exists_of_exists_bind_eq_some
+          exact H
+  | @cons Δ Δ' dn dk n k d W ih =>
+      cases v with
+      | inl i =>
+          cases i with
+          | zero =>
+              refine ⟨(d.value, d.type), ?_⟩
+              simp [VLCtx.find?, VLCtx.next]
+          | succ i =>
+              have htail : ∃ p, Δ'.find? (.inl i) = some p := by
+                change ∃ p, (Δ'.find? (.inl i)).bind (fun x =>
+                  some (x.1.liftN (d.liftN n k).depth,
+                    x.2.liftN (d.liftN n k).depth)) = some p at H
+                apply Option.exists_of_exists_bind_eq_some
+                exact H
+              obtain ⟨p, hp⟩ := ih (v := .inl i) (by simpa using hv) htail
+              obtain ⟨e, A⟩ := p
+              refine ⟨(e.liftN d.depth, A.liftN d.depth), ?_⟩
+              simp only [VLCtx.find?, VLCtx.next, hp]
+              rfl
+      | inr fv =>
+          have htail : ∃ p, Δ'.find? (.inr fv) = some p := by
+            change ∃ p, (Δ'.find? (.inr fv)).bind (fun x =>
+              some (x.1.liftN (d.liftN n k).depth,
+                x.2.liftN (d.liftN n k).depth)) = some p at H
+            apply Option.exists_of_exists_bind_eq_some
+            exact H
+          obtain ⟨p, hp⟩ := ih (v := .inr fv) (by simp) htail
+          obtain ⟨e, A⟩ := p
+          refine ⟨(e.liftN d.depth, A.liftN d.depth), ?_⟩
+          simp only [VLCtx.find?, VLCtx.next, hp]
+          rfl
+
+/-- Strengthening for strict translations across anonymous bound-variable
+insertions.  The source-side closedness premise is exactly the executable
+`hasLooseBVars = false` branch used by projection inference.  In particular,
+the projection case is handled through registered-head inverse weakening;
+no inhabitant of the skipped binder and no projector program is invented. -/
+theorem TrExprS.weakBV_inv
+    (henv : VEnv.WF env)
+    (W : VLCtx.BVLift Δ Δ₂ dn dk n k)
+    (hΔ : VLCtx.IsDefEq env Us.length Δ₁ Δ₂)
+    (H : TrExprS env Us Δ₁ e e') (hc : Closed e dk) :
+    ∃ e', TrExprS env Us Δ e e' := by
+  induction H generalizing Δ Δ₂ dn dk k with
+  | @bvar e A Δ₁ i h1 =>
+      obtain ⟨e₂, A₂, h₂⟩ := hΔ.find?_defeqDFC h1
+      obtain ⟨p, hp⟩ := W.find?_exists_inv hc ⟨_, h₂⟩
+      exact ⟨p.1, .bvar hp⟩
+  | @fvar e A Δ₁ fv h1 =>
+      obtain ⟨e₂, A₂, h₂⟩ := hΔ.find?_defeqDFC h1
+      obtain ⟨p, hp⟩ := W.find?_exists_inv (by simp) ⟨_, h₂⟩
+      exact ⟨p.1, .fvar hp⟩
+  | sort h1 => exact ⟨_, .sort h1⟩
+  | const h1 h2 h3 => exact ⟨_, .const h1 h2 h3⟩
+  | app h1 h2 hf ha ih1 ih2 =>
+      have hΔ₁ := hΔ.wf
+      have hΔ₂ := (hΔ.symm henv).wf
+      let ⟨f₁, ih1⟩ := ih1 W hΔ hc.1
+      let ⟨a₁, ih2⟩ := ih2 W hΔ hc.2
+      have ih1w := ih1.weakBV henv.ordered W
+      have ih2w := ih2.weakBV henv.ordered W
+      rw [Expr.liftLooseBVars_eq_self hc.1.looseBVarRange_le] at ih1w
+      rw [Expr.liftLooseBVars_eq_self hc.2.looseBVarRange_le] at ih2w
+      have h1 := h1.defeqU_l henv hΔ₁.toCtx <|
+        hf.uniq henv hΔ ih1w
+      have h2 := h2.defeqU_l henv hΔ₁.toCtx <|
+        ha.uniq henv hΔ ih2w
+      have hweak : VExpr.WF env Us.length Δ₂.toCtx
+          ((f₁.app a₁).liftN n k) := by
+        simpa [VExpr.liftN] using
+          (show VExpr.WF env Us.length Δ₂.toCtx
+            ((f₁.liftN n k).app (a₁.liftN n k)) from
+              ⟨_, (h1.app h2).defeqDFC henv hΔ.defeqCtx⟩)
+      have hbase := (VExpr.WF.weakN_iff henv hΔ₂.toCtx W.toCtx).1 hweak
+      obtain ⟨_, _, h1, h2⟩ := hbase.app_inv henv (W.wf henv hΔ₂).toCtx
+      exact ⟨_, .app h1 h2 ih1 ih2⟩
+  | lam h1 ht _ ih1 ih2 =>
+      let ⟨u1, h1type⟩ := h1
+      have hΔ₁ := hΔ.wf
+      have hΔ₂ := (hΔ.symm henv).wf
+      let ⟨ty₁, ih1⟩ := ih1 W hΔ hc.1
+      have ih1w := ih1.weakBV henv.ordered W
+      rw [Expr.liftLooseBVars_eq_self hc.1.looseBVarRange_le] at ih1w
+      have htt := ht.uniq henv hΔ ih1w |>.of_l henv hΔ₁.toCtx h1type
+      have ⟨_, ih2⟩ := ih2 (W.cons (.vlam ty₁))
+        (hΔ.cons (ofv := none) nofun <| .vlam htt) hc.2
+      have h1base := (VEnv.HasType.weakN_iff (A := .sort _)
+        henv hΔ₂.toCtx W.toCtx).1
+          (htt.hasType.2.defeqDFC henv hΔ.defeqCtx)
+      exact ⟨_, .lam ⟨_, h1base⟩ ih1 ih2⟩
+  | forallE h1 h2 ht hb ih1 ih2 =>
+      let ⟨u1, h1type⟩ := h1
+      let ⟨u2, h2type⟩ := h2
+      have hΔ₁ := hΔ.wf
+      have hΔ₂ := (hΔ.symm henv).wf
+      let ⟨ty₁, ih1⟩ := ih1 W hΔ hc.1
+      have ih1w := ih1.weakBV henv.ordered W
+      rw [Expr.liftLooseBVars_eq_self hc.1.looseBVarRange_le] at ih1w
+      have htt := ht.uniq henv hΔ ih1w |>.of_l henv hΔ₁.toCtx h1type
+      have hΔ' := hΔ.cons (ofv := none) nofun (.vlam htt)
+      have ⟨body₁, ih2⟩ := ih2 (W.cons (.vlam ty₁)) hΔ' hc.2
+      have h1base := (VEnv.HasType.weakN_iff (A := .sort _)
+        henv hΔ₂.toCtx W.toCtx).1
+          (htt.hasType.2.defeqDFC henv hΔ.defeqCtx)
+      have ih2w := ih2.weakBV henv.ordered (W.cons (.vlam ty₁))
+      rw [Expr.liftLooseBVars_eq_self hc.2.looseBVarRange_le] at ih2w
+      have hΔ₂' : OnCtx ((ty₁.liftN n k) :: Δ₂.toCtx)
+          (env.IsType Us.length) :=
+        ⟨hΔ₂.toCtx, _, htt.hasType.2.defeqDFC henv hΔ.defeqCtx⟩
+      have h2base := (VEnv.HasType.weakN_iff (A := .sort _)
+        henv hΔ₂' (W.cons (.vlam ty₁)).toCtx).1 <|
+          ((hb.uniq henv hΔ' ih2w).of_l henv hΔ'.wf.toCtx h2type
+            |>.hasType.2.defeqDFC henv (hΔ.defeqCtx.succ htt))
+      exact ⟨_, .forallE ⟨_, h1base⟩ ⟨_, h2base⟩ ih1 ih2⟩
+  | letE h1 ht ha _ ih1 ih2 ih3 =>
+      have hΔ₁ := hΔ.wf
+      have hΔ₂ := (hΔ.symm henv).wf
+      let ⟨ty₁, ih1⟩ := ih1 W hΔ hc.1
+      let ⟨val₁, ih2⟩ := ih2 W hΔ hc.2.1
+      have ih1w := ih1.weakBV henv.ordered W
+      have ih2w := ih2.weakBV henv.ordered W
+      rw [Expr.liftLooseBVars_eq_self hc.1.looseBVarRange_le] at ih1w
+      rw [Expr.liftLooseBVars_eq_self hc.2.1.looseBVarRange_le] at ih2w
+      have hvv := ha.uniq henv hΔ ih2w |>.of_l henv hΔ₁.toCtx h1
+      let ⟨_, h2⟩ := h1.isType henv hΔ₁.toCtx
+      have htt := ht.uniq henv hΔ ih1w |>.of_l henv hΔ₁.toCtx h2
+      have ⟨_, ih3⟩ := ih3 (W.cons (.vlet ty₁ val₁))
+        (hΔ.cons nofun <| .vlet hvv htt) hc.2.2
+      have h1base := (VEnv.HasType.weakN_iff henv hΔ₂.toCtx W.toCtx).1
+        ((htt.defeqDF hvv).hasType.2.defeqDFC henv hΔ.defeqCtx)
+      exact ⟨_, .letE h1base ih1 ih2 ih3⟩
+  | lit h1 _ ih =>
+      let ⟨_, ih⟩ := ih W hΔ .toConstructor
+      exact ⟨_, .lit h1 ih⟩
+  | mdata _ ih => let ⟨_, ih⟩ := ih W hΔ hc; exact ⟨_, .mdata ih⟩
+  | proj h1 h2 ih =>
+      simp only [Closed] at hc
+      have hΔ₂ := (hΔ.symm henv).wf
+      let ⟨major, ih⟩ := ih W hΔ hc
+      have ihw := ih.weakBV henv.ordered W
+      rw [Expr.liftLooseBVars_eq_self hc.looseBVarRange_le] at ihw
+      have htt := h1.uniq henv hΔ ihw
+      have ⟨_, h2⟩ := h2.defeqDFC henv hΔ.defeqCtx htt
+      have lift' := Ctx.liftN_iff_lift'.1 W.toCtx
+      rw [← VExpr.lift'_consN_skipN] at h2
+      have ⟨_, h2⟩ := h2.weak'_inv henv hΔ₂.toCtx lift'
+      exact ⟨_, .proj ih h2⟩
 
 variable! (henv : Ordered env) (h₀ : TrExprS env Us Δ₀ e₀ e₀') in
 theorem TrExprS.instN_var (W : VLCtx.InstN Δ₀ e₀' A₀ dk k Δ₁ Δ) (H : Δ₁.find? v = some (e', A)) :
@@ -2044,7 +2698,7 @@ registered-head inversion dependency.
 -/
 
 /--
-info: 'Lean4Lean.TrProj.weak'' depends on axioms: [propext, Quot.sound]
+info: 'Lean4Lean.TrProj.weak'' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TrProj.weak'
@@ -2074,7 +2728,7 @@ info: 'Lean4Lean.TrProj.uniq' depends on axioms: [propext, sorryAx, Quot.sound]
 #print axioms TrProj.uniq
 
 /--
-info: 'Lean4Lean.TrProj.instN' depends on axioms: [propext, Quot.sound]
+info: 'Lean4Lean.TrProj.instN' depends on axioms: [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs in
 #print axioms TrProj.instN
@@ -2222,6 +2876,61 @@ theorem substParamsCpp_wf_list (red) {us us' : List _}
 end
 
 include henv hΔ
+
+omit henv hΔ Hls eq in
+/-- Retranslate a strict expression derivation after an exact renaming of its
+universe slots.
+
+Unlike `TrExprS.instL`, this theorem leaves the host expression unchanged.
+The caller supplies the exact `ofLevel` equation for every source level, so
+the result remains a strict translation rather than acquiring a trailing
+Theory definitional equality.  Generated recursors use this specialization:
+their fresh elimination universe is prepended to the host level-parameter
+list while every source universe is shifted by the corresponding positional
+substitution. -/
+theorem TrExprS.relevel (H : TrExprS env ps Δ e e')
+    (hls : ∀ l ∈ ls', l.WF Us.length)
+    (levels : ∀ {u u'}, VLevel.ofLevel ps u = some u' →
+      VLevel.ofLevel Us u = some (u'.inst ls')) :
+    TrExprS env Us (Δ.instL ls') e (e'.instL ls') := by
+  have mapLevels : ∀ {source : List Level} {target : List VLevel},
+      source.mapM (VLevel.ofLevel ps) = some target →
+        source.mapM (VLevel.ofLevel Us) =
+          some (target.map (VLevel.inst ls')) := by
+    intro source target translated
+    rw [List.mapM_eq_some] at translated ⊢
+    induction translated with
+    | nil => exact .nil
+    | cons headRun _ ih => exact .cons (levels headRun) ih
+  induction H with
+  | bvar found => exact .bvar (VLCtx.find?_instL found)
+  | fvar found => exact .fvar (VLCtx.find?_instL found)
+  | sort translated => exact .sort (levels translated)
+  | const found translated arity =>
+      exact .const found (mapLevels translated) (by simpa using arity)
+  | app functionType argumentType _ _ functionIH argumentIH =>
+      exact .app
+        (VLCtx.instL_toCtx _ ▸ functionType.instL hls)
+        (VLCtx.instL_toCtx _ ▸ argumentType.instL hls)
+        functionIH argumentIH
+  | lam domainType _ _ domainIH bodyIH =>
+      exact .lam
+        (VLCtx.instL_toCtx _ ▸ domainType.instL hls)
+        domainIH bodyIH
+  | forallE domainType bodyType _ _ domainIH bodyIH =>
+      exact .forallE
+        (VLCtx.instL_toCtx _ ▸ domainType.instL hls)
+        (VLCtx.instL_toCtx _ ▸ bodyType.instL hls)
+        domainIH bodyIH
+  | letE valueType _ _ _ typeIH valueIH bodyIH =>
+      exact .letE
+        (VLCtx.instL_toCtx _ ▸ valueType.instL hls)
+        typeIH valueIH bodyIH
+  | lit contains _ constructorIH => exact .lit contains constructorIH
+  | mdata _ innerIH => exact .mdata innerIH
+  | proj _ projection innerIH =>
+      exact .proj innerIH
+        (VLCtx.instL_toCtx _ ▸ projection.instL hls)
 
 theorem TrExprS.instL (H : TrExprS env ps Δ e e') :
     TrExpr env Us (Δ.instL ls') (e.instantiateLevelParams ps ls) (e'.instL ls') := by
@@ -2425,6 +3134,25 @@ theorem TrExprS.unique' (hΔ : IsUniqueCtx Δ₁ Δ₂) (H : IsUnique e)
 theorem TrExprS.unique (H : IsUnique e)
     (H1 : TrExprS env Us Δ e e₁) (H2 : TrExprS env Us Δ e e₂) : e₁ = e₂ := H1.unique' .base H H2
 
+/-- A projection-free strict translation of a source expression which does
+not mention an inserted bound-variable range syntactically skips the matching
+Theory binders.  Strengthening supplies the smaller translation; weakening it
+back and strict-translation uniqueness identify the original target with the
+literal lift of that smaller term. -/
+theorem TrExprS.skips_of_closed_bvLift
+    (henv : VEnv.WF env)
+    (hΔ' : VLCtx.WF env Us.length Δ')
+    (W : VLCtx.BVLift Δ Δ' dn dk n k)
+    (H : TrExprS env Us Δ' e e')
+    (hc : Closed e dk)
+    (hu : TrExprS.IsUnique e) :
+    e'.Skips n k := by
+  obtain ⟨base, hbase⟩ :=
+    H.weakBV_inv henv W (.refl henv hΔ') hc
+  have hweak := hbase.weakBV henv.ordered W
+  rw [Expr.liftLooseBVars_eq_self hc.looseBVarRange_le] at hweak
+  exact VExpr.skips_iff_exists.2 ⟨base, H.unique hu hweak⟩
+
 /-- A successful lookup transfers along value-preserving context alignment:
 the found value is identical and only the (discarded) type component may
 differ. -/
@@ -2449,6 +3177,67 @@ theorem TrExprS.IsUniqueCtx.find?_transfer (hΔ : IsUniqueCtx Δ₁ Δ₂)
       refine ⟨VExpr.liftN d₂.depth A₂, ?_⟩
       simp only [Bind.bind, Option.bind_eq_some_iff]
       exact ⟨(e₁, A₂), h₂, by rw [hdep]⟩
+
+/-- Move a strict translation across definitionally equal local types while
+preserving its literal Theory endpoint.  `values` says that both verified
+local contexts resolve variables to the same expressions; their type
+annotations may differ.  The projection case reuses the resolved projector
+carried by the original derivation via `ResolvedTrProj.defeqDFC_same`, so no
+syntactic uniqueness principle for projections is asserted. -/
+theorem TrExprS.defeqDFC_same
+    (henv : VEnv.WF env)
+    (contexts : VLCtx.IsDefEq env Us.length Δ₁ Δ₂)
+    (values : TrExprS.IsUniqueCtx Δ₁ Δ₂)
+    (self : TrExprS env Us Δ₁ source target) :
+    TrExprS env Us Δ₂ source target := by
+  induction self generalizing Δ₂ with
+  | bvar found =>
+      obtain ⟨_, found'⟩ := values.find?_transfer found
+      exact .bvar found'
+  | fvar found =>
+      obtain ⟨_, found'⟩ := values.find?_transfer found
+      exact .fvar found'
+  | sort level => exact .sort level
+  | const present levels arity => exact .const present levels arity
+  | app functionType argumentType functionTr argumentTr functionIH argumentIH =>
+      exact .app
+        (functionType.defeqDFC henv.ordered contexts.defeqCtx)
+        (argumentType.defeqDFC henv.ordered contexts.defeqCtx)
+        (functionIH contexts values) (argumentIH contexts values)
+  | lam typeType typeTr bodyTr typeIH bodyIH =>
+      have typeType' := typeType.defeqDFC henv.ordered contexts.defeqCtx
+      obtain ⟨_, typeHasType⟩ := typeType
+      have nextContexts := contexts.cons (ofv := none) nofun
+        (.vlam typeHasType)
+      exact .lam
+        typeType'
+        (typeIH contexts values)
+        (bodyIH nextContexts (values.cons .vlam))
+  | forallE typeType bodyType typeTr bodyTr typeIH bodyIH =>
+      have typeType' := typeType.defeqDFC henv.ordered contexts.defeqCtx
+      obtain ⟨_, typeHasType⟩ := typeType
+      have nextContexts := contexts.cons (ofv := none) nofun
+        (.vlam typeHasType)
+      exact .forallE
+        typeType'
+        (bodyType.defeqDFC henv.ordered nextContexts.defeqCtx)
+        (typeIH contexts values)
+        (bodyIH nextContexts (values.cons .vlam))
+  | letE valueType typeTr valueTr bodyTr typeIH valueIH bodyIH =>
+      obtain ⟨_, typeType⟩ := valueType.isType henv contexts.wf
+      have nextContexts := contexts.cons (ofv := none) nofun
+        (.vlet valueType typeType)
+      exact .letE
+        (valueType.defeqDFC henv.ordered contexts.defeqCtx)
+        (typeIH contexts values) (valueIH contexts values)
+        (bodyIH nextContexts (values.cons .vlet))
+  | lit contains innerTr innerIH =>
+      exact .lit contains (innerIH contexts values)
+  | mdata innerTr innerIH =>
+      exact .mdata (innerIH contexts values)
+  | proj majorTr projection majorIH =>
+      exact .proj (majorIH contexts values)
+        (projection.defeqDFC_same henv contexts.defeqCtx)
 
 /-- Every strict translation of an unfolded natural-number literal is the
 canonical numeral: the constructor spine pins the Theory value
@@ -3340,6 +4129,23 @@ theorem List.Forall₂.getElem?_left
       subst x
       exact ⟨_, rfl, hxy⟩
     | succ i => simpa using ih (i := i) (by simpa using hx)
+
+/-- A successful lookup on the right side of a pointwise list relation has a
+related lookup at the same position on the left. -/
+theorem List.Forall₂.getElem?_right
+    {α : Type u} {β : Type v} {R : α → β → Prop}
+    {xs : List α} {ys : List β} {i : Nat} {y : β}
+    (H : List.Forall₂ R xs ys) (hy : ys[i]? = some y) :
+    ∃ x : α, xs[i]? = some x ∧ R x y := by
+  induction H generalizing i with
+  | nil => simp at hy
+  | cons hxy _ ih =>
+    cases i with
+    | zero =>
+      simp at hy
+      subst y
+      exact ⟨_, rfl, hxy⟩
+    | succ i => simpa using ih (i := i) (by simpa using hy)
 
 /-- A strict translation of an application also strictly translates every
 successfully selected host argument. -/

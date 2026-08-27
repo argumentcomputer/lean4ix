@@ -79,6 +79,17 @@ def Context.pushLocalDecl (context : Context)
     lctx := context.lctx.mkLocalDecl context.freshFVarId name type binderInfo
     ngen := context.ngen.next }
 
+/-- A reader context reached from another solely by the scoped local
+declarations used by inductive synthesis.  The relation deliberately ignores
+the values returned by the synthesis loops: it records the one operational
+fact needed by verification, namely that an eventual callback context is the
+root context followed by zero or more `withLocalDecl` pushes. -/
+inductive Context.LocalExtension (root : Context) : Context → Prop where
+  | refl : LocalExtension root root
+  | push {current : Context} (extension : LocalExtension root current)
+      (name : Name) (binderInfo : BinderInfo) (type : Expr) :
+      LocalExtension root (current.pushLocalDecl name binderInfo type)
+
 abbrev M := ReaderT Context <| Except Exception
 
 instance : MonadLocalNameGenerator M where
@@ -382,6 +393,22 @@ theorem declaredInductiveInfos_matches
   rw [Array.toList_zipWith]
   apply forall₂_zipWith_exists_right
   simpa using size_eq.symm
+
+/-- Select the exact family metadata record synthesized from a source family
+and validator index count at one common array position. -/
+theorem declaredInductiveInfos_getElem?
+    (stats : InductiveStats) (numParams : Nat)
+    (indTypes : Array InductiveType) (numNested : Nat) (isUnsafe : Bool)
+    (context : Context) {offset : Nat} {indType : InductiveType}
+    {numIndices : Nat}
+    (sourceAt : indTypes.toList[offset]? = some indType)
+    (countAt : stats.nindices[offset]? = some numIndices) :
+    (declaredInductiveInfos stats numParams indTypes numNested isUnsafe
+      context).toList[offset]? =
+        some (declaredInductiveInfo stats numParams indTypes indType
+          numIndices numNested isUnsafe context) := by
+  simp only [declaredInductiveInfos, Array.toList_zipWith,
+    List.getElem?_zipWith, sourceAt, Array.getElem?_toList, countAt]
 
 /-- Once family validation has fixed one index count per source family, the
 metadata declaration inventory preserves the complete source name order. -/
@@ -2398,6 +2425,92 @@ info: 'Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.check_eq_true' d
 #guard_msgs in
 #print axioms CandidateFamilyParameterSpineList.check_eq_true
 
+/-- Source-ordered agreement between the validator's completed index-count
+array and the exact family candidates retained by normalization.  The
+ordinal is explicit so recursive suffixes remain tied to their positions in
+the whole declaration block. -/
+inductive CandidateFamilyIndexCountList (stats : InductiveStats)
+    (nparams : Nat) :
+    (ordinal : Nat) → {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Prop where
+  | nil (ordinal : Nat) :
+      CandidateFamilyIndexCountList stats nparams ordinal .nil
+  | cons
+      {ordinal : Nat} {source : InductiveType}
+      {sources : List InductiveType}
+      {candidate : CandidateFamily source}
+      {candidates : CandidateList CandidateFamily sources}
+      (head : stats.nindices[ordinal]? =
+        some (candidate.familyType.type.trace.spineLength - nparams))
+      (tail : CandidateFamilyIndexCountList stats nparams (ordinal + 1)
+        candidates) :
+      CandidateFamilyIndexCountList stats nparams ordinal
+        (.cons candidate candidates)
+
+/-- Executable audit for the exact positional family-index inventory. -/
+def CandidateFamilyIndexCountList.check (stats : InductiveStats)
+    (nparams : Nat) :
+    (ordinal : Nat) → {sources : List InductiveType} →
+      CandidateList CandidateFamily sources → Bool
+  | _, _, .nil => true
+  | ordinal, _, .cons candidate candidates =>
+      stats.nindices[ordinal]? ==
+          some (candidate.familyType.type.trace.spineLength - nparams) &&
+        CandidateFamilyIndexCountList.check stats nparams (ordinal + 1)
+          candidates
+
+/-- A successful positional index audit reconstructs its proof-carrying
+source-indexed inventory. -/
+theorem CandidateFamilyIndexCountList.of_check (stats : InductiveStats)
+    (nparams ordinal : Nat) :
+    (candidates : CandidateList CandidateFamily sources) →
+      CandidateFamilyIndexCountList.check stats nparams ordinal candidates =
+          true →
+        CandidateFamilyIndexCountList stats nparams ordinal candidates
+  | .nil, _ => .nil ordinal
+  | .cons candidate candidates, checked => by
+      simp only [CandidateFamilyIndexCountList.check, Bool.and_eq_true,
+        beq_iff_eq] at checked
+      exact .cons checked.1
+        (CandidateFamilyIndexCountList.of_check stats nparams (ordinal + 1)
+          candidates checked.2)
+
+/-- Proof-carrying positional index evidence evaluates back to the exact
+audit performed by the strengthened normalization producer. -/
+theorem CandidateFamilyIndexCountList.check_eq_true
+    (counts : CandidateFamilyIndexCountList stats nparams ordinal
+      candidates) :
+    CandidateFamilyIndexCountList.check stats nparams ordinal candidates =
+      true := by
+  induction counts with
+  | nil => rfl
+  | cons head tail ih =>
+      simp [CandidateFamilyIndexCountList.check, head, ih]
+
+/-- The exact positional family-index inventory retained by a detailed
+normalization execution. -/
+theorem CandidateFamilyIndexCountList.head
+    {source : InductiveType} {sources : List InductiveType}
+    {candidate : CandidateFamily source}
+    {candidates : CandidateList CandidateFamily sources}
+    (counts : CandidateFamilyIndexCountList stats nparams ordinal
+      (.cons candidate candidates)) :
+    stats.nindices[ordinal]? =
+      some (candidate.familyType.type.trace.spineLength - nparams) := by
+  cases counts with
+  | cons head tail => exact head
+
+/-- Positional family-index evidence after the exact dependent head. -/
+theorem CandidateFamilyIndexCountList.tail
+    {source : InductiveType} {sources : List InductiveType}
+    {candidate : CandidateFamily source}
+    {candidates : CandidateList CandidateFamily sources}
+    (counts : CandidateFamilyIndexCountList stats nparams ordinal
+      (.cons candidate candidates)) :
+    CandidateFamilyIndexCountList stats nparams (ordinal + 1) candidates := by
+  cases counts with
+  | cons head tail => exact tail
+
 /-- Project the pre-family candidate spine from a complete dependent family
 candidate list without erasing source indices or using a parallel list. -/
 def CandidateList.familyTypes :
@@ -2433,6 +2546,23 @@ theorem CandidateConstructor.context_eq_of_normalize
       simp [Except.bind, ReaderT.pure, Pure.pure, Except.pure, hbuild] at h
       subst candidate
       exact CandidateExpr.context_eq_of_build hbuild
+
+/-- A successful constructor normalization carries the annotation provenance
+of its underlying executable expression traversal. -/
+theorem CandidateConstructor.validationAnnotations_of_normalize
+    {context : Context} {source : Constructor}
+    {candidate : CandidateConstructor source}
+    (h : normalizeCandidateConstructor source context = .ok candidate) :
+    candidate.type.trace.validationAnnotations := by
+  unfold normalizeCandidateConstructor at h
+  simp only [ReaderT.bind, Bind.bind] at h
+  cases hbuild : buildCandidateExpr source.type context with
+  | error error =>
+      simp [Except.bind, hbuild] at h
+  | ok type =>
+      simp [Except.bind, ReaderT.pure, Pure.pure, Except.pure, hbuild] at h
+      subst candidate
+      exact type.validationAnnotations_of_build hbuild
 
 def normalizeCandidateFamilyType
     (indType : InductiveType) : M (CandidateFamilyType indType) := do
@@ -2641,6 +2771,18 @@ theorem CandidateConstructorListProduced.tail
     CandidateConstructorListProduced context candidates := by
   cases run with
   | cons _ tail => exact tail
+
+/-- Annotation provenance at the exact head of a successful constructor-list
+traversal. -/
+theorem CandidateConstructorListProduced.head_validationAnnotations
+    {context : Context} {source : Constructor}
+    {sources : List Constructor}
+    {candidate : CandidateConstructor source}
+    {candidates : CandidateList CandidateConstructor sources}
+    (run : CandidateConstructorListProduced context
+      (.cons candidate candidates)) :
+    candidate.type.trace.validationAnnotations :=
+  CandidateConstructor.validationAnnotations_of_normalize run.head
 
 /-- A source-indexed constructor traversal determines the complete executable
 list result for any length, with no `zip`, partial lookup, or fixture-specific
@@ -3084,6 +3226,8 @@ structure NormalizationCandidateExecution
   generationSpines : CandidateFamilyGenerationSpineList families.candidates
   familyParameterSpines :
     CandidateFamilyParameterSpineList nparams families.candidates
+  familyIndexCounts :
+    CandidateFamilyIndexCountList stats nparams 0 families.candidates
 
 def NormalizationCandidateExecution.candidate
     (execution : NormalizationCandidateExecution nparams types numNested
@@ -3148,25 +3292,33 @@ def buildNormalizationCandidateExecutionAfterValidation
                     families.candidates then
                   if hparameters : CandidateFamilyParameterSpineList.check
                       nparams families.candidates then
-                    .ok {
-                      validationContext
-                      stats
-                      familySourcesClosed :=
-                        FamilySourceClosedList.of_check _ hsources
-                      familyTypes
-                      familyTerminals :=
-                        CandidateFamilyTypeTerminalSortList.of_check _ hterminals
-                      familyEnv
-                      declareRun := by simpa using hdeclare
-                      declareTrace := DeclareInductiveInfoListRun.of_run (by
-                        simpa only [declareInductiveTypes] using hdeclare)
-                      constructorRun := by simpa using hconstructors
-                      families
-                      generationSpines :=
-                        CandidateFamilyGenerationSpineList.of_check _ hspines
-                      familyParameterSpines :=
-                        CandidateFamilyParameterSpineList.of_check nparams _
-                          hparameters }
+                    if hcounts : CandidateFamilyIndexCountList.check stats
+                        nparams 0 families.candidates then
+                      .ok {
+                        validationContext
+                        stats
+                        familySourcesClosed :=
+                          FamilySourceClosedList.of_check _ hsources
+                        familyTypes
+                        familyTerminals :=
+                          CandidateFamilyTypeTerminalSortList.of_check _ hterminals
+                        familyEnv
+                        declareRun := by simpa using hdeclare
+                        declareTrace := DeclareInductiveInfoListRun.of_run (by
+                          simpa only [declareInductiveTypes] using hdeclare)
+                        constructorRun := by simpa using hconstructors
+                        families
+                        generationSpines :=
+                          CandidateFamilyGenerationSpineList.of_check _ hspines
+                        familyParameterSpines :=
+                          CandidateFamilyParameterSpineList.of_check nparams _
+                            hparameters
+                        familyIndexCounts :=
+                          CandidateFamilyIndexCountList.of_check stats nparams
+                            0 _ hcounts }
+                    else
+                      .error (.other
+                        "normalization candidate index counts disagree with family validation")
                   else
                     .error (.other
                       "normalization candidate family parameter spine is incomplete")
@@ -3581,6 +3733,32 @@ def constructorArity : Expr → Nat → Nat
   | .forallE _ _ body _, arity => constructorArity body (arity + 1)
   | _, arity => arity
 
+/-- Adding to the accumulator commutes with counting the literal leading Pi
+spine. -/
+theorem constructorArity_add (source : Expr) (left right : Nat) :
+    constructorArity source (left + right) =
+      constructorArity source left + right := by
+  induction source generalizing left right <;>
+    simp only [constructorArity]
+  rw [show left + right + 1 = left + 1 + right by omega]
+  apply_assumption
+
+/-- The accumulator contributes additively to the literal leading Pi count. -/
+theorem constructorArity_eq_zero_add (source : Expr) (arity : Nat) :
+    constructorArity source arity = constructorArity source 0 + arity := by
+  simpa only [Nat.zero_add] using constructorArity_add source 0 arity
+
+/-- Structural expression equality preserves the literal leading Pi count
+used by ordinary constructor metadata. -/
+theorem constructorArity_eq_of_structuralEq
+    {source target : Expr}
+    (equal : Expr.structuralEq source target = true) (arity : Nat) :
+    constructorArity source arity = constructorArity target arity := by
+  induction source generalizing target arity <;> cases target <;>
+    simp_all [Expr.structuralEq, constructorArity]
+  apply_assumption
+  exact equal.2
+
 /-- Exact constructor record assembled by the ordinary declaration phase. -/
 def declaredConstructorInfo (stats : InductiveStats)
     (induct : Name) (ctor : Constructor) (cidx : Nat)
@@ -3856,6 +4034,13 @@ def isLargeEliminator (stats : InductiveStats) (indTypes : Array InductiveType) 
     loop ctor.type 0 #[] (← readThe Context).fuel.inductiveFuel
   | _ => return false
 
+/-- The kernel's indexed elimination-universe spelling.  Constructing this
+name through public `String.append` is extensionally identical to
+``(`u).appendIndexAfter i`` while keeping the distinct-index property
+available to verification (the latter uses an opaque internal append). -/
+def getElimParamName (i : Nat) : Name :=
+  .str .anonymous ("u_" ++ Nat.repr i)
+
 /-- Search the kernel's elimination-universe name sequence (`u`, `u_1`, …)
 for its first entry not already used by the inductive declaration.  Among
 `lparams.length + 1` distinct candidates at least one is available; the
@@ -3865,7 +4050,7 @@ def getFreshElimParam.loop (lparams : List Name) (u : Name) (i : Nat) :
   | 0 => u
   | fuel + 1 =>
       if lparams.contains u then
-        loop lparams ((`u).appendIndexAfter i) (i + 1) fuel
+        loop lparams (getElimParamName i) (i + 1) fuel
       else
         u
 
@@ -3911,6 +4096,183 @@ def loopArgs1 (stats : InductiveStats) (type : Expr) (i : Nat) (indices : Array 
     else
       k indices
 
+/-- A successful first-phase argument traversal reaches its continuation in
+a local extension of the context in which the traversal started. -/
+theorem loopArgs1_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {type : Expr} {i : Nat}
+    {indices : Array Expr} {fuel : Nat} {k : Array Expr → M α}
+    {result : α} {P : Prop}
+    (run : loopArgs1 stats type i indices fuel k current = .ok result)
+    (done : ∀ nextIndices nextContext,
+      root.LocalExtension nextContext →
+      k nextIndices nextContext = .ok result → P) : P := by
+  induction fuel generalizing type i indices current with
+  | zero =>
+      simp [loopArgs1, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases type <;> simp only [loopArgs1] at run
+      case forallE name dom body bi =>
+        split at run
+        · simp only [ReaderT.bind, Bind.bind] at run
+          cases whnfRun :
+              (liftM (TypeChecker.whnf <| body.instantiate1 stats.params[i]!) :
+                M Expr) current with
+          | error error =>
+              rw [whnfRun] at run
+              contradiction
+          | ok nextType =>
+              rw [whnfRun] at run
+              simp only [Except.bind] at run
+              exact ih extension run
+        · rw [withLocalDecl_apply] at run
+          simp only [ReaderT.bind, Bind.bind] at run
+          cases whnfRun :
+              (liftM (TypeChecker.whnf <|
+                body.instantiate1 current.freshExpr) : M Expr)
+                (current.pushLocalDecl name bi
+                  (consumeTypeAnnotations dom)) with
+          | error error =>
+              rw [whnfRun] at run
+              contradiction
+          | ok nextType =>
+              rw [whnfRun] at run
+              simp only [Except.bind] at run
+              exact ih
+                (extension.push name bi (consumeTypeAnnotations dom)) run
+      all_goals exact done indices current extension run
+
+/-- Expose the terminal index array and reader context of `loopArgs1`
+independently of its continuation.  This is a proof-only reassociation of
+the existing continuation-passing worker; it does not rerun the traversal or
+change the executable recursor synthesis path. -/
+theorem loopArgs1_eq_capture
+    {stats : InductiveStats} {type : Expr} {i : Nat}
+    {indices : Array Expr} {fuel : Nat} {k : Array Expr → M α}
+    (current : Context) :
+    loopArgs1 stats type i indices fuel k current =
+      (loopArgs1 stats type i indices fuel
+        (fun nextIndices nextContext => .ok (nextIndices, nextContext))
+        current).bind fun result => k result.1 result.2 := by
+  induction fuel generalizing type i indices current k with
+  | zero => rfl
+  | succ fuel ih =>
+      cases type <;> simp only [loopArgs1]
+      case forallE name dom body bi =>
+        split
+        · simp only [ReaderT.bind, Bind.bind]
+          cases run :
+              (liftM (TypeChecker.whnf <| body.instantiate1 stats.params[i]!) :
+                M Expr) current with
+          | error error => simp only [run, Except.bind]
+          | ok nextType =>
+              simp only [run, Except.bind]
+              exact ih (k := k) current
+        · simp only [withLocalDecl_apply, ReaderT.bind, Bind.bind]
+          cases run :
+              (liftM (TypeChecker.whnf <|
+                body.instantiate1 current.freshExpr) : M Expr)
+                (current.pushLocalDecl name bi
+                  (consumeTypeAnnotations dom)) with
+          | error error => simp only [run, Except.bind]
+          | ok nextType =>
+              simp only [run, Except.bind]
+              exact ih (k := k)
+                (current.pushLocalDecl name bi
+                  (consumeTypeAnnotations dom))
+      all_goals rfl
+
+/-- Exact parameter/index decomposition of one successful `loopArgs1` run.
+
+The aggregate capture equation records only the final index array and reader
+context.  Semantic recursor assembly additionally needs to know which visible
+Pi binders were consumed by the shared parameter prefix and which ones were
+retained as family indices.  This trace exposes precisely those executable
+branches while keeping every WHNF observation tied to the original run. -/
+inductive LoopArgs1Trace (stats : InductiveStats) :
+    (type : Expr) → (i : Nat) → (indices : Array Expr) → (fuel : Nat) →
+      (current : Context) → (finalIndices : Array Expr) →
+      (finalContext : Context) → Type where
+  | done
+      (notForall : type.isForall = false) :
+      LoopArgs1Trace stats type i indices fuel current indices current
+  | parameter
+      (isParameter : i < stats.params.size)
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 stats.params[i]!) : M Expr) current =
+            .ok nextType)
+      (tail : LoopArgs1Trace stats nextType (i + 1) indices fuel current
+        finalIndices finalContext) :
+      LoopArgs1Trace stats (.forallE name domain body binderInfo) i indices
+        (fuel + 1) current finalIndices finalContext
+  | index
+      (notParameter : ¬ i < stats.params.size)
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 current.freshExpr) : M Expr)
+            (current.pushLocalDecl name binderInfo
+              (consumeTypeAnnotations domain)) = .ok nextType)
+      (tail : LoopArgs1Trace stats nextType i
+        (indices.push current.freshExpr) fuel
+        (current.pushLocalDecl name binderInfo
+          (consumeTypeAnnotations domain)) finalIndices finalContext) :
+      LoopArgs1Trace stats (.forallE name domain body binderInfo) i indices
+        (fuel + 1) current finalIndices finalContext
+
+/-- Recover the complete parameter/index decomposition from the
+continuation-free capture used by recursor synthesis. -/
+theorem LoopArgs1Trace.of_run
+    {stats : InductiveStats} {type : Expr} {i : Nat}
+    {indices finalIndices : Array Expr} {fuel : Nat}
+    {current finalContext : Context}
+    (run : loopArgs1 stats type i indices fuel
+      (fun nextIndices nextContext => .ok (nextIndices, nextContext))
+      current = .ok (finalIndices, finalContext)) :
+    Nonempty (LoopArgs1Trace stats type i indices fuel current finalIndices
+      finalContext) := by
+  induction fuel generalizing type i indices current with
+  | zero =>
+      simp [loopArgs1, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases type <;> simp only [loopArgs1] at run
+      case forallE name domain body binderInfo =>
+        split at run
+        · simp only [ReaderT.bind, Bind.bind] at run
+          cases whnfRun :
+            (liftM (TypeChecker.whnf <|
+              body.instantiate1 stats.params[i]!) : M Expr) current with
+          | error error =>
+              rw [whnfRun] at run
+              contradiction
+          | ok nextType =>
+              rw [whnfRun] at run
+              simp only [ReaderT.bind, Bind.bind, Except.bind] at run
+              obtain ⟨tail⟩ := ih run
+              exact ⟨.parameter (by assumption) nextType whnfRun tail⟩
+        · rw [withLocalDecl_apply] at run
+          simp only [ReaderT.bind, Bind.bind] at run
+          cases whnfRun :
+              (liftM (TypeChecker.whnf <|
+                body.instantiate1 current.freshExpr) : M Expr)
+                (current.pushLocalDecl name binderInfo
+                  (consumeTypeAnnotations domain)) with
+          | error error =>
+              rw [whnfRun] at run
+              contradiction
+          | ok nextType =>
+              rw [whnfRun] at run
+              simp only [Except.bind] at run
+              obtain ⟨tail⟩ := ih run
+              exact ⟨.index (by assumption) nextType whnfRun tail⟩
+      all_goals
+        have pairEq : (indices, current) =
+            (finalIndices, finalContext) := Except.ok.inj run
+        cases pairEq
+        exact ⟨.done rfl⟩
+
 variable (stats : InductiveStats) (indTypes : Array InductiveType) (elimLevel : Level) in
 def loopInd1 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α) : M α := do
   if _h : dIdx < indTypes.size then
@@ -3925,6 +4287,115 @@ def loopInd1 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α
     loopInd1 (dIdx + 1) (recInfos.push { motive, minors := #[], indices, major }) k
   else
     k recInfos
+termination_by indTypes.size - dIdx
+
+/-- The whole first recursor-synthesis phase preserves the same local-
+extension invariant as its argument traversal. -/
+theorem loopInd1_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {dIdx : Nat} {recInfos : Array RecInfo}
+    {k : Array RecInfo → M α} {result : α} {P : Prop}
+    (run : loopInd1 stats indTypes elimLevel dIdx recInfos k current =
+      .ok result)
+    (done : ∀ nextInfos nextContext,
+      root.LocalExtension nextContext →
+      k nextInfos nextContext = .ok result → P) : P := by
+  rw [loopInd1.eq_1] at run
+  split at run
+  · simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+      Except.bind] at run
+    cases whnfRun :
+        (liftM (TypeChecker.whnf indTypes[dIdx].type) : M Expr) current with
+    | error error =>
+        rw [whnfRun] at run
+        contradiction
+    | ok normalizedType =>
+        rw [whnfRun] at run
+        simp only [Except.bind] at run
+        exact loopArgs1_localExtension extension run fun indices
+          indexContext indexExtension continuationRun => by
+            rw [withLocalDecl_apply] at continuationRun
+            simp only [getLCtx_apply, ReaderT.bind, Bind.bind, Except.bind,
+              Pure.pure, ReaderT.pure, Except.pure] at continuationRun
+            rw [withLocalDecl_apply] at continuationRun
+            exact loopInd1_localExtension
+              ((indexExtension.push `t .default
+                (consumeTypeAnnotations
+                  (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                    indices))).push
+                (if indTypes.size > 1 then
+                  (`motive).appendIndexAfter (dIdx + 1)
+                else `motive)
+                .default
+                (consumeTypeAnnotations
+                  ((indexContext.pushLocalDecl `t .default
+                    (consumeTypeAnnotations
+                      (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                        indices))).lctx.mkForall indices <|
+                    (indexContext.pushLocalDecl `t .default
+                      (consumeTypeAnnotations
+                        (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                          indices))).lctx.mkForall
+                      #[indexContext.freshExpr] <| .sort elimLevel)))
+              continuationRun done
+  · exact done recInfos current extension run
+termination_by indTypes.size - dIdx
+
+/-- Capture the complete phase-one `RecInfo` array and its final motive
+context independently of the callback that consumes them. -/
+theorem loopInd1_eq_capture
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {dIdx : Nat} {recInfos : Array RecInfo}
+    {k : Array RecInfo → M α} (current : Context) :
+    loopInd1 stats indTypes elimLevel dIdx recInfos k current =
+      (loopInd1 stats indTypes elimLevel dIdx recInfos
+        (fun nextInfos nextContext => .ok (nextInfos, nextContext))
+        current).bind fun result => k result.1 result.2 := by
+  conv => rhs; rw [loopInd1.eq_1]
+  rw [loopInd1.eq_1]
+  split
+  · simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+      Except.bind]
+    cases whnfRun :
+        (liftM (TypeChecker.whnf indTypes[dIdx].type) : M Expr) current with
+    | error error => simp only [whnfRun, Except.bind]
+    | ok normalizedType =>
+        simp only [whnfRun, Except.bind]
+        conv => lhs; rw [loopArgs1_eq_capture current]
+        conv => rhs; rw [loopArgs1_eq_capture current]
+        cases indicesRun :
+            loopArgs1 stats normalizedType 0 #[]
+              current.fuel.inductiveFuel
+              (fun nextIndices nextContext =>
+                .ok (nextIndices, nextContext)) current with
+        | error error => simp only [indicesRun, Except.bind]
+        | ok indicesResult =>
+            rcases indicesResult with ⟨indices, indexContext⟩
+            simp only [indicesRun, Except.bind, withLocalDecl_apply,
+              getLCtx_apply, Pure.pure, ReaderT.pure, Except.pure]
+            exact loopInd1_eq_capture
+              ((indexContext.pushLocalDecl `t .default
+                (consumeTypeAnnotations
+                  (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                    indices))).pushLocalDecl
+                (if indTypes.size > 1 then
+                  (`motive).appendIndexAfter (dIdx + 1)
+                else `motive)
+                .default
+                (consumeTypeAnnotations
+                  ((indexContext.pushLocalDecl `t .default
+                    (consumeTypeAnnotations
+                      (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                        indices))).lctx.mkForall indices <|
+                    (indexContext.pushLocalDecl `t .default
+                      (consumeTypeAnnotations
+                        (mkAppN (mkAppN stats.indConsts[dIdx]! stats.params)
+                          indices))).lctx.mkForall
+                      #[indexContext.freshExpr] <| .sort elimLevel)))
+  · rfl
 termination_by indTypes.size - dIdx
 
 variable (stats : InductiveStats) in
@@ -3944,6 +4415,117 @@ where
         loop (body.instantiate1 arg) (i + 1) bu u fuel
     else k t bu u
 
+/-- The inner constructor-argument traversal invokes its continuation only
+under local-declaration pushes from its input context. -/
+theorem loopCtorArgs_loop_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {t : Expr} {i : Nat}
+    {bu u : Array Expr} {fuel : Nat}
+    {k : Expr → Array Expr → Array Expr → M α}
+    {result : α} {P : Prop}
+    (run : loopCtorArgs.loop stats k t i bu u fuel current = .ok result)
+    (done : ∀ terminal nextBu nextU nextContext,
+      root.LocalExtension nextContext →
+      k terminal nextBu nextU nextContext = .ok result → P) : P := by
+  induction fuel generalizing t i bu u current with
+  | zero =>
+      simp [loopCtorArgs.loop, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases t <;> simp only [loopCtorArgs.loop] at run
+      case forallE name dom body bi =>
+        cases parameterEq : stats.params[i]? with
+        | some parameter =>
+          simp only [parameterEq] at run
+          exact ih extension run
+        | none =>
+          simp only [parameterEq] at run
+          rw [withLocalDecl_apply] at run
+          simp only [ReaderT.bind, Bind.bind] at run
+          cases recursiveRun :
+              isRecArg stats dom
+                (current.pushLocalDecl name bi
+                  (consumeTypeAnnotations dom)) with
+          | error error =>
+              rw [recursiveRun] at run
+              contradiction
+          | ok recursive =>
+              rw [recursiveRun] at run
+              simp only [Except.bind] at run
+              exact ih
+                (extension.push name bi (consumeTypeAnnotations dom)) run
+      all_goals exact done _ bu u current extension run
+
+/-- Wrapper form of `loopCtorArgs_loop_localExtension`. -/
+theorem loopCtorArgs_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {t : Expr}
+    {k : Expr → Array Expr → Array Expr → M α}
+    {result : α} {P : Prop}
+    (run : loopCtorArgs stats t k current = .ok result)
+    (done : ∀ terminal nextBu nextU nextContext,
+      root.LocalExtension nextContext →
+      k terminal nextBu nextU nextContext = .ok result → P) : P := by
+  unfold loopCtorArgs at run
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind] at run
+  exact loopCtorArgs_loop_localExtension extension run done
+
+/-- Continuation-independent capture form of the constructor-argument
+worker.  It exposes the terminal result, all constructor arguments, the
+recursive-argument subarray, and the exact reader context at which the
+continuation is entered. -/
+theorem loopCtorArgs_loop_eq_capture
+    {stats : InductiveStats} {t : Expr} {i : Nat}
+    {bu u : Array Expr} {fuel : Nat}
+    {k : Expr → Array Expr → Array Expr → M α}
+    (current : Context) :
+    loopCtorArgs.loop stats k t i bu u fuel current =
+      (loopCtorArgs.loop stats
+        (fun terminal nextBu nextU nextContext =>
+          .ok (terminal, nextBu, nextU, nextContext))
+        t i bu u fuel current).bind fun result =>
+          k result.1 result.2.1 result.2.2.1 result.2.2.2 := by
+  induction fuel generalizing t i bu u current k with
+  | zero => rfl
+  | succ fuel ih =>
+      cases t <;> simp only [loopCtorArgs.loop]
+      case forallE name dom body bi =>
+        cases parameterEq : stats.params[i]? with
+        | some parameter =>
+            simp only [parameterEq]
+            exact ih (k := k) current
+        | none =>
+            simp only [parameterEq, withLocalDecl_apply, ReaderT.bind,
+              Bind.bind]
+            cases recursiveRun :
+                isRecArg stats dom
+                  (current.pushLocalDecl name bi
+                    (consumeTypeAnnotations dom)) with
+            | error error => simp only [recursiveRun, Except.bind]
+            | ok recursive =>
+                simp only [recursiveRun, Except.bind]
+                exact ih (k := k)
+                  (current.pushLocalDecl name bi
+                    (consumeTypeAnnotations dom))
+      all_goals rfl
+
+/-- Wrapper capture equation for `loopCtorArgs`. -/
+theorem loopCtorArgs_eq_capture
+    {stats : InductiveStats} {t : Expr}
+    {k : Expr → Array Expr → Array Expr → M α}
+    (current : Context) :
+    loopCtorArgs stats t k current =
+      (loopCtorArgs stats t
+        (fun terminal nextBu nextU nextContext =>
+          .ok (terminal, nextBu, nextU, nextContext)) current).bind fun result =>
+            k result.1 result.2.1 result.2.2.1 result.2.2.2 := by
+  unfold loopCtorArgs
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind]
+  exact loopCtorArgs_loop_eq_capture current
+
 def loopUArgs (ui : Expr) (k : Expr → Array Expr → M α) : M α := do
   loop (← whnf (← inferType ui)) #[] (← readThe Context).fuel.inductiveFuel
 where
@@ -3955,6 +4537,124 @@ where
       loop (← whnf <| body.instantiate1 arg) (xs.push arg) fuel
     else
       k uiTy xs
+
+/-- Recursive-argument index synthesis likewise reaches its continuation
+only through scoped local-declaration pushes. -/
+theorem loopUArgs_loop_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {uiType : Expr} {xs : Array Expr} {fuel : Nat}
+    {k : Expr → Array Expr → M α} {result : α} {P : Prop}
+    (run : loopUArgs.loop k uiType xs fuel current = .ok result)
+    (done : ∀ terminal nextXs nextContext,
+      root.LocalExtension nextContext →
+      k terminal nextXs nextContext = .ok result → P) : P := by
+  induction fuel generalizing uiType xs current with
+  | zero =>
+      simp [loopUArgs.loop, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases uiType <;> simp only [loopUArgs.loop] at run
+      case forallE name dom body bi =>
+        rw [withLocalDecl_apply] at run
+        simp only [ReaderT.bind, Bind.bind] at run
+        cases whnfRun :
+            (liftM (TypeChecker.whnf <|
+              body.instantiate1 current.freshExpr) : M Expr)
+              (current.pushLocalDecl name bi
+                (consumeTypeAnnotations dom)) with
+        | error error =>
+            rw [whnfRun] at run
+            contradiction
+        | ok nextType =>
+            rw [whnfRun] at run
+            simp only [Except.bind] at run
+            exact ih (extension.push name bi (consumeTypeAnnotations dom))
+              run
+      all_goals exact done _ xs current extension run
+
+/-- Wrapper form of `loopUArgs_loop_localExtension`. -/
+theorem loopUArgs_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {ui : Expr} {k : Expr → Array Expr → M α}
+    {result : α} {P : Prop}
+    (run : loopUArgs ui k current = .ok result)
+    (done : ∀ terminal nextXs nextContext,
+      root.LocalExtension nextContext →
+      k terminal nextXs nextContext = .ok result → P) : P := by
+  unfold loopUArgs at run
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind] at run
+  cases inferRun : (liftM (TypeChecker.inferType ui) : M Expr) current with
+  | error error =>
+      rw [inferRun] at run
+      contradiction
+  | ok inferredType =>
+      rw [inferRun] at run
+      simp only [Except.bind] at run
+      cases whnfRun :
+          (liftM (TypeChecker.whnf inferredType) : M Expr) current with
+      | error error =>
+          rw [whnfRun] at run
+          contradiction
+      | ok normalizedType =>
+          rw [whnfRun] at run
+          simp only [Except.bind] at run
+          exact loopUArgs_loop_localExtension extension run done
+
+/-- Capture the terminal recursive-argument type, its introduced argument
+array, and the exact continuation context independently of the consumer. -/
+theorem loopUArgs_loop_eq_capture
+    {uiType : Expr} {xs : Array Expr} {fuel : Nat}
+    {k : Expr → Array Expr → M α} (current : Context) :
+    loopUArgs.loop k uiType xs fuel current =
+      (loopUArgs.loop
+        (fun terminal nextXs nextContext =>
+          .ok (terminal, nextXs, nextContext))
+        uiType xs fuel current).bind fun result =>
+          k result.1 result.2.1 result.2.2 := by
+  induction fuel generalizing uiType xs current k with
+  | zero => rfl
+  | succ fuel ih =>
+      cases uiType <;> simp only [loopUArgs.loop]
+      case forallE name dom body bi =>
+        simp only [withLocalDecl_apply, ReaderT.bind, Bind.bind]
+        cases run :
+            (liftM (TypeChecker.whnf <|
+              body.instantiate1 current.freshExpr) : M Expr)
+              (current.pushLocalDecl name bi
+                (consumeTypeAnnotations dom)) with
+        | error error => simp only [run, Except.bind]
+        | ok nextType =>
+            simp only [run, Except.bind]
+            exact ih (k := k)
+              (current.pushLocalDecl name bi
+                (consumeTypeAnnotations dom))
+      all_goals rfl
+
+/-- Wrapper capture equation for `loopUArgs`, including its initial
+`inferType` and WHNF observations. -/
+theorem loopUArgs_eq_capture
+    {ui : Expr} {k : Expr → Array Expr → M α}
+    (current : Context) :
+    loopUArgs ui k current =
+      (loopUArgs ui
+        (fun terminal nextXs nextContext =>
+          .ok (terminal, nextXs, nextContext)) current).bind fun result =>
+            k result.1 result.2.1 result.2.2 := by
+  unfold loopUArgs
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind]
+  cases inferRun : (liftM (TypeChecker.inferType ui) : M Expr) current with
+  | error error => simp only [inferRun, Except.bind]
+  | ok inferredType =>
+      simp only [inferRun, Except.bind]
+      cases whnfRun :
+          (liftM (TypeChecker.whnf inferredType) : M Expr) current with
+      | error error => simp only [whnfRun, Except.bind]
+      | ok normalizedType =>
+          simp only [whnfRun, Except.bind]
+          exact loopUArgs_loop_eq_capture current
 
 variable (stats : InductiveStats) (u : Array Expr) (recInfos : Array RecInfo) in
 def loopU (i : Nat) (v : Array Expr) (k : Array Expr → M α) : M α := do
@@ -3969,6 +4669,78 @@ def loopU (i : Nat) (v : Array Expr) (k : Array Expr → M α) : M α := do
     loopU (i + 1) (v.push vi) k
   else
     k v
+termination_by u.size - i
+
+/-- Recursive hypotheses retained by phase two are added by one local push
+per hypothesis; temporary index binders created by `loopUArgs` are abstracted
+back into the hypothesis type and therefore do not escape that subcall. -/
+theorem loopU_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {u : Array Expr}
+    {recInfos : Array RecInfo} {i : Nat} {v : Array Expr}
+    {k : Array Expr → M α} {result : α} {P : Prop}
+    (run : loopU stats u recInfos i v k current = .ok result)
+    (done : ∀ nextV nextContext,
+      root.LocalExtension nextContext →
+      k nextV nextContext = .ok result → P) : P := by
+  rw [loopU.eq_1] at run
+  split at run
+  · simp only [ReaderT.bind, Bind.bind] at run
+    cases argsRun :
+        loopUArgs u[i] (fun uiType xs =>
+          ReaderT.bind getLCtx fun implementationLCtx =>
+            pure (implementationLCtx.mkForall xs <|
+              .app
+                (mkAppN recInfos[(getIIndices stats uiType).fst]!.motive
+                  (getIIndices stats uiType).snd)
+                (mkAppN u[i] xs))) current with
+    | error error =>
+        rw [argsRun] at run
+        contradiction
+    | ok hypothesisType =>
+        rw [argsRun] at run
+        simp only [Except.bind, getLCtx_apply, Pure.pure, ReaderT.pure,
+          Except.pure] at run
+        rw [withLocalDecl_apply] at run
+        exact loopU_localExtension
+          (extension.push
+            ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+            .default (consumeTypeAnnotations hypothesisType)) run done
+  · exact done v current extension run
+termination_by u.size - i
+
+/-- Capture the complete recursive-hypothesis array and the exact context at
+which `loopU` reaches its continuation. -/
+theorem loopU_eq_capture
+    {stats : InductiveStats} {u : Array Expr}
+    {recInfos : Array RecInfo} {i : Nat} {v : Array Expr}
+    {k : Array Expr → M α} (current : Context) :
+    loopU stats u recInfos i v k current =
+      (loopU stats u recInfos i v
+        (fun nextV nextContext => .ok (nextV, nextContext)) current).bind
+          fun result => k result.1 result.2 := by
+  conv => rhs; rw [loopU.eq_1]
+  rw [loopU.eq_1]
+  split
+  · simp only [ReaderT.bind, Bind.bind]
+    cases argsRun :
+        loopUArgs u[i] (fun uiType xs =>
+          ReaderT.bind getLCtx fun implementationLCtx =>
+            pure (implementationLCtx.mkForall xs <|
+              .app
+                (mkAppN recInfos[(getIIndices stats uiType).fst]!.motive
+                  (getIIndices stats uiType).snd)
+                (mkAppN u[i] xs))) current with
+    | error error =>
+        rfl
+    | ok hypothesisType =>
+        simp only [Except.bind, getLCtx_apply, Pure.pure, ReaderT.pure,
+          Except.pure, withLocalDecl_apply]
+        exact loopU_eq_capture
+          (current.pushLocalDecl
+            ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+            .default (consumeTypeAnnotations hypothesisType))
+  · rfl
 termination_by u.size - i
 
 variable (stats : InductiveStats) (indTypeName : Name) (dIdx : Nat) in
@@ -3988,6 +4760,98 @@ def loopCtors (recInfos : Array RecInfo)
     loopCtors recInfos ctors k
   | [] => k recInfos
 
+/-- Constructor traversal composes the argument, recursive-hypothesis, and
+minor-declaration pushes without losing the local-extension invariant. -/
+theorem loopCtors_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {recInfos : Array RecInfo} {ctors : List Constructor}
+    {k : Array RecInfo → M α} {result : α} {P : Prop}
+    (run : loopCtors stats indTypeName dIdx recInfos ctors k current =
+      .ok result)
+    (done : ∀ nextInfos nextContext,
+      root.LocalExtension nextContext →
+      k nextInfos nextContext = .ok result → P) : P := by
+  induction ctors generalizing recInfos current with
+  | nil => exact done recInfos current extension run
+  | cons ctor ctors ih =>
+      rw [loopCtors] at run
+      exact loopCtorArgs_localExtension extension run fun terminal
+        constructorArgs recursiveArgs argumentContext argumentExtension
+        continuationRun => by
+          exact loopU_localExtension argumentExtension continuationRun
+            fun hypotheses hypothesisContext hypothesisExtension minorRun => by
+              simp only [getLCtx_apply, ReaderT.bind, Bind.bind, Except.bind,
+                Pure.pure, ReaderT.pure, Except.pure] at minorRun
+              rw [withLocalDecl_apply] at minorRun
+              exact ih
+                (hypothesisExtension.push
+                  (ctor.name.replacePrefix indTypeName .anonymous) .default
+                  (consumeTypeAnnotations
+                    (hypothesisContext.lctx.mkForall constructorArgs <|
+                      hypothesisContext.lctx.mkForall hypotheses <|
+                        .app
+                          (mkAppN
+                            recInfos[(getIIndices stats terminal).fst]!.motive
+                            (getIIndices stats terminal).snd)
+                          (mkAppN
+                            (mkAppN (.const ctor.name stats.levels)
+                              stats.params)
+                            constructorArgs))))
+                minorRun
+
+/-- Capture the final `RecInfo` array and context of one constructor-list
+traversal independently of the continuation that consumes them. -/
+theorem loopCtors_eq_capture
+    {stats : InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {recInfos : Array RecInfo} {ctors : List Constructor}
+    {k : Array RecInfo → M α} (current : Context) :
+    loopCtors stats indTypeName dIdx recInfos ctors k current =
+      (loopCtors stats indTypeName dIdx recInfos ctors
+        (fun nextInfos nextContext => .ok (nextInfos, nextContext))
+        current).bind fun result => k result.1 result.2 := by
+  induction ctors generalizing recInfos current k with
+  | nil => rfl
+  | cons ctor ctors ih =>
+      simp only [loopCtors]
+      conv => lhs; rw [loopCtorArgs_eq_capture current]
+      conv => rhs; rw [loopCtorArgs_eq_capture current]
+      cases argsRun :
+          loopCtorArgs stats ctor.type
+            (fun terminal nextBu nextU nextContext =>
+              .ok (terminal, nextBu, nextU, nextContext)) current with
+      | error error => simp only [argsRun, Except.bind]
+      | ok argsResult =>
+          rcases argsResult with
+            ⟨terminal, constructorArgs, recursiveArgs, argumentContext⟩
+          simp only [argsRun, Except.bind]
+          conv => lhs; rw [loopU_eq_capture argumentContext]
+          conv => rhs; rw [loopU_eq_capture argumentContext]
+          cases hypothesesRun :
+              loopU stats recursiveArgs recInfos 0 #[]
+                (fun nextHypotheses nextContext =>
+                  .ok (nextHypotheses, nextContext)) argumentContext with
+          | error error => simp only [hypothesesRun, Except.bind]
+          | ok hypothesesResult =>
+              rcases hypothesesResult with
+                ⟨hypotheses, hypothesisContext⟩
+              simp only [hypothesesRun, Except.bind, getLCtx_apply,
+                Pure.pure, ReaderT.pure, Except.pure, withLocalDecl_apply]
+              exact ih (k := k)
+                (hypothesisContext.pushLocalDecl
+                  (ctor.name.replacePrefix indTypeName .anonymous) .default
+                  (consumeTypeAnnotations
+                    (hypothesisContext.lctx.mkForall constructorArgs <|
+                      hypothesisContext.lctx.mkForall hypotheses <|
+                        .app
+                          (mkAppN
+                            recInfos[(getIIndices stats terminal).fst]!.motive
+                            (getIIndices stats terminal).snd)
+                          (mkAppN
+                            (mkAppN (.const ctor.name stats.levels)
+                              stats.params)
+                            constructorArgs))))
+
 variable (stats : InductiveStats) (indTypes : Array InductiveType) in
 def loopInd2 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α) : M α := do
   if _h : dIdx < indTypes.size then
@@ -3999,12 +4863,63 @@ def loopInd2 (dIdx : Nat) (recInfos : Array RecInfo) (k : Array RecInfo → M α
     k recInfos
 termination_by indTypes.size - dIdx
 
+/-- The complete second synthesis phase reaches its final callback in a
+local extension of the phase-one context. -/
+theorem loopInd2_localExtension
+    {root current : Context} (extension : root.LocalExtension current)
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos : Array RecInfo} {k : Array RecInfo → M α}
+    {result : α} {P : Prop}
+    (run : loopInd2 stats indTypes dIdx recInfos k current = .ok result)
+    (done : ∀ nextInfos nextContext,
+      root.LocalExtension nextContext →
+      k nextInfos nextContext = .ok result → P) : P := by
+  rw [loopInd2.eq_1] at run
+  split at run
+  · exact loopCtors_localExtension extension run fun nextInfos nextContext
+      nextExtension continuationRun =>
+        loopInd2_localExtension nextExtension continuationRun done
+  · exact done recInfos current extension run
+termination_by indTypes.size - dIdx
+
+/-- Capture the complete phase-two `RecInfo` array and its final synthesis
+context independently of the callback that consumes them. -/
+theorem loopInd2_eq_capture
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos : Array RecInfo} {k : Array RecInfo → M α}
+    (current : Context) :
+    loopInd2 stats indTypes dIdx recInfos k current =
+      (loopInd2 stats indTypes dIdx recInfos
+        (fun nextInfos nextContext => .ok (nextInfos, nextContext))
+        current).bind fun result => k result.1 result.2 := by
+  conv => rhs; rw [loopInd2.eq_1]
+  rw [loopInd2.eq_1]
+  split
+  · conv => lhs; rw [loopCtors_eq_capture current]
+    conv => rhs; rw [loopCtors_eq_capture current]
+    cases constructorsRun :
+        loopCtors stats indTypes[dIdx].name dIdx recInfos
+          indTypes[dIdx].ctors
+          (fun nextInfos nextContext => .ok (nextInfos, nextContext))
+          current with
+    | error error => simp only [constructorsRun, Except.bind]
+    | ok constructorsResult =>
+        rcases constructorsResult with ⟨nextInfos, nextContext⟩
+        simp only [constructorsRun, Except.bind]
+        exact loopInd2_eq_capture nextContext
+  · rfl
+termination_by indTypes.size - dIdx
+
 end mkRecInfos
 
 def mkRecInfos (stats : InductiveStats) (indTypes : Array InductiveType)
-    (elimLevel : Level) (k : Array RecInfo → M α) : M α :=
-  mkRecInfos.loopInd1 stats indTypes elimLevel 0 #[] fun recInfos =>
-  mkRecInfos.loopInd2 stats indTypes 0 recInfos k
+    (elimLevel : Level) (k : Array RecInfo → M α) : M α := fun context =>
+  match mkRecInfos.loopInd1 stats indTypes elimLevel 0 #[]
+      (fun recInfos phase1Context => .ok (recInfos, phase1Context))
+      context with
+  | .error error => .error error
+  | .ok (phase1Infos, phase1Context) =>
+      mkRecInfos.loopInd2 stats indTypes 0 phase1Infos k phase1Context
 
 def getRecLevels (elimLevel : Level) (levels : List Level) : List Level :=
   if elimLevel.isParam then elimLevel :: levels else levels
@@ -4119,10 +5034,14 @@ structure RecursorDeclarationResult where
   allowPrimitive : Bool
   kTarget : Bool
   sourceTypes : Array InductiveType
+  levelParams : List Name
+  isUnsafe : Bool
   infos : List RecursorVal
   infos_names : infos.map (·.name) =
     sourceTypes.toList.map (fun indType => mkRecName indType.name)
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  infos_levelParams : ∀ info ∈ infos, info.levelParams = levelParams
+  infos_isUnsafe : ∀ info ∈ infos, info.isUnsafe = isUnsafe
   info_of_source_index : ∀ (i : Nat) (_upper : i < sourceTypes.size),
     ∃ info ∈ infos, info.name = mkRecName sourceTypes[i].name
   env : Environment
@@ -4134,12 +5053,15 @@ verification can reason from the retained producer equation without
 reimplementing recursor synthesis. -/
 structure RecursorDeclarationTail
     (allowPrimitive : Bool) (initialEnv : Environment) (kTarget : Bool)
-    (sourceTypes : Array InductiveType) (startIndex : Nat) where
+    (sourceTypes : Array InductiveType) (startIndex : Nat)
+    (levelParams : List Name) (isUnsafe : Bool) where
   infos : List RecursorVal
   infos_names : infos.map (·.name) =
     (sourceTypes.toList.drop startIndex).map
       (fun indType => mkRecName indType.name)
   infos_kTarget : ∀ info ∈ infos, info.k = kTarget
+  infos_levelParams : ∀ info ∈ infos, info.levelParams = levelParams
+  infos_isUnsafe : ∀ info ∈ infos, info.isUnsafe = isUnsafe
   info_of_source_index : ∀ (i : Nat) (_lower : startIndex ≤ i)
     (_upper : i < sourceTypes.size),
     ∃ info ∈ infos, info.name = mkRecName sourceTypes[i].name
@@ -4158,6 +5080,21 @@ def generatedRecursorType (stats : InductiveStats)
     lctx.mkForall info.indices <|
     lctx.mkForall #[info.major] <|
     .app (mkAppN info.motive info.indices) info.major).inferImplicit 1000 false
+
+/-- Source-indexed list of the recursor types assembled by `loop`.  This
+definition mirrors only the family traversal; rule generation and environment
+insertion do not affect these headers. -/
+def generatedRecursorTypes (stats : InductiveStats)
+    (indTypes : Array InductiveType) (recInfos : Array RecInfo)
+    (motives minors : Array Expr) (lctx : LocalContext) : Nat → List Expr
+  | dIdx =>
+      if h : dIdx < indTypes.size then
+        generatedRecursorType stats motives minors lctx recInfos[dIdx]! ::
+          generatedRecursorTypes stats indTypes recInfos motives minors lctx
+            (dIdx + 1)
+      else
+        []
+termination_by dIdx => indTypes.size - dIdx
 
 /-- Pure assembly of one generated recursor record once its rules have been
 synthesized.  Its translation-visible header does not depend on `rules`. -/
@@ -4206,7 +5143,8 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
     (lparams : List Name) (isUnsafe allowPrimitive : Bool) :
     (dIdx : Nat) → (env : Environment) →
       StateT Nat M
-        (RecursorDeclarationTail allowPrimitive env k indTypes dIdx)
+        (RecursorDeclarationTail allowPrimitive env k indTypes dIdx
+          (getRecLevelParams elimLevel lparams) isUnsafe)
   | dIdx, env => do
       if h : dIdx < indTypes.size then
         let indType := indTypes[dIdx]
@@ -4234,6 +5172,16 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
             rcases List.mem_cons.mp member with rfl | member
             · rfl
             · exact tail.infos_kTarget other member
+          infos_levelParams := by
+            intro other member
+            rcases List.mem_cons.mp member with rfl | member
+            · rfl
+            · exact tail.infos_levelParams other member
+          infos_isUnsafe := by
+            intro other member
+            rcases List.mem_cons.mp member with rfl | member
+            · rfl
+            · exact tail.infos_isUnsafe other member
           info_of_source_index := by
             intro i lower upper
             by_cases equal : i = dIdx
@@ -4255,12 +5203,101 @@ def loop (stats : InductiveStats) (indTypes : Array InductiveType)
             rw [dropped]
             rfl
           infos_kTarget := by simp
+          infos_levelParams := by simp
+          infos_isUnsafe := by simp
           info_of_source_index := by
             intro i lower upper
             exact (h (by omega)).elim
           env
           trace := .nil }
 termination_by dIdx _ => indTypes.size - dIdx
+
+/-- A successful worker run exposes the exact source-ordered generated type
+headers.  Rule synthesis remains existentially internal, but cannot change
+the `generatedRecursorType` stored in each emitted record. -/
+theorem loop_infos_types
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {k : Bool} {recInfos : Array RecInfo}
+    {motives minors : Array Expr} {lctx : LocalContext}
+    {lparams : List Name} {isUnsafe allowPrimitive : Bool}
+    {dIdx : Nat} {env : Environment} {state : Nat} {context : Context}
+    {tail : RecursorDeclarationTail allowPrimitive env k indTypes dIdx
+      (getRecLevelParams elimLevel lparams) isUnsafe}
+    (run : StateT.run'
+      (loop stats indTypes elimLevel k recInfos motives minors lctx lparams
+        isUnsafe allowPrimitive dIdx env) state context = .ok tail) :
+    tail.infos.map (fun info => info.type) =
+      generatedRecursorTypes stats indTypes recInfos motives minors lctx
+        dIdx := by
+  rw [loop.eq_1] at run
+  by_cases hindex : dIdx < indTypes.size
+  · rw [dif_pos hindex] at run
+    dsimp only at run
+    simp only [StateT.run', StateT.bind, ReaderT.bind, Bind.bind,
+      Functor.map, Except.map] at run
+    cases hrules : mkRecRules indTypes elimLevel stats dIdx motives minors state
+        context with
+    | error error =>
+        rw [hrules] at run
+        contradiction
+    | ok rulesState =>
+        rw [hrules] at run
+        simp only [Except.bind] at run
+        cases hcheck : checkNameCertificate env
+            (mkRecName indTypes[dIdx].name) allowPrimitive with
+        | error error =>
+            rw [hcheck] at run
+            contradiction
+        | ok certificate =>
+            rw [hcheck] at run
+            dsimp [liftM, monadLift, MonadLift.monadLift, StateT.lift] at run
+            simp only [Bind.bind, ReaderT.bind, Except.bind, Pure.pure,
+              ReaderT.pure, StateT.pure, Except.pure] at run
+            let recursor := generatedRecursorVal stats indTypes elimLevel k
+              motives minors lctx lparams isUnsafe dIdx indTypes[dIdx]
+                recInfos[dIdx]! rulesState.fst
+            cases htailState :
+                loop stats indTypes elimLevel k recInfos motives minors lctx
+                  lparams isUnsafe allowPrimitive (dIdx + 1)
+                    (env.add (.recInfo recursor)) rulesState.snd context with
+            | error error =>
+                rw [htailState] at run
+                contradiction
+            | ok nextTailState =>
+                rw [htailState] at run
+                simp only [Pure.pure, ReaderT.pure, StateT.pure,
+                  Except.pure] at run
+                have tail_eq := Except.ok.inj run
+                subst tail
+                have htail : StateT.run'
+                    (loop stats indTypes elimLevel k recInfos motives minors
+                      lctx lparams isUnsafe allowPrimitive (dIdx + 1)
+                        (env.add (.recInfo recursor))) rulesState.snd context =
+                      .ok nextTailState.fst := by
+                  simp [StateT.run', htailState, Functor.map, Except.map]
+                simp only [List.map_cons]
+                rw [loop_infos_types htail]
+                have types_eq :
+                    generatedRecursorTypes stats indTypes recInfos motives
+                        minors lctx dIdx =
+                      generatedRecursorType stats motives minors lctx
+                          recInfos[dIdx]! ::
+                        generatedRecursorTypes stats indTypes recInfos motives
+                          minors lctx (dIdx + 1) := by
+                  rw [generatedRecursorTypes.eq_1, dif_pos hindex]
+                rw [types_eq]
+                rfl
+  · rw [dif_neg hindex] at run
+    simp only [Pure.pure, ReaderT.pure, StateT.pure, StateT.run',
+      Functor.map, Except.map, Except.pure] at run
+    have tail_eq := Except.ok.inj run
+    subst tail
+    have types_eq :
+        generatedRecursorTypes stats indTypes recInfos motives minors lctx
+            dIdx = [] := by
+      rw [generatedRecursorTypes.eq_1, dif_neg hindex]
+    exact types_eq.symm
+termination_by indTypes.size - dIdx
 
 /-- A successful singleton-family worker emits exactly the recursor assembled
 from its first family and `RecInfo`.  Only the generated rule payload remains
@@ -4272,7 +5309,8 @@ theorem loop_singleton_infos_eq
     {motives minors : Array Expr} {lctx : LocalContext}
     {lparams : List Name} {isUnsafe allowPrimitive : Bool}
     {env : Environment} {state : Nat} {context : Context}
-    {tail : RecursorDeclarationTail allowPrimitive env k indTypes 0}
+    {tail : RecursorDeclarationTail allowPrimitive env k indTypes 0
+      (getRecLevelParams elimLevel lparams) isUnsafe}
     (hindex : 0 < indTypes.size)
     (size_eq : indTypes.size = 1)
     (run : StateT.run'
@@ -4312,6 +5350,543 @@ theorem loop_singleton_infos_eq
 
 end declareRecursors
 
+/-- One family step retained by the first half of recursor-info synthesis.
+It records the two normalization observations and the exact index context;
+the major, motive, next context, and appended `RecInfo` are deterministic
+projections of those observations. -/
+structure RecInfoPhaseOneStep
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (dIdx : Nat) (current : Context) where
+  active : dIdx < indTypes.size
+  normalizedType : Expr
+  whnfRun :
+    (liftM (TypeChecker.whnf (indTypes[dIdx]'active).type) : M Expr) current =
+      .ok normalizedType
+  indices : Array Expr
+  indexContext : Context
+  indicesRun :
+    mkRecInfos.loopArgs1 stats normalizedType 0 #[]
+      current.fuel.inductiveFuel
+      (fun nextIndices nextContext => .ok (nextIndices, nextContext))
+      current = .ok (indices, indexContext)
+
+namespace RecInfoPhaseOneStep
+
+/-- Expand the retained aggregate index run into its exact parameter/index
+branch trace. -/
+theorem indicesTrace
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) :
+    Nonempty (mkRecInfos.LoopArgs1Trace stats step.normalizedType 0 #[]
+      current.fuel.inductiveFuel current step.indices step.indexContext) :=
+  mkRecInfos.LoopArgs1Trace.of_run step.indicesRun
+
+def majorType
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) : Expr :=
+  mkAppN (mkAppN stats.indConsts[dIdx]! stats.params) step.indices
+
+def majorContext
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) :
+    Context :=
+  step.indexContext.pushLocalDecl `t .default
+    (consumeTypeAnnotations step.majorType)
+
+def major
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) : Expr :=
+  step.indexContext.freshExpr
+
+def motiveType
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) : Expr :=
+  step.majorContext.lctx.mkForall step.indices <|
+    step.majorContext.lctx.mkForall #[step.major] <| .sort elimLevel
+
+def motiveName
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) : Name :=
+  if indTypes.size > 1 then
+    (`motive).appendIndexAfter (dIdx + 1)
+  else
+    `motive
+
+def motive
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) : Expr :=
+  step.majorContext.freshExpr
+
+def motiveContext
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) :
+    Context :=
+  step.majorContext.pushLocalDecl step.motiveName .default
+    (consumeTypeAnnotations step.motiveType)
+
+def info
+    (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current) :
+    RecInfo :=
+  { motive := step.motive
+    minors := #[]
+    indices := step.indices
+    major := step.major }
+
+end RecInfoPhaseOneStep
+
+/-- Complete source-ordered decomposition of a captured `loopInd1` run. -/
+inductive RecInfoPhaseOneTrace
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) :
+    Nat → Array RecInfo → Context → Array RecInfo → Context → Type where
+  | done
+      (finished : ¬ dIdx < indTypes.size) :
+      RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos current
+        recInfos current
+  | next
+      (step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx current)
+      (tail : RecInfoPhaseOneTrace stats indTypes elimLevel (dIdx + 1)
+        (recInfos.push step.info) step.motiveContext finalInfos finalContext) :
+      RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos current
+        finalInfos finalContext
+
+/-- Extract the complete phase-one decomposition from its retained capture
+equation. -/
+theorem RecInfoPhaseOneTrace.of_run
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {dIdx : Nat} {recInfos finalInfos : Array RecInfo}
+    {current finalContext : Context}
+    (run : mkRecInfos.loopInd1 stats indTypes elimLevel dIdx recInfos
+      (fun nextInfos nextContext => .ok (nextInfos, nextContext)) current =
+        .ok (finalInfos, finalContext)) :
+    Nonempty (RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos
+      current finalInfos finalContext) := by
+  rw [mkRecInfos.loopInd1.eq_1] at run
+  split at run
+  · simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+      ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+      Except.bind] at run
+    cases whnfRun :
+        (liftM (TypeChecker.whnf indTypes[dIdx].type) : M Expr) current with
+    | error error =>
+        simp only [whnfRun, Except.bind] at run
+        contradiction
+    | ok normalizedType =>
+        simp only [whnfRun, Except.bind] at run
+        rw [mkRecInfos.loopArgs1_eq_capture current] at run
+        cases indicesRun :
+            mkRecInfos.loopArgs1 stats normalizedType 0 #[]
+              current.fuel.inductiveFuel
+              (fun nextIndices nextContext =>
+                .ok (nextIndices, nextContext)) current with
+        | error error =>
+            simp only [indicesRun, Except.bind] at run
+            contradiction
+        | ok indicesResult =>
+            rcases indicesResult with ⟨indices, indexContext⟩
+            simp only [indicesRun, Except.bind, withLocalDecl_apply,
+              ReaderT.bind, Bind.bind, getLCtx_apply, Pure.pure,
+              ReaderT.pure, Except.pure] at run
+            let step : RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+                current := {
+              active := by assumption
+              normalizedType
+              whnfRun
+              indices
+              indexContext
+              indicesRun }
+            have tailRun :
+                mkRecInfos.loopInd1 stats indTypes elimLevel (dIdx + 1)
+                  (recInfos.push step.info)
+                  (fun nextInfos nextContext =>
+                    .ok (nextInfos, nextContext)) step.motiveContext =
+                    .ok (finalInfos, finalContext) := by
+              simpa only [step, RecInfoPhaseOneStep.info,
+                RecInfoPhaseOneStep.motive, RecInfoPhaseOneStep.motiveContext,
+                RecInfoPhaseOneStep.motiveName,
+                RecInfoPhaseOneStep.motiveType,
+                RecInfoPhaseOneStep.major,
+                RecInfoPhaseOneStep.majorContext,
+                RecInfoPhaseOneStep.majorType] using run
+            obtain ⟨tail⟩ := RecInfoPhaseOneTrace.of_run tailRun
+            exact ⟨.next step tail⟩
+  · have pairEq : (recInfos, current) = (finalInfos, finalContext) :=
+      Except.ok.inj run
+    cases pairEq
+    exact ⟨.done (by assumption)⟩
+termination_by indTypes.size - dIdx
+
+/-- Exact boundary between the two operational halves of `mkRecInfos`.
+
+`loopInd1` creates every family index, major premise, and motive.  Only after
+that whole array exists does `loopInd2` traverse constructors and add the
+minor premises.  Retaining both equations gives verification a natural
+family-wise induction boundary without rerunning recursor synthesis or
+placing semantic data in the kernel producer. -/
+structure RecInfoSynthesisTrace
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (rootContext : Context)
+    (recInfos : Array RecInfo) (synthesisContext : Context) where
+  phase1Infos : Array RecInfo
+  phase1Context : Context
+  phase1Run :
+    mkRecInfos.loopInd1 stats indTypes elimLevel 0 #[]
+      (fun infos context => .ok (infos, context)) rootContext =
+        .ok (phase1Infos, phase1Context)
+  phase2Run :
+    mkRecInfos.loopInd2 stats indTypes 0 phase1Infos
+      (fun infos context => .ok (infos, context)) phase1Context =
+        .ok (recInfos, synthesisContext)
+
+/-- Source-ordered family decomposition of the retained first-phase run. -/
+theorem RecInfoSynthesisTrace.phase1_trace
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    Nonempty (RecInfoPhaseOneTrace stats indTypes elimLevel 0 #[] rootContext
+      trace.phase1Infos trace.phase1Context) :=
+  RecInfoPhaseOneTrace.of_run trace.phase1Run
+
+/-- One constructor step retained by the second half of recursor-info
+synthesis.  The two nested workers expose the exact constructor arguments,
+recursive arguments, induction hypotheses, and callback contexts.  The
+minor premise and updated `RecInfo` array are deterministic projections of
+those observations. -/
+structure RecInfoConstructorStep
+    (stats : InductiveStats) (indTypeName : Name) (dIdx : Nat)
+    (ctor : Constructor) (recInfos : Array RecInfo) (current : Context) where
+  terminal : Expr
+  constructorArgs : Array Expr
+  recursiveArgs : Array Expr
+  argumentContext : Context
+  argumentsRun :
+    mkRecInfos.loopCtorArgs stats ctor.type
+      (fun nextTerminal nextConstructorArgs nextRecursiveArgs nextContext =>
+        .ok (nextTerminal, nextConstructorArgs, nextRecursiveArgs,
+          nextContext)) current =
+      .ok (terminal, constructorArgs, recursiveArgs, argumentContext)
+  hypotheses : Array Expr
+  hypothesisContext : Context
+  hypothesesRun :
+    mkRecInfos.loopU stats recursiveArgs recInfos 0 #[]
+      (fun nextHypotheses nextContext =>
+        .ok (nextHypotheses, nextContext)) argumentContext =
+      .ok (hypotheses, hypothesisContext)
+
+namespace RecInfoConstructorStep
+
+def targetIndex
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Nat :=
+  (getIIndices stats step.terminal).fst
+
+def targetIndices
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Array Expr :=
+  (getIIndices stats step.terminal).snd
+
+def constructorApplication
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Expr :=
+  mkAppN (mkAppN (.const ctor.name stats.levels) stats.params)
+    step.constructorArgs
+
+def motiveApplication
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Expr :=
+  .app (mkAppN recInfos[step.targetIndex]!.motive step.targetIndices)
+    step.constructorApplication
+
+def minorType
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Expr :=
+  step.hypothesisContext.lctx.mkForall step.constructorArgs <|
+    step.hypothesisContext.lctx.mkForall step.hypotheses <|
+      step.motiveApplication
+
+def minorName
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Name :=
+  ctor.name.replacePrefix indTypeName .anonymous
+
+def minor
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Expr :=
+  step.hypothesisContext.freshExpr
+
+def minorContext
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Context :=
+  step.hypothesisContext.pushLocalDecl step.minorName .default
+    (consumeTypeAnnotations step.minorType)
+
+def nextInfos
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) : Array RecInfo :=
+  recInfos.modify dIdx fun info =>
+    { info with minors := info.minors.push step.minor }
+
+end RecInfoConstructorStep
+
+/-- Complete source-ordered decomposition of one captured constructor-list
+worker. -/
+inductive RecInfoConstructorTrace
+    (stats : InductiveStats) (indTypeName : Name) (dIdx : Nat) :
+    List Constructor → Array RecInfo → Context →
+      Array RecInfo → Context → Type where
+  | done :
+      RecInfoConstructorTrace stats indTypeName dIdx [] recInfos current
+        recInfos current
+  | next
+      (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+        current)
+      (tail : RecInfoConstructorTrace stats indTypeName dIdx ctors
+        step.nextInfos step.minorContext finalInfos finalContext) :
+      RecInfoConstructorTrace stats indTypeName dIdx (ctor :: ctors)
+        recInfos current finalInfos finalContext
+
+/-- Extract a constructor-list decomposition from its continuation-free
+capture equation. -/
+theorem RecInfoConstructorTrace.of_run
+    {stats : InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array RecInfo}
+    {current finalContext : Context}
+    (run : mkRecInfos.loopCtors stats indTypeName dIdx recInfos ctors
+      (fun nextInfos nextContext => .ok (nextInfos, nextContext)) current =
+        .ok (finalInfos, finalContext)) :
+    Nonempty (RecInfoConstructorTrace stats indTypeName dIdx ctors recInfos
+      current finalInfos finalContext) := by
+  induction ctors generalizing recInfos current with
+  | nil =>
+      have pairEq : (recInfos, current) = (finalInfos, finalContext) :=
+        Except.ok.inj run
+      cases pairEq
+      exact ⟨.done⟩
+  | cons ctor ctors ih =>
+      rw [mkRecInfos.loopCtors] at run
+      rw [mkRecInfos.loopCtorArgs_eq_capture current] at run
+      cases argumentsRun :
+          mkRecInfos.loopCtorArgs stats ctor.type
+            (fun nextTerminal nextConstructorArgs nextRecursiveArgs
+                nextContext =>
+              .ok (nextTerminal, nextConstructorArgs, nextRecursiveArgs,
+                nextContext)) current with
+      | error error =>
+          simp only [argumentsRun, Except.bind] at run
+          contradiction
+      | ok argumentsResult =>
+          rcases argumentsResult with
+            ⟨terminal, constructorArgs, recursiveArgs, argumentContext⟩
+          simp only [argumentsRun, Except.bind] at run
+          rw [mkRecInfos.loopU_eq_capture argumentContext] at run
+          cases hypothesesRun :
+              mkRecInfos.loopU stats recursiveArgs recInfos 0 #[]
+                (fun nextHypotheses nextContext =>
+                  .ok (nextHypotheses, nextContext)) argumentContext with
+          | error error =>
+              simp only [hypothesesRun, Except.bind] at run
+              contradiction
+          | ok hypothesesResult =>
+              rcases hypothesesResult with ⟨hypotheses, hypothesisContext⟩
+              simp only [hypothesesRun, Except.bind, getLCtx_apply,
+                ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+                withLocalDecl_apply] at run
+              let step : RecInfoConstructorStep stats indTypeName dIdx ctor
+                  recInfos current := {
+                terminal
+                constructorArgs
+                recursiveArgs
+                argumentContext
+                argumentsRun
+                hypotheses
+                hypothesisContext
+                hypothesesRun }
+              have tailRun :
+                  mkRecInfos.loopCtors stats indTypeName dIdx step.nextInfos
+                    ctors
+                    (fun nextInfos nextContext =>
+                      .ok (nextInfos, nextContext)) step.minorContext =
+                    .ok (finalInfos, finalContext) := by
+                simpa only [step, RecInfoConstructorStep.nextInfos,
+                  RecInfoConstructorStep.minor,
+                  RecInfoConstructorStep.minorContext,
+                  RecInfoConstructorStep.minorName,
+                  RecInfoConstructorStep.minorType,
+                  RecInfoConstructorStep.motiveApplication,
+                  RecInfoConstructorStep.constructorApplication,
+                  RecInfoConstructorStep.targetIndices,
+                  RecInfoConstructorStep.targetIndex] using run
+              obtain ⟨tail⟩ := ih tailRun
+              exact ⟨.next step tail⟩
+
+/-- One family step retained by the second half of recursor-info synthesis. -/
+structure RecInfoPhaseTwoStep
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (dIdx : Nat) (recInfos : Array RecInfo) (current : Context) where
+  active : dIdx < indTypes.size
+  finalInfos : Array RecInfo
+  finalContext : Context
+  constructors : RecInfoConstructorTrace stats
+    (indTypes[dIdx]'active).name dIdx (indTypes[dIdx]'active).ctors recInfos
+      current finalInfos finalContext
+
+/-- Complete source-ordered decomposition of a captured `loopInd2` run. -/
+inductive RecInfoPhaseTwoTrace
+    (stats : InductiveStats) (indTypes : Array InductiveType) :
+    Nat → Array RecInfo → Context → Array RecInfo → Context → Type where
+  | done
+      (finished : ¬ dIdx < indTypes.size) :
+      RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current recInfos
+        current
+  | next
+      (step : RecInfoPhaseTwoStep stats indTypes dIdx recInfos current)
+      (tail : RecInfoPhaseTwoTrace stats indTypes (dIdx + 1)
+        step.finalInfos step.finalContext finalInfos finalContext) :
+      RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current finalInfos
+        finalContext
+
+/-- Extract the complete phase-two decomposition from its retained capture
+equation. -/
+theorem RecInfoPhaseTwoTrace.of_run
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array RecInfo}
+    {current finalContext : Context}
+    (run : mkRecInfos.loopInd2 stats indTypes dIdx recInfos
+      (fun nextInfos nextContext => .ok (nextInfos, nextContext)) current =
+        .ok (finalInfos, finalContext)) :
+    Nonempty (RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext) := by
+  rw [mkRecInfos.loopInd2.eq_1] at run
+  split at run
+  · rw [mkRecInfos.loopCtors_eq_capture current] at run
+    cases constructorsRun :
+        mkRecInfos.loopCtors stats indTypes[dIdx].name dIdx recInfos
+          indTypes[dIdx].ctors
+          (fun nextInfos nextContext => .ok (nextInfos, nextContext))
+          current with
+    | error error =>
+        simp only [constructorsRun, Except.bind] at run
+        contradiction
+    | ok constructorsResult =>
+        rcases constructorsResult with ⟨nextInfos, nextContext⟩
+        simp only [constructorsRun, Except.bind] at run
+        obtain ⟨constructors⟩ := RecInfoConstructorTrace.of_run
+          constructorsRun
+        obtain ⟨tail⟩ := RecInfoPhaseTwoTrace.of_run run
+        let step : RecInfoPhaseTwoStep stats indTypes dIdx recInfos current := {
+          active := by assumption
+          finalInfos := nextInfos
+          finalContext := nextContext
+          constructors := by simpa using constructors }
+        exact ⟨.next step (by simpa only [step] using tail)⟩
+  · have pairEq : (recInfos, current) = (finalInfos, finalContext) :=
+      Except.ok.inj run
+    cases pairEq
+    exact ⟨.done (by assumption)⟩
+termination_by indTypes.size - dIdx
+
+/-- Source-ordered family/constructor decomposition of the retained second
+phase. -/
+theorem RecInfoSynthesisTrace.phase2_trace
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    Nonempty (RecInfoPhaseTwoTrace stats indTypes 0 trace.phase1Infos
+      trace.phase1Context recInfos synthesisContext) :=
+  RecInfoPhaseTwoTrace.of_run trace.phase2Run
+
+/-- The phase-one callback context is reached solely by local-declaration
+pushes from the recursor root. -/
+theorem RecInfoSynthesisTrace.phase1_localExtension
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    rootContext.LocalExtension trace.phase1Context := by
+  exact mkRecInfos.loopInd1_localExtension .refl trace.phase1Run
+    fun nextInfos nextContext extension callbackRun => by
+      have pairEq : (nextInfos, nextContext) =
+          (trace.phase1Infos, trace.phase1Context) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = trace.phase1Context :=
+        congrArg Prod.snd pairEq
+      exact contextEq ▸ extension
+
+/-- Composing both synthesis phases shows that the final context used to
+assemble generated recursor types still contains the root local context as an
+exact push-only prefix. -/
+theorem RecInfoSynthesisTrace.synthesis_localExtension
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    rootContext.LocalExtension synthesisContext := by
+  exact mkRecInfos.loopInd2_localExtension trace.phase1_localExtension
+    trace.phase2Run fun nextInfos nextContext extension callbackRun => by
+      have pairEq : (nextInfos, nextContext) = (recInfos, synthesisContext) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = synthesisContext :=
+        congrArg Prod.snd pairEq
+      exact contextEq ▸ extension
+
+/-- Producer-owned provenance for the successful `mkRecInfos` callback and
+the exact recursor declaration worker it launches.  Retaining the callback
+context makes the generated motive/minor telescope available to verification
+without rerunning synthesis or inspecting a parallel executable checker. -/
+structure RecursorDeclarationSynthesis
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (k : Bool) (rootContext : Context) where
+  recInfos : Array RecInfo
+  synthesisContext : Context
+  synthesisTrace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+    recInfos synthesisContext
+  tail : RecursorDeclarationTail rootContext.allowPrimitive rootContext.env k
+    indTypes 0 (getRecLevelParams elimLevel rootContext.lparams)
+      (rootContext.safety != .safe)
+  run : StateT.run'
+    (declareRecursors.loop stats indTypes elimLevel k recInfos
+      (recInfos.map (·.motive)) (recInfos.flatMap (·.minors))
+      synthesisContext.lctx rootContext.lparams
+      (rootContext.safety != .safe) rootContext.allowPrimitive 0
+      rootContext.env) 0 synthesisContext = .ok tail
+
+/-- Transparent synthesis/declaration worker retaining the exact callback
+context and `RecInfo` array that determine every generated recursor type. -/
+def declareRecursorsDetailedAt (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
+    (context : Context) :
+    Except Exception
+      (RecursorDeclarationSynthesis stats indTypes elimLevel k context) :=
+  match hphase1 : mkRecInfos.loopInd1 stats indTypes elimLevel 0 #[]
+      (fun recInfos phase1Context => .ok (recInfos, phase1Context))
+      context with
+  | .error error => .error error
+  | .ok (phase1Infos, phase1Context) =>
+      match hphase2 : mkRecInfos.loopInd2 stats indTypes 0 phase1Infos
+          (fun recInfos synthesisContext => .ok (recInfos, synthesisContext))
+          phase1Context with
+      | .error error => .error error
+      | .ok (recInfos, synthesisContext) =>
+          match hloop : StateT.run'
+              (declareRecursors.loop stats indTypes elimLevel k recInfos
+                (recInfos.map (·.motive)) (recInfos.flatMap (·.minors))
+                synthesisContext.lctx context.lparams
+                (context.safety != .safe) context.allowPrimitive 0 context.env)
+              0 synthesisContext with
+          | .error error => .error error
+          | .ok tail => .ok {
+              recInfos
+              synthesisContext
+              synthesisTrace := {
+                phase1Infos
+                phase1Context
+                phase1Run := hphase1
+                phase2Run := hphase2 }
+              tail
+              run := hloop }
+
+/-- Recover the exact successful `mkRecInfos` capture from a successful
+detailed declaration worker.  The equation is derived at the consumer
+boundary instead of being stored dependently in the result, keeping concrete
+replay reductions proof-irrelevant. -/
+theorem RecursorDeclarationSynthesis.synthesisRun
+    (synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k
+      context)
+    (run : declareRecursorsDetailedAt stats indTypes elimLevel k context =
+      .ok synthesis) :
+    mkRecInfos stats indTypes elimLevel
+      (fun recInfos synthesisContext => .ok (recInfos, synthesisContext))
+      context = .ok (synthesis.recInfos, synthesis.synthesisContext) := by
+  unfold mkRecInfos
+  rw [synthesis.synthesisTrace.phase1Run]
+  exact synthesis.synthesisTrace.phase2Run
+
 /-- Transparent recursor synthesis/declaration worker at an explicit reader
 context.  Exposing this worker lets verification recover generated metadata
 from a successful `declareRecursors` equation while keeping the public result
@@ -4321,15 +5896,10 @@ def declareRecursorsAt (stats : InductiveStats)
     (context : Context) :
     Except Exception
       (RecursorDeclarationTail context.allowPrimitive context.env k
-        indTypes 0) :=
-  (mkRecInfos stats indTypes elimLevel fun recInfos => do
-    let motives := recInfos.map (·.motive)
-    let minors := recInfos.flatMap (·.minors)
-    let lctx ← getLCtx
-    StateT.run' (s := 0) <|
-      declareRecursors.loop stats indTypes elimLevel k recInfos motives minors
-        lctx context.lparams (context.safety != .safe)
-          context.allowPrimitive 0 context.env) context
+        indTypes 0 (getRecLevelParams elimLevel context.lparams)
+        (context.safety != .safe)) :=
+  (declareRecursorsDetailedAt stats indTypes elimLevel k context).map
+    (·.tail)
 
 /-- Run the complete ordinary recursor synthesis/declaration phase while
 retaining the generated metadata inventory. -/
@@ -4342,14 +5912,60 @@ def declareRecursors (stats : InductiveStats)
     allowPrimitive := context.allowPrimitive
     kTarget := k
     sourceTypes := indTypes
+    levelParams := getRecLevelParams elimLevel context.lparams
+    isUnsafe := context.safety != .safe
     infos := result.infos
     infos_names := by simpa using result.infos_names
     infos_kTarget := result.infos_kTarget
+    infos_levelParams := result.infos_levelParams
+    infos_isUnsafe := result.infos_isUnsafe
     info_of_source_index := by
       intro i upper
       exact result.info_of_source_index i (Nat.zero_le i) upper
     env := result.env
     trace := result.trace }
+
+/-- Recover the exact successful `mkRecInfos` callback owned by a public
+recursor result.  The equality on `infos` is intentionally retained even
+though the detailed worker is definitionally projected by
+`declareRecursorsAt`; it is the stable transport boundary for verification. -/
+theorem declareRecursors_synthesis
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    ∃ synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k
+        context,
+      declareRecursorsDetailedAt stats indTypes elimLevel k context =
+          .ok synthesis ∧
+        result.infos = synthesis.tail.infos := by
+  unfold declareRecursors at run
+  unfold declareRecursorsAt at run
+  cases hsynthesis :
+      declareRecursorsDetailedAt stats indTypes elimLevel k context with
+  | error error =>
+      simp_all [Functor.map, Except.map, Bind.bind, Except.bind]
+  | ok synthesis =>
+      simp only [hsynthesis, Functor.map, Except.map, Bind.bind, Except.bind,
+        Pure.pure, Except.pure] at run
+      cases run
+      exact ⟨synthesis, rfl, rfl⟩
+
+/-- Every public recursor header is exactly the source-ordered type assembled
+from the retained `mkRecInfos` callback. -/
+theorem declareRecursors_infos_types
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    ∃ synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k
+        context,
+      declareRecursorsDetailedAt stats indTypes elimLevel k context =
+          .ok synthesis ∧
+        result.infos.map (fun info => info.type) =
+          declareRecursors.generatedRecursorTypes stats indTypes
+            synthesis.recInfos (synthesis.recInfos.map (·.motive))
+            (synthesis.recInfos.flatMap (·.minors))
+            synthesis.synthesisContext.lctx 0 := by
+  obtain ⟨synthesis, synthesisRun, infos_eq⟩ :=
+    declareRecursors_synthesis run
+  refine ⟨synthesis, synthesisRun, ?_⟩
+  rw [infos_eq]
+  exact declareRecursors.loop_infos_types synthesis.run
 
 /-- A successful recursor phase records the exact input environment and name-
 checking mode of its reader context. -/
@@ -4383,6 +5999,32 @@ to the producer. -/
 theorem declareRecursors_sourceTypes_eq
     (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
     result.sourceTypes = indTypes := by
+  unfold declareRecursors at run
+  cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
+  | error error => simp_all [Bind.bind, Except.bind]
+  | ok tail =>
+      simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
+      cases run
+      rfl
+
+/-- A successful recursor phase records the exact universe-parameter list
+used by every generated recursor header. -/
+theorem declareRecursors_levelParams_eq
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.levelParams = getRecLevelParams elimLevel context.lparams := by
+  unfold declareRecursors at run
+  cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
+  | error error => simp_all [Bind.bind, Except.bind]
+  | ok tail =>
+      simp only [hrun, Bind.bind, Except.bind, Pure.pure, Except.pure] at run
+      cases run
+      rfl
+
+/-- A successful recursor phase records the reader-context safety decision
+used by every generated recursor header. -/
+theorem declareRecursors_isUnsafe_eq
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result) :
+    result.isUnsafe = (context.safety != .safe) := by
   unfold declareRecursors at run
   cases hrun : declareRecursorsAt stats indTypes elimLevel k context with
   | error error => simp_all [Bind.bind, Except.bind]
@@ -4439,6 +6081,383 @@ theorem declareRecursors_infos_kTarget
   rw [← declareRecursors_kTarget_eq run]
   exact result.infos_kTarget info member
 
+/-- Every emitted recursor uses the exact universe-parameter list computed
+for the successful phase. -/
+theorem declareRecursors_infos_levelParams
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result)
+    {info : RecursorVal} (member : info ∈ result.infos) :
+    info.levelParams = getRecLevelParams elimLevel context.lparams := by
+  rw [← declareRecursors_levelParams_eq run]
+  exact result.infos_levelParams info member
+
+/-- Every emitted recursor carries the exact safety bit of the reader
+context used by the successful phase. -/
+theorem declareRecursors_infos_isUnsafe
+    (run : declareRecursors stats indTypes elimLevel k context = .ok result)
+    {info : RecursorVal} (member : info ∈ result.infos) :
+    info.isUnsafe = (context.safety != .safe) := by
+  rw [← declareRecursors_isUnsafe_eq run]
+  exact result.infos_isUnsafe info member
+
+/-- Repackage the exact detailed worker result as the public recursor
+declaration result without rerunning synthesis. -/
+def RecursorDeclarationSynthesis.toDeclarationResult
+    (synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k
+      context) : RecursorDeclarationResult := {
+  initialEnv := context.env
+  allowPrimitive := context.allowPrimitive
+  kTarget := k
+  sourceTypes := indTypes
+  levelParams := getRecLevelParams elimLevel context.lparams
+  isUnsafe := context.safety != .safe
+  infos := synthesis.tail.infos
+  infos_names := by simpa using synthesis.tail.infos_names
+  infos_kTarget := synthesis.tail.infos_kTarget
+  infos_levelParams := synthesis.tail.infos_levelParams
+  infos_isUnsafe := synthesis.tail.infos_isUnsafe
+  info_of_source_index := by
+    intro i upper
+    exact synthesis.tail.info_of_source_index i (Nat.zero_le i) upper
+  env := synthesis.tail.env
+  trace := synthesis.tail.trace }
+
+/-- The public declaration equation projected from one successful detailed
+worker.  This is a proof-only projection of the same run, not a second
+execution of recursor synthesis. -/
+theorem RecursorDeclarationSynthesis.declareRecursorsRun
+    (synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k
+      context)
+    (run : declareRecursorsDetailedAt stats indTypes elimLevel k context =
+      .ok synthesis) :
+    declareRecursors stats indTypes elimLevel k context =
+      .ok synthesis.toDeclarationResult := by
+  unfold declareRecursors declareRecursorsAt
+  rw [run]
+  rfl
+
+/-- The recursor prefix applied before a constructor in the generated-rule
+check: parameters, all motives, and all minor premises have already been
+supplied. -/
+def generatedRecursorCheckPrefix (stats : InductiveStats)
+    (elimLevel : Level) (motives minors : Array Expr)
+    (indType : InductiveType) : Expr :=
+  mkAppN (mkAppN (mkAppN
+    (.const (mkRecName indType.name)
+      (getRecLevels elimLevel stats.levels)) stats.params) motives) minors
+
+/-- The constructor application used as the major premise in one generated
+recursor type-preservation check. -/
+def generatedRecursorConstructorApplication (stats : InductiveStats)
+    (constructor : Constructor) (fields : Array Expr) : Expr :=
+  mkAppN (mkAppN (.const constructor.name stats.levels) stats.params) fields
+
+/-- Exact left-hand side inferred, reduced, and inferred again by Lean
+4.33.1's generated-rule guard. -/
+def generatedRecursorRuleLhs (stats : InductiveStats)
+    (elimLevel : Level) (motives minors : Array Expr)
+    (indType : InductiveType) (constructor : Constructor)
+    (terminal : Expr) (fields : Array Expr) : Expr :=
+  let indices := (getIIndices stats terminal).2
+  .app (mkAppN
+      (generatedRecursorCheckPrefix stats elimLevel motives minors indType)
+      indices)
+    (generatedRecursorConstructorApplication stats constructor fields)
+
+/-- One constructor-specific generated-rule verification.  Besides the four
+checker equations it retains the exact constructor traversal, terminal
+indices, field locals, constructor application, and recursor left-hand side. -/
+structure GeneratedRecursorRuleCheck
+    (stats : InductiveStats) (elimLevel : Level)
+    (motives minors : Array Expr) (indType : InductiveType)
+    (recursor : RecursorVal) (constructor : Constructor)
+    (initialContext finalContext : Context) where
+  terminal : Expr
+  fields : Array Expr
+  recursiveFields : Array Expr
+  argumentsRun :
+    mkRecInfos.loopCtorArgs stats constructor.type
+      (fun terminal fields recursiveFields context =>
+        .ok (terminal, fields, recursiveFields, context)) initialContext =
+      .ok (terminal, fields, recursiveFields, finalContext)
+  constructorApplication : Expr
+  constructorApplication_eq : constructorApplication =
+    generatedRecursorConstructorApplication stats constructor fields
+  lhs : Expr
+  lhs_eq : lhs = generatedRecursorRuleLhs stats elimLevel motives minors
+    indType constructor terminal fields
+  expected : Expr
+  expectedRun :
+    TypeChecker.M.run finalContext.env (safety := finalContext.safety)
+      (lctx := finalContext.lctx) (lparams := recursor.levelParams)
+      (fuel := finalContext.fuel) (TypeChecker.inferType lhs) = .ok expected
+  reduct : Expr
+  reductRun :
+    TypeChecker.M.run finalContext.env (safety := finalContext.safety)
+      (lctx := finalContext.lctx) (lparams := recursor.levelParams)
+      (fuel := finalContext.fuel) (TypeChecker.whnf lhs) = .ok reduct
+  actual : Expr
+  actualRun :
+    TypeChecker.M.run finalContext.env (safety := finalContext.safety)
+      (lctx := finalContext.lctx) (lparams := recursor.levelParams)
+      (fuel := finalContext.fuel) (TypeChecker.inferType reduct) = .ok actual
+  typePreservingRun :
+    TypeChecker.M.run finalContext.env (safety := finalContext.safety)
+      (lctx := finalContext.lctx) (lparams := recursor.levelParams)
+      (fuel := finalContext.fuel)
+      (TypeChecker.isDefEq actual expected) = .ok true
+
+/-- Run one constructor-specific generated-rule guard at an explicit
+name-generator/local-context boundary. -/
+def checkGeneratedRecursorRuleAt
+    (stats : InductiveStats) (elimLevel : Level)
+    (motives minors : Array Expr) (indType : InductiveType)
+    (recursor : RecursorVal) (constructor : Constructor)
+    (initialContext : Context) :
+    Except Exception (Σ finalContext,
+      GeneratedRecursorRuleCheck stats elimLevel motives minors indType
+        recursor constructor initialContext finalContext) :=
+  match hargs : mkRecInfos.loopCtorArgs stats constructor.type
+      (fun terminal fields recursiveFields context =>
+        .ok (terminal, fields, recursiveFields, context)) initialContext with
+  | .error error => .error error
+  | .ok (terminal, fields, recursiveFields, finalContext) =>
+      let constructorApplication :=
+        generatedRecursorConstructorApplication stats constructor fields
+      let lhs := generatedRecursorRuleLhs stats elimLevel motives minors
+        indType constructor terminal fields
+      match hexpected : TypeChecker.M.run finalContext.env
+          (safety := finalContext.safety) (lctx := finalContext.lctx)
+          (lparams := recursor.levelParams) (fuel := finalContext.fuel)
+          (TypeChecker.inferType lhs) with
+      | .error error => .error error
+      | .ok expected =>
+          match hreduct : TypeChecker.M.run finalContext.env
+              (safety := finalContext.safety) (lctx := finalContext.lctx)
+              (lparams := recursor.levelParams) (fuel := finalContext.fuel)
+              (TypeChecker.whnf lhs) with
+          | .error error => .error error
+          | .ok reduct =>
+              match hactual : TypeChecker.M.run finalContext.env
+                  (safety := finalContext.safety)
+                  (lctx := finalContext.lctx)
+                  (lparams := recursor.levelParams)
+                  (fuel := finalContext.fuel)
+                  (TypeChecker.inferType reduct) with
+              | .error error => .error error
+              | .ok actual =>
+                  match hequal : TypeChecker.M.run finalContext.env
+                      (safety := finalContext.safety)
+                      (lctx := finalContext.lctx)
+                      (lparams := recursor.levelParams)
+                      (fuel := finalContext.fuel)
+                      (TypeChecker.isDefEq actual expected) with
+                  | .error error => .error error
+                  | .ok false => .error (.other
+                      s!"generated recursor computation rule for '{
+                        constructor.name}' is not type-preserving")
+                  | .ok true => .ok ⟨finalContext, {
+                      terminal
+                      fields
+                      recursiveFields
+                      argumentsRun := hargs
+                      constructorApplication
+                      constructorApplication_eq := rfl
+                      lhs
+                      lhs_eq := rfl
+                      expected
+                      expectedRun := hexpected
+                      reduct
+                      reductRun := hreduct
+                      actual
+                      actualRun := hactual
+                      typePreservingRun := hequal }⟩
+
+/-- Source-ordered generated-rule checks for all constructors of one family,
+threading the persistent local/name-generator context exactly as the kernel
+does. -/
+inductive GeneratedRecursorRuleCheckTrace
+    (stats : InductiveStats) (elimLevel : Level)
+    (motives minors : Array Expr) (indType : InductiveType)
+    (recursor : RecursorVal) :
+    List Constructor → Context → Context → Type where
+  | nil : GeneratedRecursorRuleCheckTrace stats elimLevel motives minors
+      indType recursor [] context context
+  | cons
+      (head : GeneratedRecursorRuleCheck stats elimLevel motives minors
+        indType recursor constructor initialContext nextContext)
+      (tail : GeneratedRecursorRuleCheckTrace stats elimLevel motives minors
+        indType recursor constructors nextContext finalContext) :
+      GeneratedRecursorRuleCheckTrace stats elimLevel motives minors indType
+        recursor (constructor :: constructors) initialContext finalContext
+
+/-- Execute all constructor checks for one generated recursor in source
+order. -/
+def checkGeneratedRecursorRulesAt
+    (stats : InductiveStats) (elimLevel : Level)
+    (motives minors : Array Expr) (indType : InductiveType)
+    (recursor : RecursorVal) :
+    (constructors : List Constructor) → (initialContext : Context) →
+      Except Exception (Σ finalContext,
+        GeneratedRecursorRuleCheckTrace stats elimLevel motives minors
+          indType recursor constructors initialContext finalContext)
+  | [], context => .ok ⟨context, .nil⟩
+  | constructor :: constructors, context => do
+      let ⟨nextContext, head⟩ ← checkGeneratedRecursorRuleAt stats elimLevel
+        motives minors indType recursor constructor context
+      let ⟨finalContext, tail⟩ ← checkGeneratedRecursorRulesAt stats elimLevel
+        motives minors indType recursor constructors nextContext
+      return ⟨finalContext, .cons head tail⟩
+
+/-- One family-specific generated-recursor verification: the exact final-env
+lookup, a full check of the stored recursor type, and every source constructor
+rule check. -/
+structure GeneratedRecursorFamilyCheck
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (motives minors : Array Expr) (dIdx : Nat)
+    (initialContext finalContext : Context) where
+  active : dIdx < indTypes.size
+  recursor : RecursorVal
+  recursorLookup : initialContext.env.find?
+    (mkRecName indTypes[dIdx].name) = some (.recInfo recursor)
+  recursorType : Expr
+  recursorType_eq : recursorType = recursor.type
+  recursorTypeInferred : Expr
+  recursorTypeRun :
+    TypeChecker.M.run initialContext.env (safety := initialContext.safety)
+      (lctx := initialContext.lctx) (lparams := recursor.levelParams)
+      (fuel := initialContext.fuel) (TypeChecker.checkType recursorType) =
+      .ok recursorTypeInferred
+  rules : GeneratedRecursorRuleCheckTrace stats elimLevel motives minors
+    indTypes[dIdx] recursor indTypes[dIdx].ctors initialContext finalContext
+
+/-- Complete family-ordered generated-recursor guard. -/
+inductive GeneratedRecursorCheckTrace
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (motives minors : Array Expr) :
+    Nat → Context → Context → Type where
+  | done
+      (finished : ¬ dIdx < indTypes.size) :
+      GeneratedRecursorCheckTrace stats indTypes elimLevel motives minors
+        dIdx context context
+  | next
+      (family : GeneratedRecursorFamilyCheck stats indTypes elimLevel
+        motives minors dIdx initialContext nextContext)
+      (tail : GeneratedRecursorCheckTrace stats indTypes elimLevel motives
+        minors (dIdx + 1) nextContext finalContext) :
+      GeneratedRecursorCheckTrace stats indTypes elimLevel motives minors
+        dIdx initialContext finalContext
+
+/-- Execute Lean 4.33.1's generated-recursor guard over every family. -/
+def checkGeneratedRecursorsAt
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (motives minors : Array Expr) :
+    (dIdx : Nat) → (initialContext : Context) →
+      Except Exception (Σ finalContext,
+        GeneratedRecursorCheckTrace stats indTypes elimLevel motives minors
+          dIdx initialContext finalContext)
+  | dIdx, context =>
+      if active : dIdx < indTypes.size then
+        let indType := indTypes[dIdx]
+        let recName := mkRecName indType.name
+        match hlookup : context.env.find? recName with
+        | none => .error (.other
+            s!"generated recursor '{recName}' is missing")
+        | some (.recInfo recursor) =>
+            let recursorType := recursor.type
+            match htype : TypeChecker.M.run context.env
+                (safety := context.safety) (lctx := context.lctx)
+                (lparams := recursor.levelParams) (fuel := context.fuel)
+                (TypeChecker.checkType recursorType) with
+            | .error error => .error error
+            | .ok recursorTypeInferred => do
+                let ⟨nextContext, rules⟩ ←
+                  checkGeneratedRecursorRulesAt stats elimLevel motives minors
+                    indType recursor indType.ctors context
+                let ⟨finalContext, tail⟩ ←
+                  checkGeneratedRecursorsAt stats indTypes elimLevel motives
+                    minors (dIdx + 1) nextContext
+                return ⟨finalContext, .next {
+                  active
+                  recursor
+                  recursorLookup := hlookup
+                  recursorType
+                  recursorType_eq := rfl
+                  recursorTypeInferred
+                  recursorTypeRun := htype
+                  rules } tail⟩
+        | some _ => .error (.other
+            s!"generated declaration '{recName}' is not a recursor")
+      else
+        .ok ⟨context, .done active⟩
+termination_by dIdx context => indTypes.size - dIdx
+
+/-- A one-pass recursor declaration plus the exact 4.33.1 generated-recursors
+verification.  `synthesisRun` owns the only execution of the detailed
+producer; `recursorsRun` is its proof-level public projection. -/
+structure CheckedRecursorDeclaration
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (k : Bool) (context : Context) where
+  synthesis : RecursorDeclarationSynthesis stats indTypes elimLevel k context
+  synthesisRun :
+    declareRecursorsDetailedAt stats indTypes elimLevel k context =
+      .ok synthesis
+  recursors : RecursorDeclarationResult
+  recursors_eq : recursors = synthesis.toDeclarationResult
+  recursorsRun :
+    declareRecursors stats indTypes elimLevel k context = .ok recursors
+  finalContext : Context
+  verification : GeneratedRecursorCheckTrace stats indTypes elimLevel
+    (synthesis.recInfos.map (·.motive))
+    (synthesis.recInfos.flatMap (·.minors)) 0
+    { synthesis.synthesisContext with env := synthesis.tail.env }
+    finalContext
+
+/-- Run recursor synthesis, declaration, and the generated-artifact guard
+without repeating the producer. -/
+def declareRecursorsCheckedAt (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool)
+    (context : Context) : Except Exception
+      (CheckedRecursorDeclaration stats indTypes elimLevel k context) :=
+  match hsynthesis : declareRecursorsDetailedAt stats indTypes elimLevel k
+      context with
+  | .error error => .error error
+  | .ok synthesis =>
+      let motives := synthesis.recInfos.map (·.motive)
+      let minors := synthesis.recInfos.flatMap (·.minors)
+      let verificationContext : Context :=
+        { synthesis.synthesisContext with env := synthesis.tail.env }
+      match checkGeneratedRecursorsAt stats indTypes elimLevel motives minors
+          0 verificationContext with
+      | .error error => .error error
+      | .ok ⟨finalContext, verification⟩ =>
+          let recursors := synthesis.toDeclarationResult
+          .ok {
+            synthesis
+            synthesisRun := hsynthesis
+            recursors
+            recursors_eq := rfl
+            recursorsRun := synthesis.declareRecursorsRun hsynthesis
+            finalContext
+            verification := by
+              simpa only [motives, minors, verificationContext] using
+                verification }
+
+/-- Reader-independent package for the checked recursor result returned by
+the ordinary `AddInductive.M` pipeline. -/
+structure CheckedRecursorDeclarationResult
+    (stats : InductiveStats) (indTypes : Array InductiveType)
+    (elimLevel : Level) (k : Bool) where
+  context : Context
+  checked : CheckedRecursorDeclaration stats indTypes elimLevel k context
+
+/-- Reader-form checked recursor phase used by the public ordinary runner. -/
+def declareRecursorsChecked (stats : InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) (k : Bool) :
+    M (CheckedRecursorDeclarationResult stats indTypes elimLevel k) :=
+  fun context =>
+    (declareRecursorsCheckedAt stats indTypes elimLevel k context).map fun
+      checked => { context, checked }
+
 /-- Run an ordinary flattened inductive transaction through the retained
 normalization prefix consumed by Theory/Verify.  The prefix keeps the kernel's
 family-validation, raw-declaration, and constructor-validation order, then
@@ -4457,8 +6476,9 @@ def run (nparams : Nat) (types : List InductiveType) (numNested : Nat) : M Envir
   withEnv (← declareConstructors normalization.stats indTypes isUnsafe) do
   let elimLevel ← getElimLevel normalization.stats indTypes
   let k ← isKTarget normalization.stats indTypes
-  let recursors ← declareRecursors normalization.stats indTypes elimLevel k
-  pure recursors.env
+  let checked ← declareRecursorsChecked normalization.stats indTypes
+    elimLevel k
+  pure checked.checked.recursors.env
 
 end AddInductive
 
@@ -4470,6 +6490,11 @@ structure Result where
   lctx : LocalContext
   params : Array Expr -- the fvars declared in `lctx`
   aux2nested : NameMap Expr -- exprs are open over `params`, like the C++ `m_aux2nested`
+  /-- Exact owner of every auxiliary constructor emitted by nested
+  elimination.  Retaining this map makes restoration classification a
+  producer-owned fact instead of a lookup reconstructed from the temporary
+  flattened environment. -/
+  auxCtor2Induct : NameMap Name
   types : List InductiveType
   types_nonempty : types.isEmpty = false
 
@@ -4479,8 +6504,38 @@ instance [MonadStateOf NameGenerator m] : MonadNameGenerator m where
 
 namespace Result
 
-def getNestedIfAuxCtor (r : Result) (env' : Environment) (c : Name) : Option (Expr × Name) := do
-  let .ctorInfo { induct, .. } ← env'.find? c | none
+/-- Structural abstraction of the fresh parameter FVar introduced by nested
+restoration.  Unlike the opaque array abstraction primitive, this one-variable
+form exposes the binder-depth shift needed by the prefix invariant. -/
+def abstractNestedFVar (id : FVarId) : Expr → (depth : Nat := 0) → Expr
+  | .bvar index, depth =>
+      .bvar (if index < depth then index else index + 1)
+  | expression@(.fvar other), depth =>
+      if id == other then .bvar depth else expression
+  | .mdata data expression, depth =>
+      .mdata data (abstractNestedFVar id expression depth)
+  | .proj typeName index expression, depth =>
+      .proj typeName index (abstractNestedFVar id expression depth)
+  | .app function argument, depth =>
+      .app (abstractNestedFVar id function depth)
+        (abstractNestedFVar id argument depth)
+  | .lam name domain body binderInfo, depth =>
+      .lam name (abstractNestedFVar id domain depth)
+        (abstractNestedFVar id body (depth + 1)) binderInfo
+  | .forallE name domain body binderInfo, depth =>
+      .forallE name (abstractNestedFVar id domain depth)
+        (abstractNestedFVar id body (depth + 1)) binderInfo
+  | .letE name type value body nondep, depth =>
+      .letE name (abstractNestedFVar id type depth)
+        (abstractNestedFVar id value depth)
+        (abstractNestedFVar id body (depth + 1)) nondep
+  | expression@(.const ..), _
+  | expression@(.sort _), _
+  | expression@(.mvar _), _
+  | expression@(.lit _), _ => expression
+
+def getNestedIfAuxCtor (r : Result) (_env' : Environment) (c : Name) : Option (Expr × Name) := do
+  let induct ← r.auxCtor2Induct.find? c
   return (← r.aux2nested.find? induct, induct)
 
 def restoreCtorName (r : Result) (env' : Environment) (c : Name) : Name := Id.run do
@@ -4488,23 +6543,11 @@ def restoreCtorName (r : Result) (env' : Environment) (c : Name) : Name := Id.ru
   let .const I _ := e.getAppFn | unreachable!
   c.replacePrefix name I
 
-def restoreNested (r : Result) (env' : Environment) (e : Expr)
-    (auxRec : NameMap Name := {}) : Expr :=
-  Id.run <| StateT.run' (s := { namePrefix := `_nested_fresh : NameGenerator }) do
-  let pi := e.isForall
-  let mut e := e
-  let mut As := #[]
-  let mut lctx : LocalContext := {}
-  for _ in [:r.nparams] do
-    match e with
-    | .forallE name dom body bi | .lam name dom body bi =>
-      let id := ⟨← mkFreshId⟩
-      lctx := lctx.mkLocalDecl id name dom bi
-      let arg := .fvar id
-      e := body.instantiate1 arg
-      As := As.push arg
-    | _ => unreachable!
-  e := e.replace fun t => do
+/-- One top-down rewrite step used by `restoreNestedBody`.  Naming the
+callback separately exposes the exact replacement boundary to verification:
+recursive traversal stops precisely when this operation returns `some`. -/
+def restoreNestedBodyRewrite? (r : Result) (env' : Environment)
+    (As : Array Expr) (auxRec : NameMap Name) (t : Expr) : Option Expr := do
     if let .const c ls := t then
       if let some recName := auxRec.find? c then
         return .const recName ls
@@ -4521,13 +6564,141 @@ def restoreNested (r : Result) (env' : Environment) (e : Expr)
     let .const I_c I_ls := I | unreachable!
     let c' := .const (c.replacePrefix auxI_name I_c) I_ls
     return mkAppRange (mkAppN c' I_args) r.nparams args.size args
-  return if pi then lctx.mkForall As e else lctx.mkLambda As e
+
+private def restoreNestedBodyImpl (r : Result) (env' : Environment) (e : Expr)
+    (As : Array Expr) (auxRec : NameMap Name) : Expr :=
+  e.replace (r.restoreNestedBodyRewrite? env' As auxRec)
+
+/-- Restore the body opened over the exact shared-parameter FVars selected by
+`restoreNestedAux`.  Keeping this rewrite separate from the prefix traversal
+makes the fact that restoration never visits a parameter domain structural.
+The logical definition uses the transparent no-cache traversal so proofs can
+follow every visited child; compiled code retains the kernel's pointer-cached
+implementation. -/
+@[implemented_by restoreNestedBodyImpl]
+def restoreNestedBody (r : Result) (env' : Environment) (e : Expr)
+    (As : Array Expr) (auxRec : NameMap Name) : Expr :=
+  e.replaceNoCache (r.restoreNestedBodyRewrite? env' As auxRec)
+
+/-- Open and rebuild the shared-parameter prefix one binder at a time.  The
+fresh FVars passed to `restoreNestedBody` are abstracted immediately on the
+way back out, so each parameter domain is retained verbatim and only the
+terminal body is rewritten.  `pi` preserves the kernel's historical choice
+to rebuild the whole prefix using the outer binder kind. -/
+def restoreNestedAux (r : Result) (env' : Environment)
+    (auxRec : NameMap Name) (pi : Bool) :
+    (remaining : Nat) → (e : Expr) → (As : Array Expr) →
+      StateM NameGenerator Expr
+  | 0, e, As => pure (r.restoreNestedBody env' e As auxRec)
+  | remaining + 1, e, As => do
+      match e with
+      | .forallE name dom body bi | .lam name dom body bi =>
+        let id := ⟨← mkFreshId⟩
+        let arg := .fvar id
+        let restored ← r.restoreNestedAux env' auxRec pi remaining
+          (body.instantiate1 arg) (As.push arg)
+        let restoredBody := abstractNestedFVar id restored
+        return if pi then .forallE name dom restoredBody bi
+          else .lam name dom restoredBody bi
+      | _ => unreachable!
+
+def restoreNested (r : Result) (env' : Environment) (e : Expr)
+    (auxRec : NameMap Name := {}) : Expr :=
+  Id.run <| StateT.run' (s :=
+      { namePrefix := `_nested_fresh : NameGenerator }) <|
+    r.restoreNestedAux env' auxRec e.isForall r.nparams e #[]
+
+/-- Transparent loose-bound-variable range used by the nested producer's
+restoration certificate.  Unlike the packed expression cache, this traversal
+can be used as proof evidence for arbitrary syntax. -/
+def restorationLooseBVarRange : Expr → Nat
+  | .bvar index => index + 1
+  | .mdata _ expression
+  | .proj _ _ expression => restorationLooseBVarRange expression
+  | .app function argument =>
+      max (restorationLooseBVarRange function)
+        (restorationLooseBVarRange argument)
+  | .lam _ domain body _
+  | .forallE _ domain body _ =>
+      max (restorationLooseBVarRange domain)
+        (restorationLooseBVarRange body - 1)
+  | .letE _ type value body _ =>
+      max (max (restorationLooseBVarRange type)
+        (restorationLooseBVarRange value))
+        (restorationLooseBVarRange body - 1)
+  | .const ..
+  | .sort _
+  | .fvar _
+  | .mvar _
+  | .lit _ => 0
+
+/-- The arguments erased by one auxiliary-family or auxiliary-constructor
+restoration step contain no loose bound variables. -/
+def restoreNestedBodyNodeDependencyCheck (r : Result) (source : Expr) : Bool :=
+  match source.getAppFn with
+  | .const name _ =>
+      if (r.aux2nested.find? name).isSome ||
+          (r.auxCtor2Induct.find? name).isSome then
+        (source.getAppArgs.extract 0 r.nparams).all fun argument =>
+          restorationLooseBVarRange argument == 0
+      else
+        true
+  | _ => true
+
+/-- Structural certificate checked at every node visited by the public
+top-down nested-restoration callback. -/
+def restoreNestedBodyDependencyCheck (r : Result) : Expr → Bool
+  | source@(.app function argument) =>
+      r.restoreNestedBodyNodeDependencyCheck source &&
+        r.restoreNestedBodyDependencyCheck function &&
+        r.restoreNestedBodyDependencyCheck argument
+  | source@(.lam _ domain body _)
+  | source@(.forallE _ domain body _) =>
+      r.restoreNestedBodyNodeDependencyCheck source &&
+        r.restoreNestedBodyDependencyCheck domain &&
+        r.restoreNestedBodyDependencyCheck body
+  | source@(.letE _ type value body _) =>
+      r.restoreNestedBodyNodeDependencyCheck source &&
+        r.restoreNestedBodyDependencyCheck type &&
+        r.restoreNestedBodyDependencyCheck value &&
+        r.restoreNestedBodyDependencyCheck body
+  | source@(.mdata _ expression)
+  | source@(.proj _ _ expression) =>
+      r.restoreNestedBodyNodeDependencyCheck source &&
+        r.restoreNestedBodyDependencyCheck expression
+  | source => r.restoreNestedBodyNodeDependencyCheck source
+
+/-- Execute the same shared-parameter opening loop as `restoreNestedAux`,
+then check the terminal body on which restoration actually runs. -/
+def restoreNestedAuxDependencyCheck (r : Result) :
+    Nat → Expr → Array Expr → NameGenerator → Bool
+  | 0, source, _, _ => r.restoreNestedBodyDependencyCheck source
+  | remaining + 1, .forallE _ _ body _, parameters, ngen
+  | remaining + 1, .lam _ _ body _, parameters, ngen =>
+      let id : FVarId := ⟨ngen.curr⟩
+      let argument : Expr := .fvar id
+      r.restoreNestedAuxDependencyCheck remaining
+        (body.instantiate1 argument) (parameters.push argument) ngen.next
+  | _ + 1, _, _, _ => false
+
+/-- Public constructor-level restoration certificate. -/
+def restoreNestedDependencyCheck (r : Result) (source : Expr) : Bool :=
+  let initial : NameGenerator := { namePrefix := `_nested_fresh }
+  r.restoreNestedAuxDependencyCheck r.nparams source #[] initial
+
+/-- Every constructor emitted by this nested-elimination result is safe for
+the exact subsequent public restoration pass. -/
+def restorationDependencyCheck (r : Result) : Bool :=
+  r.types.all fun type =>
+    type.ctors.all fun constructor =>
+      r.restoreNestedDependencyCheck constructor.type
 
 end Result
 
 structure State where
   ngen : NameGenerator := { namePrefix := `_nested_fresh }
   nestedAux : Array (Expr × Name) := {}
+  auxCtor2Induct : NameMap Name := {}
   lvls : List Level
   newTypes : Array InductiveType
   newTypes_nonempty : newTypes.isEmpty = false
@@ -4573,7 +6744,9 @@ theorem newTypes_toList_nonempty (state : State) :
 end State
 
 /--
-info: 'Lean4Lean.ElimNestedInductive.State.newTypes_toList_nonempty' depends on axioms: [propext]
+info: 'Lean4Lean.ElimNestedInductive.State.newTypes_toList_nonempty' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
 -/
 #guard_msgs in
 #print axioms State.newTypes_toList_nonempty
@@ -4671,6 +6844,8 @@ def replaceIfNested (lctx : LocalContext) (params : Array Expr) (As : Array Expr
       let J_ctor_info ← env.get J_ctor_name
       -- auxJ_cnstr_type still has references to `J`, this will be fixed later when we process it.
       let auxJ_ctor_name := J_ctor_name.replacePrefix J_name auxJ_name
+      modify fun st => { st with
+        auxCtor2Induct := st.auxCtor2Induct.insert auxJ_ctor_name auxJ_name }
       let auxJ_ctor_type := J_ctor_info.type.instantiateLevelParams J_ctor_info.levelParams I_lvls
       let auxJ_ctor_type ← instantiateForallParams auxJ_ctor_type I_nparams args
       return { name := auxJ_ctor_name, type := lctx.mkForall As auxJ_ctor_type }
@@ -4719,6 +6894,7 @@ def run (fuel nparams : Nat) (types : List InductiveType) : M Result := do
         lctx := lctx
         params := params
         aux2nested := aux2nested
+        auxCtor2Induct := s.auxCtor2Induct
         types := s.newTypes.toList
         types_nonempty := s.newTypes_toList_nonempty }
   loop 0 fuel
@@ -4743,11 +6919,25 @@ def mkAuxRecNameMap (env' : Environment) (types : List InductiveType) :
     oldRecNames := oldRecNames.push oldRecName
   return (oldRecNames.toList, recMap)
 
+/-- Transparent reserved-prefix occurrence test used by the public inductive
+precheck.  This follows the same expression children as `Expr.find?`, but its
+structural definition lets a retained successful execution expose the exact
+absence fact to later verification phases. -/
+def hasNestedAux : Expr → Bool
+  | .const name _ => (`_nested).isPrefixOf name
+  | .app function argument =>
+      hasNestedAux function || hasNestedAux argument
+  | .lam _ domain body _ | .forallE _ domain body _ =>
+      hasNestedAux domain || hasNestedAux body
+  | .letE _ type value body _ =>
+      hasNestedAux type || hasNestedAux value || hasNestedAux body
+  | .mdata _ body => hasNestedAux body
+  | .proj structureName _ body =>
+      (`_nested).isPrefixOf structureName || hasNestedAux body
+  | _ => false
+
 def checkNoNestedAux (n : Name) (e : Expr) : Except Exception Unit := do
-  if (e.find? fun
-      | .const c _ => (`_nested).isPrefixOf c
-      | .proj s _ _ => (`_nested).isPrefixOf s
-      | _ => false).isSome then
+  if hasNestedAux e then
     throw <| .other s!"invalid declaration '{n}', it uses the reserved prefix '_nested'"
 
 /-- Closedness and reserved-prefix checks performed before nested
@@ -4756,10 +6946,69 @@ successful precheck equation. -/
 def Environment.checkInductiveInput (env : Environment)
     (types : List InductiveType) : Except Exception Unit := do
   for indType in types do
+    checkNoNestedAux indType.name (.const indType.name [])
     env.checkNoMVarNoFVar indType.name indType.type
     for ctor in indType.ctors do
+      checkNoNestedAux ctor.name (.const ctor.name [])
       env.checkNoMVarNoFVar ctor.name ctor.type
       checkNoNestedAux ctor.name ctor.type
+
+/-- Check one expression for the Lean 4.33.1 uniform-occurrence invariant.
+An occurrence of a family currently being declared must use the declaration's
+exact universe levels and the surrounding shared binders.  Over-applied
+occurrences are traversed so their parameter prefix and indices are checked
+separately, matching the kernel's `for_each` pass. -/
+def checkUniformInductiveOccurrence (familyNames : List Name)
+    (levels : List Level) (nparams : Nat) : Expr → Nat → Except Exception Unit
+  | expression, offset => do
+      let function := expression.getAppFn
+      let arguments := expression.getAppArgs
+      if let .const name actualLevels := function then
+        if familyNames.contains name then
+          if arguments.size ≤ nparams then
+            let uniform := arguments.size == nparams &&
+              offset ≥ nparams &&
+              arguments.toList.zipIdx.all fun (argument, index) =>
+                Expr.structuralEq argument (.bvar (offset - 1 - index))
+            unless actualLevels == levels && uniform do
+              throw <| .other s!"invalid occurrence of datatype '{name
+                }' being declared: it must be applied to the parameters and universe levels of the mutual declaration"
+            return
+      match expression with
+      | .app function argument =>
+          checkUniformInductiveOccurrence familyNames levels nparams function
+            offset
+          checkUniformInductiveOccurrence familyNames levels nparams argument
+            offset
+      | .lam _ domain body _ | .forallE _ domain body _ =>
+          checkUniformInductiveOccurrence familyNames levels nparams domain
+            offset
+          checkUniformInductiveOccurrence familyNames levels nparams body
+            (offset + 1)
+      | .letE _ type value body _ =>
+          checkUniformInductiveOccurrence familyNames levels nparams type
+            offset
+          checkUniformInductiveOccurrence familyNames levels nparams value
+            offset
+          checkUniformInductiveOccurrence familyNames levels nparams body
+            (offset + 1)
+      | .mdata _ body | .proj _ _ body =>
+          checkUniformInductiveOccurrence familyNames levels nparams body
+            offset
+      | .bvar _ | .fvar _ | .mvar _ | .sort _ | .const _ _ | .lit _ =>
+          pure ()
+termination_by expression => expression
+
+/-- Lean 4.33.1's up-front uniform-occurrence scan over the original
+constructor declarations.  It intentionally runs before nested elimination
+or WHNF can erase an invalid syntactic occurrence. -/
+def Environment.checkUniformInductiveOccurrences (lparams : List Name)
+    (nparams : Nat) (types : List InductiveType) : Except Exception Unit := do
+  let familyNames := types.map (·.name)
+  let levels := lparams.map Level.param
+  for indType in types do
+    for ctor in indType.ctors do
+      checkUniformInductiveOccurrence familyNames levels nparams ctor.type 0
 
 /-- Exact initial state used by nested elimination. -/
 def ElimNestedInductive.initialState (lparams : List Name)
@@ -4779,8 +7028,75 @@ def ElimNestedInductive.runAt (env : Environment) (fuel nparams : Nat)
       .error <| .other s!"invalid empty (mutual) inductive datatype declaration, \
         it must contain at least one inductive type."
   | head :: tail =>
-      ElimNestedInductive.run fuel nparams (head :: tail) env
-        |>.run' (ElimNestedInductive.initialState lparams head tail)
+      do
+        let result ← ElimNestedInductive.run fuel nparams (head :: tail) env
+          |>.run' (ElimNestedInductive.initialState lparams head tail)
+        -- `run` obtains the same count as `params.size` after consuming the
+        -- requested telescope.  Retain the public input directly so later
+        -- restoration does not need to rediscover that operational invariant.
+        let result' : ElimNestedInductive.Result :=
+          { result with nparams := nparams }
+        if result'.restorationDependencyCheck then
+          return result'
+        else
+          throw <| .other "internal nested restoration dependency check failed"
+
+/-- A successful nested-elimination run retains the exact shared parameter
+count supplied at its public boundary. -/
+theorem ElimNestedInductive.runAt_nparams_eq
+    (run : ElimNestedInductive.runAt env fuel nparams lparams types =
+      .ok result) :
+    result.nparams = nparams := by
+  cases types with
+  | nil => simp [ElimNestedInductive.runAt] at run
+  | cons head tail =>
+      unfold ElimNestedInductive.runAt at run
+      generalize hraw :
+        ElimNestedInductive.run fuel nparams (head :: tail) env
+          (ElimNestedInductive.initialState lparams head tail) = raw at run
+      cases raw with
+      | error error =>
+          simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+            Except.bind] at run
+      | ok pair =>
+          let checked : ElimNestedInductive.Result :=
+            { pair.1 with nparams := nparams }
+          by_cases check : checked.restorationDependencyCheck = true
+          · simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+              Except.bind, Pure.pure, Except.pure, checked, check] at run
+            rw [← run]
+          · simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+              Except.bind, Pure.pure, Except.pure, throw, throwThe,
+              MonadExceptOf.throw, checked, check] at run
+
+/-- Every successful public nested-elimination execution owns the exact
+constructor restoration certificate checked before flattened insertion. -/
+theorem ElimNestedInductive.runAt_restorationDependencyCheck
+    (run : ElimNestedInductive.runAt env fuel nparams lparams types =
+      .ok result) :
+    result.restorationDependencyCheck = true := by
+  cases types with
+  | nil => simp [ElimNestedInductive.runAt] at run
+  | cons head tail =>
+      unfold ElimNestedInductive.runAt at run
+      generalize hraw :
+        ElimNestedInductive.run fuel nparams (head :: tail) env
+          (ElimNestedInductive.initialState lparams head tail) = raw at run
+      cases raw with
+      | error error =>
+          simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+            Except.bind] at run
+      | ok pair =>
+          let checked : ElimNestedInductive.Result :=
+            { pair.1 with nparams := nparams }
+          by_cases check : checked.restorationDependencyCheck = true
+          · simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+              Except.bind, Pure.pure, Except.pure, checked, check] at run
+            rw [← run]
+            exact check
+          · simp [StateT.run', Functor.map, Except.map, hraw, Bind.bind,
+              Except.bind, Pure.pure, Except.pure, throw, throwThe,
+              MonadExceptOf.throw, checked, check] at run
 
 /-- Reader context passed to the ordinary flattened-block checker. -/
 def AddInductive.Context.forInductive (env : Environment)
@@ -4801,7 +7117,10 @@ def ElimNestedInductive.Result.restoreRecursorInfo
     (allIndNames : List Name) (recNameMap : NameMap Name)
     (recName : Name) : RecursorVal := Id.run do
   let newRecName := recNameMap.getD recName recName
-  let some (.recInfo recInfo) := flatEnv.find? recName | unreachable!
+  let recInfo :=
+    match flatEnv.find? recName with
+    | some (.recInfo recInfo) => recInfo
+    | _ => default
   let newRecType := res.restoreNested flatEnv recInfo.type recNameMap
   let newRules := recInfo.rules.map fun rule =>
     let newRhs := res.restoreNested flatEnv rule.rhs recNameMap
@@ -4842,6 +7161,33 @@ def ElimNestedInductive.Result.restoreSourceInductiveInfo
   { res.restoreInductiveInfo flatEnv allIndNames indType with
     name := indType.name }
 
+/-- A nonempty restored constructor inventory can only come from a genuine
+flattened family lookup (the defensive `unreachable!` fallback has the empty
+default inventory).  The returned equation exposes the exact record copied
+by restoration. -/
+theorem ElimNestedInductive.Result.restoreSourceInductiveInfo_of_ctors_ne_nil
+    (res : ElimNestedInductive.Result) (flatEnv : Environment)
+    (allIndNames : List Name) (indType : InductiveType)
+    (nonempty :
+      (res.restoreSourceInductiveInfo flatEnv allIndNames indType).ctors ≠ []) :
+    ∃ flatInfo,
+      flatEnv.find? indType.name = some (.inductInfo flatInfo) ∧
+      res.restoreSourceInductiveInfo flatEnv allIndNames indType =
+        { flatInfo with name := indType.name, all := allIndNames } := by
+  have defaultCtors : (default : InductiveVal).ctors = [] := rfl
+  cases found : flatEnv.find? indType.name with
+  | none =>
+      have impossible : False := by
+        apply nonempty
+        simp [ElimNestedInductive.Result.restoreSourceInductiveInfo,
+          ElimNestedInductive.Result.restoreInductiveInfo, found,
+          defaultCtors]
+      exact impossible.elim
+  | some info =>
+      cases info <;>
+        simp_all [ElimNestedInductive.Result.restoreSourceInductiveInfo,
+          ElimNestedInductive.Result.restoreInductiveInfo]
+
 /-- Restore a source constructor while retaining the family chunk's public
 owner and the constructor lookup key.  The flattened producer already emits
 these exact fields; the explicit updates expose that fact to inventory
@@ -4851,7 +7197,8 @@ def ElimNestedInductive.Result.restoreSourceConstructorInfo
     (induct ctorName : Name) : ConstructorVal :=
   { res.restoreConstructorInfo flatEnv ctorName with
     name := ctorName
-    induct := induct }
+    induct := induct
+    numParams := res.nparams }
 
 /-- Restore a source family's main recursor at its canonical public name.
 Auxiliary recursors continue to use `mkAuxRecNameMap`; source recursors are
@@ -4907,6 +7254,17 @@ theorem restoredNestedFamilyInfos_family_cases
   obtain rfl := member
   rfl
 
+/-- The family entry of one restored source chunk is not merely named by its
+source family: it is definitionally the exact record assembled by the
+restoration producer. -/
+theorem restoredNestedFamilyInfos_family_exact
+    (member : (.inductInfo info : ConstantInfo) ∈
+      restoredNestedFamilyInfos res flatEnv allIndNames recNameMap indType) :
+    info = res.restoreSourceInductiveInfo flatEnv allIndNames indType := by
+  simp [restoredNestedFamilyInfos] at member
+  obtain rfl := member
+  rfl
+
 /-- A restored constructor record in one source chunk retains that source
 family as its exact owner. -/
 theorem restoredNestedFamilyInfos_constructor_cases
@@ -4942,6 +7300,21 @@ theorem restoredNestedInfos_family_cases
       restoredNestedFamilyInfos_family_cases familyMember⟩
   · simp [restoredNestedAuxRecursorInfos] at member
 
+/-- Every family in the complete restored inventory is the exact producer
+record belonging to one original source family. -/
+theorem restoredNestedInfos_family_exact
+    (member : (.inductInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types) :
+    ∃ indType ∈ types,
+      info = res.restoreSourceInductiveInfo flatEnv
+        (types.map (·.name)) indType := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, sourceMember, familyMember⟩ := member
+    exact ⟨indType, sourceMember,
+      restoredNestedFamilyInfos_family_exact familyMember⟩
+  · simp [restoredNestedAuxRecursorInfos] at member
+
 /-- Every constructor record in the complete restored inventory retains the
 exact source family that owns its chunk. -/
 theorem restoredNestedInfos_constructor_cases
@@ -4954,6 +7327,114 @@ theorem restoredNestedInfos_constructor_cases
     exact ⟨indType, sourceMember,
       restoredNestedFamilyInfos_constructor_cases constructorMember⟩
   · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- Every restored source constructor retains the shared parameter count
+owned by the nested-elimination result.  The auxiliary suffix contains only
+recursors, so no other constructor case exists. -/
+theorem restoredNestedInfos_constructor_numParams
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types) :
+    info.numParams = res.nparams := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, _sourceMember, constructorMember⟩ := member
+    simp [restoredNestedFamilyInfos,
+      ElimNestedInductive.Result.restoreSourceConstructorInfo] at constructorMember
+    obtain ⟨_ctorName, _ctorMember, rfl⟩ := constructorMember
+    rfl
+  · have : False := by
+      simp [restoredNestedAuxRecursorInfos] at member
+    exact this.elim
+
+/-- Restoration changes a source constructor's type and public ownership,
+but retains the flattened producer's cached field count.  The exact flat
+lookup keeps this fact tied to the constructor record selected by the
+restored inventory rather than to a parallel name lookup. -/
+theorem restoredNestedInfos_constructor_numFields_of_flat_lookup
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types)
+    (found : flatEnv.find? info.name = some (.ctorInfo flatInfo)) :
+    info.numFields = flatInfo.numFields := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, _sourceMember, constructorMember⟩ := member
+    simp [restoredNestedFamilyInfos] at constructorMember
+    obtain ⟨ctorName, _ctorMember, rfl⟩ := constructorMember
+    simp [ElimNestedInductive.Result.restoreSourceConstructorInfo,
+      ElimNestedInductive.Result.restoreConstructorInfo] at found ⊢
+    rw [found]
+  · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- The public restored constructor type is exactly the nested-restoration
+rewrite of the flattened constructor record selected by the same lookup. -/
+theorem restoredNestedInfos_constructor_type_of_flat_lookup
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types)
+    (found : flatEnv.find? info.name = some (.ctorInfo flatInfo)) :
+    info.type = res.restoreNested flatEnv flatInfo.type := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, _sourceMember, constructorMember⟩ := member
+    simp [restoredNestedFamilyInfos] at constructorMember
+    obtain ⟨ctorName, _ctorMember, rfl⟩ := constructorMember
+    simp [ElimNestedInductive.Result.restoreSourceConstructorInfo,
+      ElimNestedInductive.Result.restoreConstructorInfo] at found ⊢
+    rw [found]
+  · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- Constructor restoration rewrites only the stored type; its universe
+parameter names remain those of the exact flattened constructor record
+selected by the same lookup. -/
+theorem restoredNestedInfos_constructor_levelParams_of_flat_lookup
+    (member : (.ctorInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types)
+    (found : flatEnv.find? info.name = some (.ctorInfo flatInfo)) :
+    info.levelParams = flatInfo.levelParams := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, _sourceMember, constructorMember⟩ := member
+    simp [restoredNestedFamilyInfos] at constructorMember
+    obtain ⟨ctorName, _ctorMember, rfl⟩ := constructorMember
+    simp [ElimNestedInductive.Result.restoreSourceConstructorInfo,
+      ElimNestedInductive.Result.restoreConstructorInfo] at found ⊢
+    rw [found]
+  · simp [restoredNestedAuxRecursorInfos] at member
+
+/-- Every recursor in the restored inventory records the complete public
+source-family list.  This includes both canonical source recursors and the
+renamed auxiliary suffix; restoration deliberately gives both groups the
+same `all` inventory. -/
+theorem restoredNestedInfos_recursor_all
+    (member : (.recInfo info : ConstantInfo) ∈
+      restoredNestedInfos res flatEnv types) :
+    info.all = types.map (·.name) := by
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap] at member
+  rcases member with member | member
+  · obtain ⟨indType, _sourceMember, recursorMember⟩ := member
+    simp [restoredNestedFamilyInfos] at recursorMember
+    obtain rfl := recursorMember
+    simp [ElimNestedInductive.Result.restoreSourceRecursorInfo,
+      ElimNestedInductive.Result.restoreRecursorInfo]
+  · simp [restoredNestedAuxRecursorInfos] at member
+    obtain ⟨_recName, _recursorMember, rfl⟩ := member
+    simp [ElimNestedInductive.Result.restoreRecursorInfo]
+
+/-- Every source family contributes its exact public family record to the
+complete restored inventory.  This is the family-side counterpart of
+`restoredNestedInfos_recursor_of_family`; retaining the record explicitly is
+useful when freshness must be transported back across the restoration fold. -/
+theorem restoredNestedInfos_family_of_source
+    (sourceMember : indType ∈ types) :
+    ∃ info,
+      (.inductInfo info : ConstantInfo) ∈
+        restoredNestedInfos res flatEnv types ∧
+      info.name = indType.name := by
+  let info := res.restoreSourceInductiveInfo flatEnv
+    (types.map (·.name)) indType
+  refine ⟨info, ?_, rfl⟩
+  simp only [restoredNestedInfos, List.mem_append, List.mem_flatMap]
+  refine .inl ⟨indType, sourceMember, ?_⟩
+  simp [restoredNestedFamilyInfos, info]
 
 /-- Every source family owns a canonical main recursor in the complete
 restored inventory. -/
@@ -5067,8 +7548,99 @@ def checkNestedAuxValues (res : ElimNestedInductive.Result)
     res.aux2nested.forM fun _ e => do
       _ ← TypeChecker.checkType e
 
+/-- Which restored artifact is being rechecked by Lean 4.33.1's final
+defense-in-depth pass.  Rule origins retain both the recursor and constructor
+names so later semantic consumers do not have to rediscover their ownership
+from an unindexed expression list. -/
+inductive RestoredArtifactCheckOrigin where
+  | constructorType (constructor : Name)
+  | recursorType (recursor : Name)
+  | ruleRhs (recursor constructor : Name)
+
+/-- One source expression, with the universe-parameter context in which the
+kernel rechecks it after nested restoration. -/
+structure RestoredArtifactCheckSource where
+  origin : RestoredArtifactCheckOrigin
+  lparams : List Name
+  expression : Expr
+
+/-- Restored constructor types in source order.  The restored inventory is
+assembled family-by-family, so filtering it preserves the original family and
+constructor ordering used by Lean's final pass. -/
+def restoredConstructorCheckSources (lparams : List Name) :
+    List ConstantInfo → List RestoredArtifactCheckSource
+  | [] => []
+  | .ctorInfo constructor :: infos =>
+      { origin := .constructorType constructor.name
+        lparams
+        expression := constructor.type } ::
+        restoredConstructorCheckSources lparams infos
+  | _ :: infos => restoredConstructorCheckSources lparams infos
+
+/-- Restored recursors in inventory order, with each recursor type immediately
+followed by its computation-rule right-hand sides. -/
+def restoredRecursorCheckSources :
+    List ConstantInfo → List RestoredArtifactCheckSource
+  | [] => []
+  | .recInfo recursor :: infos =>
+      { origin := .recursorType recursor.name
+        lparams := recursor.levelParams
+        expression := recursor.type } ::
+        (recursor.rules.map fun rule =>
+          { origin := .ruleRhs recursor.name rule.ctor
+            lparams := recursor.levelParams
+            expression := rule.rhs }) ++
+        restoredRecursorCheckSources infos
+  | _ :: infos => restoredRecursorCheckSources infos
+
+/-- The exact source order of Lean 4.33.1's post-restoration recheck. -/
+def restoredArtifactCheckSources (lparams : List Name)
+    (infos : List ConstantInfo) : List RestoredArtifactCheckSource :=
+  restoredConstructorCheckSources lparams infos ++
+    restoredRecursorCheckSources infos
+
+/-- Data-bearing successful checks for a source-ordered restored-artifact
+inventory.  Every node retains the exact full-check equation in the final
+restored environment. -/
+inductive RestoredArtifactCheckTrace (env : Environment)
+    (safety : DefinitionSafety) (fuel : FuelConfig) :
+    List RestoredArtifactCheckSource → Type where
+  | nil : RestoredArtifactCheckTrace env safety fuel []
+  | cons {source sources} (inferred : Expr)
+      (check : TypeChecker.M.run env (safety := safety) (lctx := {})
+        (lparams := source.lparams) (fuel := fuel)
+        (TypeChecker.checkType source.expression) = .ok inferred)
+      (tail : RestoredArtifactCheckTrace env safety fuel sources) :
+      RestoredArtifactCheckTrace env safety fuel (source :: sources)
+
+/-- Execute and retain every full typecheck in the post-restoration pass. -/
+def checkRestoredArtifactSources (env : Environment)
+    (safety : DefinitionSafety) (fuel : FuelConfig) :
+    (sources : List RestoredArtifactCheckSource) →
+      Except Exception (RestoredArtifactCheckTrace env safety fuel sources)
+  | [] => .ok .nil
+  | source :: sources =>
+      match hcheck : TypeChecker.M.run env (safety := safety) (lctx := {})
+          (lparams := source.lparams) (fuel := fuel)
+          (TypeChecker.checkType source.expression) with
+      | .error error => .error error
+      | .ok inferred =>
+          match checkRestoredArtifactSources env safety fuel sources with
+          | .error error => .error error
+          | .ok tail => .ok (.cons inferred hcheck tail)
+
+/-- Complete Lean 4.33.1 restored-artifact recheck over one exact restored
+inventory. -/
+def checkRestoredArtifacts (infos : List ConstantInfo) (env : Environment)
+    (safety : DefinitionSafety) (lparams : List Name) (fuel : FuelConfig) :
+    Except Exception (RestoredArtifactCheckTrace env safety fuel
+      (restoredArtifactCheckSources lparams infos)) :=
+  checkRestoredArtifactSources env safety fuel
+    (restoredArtifactCheckSources lparams infos)
+
 /-- Successful nested restoration retains the exact restored inventory, all
-name checks and insertions, and the final auxiliary-value typecheck. -/
+name checks and insertions, the auxiliary-value typecheck, and every final
+restored-artifact recheck. -/
 structure NestedRestorationResult
     (res : ElimNestedInductive.Result) (flatEnv initialEnv : Environment)
     (types : List InductiveType) (allowPrimitive : Bool)
@@ -5078,6 +7650,10 @@ structure NestedRestorationResult
   env : Environment
   trace : DeclareRestoredInfoListRun allowPrimitive initialEnv infos env
   auxCheck : checkNestedAuxValues res env safety lparams fuel = .ok ()
+  artifactChecks : RestoredArtifactCheckTrace env safety fuel
+    (restoredArtifactCheckSources lparams infos)
+  artifactChecksRun :
+    checkRestoredArtifacts infos env safety lparams fuel = .ok artifactChecks
 
 theorem NestedRestorationResult.constants
     (result : NestedRestorationResult res flatEnv initialEnv types
@@ -5102,17 +7678,24 @@ def restoreNestedEnvironment (res : ElimNestedInductive.Result)
   | .ok restoredEnv =>
     match hcheck : checkNestedAuxValues res restoredEnv safety lparams fuel with
     | .error error => .error error
-    | .ok () => .ok {
-        infos
-        infos_eq := rfl
-        env := restoredEnv
-        trace := DeclareRestoredInfoListRun.of_run hdeclare
-        auxCheck := hcheck }
+    | .ok () =>
+      match hartifacts : checkRestoredArtifacts infos restoredEnv safety
+          lparams fuel with
+      | .error error => .error error
+      | .ok artifactChecks => .ok {
+          infos
+          infos_eq := rfl
+          env := restoredEnv
+          trace := DeclareRestoredInfoListRun.of_run hdeclare
+          auxCheck := hcheck
+          artifactChecks
+          artifactChecksRun := hartifacts }
 
 def Environment.addInductive (env : Environment) (lparams : List Name) (nparams : Nat)
     (types : List InductiveType) (isUnsafe allowPrimitive : Bool) (fuel : FuelConfig := {}) :
     Except Exception Environment := do
   Environment.checkInductiveInput env types
+  Environment.checkUniformInductiveOccurrences lparams nparams types
   let res ← ElimNestedInductive.runAt env fuel.inductiveFuel nparams
     lparams types
   let numNested := res.aux2nested.size

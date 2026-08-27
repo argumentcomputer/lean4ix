@@ -691,7 +691,7 @@ theorem AssembledPat.pat_uniq {hcl : gen.RuleClosure}
         (List.mem_of_getElem? hentry)).inter_subpattern_none H3] at H4
       cases H4
     | ext ext2 hm2 =>
-      rcases Classical.em (ext1.pat = ext2.pat) with hpq | hpq
+      rcases Decidable.em (ext1.pat = ext2.pat) with hpq | hpq
       · obtain rfl := hsep.ext_uniq ext1 hm1 ext2 hm2 hpq
         exact ⟨rfl,
           ((hsep.self_sep ext1 hm1).subpattern_inter_eq H3 H4).symm, HEq.rfl⟩
@@ -736,7 +736,7 @@ theorem AssembledPat.pat_app_l_uniq {hcl : gen.RuleClosure}
       exact (hsep.block_sep ext1 hm1
         (List.mem_of_getElem? hentry)).app_l_uniq h h' h₃
     | ext ext2 hm2 =>
-      rcases Classical.em (ext1.pat = ext2.pat) with hpq | hpq
+      rcases Decidable.em (ext1.pat = ext2.pat) with hpq | hpq
       · -- Equal patterns: separation cannot apply, but the two towers then
         -- differ in arity, `h₃` being a strictly shorter left spine.
         cases hsp1 : ext1.pat with
@@ -778,7 +778,7 @@ theorem AssembledPat.pat_app_uniq {hcl : gen.RuleClosure}
       exact (hsep.block_sep ext1 hm1
         (List.mem_of_getElem? hentry)).app_uniq h h' h₃ h₃'
     | ext ext2 hm2 =>
-      rcases Classical.em (ext1.pat = ext2.pat) with hpq | hpq
+      rcases Decidable.em (ext1.pat = ext2.pat) with hpq | hpq
       · -- Equal patterns: separation cannot apply, but `SelfSeparated` keeps
         -- the shared pattern's own two heads apart.
         cases hsp1 : ext1.pat with
@@ -881,19 +881,11 @@ info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_uniq' depen
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_l
 
-/--
-info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_l_uniq' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_l_uniq' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_l_uniq
 
-/--
-info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_uniq' depends on axioms: [propext,
- Classical.choice,
- Quot.sound]
--/
+/-- info: 'Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_uniq' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Lean4Lean.VInductDecl.BlockGenerationChecked.AssembledPat.pat_app_uniq
 

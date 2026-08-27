@@ -595,6 +595,31 @@ theorem push_findOld (run : CandidateLocalContextRun context)
     localContextFindOld context.lctx id context.freshFVarId
       name type binderInfo .default decl run.wf run.fresh hfind
 
+/-- A push-only operational extension preserves the candidate local-context
+invariant. -/
+theorem ofLocalExtension
+    (rootRun : CandidateLocalContextRun root)
+    (extension : root.LocalExtension current) :
+    CandidateLocalContextRun current := by
+  induction extension with
+  | refl => exact rootRun
+  | push extension name binderInfo type ih =>
+      exact ih.push name binderInfo type
+
+/-- Every exact lookup in the root of a push-only operational extension is
+preserved at its endpoint. -/
+theorem findOld_ofLocalExtension
+    (rootRun : CandidateLocalContextRun root)
+    (extension : root.LocalExtension current)
+    {fv : FVarId} {decl : LocalDecl}
+    (found : root.lctx.find? fv = some decl) :
+    current.lctx.find? fv = some decl := by
+  induction extension with
+  | refl => exact found
+  | @push intermediate extension name binderInfo type ih =>
+      exact (ofLocalExtension rootRun extension).push_findOld
+        name binderInfo type ih
+
 end CandidateLocalContextRun
 
 /-- Every local declaration already present at a candidate node remains at
@@ -784,6 +809,57 @@ def CandidateContextRun.root
     run.context.fuel = candidateContext.fuel := by
   have h := congrArg (fun c : TypeChecker.Context => c.fuel) run.context_eq
   simpa only [AddInductive.Context.toTypeChecker] using h
+
+/-- Interpret the exact terminal `ensureSort` run retained by family
+validation.  The checker-selected kernel sort level is translated strictly;
+its Theory sort is definitionally equal to the already translated terminal
+family expression. -/
+theorem _root_.Lean4Lean.AddInductive.FamilyEnsureSortStep.exists_translation
+    (step : AddInductive.FamilyEnsureSortStep)
+    (valid : step.Valid)
+    (contextRun : CandidateContextRun step.context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS step.source source') :
+    ∃ resultLevel resultLevel',
+      step.result = .sort resultLevel ∧
+        VLevel.ofLevel contextRun.context.lparams resultLevel =
+          some resultLevel' ∧
+        contextRun.context.IsDefEqU (.sort resultLevel') source' := by
+  obtain ⟨state, run⟩ := step.innerRun valid
+  rw [← contextRun.context_eq] at run
+  obtain ⟨_, _, _, _, resultTr, resultSort⟩ :=
+    (TypeChecker.ensureSort.WF source_tr)
+      contextRun.state_wf step.result state run
+  obtain ⟨resultLevel, resultEq⟩ := resultSort
+  rw [resultEq] at resultTr
+  obtain ⟨translated, strict, defeq⟩ := resultTr
+  cases strict with
+  | sort levelTr =>
+      exact ⟨resultLevel, _, resultEq, levelTr, defeq⟩
+
+/-- If the translated family terminal is already known definitionally equal
+to a Theory sort, the exact `ensureSort` result translates to an equivalent
+universe level. -/
+theorem _root_.Lean4Lean.AddInductive.FamilyEnsureSortStep.resultLevel_equiv
+    (step : AddInductive.FamilyEnsureSortStep)
+    (valid : step.Valid)
+    (contextRun : CandidateContextRun step.context)
+    (source' : VExpr)
+    (source_tr : contextRun.context.TrExprS step.source source')
+    (sourceLevel : VLevel)
+    (source_sort : contextRun.context.IsDefEqU source' (.sort sourceLevel)) :
+    ∃ resultLevel resultLevel',
+      step.result = .sort resultLevel ∧
+        VLevel.ofLevel contextRun.context.lparams resultLevel =
+          some resultLevel' ∧
+        resultLevel' ≈ sourceLevel := by
+  obtain ⟨resultLevel, resultLevel', resultEq, levelTr, resultDef⟩ :=
+    step.exists_translation valid contextRun source' source_tr
+  have sortDef := resultDef.trans contextRun.context.Ewf
+    contextRun.context.Δwf.toCtx source_sort
+  exact ⟨resultLevel, resultLevel', resultEq, levelTr,
+    VEnv.IsDefEqU.sort_inv contextRun.context.Ewf
+      contextRun.context.Δwf.toCtx sortDef⟩
 
 /-- Reuse a strict translation established at the empty producer root in any
 verified candidate context with the same Theory environment and level
@@ -2772,6 +2848,68 @@ theorem FamilyParameterIndexBoundary.Terminal.result_context_eq
     contradiction
   | terminal => rfl
 
+/-- A terminal index boundary's retained source is the exact type stored in
+the family telescope result. -/
+theorem FamilyParameterIndexBoundary.Terminal.result_type_eq
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (terminal : boundary.Terminal) :
+    boundary.trace.result.type = boundary.source := by
+  have boundaryNotForall := terminal.notForall
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail => omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail => omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    simp only [Lean.Expr.isForall] at boundaryNotForall
+    contradiction
+  | terminal => rfl
+
+/-- A terminal index boundary has consumed no further index binder: its
+result counter is exactly the counter stored at that boundary. -/
+theorem FamilyParameterIndexBoundary.Terminal.result_nindices_eq
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (terminal : boundary.Terminal) :
+    boundary.trace.result.nindices = nindices := by
+  have boundaryNotForall := terminal.notForall
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail => omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail => omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    simp only [Lean.Expr.isForall] at boundaryNotForall
+    contradiction
+  | terminal => rfl
+
 /-- If an index-only suffix reaches the same index counter at its final
 result, it is already terminal.  An `index` constructor would force the
 counter to grow, while parameter constructors are impossible at the retained
@@ -2951,6 +3089,25 @@ theorem CandidateExprRun.exists_ofCandidate
     exact .forallE annotations annotationsEq domainCandidate bodyCandidate node
       domainRun annotationsRun bodyRun domainTypeHasType bodyTypeHasType
       bodySource bodyVlctx
+
+private theorem candidateView_abstract1_instantiate_self
+    (expression : Expr) (id : FVarId) (depth : Nat) :
+    Closed expression depth →
+    (expression.abstract1 id depth).instantiate1' (.fvar id) depth =
+      expression := by
+  induction expression generalizing depth <;>
+    simp_all [Closed, Expr.abstract1, Expr.instantiate1', beq_iff_eq]
+  split <;>
+    simp_all [Expr.instantiate1', Expr.liftLooseBVars']
+
+private theorem candidateView_abstract_instantiate_self
+    (expression : Expr) (id : FVarId) (closed : Closed expression) :
+    (expression.abstract #[.fvar id]).instantiate1 (.fvar id) =
+      expression := by
+  rw [show #[Expr.fvar id] = ⟨[id].map Expr.fvar⟩ by rfl]
+  rw [Expr.abstract_eq _ _ (.inr closed.looseBVarRange_zero) (by simp)]
+  simp only [Expr.abstractList, Expr.instantiate1_eq]
+  exact candidateView_abstract1_instantiate_self expression id 0 closed
 
 /-- Interpret a recursively identity-normalizing candidate at the exact
 strict Theory translation of its source.
@@ -3259,6 +3416,264 @@ theorem CandidateExprRun.view_tr
     · simpa only [AddInductive.CandidateExprTrace.view,
         habstract] using bodyMoved
 
+/-- The recursively reconstructed candidate view has the exact strict Theory
+endpoint selected by its semantic run, including projection-bearing views.
+
+At a Pi node the body derivation is moved between contexts whose binder types
+are definitionally equal but whose variable values are literally identical.
+`TrExprS.defeqDFC_same` therefore reuses every resolved projector carried by
+the original derivation and preserves the body syntax.  This is a provenance
+transport theorem, not a uniqueness theorem for independently resolved
+projections. -/
+theorem CandidateExprRun.view_tr_resolved
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred') :
+    TrExprS env Us Δ trace.view view' := by
+  induction run with
+  | terminal node =>
+      simpa only [AddInductive.CandidateExprTrace.view] using
+        node.whnf.rhs_tr
+  | @forallE domain context name binderInfo Δ source inferred body
+      source' domain' body' inferred' domainView' domainInferred'
+      storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh
+      checked normalized annotations annotationsEq domainCandidate
+      bodyCandidate node domainRun annotationsRun bodyRun domainType bodyType
+      bodySource bodyContext domainIH bodyIH =>
+    have domainStrict := domainIH
+    have bodyStrict : TrExprS env Us
+        ((some (context.freshFVarId,
+          annotations.consumed.fvarsList), .vlam storedDomain') :: Δ)
+        bodyCandidate.view bodyView' := by
+      simpa only [bodyContext] using bodyIH
+    have bodyAbstract := bodyStrict.abstract VLCtx.Abstract.zero
+    have henv : VEnv.WF env := by
+      simpa only [node.check.venv_eq] using node.check.context.Ewf
+    have hΔ : VLCtx.WF env Us.length Δ := by
+      simpa only [node.check.venv_eq, node.check.lparams_eq,
+        node.check.vlctx_eq] using node.check.context.Δwf
+    obtain ⟨_, domainTypeEq⟩ :=
+      domainType.uniq henv hΔ.toCtx domainRun.evidence.isDefEq
+    have domainDef : env.IsDefEq Us.length Δ.toCtx
+        domain' domainView' (.sort u) :=
+      (DefEqEvidence.change domainTypeEq.symm domainRun.evidence).isDefEq
+    have annotationDef :=
+      annotationsRun.isDefEqU.of_l henv hΔ.toCtx domainType
+    have storedToView : env.IsDefEq Us.length Δ.toCtx
+        storedDomain' domainView' (.sort u) :=
+      annotationDef.symm.trans domainDef
+    have hctx : VLCtx.IsDefEq env Us.length
+        ((none, .vlam storedDomain') :: Δ)
+        ((none, .vlam domainView') :: Δ) :=
+      .cons (.refl henv hΔ) (by nofun) (.vlam storedToView)
+    have bodyMoved := bodyAbstract.defeqDFC_same henv hctx
+      (.cons .base .vlam)
+    have habstract :
+        bodyCandidate.view.abstract #[context.freshExpr] =
+          Expr.abstract1 context.freshFVarId bodyCandidate.view := by
+      have hnoBV : Δ.NoBV := by
+        rw [← node.check.vlctx_eq]
+        exact node.check.context.mlctx.noBV
+      have hclosed : bodyCandidate.view.looseBVarRange' = 0 :=
+        ((show VLCtx.bvars ((some (context.freshFVarId,
+            annotations.consumed.fvarsList), VLocalDecl.vlam storedDomain') :: Δ) = 0 by
+            exact hnoBV) ▸ bodyStrict.closed).looseBVarRange_zero
+      rw [show #[context.freshExpr] =
+        ⟨[context.freshFVarId].map Expr.fvar⟩ by rfl]
+      rw [Expr.abstract_eq _ _ (.inr hclosed) (by simp)]
+      rfl
+    have bodyEvidence := bodyRun.evidence
+    rw [bodyContext] at bodyEvidence
+    simp only [VLCtx.toCtx] at bodyEvidence
+    have annotationContext : VLCtx.IsDefEq env Us.length
+        ((none, .vlam domain') :: Δ)
+        ((none, .vlam storedDomain') :: Δ) :=
+      .cons (.refl henv hΔ) (by nofun) (.vlam annotationDef)
+    have bodyStoredType :=
+      bodySource.hasType.2.defeqDFC henv annotationContext.defeqCtx
+    have hBodyΓ : OnCtx (storedDomain' :: Δ.toCtx)
+        (env.IsType Us.length) :=
+      ⟨hΔ.toCtx, ⟨_, annotationDef.hasType.2⟩⟩
+    obtain ⟨_, bodyTypeEq⟩ :=
+      bodyStoredType.uniq henv hBodyΓ bodyEvidence.isDefEq
+    have bodyDefStored : env.IsDefEq Us.length
+        (storedDomain' :: Δ.toCtx) storedBody' bodyView' (.sort v) :=
+      (DefEqEvidence.change bodyTypeEq.symm bodyEvidence).isDefEq
+    have bodyDefMoved :=
+      bodyDefStored.defeqDFC henv hctx.defeqCtx
+    simpa only [AddInductive.CandidateExprTrace.view, habstract] using
+      TrExprS.forallE
+        (⟨u, domainDef.hasType.2⟩ :
+          env.IsType Us.length Δ.toCtx domainView')
+        (⟨v, bodyDefMoved.hasType.2⟩ :
+          env.IsType Us.length (domainView' :: Δ.toCtx) bodyView')
+        domainStrict bodyMoved
+
+/-- Interpret a retained candidate at a caller-selected strict translation
+of its exact reconstructed view.
+
+The selected endpoint is not justified by uniqueness.  At every Pi node the
+given strict derivation supplies the desired domain and body endpoints;
+terminal WHNF packaging fixes the named result, while value-preserving
+context transport reuses every resolved projector in the body derivation.
+This is the construction needed by staged declarations that deliberately
+reuse pre-family projection artifacts. -/
+theorem CandidateExprRun.exists_ofCandidateAtView
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    (candidateRun : CandidateContextRun candidateContext)
+    (source' view' : VExpr)
+    (source_tr : candidateRun.context.TrExprS source source')
+    (view_tr : candidateRun.context.TrExprS trace.view view')
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    ∃ inferred', Nonempty
+      (CandidateExprRun candidateRun.context.venv
+        candidateRun.context.lparams trace candidateRun.context.vlctx
+        source' view' inferred') := by
+  induction trace generalizing source' view' with
+  | terminal context source inferred result checked normalized =>
+      have result_tr : candidateRun.context.TrExprS result view' := by
+        simpa only [AddInductive.CandidateExprTrace.view] using view_tr
+      obtain ⟨inferred', ⟨node⟩⟩ :=
+        CandidateNodeRun.exists_ofCandidateAtResult
+          context source inferred result checked normalized
+          candidateRun.context candidateRun.context_eq candidateRun.state_wf
+          source' view' source_tr result_tr
+          context.fuel.recDepth whnfFuel rfl whnfDepth
+      exact ⟨inferred', ⟨.terminal node⟩⟩
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized
+      domainCandidate bodyCandidate domainIH bodyIH =>
+      obtain ⟨inferred', result', _, result_tr, ⟨node⟩⟩ :=
+        CandidateNodeRun.exists_ofCandidate context source inferred
+          (.forallE name domain body binderInfo) checked normalized
+          candidateRun.context candidateRun.context_eq candidateRun.state_wf
+          source' source_tr context.fuel.recDepth whnfFuel rfl whnfDepth
+      obtain ⟨rawDomain', rawBody', resultEq, domainType, bodyType,
+          domain_tr, body_tr⟩ := TrExprS.forallE_components result_tr
+      subst result'
+      obtain ⟨u, domainTypeHasType⟩ := domainType
+      obtain ⟨v, bodyTypeHasType⟩ := bodyType
+      obtain ⟨domainView', bodyView', viewEq, _domainViewType,
+          _bodyViewType, domainView_tr, bodyView_tr⟩ :=
+        TrExprS.forallE_components view_tr
+      subst view'
+      obtain ⟨domainInferred', ⟨domainRun⟩⟩ :=
+        domainIH candidateRun rawDomain' domainView' domain_tr domainView_tr
+          whnfDepth
+      obtain ⟨storedDomain', storedDomain_tr⟩ :=
+        candidateTypeAnnotation_exists_translation annotations.trace domain_tr
+      let annotationsRun := IsDefEqRun.ofCandidateStep
+        ⟨context, domain, annotations.consumed⟩ annotationsEq
+        candidateRun.context candidateRun.context_eq rfl rfl rfl
+        candidateRun.state_wf domain_tr storedDomain_tr
+        context.fuel.recDepth rfl
+      have henv : VEnv.WF candidateRun.context.venv :=
+        candidateRun.context.Ewf
+      have hΔ : OnCtx candidateRun.context.vlctx.toCtx
+          (candidateRun.context.venv.IsType
+            candidateRun.context.lparams.length) :=
+        candidateRun.context.Δwf.toCtx
+      have annotationDef :=
+        annotationsRun.isDefEqU.of_l henv hΔ domainTypeHasType
+      let bodyCandidateRun := candidateRun.pushLocalDecl name binderInfo
+        annotations.consumed fresh storedDomain' storedDomain_tr
+          ⟨u, annotationDef.hasType.2⟩
+      have bodyVenv : bodyCandidateRun.context.venv =
+          candidateRun.context.venv := rfl
+      have bodyLparams : bodyCandidateRun.context.lparams =
+          candidateRun.context.lparams := rfl
+      have bodyVlctx : bodyCandidateRun.context.vlctx =
+          (some (context.freshFVarId, annotations.consumed.fvarsList),
+            .vlam storedDomain') :: candidateRun.context.vlctx := rfl
+      have bodyDepth :
+          (context.pushLocalDecl name binderInfo
+            annotations.consumed).fuel.recDepth = whnfFuel + 1 := by
+        simpa [AddInductive.Context.pushLocalDecl] using whnfDepth
+      have domainContext : VLCtx.IsDefEq
+          candidateRun.context.venv candidateRun.context.lparams.length
+          ((none, .vlam rawDomain') :: candidateRun.context.vlctx)
+          ((none, .vlam storedDomain') :: candidateRun.context.vlctx) :=
+        .cons (.refl henv candidateRun.context.Δwf) (by nofun)
+          (.vlam annotationDef)
+      obtain ⟨storedBody', storedBody_tr⟩ :=
+        body_tr.defeqDFC henv domainContext
+      have hRawBody : OnCtx
+          (rawDomain' :: candidateRun.context.vlctx.toCtx)
+          (candidateRun.context.venv.IsType
+            candidateRun.context.lparams.length) :=
+        ⟨hΔ, ⟨u, domainTypeHasType⟩⟩
+      have bodySource :=
+        (body_tr.uniq henv domainContext storedBody_tr).of_l
+          henv hRawBody bodyTypeHasType
+      have bodyΔwf := bodyCandidateRun.context.Δwf
+      rw [bodyVenv, bodyLparams, bodyVlctx] at bodyΔwf
+      have instantiatedBody_tr :=
+        storedBody_tr.inst_fvar henv.ordered bodyΔwf
+      have bodySource_tr : bodyCandidateRun.context.TrExprS
+          (body.instantiate1 context.freshExpr) storedBody' := by
+        simpa only [VContext.TrExprS, bodyVenv, bodyLparams, bodyVlctx,
+          AddInductive.Context.freshExpr, Expr.instantiate1_eq] using
+            instantiatedBody_tr
+      obtain ⟨_, domainTypeEq⟩ :=
+        domainTypeHasType.uniq henv hΔ domainRun.evidence.isDefEq
+      have domainDef : candidateRun.context.venv.IsDefEq
+          candidateRun.context.lparams.length
+          candidateRun.context.vlctx.toCtx rawDomain' domainView'
+          (.sort u) :=
+        (DefEqEvidence.change domainTypeEq.symm
+          domainRun.evidence).isDefEq
+      have storedToView : candidateRun.context.venv.IsDefEq
+          candidateRun.context.lparams.length
+          candidateRun.context.vlctx.toCtx storedDomain' domainView'
+          (.sort u) :=
+        annotationDef.symm.trans domainDef
+      have viewToStored : VLCtx.IsDefEq
+          candidateRun.context.venv candidateRun.context.lparams.length
+          ((none, .vlam domainView') :: candidateRun.context.vlctx)
+          ((none, .vlam storedDomain') :: candidateRun.context.vlctx) :=
+        .cons (.refl henv candidateRun.context.Δwf) (by nofun)
+          (.vlam storedToView.symm)
+      have bodyViewAtStored : TrExprS candidateRun.context.venv
+          candidateRun.context.lparams
+          ((none, .vlam storedDomain') :: candidateRun.context.vlctx)
+          (bodyCandidate.view.abstract #[context.freshExpr]) bodyView' :=
+        bodyView_tr.defeqDFC_same henv viewToStored (.cons .base .vlam)
+      have bodyViewInst := bodyViewAtStored.inst_fvar henv.ordered bodyΔwf
+      have bodyClosed : Closed bodyCandidate.view := by
+        obtain ⟨arbitraryView, arbitraryInferred, ⟨arbitraryRun⟩⟩ :=
+          CandidateExprRun.exists_ofCandidate bodyCandidate bodyCandidateRun
+            storedBody' bodySource_tr whnfFuel bodyDepth
+        have closed := arbitraryRun.view_tr_resolved.closed
+        have noBV : bodyCandidateRun.context.vlctx.NoBV :=
+          bodyCandidateRun.context.mlctx.noBV
+        rw [noBV] at closed
+        exact closed
+      have bodyViewInst' : TrExprS candidateRun.context.venv
+          candidateRun.context.lparams
+          ((some (context.freshFVarId,
+              annotations.consumed.fvarsList), .vlam storedDomain') ::
+            candidateRun.context.vlctx)
+          ((bodyCandidate.view.abstract #[.fvar context.freshFVarId])
+            |>.instantiate1 (.fvar context.freshFVarId)) bodyView' := by
+        simpa only [AddInductive.Context.freshExpr,
+          Expr.instantiate1_eq] using bodyViewInst
+      rw [candidateView_abstract_instantiate_self
+        bodyCandidate.view context.freshFVarId bodyClosed] at bodyViewInst'
+      have desiredBody_tr : bodyCandidateRun.context.TrExprS
+          bodyCandidate.view bodyView' := by
+        simpa only [VContext.TrExprS, bodyVenv, bodyLparams, bodyVlctx] using
+          bodyViewInst'
+      obtain ⟨bodyInferred', ⟨bodyRun⟩⟩ :=
+        bodyIH bodyCandidateRun storedBody' bodyView' bodySource_tr
+          desiredBody_tr bodyDepth
+      refine ⟨inferred', ⟨?_⟩⟩
+      exact .forallE annotations annotationsEq domainCandidate bodyCandidate
+        node domainRun annotationsRun bodyRun domainTypeHasType bodyTypeHasType
+        bodySource bodyVlctx
+
 /-- Exact-translation uniqueness for every expression that contributes to a
 candidate view.  The abstracted-body clause names the syntax stored by
 `CandidateExprTrace.view`, while the recursive body clause supports the next
@@ -3545,6 +3960,21 @@ structure CandidateExprSemanticRootInput (env : VEnv) (Us : List Name)
   whnfFuel : Nat
   whnfDepth : candidate.context.fuel.recDepth = whnfFuel + 1
 
+/-- Forget a completed recursive interpretation back to the exact root input
+that produced it.  This is useful when a later staging phase has assembled a
+more precisely controlled strict view and wants to rerun the same retained
+checker trace at that endpoint. -/
+def CandidateExprSemanticRootRun.input
+    (run : CandidateExprSemanticRootRun env Us candidate source') :
+    CandidateExprSemanticRootInput env Us candidate source' where
+  contextRun := run.contextRun
+  venv_eq := run.venv_eq
+  lparams_eq := run.lparams_eq
+  vlctx_eq := run.vlctx_eq
+  source_tr := run.source_tr
+  whnfFuel := run.whnfFuel
+  whnfDepth := run.whnfDepth
+
 /-- Run the retained checker interpreter on an exact root input.  The result is
 `Nonempty` because the checker-selected Theory view is semantic evidence rather
 than executable metadata; no choice operator or caller-supplied endpoint is
@@ -3555,6 +3985,54 @@ theorem CandidateExprSemanticRootInput.exists
   CandidateExprSemanticRootRun.exists_ofCandidate input.contextRun
     input.venv_eq input.lparams_eq input.vlctx_eq input.source_tr
     input.whnfFuel input.whnfDepth
+
+/-- Interpret a root candidate at an exact strict translation selected by a
+producer.  In particular, a staging producer may transport pre-family
+projector witnesses into the enlarged environment, assemble the intended
+constructor view, and ask the retained checker interpreter to use that view
+literally. -/
+theorem CandidateExprSemanticRootInput.existsAtView
+    {env : VEnv} {Us : List Name} {source : Expr}
+    {candidate : AddInductive.CandidateExpr source} {source' : VExpr}
+    (input : CandidateExprSemanticRootInput env Us candidate source')
+    {view : VExpr}
+    (view_tr : TrExprS env Us [] candidate.trace.view view) :
+    ∃ run : CandidateExprSemanticRootRun env Us candidate source',
+      run.view = view := by
+  have contextualSource : input.contextRun.context.TrExprS source source' := by
+    simpa only [VContext.TrExprS, input.venv_eq, input.lparams_eq,
+      input.vlctx_eq] using input.source_tr
+  have contextualView : input.contextRun.context.TrExprS
+      candidate.trace.view view := by
+    simpa only [VContext.TrExprS, input.venv_eq, input.lparams_eq,
+      input.vlctx_eq] using view_tr
+  obtain ⟨inferred, ⟨recursive⟩⟩ :=
+    CandidateExprRun.exists_ofCandidateAtView candidate.trace
+      input.contextRun source' view contextualSource contextualView
+      input.whnfFuel input.whnfDepth
+  refine ⟨{
+    contextRun := input.contextRun
+    venv_eq := input.venv_eq
+    lparams_eq := input.lparams_eq
+    vlctx_eq := input.vlctx_eq
+    source_tr := input.source_tr
+    whnfFuel := input.whnfFuel
+    whnfDepth := input.whnfDepth
+    view := view
+    recursive := ⟨inferred, ?_⟩ }, rfl⟩
+  simpa only [input.venv_eq, input.lparams_eq, input.vlctx_eq] using recursive
+
+/-- Retarget a completed semantic root to a producer-selected strict view
+while preserving its exact source translation, checker context, and fuel.
+The returned equality prevents existential packaging from forgetting the
+chosen endpoint. -/
+theorem CandidateExprSemanticRootRun.existsAtView
+    (run : CandidateExprSemanticRootRun env Us candidate source')
+    {view : VExpr}
+    (view_tr : TrExprS env Us [] candidate.trace.view view) :
+    ∃ retargeted : CandidateExprSemanticRootRun env Us candidate source',
+      retargeted.view = view :=
+  run.input.existsAtView view_tr
 
 /-- Interpret an identity-normalizing staged root at the strict Theory
 translation already owned by its source input.  This keeps the endpoint
@@ -3712,6 +4190,263 @@ end TypeChecker
 
 namespace AddInductive
 
+/-! ## Semantic leverage from retained generated-recursor checks -/
+
+/-- Once the exact post-recursor checker context has been translated, the
+retained 4.33.1 recursor-type guard certifies the translated recursor type.
+
+The verified context is intentionally an explicit premise.  Constructing it
+requires a translation of the post-recursor host environment and its
+synthesis local context, so this theorem is a downstream checker-soundness
+consumer rather than a replacement for recursor telescope correspondence. -/
+theorem GeneratedRecursorFamilyCheck.recursorTypeTyping
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {motives minors : Array Expr} {dIdx : Nat}
+    {initialContext finalContext : Context}
+    (check : GeneratedRecursorFamilyCheck stats indTypes elimLevel motives
+      minors dIdx initialContext finalContext)
+    (context : TypeChecker.VContext)
+    (context_eq : context.toContext =
+      { initialContext.toTypeChecker with
+        lparams := check.recursor.levelParams })
+    (stateWF : TypeChecker.VState.WF context {})
+    {recursorType' : VExpr}
+    (recursorType_tr : context.TrExprS check.recursorType recursorType') :
+    ∃ inferred', context.TrTyping check.recursorType
+      check.recursorTypeInferred recursorType' inferred' := by
+  have eagerReduce_eq : context.eagerReduce = false := by
+    have equality := congrArg TypeChecker.Context.eagerReduce context_eq
+    simpa [Context.toTypeChecker] using equality
+  have run_eq :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel
+        (TypeChecker.checkType check.recursorType) =
+          .ok check.recursorTypeInferred := by
+    change TypeChecker.M.run context.toContext.env context.toContext.safety
+      context.toContext.lctx context.toContext.lparams context.toContext.fuel
+        (TypeChecker.checkType check.recursorType) =
+          .ok check.recursorTypeInferred
+    rw [context_eq]
+    simpa only [AddInductive.Context.toTypeChecker] using
+      check.recursorTypeRun
+  obtain ⟨source', inferred', typing⟩ :=
+    (TypeChecker.M.WF.runContext eagerReduce_eq stateWF
+      (TypeChecker.checkType.WF recursorType_tr.fvarsIn))
+      check.recursorTypeInferred run_eq
+  have source_eq := typing.2.1.uniq context.Ewf
+    (.refl context.Ewf context.Δwf) recursorType_tr
+  exact ⟨inferred', typing.1, recursorType_tr, typing.2.2.1,
+    typing.2.2.2.defeqU_l context.Ewf context.Δwf source_eq⟩
+
+/-- Theory meaning recovered from one retained generated-rule check after its
+post-recursor, motive/minor/index/major/field context has been verified. -/
+structure GeneratedRecursorRuleTheoryCheck
+    {stats : InductiveStats} {elimLevel : Level}
+    {motives minors : Array Expr} {indType : InductiveType}
+    {recursor : RecursorVal} {constructor : Constructor}
+    {initialContext finalContext : Context}
+    (check : GeneratedRecursorRuleCheck stats elimLevel motives minors
+      indType recursor constructor initialContext finalContext)
+    (context : TypeChecker.VContext) (lhs' : VExpr) : Type where
+  expected' : VExpr
+  reduct' : VExpr
+  actual' : VExpr
+  expectedTyping : context.TrTyping check.lhs check.expected lhs' expected'
+  reduct_tr : context.TrExprS check.reduct reduct'
+  reduct_eq : context.IsDefEqU reduct' lhs'
+  actualTyping : context.TrTyping check.reduct check.actual reduct' actual'
+  typePreserving : context.IsDefEqU actual' expected'
+
+/-- The four retained 4.33.1 rule equations are sufficient to recover
+Theory typing and type preservation, provided the exact rule-local context
+and the generated left-hand side have already been translated. -/
+theorem GeneratedRecursorRuleCheck.theoryTypePreserving
+    {stats : InductiveStats} {elimLevel : Level}
+    {motives minors : Array Expr} {indType : InductiveType}
+    {recursor : RecursorVal} {constructor : Constructor}
+    {initialContext finalContext : Context}
+    (check : GeneratedRecursorRuleCheck stats elimLevel motives minors
+      indType recursor constructor initialContext finalContext)
+    (context : TypeChecker.VContext)
+    (context_eq : context.toContext =
+      { finalContext.toTypeChecker with lparams := recursor.levelParams })
+    (stateWF : TypeChecker.VState.WF context {})
+    {lhs' : VExpr} (lhs_tr : context.TrExprS check.lhs lhs') :
+    Nonempty (GeneratedRecursorRuleTheoryCheck check context lhs') := by
+  have eagerReduce_eq : context.eagerReduce = false := by
+    have equality := congrArg TypeChecker.Context.eagerReduce context_eq
+    simpa [Context.toTypeChecker] using equality
+  have expectedRun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.inferType check.lhs) =
+          .ok check.expected := by
+    change TypeChecker.M.run context.toContext.env context.toContext.safety
+      context.toContext.lctx context.toContext.lparams context.toContext.fuel
+        (TypeChecker.inferType check.lhs) = .ok check.expected
+    rw [context_eq]
+    simpa only [AddInductive.Context.toTypeChecker] using check.expectedRun
+  obtain ⟨expected', expectedTyping⟩ :=
+    (TypeChecker.M.WF.runContext eagerReduce_eq stateWF
+      (TypeChecker.inferType.WF lhs_tr)) check.expected expectedRun
+  have reductRun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.whnf check.lhs) =
+          .ok check.reduct := by
+    change TypeChecker.M.run context.toContext.env context.toContext.safety
+      context.toContext.lctx context.toContext.lparams context.toContext.fuel
+        (TypeChecker.whnf check.lhs) = .ok check.reduct
+    rw [context_eq]
+    simpa only [AddInductive.Context.toTypeChecker] using check.reductRun
+  obtain ⟨reduct', reduct_tr, reduct_eq⟩ :=
+    (TypeChecker.M.WF.runContext eagerReduce_eq stateWF
+      (TypeChecker.whnf.WF lhs_tr)) check.reduct reductRun
+  have actualRun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel (TypeChecker.inferType check.reduct) =
+          .ok check.actual := by
+    change TypeChecker.M.run context.toContext.env context.toContext.safety
+      context.toContext.lctx context.toContext.lparams context.toContext.fuel
+        (TypeChecker.inferType check.reduct) = .ok check.actual
+    rw [context_eq]
+    simpa only [AddInductive.Context.toTypeChecker] using check.actualRun
+  obtain ⟨actual', actualTyping⟩ :=
+    (TypeChecker.M.WF.runContext eagerReduce_eq stateWF
+      (TypeChecker.inferType.WF reduct_tr)) check.actual actualRun
+  have typePreservingRun :
+      TypeChecker.M.run context.env context.safety context.lctx
+        context.lparams context.fuel
+        (TypeChecker.isDefEq check.actual check.expected) = .ok true := by
+    change TypeChecker.M.run context.toContext.env context.toContext.safety
+      context.toContext.lctx context.toContext.lparams context.toContext.fuel
+        (TypeChecker.isDefEq check.actual check.expected) = .ok true
+    rw [context_eq]
+    simpa only [AddInductive.Context.toTypeChecker] using
+      check.typePreservingRun
+  have typePreserving :=
+    (TypeChecker.M.WF.runContext eagerReduce_eq stateWF
+      (TypeChecker.isDefEq.WF actualTyping.2.2.1
+        expectedTyping.2.2.1)) true typePreservingRun
+  exact ⟨{
+    expected'
+    reduct'
+    actual'
+    expectedTyping
+    reduct_tr
+    reduct_eq
+    actualTyping
+    typePreserving := typePreserving (by simp) }⟩
+
+/-- Project the first family check from a retained nonterminal G2 trace. -/
+def GeneratedRecursorCheckTrace.first
+    {stats : InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {motives minors : Array Expr}
+    {dIdx : Nat} {initialContext finalContext : Context}
+    (trace : GeneratedRecursorCheckTrace stats indTypes elimLevel motives
+      minors dIdx initialContext finalContext)
+    (active : dIdx < indTypes.size) :
+    Σ nextContext, GeneratedRecursorFamilyCheck stats indTypes elimLevel
+      motives minors dIdx initialContext nextContext := by
+  cases trace with
+  | done finished => exact (finished active).elim
+  | next family _ => exact ⟨_, family⟩
+
+/-- Project the first constructor check from a nonempty retained family-rule
+trace. -/
+def GeneratedRecursorRuleCheckTrace.first
+    {stats : InductiveStats} {elimLevel : Level}
+    {motives minors : Array Expr} {indType : InductiveType}
+    {recursor : RecursorVal} {constructor : Constructor}
+    {constructors : List Constructor}
+    {initialContext finalContext : Context}
+    (trace : GeneratedRecursorRuleCheckTrace stats elimLevel motives minors
+      indType recursor (constructor :: constructors) initialContext
+        finalContext) :
+    Σ nextContext, GeneratedRecursorRuleCheck stats elimLevel motives
+      minors indType recursor constructor initialContext nextContext := by
+  cases trace with
+  | cons head _ => exact ⟨_, head⟩
+
+/-- A retained G3 full-check equation certifies the translated restored
+artifact once the final restored host environment already has a verified
+Theory model.  The explicit `VEnvAt` premise records the staging boundary:
+this theorem consumes restored metadata correspondence; it does not construct
+that correspondence. -/
+theorem restoredArtifactCheck_theoryTyping
+    {env : Environment} {safety : DefinitionSafety} {fuel : FuelConfig}
+    {source : RestoredArtifactCheckSource} {inferred : Expr} {venv : VEnv}
+    (check : TypeChecker.M.run env (safety := safety) (lctx := {})
+      (lparams := source.lparams) (fuel := fuel)
+      (TypeChecker.checkType source.expression) = .ok inferred)
+    (wf : VEnvAt env safety venv)
+    {source' : VExpr}
+    (source_tr : TrExprS venv source.lparams [] source.expression source') :
+    ∃ inferred', TrTyping venv source.lparams [] source.expression inferred
+      source' inferred' := by
+  let context := TypeChecker.VContext.mk1 wf source.lparams fuel
+  have source_tr' : context.TrExprS source.expression source' := by
+    change TrExprS venv source.lparams [] source.expression source'
+    exact source_tr
+  obtain ⟨_foundSource, inferred', typing⟩ :=
+    (TypeChecker.M.WF.run1 wf
+      (TypeChecker.checkType.WF source_tr'.fvarsIn)) inferred check
+  have source_eq := typing.2.1.uniq context.Ewf
+    (.refl context.Ewf context.Δwf) source_tr'
+  have result : context.TrTyping source.expression inferred source' inferred' :=
+    ⟨typing.1, source_tr', typing.2.2.1,
+      typing.2.2.2.defeqU_l context.Ewf context.Δwf source_eq⟩
+  refine ⟨inferred', ?_⟩
+  change TrTyping venv source.lparams [] source.expression inferred source'
+    inferred'
+  exact result
+
+/-- Project the first exact full-check equation from a nonempty G3 trace. -/
+def RestoredArtifactCheckTrace.first
+    {env : Environment} {safety : DefinitionSafety} {fuel : FuelConfig}
+    {source : RestoredArtifactCheckSource}
+    {sources : List RestoredArtifactCheckSource}
+    (trace : RestoredArtifactCheckTrace env safety fuel
+      (source :: sources)) :
+    { inferred // TypeChecker.M.run env (safety := safety) (lctx := {})
+      (lparams := source.lparams) (fuel := fuel)
+      (TypeChecker.checkType source.expression) = .ok inferred } := by
+  cases trace with
+  | cons inferred check _ => exact ⟨inferred, check⟩
+
+/-- Drop the first retained restored-artifact check without rerunning it. -/
+def RestoredArtifactCheckTrace.tail
+    {env : Environment} {safety : DefinitionSafety} {fuel : FuelConfig}
+    {source : RestoredArtifactCheckSource}
+    {sources : List RestoredArtifactCheckSource}
+    (trace : RestoredArtifactCheckTrace env safety fuel
+      (source :: sources)) :
+    RestoredArtifactCheckTrace env safety fuel sources := by
+  cases trace with
+  | cons _ _ tail => exact tail
+
+/-- Select an exact full-check equation at any source position retained by a
+G3 trace.  The `getElem?` premise is intentionally propositional: restored
+recursor rule lists are opaque producer outputs, so their nonemptiness is
+usually available as a retained lookup theorem rather than by reduction. -/
+theorem RestoredArtifactCheckTrace.get?
+    {env : Environment} {safety : DefinitionSafety} {fuel : FuelConfig}
+    {sources : List RestoredArtifactCheckSource}
+    (trace : RestoredArtifactCheckTrace env safety fuel sources)
+    {i : Nat} {source : RestoredArtifactCheckSource}
+    (source_at : sources[i]? = some source) :
+    ∃ inferred, TypeChecker.M.run env (safety := safety) (lctx := {})
+      (lparams := source.lparams) (fuel := fuel)
+      (TypeChecker.checkType source.expression) = .ok inferred := by
+  induction trace generalizing i source with
+  | nil => simp at source_at
+  | @cons headSource tailSources inferred check tail ih =>
+    cases i with
+    | zero =>
+      simp at source_at
+      subst source
+      exact ⟨inferred, check⟩
+    | succ i =>
+      exact ih (by simpa using source_at)
+
 /-- The terminal assertion wrapper preserves the literal shared-parameter
 array whenever both its input and output have the validator-required size.
 If an earlier assertion selected the inhabited fallback, the output-size
@@ -3758,6 +4493,79 @@ theorem familyValidationTerminalStats_params_eq_of_sizes
       Array.size_eq_zero_iff.mp (rawSize.trans nparams_eq)
     rw [params_eq]
     rfl
+
+/-- The terminal assertion wrapper likewise preserves the completed family
+index-count array when both sides have the required block size. -/
+theorem familyValidationTerminalStats_nindices_eq_of_sizes
+    (stats : InductiveStats) (context : Context)
+    (rawSize : stats.nindices.size = indTypes.size)
+    (resultSize :
+      (familyValidationTerminalStats nparams indTypes stats context).nindices.size =
+        indTypes.size) :
+    (familyValidationTerminalStats nparams indTypes stats context).nindices =
+      stats.nindices := by
+  unfold familyValidationTerminalStats at resultSize ⊢
+  split <;> rename_i hlevels
+  · split <;> rename_i hnindices
+    · split <;> rename_i hindConsts
+      · split <;> rename_i hparams
+        · rfl
+        · simp only [hlevels, hnindices, hindConsts, hparams] at resultSize
+          change 0 = indTypes.size at resultSize
+          have sizeZero : indTypes.size = 0 := resultSize.symm
+          have arrayEmpty : stats.nindices = #[] :=
+            Array.size_eq_zero_iff.mp (rawSize.trans sizeZero)
+          rw [arrayEmpty]
+          rfl
+      · simp only [hlevels, hnindices, hindConsts] at resultSize
+        change 0 = indTypes.size at resultSize
+        have sizeZero : indTypes.size = 0 := resultSize.symm
+        have arrayEmpty : stats.nindices = #[] :=
+          Array.size_eq_zero_iff.mp (rawSize.trans sizeZero)
+        rw [arrayEmpty]
+        rfl
+    · simp only [hlevels, hnindices] at resultSize
+      change 0 = indTypes.size at resultSize
+      have sizeZero : indTypes.size = 0 := resultSize.symm
+      have arrayEmpty : stats.nindices = #[] :=
+        Array.size_eq_zero_iff.mp (rawSize.trans sizeZero)
+      rw [arrayEmpty]
+      rfl
+  · simp only [hlevels] at resultSize
+    change 0 = indTypes.size at resultSize
+    have sizeZero : indTypes.size = 0 := resultSize.symm
+    have arrayEmpty : stats.nindices = #[] :=
+      Array.size_eq_zero_iff.mp (rawSize.trans sizeZero)
+    rw [arrayEmpty]
+    rfl
+
+/-- A nonempty final family inventory rules out every inhabited fallback in
+the terminal assertion wrapper.  Hence all statistics fields, including the
+common result universe, are preserved literally. -/
+theorem familyValidationTerminalStats_eq_of_indConsts_nonempty
+    (stats : InductiveStats) (context : Context)
+    (nonempty :
+      (familyValidationTerminalStats nparams indTypes stats context).indConsts.isEmpty =
+        false) :
+    familyValidationTerminalStats nparams indTypes stats context = stats := by
+  unfold familyValidationTerminalStats at nonempty ⊢
+  split <;> rename_i hlevels
+  · split <;> rename_i hnindices
+    · split <;> rename_i hindConsts
+      · split <;> rename_i hparams
+        · rfl
+        · simp only [hlevels, hnindices, hindConsts, hparams] at nonempty
+          change true = false at nonempty
+          contradiction
+      · simp only [hlevels, hnindices, hindConsts] at nonempty
+        change true = false at nonempty
+        contradiction
+    · simp only [hlevels, hnindices] at nonempty
+      change true = false at nonempty
+      contradiction
+  · simp only [hlevels] at nonempty
+    change true = false at nonempty
+    contradiction
 
 end AddInductive
 
@@ -3809,9 +4617,133 @@ theorem result_params_eq_of_later
   | terminal =>
     rfl
 
+/-- A family telescope increments only its scalar index counter; the array of
+already completed family counts is unchanged. -/
+theorem result_stats_nindices_eq
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    trace.result.stats.nindices = stats.nindices := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | terminal => rfl
+
+/-- A family telescope never changes the block's common result universe. -/
+theorem result_stats_resultLevel_eq
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    trace.result.stats.resultLevel = stats.resultLevel := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    simpa only [FamilyTypeParameterComparisonTrace.result] using ih
+  | terminal => rfl
+
 end AddInductive.FamilyTypeParameterComparisonTrace
 
 namespace AddInductive.FamilyParameterComparisonBlockTrace
+
+/-- Once family validation is in its later-family phase, the dependent outer
+suffix preserves the common result universe all the way to its terminal
+result.  Final nonemptiness rules out the assertion wrapper's inhabited
+fallback. -/
+theorem result_stats_resultLevel_eq_of_later
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (later : stats.indConsts.isEmpty = false)
+    (resultNonempty : trace.result.stats.indConsts.isEmpty = false) :
+    trace.result.stats.resultLevel = stats.resultLevel := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+    have nextLater :
+        ({ telescope.result.stats with
+          nindices := telescope.result.stats.nindices.push
+            telescope.result.nindices
+          indConsts := telescope.result.stats.indConsts.push
+            (.const indTypes[dIdx].name
+              telescope.result.stats.levels) }).indConsts.isEmpty = false := by
+      simp
+    have tailEq := ih nextLater resultNonempty
+    exact tailEq.trans telescope.result_stats_resultLevel_eq
+  | terminal dIdx stats context outOfBounds =>
+    have terminalEq := familyValidationTerminalStats_eq_of_indConsts_nonempty
+      stats context resultNonempty
+    exact congrArg InductiveStats.resultLevel terminalEq
+
+/-- Later source families only append completed index counts, so every slot
+already present at the start of an outer suffix is preserved to its terminal
+result. -/
+theorem result_nindices_getElem?_of_lt
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (startSize : stats.nindices.size = dIdx)
+    (startBound : dIdx ≤ indTypes.size)
+    (resultSize : trace.result.stats.nindices.size = indTypes.size) :
+    ∀ index, index < dIdx →
+      trace.result.stats.nindices[index]? = stats.nindices[index]? := by
+  intro index indexLt
+  induction trace generalizing index with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+    have telescopeEq := telescope.result_stats_nindices_eq
+    have nextSize :
+        (telescope.result.stats.nindices.push
+          telescope.result.nindices).size = dIdx + 1 := by
+      simp only [Array.size_push]
+      rw [telescopeEq, startSize]
+    have tailEq := ih nextSize (by omega) resultSize index (by omega)
+    have indexNe : index ≠ stats.nindices.size := by
+      rw [startSize]
+      omega
+    simpa only [FamilyParameterComparisonBlockTrace.result,
+      Array.getElem?_push, if_neg indexNe, telescopeEq] using tailEq
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail
+      ih =>
+    have telescopeEq := telescope.result_stats_nindices_eq
+    have nextSize :
+        (telescope.result.stats.nindices.push
+          telescope.result.nindices).size = dIdx + 1 := by
+      simp only [Array.size_push]
+      rw [telescopeEq, startSize]
+    have tailEq := ih nextSize (by omega) resultSize index (by omega)
+    have indexNe : index ≠ stats.nindices.size := by
+      rw [startSize]
+      omega
+    simpa only [FamilyParameterComparisonBlockTrace.result,
+      Array.getElem?_push, if_neg indexNe, telescopeEq] using tailEq
+  | terminal dIdx stats context outOfBounds =>
+    have dIdxEq : dIdx = indTypes.size := by omega
+    have rawSize : stats.nindices.size = indTypes.size :=
+      startSize.trans dIdxEq
+    have terminalEq := familyValidationTerminalStats_nindices_eq_of_sizes
+      stats context rawSize resultSize
+    simp only [FamilyParameterComparisonBlockTrace.result]
+    rw [terminalEq]
 
 /-- One exact source-order family node together with the dependent outer
 trace that follows its completed telescope.  Unlike `FamilyTelescopePosition`,
@@ -3978,6 +4910,73 @@ theorem headContinuation?_laterInvariant
     simp only [headContinuation?] at selected
     contradiction
 
+/-- The ordinary validator's later-family universe gate is exposed as the
+positive kernel-level equivalence decision at the selected continuation. -/
+theorem headContinuation?_resultLevelCompatible
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (later : continuation.stats.indConsts.isEmpty = false) :
+    continuation.sorted.sortLevel!.isEquiv
+        continuation.stats.resultLevel = true := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    change sorted.sortLevel!.isEquiv stats.resultLevel = true
+    have compatible : sorted.sortLevel!.isEquiv
+        telescope.result.stats.resultLevel = true := by
+      simpa using resultLevelCompatible
+    rw [telescope.result_stats_resultLevel_eq] at compatible
+    exact compatible
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
+/-- Advancing a selected later-family node preserves the literal common
+kernel result level in the dependent tail statistics. -/
+theorem headContinuation?_next_resultLevel_eq
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (later : continuation.stats.indConsts.isEmpty = false) :
+    continuation.nextStats.resultLevel =
+      continuation.stats.resultLevel := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    exact telescope.result_stats_resultLevel_eq
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
 /-- Completing a selected later-family telescope produces the genuine local
 inventory expected by its dependent outer tail.  The block update changes
 family statistics but preserves the completed parameter array. -/
@@ -4071,7 +5070,91 @@ theorem headContinuation?_result
     simp only [headContinuation?] at selected
     contradiction
 
-/-- Select the second source family together with the exact outer trace that
+/-- A selected family appends exactly one completed count to the array handed
+to its dependent outer tail. -/
+theorem headContinuation?_next_nindices_size
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (currentSize : continuation.stats.nindices.size = continuation.dIdx) :
+    continuation.nextStats.nindices.size = continuation.dIdx + 1 := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    simp only [Array.size_push]
+    rw [telescope.result_stats_nindices_eq, currentSize]
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    simp only [Array.size_push]
+    rw [telescope.result_stats_nindices_eq, currentSize]
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
+theorem headContinuation?_result_nindices
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (currentSize : continuation.stats.nindices.size = continuation.dIdx)
+    (resultSize : trace.result.stats.nindices.size = indTypes.size) :
+    trace.result.stats.nindices[continuation.dIdx]? =
+      some continuation.telescope.result.nindices := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have telescopeEq := telescope.result_stats_nindices_eq
+    have nextSize :
+        (telescope.result.stats.nindices.push
+          telescope.result.nindices).size = dIdx + 1 := by
+      simp only [Array.size_push]
+      rw [telescopeEq, currentSize]
+    have preserved := tail.result_nindices_getElem?_of_lt nextSize
+      (by omega) resultSize dIdx (by omega)
+    calc
+      tail.result.stats.nindices[dIdx]? =
+          (telescope.result.stats.nindices.push
+            telescope.result.nindices)[dIdx]? := preserved
+      _ = some telescope.result.nindices := by
+        simp only [Array.getElem?_push]
+        rw [telescopeEq, currentSize]
+        simp
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have telescopeEq := telescope.result_stats_nindices_eq
+    have nextSize :
+        (telescope.result.stats.nindices.push
+          telescope.result.nindices).size = dIdx + 1 := by
+      simp only [Array.size_push]
+      rw [telescopeEq, currentSize]
+    have preserved := tail.result_nindices_getElem?_of_lt nextSize
+      (by omega) resultSize dIdx (by omega)
+    calc
+      tail.result.stats.nindices[dIdx]? =
+          (telescope.result.stats.nindices.push
+            telescope.result.nindices)[dIdx]? := preserved
+      _ = some telescope.result.nindices := by
+        simp only [Array.getElem?_push]
+        rw [telescopeEq, currentSize]
+        simp
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
+/-- Select the second source family together with its exact outer trace that
 starts after its telescope. -/
 def secondContinuation?
     (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
@@ -4168,8 +5251,71 @@ theorem secondContinuation?_dIdx
   | terminal =>
     simp_all [secondContinuation?, headContinuation?]
 
-/-- Forgetting the second continuation produces exactly the existing second
-telescope selector. -/
+/-- Completing the first two selected source families appends exactly two
+index counts to the statistics at the block entry point. -/
+theorem secondContinuation?_next_nindices_size
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation)
+    (startSize : stats.nindices.size = dIdx) :
+    continuation.nextStats.nindices.size = dIdx + 2 := by
+  obtain ⟨first, firstSelected, headSelected⟩ :=
+    exists_predecessor_of_secondContinuation? selected
+  have firstDIdx := headContinuation?_dIdx firstSelected
+  have firstStats := headContinuation?_stats firstSelected
+  have firstSize : first.stats.nindices.size = first.dIdx := by
+    rw [firstStats, firstDIdx]
+    exact startSize
+  have firstNextSize :=
+    headContinuation?_next_nindices_size firstSelected firstSize
+  have continuationStats := headContinuation?_stats headSelected
+  have continuationDIdx := headContinuation?_dIdx headSelected
+  have continuationSize :
+      continuation.stats.nindices.size = continuation.dIdx := by
+    rw [continuationStats, continuationDIdx]
+    exact firstNextSize
+  have nextSize :=
+    headContinuation?_next_nindices_size headSelected continuationSize
+  have ordinal := secondContinuation?_dIdx selected
+  omega
+
+/-- The second selected family stores its completed scalar count at the next
+source ordinal in the original trace's terminal statistics. -/
+theorem secondContinuation?_result_nindices
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation)
+    (startSize : stats.nindices.size = dIdx)
+    (resultSize : trace.result.stats.nindices.size = indTypes.size) :
+    trace.result.stats.nindices[dIdx + 1]? =
+      some continuation.telescope.result.nindices := by
+  obtain ⟨first, firstSelected, headSelected⟩ :=
+    exists_predecessor_of_secondContinuation? selected
+  have firstDIdx := headContinuation?_dIdx firstSelected
+  have firstStats := headContinuation?_stats firstSelected
+  have firstSize : first.stats.nindices.size = first.dIdx := by
+    rw [firstStats, firstDIdx]
+    exact startSize
+  have nextSize := headContinuation?_next_nindices_size firstSelected firstSize
+  have continuationStats := headContinuation?_stats headSelected
+  have continuationDIdx := headContinuation?_dIdx headSelected
+  have continuationSize :
+      continuation.stats.nindices.size = continuation.dIdx := by
+    rw [continuationStats, continuationDIdx]
+    exact nextSize
+  have firstResult := headContinuation?_result firstSelected
+  have tailResultSize : first.tail.result.stats.nindices.size =
+      indTypes.size := by
+    rw [firstResult]
+    exact resultSize
+  have installed := headContinuation?_result_nindices headSelected
+    continuationSize tailResultSize
+  rw [firstResult] at installed
+  have ordinal := secondContinuation?_dIdx selected
+  simpa only [ordinal] using installed
+
 theorem secondTelescope?_eq_map_position
     (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
       context) :
@@ -4550,6 +5696,62 @@ inductive VLCtx.FVarLamOnly : VLCtx → Prop where
   | nil : FVarLamOnly []
   | cons : FVarLamOnly Δ →
       FVarLamOnly ((some (fv, deps), .vlam type) :: Δ)
+
+/-- In a context made only from free-variable assumptions, the source-order
+free variables translate to the canonical reverse de Bruijn range.  This is
+the exact parameter prefix expected by the inductive block analyzers. -/
+theorem VLCtx.FVarLamOnly.sourceTranslations
+    {env : VEnv} {Us : List Name} {Δ : VLCtx}
+    (shape : Δ.FVarLamOnly) (henv : VEnv.WF env)
+    (wf : VLCtx.WF env Us.length Δ) :
+    List.Forall₂ (TrExprS env Us Δ)
+      (Δ.fvars.reverse.map Expr.fvar)
+      (VExpr.bvarRevRange 0 Δ.toCtx.length) := by
+  induction shape with
+  | nil => exact .nil
+  | @cons tail fv deps type tailShape ih =>
+      have tailWF : VLCtx.WF env Us.length tail := wf.1
+      let liftOne : VExpr → VExpr := fun expression =>
+        expression.liftN 1 0
+      let extension : VLCtx.FVLift tail
+          ((some (fv, deps), .vlam type) :: tail) 0 1 0 :=
+        .skip_fvar _ _ .refl
+      have liftedTail : List.Forall₂
+          (TrExprS env Us ((some (fv, deps), .vlam type) :: tail))
+          (tail.fvars.reverse.map Expr.fvar)
+          ((VExpr.bvarRevRange 0 tail.toCtx.length).map
+            liftOne) := by
+        have tailTranslations := ih tailWF
+        let rec weakenTranslations :
+            ∀ {sources targets},
+              List.Forall₂ (TrExprS env Us tail) sources targets →
+              List.Forall₂
+                (TrExprS env Us
+                  ((some (fv, deps), .vlam type) :: tail))
+                sources (targets.map liftOne)
+          | _, _, .nil => .nil
+          | _, _, .cons head rest =>
+              .cons (head.weakFV henv.ordered extension wf)
+                (weakenTranslations rest)
+        exact weakenTranslations tailTranslations
+      have headTranslation : TrExprS env Us
+          ((some (fv, deps), .vlam type) :: tail)
+          (.fvar fv) (.bvar 0) := by
+        exact TrExprS.fvar (A := type.lift) (by
+          simp [VLCtx.find?, VLCtx.next, VLocalDecl.value,
+            VLocalDecl.type])
+      have combined := Lean4Lean.List.Forall₂.append liftedTail
+        (.cons headTranslation .nil)
+      have ranges : VExpr.bvarRevRange 1 tail.toCtx.length ++ [.bvar 0] =
+          VExpr.bvarRevRange 0 (tail.toCtx.length + 1) := by
+        change VExpr.bvarRevRange 1 tail.toCtx.length ++
+            VExpr.bvarRevRange 0 1 = _
+        rw [VExpr.bvarRevRange_append]
+        rw [Nat.add_comm]
+      simpa only [VLCtx.fvars_cons_some, List.reverse_cons, List.map_append,
+        List.map_singleton, VLCtx.toCtx, List.length_cons,
+        liftOne, VExpr.bvarRevRange_liftN_low, Nat.zero_add, ranges,
+        Nat.add_comm] using combined
 
 /-- A verified local context containing only bound assumptions.  This is the
 common alpha-normal form of two `FVarLamOnly` contexts whose producer-owned
@@ -5017,6 +6219,246 @@ theorem CandidateAnnotationSnapshot.context_noBV
   rw [snapshot.annotation_run.vlctx_eq] at noBV
   exact noBV
 
+/-- Source-agnostic semantic completion of one alpha-aligned annotation
+binder.  The current traversal supplies only a strict translation of its
+raw `forallE`; the producer snapshot supplies the already-verified
+raw/annotation-consumed equality at the corresponding alpha-normalized
+position. -/
+structure AlphaAlignedAnnotationDomainRun
+    {context : AddInductive.Context}
+    (contextRun : CandidateContextRun context)
+    (source : Expr) (source' : VExpr) : Type where
+  name : Name
+  domain : Expr
+  body : Expr
+  binderInfo : BinderInfo
+  domain' : VExpr
+  body' : VExpr
+  consumed' : VExpr
+  sort : VLevel
+  source_eq : source = .forallE name domain body binderInfo
+  source'_eq : source' = .forallE domain' body'
+  domain_type : contextRun.context.IsType domain'
+  body_type : contextRun.context.venv.IsType
+    contextRun.context.lparams.length
+    (domain' :: contextRun.context.vlctx.toCtx) body'
+  domain_tr : contextRun.context.TrExprS domain domain'
+  body_tr : TrExprS contextRun.context.venv contextRun.context.lparams
+    ((none, .vlam domain') :: contextRun.context.vlctx) body body'
+  consumed_tr : contextRun.context.TrExprS
+    (AddInductive.consumeTypeAnnotations domain) consumed'
+  annotation_def : contextRun.context.venv.IsDefEq
+    contextRun.context.lparams.length contextRun.context.vlctx.toCtx
+    domain' consumed' (.sort sort)
+
+/-- The transported annotation equality types the exact consumed local
+declaration used by the current traversal. -/
+theorem AlphaAlignedAnnotationDomainRun.consumed_type
+    {context : AddInductive.Context}
+    {contextRun : CandidateContextRun context}
+    {source : Expr} {source' : VExpr}
+    (run : AlphaAlignedAnnotationDomainRun contextRun source source') :
+    contextRun.context.IsType run.consumed' :=
+  ⟨run.sort, run.annotation_def.hasType.2⟩
+
+/-- Move the translated Pi body from its raw-domain binder to the exact
+annotation-consumed binder selected by the current traversal. -/
+theorem AlphaAlignedAnnotationDomainRun.bodyTranslation
+    {context : AddInductive.Context}
+    {contextRun : CandidateContextRun context}
+    {source : Expr} {source' : VExpr}
+    (run : AlphaAlignedAnnotationDomainRun contextRun source source') :
+    ∃ body'', TrExprS contextRun.context.venv contextRun.context.lparams
+      ((none, .vlam run.consumed') :: contextRun.context.vlctx)
+      run.body body'' := by
+  have henv : VEnv.WF contextRun.context.venv := contextRun.context.Ewf
+  let domainContext : VLCtx.IsDefEq contextRun.context.venv
+      contextRun.context.lparams.length
+      ((none, .vlam run.domain') :: contextRun.context.vlctx)
+      ((none, .vlam run.consumed') :: contextRun.context.vlctx) :=
+    .cons (.refl henv contextRun.context.Δwf) (by nofun)
+      (.vlam run.annotation_def)
+  exact run.body_tr.defeqDFC henv domainContext
+
+/-- Reuse a producer annotation equality at any alpha-equivalent raw Pi
+owned by another retained traversal.  Unrelated locals in the current
+context are lowered through `reference`, the equality is transported at the
+common `base`, and the exact current strict endpoints are restored. -/
+theorem CandidateAnnotationSnapshot.alphaAlignedDomainRun
+    {env : VEnv} {Us : List Name} {candidateRoot : Lean.Expr}
+    (candidate : CandidateAnnotationSnapshot env Us candidateRoot)
+    {context : AddInductive.Context}
+    (contextRun : CandidateContextRun context)
+    {source : Expr} {source' : VExpr}
+    (source_tr : contextRun.context.TrExprS source source')
+    (venv_eq : contextRun.context.venv = env)
+    (lparams_eq : contextRun.context.lparams = Us)
+    {base reference : VLCtx} {lift : Lift}
+    (baseShape : base.FVarLamOnly)
+    (candidateShape : candidate.Δ.FVarLamOnly)
+    (relation : VLCtx.FVarAlpha env Us.length base candidate.Δ)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length
+      contextRun.context.vlctx reference)
+    (sourceScope : source.FVarsIn (· ∈ base.fvars))
+    (sourceAlpha : Lean.Expr.abstractFVars base source =
+      Lean.Expr.abstractFVars candidate.Δ candidateRoot)
+    (isForall : source.isForall = true) :
+    Nonempty (AlphaAlignedAnnotationDomainRun contextRun source source') := by
+  have henv : VEnv.WF env := by
+    simpa only [venv_eq] using contextRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length contextRun.context.vlctx := by
+    simpa only [venv_eq, lparams_eq] using contextRun.context.Δwf
+  have referenceWF : VLCtx.WF env Us.length reference :=
+    (currentReference.symm henv.ordered).wf
+  have baseWF : VLCtx.WF env Us.length base :=
+    referenceLift.wf henv referenceWF
+  cases hsource : source with
+  | forallE name domain body binderInfo =>
+      have source_tr' := source_tr
+      rw [hsource] at source_tr'
+      obtain ⟨domain', body', source'_eq, domainType, bodyType,
+          domain_tr, body_tr⟩ := TrExprS.forallE_components source_tr'
+      obtain ⟨consumed', consumed_tr⟩ :=
+        consumeTypeAnnotations_exists_translation domain_tr
+      have rootAlpha : Lean.Expr.abstractFVars base
+          (.forallE name domain body binderInfo) =
+          Lean.Expr.abstractFVars candidate.Δ
+            (.forallE candidate.name candidate.domain candidate.body
+              candidate.binderInfo) := by
+        calc
+          Lean.Expr.abstractFVars base
+              (.forallE name domain body binderInfo) =
+              Lean.Expr.abstractFVars base source :=
+            congrArg (Lean.Expr.abstractFVars base) hsource.symm
+          _ = Lean.Expr.abstractFVars candidate.Δ candidateRoot :=
+            sourceAlpha
+          _ = Lean.Expr.abstractFVars candidate.Δ
+              (.forallE candidate.name candidate.domain candidate.body
+                candidate.binderInfo) :=
+            congrArg (Lean.Expr.abstractFVars candidate.Δ)
+              candidate.root_eq
+      rw [Lean.Expr.abstractFVars_forallE,
+        Lean.Expr.abstractFVars_forallE] at rootAlpha
+      simp only [Lean.Expr.forallE.injEq] at rootAlpha
+      obtain ⟨_nameAlpha, domainAlpha, _bodyAlpha, _binderAlpha⟩ :=
+        rootAlpha
+      have consumedAlpha : Lean.Expr.abstractFVars base
+          (AddInductive.consumeTypeAnnotations domain) =
+          Lean.Expr.abstractFVars candidate.Δ candidate.consumed := by
+        calc
+          Lean.Expr.abstractFVars base
+              (AddInductive.consumeTypeAnnotations domain) =
+              AddInductive.consumeTypeAnnotations
+                (Lean.Expr.abstractFVars base domain) :=
+            (AddInductive.consumeTypeAnnotations_abstractFVars
+              base domain).symm
+          _ = AddInductive.consumeTypeAnnotations
+                (Lean.Expr.abstractFVars candidate.Δ candidate.domain) :=
+            congrArg AddInductive.consumeTypeAnnotations domainAlpha
+          _ = Lean.Expr.abstractFVars candidate.Δ
+                (AddInductive.consumeTypeAnnotations candidate.domain) :=
+            AddInductive.consumeTypeAnnotations_abstractFVars
+              candidate.Δ candidate.domain
+          _ = Lean.Expr.abstractFVars candidate.Δ candidate.consumed :=
+            congrArg (Lean.Expr.abstractFVars candidate.Δ)
+              candidate.annotation_match.symm
+      have sourceScope' := sourceScope
+      rw [hsource] at sourceScope'
+      have domainScope : domain.FVarsIn (· ∈ base.fvars) :=
+        sourceScope'.1
+      have consumedScope :
+          (AddInductive.consumeTypeAnnotations domain).FVarsIn
+            (· ∈ base.fvars) := by
+        cases htrace : AddInductive.CandidateTypeAnnotationTrace.build
+            domain with
+        | mk consumed trace =>
+            have consumed_eq : consumed =
+                AddInductive.consumeTypeAnnotations domain := by
+              simpa only [htrace] using
+                AddInductive.CandidateTypeAnnotationTrace.build_consumed
+                  domain
+            simpa only [← consumed_eq] using
+              candidateTypeAnnotation_fvarsIn trace domainScope
+      have currentNoBV : contextRun.context.vlctx.NoBV :=
+        contextRun.context.mlctx.noBV
+      have domainClosed : Closed domain 0 := by
+        simpa only [currentNoBV] using domain_tr.closed
+      have consumedClosed :
+          Closed (AddInductive.consumeTypeAnnotations domain) 0 := by
+        simpa only [currentNoBV] using consumed_tr.closed
+      have currentDomainTr : TrExprS env Us contextRun.context.vlctx
+          domain domain' := by
+        simpa only [VContext.TrExprS, venv_eq, lparams_eq] using domain_tr
+      have currentConsumedTr : TrExprS env Us contextRun.context.vlctx
+          (AddInductive.consumeTypeAnnotations domain) consumed' := by
+        simpa only [VContext.TrExprS, venv_eq, lparams_eq] using consumed_tr
+      obtain ⟨baseDomain, baseDomainTr⟩ :=
+        currentDomainTr.weakFV'_inv henv referenceLift currentReference
+          domainClosed domainScope
+      obtain ⟨baseConsumed, baseConsumedTr⟩ :=
+        currentConsumedTr.weakFV'_inv henv referenceLift currentReference
+          consumedClosed consumedScope
+      have baseDomainEq : env.IsDefEqU Us.length base.toCtx
+          baseDomain candidate.domain' :=
+        baseDomainTr.uniqAlpha henv relation baseShape candidateShape
+          candidate.domain_tr domainAlpha
+      have baseConsumedEq : env.IsDefEqU Us.length base.toCtx
+          baseConsumed candidate.consumed' :=
+        baseConsumedTr.uniqAlpha henv relation baseShape candidateShape
+          candidate.consumed_tr consumedAlpha
+      have annotationAtCandidate : env.IsDefEqU Us.length
+          candidate.Δ.toCtx candidate.domain' candidate.consumed' :=
+        candidate.annotation_run.isDefEqU
+      have annotationAtBase : env.IsDefEqU Us.length base.toCtx
+          baseDomain baseConsumed := by
+        have candidateAtBase := annotationAtCandidate.defeqDFC henv.ordered
+          (relation.defeqCtx.symm henv.ordered)
+        exact (baseDomainEq.trans henv baseWF.toCtx candidateAtBase).trans
+          henv baseWF.toCtx baseConsumedEq.symm
+      have annotationAtReference :=
+        annotationAtBase.weak' henv.ordered referenceLift.toCtx
+      have baseDomainAtReference :=
+        baseDomainTr.weakFV' henv.ordered referenceLift referenceWF
+      have baseConsumedAtReference :=
+        baseConsumedTr.weakFV' henv.ordered referenceLift referenceWF
+      have currentDomainEq :=
+        currentDomainTr.uniq henv currentReference baseDomainAtReference
+      have currentConsumedEq :=
+        currentConsumedTr.uniq henv currentReference baseConsumedAtReference
+      have annotationAtCurrent :=
+        annotationAtReference.defeqDFC henv.ordered
+          ((currentReference.symm henv.ordered).defeqCtx)
+      have annotationU : env.IsDefEqU Us.length
+          contextRun.context.vlctx.toCtx domain' consumed' :=
+        (currentDomainEq.trans henv currentWF.toCtx annotationAtCurrent).trans
+          henv currentWF.toCtx currentConsumedEq.symm
+      have domainType' : env.IsType Us.length
+          contextRun.context.vlctx.toCtx domain' := by
+        simpa only [VContext.IsType, venv_eq, lparams_eq] using domainType
+      obtain ⟨sort, domainHasType⟩ := domainType'
+      have annotationDef :=
+        annotationU.of_l henv currentWF.toCtx domainHasType
+      exact ⟨{
+        name := name
+        domain := domain
+        body := body
+        binderInfo := binderInfo
+        domain' := domain'
+        body' := body'
+        consumed' := consumed'
+        sort := sort
+        source_eq := rfl
+        source'_eq := source'_eq
+        domain_type := domainType
+        body_type := bodyType
+        domain_tr := domain_tr
+        body_tr := body_tr
+        consumed_tr := consumed_tr
+        annotation_def := by
+          simpa only [venv_eq, lparams_eq] using annotationDef }⟩
+  | _ => simp_all [Expr.isForall]
+
 /-- Interpret a structural annotation position through the same recursive
 semantic run that produced the candidate telescope. -/
 theorem CandidateExprRun.annotationSnapshot
@@ -5092,6 +6534,42 @@ inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
           bodyCandidate)
         Δ terminalΔ (storedDomain' :: domains)
 
+/-- A terminal-shape-independent cursor into an annotation spine.  Family
+consumers may refine the terminal to a sort; constructor consumers instead
+retain an application target, so the structural cursor deliberately records
+only the common recursive data. -/
+structure CandidateAnnotationStructuralCursor (env : VEnv) (Us : List Name)
+    (terminalΔ : VLCtx) where
+  candidateContext : AddInductive.Context
+  source : Expr
+  trace : AddInductive.CandidateExprTrace candidateContext source
+  Δ : VLCtx
+  domains : List VExpr
+  spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains
+  shape : Δ.FVarLamOnly
+  stored : trace.storedSpine = true
+  annotations : trace.validationAnnotations
+
+/-- A terminal-inclusive structural suffix selected at one exact main-spine
+position.  Unlike `MainPositionSuffix`, this package makes no assumption
+about the candidate's terminal expression. -/
+structure CandidateAnnotationSpine.StructuralMainPositionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    {count : Nat} (position : trace.MainSpineAt count) where
+  cursor : CandidateAnnotationStructuralCursor env Us terminalΔ
+  root_eq : position.position.trace.rootWhnf = cursor.trace.rootWhnf
+  context_eq : cursor.Δ.toCtx =
+    (domains.take count).reverse ++ Δ.toCtx
+  domains_eq : cursor.domains = domains.drop count
+  fvars_eq : cursor.Δ.fvars.map Expr.fvar =
+    (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
+  fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
+  terminalResult_eq : cursor.trace.terminalResult = trace.terminalResult
+
 /-- An exact producer-owned suffix of an annotation spine.  The cursor owns
 the literal recursive trace and verified context reached at that position. -/
 structure CandidateAnnotationCursor (env : VEnv) (Us : List Name)
@@ -5126,6 +6604,7 @@ structure CandidateAnnotationSpine.PositionSuffix
   fvars_eq : cursor.Δ.fvars.map Expr.fvar =
     (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
   fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
+  terminalResult_eq : cursor.trace.terminalResult = trace.terminalResult
 
 /-- A terminal-inclusive annotation-spine suffix.  The selected structural
 position may be either a Pi node or the terminal candidate reached after all
@@ -5145,6 +6624,7 @@ structure CandidateAnnotationSpine.MainPositionSuffix
   fvars_eq : cursor.Δ.fvars.map Expr.fvar =
     (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
   fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
+  terminalResult_eq : cursor.trace.terminalResult = trace.terminalResult
 
 /-- Follow an annotation path into the literal recursive spine.  No suffix
 trace, context, or semantic snapshot is independently reselected. -/
@@ -5180,7 +6660,8 @@ theorem CandidateAnnotationSpine.positionSuffix
         context_eq := rfl
         domains_eq := rfl
         fvars_eq := rfl
-        fuel_eq := rfl }⟩
+        fuel_eq := rfl
+        terminalResult_eq := rfl }⟩
   | succ bodyCandidate position ih =>
       cases spine with
       | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
@@ -5205,7 +6686,8 @@ theorem CandidateAnnotationSpine.positionSuffix
                 suffix.fvars_eq
             fuel_eq := by
               simpa [AddInductive.Context.pushLocalDecl] using
-                suffix.fuel_eq }⟩
+                suffix.fuel_eq
+            terminalResult_eq := suffix.terminalResult_eq }⟩
 
 /-- Follow a terminal-inclusive main-spine path into the literal recursive
 annotation spine.  In particular, selecting the complete spine length yields
@@ -5242,7 +6724,8 @@ theorem CandidateAnnotationSpine.mainPositionSuffix
         context_eq := rfl
         domains_eq := rfl
         fvars_eq := rfl
-        fuel_eq := rfl }⟩
+        fuel_eq := rfl
+        terminalResult_eq := rfl }⟩
   | succ bodyCandidate position ih =>
       cases spine with
       | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
@@ -5267,7 +6750,68 @@ theorem CandidateAnnotationSpine.mainPositionSuffix
                 suffix.fvars_eq
             fuel_eq := by
               simpa [AddInductive.Context.pushLocalDecl] using
-                suffix.fuel_eq }⟩
+                suffix.fuel_eq
+            terminalResult_eq := suffix.terminalResult_eq }⟩
+
+/-- Follow a terminal-inclusive main-spine path without constraining the
+terminal expression.  This is the constructor-compatible counterpart of
+`mainPositionSuffix`. -/
+theorem CandidateAnnotationSpine.structuralMainPositionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly)
+    (stored : trace.storedSpine = true)
+    (annotations : trace.validationAnnotations)
+    {count : Nat} (position : trace.MainSpineAt count) :
+    Nonempty (spine.StructuralMainPositionSuffix position) := by
+  induction position generalizing Δ terminalΔ domains with
+  | zero trace =>
+      exact ⟨{
+        cursor := {
+          candidateContext := _
+          source := _
+          trace := trace
+          Δ := Δ
+          domains := domains
+          spine := spine
+          shape := initialShape
+          stored := stored
+          annotations := annotations }
+        root_eq := rfl
+        context_eq := rfl
+        domains_eq := rfl
+        fvars_eq := rfl
+        fuel_eq := rfl
+        terminalResult_eq := rfl }⟩
+  | succ bodyCandidate position ih =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
+          simp only [AddInductive.CandidateExprTrace.storedSpine,
+            Bool.and_eq_true] at stored
+          rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+          obtain ⟨suffix⟩ := ih tail (.cons initialShape) stored.2
+            tailAnnotations
+          exact ⟨{
+            cursor := suffix.cursor
+            root_eq := suffix.root_eq
+            context_eq := by
+              simpa only [List.take_succ_cons, List.reverse_cons,
+                List.singleton_append, List.append_assoc, VLCtx.toCtx] using
+                suffix.context_eq
+            domains_eq := by
+              simpa only [List.drop_succ_cons] using suffix.domains_eq
+            fvars_eq := by
+              simpa [VLCtx.fvars, List.append_assoc,
+                AddInductive.Context.freshExpr,
+                AddInductive.CandidateExprTrace.parameterList] using
+                suffix.fvars_eq
+            fuel_eq := by
+              simpa [AddInductive.Context.pushLocalDecl] using
+                suffix.fuel_eq
+            terminalResult_eq := suffix.terminalResult_eq }⟩
 
 /-- The WHNF root selected by an annotation spine mentions only the free
 variables in that spine's exact initial verified context. -/
@@ -5314,6 +6858,62 @@ theorem CandidateAnnotationCursor.root_fvars
     (cursor : CandidateAnnotationCursor env Us terminalΔ) :
     cursor.trace.rootWhnf.FVarsIn (· ∈ cursor.Δ.fvars) :=
   cursor.spine.root_fvars cursor.annotations
+
+/-- Structural annotation cursors retain the same exact free-variable scope
+as their sort-refined counterparts. -/
+theorem CandidateAnnotationStructuralCursor.root_fvars
+    {env : VEnv} {Us : List Name} {terminalΔ : VLCtx}
+    (cursor : CandidateAnnotationStructuralCursor env Us terminalΔ) :
+    cursor.trace.rootWhnf.FVarsIn (· ∈ cursor.Δ.fvars) :=
+  cursor.spine.root_fvars cursor.annotations
+
+/-- The annotation-consumed domains retained by a candidate spine form a
+sort-labelled Theory telescope.  The labels are selected by the exact
+candidate equality executions at each binder; no terminal-shape assumption
+is needed, so constructor spines can use this projection directly. -/
+theorem CandidateAnnotationSpine.exists_onSortTel
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (annotations : trace.validationAnnotations) :
+    ∃ sorts, env.OnSortTel Us.length Δ.toCtx domains sorts := by
+  induction spine with
+  | terminal node =>
+      exact ⟨[], .nil⟩
+  | forallE domainCandidate bodyCandidate storedDomain domains head tail ih =>
+      rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      obtain ⟨sorts, tailSorts⟩ := ih tailAnnotations
+      have henv : VEnv.WF env := by
+        simpa only [snapshot.annotation_run.venv_eq] using
+          snapshot.annotation_run.context.Ewf
+      have storedTypeAtSnapshot : env.HasType Us.length snapshot.Δ.toCtx
+          snapshot.consumed' (.sort snapshot.sort) :=
+        (snapshot.annotation_run.isDefEqU.of_l henv
+          snapshot.context_wf.toCtx snapshot.domain_type).hasType.2
+      exact ⟨snapshot.sort :: sorts, .cons (by
+        simpa only [snapshotContext, snapshotStored] using
+          storedTypeAtSnapshot) (by
+        simpa only [VLCtx.toCtx] using tailSorts)⟩
+
+/-- Drop a prefix from a sort-labelled telescope while retaining the exact
+dependent context accumulated from the removed raw binders. -/
+theorem _root_.Lean4Lean.VEnv.OnSortTel.drop
+    {env : VEnv} {U : Nat} :
+    ∀ (n : Nat) {Γ As : List VExpr} {sorts : List VLevel},
+      env.OnSortTel U Γ As sorts →
+        env.OnSortTel U ((As.take n).reverse ++ Γ)
+          (As.drop n) (sorts.drop n)
+  | 0, _, _, _, telescope => by simpa using telescope
+  | _ + 1, _, [], [], .nil => .nil
+  | n + 1, Γ, A :: As, u :: sorts, .cons head tail => by
+      have suffix := VEnv.OnSortTel.drop n tail
+      simpa only [List.take_succ_cons, List.drop_succ_cons,
+        List.reverse_cons, List.singleton_append, List.append_assoc] using
+        suffix
 
 /--
 info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.positionSuffix' depends on axioms: [propext,
@@ -6005,6 +7605,7 @@ structure FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment
   originLift : Lift
   base_shape : base.FVarLamOnly
   terminal_shape : terminalΔ.FVarLamOnly
+  reference_shape : reference.FVarLamOnly
   relation : VLCtx.FVarAlpha env Us.length base terminalΔ
   reference_lift : VLCtx.FVLift' base reference 0 lift 0
   root_reference_lift : VLCtx.FVLift' rootBase reference 0 rootLift 0
@@ -6297,6 +7898,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
     (baseShape : base.FVarLamOnly)
     (relation : VLCtx.FVarAlpha env Us.length base cursor.Δ)
     (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (referenceShape : reference.FVarLamOnly)
     {rootBase : VLCtx} {rootLift : Lift}
     (rootReferenceLift : VLCtx.FVLift' rootBase reference 0 rootLift 0)
     {originBase : VLCtx} {originLift : Lift}
@@ -6314,7 +7916,8 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
     Nonempty (Sigma fun chain : boundary.IndexDomainChain =>
       { _alignment : chain.EndpointAlignment env Us terminalΔ rootBase
           originBase //
-        chain.length = cursor.domains.length }) := by
+        chain.length = cursor.domains.length ∧
+          VLevel.ofLevel Us cursor.resultLevel = some _alignment.sort }) := by
   rcases cursor with ⟨candidateContext, candidateSource, candidateTrace,
     candidateΔ, candidateDomains, spine, candidateShape, stored,
     annotations, resultLevel, terminalEq, terminalNotForall⟩
@@ -6353,6 +7956,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           originLift := originLift
           base_shape := baseShape
           terminal_shape := candidateShape
+          reference_shape := referenceShape
           relation := relation
           reference_lift := referenceLift
           root_reference_lift := rootReferenceLift
@@ -6365,7 +7969,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           endpoint_sort := by
             simpa only [chain,
               FamilyParameterIndexBoundary.IndexDomainChain.endpoint,
-              VExpr.lift'] using endpointSort }, rfl⟩⟩
+              VExpr.lift'] using endpointSort }, ⟨rfl, level_tr⟩⟩⟩
   | @forallE candidateContext candidateDomain candidateName
       candidateBinderInfo candidateBody candidateΔ terminalΔ candidateSource
       candidateInferred candidateFresh annotationsNode annotationsEq
@@ -6415,6 +8019,8 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           VLocalDecl.depth] using referenceLift.cons_fvar
             (context.freshFVarId, deps) (.vlam preparation.baseConsumed)
             depsSubset
+      have nextReferenceShape : nextReference.FVarLamOnly := by
+        exact .cons referenceShape
       have nextRootReferenceLift : VLCtx.FVLift' rootBase nextReference 0
           (.skipN rootLift 1) 0 := by
         simpa only [nextReference, VLocalDecl.depth] using
@@ -6596,6 +8202,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
               originLift := .skipN originLift 1
               base_shape := nextBaseShape
               terminal_shape := nextCandidateShape
+              reference_shape := nextReferenceShape
               relation := nextRelation
               reference_lift := nextReferenceLift
               root_reference_lift := nextRootReferenceLift
@@ -6609,7 +8216,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
                 simpa only [chain, tailChain,
                   FamilyParameterIndexBoundary.IndexDomainChain.endpoint,
                   FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary,
-                  VExpr.lift'] using viewToSort }, rfl⟩⟩
+                  VExpr.lift'] using viewToSort }, ⟨rfl, level_tr⟩⟩⟩
       | forallE nextDomainCandidate nextBodyCandidate nextStoredDomain
           nextDomains nextHead nextTail =>
           have tailStored := stored.2
@@ -6677,10 +8284,11 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
               run.pushContext.context.venv = env := pushedVenv
           have nextValidatorLparams :
               run.pushContext.context.lparams = Us := pushedLparams
-          obtain ⟨⟨tailChain, tailAlignment, tailLength⟩⟩ :=
+          obtain ⟨⟨tailChain, tailAlignment, tailFacts⟩⟩ :=
             ih terminalWF advance.toBoundary
             nextValidatorVenv nextValidatorLparams nextBaseShape
-            nextReferenceLift nextRootReferenceLift nextOriginReferenceLift
+            nextReferenceLift nextReferenceShape nextRootReferenceLift
+            nextOriginReferenceLift
             nextCurrentReference
             nextSourceScope
             nextValidatorDepth nextCandidateShape stored.2 tailAnnotations
@@ -6696,6 +8304,7 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
             originLift := tailAlignment.originLift
             base_shape := tailAlignment.base_shape
             terminal_shape := tailAlignment.terminal_shape
+            reference_shape := tailAlignment.reference_shape
             relation := tailAlignment.relation
             reference_lift := tailAlignment.reference_lift
             root_reference_lift := tailAlignment.root_reference_lift
@@ -6708,11 +8317,12 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
             endpoint_sort := by
               simpa only [chain,
                 FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
-                tailAlignment.endpoint_sort }, by
+                tailAlignment.endpoint_sort }, ⟨by
               simpa only [chain,
                 FamilyParameterIndexBoundary.IndexDomainChain.length,
                 List.length_cons] using
-                congrArg (fun length => length + 1) tailLength⟩⟩
+                congrArg (fun length => length + 1) tailFacts.1,
+              tailFacts.2⟩⟩⟩
 
 /-- Compatibility projection of the endpoint-aligned traversal. -/
 theorem CandidateAnnotationCursor.indexDomainChain
@@ -6732,6 +8342,7 @@ theorem CandidateAnnotationCursor.indexDomainChain
     (baseShape : base.FVarLamOnly)
     (relation : VLCtx.FVarAlpha env Us.length base cursor.Δ)
     (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (referenceShape : reference.FVarLamOnly)
     (currentReference : VLCtx.IsDefEq env Us.length
       contextRun.context.vlctx reference)
     (sourceScope : boundary.source.FVarsIn (· ∈ base.fvars))
@@ -6744,7 +8355,7 @@ theorem CandidateAnnotationCursor.indexDomainChain
     Nonempty boundary.IndexDomainChain := by
   obtain ⟨⟨chain, _alignment, _length⟩⟩ :=
     cursor.indexDomainChainAligned terminalWF boundary venv_eq lparams_eq
-      baseShape relation referenceLift referenceLift referenceLift
+      baseShape relation referenceLift referenceShape referenceLift referenceLift
       currentReference
       sourceScope sourceAlpha whnfFuel validatorDepth candidateDepth
   exact ⟨chain⟩
@@ -7326,6 +8937,35 @@ theorem TelResultDefEqEvidence.replacePrefix
   exact TelResultDefEqEvidence.ofTelescopeResult
     (.ofTelDefEq emittedTel) (by simpa using emittedResult)
 
+/-- Replace only the normalized/view prefix of a complete telescope/result
+certificate.  The new prefix is related to the old view prefix in the same
+direction used by constructor validation (`newViewPrefix ~ oldViewPrefix`).
+The suffix syntax and terminal result are unchanged; their well-formedness is
+transported across the induced prefix-context equality.  This is the
+canonical shared-parameter counterpart of `replacePrefix`, which changes the
+raw prefix instead. -/
+theorem TelResultDefEqEvidence.replaceViewPrefix
+    (henv : VEnv.WF env)
+    (newPrefix : TelDefEqEvidence env U [] newViewPrefix oldViewPrefix)
+    (run : TelResultDefEqEvidence env U [] rawBinders
+      (oldViewPrefix ++ viewSuffix) rawResult viewResult resultType) :
+    TelResultDefEqEvidence env U [] rawBinders
+      (newViewPrefix ++ viewSuffix) rawResult viewResult resultType := by
+  have prefixContext : env.IsDefEqCtx U []
+      newViewPrefix.reverse oldViewPrefix.reverse := by
+    simpa using newPrefix.telDefEq.ctx
+  have oldParts := VEnv.OnTel.of_append
+    (run.telescope.telDefEq.view_onTel henv.ordered)
+  have oldSuffix : env.OnTel U oldViewPrefix.reverse viewSuffix :=
+    by simpa using oldParts.2
+  have oldToNewPrefix := newPrefix.symm henv trivial
+  have oldToNew : TelDefEqEvidence env U []
+      (oldViewPrefix ++ viewSuffix) (newViewPrefix ++ viewSuffix) :=
+    .ofTelDefEq (oldToNewPrefix.telDefEq.append_refl (by
+      simpa using oldSuffix))
+  have telescope := run.telescope.trans henv trivial oldToNew
+  exact TelResultDefEqEvidence.ofTelescopeResult telescope run.result
+
 /-- Every recursive candidate run carries the well-formed local context used
 by its root checker observation. -/
 theorem CandidateExprRun.context_wf
@@ -7394,6 +9034,58 @@ private theorem candidateTerminal_of_generationSource
   induction run <;>
     simp_all [AddInductive.CandidateExprTrace.generationTerminalSource,
       CandidateTerminal]
+
+/-- Replacing a loose variable by the fresh free variable used by candidate
+contexts preserves the literal constructor arity. -/
+private theorem candidateConstructorArity_instantiate1'_fvar
+    (source : Expr) (fresh : FVarId) (depth arity : Nat) :
+    AddInductive.constructorArity
+        (source.instantiate1' (.fvar fresh) depth) arity =
+      AddInductive.constructorArity source arity := by
+  induction source generalizing depth arity <;>
+    simp [Expr.instantiate1', Expr.liftLooseBVars',
+      AddInductive.constructorArity, *]
+  case bvar index =>
+    split
+    · rfl
+    · split <;> rfl
+
+/-- The complete generation-spine gate computes exactly the literal source
+arity later retained by ordinary constructor metadata. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateExprTrace.constructorArity_eq_spineLength
+    (trace : AddInductive.CandidateExprTrace context source)
+    (generation : trace.generationSpine = true) :
+    AddInductive.constructorArity source 0 = trace.spineLength := by
+  induction trace with
+  | terminal context source inferred result checked normalized =>
+      cases source <;>
+        simp_all [AddInductive.CandidateExprTrace.generationSpine,
+          AddInductive.CandidateExprTrace.generationTerminalSource,
+          AddInductive.CandidateExprTrace.spineLength,
+          AddInductive.constructorArity]
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+      simp only [AddInductive.CandidateExprTrace.generationSpine,
+        Bool.and_eq_true] at generation
+      obtain ⟨sourceEq, bodyGeneration⟩ := generation
+      have bodyArity : AddInductive.constructorArity body 0 =
+          bodyCandidate.spineLength := by
+        simpa only [AddInductive.Context.freshExpr, Expr.instantiate1_eq,
+          candidateConstructorArity_instantiate1'_fvar] using
+          bodyIH bodyGeneration
+      calc
+        AddInductive.constructorArity source 0 =
+            AddInductive.constructorArity
+              (.forallE name domain body binderInfo) 0 :=
+          AddInductive.constructorArity_eq_of_structuralEq sourceEq 0
+        _ = AddInductive.constructorArity body 1 := rfl
+        _ = AddInductive.constructorArity body 0 + 1 :=
+          AddInductive.constructorArity_eq_zero_add body 1
+        _ = bodyCandidate.spineLength + 1 := congrArg (fun count => count + 1) bodyArity
+        _ = (AddInductive.CandidateExprTrace.forallE context source inferred
+              name domain body binderInfo fresh annotations annotationsEq
+              checked normalized domainCandidate bodyCandidate).spineLength := rfl
 
 /-- A fresh kernel local is absent from the corresponding explicit local
 inventory. -/
@@ -7493,6 +9185,192 @@ private theorem candidateGenerationSpineLengthAux
     simpa only [AddInductive.CandidateExprTrace.spineLength,
       VInductDecl.ctorFields, List.length_cons, Nat.succ.injEq] using
       tailLength
+
+/-- Choose a strict Theory translation whose complete stored Pi spine
+retains the source dependency mask literally.  In a nondependent branch the
+translation is strengthened while it is still producer-owned; a later
+consumer never has to identify two independently selected translations. -/
+private theorem candidateProjectionSpineSupportAux
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    {rawΔ : VLCtx} {rawSource : VExpr}
+    (henv : VEnv.WF env)
+    (rawWF : VLCtx.WF env Us.length rawΔ)
+    (rawNoBV : rawΔ.NoBV)
+    (lctxWF : candidateContext.lctx.WF)
+    (rawFVars : rawΔ.fvars ⊆ candidateContext.lctx.fvars)
+    (rawSource_tr : TrExprS env Us rawΔ source rawSource)
+    (generation : trace.generationSpine = true)
+    (recursionFuel : Nat)
+    (depth : candidateContext.fuel.recDepth = recursionFuel + 1) :
+    ∃ supported,
+      TrExprS env Us rawΔ source supported ∧
+      ProjectionSpineSupport trace.spineLength source supported := by
+  induction trace generalizing rawΔ rawSource with
+  | terminal context source inferred result checked normalized =>
+      exact ⟨rawSource, rawSource_tr, .nil _ _⟩
+  | @forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+    simp only [AddInductive.CandidateExprTrace.generationSpine,
+      Bool.and_eq_true] at generation
+    obtain ⟨sourceEq, bodyGeneration⟩ := generation
+    have sourceForall : source.isForall = true :=
+      AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall sourceEq
+    have resultEq :
+        (.forallE name domain body binderInfo : Expr) = source :=
+      (AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        normalized recursionFuel depth sourceForall)
+    subst source
+    let @TrExprS.forallE _ _ rawDomain rawBody _ _ _ _ _
+        rawDomainType rawBodyType rawDomain_tr rawBody_tr := rawSource_tr
+    have freshRaw : context.freshFVarId ∉ rawΔ.fvars := by
+      intro member
+      exact localContextFresh_not_mem_fvars lctxWF fresh
+        (rawFVars member)
+    have nextLctxWF :
+        (context.pushLocalDecl name binderInfo annotations.consumed).lctx.WF := by
+      simpa only [AddInductive.Context.pushLocalDecl] using
+        LocalContext.WF.mkLocalDecl lctxWF fresh
+    have nextDepth :
+        (context.pushLocalDecl name binderInfo annotations.consumed).fuel.recDepth =
+          recursionFuel + 1 := by
+      simpa only [AddInductive.Context.pushLocalDecl] using depth
+    let anonΔ : VLCtx := (none, .vlam rawDomain) :: rawΔ
+    have anonWF : VLCtx.WF env Us.length anonΔ := by
+      exact ⟨rawWF, nofun, rawDomainType⟩
+    let fvarΔ : VLCtx :=
+      (some (context.freshFVarId, []), .vlam rawDomain) :: rawΔ
+    have fvarWF : VLCtx.WF env Us.length fvarΔ := by
+      refine ⟨rawWF, ?_, rawDomainType⟩
+      intro fv deps equality
+      cases equality
+      exact ⟨freshRaw, by simp⟩
+    have fvarNoBV : fvarΔ.NoBV := by
+      change rawΔ.bvars = 0
+      exact rawNoBV
+    have fvarFVars : fvarΔ.fvars ⊆
+        (context.pushLocalDecl name binderInfo annotations.consumed).lctx.fvars := by
+      intro fv member
+      simp only [fvarΔ, VLCtx.fvars_cons_some, List.mem_cons] at member
+      simp only [AddInductive.Context.pushLocalDecl, LocalContext.fvars,
+        LocalContext.mkLocalDecl_toList lctxWF.decls_wf, List.map_cons,
+        LocalDecl.fvarId, List.mem_cons]
+      exact member.imp id (fun tail => rawFVars tail)
+    have rawBodyInst_tr : TrExprS env Us fvarΔ
+        (body.instantiate1 context.freshExpr) rawBody := by
+      simpa only [fvarΔ, AddInductive.Context.freshExpr,
+        Expr.instantiate1_eq] using
+        rawBody_tr.inst_fvar henv.ordered fvarWF
+    by_cases unused : body.hasLooseBVar' 0 = false
+    · have bodyClosedOne : Closed body 1 := by
+        have closed := rawBody_tr.closed
+        simpa only [VLCtx.bvars, rawNoBV, Nat.zero_add] using closed
+      have bodyClosedZero : Closed body 0 :=
+        bodyClosedOne.zero_of_one_of_hasLooseBVar_false unused
+      have bodyInstEq : body.instantiate1 context.freshExpr = body := by
+        rw [Expr.instantiate1_eq]
+        exact Expr.instantiate1_eq_self (e := body)
+          (a := context.freshExpr) bodyClosedZero.looseBVarRange_zero
+      let lift : VLCtx.BVLift rawΔ anonΔ 1 0 1 0 :=
+        .skip (.vlam rawDomain) .refl
+      obtain ⟨baseBody, baseBody_tr⟩ := rawBody_tr.weakBV_inv henv lift
+        (VLCtx.IsDefEq.refl henv.ordered anonWF) bodyClosedZero
+      have baseBodyInst_tr : TrExprS env Us rawΔ
+          (body.instantiate1 context.freshExpr) baseBody := by
+        simpa only [bodyInstEq] using baseBody_tr
+      have rawFVarsNext : rawΔ.fvars ⊆
+          (context.pushLocalDecl name binderInfo annotations.consumed).lctx.fvars := by
+        intro fv member
+        simp only [AddInductive.Context.pushLocalDecl, LocalContext.fvars,
+          LocalContext.mkLocalDecl_toList lctxWF.decls_wf, List.map_cons,
+          LocalDecl.fvarId, List.mem_cons]
+        exact .inr (rawFVars member)
+      obtain ⟨chosenBody, chosenBody_tr, chosenSupport⟩ :=
+        bodyIH rawWF rawNoBV nextLctxWF rawFVarsNext
+          baseBodyInst_tr bodyGeneration nextDepth
+      rw [bodyInstEq] at chosenBody_tr
+      have chosenSupport' : ProjectionSpineSupport
+          bodyCandidate.spineLength body chosenBody := by
+        have instantiated : ProjectionSpineSupport bodyCandidate.spineLength
+            (body.instantiate1' (.fvar context.freshFVarId)) chosenBody := by
+          simpa only [AddInductive.Context.freshExpr,
+            Expr.instantiate1_eq] using chosenSupport
+        exact instantiated.of_instantiateFVar
+      have chosenBodyLift_tr := chosenBody_tr.weakBV henv.ordered lift
+      rw [Expr.liftLooseBVars_eq_self
+        bodyClosedZero.looseBVarRange_le] at chosenBodyLift_tr
+      have bodyDef := chosenBodyLift_tr.uniq henv
+        (VLCtx.IsDefEq.refl henv.ordered anonWF) rawBody_tr
+      have chosenBodyType : env.IsType Us.length anonΔ.toCtx
+          (chosenBody.liftN 1 0) :=
+        rawBodyType.defeqU_l henv anonWF.toCtx bodyDef.symm
+      refine ⟨.forallE rawDomain (chosenBody.liftN 1 0),
+        .forallE rawDomainType chosenBodyType rawDomain_tr chosenBodyLift_tr,
+        .cons (fun _ => VExpr.Skips.liftN) chosenSupport'.liftN⟩
+    · obtain ⟨chosenBody, chosenBodyInst_tr, chosenSupport⟩ :=
+        bodyIH fvarWF fvarNoBV nextLctxWF fvarFVars
+          rawBodyInst_tr bodyGeneration nextDepth
+      have bodyFVars : body.FVarsIn (· ≠ context.freshFVarId) :=
+        rawBody_tr.fvarsIn.mono fun fv member equality => by
+          subst fv
+          exact freshRaw member
+      have chosenBodyInst_tr' : TrExprS env Us
+          ((some (context.freshFVarId, []), .vlam rawDomain) :: rawΔ)
+          (body.instantiate1' (.fvar context.freshFVarId)) chosenBody := by
+        simpa only [fvarΔ, AddInductive.Context.freshExpr,
+          Expr.instantiate1_eq] using chosenBodyInst_tr
+      have chosenBody_tr : TrExprS env Us anonΔ body chosenBody := by
+        simpa only [anonΔ] using
+          chosenBodyInst_tr'.uninstantiate bodyFVars
+      have chosenSupport' : ProjectionSpineSupport
+          bodyCandidate.spineLength body chosenBody := by
+        have instantiated : ProjectionSpineSupport bodyCandidate.spineLength
+            (body.instantiate1' (.fvar context.freshFVarId)) chosenBody := by
+          simpa only [AddInductive.Context.freshExpr,
+            Expr.instantiate1_eq] using chosenSupport
+        exact instantiated.of_instantiateFVar
+      have bodyDef := chosenBody_tr.uniq henv
+        (VLCtx.IsDefEq.refl henv.ordered anonWF) rawBody_tr
+      have chosenBodyType : env.IsType Us.length anonΔ.toCtx chosenBody :=
+        rawBodyType.defeqU_l henv anonWF.toCtx bodyDef.symm
+      refine ⟨.forallE rawDomain chosenBody,
+        .forallE rawDomainType chosenBodyType rawDomain_tr chosenBody_tr,
+        .cons (fun closed => (unused closed).elim) chosenSupport'⟩
+
+/-- Root producer for the exact projection-runtime telescope.  The same
+chosen expression is returned as the raw constructor type and supplies the
+closed-terminal dependency mask consumed by runtime projection inference. -/
+private theorem candidateProjectionSpineSupport
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    (trace : AddInductive.CandidateExprTrace candidateContext source)
+    {rawΔ : VLCtx} {rawSource : VExpr}
+    (henv : VEnv.WF env)
+    (rawWF : VLCtx.WF env Us.length rawΔ)
+    (rawNoBV : rawΔ.NoBV)
+    (lctxWF : candidateContext.lctx.WF)
+    (lctxFVars : candidateContext.lctx.fvars = rawΔ.fvars)
+    (rawSource_tr : TrExprS env Us rawΔ source rawSource)
+    (generation : trace.generationSpine = true)
+    (recursionFuel : Nat)
+    (depth : candidateContext.fuel.recDepth = recursionFuel + 1) :
+    ∃ supported,
+      TrExprS env Us rawΔ source supported ∧
+      ProjectionSpineSupport
+        (VInductDecl.ctorFields supported).length source supported ∧
+      trace.spineLength = (VInductDecl.ctorFields supported).length := by
+  obtain ⟨supported, supportedTr, support⟩ :=
+    candidateProjectionSpineSupportAux trace henv rawWF rawNoBV lctxWF
+      (by
+        rw [lctxFVars]
+        exact fun _ member => member)
+      rawSource_tr generation recursionFuel depth
+  have full := candidateGenerationSpineLengthAux trace henv rawWF lctxWF
+    lctxFVars supportedTr generation
+  rw [full] at support
+  exact ⟨supported, supportedTr, support, full⟩
 
 /-- If dropping `n` binders from a telescope reaches its non-forall terminal,
 then taking `n` binders recovers the entire telescope. -/
@@ -7992,6 +9870,20 @@ theorem CandidateExprRun.viewTelN_length_of_le
     (VExpr.telN count view').length = count :=
   candidateTelN_prefix_length view' count_le (run.spineLengths aligned).2
 
+/-- Every validator-selected prefix of the raw translated candidate contains
+exactly the requested number of binders.  This is the source-side counterpart
+of `viewTelN_length_of_le`; both follow from the same stored-spine evidence. -/
+theorem CandidateExprRun.sourceTelN_length_of_le
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ : VLCtx} {source' view' inferred' : VExpr}
+    (run : CandidateExprRun env Us trace Δ source' view' inferred')
+    (aligned : trace.storedSpine = true)
+    (count_le : count ≤ trace.spineLength) :
+    (VExpr.telN count source').length = count :=
+  candidateTelN_prefix_length source' count_le (run.spineLengths aligned).1
+
 /-- Splitting a Theory expression after any prefix partitions its complete
 stored Pi telescope. -/
 private theorem candidateCtorFields_split :
@@ -8131,6 +10023,32 @@ theorem CandidateExprSemanticRootInput.generationSpineLength
   exact candidateGenerationSpineLengthAux candidate.trace
     (by simpa only [input.venv_eq] using input.contextRun.context.Ewf)
     contextTr.wf contextTr.1 contextTr.fvars_eq input.source_tr generation
+
+/-- Select the strict source translation whose literal stored Pi spine
+preserves the kernel source dependency mask.  The selected translation is
+also the constructor payload returned to the producer, so projection support
+cannot be attached to an independently chosen expression. -/
+theorem CandidateExprSemanticRootInput.projectionSpineSupport
+    {env : VEnv} {Us : List Name}
+    {source : Expr} {candidate : AddInductive.CandidateExpr source}
+    {source' : VExpr}
+    (input : CandidateExprSemanticRootInput env Us candidate source')
+    (generation : candidate.trace.generationSpine = true) :
+    ∃ supported,
+      TrExprS env Us [] source supported ∧
+      ProjectionSpineSupport
+        (VInductDecl.ctorFields supported).length source supported ∧
+      candidate.trace.spineLength =
+        (VInductDecl.ctorFields supported).length := by
+  have contextTr : TrLCtx env Us candidate.context.lctx [] := by
+    simpa only [input.venv_eq, input.lparams_eq, input.vlctx_eq,
+      input.contextRun.context_lctx,
+      input.contextRun.context.lctx_eq] using
+      input.contextRun.context.trlctx
+  exact candidateProjectionSpineSupport candidate.trace
+    (by simpa only [input.venv_eq] using input.contextRun.context.Ewf)
+    contextTr.wf rfl contextTr.1 contextTr.fvars_eq input.source_tr
+    generation input.whnfFuel input.whnfDepth
 
 /-- The source-input form of complete-spine length at an arbitrary parameter
 split. -/
@@ -9498,6 +11416,191 @@ theorem NormalizationBlockRun.wf
     exact Lean4Lean.List.Forall₂.imp (h := h.2) fun _ _ hctor =>
       hctor.choose_spec.isDefEq.toU
 
+/-- Every normalized family and constructor selected by a verified block run
+is well formed in the exact environment where its equality was checked. -/
+theorem NormalizationBlockRun.viewWF
+    {source : VInductDecl} {norm : Normalization source}
+    (run : NormalizationBlockRun norm env blockEnv) :
+    List.All
+      (fun family =>
+        VExpr.WF env source.uvars [] family.type ∧
+          List.All (fun constructor =>
+            VExpr.WF blockEnv source.uvars [] constructor.type)
+            family.ctors)
+      norm.view.types := by
+  have rightWF {checkEnv : VEnv} {lhs rhs type : VExpr}
+      (evidence : checkEnv.IsDefEq source.uvars [] lhs rhs type) :
+      VExpr.WF checkEnv source.uvars [] rhs :=
+    ⟨type, evidence.hasType.2⟩
+  let rec constructorWF :
+      ∀ {raws views : List VConstVal},
+        List.Forall₂
+          (fun raw view => ∃ A,
+            TypeChecker.DefEqEvidence blockEnv source.uvars []
+              raw.type view.type A)
+          raws views →
+        List.All (fun constructor =>
+          VExpr.WF blockEnv source.uvars [] constructor.type) views
+    | _, _, .nil => trivial
+    | _, _, .cons head tail =>
+        ⟨rightWF head.choose_spec.isDefEq,
+          constructorWF tail⟩
+  let rec familyWF :
+      ∀ {raws views : List VInductiveType},
+        List.Forall₂
+          (fun raw view =>
+            (∃ A, TypeChecker.DefEqEvidence env source.uvars []
+              raw.type view.type A) ∧
+            List.Forall₂
+              (fun rawCtor viewCtor =>
+                ∃ A, TypeChecker.DefEqEvidence blockEnv source.uvars []
+                  rawCtor.type viewCtor.type A)
+              raw.ctors view.ctors)
+          raws views →
+        List.All
+          (fun family =>
+            VExpr.WF env source.uvars [] family.type ∧
+              List.All (fun constructor =>
+                VExpr.WF blockEnv source.uvars [] constructor.type)
+                family.ctors)
+          views
+    | _, _, .nil => trivial
+    | _, _, .cons head tail =>
+        ⟨⟨rightWF head.1.choose_spec.isDefEq,
+          constructorWF head.2⟩,
+          familyWF tail⟩
+  exact familyWF run.families
+
+/-- Closure and universe-range checks are logical consequences of the
+well-formed canonical family and constructor types retained by a block run. -/
+theorem NormalizationBlockRun.viewMetadataOK
+    {source : VInductDecl} {norm : Normalization source}
+    (run : NormalizationBlockRun norm env blockEnv)
+    (henv : VEnv.WF env) (hblockEnv : VEnv.WF blockEnv) :
+    List.All (fun family =>
+      closedOK family = true ∧ levelsOK source.uvars family = true)
+      norm.view.types := by
+  let rec constructorWFAt :
+      ∀ {constructors : List VConstVal},
+        List.All (fun constructor =>
+          VExpr.WF blockEnv source.uvars [] constructor.type)
+          constructors →
+        ∀ constructor ∈ constructors,
+          VExpr.WF blockEnv source.uvars [] constructor.type
+    | [], _, constructor, member => nomatch member
+    | head :: tail, evidence, constructor, member => by
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · exact evidence.1
+      · exact constructorWFAt evidence.2 constructor member
+  let rec metadataOK :
+      ∀ {families : List VInductiveType},
+        List.All
+          (fun family =>
+            VExpr.WF env source.uvars [] family.type ∧
+              List.All (fun constructor =>
+                VExpr.WF blockEnv source.uvars [] constructor.type)
+                family.ctors)
+          families →
+        List.All (fun family =>
+          closedOK family = true ∧ levelsOK source.uvars family = true)
+          families
+    | [], _ => trivial
+    | family :: families, evidence => by
+      refine ⟨?_, metadataOK evidence.2⟩
+      simp only [closedOK, levelsOK, Bool.and_eq_true, List.all_eq_true,
+        decide_eq_true_eq]
+      exact ⟨⟨evidence.1.1.closedN henv.ordered trivial,
+          fun constructor member =>
+            (constructorWFAt evidence.1.2 constructor member).closedN
+              hblockEnv.ordered trivial⟩,
+        ⟨(evidence.1.1.choose_spec.levelWF trivial).1,
+          fun constructor member =>
+            ((constructorWFAt evidence.1.2 constructor member).choose_spec.levelWF
+              trivial).1⟩⟩
+  exact metadataOK run.viewWF
+
+private theorem telN_hasConst_false_of_source :
+    ∀ (count : Nat) (expression : VExpr),
+      expression.hasConst name = false →
+      ∀ part ∈ VExpr.telN count expression,
+        part.hasConst name = false
+  | 0, _, _, _, member => nomatch member
+  | _ + 1, .forallE domain body, absent, part, member => by
+      simp only [VExpr.hasConst, Bool.or_eq_false_iff] at absent
+      simp only [VExpr.telN, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact absent.1
+      · exact telN_hasConst_false_of_source _ body absent.2 part member
+  | _ + 1, .bvar _, _, _, member
+  | _ + 1, .sort _, _, _, member
+  | _ + 1, .const _ _, _, _, member
+  | _ + 1, .app _ _, _, _, member
+  | _ + 1, .lam _ _, _, _, member => nomatch member
+
+private theorem dropN_hasConst_false_of_source :
+    ∀ (count : Nat) (expression : VExpr),
+      expression.hasConst name = false →
+        (VExpr.dropN count expression).hasConst name = false
+  | 0, _, absent => absent
+  | _ + 1, .forallE domain body, absent => by
+      simp only [VExpr.hasConst, Bool.or_eq_false_iff] at absent
+      exact dropN_hasConst_false_of_source _ body absent.2
+  | _ + 1, .bvar _, absent
+  | _ + 1, .sort _, absent
+  | _ + 1, .const _ _, absent
+  | _ + 1, .app _ _, absent
+  | _ + 1, .lam _ _, absent => absent
+
+private theorem ctorFields_hasConst_false_of_source :
+    ∀ (expression : VExpr), expression.hasConst name = false →
+      ∀ field ∈ ctorFields expression, field.hasConst name = false
+  | .forallE domain body, absent, field, member => by
+      simp only [VExpr.hasConst, Bool.or_eq_false_iff] at absent
+      simp only [ctorFields, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact absent.1
+      · exact ctorFields_hasConst_false_of_source body absent.2 field member
+  | .bvar _, _, _, member
+  | .sort _, _, _, member
+  | .const _ _, _, _, member
+  | .app _ _, _, _, member
+  | .lam _ _, _, _, member => nomatch member
+
+/-- A family type checked before all block constants are inserted has a
+family-free parameter/index former whenever every reserved family name is
+absent from that entry environment. -/
+theorem blockTypeFormerOK_of_isType
+    {env : VEnv} {U nparams : Nat} {family : VInductiveType}
+    {names : List Name}
+    (henv : VEnv.WF env)
+    (typed : env.IsType U [] family.type)
+    (fresh : ∀ name ∈ names, env.constants name = none) :
+    blockTypeFormerOK nparams names family = true := by
+  obtain ⟨level, familyType⟩ := typed
+  have familyAbsent : ∀ name ∈ names,
+      family.type.hasConst name = false := by
+    intro name member
+    exact familyType.hasConst_false_of_absent henv.ordered trivial
+      (fresh name member)
+  simp only [blockTypeFormerOK, Bool.and_eq_true, List.all_eq_true,
+    Bool.not_eq_true']
+  refine ⟨?_, ?_⟩
+  · intro parameter member
+    simp only [VExpr.hasAnyConst, List.any_eq_false]
+    intro name nameMember
+    simpa [Bool.not_eq_true'] using
+      telN_hasConst_false_of_source nparams family.type
+        (familyAbsent name nameMember) parameter member
+  · intro index member
+    simp only [VExpr.hasAnyConst, List.any_eq_false]
+    intro name nameMember
+    simpa [Bool.not_eq_true'] using
+      ctorFields_hasConst_false_of_source
+        (VExpr.dropN nparams family.type)
+        (dropN_hasConst_false_of_source nparams family.type
+          (familyAbsent name nameMember)) index member
+
 /-- One constructor candidate tied to the corresponding raw Theory constant.
 Its expression payload may normalize, but its name, universe arity, and exact
 source position remain fixed. -/
@@ -9659,6 +11762,21 @@ def CandidateConstructorSemanticRun.root
   uvars_eq := run.uvars_eq
   viewType := run.type.view
   typeRun := run.type.root
+
+/-- Reinterpret one retained constructor at a strict view selected by a
+staging producer.  Header and raw-source ownership are unchanged, and the
+result remembers literal equality with the requested type endpoint. -/
+theorem CandidateConstructorSemanticRun.existsAtView
+    (run : CandidateConstructorSemanticRun env Us candidate raw)
+    {view : VExpr}
+    (view_tr : TrExprS env Us [] candidate.type.trace.view view) :
+    ∃ retargeted : CandidateConstructorSemanticRun env Us candidate raw,
+      retargeted.type.view = view := by
+  obtain ⟨type, typeEq⟩ := run.type.existsAtView view_tr
+  exact ⟨{
+    name_eq := run.name_eq
+    uvars_eq := run.uvars_eq
+    type := type }, typeEq⟩
 
 /-- Exact positional semantic ownership for an arbitrary constructor list.
 Every element retains the recursive run selected at that source position; the
@@ -10228,6 +12346,7 @@ structure CandidateBlockLaterFamilyValidationCursor
   current_parameterSources_eq : stats.params.toList = parameterSources
   current_indConsts_nonempty : stats.indConsts.isEmpty = false
   current_params_size : stats.params.size = nparams
+  current_nindices_size : stats.nindices.size = dIdx
 
 /-- A nonempty later-family cursor exposes the exact outer continuation at its
 semantic head, together with the stable counters required by its dependent
@@ -10340,6 +12459,16 @@ def CandidateBlockLaterFamilyValidationCursor.advance
   have dIdxEq :=
     AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx
       selected
+  have statsEq :=
+    AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+      selected
+  have currentNindicesSize : continuation.stats.nindices.size =
+      continuation.dIdx := by
+    rw [statsEq, dIdxEq]
+    exact cursor.current_nindices_size
+  have nextNindicesSize :=
+    AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_next_nindices_size
+      selected currentNindicesSize
   refine {
     sourceSuffix_eq := ?_
     semantics := cursor.semantics.tail
@@ -10364,7 +12493,8 @@ def CandidateBlockLaterFamilyValidationCursor.advance
               selected)
         _ = cursor.parameterSources := cursor.current_parameterSources_eq
     current_indConsts_nonempty := invariant.next_indConsts_nonempty
-    current_params_size := invariant.next_params_size }
+    current_params_size := invariant.next_params_size
+    current_nindices_size := nextNindicesSize }
   have suffixEq := congrArg (List.drop 1) cursor.sourceSuffix_eq
   simpa [List.drop_drop, dIdxEq] using suffixEq
 
@@ -10725,6 +12855,16 @@ def canonicalizeFamilyParamsList (nparams : Nat) (params : List VExpr)
     (families : List VInductiveType) : List VInductiveType :=
   families.map (canonicalizeFamilyParams nparams params)
 
+/-- Canonicalizing shared parameter prefixes changes no family name or
+source-order position. -/
+theorem familyNames_canonicalizeFamilyParamsList
+    (nparams : Nat) (params : List VExpr)
+    (families : List VInductiveType) :
+    familyNames (canonicalizeFamilyParamsList nparams params families) =
+      familyNames families := by
+  simp [familyNames, canonicalizeFamilyParamsList,
+    canonicalizeFamilyParams]
+
 /-- Exact source-order evidence that every constructor view has a parameter
 telescope definitionally equal to one distinguished block telescope.  The
 semantic list remains an index, so a prefix proof cannot be moved to another
@@ -10738,6 +12878,14 @@ inductive CandidateConstructorViewParameterDefEqList
       CandidateConstructorSemanticListRun env Us candidates raws → Prop where
   | nil : CandidateConstructorViewParameterDefEqList env Us nparams params .nil
   | cons
+      {source : Constructor} {sources : List Constructor}
+      {candidate : AddInductive.CandidateConstructor source}
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateConstructor sources}
+      {raw : VConstVal} {raws : List VConstVal}
+      {semantic : CandidateConstructorSemanticRun env Us candidate raw}
+      {semantics : CandidateConstructorSemanticListRun env Us candidates raws}
+      (bound : nparams ≤ candidate.type.trace.spineLength)
       (head : TypeChecker.TelDefEqEvidence env Us.length [] params
         (VExpr.telN nparams semantic.type.view))
       (tail : CandidateConstructorViewParameterDefEqList env Us nparams params
@@ -10769,7 +12917,7 @@ theorem CandidateConstructorSemanticListRun.canonicalConstructorEvidence
       exact .nil
   | cons head tail ih =>
       cases parameters with
-      | cons headParameters tailParameters =>
+      | cons headBound headParameters tailParameters =>
           obtain ⟨resultType, rawView⟩ := head.type.root.evidence
           obtain ⟨canonicalType, rawCanonical⟩ :=
             headParameters.rebuildForallNPrefix_of_sourceDefEq paramsLength
@@ -11170,6 +13318,37 @@ def NormalizationCandidateBlockSemanticRun.canonicalNormalization
       candidate rawDecl) : Normalization rawDecl :=
   run.normalization.canonicalizeSharedParams
 
+/-- Every family name in the canonical semantic view was absent from the
+entry environment.  The proof follows the producer-owned source order back
+through canonicalization and the raw staging fold. -/
+theorem NormalizationCandidateBlockSemanticRun.canonicalFamilyNames_fresh
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      candidate rawDecl) :
+    ∀ name ∈ familyNames run.canonicalNormalization.view.types,
+      env.constants name = none := by
+  have canonicalNames :
+      familyNames run.canonicalNormalization.view.types =
+        familyNames run.families.views := by
+    simp only [
+      NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+      Normalization.canonicalizeSharedParams,
+      VInductDecl.canonicalizeSharedParams,
+      familyNames_canonicalizeFamilyParamsList,
+      NormalizationCandidateBlockSemanticRun.normalization,
+      NormalizationCandidateBlockSemanticRun.viewDecl]
+  have viewRawNames : familyNames run.families.views =
+      familyNames rawDecl.types := by
+    exact run.families.viewHeaderNames.1.trans
+      run.families.rawHeaderNames.1.symm
+  intro name member
+  rw [canonicalNames, viewRawNames] at member
+  simp only [familyNames] at member
+  obtain ⟨family, familyMember, rfl⟩ := List.mem_map.mp member
+  exact VEnv.stageInductiveTypes_fresh run.stage family familyMember
+
 /-- Once the producer has established the shared-prefix length, every family
 and constructor in the canonical semantic view has that exact first-family
 parameter telescope by construction. -/
@@ -11341,6 +13520,8 @@ def NormalizationCandidateBlockSemanticRun.blockGenerationChecked
     block := run.normalizedCheckedBlock checked
     resultLevel := resultLevel }
   shape_eq := shape
+  generatedParams_length :=
+    (run.normalizedCheckedBlock checked).generationParams_length_of_shape shape
 
 /-- The generation package constructed from a semantic analyzer result
 replays through that same semantic normalization exactly. -/
@@ -11603,6 +13784,32 @@ theorem
                   canonicalizeFamilyParams] using canonical,
                 ih tail terminalTail⟩
 
+/-- Canonical whole-family equality evidence makes every relocated family
+view an actual type in the common pre-family environment. -/
+theorem CandidateBlockFamilySemanticListRun.canonicalFamilyTypesIsType
+    {env blockEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    {nparams : Nat} {params : List VExpr}
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams nparams params family).type
+          (.sort resultLevel))
+      run.views) :
+    List.All (fun family => env.IsType Us.length [] family.type)
+      (canonicalizeFamilyParamsList nparams params run.views) := by
+  induction run with
+  | nil => trivial
+  | cons head tail ih =>
+      obtain ⟨⟨resultLevel, headEvidence⟩, tailEvidence⟩ := canonical
+      exact ⟨⟨resultLevel, headEvidence.isDefEq.hasType.2⟩,
+        ih tailEvidence⟩
+
 /-- Compose each semantic raw/view family equality with the canonical
 parameter-prefix rewrite at the same dependent source position.  Constructor
 evidence is intentionally left untouched for its separate validation pass. -/
@@ -11664,6 +13871,67 @@ inductive CandidateBlockConstructorViewParameterDefEqLists
         Us nparams params semantics) :
       CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
         nparams params (.cons semantic semantics)
+
+/-- Exact residual field counts for every analyzer-owned constructor view.
+The right side is the producer's complete stored spine after removing the
+shared parameter prefix, so this inventory rules out both extra and missing
+normalized fields at every dependent source position. -/
+inductive CandidateConstructorCanonicalFieldCountList
+    (nparams : Nat) :
+    {env : VEnv} → {Us : List Name} →
+    {sources : List Constructor} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources} →
+    {raws : List VConstVal} →
+    CandidateConstructorSemanticListRun env Us candidates raws → Prop where
+  | nil : CandidateConstructorCanonicalFieldCountList nparams
+      (CandidateConstructorSemanticListRun.nil (env := env) (Us := Us))
+  | cons
+      {env : VEnv} {Us : List Name}
+      {source : Constructor} {sources : List Constructor}
+      {candidate : AddInductive.CandidateConstructor source}
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateConstructor sources}
+      {raw : VConstVal} {raws : List VConstVal}
+      {semantic : CandidateConstructorSemanticRun env Us candidate raw}
+      {semantics : CandidateConstructorSemanticListRun env Us candidates raws}
+      (bound : nparams ≤ candidate.type.trace.spineLength)
+      (head : (ctorFields (VExpr.dropN nparams semantic.type.view)).length =
+        candidate.type.trace.spineLength - nparams)
+      (tail : CandidateConstructorCanonicalFieldCountList nparams semantics) :
+      CandidateConstructorCanonicalFieldCountList nparams
+        (.cons semantic semantics)
+
+/-- Family-major residual field-count inventory for an exact mutual semantic
+hierarchy. -/
+inductive CandidateBlockConstructorCanonicalFieldCountLists
+    (nparams : Nat) :
+    {env blockEnv : VEnv} → {Us : List Name} →
+    {sources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources} →
+    {raws : List VInductiveType} →
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
+      Prop where
+  | nil : CandidateBlockConstructorCanonicalFieldCountLists nparams
+      (CandidateBlockFamilySemanticListRun.nil
+        (env := env) (blockEnv := blockEnv) (Us := Us))
+  | cons
+      {env blockEnv : VEnv} {Us : List Name}
+      {source : InductiveType} {sources : List InductiveType}
+      {candidate : AddInductive.CandidateFamily source}
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateFamily sources}
+      {raw : VInductiveType} {raws : List VInductiveType}
+      {semantic : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+      {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+        candidates raws}
+      (head : CandidateConstructorCanonicalFieldCountList nparams
+        semantic.constructors)
+      (tail : CandidateBlockConstructorCanonicalFieldCountLists nparams
+        semantics) :
+      CandidateBlockConstructorCanonicalFieldCountLists nparams
+        (.cons semantic semantics)
 
 /-- Compose the complete canonical raw/view block evidence at the exact
 dependent source positions: every family type relocates onto the shared
@@ -11924,6 +14192,30 @@ inductive CandidateBlockFamilyTypeSourceListInput
       CandidateBlockFamilyTypeSourceListInput env Us
         (source :: sources) (raw :: raws)
 
+/-- Select the exact raw family and its source translation at one retained
+source-list position.  The returned raw lookup keeps later consumers on the
+same position instead of recovering alignment from names. -/
+def CandidateBlockFamilyTypeSourceListInput.getElem?
+    {env : VEnv} {Us : List Name}
+    {sources : List InductiveType} {raws : List VInductiveType}
+    (input : CandidateBlockFamilyTypeSourceListInput env Us sources raws)
+    {offset : Nat} {source : InductiveType}
+    (found : sources[offset]? = some source) :
+    Σ raw, PLift (raws[offset]? = some raw) ×
+      PLift (CandidateBlockFamilyTypeSourceInput env Us source raw) :=
+  match input, offset with
+  | .nil, offset => by simp at found
+  | .cons head _, 0 => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst source
+      exact ⟨_, ⟨rfl⟩, ⟨head⟩⟩
+  | .cons _ tail, offset + 1 => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨raw, rawFound, selected⟩ := tail.getElem? found
+      exact ⟨raw,
+        ⟨by simpa only [List.getElem?_cons_succ] using rawFound.down⟩,
+        selected⟩
+
 /-- Transfer a name-only property from an aligned implementation family
 inventory to the corresponding raw Theory families. -/
 theorem CandidateBlockFamilyTypeSourceListInput.forall_names_of_declared
@@ -12109,7 +14401,7 @@ structure NormalizationCandidateBlockStagingInput
   names_not_primitive : ∀ raw ∈ rawDecl.types,
     raw.name ∉ VEnv.reflectedPrimitiveNames ∧
       Environment.primitives.contains raw.name = false
-  projectionReady : ProjectionReady execution.familyEnv blockEnv
+  projectionReady : ProjectionResolutionReady execution.familyEnv blockEnv
   structureEtaReady : StructureEtaReady execution.familyEnv blockEnv
 
 /-- Exact implementation metadata correspondence used by the retained
@@ -12506,7 +14798,7 @@ structure CandidateFamilyStagedInput
   /-- The staged family environment has not yet completed a new projection
   artifact; any already-complete host structure remains backed by a registered
   Theory view. -/
-  projectionReady : ProjectionReady constructorContext.env typeEnv
+  projectionReady : ProjectionResolutionReady constructorContext.env typeEnv
   structureEtaReady : StructureEtaReady constructorContext.env typeEnv
   family_lctx_eq : familyContext.lctx = {}
   constructorContext_eq : constructorContext =
@@ -12812,6 +15104,10 @@ structure CandidateConstructorSourceInput (env : VEnv) (Us : List Name)
   name_eq : source.name = raw.name
   uvars_eq : raw.uvars = Us.length
   source_tr : TrExprS env Us [] source.type raw.type
+  sourceArity_eq : AddInductive.constructorArity source.type 0 =
+    (VInductDecl.ctorFields raw.type).length
+  spineSupport : ProjectionSpineSupport
+    (VInductDecl.ctorFields raw.type).length source.type raw.type
 
 /-- Complete source/raw translations for one constructor list, before the
 opaque executable candidate payload is inspected. -/
@@ -12823,6 +15119,65 @@ inductive CandidateConstructorSourceListInput (env : VEnv) (Us : List Name) :
       (tail : CandidateConstructorSourceListInput env Us sources raws) :
       CandidateConstructorSourceListInput env Us
         (source :: sources) (raw :: raws)
+
+/-- Source and raw constructor inventories have the same length by
+construction. -/
+theorem CandidateConstructorSourceListInput.length_eq
+    {env : VEnv} {Us : List Name}
+    {sources : List Constructor} {raws : List VConstVal}
+    (input : CandidateConstructorSourceListInput env Us sources raws) :
+    sources.length = raws.length := by
+  induction input with
+  | nil => rfl
+  | cons _ _ ih => simp only [List.length_cons, ih]
+
+/-- Select one constructor translation at the exact source-list position
+owned by the producer. -/
+def CandidateConstructorSourceListInput.getElem?
+    {env : VEnv} {Us : List Name}
+    {sources : List Constructor} {raws : List VConstVal}
+    (input : CandidateConstructorSourceListInput env Us sources raws)
+    {offset : Nat} {source : Constructor}
+    (found : sources[offset]? = some source) :
+    Σ raw, PLift (raws[offset]? = some raw) ×
+      PLift (CandidateConstructorSourceInput env Us source raw) :=
+  match input, offset with
+  | .nil, offset => by simp at found
+  | .cons head _, 0 => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst source
+      exact ⟨_, ⟨rfl⟩, ⟨head⟩⟩
+  | .cons _ tail, offset + 1 => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨raw, rawFound, selected⟩ := tail.getElem? found
+      exact ⟨raw,
+        ⟨by simpa only [List.getElem?_cons_succ] using rawFound.down⟩,
+        selected⟩
+
+/-- Select a host constructor and its exact source translation from a
+Theory-side position.  This is the converse positional projection to
+`getElem?`; keeping it on the dependent source inventory avoids recovering
+the host constructor later by name. -/
+def CandidateConstructorSourceListInput.getElem?_right
+    {env : VEnv} {Us : List Name}
+    {sources : List Constructor} {raws : List VConstVal}
+    (input : CandidateConstructorSourceListInput env Us sources raws)
+    {offset : Nat} {raw : VConstVal}
+    (found : raws[offset]? = some raw) :
+    Σ source, PLift (sources[offset]? = some source) ×
+      PLift (CandidateConstructorSourceInput env Us source raw) :=
+  match input, offset with
+  | .nil, offset => by simp at found
+  | .cons head _, 0 => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst raw
+      exact ⟨_, ⟨rfl⟩, ⟨head⟩⟩
+  | .cons _ tail, offset + 1 => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨source, sourceFound, selected⟩ := tail.getElem?_right found
+      exact ⟨source,
+        ⟨by simpa only [List.getElem?_cons_succ] using sourceFound.down⟩,
+        selected⟩
 
 /-- Recover candidate-independent raw constructors from one exact successful
 constructor traversal.  Closed source types translate in the retained shared
@@ -12836,46 +15191,69 @@ theorem CandidateConstructorSourceListInput.exists_ofProduced
       AddInductive.CandidateConstructor sources)
     (produced : AddInductive.CandidateConstructorListProduced candidateContext
       candidates)
+    (spines : AddInductive.CandidateConstructorGenerationSpineList candidates)
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
     (closed : ∀ source ∈ sources,
       source.type.FVarsIn (fun _ => False)) :
     Nonempty (Σ raws,
       CandidateConstructorSourceListInput env Us sources raws) := by
   induction candidates with
-  | nil => exact ⟨⟨[], .nil⟩⟩
+  | nil =>
+      cases spines
+      exact ⟨⟨[], .nil⟩⟩
   | @cons source sources candidate candidates ih =>
-      have contextEq : candidate.type.context = candidateContext :=
-        AddInductive.CandidateConstructor.context_eq_of_normalize produced.head
-      cases contextEq
-      let candidateRun : TypeChecker.CandidateContextRun
-          candidate.type.context := stage.contextRun
-      have sourceFVars : source.type.FVarsIn
-          (· ∈ candidateRun.context.vlctx.fvars) :=
-        (closed source (.head _)).mono fun _ impossible => impossible.elim
-      obtain ⟨sourceType, contextualTr⟩ :=
-        TypeChecker.candidateExprTrace_exists_source_translation
-          candidate.type.trace candidateRun sourceFVars
-      have candidateVenv : candidateRun.context.venv = env := by
-        simpa only [candidateRun] using stage.venv_eq
-      have candidateLparams : candidateRun.context.lparams = Us := by
-        simpa only [candidateRun] using stage.lparams_eq
-      have candidateVlctx : candidateRun.context.vlctx = [] := by
-        simpa only [candidateRun] using stage.vlctx_eq
-      have sourceTr : TrExprS env Us [] source.type sourceType := by
-        change TrExprS candidateRun.context.venv
-          candidateRun.context.lparams candidateRun.context.vlctx
-          source.type sourceType at contextualTr
-        simpa only [candidateVenv, candidateLparams, candidateVlctx] using
-          contextualTr
-      obtain ⟨⟨raws, tailInput⟩⟩ := ih produced.tail (fun tail member =>
-        closed tail (.tail _ member))
-      let raw : VConstVal := {
-        uvars := Us.length
-        type := sourceType
-        name := source.name }
-      exact ⟨⟨raw :: raws, .cons {
-        name_eq := rfl
-        uvars_eq := rfl
-        source_tr := sourceTr } tailInput⟩⟩
+      cases spines with
+      | cons generation generations =>
+        have contextEq : candidate.type.context = candidateContext :=
+          AddInductive.CandidateConstructor.context_eq_of_normalize produced.head
+        cases contextEq
+        let candidateRun : TypeChecker.CandidateContextRun
+            candidate.type.context := stage.contextRun
+        have sourceFVars : source.type.FVarsIn
+            (· ∈ candidateRun.context.vlctx.fvars) :=
+          (closed source (.head _)).mono fun _ impossible => impossible.elim
+        obtain ⟨sourceType, contextualTr⟩ :=
+          TypeChecker.candidateExprTrace_exists_source_translation
+            candidate.type.trace candidateRun sourceFVars
+        have candidateVenv : candidateRun.context.venv = env := by
+          simpa only [candidateRun] using stage.venv_eq
+        have candidateLparams : candidateRun.context.lparams = Us := by
+          simpa only [candidateRun] using stage.lparams_eq
+        have candidateVlctx : candidateRun.context.vlctx = [] := by
+          simpa only [candidateRun] using stage.vlctx_eq
+        have sourceTr : TrExprS env Us [] source.type sourceType := by
+          change TrExprS candidateRun.context.venv
+            candidateRun.context.lparams candidateRun.context.vlctx
+            source.type sourceType at contextualTr
+          simpa only [candidateVenv, candidateLparams, candidateVlctx] using
+            contextualTr
+        let rootInput : TypeChecker.CandidateExprSemanticRootInput env Us
+            candidate.type sourceType := {
+          contextRun := candidateRun
+          venv_eq := candidateVenv
+          lparams_eq := candidateLparams
+          vlctx_eq := candidateVlctx
+          source_tr := sourceTr
+          whnfFuel
+          whnfDepth }
+        obtain ⟨supported, supportedTr, support, supportedLength⟩ :=
+          rootInput.projectionSpineSupport generation
+        obtain ⟨⟨raws, tailInput⟩⟩ := ih produced.tail generations
+          (fun tail member =>
+          closed tail (.tail _ member))
+        let raw : VConstVal := {
+          uvars := Us.length
+          type := supported
+          name := source.name }
+        exact ⟨⟨raw :: raws, .cons {
+          name_eq := rfl
+          uvars_eq := rfl
+          source_tr := supportedTr
+          sourceArity_eq :=
+            (candidate.type.trace.constructorArity_eq_spineLength
+              generation).trans supportedLength
+          spineSupport := support } tailInput⟩⟩
 
 /-- Reindex constructor source translations at the exact candidate list
 retained by the ordinary producer. -/
@@ -13051,6 +15429,53 @@ inductive CandidateBlockConstructorSourceListInput
       CandidateBlockConstructorSourceListInput env Us
         (source :: sources) (raw :: raws)
 
+/-- Select the exact constructor-source list belonging to one retained
+family position. -/
+def CandidateBlockConstructorSourceListInput.getElem?
+    {env : VEnv} {Us : List Name}
+    {sources : List InductiveType} {raws : List VInductiveType}
+    (input : CandidateBlockConstructorSourceListInput env Us sources raws)
+    {offset : Nat} {source : InductiveType}
+    (found : sources[offset]? = some source) :
+    Σ raw, PLift (raws[offset]? = some raw) ×
+      CandidateConstructorSourceListInput env Us source.ctors raw.ctors :=
+  match input, offset with
+  | .nil, offset => by simp at found
+  | .cons head _, 0 => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst source
+      exact ⟨_, ⟨rfl⟩, head⟩
+  | .cons _ tail, offset + 1 => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨raw, rawFound, selected⟩ := tail.getElem? found
+      exact ⟨raw,
+        ⟨by simpa only [List.getElem?_cons_succ] using rawFound.down⟩,
+        selected⟩
+
+/-- Select the exact host family and its constructor translation inventory
+from a Theory-side family position.  The returned host lookup is the index
+needed by the source-ordered raw constructor audit. -/
+def CandidateBlockConstructorSourceListInput.getElem?_right
+    {env : VEnv} {Us : List Name}
+    {sources : List InductiveType} {raws : List VInductiveType}
+    (input : CandidateBlockConstructorSourceListInput env Us sources raws)
+    {offset : Nat} {raw : VInductiveType}
+    (found : raws[offset]? = some raw) :
+    Σ source, PLift (sources[offset]? = some source) ×
+      CandidateConstructorSourceListInput env Us source.ctors raw.ctors :=
+  match input, offset with
+  | .nil, offset => by simp at found
+  | .cons head _, 0 => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst raw
+      exact ⟨_, ⟨rfl⟩, head⟩
+  | .cons _ tail, offset + 1 => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨source, sourceFound, selected⟩ := tail.getElem?_right found
+      exact ⟨source,
+        ⟨by simpa only [List.getElem?_cons_succ] using sourceFound.down⟩,
+        selected⟩
+
 /-- Candidate-independent translations for both phases of one raw block.
 Family types live in the entry Theory environment; constructor types live in
 the shared environment obtained after staging all raw families. -/
@@ -13059,6 +15484,27 @@ structure CandidateBlockSourceListInput
     (sources : List InductiveType) (raws : List VInductiveType) where
   familyTypes : CandidateBlockFamilyTypeSourceListInput preEnv Us sources raws
   constructors : CandidateBlockConstructorSourceListInput postEnv Us sources raws
+
+/-- Resolve both producer phases at one source-family position.  Equality of
+the two returned raw lookups forces the family-type and constructor evidence
+to refer to the very same enriched raw family. -/
+def CandidateBlockSourceListInput.getElem?
+    {preEnv postEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType} {raws : List VInductiveType}
+    (input : CandidateBlockSourceListInput preEnv postEnv Us sources raws)
+    {offset : Nat} {source : InductiveType}
+    (found : sources[offset]? = some source) :
+    Σ raw, PLift (raws[offset]? = some raw) ×
+      PLift (CandidateBlockFamilyTypeSourceInput preEnv Us source raw) ×
+      CandidateConstructorSourceListInput postEnv Us source.ctors raw.ctors := by
+  obtain ⟨familyRaw, familyFound, familyInput⟩ :=
+    input.familyTypes.getElem? found
+  obtain ⟨constructorRaw, constructorFound, constructorInput⟩ :=
+    input.constructors.getElem? found
+  have rawEq : constructorRaw = familyRaw :=
+    Option.some.inj (constructorFound.down.symm.trans familyFound.down)
+  subst constructorRaw
+  exact ⟨familyRaw, familyFound, familyInput, constructorInput⟩
 
 /-- Reindex the exact pre-family traversal at the family list retained by the
 complete ordinary execution. -/
@@ -13251,7 +15697,7 @@ theorem NormalizationCandidateBlockFamilySourceStagingInput.stage
 
 /-- Complete the automatically chosen family stage once readiness has been
 proved at its exact kernel/Theory endpoint. -/
-noncomputable def
+def
     NormalizationCandidateBlockFamilySourceStagingInput.staging
     {nparams : Nat} {sources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -13261,7 +15707,7 @@ noncomputable def
     {env : VEnv} {Us : List Name} {rawDecl : VInductDecl}
     (input : NormalizationCandidateBlockFamilySourceStagingInput context
       execution env Us rawDecl)
-    (projectionReady : ProjectionReady execution.familyEnv
+    (projectionReady : ProjectionResolutionReady execution.familyEnv
       input.familyInsertion.blockEnv)
     (structureEtaReady : StructureEtaReady execution.familyEnv
       input.familyInsertion.blockEnv) :
@@ -13366,7 +15812,7 @@ theorem CandidateBlockSourceListEnrichment.forall_names
 /-- Rebuild the exact block staging owner over the enriched raw declaration.
 The endpoint and readiness certificates are reused because the family
 constant fold is unchanged. -/
-noncomputable def
+def
     NormalizationCandidateBlockFamilySourceStagingInput.enrichedStaging
     {nparams : Nat} {sources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -13378,7 +15824,7 @@ noncomputable def
       execution env Us familyDecl)
     (enrichment : CandidateBlockSourceListEnrichment env
       input.familyInsertion.blockEnv Us sources familyDecl.types)
-    (projectionReady : ProjectionReady execution.familyEnv
+    (projectionReady : ProjectionResolutionReady execution.familyEnv
       input.familyInsertion.blockEnv)
     (structureEtaReady : StructureEtaReady execution.familyEnv
       input.familyInsertion.blockEnv) :
@@ -13422,6 +15868,9 @@ theorem
       AddInductive.CandidateFamily sources)
     (produced : AddInductive.CandidateBlockConstructorListProduced
       candidateContext families)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList families)
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
     (closed : ∀ source ∈ sources, ∀ ctor ∈ source.ctors,
       ctor.type.FVarsIn (fun _ => False)) :
     Nonempty (CandidateBlockSourceListEnrichment preEnv postEnv Us
@@ -13429,6 +15878,7 @@ theorem
   induction familyInput with
   | nil =>
       cases families
+      cases spines
       exact ⟨{
         raws := []
         input := { familyTypes := .nil, constructors := .nil }
@@ -13436,23 +15886,28 @@ theorem
   | @cons source familyRaw sources familyRaws familyHead familyTail ih =>
       cases families with
       | cons family families =>
-          obtain ⟨⟨ctorRaws, constructorInput⟩⟩ :=
-            CandidateConstructorSourceListInput.exists_ofProduced postFamily
-              family.constructors produced.head (fun ctor member =>
-                closed source (.head _) ctor member)
-          obtain ⟨tail⟩ := ih families produced.tail
-            (fun tail tailMember ctor ctorMember =>
-              closed tail (.tail _ tailMember) ctor ctorMember)
-          let raw : VInductiveType := { familyRaw with ctors := ctorRaws }
-          exact ⟨{
-            raws := raw :: tail.raws
-            input := {
-              familyTypes := .cons {
-                name_eq := familyHead.name_eq
-                uvars_eq := familyHead.uvars_eq
-                source_tr := familyHead.source_tr } tail.input.familyTypes
-              constructors := .cons constructorInput tail.input.constructors }
-            familyConstants := .cons rfl tail.familyConstants }⟩
+          cases spines with
+          | cons familySpine constructorSpines familySpines =>
+              obtain ⟨⟨ctorRaws, constructorInput⟩⟩ :=
+                CandidateConstructorSourceListInput.exists_ofProduced
+                  postFamily family.constructors produced.head
+                    constructorSpines whnfFuel whnfDepth
+                    (fun ctor member =>
+                      closed source (.head _) ctor member)
+              obtain ⟨tail⟩ := ih families produced.tail familySpines
+                (fun tail tailMember ctor ctorMember =>
+                  closed tail (.tail _ tailMember) ctor ctorMember)
+              let raw : VInductiveType := { familyRaw with ctors := ctorRaws }
+              exact ⟨{
+                raws := raw :: tail.raws
+                input := {
+                  familyTypes := .cons {
+                    name_eq := familyHead.name_eq
+                    uvars_eq := familyHead.uvars_eq
+                    source_tr := familyHead.source_tr } tail.input.familyTypes
+                  constructors :=
+                    .cons constructorInput tail.input.constructors }
+                familyConstants := .cons rfl tail.familyConstants }⟩
 
 /-- Enrich already translated family raws with the exact constructor raws
 recovered from the retained post-family traversals.  Updating `ctors` leaves
@@ -13470,12 +15925,15 @@ theorem CandidateBlockFamilyTypeSourceListInput.withConstructors
       AddInductive.CandidateFamily sources)
     (produced : AddInductive.CandidateBlockConstructorListProduced
       candidateContext families)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList families)
+    (whnfFuel : Nat)
+    (whnfDepth : candidateContext.fuel.recDepth = whnfFuel + 1)
     (closed : ∀ source ∈ sources, ∀ ctor ∈ source.ctors,
       ctor.type.FVarsIn (fun _ => False)) :
     Nonempty (Σ raws,
       CandidateBlockSourceListInput preEnv postEnv Us sources raws) := by
   obtain ⟨enrichment⟩ := familyInput.withConstructorsEnrichment
-    postFamily families produced closed
+    postFamily families produced spines whnfFuel whnfDepth closed
   exact ⟨⟨enrichment.raws, enrichment.input⟩⟩
 
 /-- Recover one complete raw Theory block directly from the exact two-phase
@@ -13496,6 +15954,9 @@ theorem CandidateBlockSourceListInput.exists_ofProduced
     (constructorsProduced :
       AddInductive.CandidateBlockConstructorListProduced constructorContext
         families)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList families)
+    (whnfFuel : Nat)
+    (whnfDepth : constructorContext.fuel.recDepth = whnfFuel + 1)
     (closed : ∀ source ∈ sources,
       source.type.FVarsIn (fun _ => False) ∧
         ∀ ctor ∈ source.ctors,
@@ -13507,6 +15968,7 @@ theorem CandidateBlockSourceListInput.exists_ofProduced
       families familyTypesProduced (fun source member =>
         (closed source member).1)
   exact familyInput.withConstructors postFamily families constructorsProduced
+    spines whnfFuel whnfDepth
     (fun source member => (closed source member).2)
 
 /-- Reindex all block constructor translations at the exact nested candidate
@@ -13757,7 +16219,7 @@ theorem NormalizationCandidateBlockFamilySourceStagingInput.enrich
     {env : VEnv} {Us : List Name} {familyDecl : VInductDecl}
     (input : NormalizationCandidateBlockFamilySourceStagingInput context
       execution env Us familyDecl)
-    (projectionReady : ProjectionReady execution.familyEnv
+    (projectionReady : ProjectionResolutionReady execution.familyEnv
       input.familyInsertion.blockEnv)
     (structureEtaReady : StructureEtaReady execution.familyEnv
       input.familyInsertion.blockEnv)
@@ -13767,7 +16229,8 @@ theorem NormalizationCandidateBlockFamilySourceStagingInput.enrich
   let familyStaging := input.staging projectionReady structureEtaReady
   obtain ⟨enrichment⟩ := input.familySources.withConstructorsEnrichment
     familyStaging.postFamily execution.candidate.families
-      execution.constructorListsProduced closed
+      execution.constructorListsProduced execution.generationSpines
+      input.whnfFuel (by simpa using input.whnfDepth) closed
   let staging := input.enrichedStaging enrichment projectionReady
     structureEtaReady
   exact ⟨{
@@ -14157,6 +16620,58 @@ theorem NormalizedFamilyRun.wf
   familyTel := run.familyTel.telDefEq
   familyResult := run.familyResult.isDefEq
 
+/-- When a generation retains the raw family-index surface, reify its
+reflexive telescope certificate over the producer-owned parameter context.
+The family run supplies well-formedness over that family's raw parameter
+prefix; both parameter prefixes are transported through the common checked
+surface before the index suffix is reused. -/
+theorem NormalizedFamilyRun.rawIndicesTel_refl
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {family : NormalizedFamily} {env : VEnv}
+    (run : NormalizedFamilyRun generation family env)
+    (familyMember : family ∈ generation.families)
+    (henv : VEnv.WF env)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params) :
+    TypeChecker.TelDefEqEvidence env source.uvars
+      generation.generatedParams.reverse
+      (family.rawIndices source.nparams)
+      (family.rawIndices source.nparams) := by
+  have hrawLen : (family.rawParams source.nparams).length =
+      source.nparams :=
+    (generation.shape.2.2.2.2 family familyMember).2.2.1
+  have hviewLen : generation.block.checked.params.length = source.nparams :=
+    generation.shape.2.1.symm.trans generation.shape.1
+  have prefixEvidence := run.familyTel.take source.nparams
+  have hraw :
+      (family.rawParams source.nparams ++
+          family.rawIndices source.nparams).take source.nparams =
+        family.rawParams source.nparams := by
+    let Ps := family.rawParams source.nparams
+    let Is := family.rawIndices source.nparams
+    have hlen : Ps.length = source.nparams := by
+      simpa only [Ps] using hrawLen
+    change (Ps ++ Is).take source.nparams = Ps
+    rw [← hlen, List.take_append, List.take_length]
+    simp
+  have hview :
+      (generation.block.checked.params ++ family.view.indices).take
+          source.nparams = generation.block.checked.params := by
+    rw [← hviewLen, List.take_append, List.take_length]
+    simp
+  rw [hraw, hview] at prefixEvidence
+  have generatedToRaw := generatedParamsTel.trans henv trivial
+    (prefixEvidence.symm henv trivial)
+  have indicesAtRawParams :=
+    (VEnv.OnTel.of_append (As := family.rawParams source.nparams)
+      run.familyTel.telDefEq.raw_onTel).2
+  apply TypeChecker.TelDefEqEvidence.ofTelDefEq
+  apply VEnv.OnTel.telDefEq_refl
+  simpa only [List.append_nil] using
+    indicesAtRawParams.defeqDFC henv.ordered
+      (generatedToRaw.telDefEq.ctx.symm henv.ordered)
+
 /-- Exact source-order ownership of every normalized-family run.  The family
 list is an index, so a shorter, reordered, or independently selected proof
 inventory cannot inhabit this boundary. -/
@@ -14198,6 +16713,63 @@ structure CheckedBlockFamilyRun
           (.sort resultLevel))
         constructor.resultIndices (.sort resultLevel)
 
+/-- Invert a verified iterated Π type only as far as its binder telescope.
+The terminal type remains existentially typed and is irrelevant to the
+family-header obligation. -/
+theorem VEnv.IsType.forallN_onTel
+    (henv : VEnv.Ordered env) :
+    ∀ {binders : List VExpr} {U : Nat} {context : List VExpr}
+        {result : VExpr},
+      env.IsType U context (VExpr.forallN binders result) →
+        env.OnTel U context binders
+  | [], _, _, _, _ => trivial
+  | _ :: _binders, _, _, _, type =>
+      ⟨(type.forallE_inv henv).1,
+        VEnv.IsType.forallN_onTel henv (type.forallE_inv henv).2⟩
+
+/-- A checked family's reconstructed normalized family type supplies its
+exact shared-parameter/index telescope. -/
+theorem CheckedFamily.familyOnTel_of_isType
+    {source : VInductDecl} {params : List VExpr}
+    {ordinal : Nat} {type : VInductiveType}
+    (family : CheckedFamily source params ordinal type)
+    {env : VEnv} (henv : VEnv.Ordered env)
+    (familyType : env.IsType source.uvars [] type.type) :
+    env.OnTel source.uvars [] (params ++ family.indices) := by
+  rw [family.type_eq, ← VExpr.forallN_append] at familyType
+  exact VEnv.IsType.forallN_onTel henv familyType
+
+/-- Interpret a source-ordered inventory of normalized family types as the
+exact telescope inventory of the dependent checked-family spine indexed by
+that same type list. -/
+theorem CheckedFamilies.familyOnTel_all
+    {source : VInductDecl} {params : List VExpr}
+    {env : VEnv} (henv : VEnv.Ordered env) :
+    {ordinal : Nat} → {types : List VInductiveType} →
+    (families : CheckedFamilies source params ordinal types) →
+    List.All (fun type => env.IsType source.uvars [] type.type) types →
+      List.All (fun indices =>
+        env.OnTel source.uvars [] (params ++ indices)) families.indices
+  | _, _, .nil, _ => trivial
+  | _, _, .cons head tail, typesWF =>
+      ⟨head.familyOnTel_of_isType henv typesWF.1,
+        tail.familyOnTel_all henv typesWF.2⟩
+
+/-- The result-level inventory of a dependent checked-family spine is the
+exact source-ordered projection of the family result sorts indexing it. -/
+theorem CheckedFamilies.resultLevels_eq_map_sortLevel
+    {source : VInductDecl} {params : List VExpr} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+    (families : CheckedFamilies source params ordinal types) →
+      families.resultLevels = types.map (sortLevel source.nparams)
+  | _, _, .nil => rfl
+  | _, _, .cons head tail => by
+      simp only [CheckedFamilies.resultLevels, List.map_cons]
+      rw [tail.resultLevels_eq_map_sortLevel]
+      congr 1
+      unfold sortLevel
+      rw [head.result_eq]
+
 /-- Exact dependent analyzer semantics for every checked family in source
 order. -/
 inductive CheckedBlockFamilyRunList
@@ -14213,6 +16785,59 @@ inductive CheckedBlockFamilyRunList
         families) :
       CheckedBlockFamilyRunList env resultLevel familyIndices
         (.cons family families)
+
+/-- Constructor-only semantic inventory over the exact dependent family
+spine.  This isolates the genuinely constructor-specific remainder from the
+family result-level and telescope inventories. -/
+inductive CheckedBlockConstructorRunList
+    {source : VInductDecl} {params : List VExpr}
+    (env : VEnv) (resultLevel : VLevel)
+    (familyIndices : List (List VExpr)) :
+    {ordinal : Nat} → {types : List VInductiveType} →
+    CheckedFamilies source params ordinal types → Type where
+  | nil : CheckedBlockConstructorRunList env resultLevel familyIndices .nil
+  | cons
+      {ordinal : Nat} {type : VInductiveType}
+      {types : List VInductiveType}
+      {family : CheckedFamily source params ordinal type}
+      {families : CheckedFamilies source params (ordinal + 1) types}
+      (head : ∀ constructor ∈ family.constructors,
+        checkedBlockFieldsWF env source.uvars resultLevel familyIndices
+            constructor.fields constructor.recursiveAt params.reverse 0 ∧
+          env.SpineWF source.uvars
+            (constructor.fields.reverse ++ params.reverse)
+            (VExpr.forallN
+              (VExpr.liftTelN constructor.fields.length family.indices 0)
+              (.sort resultLevel))
+            constructor.resultIndices (.sort resultLevel))
+      (tail : CheckedBlockConstructorRunList env resultLevel familyIndices
+        families) :
+      CheckedBlockConstructorRunList env resultLevel familyIndices
+        (.cons family families)
+
+/-- Assemble exact dependent family runs once the three independently
+produced inventories—common result levels, family telescopes, and constructor
+semantics—have been aligned to the same checked-family spine. -/
+def CheckedBlockFamilyRunList.ofInventories
+    {source : VInductDecl} {params : List VExpr}
+    {env : VEnv} {resultLevel : VLevel}
+    {familyIndices : List (List VExpr)} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+    (families : CheckedFamilies source params ordinal types) →
+    List.All (fun level => level ≈ resultLevel) families.resultLevels →
+    List.All (fun indices =>
+      env.OnTel source.uvars [] (params ++ indices)) families.indices →
+    CheckedBlockConstructorRunList env resultLevel familyIndices families →
+      CheckedBlockFamilyRunList env resultLevel familyIndices families
+  | _, _, .nil, _, _, .nil => .nil
+  | _, _, .cons _ tail, resultLevels, familyTels,
+      .cons constructors constructorTail =>
+        .cons {
+          resultLevelEq := resultLevels.1
+          familyOnTel := familyTels.1
+          constructors := constructors }
+          (CheckedBlockFamilyRunList.ofInventories tail resultLevels.2
+            familyTels.2 constructorTail)
 
 /-- Reindex the erased `CheckedBlock.WF` fold onto its exact dependent family
 spine. -/
@@ -14232,6 +16857,43 @@ def CheckedBlockFamilyRunList.ofListsWF
         familyOnTel := familyWF.2.1
         constructors := familyWF.2.2.1 }
         (CheckedBlockFamilyRunList.ofListsWF tail familyWF.2.2.2)
+
+/-- Reassemble the erased `CheckedBlock.WF` fold from exact dependent family
+runs.  This is the producer-facing direction: each family proof remains
+indexed by its actual `CheckedFamily`, then erases only at the final Theory
+boundary. -/
+theorem CheckedBlockFamilyRunList.listsWF
+    {source : VInductDecl} {params : List VExpr}
+    {env : VEnv} {resultLevel : VLevel}
+    {familyIndices : List (List VExpr)} :
+    {ordinal : Nat} → {types : List VInductiveType} →
+    {families : CheckedFamilies source params ordinal types} →
+    CheckedBlockFamilyRunList env resultLevel familyIndices families →
+      checkedFamilyListsWF source params env resultLevel familyIndices
+        families.resultLevels families.indices families.constructors
+  | _, _, .nil, .nil => trivial
+  | _, _, .cons _ tail, .cons head tailRuns =>
+      ⟨head.resultLevelEq, head.familyOnTel, head.constructors,
+        CheckedBlockFamilyRunList.listsWF
+          (families := tail) tailRuns⟩
+
+/-- Exact dependent family runs are equivalent to the erased semantic fold
+used by `CheckedBlock.WF`. -/
+theorem CheckedBlockFamilyRunList.nonempty_iff_listsWF
+    {source : VInductDecl} {params : List VExpr}
+    {env : VEnv} {resultLevel : VLevel}
+    {familyIndices : List (List VExpr)}
+    {ordinal : Nat} {types : List VInductiveType}
+    {families : CheckedFamilies source params ordinal types} :
+    Nonempty (CheckedBlockFamilyRunList env resultLevel familyIndices
+        families) ↔
+      checkedFamilyListsWF source params env resultLevel familyIndices
+        families.resultLevels families.indices families.constructors := by
+  constructor
+  · rintro ⟨runs⟩
+    exact runs.listsWF
+  · intro wf
+    exact ⟨CheckedBlockFamilyRunList.ofListsWF families wf⟩
 
 /-- The exact dependent family semantics owned by one checked block. -/
 def CheckedBlock.WF.familyRuns
@@ -14309,6 +16971,37 @@ theorem NormalizedBlockCtorRun.wf
   recursive := run.recursive
   resultSpine := run.resultSpine
 
+/-- When a generation retains the raw constructor-field surface, reify its
+reflexive telescope certificate over the producer-owned parameter context.
+The emitted constructor certificate already places raw fields after checked
+parameters, so only the generated/checked parameter context transport is
+needed. -/
+theorem NormalizedBlockCtorRun.rawFieldsTel_refl
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {constructor : NormalizedBlockCtor} {env : VEnv}
+    (run : NormalizedBlockCtorRun generation constructor env)
+    (henv : VEnv.WF env)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params) :
+    TypeChecker.TelDefEqEvidence env source.uvars
+      generation.generatedParams.reverse
+      (constructor.ctor.rawFields source.nparams)
+      (constructor.ctor.rawFields source.nparams) := by
+  have emittedOnTel : env.OnTel source.uvars []
+      (generation.block.checked.params ++
+        constructor.ctor.rawFields source.nparams) := by
+    simpa only [NormalizedBlockCtor.emittedBinders] using
+      run.emittedTel.telDefEq.raw_onTel
+  have fieldsAtChecked :=
+    (VEnv.OnTel.of_append
+      (As := generation.block.checked.params) emittedOnTel).2
+  apply TypeChecker.TelDefEqEvidence.ofTelDefEq
+  apply VEnv.OnTel.telDefEq_refl
+  simpa only [List.append_nil] using
+    fieldsAtChecked.defeqDFC henv.ordered
+      (generatedParamsTel.telDefEq.ctx.symm henv.ordered)
+
 /-- Exact flattened source order for every mutual-constructor run.  Its list
 index is definitionally the generation inventory consumed by block artifact
 preservation. -/
@@ -14346,6 +17039,17 @@ structure BlockGenerationRun {source : VInductDecl}
   resultLevelWF : generation.validated.resultLevel.WF source.uvars
   paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
     generation.block.rawParams generation.block.checked.params
+  generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+    generation.generatedParams generation.block.checked.params
+  generatedIndicesTel : ∀ family ∈ generation.families,
+    TypeChecker.TelDefEqEvidence env source.uvars
+      generation.generatedParams.reverse
+      (family.rawIndices source.nparams) (generation.generatedIndices family)
+  generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+    TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      generation.generatedParams.reverse
+      (constructor.ctor.rawFields source.nparams)
+      (generation.generatedFields constructor)
   families : NormalizedFamilyRunList generation env generation.families
   constructors : NormalizedBlockCtorRunList generation blockEnv
     generation.flatCtors
@@ -14358,6 +17062,11 @@ theorem BlockGenerationRun.wf
   blockWF := ⟨run.normalization.wf, run.checked⟩
   resultLevelWF := run.resultLevelWF
   paramsTel := run.paramsTel.telDefEq
+  generatedParamsTel := run.generatedParamsTel.telDefEq
+  generatedIndicesTel := fun family member =>
+    (run.generatedIndicesTel family member).telDefEq
+  generatedFieldsTel := fun constructor member =>
+    (run.generatedFieldsTel constructor member).telDefEq
   families := fun family member => (run.families.get family member).wf
   constructors := fun constructor member =>
     (run.constructors.get constructor member).wf
@@ -14523,6 +17232,112 @@ structure CandidateConstructorSemanticGenerationShape
   spineLength_eq : candidate.type.trace.spineLength =
     (VExpr.telN source.nparams raw.type ++
       ctorFields (VExpr.dropN source.nparams raw.type)).length
+
+/-- The structural generation gate covers the complete raw constructor Pi
+telescope, independently of the shared-parameter/field split. -/
+theorem CandidateConstructorSemanticGenerationShape.spineLength_eq_ctorFields
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    (shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root) :
+    candidate.type.trace.spineLength = (ctorFields raw.type).length := by
+  rw [shape.spineLength_eq]
+  exact congrArg List.length
+    (TypeChecker.candidateCtorFields_split source.nparams raw.type).symm
+
+/-- Annotation-consumed telescope ownership for one exact semantic
+constructor position.  It is terminal-shape neutral: constructor candidates
+end in family applications rather than the sort terminals used by family
+annotations. -/
+structure CandidateConstructorAnnotationSpine
+    (source : VInductDecl) (env : VEnv) (Us : List Name)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun env Us candidate raw)
+    (shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root) where
+  validation_annotations : candidate.type.trace.validationAnnotations
+  storedBinders : List VExpr
+  telescope : TypeChecker.TelDefEqEvidence env Us.length []
+    (VExpr.telN (ctorFields raw.type).length raw.type) storedBinders
+  stored_length : storedBinders.length = (ctorFields raw.type).length
+  terminalRun : TypeChecker.CandidateContextRun
+    candidate.type.trace.terminalContext
+  terminal_venv : terminalRun.context.venv = env
+  terminal_lparams : terminalRun.context.lparams = Us
+  terminal_vlctx : terminalRun.context.vlctx.toCtx = storedBinders.reverse
+  inferred : VExpr
+  recursive : TypeChecker.CandidateExprRun env Us candidate.type.trace []
+    raw.type root.type.view inferred
+  annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
+    candidate.type.trace [] terminalRun.context.vlctx storedBinders
+
+/-- Construct a constructor annotation owner from the retained semantic root,
+its structural generation witness, and the exact producer traversal. -/
+theorem CandidateConstructorAnnotationSpine.exists
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun env Us candidate raw)
+    (shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root)
+    (produced : AddInductive.normalizeCandidateConstructor kernelSource
+      candidate.type.context = .ok candidate) :
+    Nonempty (CandidateConstructorAnnotationSpine source env Us root
+      shape) := by
+  obtain ⟨inferred, recursive⟩ := root.type.recursive
+  obtain ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
+      telescope, storedLength, terminalVlctx, annotationSpine⟩ :=
+    root.type.annotationSpineContext shape.storedSpine
+  have spineLength := shape.spineLength_eq_ctorFields
+  rw [spineLength] at telescope storedLength
+  exact ⟨{
+    validation_annotations :=
+      candidate.validationAnnotations_of_normalize produced
+    storedBinders := storedBinders
+    telescope := telescope
+    stored_length := storedLength
+    terminalRun := terminalRun
+    terminal_venv := terminalVenv
+    terminal_lparams := terminalLparams
+    terminal_vlctx := terminalVlctx
+    inferred := inferred
+    recursive := recursive
+    annotation_spine := annotationSpine }⟩
+
+/-- The complete normalized constructor view inherits a sort-labelled
+telescope from the producer's exact annotation-consumed domains.  Both
+transports use the retained raw telescope as their common middle surface;
+no validator/view alignment pass is involved. -/
+theorem CandidateConstructorAnnotationSpine.fullView_onSortTel
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    {shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root}
+    (annotation : CandidateConstructorAnnotationSpine source env Us root
+      shape) :
+    ∃ sorts, env.OnSortTel Us.length []
+      (VExpr.telN (ctorFields raw.type).length root.type.view) sorts := by
+  obtain ⟨sorts, storedSorts⟩ :=
+    annotation.annotation_spine.exists_onSortTel
+      annotation.validation_annotations
+  have henv : VEnv.WF env := by
+    simpa only [root.type.venv_eq] using root.type.contextRun.context.Ewf
+  obtain ⟨_resultType, rawView⟩ :=
+    annotation.recursive.spineEvidence shape.storedSpine
+  rw [shape.spineLength_eq_ctorFields] at rawView
+  have viewRaw := rawView.telescope.symm henv trivial
+  have viewStored := viewRaw.trans henv trivial annotation.telescope
+  exact ⟨sorts,
+    VEnv.TelDefEq.raw_onSortTel henv trivial viewStored.telDefEq storedSorts⟩
 
 /-- Project the compatibility constructor run without rebuilding or choosing
 semantic evidence. -/
@@ -14818,6 +17633,114 @@ def normalizationCandidateBlockGenerationShape
     (candidate : AddInductive.NormalizationCandidate kernelSources) : Bool :=
   candidateBlockFamilySemanticGenerationShape source candidate.families
     source.types
+
+/-- Exact positional constructor layout after canonical parameter rewriting.
+The relation retains both list ends, so neither pairing nor its Boolean gate
+can silently truncate a constructor inventory. -/
+inductive CanonicalConstructorGenerationLayout (nparams uvars : Nat) :
+    List VConstVal → List CheckedCtor → Prop where
+  | nil : CanonicalConstructorGenerationLayout nparams uvars [] []
+  | cons
+      (shape : NormalizedCtor.generationShape nparams
+        ({ raw := raw, view := view } : NormalizedCtor) = true)
+      (raw_uvars : raw.uvars = uvars)
+      (tail : CanonicalConstructorGenerationLayout nparams uvars raws views) :
+      CanonicalConstructorGenerationLayout nparams uvars
+        (raw :: raws) (view :: views)
+
+namespace CanonicalConstructorGenerationLayout
+
+/-- Erase the dependent constructor layout to the exact facts consumed by a
+family generation gate and the block-wide raw-universe check. -/
+theorem facts
+    {nparams uvars : Nat} {raws : List VConstVal}
+    {views : List CheckedCtor}
+    (layout : CanonicalConstructorGenerationLayout nparams uvars raws views) :
+    let constructors := pairNormalizedCtors raws views
+    constructors.length = raws.length ∧
+      constructors.length = views.length ∧
+      constructors.all (NormalizedCtor.generationShape nparams) = true ∧
+      (∀ constructor ∈ constructors, constructor.raw.uvars = uvars) := by
+  induction layout with
+  | nil =>
+      exact ⟨rfl, rfl, rfl, by
+        intro constructor member
+        nomatch member⟩
+  | @cons raw view raws views shape rawUvars tail ih =>
+      simp only [pairNormalizedCtors, List.length_cons, Nat.succ.injEq,
+        List.all_cons, Bool.and_eq_true, List.mem_cons]
+      refine ⟨ih.1, ih.2.1, ⟨shape, ih.2.2.1⟩, ?_⟩
+      intro constructor member
+      rcases member with rfl | member
+      · exact rawUvars
+      · exact ih.2.2.2 constructor member
+
+end CanonicalConstructorGenerationLayout
+
+/-- Exact positional facts needed by the mixed raw/view block layout gate.
+The raw and checked lists remain indices, so the witness cannot silently
+truncate either side.  Constructor universe arities are recorded separately
+because `NormalizedFamily.generationShape` deliberately checks only the
+raw/view pair, while the block gate also relates every raw constructor to the
+declaration universe arity. -/
+inductive CanonicalBlockGenerationLayout (nparams uvars : Nat) :
+    List VInductiveType → List CheckedFamilyData → Prop where
+  | nil : CanonicalBlockGenerationLayout nparams uvars [] []
+  | cons
+      (shape : NormalizedFamily.generationShape nparams
+        ({ raw := raw, view := view } : NormalizedFamily) = true)
+      (family_uvars : raw.uvars = uvars)
+      (constructor_uvars : ∀ constructor ∈
+        pairNormalizedCtors raw.ctors view.constructors,
+        constructor.raw.uvars = uvars)
+      (tail : CanonicalBlockGenerationLayout nparams uvars raws views) :
+      CanonicalBlockGenerationLayout nparams uvars
+        (raw :: raws) (view :: views)
+
+namespace CanonicalBlockGenerationLayout
+
+/-- Erase a dependent layout witness to the exact Boolean and length facts
+consumed by `NormalizedCheckedBlock.blockGenerationShape`. -/
+private theorem facts
+    {nparams uvars : Nat}
+    {raws : List VInductiveType} {views : List CheckedFamilyData}
+    (layout : CanonicalBlockGenerationLayout nparams uvars raws views) :
+    let families := pairNormalizedFamilies raws views
+    families.length = raws.length ∧
+      families.length = views.length ∧
+      families.all (NormalizedFamily.generationShape nparams) = true ∧
+      families.all (fun family =>
+        family.raw.uvars == uvars &&
+          family.ctorPairs.all fun constructor =>
+            constructor.raw.uvars == uvars) = true := by
+  induction layout with
+  | nil => trivial
+  | @cons raw view raws views shape familyU constructorU tail ih =>
+      simp only [pairNormalizedFamilies, List.length_cons,
+        Nat.succ.injEq, List.all_cons, Bool.and_eq_true, beq_iff_eq]
+      refine ⟨ih.1, ih.2.1, ⟨shape, ih.2.2.1⟩, ?_⟩
+      refine ⟨⟨familyU, ?_⟩, ih.2.2.2⟩
+      simpa only [NormalizedFamily.ctorPairs, List.all_eq_true, beq_iff_eq]
+        using constructorU
+
+/-- A source-indexed positional witness closes the executable mixed-layout
+gate for the exact checked block. -/
+theorem blockGenerationShape
+    {source : VInductDecl} (block : NormalizedCheckedBlock source)
+    (layout : CanonicalBlockGenerationLayout source.nparams source.uvars
+      source.types block.checked.families.data)
+    (rawParamsLength : block.rawParams.length = source.nparams) :
+    block.blockGenerationShape = true := by
+  have layoutFacts := layout.facts
+  simp only [NormalizedCheckedBlock.blockGenerationShape,
+    Bool.and_eq_true, beq_iff_eq]
+  exact ⟨⟨⟨⟨⟨rawParamsLength,
+    (rawParamsLength.trans block.normalization.shape.2.1).trans
+      block.checked.params_length.symm⟩,
+    layoutFacts.1⟩, layoutFacts.2.1⟩, layoutFacts.2.2.1⟩,
+    layoutFacts.2.2.2⟩
+
+end CanonicalBlockGenerationLayout
 
 /-- Complete generation-spine evidence determines the executable constructor
 shape check directly from the retained pre-run semantic inputs. -/
@@ -15641,7 +18564,7 @@ def ProducedBlockGenerationShapeCandidate.constructorValidation
 execution.  This deliberately precedes the full raw-block shape gate: the raw
 family list can therefore be chosen and staged before constructor enrichment
 determines the final common source declaration. -/
-noncomputable def
+def
     _root_.Lean4Lean.AddInductive.NormalizationCandidateExecution.familySourceStaging
     {nparams : Nat} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -15724,7 +18647,7 @@ noncomputable def
 
 /-- Reindex direct family staging through a proof-carrying generation-shape
 producer when the final raw source is already known. -/
-noncomputable def ProducedBlockGenerationShapeCandidate.familySourceStaging
+def ProducedBlockGenerationShapeCandidate.familySourceStaging
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
     {context : AddInductive.Context}
@@ -15946,6 +18869,1065 @@ private theorem candidateFullTelComponents (np n : Nat) (e : VExpr)
   exact ⟨generationTelNForallNLength _ _,
     generationDropNForallNLength _ _⟩
 
+/-- Drop the shared parameter prefix from the producer-owned constructor
+telescope and relocate the remaining field telescope into any definitionally
+equal canonical parameter context.  The residual field-count premise is the
+structural Stage-3 fact already derived from generation. -/
+theorem CandidateConstructorAnnotationSpine.fieldView_onSortTel
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    {shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root}
+    (annotation : CandidateConstructorAnnotationSpine source env Us root
+      shape)
+    {nparams : Nat} {params : List VExpr}
+    (bound : nparams ≤ candidate.type.trace.spineLength)
+    (fieldCount :
+      (ctorFields (VExpr.dropN nparams root.type.view)).length =
+        candidate.type.trace.spineLength - nparams)
+    (parameters : TypeChecker.TelDefEqEvidence env Us.length [] params
+      (VExpr.telN nparams root.type.view)) :
+    ∃ sorts, env.OnSortTel Us.length params.reverse
+      (ctorFields (VExpr.dropN nparams root.type.view)) sorts := by
+  obtain ⟨sorts, fullSorts⟩ := annotation.fullView_onSortTel
+  have henv : VEnv.WF env := by
+    simpa only [root.type.venv_eq] using root.type.contextRun.context.Ewf
+  have prefixLength : (VExpr.telN nparams root.type.view).length = nparams :=
+    annotation.recursive.viewTelN_length_of_le shape.storedSpine bound
+  have fullLength : (ctorFields raw.type).length =
+      (VExpr.telN nparams root.type.view ++
+        ctorFields (VExpr.dropN nparams root.type.view)).length := by
+    simp only [List.length_append, prefixLength, fieldCount]
+    rw [← shape.spineLength_eq_ctorFields]
+    omega
+  have components := candidateFullTelComponents nparams
+    (ctorFields raw.type).length root.type.view fullLength
+  rw [components.1] at fullSorts
+  have suffix := VEnv.OnSortTel.drop
+    (VExpr.telN nparams root.type.view).length fullSorts
+  simp only [List.take_left, List.drop_left] at suffix
+  have suffix' : env.OnSortTel Us.length
+      (VExpr.telN nparams root.type.view).reverse
+      (ctorFields (VExpr.dropN nparams root.type.view))
+      (sorts.drop (VExpr.telN nparams root.type.view).length) := by
+    simpa only [List.append_nil] using suffix
+  have parameterContexts : env.IsDefEqCtx Us.length []
+      params.reverse (VExpr.telN nparams root.type.view).reverse := by
+    simpa using parameters.telDefEq.ctx
+  exact ⟨sorts.drop (VExpr.telN nparams root.type.view).length,
+    suffix'.defeqDFC henv.ordered (parameterContexts.symm henv.ordered)⟩
+
+private theorem ctorFields_forallN_sort :
+    ∀ (binders : List VExpr) (level : VLevel),
+      ctorFields (VExpr.forallN binders (.sort level)) = binders
+  | [], _ => rfl
+  | _ :: binders, level => by
+      simp only [VExpr.forallN, ctorFields, List.cons.injEq, true_and]
+      exact ctorFields_forallN_sort binders level
+
+private theorem canonicalCtorFields_split :
+    ∀ (count : Nat) (expression : VExpr),
+      ctorFields expression =
+        VExpr.telN count expression ++
+          ctorFields (VExpr.dropN count expression)
+  | 0, _ => rfl
+  | _ + 1, .forallE domain body => by
+      simp only [ctorFields, VExpr.telN, VExpr.dropN,
+        List.cons_append, List.cons.injEq, true_and]
+      exact canonicalCtorFields_split _ body
+  | _ + 1, .bvar _ | _ + 1, .sort _ | _ + 1, .const _ _ |
+      _ + 1, .app _ _ | _ + 1, .lam _ _ => rfl
+
+/-- A retained family terminal sort translates to the literal result sort of
+its canonical shared-parameter view.  Keeping the exact `ofLevel` equation
+lets validator-owned kernel level comparisons be interpreted without
+reselecting a Theory universe. -/
+theorem CandidateBlockFamilySemanticRun.canonicalResultSortTranslation
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    {nparams : Nat} {params : List VExpr} {kernelLevel : Level}
+    (terminal : candidate.familyType.type.trace.terminalResult =
+      .sort kernelLevel)
+    (generation : candidate.familyType.type.trace.generationSpine = true)
+    (paramsLength : params.length = nparams) :
+    ∃ viewLevel,
+      VExpr.resultOf
+          (VExpr.dropN nparams
+            (canonicalizeFamilyParams nparams params run.view).type) =
+          .sort viewLevel ∧
+        VLevel.ofLevel Us kernelLevel = some viewLevel := by
+  obtain ⟨_, recursive⟩ := run.type.recursive
+  obtain ⟨viewLevel, levelTranslation, terminalResult⟩ :=
+    recursive.viewResult_of_terminalSort terminal
+  have stored :=
+    AddInductive.CandidateExprTrace.generationSpine_storedSpine _ generation
+  have viewLength := (recursive.spineLengths stored).2
+  have reconstructed := VExpr.forallN_telN_dropN
+    candidate.familyType.type.trace.spineLength run.type.view
+  have fieldsEq : ctorFields run.type.view =
+      VExpr.telN candidate.familyType.type.trace.spineLength
+        run.type.view := by
+    calc
+      ctorFields run.type.view =
+          ctorFields (VExpr.forallN
+            (VExpr.telN candidate.familyType.type.trace.spineLength
+              run.type.view)
+            (VExpr.dropN candidate.familyType.type.trace.spineLength
+              run.type.view)) := congrArg ctorFields reconstructed.symm
+      _ = ctorFields (VExpr.forallN
+            (VExpr.telN candidate.familyType.type.trace.spineLength
+              run.type.view) (.sort viewLevel)) := by rw [terminalResult]
+      _ = VExpr.telN candidate.familyType.type.trace.spineLength
+            run.type.view := ctorFields_forallN_sort _ _
+  have fullLength : candidate.familyType.type.trace.spineLength =
+      (VExpr.telN nparams run.type.view ++
+        ctorFields (VExpr.dropN nparams run.type.view)).length := by
+    rw [← canonicalCtorFields_split]
+    rw [fieldsEq, viewLength]
+  have components := candidateFullTelComponents nparams
+    candidate.familyType.type.trace.spineLength run.type.view fullLength
+  refine ⟨viewLevel, ?_, levelTranslation⟩
+  rw [canonicalizeFamilyParams_dropN paramsLength]
+  exact components.2.symm.trans terminalResult
+
+/-- A retained family terminal sort is the literal well-scoped result sort
+of its canonical shared-parameter view. -/
+theorem CandidateBlockFamilySemanticRun.canonicalResultSort
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    {nparams : Nat} {params : List VExpr} {kernelLevel : Level}
+    (terminal : candidate.familyType.type.trace.terminalResult =
+      .sort kernelLevel)
+    (generation : candidate.familyType.type.trace.generationSpine = true)
+    (paramsLength : params.length = nparams) :
+    ∃ viewLevel,
+      VExpr.resultOf
+          (VExpr.dropN nparams
+            (canonicalizeFamilyParams nparams params run.view).type) =
+          .sort viewLevel ∧
+        viewLevel.WF Us.length := by
+  obtain ⟨viewLevel, resultEq, translation⟩ :=
+    run.canonicalResultSortTranslation terminal generation paramsLength
+  exact ⟨viewLevel, resultEq, VLevel.WF.of_ofLevel translation⟩
+
+/-- The field count visible in a raw constructor is exactly the
+post-parameter suffix of the producer's complete stored spine. -/
+theorem CandidateConstructorSemanticGenerationShape.rawFieldCount
+    {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {run : CandidateConstructorSemanticRun env Us candidate raw}
+    {source : VInductDecl} {nparams : Nat}
+    (shape : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us run)
+    (parameterBound : nparams ≤ candidate.type.trace.spineLength) :
+    (ctorFields (VExpr.dropN nparams raw.type)).length =
+      candidate.type.trace.spineLength - nparams := by
+  obtain ⟨_, recursive⟩ := run.type.recursive
+  have prefixLength := recursive.sourceTelN_length_of_le shape.storedSpine
+    parameterBound
+  have splitLength := congrArg List.length
+    (TypeChecker.candidateCtorFields_split nparams raw.type)
+  simp only [List.length_append] at splitLength
+  have fullLength : candidate.type.trace.spineLength =
+      (ctorFields raw.type).length := by
+    rw [shape.spineLength_eq]
+    exact congrArg List.length
+      (TypeChecker.candidateCtorFields_split source.nparams raw.type).symm
+  rw [← fullLength, prefixLength] at splitLength
+  omega
+
+/-- One exact semantic constructor position satisfies the mixed raw/view
+generation gate after canonical parameter rewriting.  The raw and normalized
+field counts meet at the producer trace's residual spine length. -/
+theorem CandidateConstructorSemanticRun.canonicalGenerationShape
+    {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (run : CandidateConstructorSemanticRun env Us candidate raw)
+    {rawSource checkedSource : VInductDecl}
+    {params : List VExpr}
+    (shape : CandidateConstructorSemanticGenerationShape
+      (source := rawSource) env Us run)
+    (bound : rawSource.nparams ≤ candidate.type.trace.spineLength)
+    (count :
+      (ctorFields (VExpr.dropN rawSource.nparams run.type.view)).length =
+        candidate.type.trace.spineLength - rawSource.nparams)
+    (paramsLength : params.length = rawSource.nparams)
+    (checkedNparams : checkedSource.nparams = rawSource.nparams) :
+    NormalizedCtor.generationShape rawSource.nparams
+      { raw := raw
+        view := CheckedCtor.ofBlock checkedSource
+          (canonicalizeConstructorParams rawSource.nparams params
+            run.root.view) } = true := by
+  have rawPrefix : (VExpr.telN rawSource.nparams raw.type).length =
+      rawSource.nparams := by
+    obtain ⟨_, recursive⟩ := run.type.recursive
+    exact recursive.sourceTelN_length_of_le shape.storedSpine bound
+  have rawCount := shape.rawFieldCount bound
+  have canonicalDrop := canonicalizeConstructorParams_dropN
+    (constructor := run.root.view) paramsLength
+  have fieldCount :
+      (ctorFields (VExpr.dropN rawSource.nparams raw.type)).length =
+        (CheckedCtor.ofBlock checkedSource
+          (canonicalizeConstructorParams rawSource.nparams params
+            run.root.view)).fields.length := by
+    rw [CheckedCtor.ofBlock, checkedNparams, canonicalDrop]
+    exact rawCount.trans count.symm
+  simp only [NormalizedCtor.generationShape,
+    CandidateConstructorSemanticRun.root, CandidateConstructorRun.view,
+    canonicalizeConstructorParams, CheckedCtor.ofBlock,
+    Bool.and_eq_true, beq_iff_eq]
+  exact ⟨⟨⟨trivial, trivial⟩, rawPrefix⟩, fieldCount⟩
+
+/-- Assemble the complete canonical constructor layout at the exact semantic
+source positions. -/
+theorem CandidateConstructorSemanticListRun.canonicalGenerationLayout
+    {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    (run : CandidateConstructorSemanticListRun env Us candidates raws)
+    {rawSource checkedSource : VInductDecl} {params : List VExpr}
+    (shapes : CandidateConstructorSemanticGenerationShapeList rawSource env Us
+      run)
+    (counts : CandidateConstructorCanonicalFieldCountList rawSource.nparams
+      run)
+    (paramsLength : params.length = rawSource.nparams)
+    (checkedNparams : checkedSource.nparams = rawSource.nparams)
+    (checkedUvars : checkedSource.uvars = Us.length) :
+    CanonicalConstructorGenerationLayout rawSource.nparams
+      checkedSource.uvars raws
+      ((run.roots.views.map
+        (canonicalizeConstructorParams rawSource.nparams params)).map
+          (CheckedCtor.ofBlock checkedSource)) := by
+  induction run with
+  | nil =>
+      cases shapes
+      cases counts
+      exact .nil
+  | cons head tail ih =>
+      rename_i kernelSource candidate raw kernelSources candidates raws
+      cases shapes with
+      | cons headShape tailShapes =>
+          cases counts with
+          | cons headBound headCount tailCounts =>
+              simp only [CandidateConstructorSemanticListRun.roots,
+                CandidateConstructorListRun.views, List.map_cons]
+              exact .cons
+                (head.canonicalGenerationShape headShape headBound
+                  headCount paramsLength checkedNparams)
+                (head.uvars_eq.trans checkedUvars.symm)
+                (ih tailShapes tailCounts)
+
+/-- The index count visible in the raw family header is exactly the
+post-parameter suffix of the producer's complete stored spine. -/
+theorem CandidateBlockFamilySemanticGenerationShape.rawIndexCount
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {source : VInductDecl} {nparams : Nat}
+    (shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us run)
+    (parameterBound : nparams ≤
+      candidate.familyType.type.trace.spineLength) :
+    (ctorFields (VExpr.dropN nparams raw.type)).length =
+      candidate.familyType.type.trace.spineLength - nparams := by
+  obtain ⟨_, recursive⟩ := run.type.recursive
+  have prefixLength := recursive.sourceTelN_length_of_le shape.storedSpine
+    parameterBound
+  have splitLength := congrArg List.length
+    (TypeChecker.candidateCtorFields_split nparams raw.type)
+  simp only [List.length_append] at splitLength
+  rw [← shape.spineLength_eq_ctorFields, prefixLength] at splitLength
+  omega
+
+/-- A nonempty exact raw-family spine exposes precisely the declared shared
+parameter prefix.  This is the raw-side counterpart of
+`CandidateBlockFamilySemanticListRun.blockParams_length`; it is derived from
+the same producer-owned stored-spine and parameter-bound witnesses used by
+the mixed generation layout. -/
+theorem CandidateBlockFamilySemanticListRun.rawBlockParams_length
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (kernelSource :: kernelSources)}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    {source : VInductDecl}
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us run)
+    (bounds : AddInductive.CandidateFamilyParameterSpineList
+      source.nparams candidates) :
+    (blockParams source.nparams raws).length = source.nparams := by
+  cases run with
+  | cons head tail =>
+      cases shapes with
+      | cons headShape tailShapes =>
+          cases bounds with
+          | cons headBound tailBounds =>
+              obtain ⟨_, recursive⟩ := head.type.recursive
+              have length := recursive.sourceTelN_length_of_le
+                headShape.storedSpine headBound
+              simpa only [blockParams] using length
+
+/-- The index count visible in a canonical family header is exactly the
+post-parameter suffix of the producer's complete stored spine. -/
+theorem CandidateBlockFamilySemanticRun.canonicalIndexCount
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    {nparams : Nat} {params : List VExpr} {kernelLevel : Level}
+    (terminal : candidate.familyType.type.trace.terminalResult =
+      .sort kernelLevel)
+    (stored : candidate.familyType.type.trace.storedSpine = true)
+    (paramsLength : params.length = nparams)
+    (parameterBound : nparams ≤
+      candidate.familyType.type.trace.spineLength) :
+    (ctorFields
+      (VExpr.dropN nparams
+        (canonicalizeFamilyParams nparams params run.view).type)).length =
+      candidate.familyType.type.trace.spineLength - nparams := by
+  obtain ⟨_, recursive⟩ := run.type.recursive
+  obtain ⟨viewLevel, _levelTranslation, terminalResult⟩ :=
+    recursive.viewResult_of_terminalSort terminal
+  have viewLength := (recursive.spineLengths stored).2
+  have reconstructed := VExpr.forallN_telN_dropN
+    candidate.familyType.type.trace.spineLength run.type.view
+  have fieldsEq : ctorFields run.type.view =
+      VExpr.telN candidate.familyType.type.trace.spineLength
+        run.type.view := by
+    calc
+      ctorFields run.type.view =
+          ctorFields (VExpr.forallN
+            (VExpr.telN candidate.familyType.type.trace.spineLength
+              run.type.view)
+            (VExpr.dropN candidate.familyType.type.trace.spineLength
+              run.type.view)) := congrArg ctorFields reconstructed.symm
+      _ = ctorFields (VExpr.forallN
+            (VExpr.telN candidate.familyType.type.trace.spineLength
+              run.type.view) (.sort viewLevel)) := by rw [terminalResult]
+      _ = VExpr.telN candidate.familyType.type.trace.spineLength
+            run.type.view := ctorFields_forallN_sort _ _
+  have prefixLength : (VExpr.telN nparams run.type.view).length = nparams :=
+    recursive.viewTelN_length_of_le stored parameterBound
+  have splitLength := congrArg List.length
+    (canonicalCtorFields_split nparams run.type.view)
+  simp only [List.length_append] at splitLength
+  rw [canonicalizeFamilyParams_dropN paramsLength]
+  rw [fieldsEq, viewLength, prefixLength] at splitLength
+  change (ctorFields (VExpr.dropN nparams run.type.view)).length =
+    candidate.familyType.type.trace.spineLength - nparams
+  omega
+
+/-- One semantic family position satisfies the exact mixed raw/checked
+generation gate once its family and constructor residual counts have been
+joined to the canonical checked family at that same dependent position. -/
+theorem CandidateBlockFamilySemanticRun.canonicalFamilyGenerationShape
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    {rawSource checkedSource : VInductDecl}
+    {params : List VExpr} {ordinal : Nat} {kernelLevel : Level}
+    (shape : CandidateBlockFamilySemanticGenerationShape rawSource env
+      blockEnv Us run)
+    (bound : rawSource.nparams ≤
+      candidate.familyType.type.trace.spineLength)
+    (terminal : candidate.familyType.type.trace.terminalResult =
+      .sort kernelLevel)
+    (paramsLength : params.length = rawSource.nparams)
+    (checkedNparams : checkedSource.nparams = rawSource.nparams)
+    (checked : CheckedFamily checkedSource params ordinal
+      (canonicalizeFamilyParams rawSource.nparams params run.view))
+    (constructors : CanonicalConstructorGenerationLayout rawSource.nparams
+      checkedSource.uvars raw.ctors checked.constructors) :
+    NormalizedFamily.generationShape rawSource.nparams
+      ({ raw := raw, view := checked.data } : NormalizedFamily) = true := by
+  obtain ⟨_, recursive⟩ := run.type.recursive
+  have rawPrefix : (VExpr.telN rawSource.nparams raw.type).length =
+      rawSource.nparams :=
+    recursive.sourceTelN_length_of_le shape.storedSpine bound
+  have rawCount := shape.rawIndexCount bound
+  have canonicalCount := run.canonicalIndexCount terminal shape.storedSpine
+    paramsLength bound
+  have indexCount :
+      (ctorFields (VExpr.dropN rawSource.nparams raw.type)).length =
+        checked.indices.length := by
+    rw [checked.indices_eq, checkedNparams]
+    exact rawCount.trans canonicalCount.symm
+  have constructorFacts := constructors.facts
+  simp only [NormalizedFamily.generationShape, CheckedFamily.data,
+    CheckedFamily.value, CandidateBlockFamilySemanticRun.view,
+    canonicalizeFamilyParams, NormalizedFamily.rawParams,
+    NormalizedFamily.rawIndices, NormalizedFamily.ctorPairs,
+    Bool.and_eq_true, beq_iff_eq]
+  exact ⟨⟨⟨⟨⟨⟨trivial, trivial⟩, rawPrefix⟩, indexCount⟩,
+    constructorFacts.1⟩, constructorFacts.2.1⟩,
+    constructorFacts.2.2.1⟩
+
+/-- Assemble the complete canonical mixed raw/view layout against an exact
+dependent checked-family spine.  Every family and constructor list remains a
+dependent index throughout the recursion. -/
+theorem CandidateBlockFamilySemanticListRun.canonicalGenerationLayout
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws)
+    {rawSource checkedSource : VInductDecl}
+    {params : List VExpr} {ordinal : Nat}
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList rawSource env
+      blockEnv Us run)
+    (bounds : AddInductive.CandidateFamilyParameterSpineList
+      rawSource.nparams candidates)
+    (terminals : CandidateBlockFamilyTerminalSortList candidates)
+    (counts : CandidateBlockConstructorCanonicalFieldCountLists
+      rawSource.nparams run)
+    (paramsLength : params.length = rawSource.nparams)
+    (checkedNparams : checkedSource.nparams = rawSource.nparams)
+    (checkedUvars : checkedSource.uvars = Us.length)
+    (checked : CheckedFamilies checkedSource params ordinal
+      (canonicalizeFamilyParamsList rawSource.nparams params run.views)) :
+    CanonicalBlockGenerationLayout rawSource.nparams checkedSource.uvars raws
+      checked.data := by
+  induction run generalizing ordinal with
+  | nil =>
+      cases shapes
+      cases bounds
+      cases terminals
+      cases counts
+      cases checked
+      exact .nil
+  | cons head tail ih =>
+      rename_i kernelSource candidate raw kernelSources candidates raws
+      cases shapes with
+      | cons headShape tailShapes =>
+          cases bounds with
+          | cons headBound tailBounds =>
+              cases terminals with
+              | cons headTerminal tailTerminals =>
+                  cases counts with
+                  | cons headCounts tailCounts =>
+                      cases checked with
+                      | cons checkedHead checkedTail =>
+                          have constructorLayout :=
+                            head.constructors.canonicalGenerationLayout
+                              headShape.constructors headCounts paramsLength
+                              checkedNparams checkedUvars
+                          have constructorsEq : checkedHead.constructors =
+                              ((head.constructors.roots.views.map
+                                (canonicalizeConstructorParams
+                                  rawSource.nparams params)).map
+                                (CheckedCtor.ofBlock checkedSource)) := by
+                            simpa only [CheckedFamily.constructors_eq,
+                              canonicalizeFamilyParams,
+                              CandidateBlockFamilySemanticRun.view] using
+                              checkedHead.constructors_eq
+                          have constructorLayout' :
+                              CanonicalConstructorGenerationLayout
+                                rawSource.nparams checkedSource.uvars
+                                raw.ctors checkedHead.constructors := by
+                            rw [constructorsEq]
+                            exact constructorLayout
+                          have familyShape :=
+                            head.canonicalFamilyGenerationShape headShape
+                              headBound headTerminal paramsLength
+                              checkedNparams checkedHead constructorLayout'
+                          have constructorFacts := constructorLayout'.facts
+                          exact .cons familyShape
+                            (head.uvars_eq.trans checkedUvars.symm)
+                            constructorFacts.2.2.2
+                            (ih tailShapes tailBounds tailTerminals
+                              tailCounts checkedTail)
+
+/-- Raw and canonical semantic family lists induce the same Theory family
+headers.  The names are preserved definitionally; raw and canonical index
+counts meet at the exact retained candidate-spine suffix length. -/
+theorem CandidateBlockFamilySemanticListRun.familyHeaders_canonicalize
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws)
+    {source : VInductDecl} {nparams : Nat} {params : List VExpr}
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us run)
+    (bounds : AddInductive.CandidateFamilyParameterSpineList nparams
+      candidates)
+    (terminals : CandidateBlockFamilyTerminalSortList candidates)
+    (paramsLength : params.length = nparams) :
+    familyHeaders nparams raws =
+      familyHeaders nparams
+        (canonicalizeFamilyParamsList nparams params run.views) := by
+  induction run with
+  | nil => rfl
+  | cons head tail ih =>
+      rename_i kernelSource candidate raw kernelSources candidates raws
+      cases shapes with
+      | cons headShape tailShapes =>
+          cases bounds with
+          | cons headBound tailBounds =>
+              cases terminals with
+              | cons headTerminal tailTerminals =>
+                  rename_i kernelLevel
+                  have rawCount := headShape.rawIndexCount headBound
+                  have canonicalCount := head.canonicalIndexCount headTerminal
+                    headShape.storedSpine paramsLength headBound
+                  simp only [familyHeaders,
+                    canonicalizeFamilyParamsList, List.map_cons,
+                    CandidateBlockFamilySemanticListRun.views,
+                    CandidateBlockFamilySemanticRun.view,
+                    canonicalizeFamilyParams]
+                  simp only [List.cons.injEq]
+                  constructor
+                  · have countEq := rawCount.trans (by
+                      simpa only [CandidateBlockFamilySemanticRun.view,
+                        canonicalizeFamilyParams] using canonicalCount.symm)
+                    exact congrArg
+                      (fun indices => ({ name := raw.name, indices } :
+                        FamilyHeader)) countEq
+                  · simpa only [familyHeaders,
+                      canonicalizeFamilyParamsList] using
+                      ih tailShapes tailBounds tailTerminals
+
+/-- Source-ordered agreement between the validator's completed index-count
+array and a list of canonical Theory family headers.  The explicit starting
+ordinal lets recursive suffixes retain the positions they occupy in the
+whole block. -/
+inductive CanonicalFamilyIndexCountList
+    (stats : AddInductive.InductiveStats) (nparams : Nat) :
+    Nat → List VInductiveType → Prop where
+  | nil (ordinal : Nat) :
+      CanonicalFamilyIndexCountList stats nparams ordinal []
+  | cons
+      {ordinal : Nat} {family : VInductiveType}
+      {families : List VInductiveType}
+      (head : stats.nindices[ordinal]? =
+        some (ctorFields (VExpr.dropN nparams family.type)).length)
+      (tail : CanonicalFamilyIndexCountList stats nparams (ordinal + 1)
+        families) :
+      CanonicalFamilyIndexCountList stats nparams ordinal
+        (family :: families)
+
+/-- Pointwise projection of a source-ordered canonical family-count
+inventory. -/
+theorem CanonicalFamilyIndexCountList.getElem?
+    {stats : AddInductive.InductiveStats} {nparams ordinal : Nat}
+    {families : List VInductiveType}
+    (counts : CanonicalFamilyIndexCountList stats nparams ordinal families)
+    {offset : Nat} {family : VInductiveType}
+    (found : families[offset]? = some family) :
+    stats.nindices[ordinal + offset]? =
+      some (ctorFields (VExpr.dropN nparams family.type)).length := by
+  induction counts generalizing offset family with
+  | nil ordinal => simp at found
+  | @cons ordinal headFamily tailFamilies head tail ih =>
+      cases offset with
+      | zero =>
+          simp only [List.getElem?_cons_zero] at found
+          cases Option.some.inj found
+          simpa using head
+      | succ offset =>
+          simp only [List.getElem?_cons_succ] at found
+          simpa only [Nat.add_assoc, Nat.add_left_comm,
+            Nat.add_comm] using ih found
+
+/-- Transport the validator/candidate positional count audit onto the exact
+raw Theory family list retained by the semantic hierarchy.  The generation
+shape identifies each raw suffix length with its candidate spine suffix;
+the producer-owned audit identifies that same suffix with the validator's
+array slot. -/
+theorem CandidateBlockFamilySemanticListRun.rawIndexCounts
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws)
+    {source : VInductDecl} {stats : AddInductive.InductiveStats}
+    {ordinal : Nat}
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us run)
+    (bounds : AddInductive.CandidateFamilyParameterSpineList source.nparams
+      candidates)
+    (counts : AddInductive.CandidateFamilyIndexCountList stats source.nparams
+      ordinal candidates) :
+    CanonicalFamilyIndexCountList stats source.nparams ordinal raws := by
+  induction run generalizing ordinal with
+  | nil =>
+      cases shapes
+      cases bounds
+      cases counts
+      exact .nil ordinal
+  | cons head tail ih =>
+      cases shapes with
+      | cons headShape tailShapes =>
+          cases bounds with
+          | cons headBound tailBounds =>
+              cases counts with
+              | cons headCount tailCounts =>
+                  refine .cons ?_ (ih tailShapes tailBounds tailCounts)
+                  rw [headShape.rawIndexCount headBound]
+                  exact headCount
+
+/-- Transport the validator's canonical count inventory back to a raw family
+list whose source-order headers are already known to agree.  The count
+predicate depends only on each header's index component, so no raw/view
+syntax equality is needed. -/
+theorem CanonicalFamilyIndexCountList.of_familyHeaders_eq
+    {stats : AddInductive.InductiveStats} {nparams ordinal : Nat}
+    {raws canonical : List VInductiveType}
+    (counts : CanonicalFamilyIndexCountList stats nparams ordinal canonical)
+    (headers : familyHeaders nparams raws =
+      familyHeaders nparams canonical) :
+    CanonicalFamilyIndexCountList stats nparams ordinal raws := by
+  induction counts generalizing raws with
+  | nil ordinal =>
+      have rawLength : raws.length = 0 := by
+        have lengths := congrArg List.length headers
+        simpa only [familyHeaders, List.length_map, List.length_nil] using
+          lengths
+      have rawsEq : raws = [] := List.length_eq_zero_iff.mp rawLength
+      subst raws
+      exact .nil ordinal
+  | @cons ordinal family families head tail ih =>
+      cases raws with
+      | nil => simp [familyHeaders] at headers
+      | cons raw raws =>
+          simp only [familyHeaders, List.map_cons, List.cons.injEq] at headers
+          refine .cons ?_ (ih headers.2)
+          have indexEq := congrArg FamilyHeader.indices headers.1
+          have indexEq' :
+              (ctorFields (VExpr.dropN nparams raw.type)).length =
+                (ctorFields (VExpr.dropN nparams family.type)).length := by
+            simpa only using indexEq
+          rw [indexEq']
+          exact head
+
+/-- Every reconstructed constructor view retains the exact universe arity
+of its source-indexed raw Theory constructor. -/
+theorem CandidateConstructorSemanticListRun.viewUvars
+    {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    (run : CandidateConstructorSemanticListRun env Us candidates raws) :
+    ∀ constructor ∈ run.roots.views,
+      constructor.uvars = Us.length := by
+  induction run with
+  | nil =>
+      intro constructor member
+      nomatch member
+  | cons head tail ih =>
+      intro constructor member
+      simp only [CandidateConstructorSemanticListRun.roots,
+        CandidateConstructorListRun.views, List.mem_cons] at member
+      rcases member with rfl | member
+      · simpa only [CandidateConstructorSemanticRun.root,
+          CandidateConstructorRun.view] using head.uvars_eq
+      · exact ih constructor member
+
+/-- All non-recursive-list obligations of `blockFamilyCore` follow from one
+retained semantic family root, its producer terminal/spine gates, and the
+canonical normalization run.  The final premise is precisely the structural
+constructor positivity/result-target fact supplied by the D2/D3 traversal. -/
+theorem CandidateBlockFamilySemanticRun.canonicalBlockFamilyCore
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (run : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    {source : VInductDecl} {nparams ordinal : Nat}
+    {params : List VExpr} {kernelLevel : Level}
+    (henv : VEnv.WF env)
+    (sourceUvars : source.uvars = Us.length)
+    (sourceNparams : source.nparams = nparams)
+    (paramsLength : params.length = nparams)
+    (terminal : candidate.familyType.type.trace.terminalResult =
+      .sort kernelLevel)
+    (generation : candidate.familyType.type.trace.generationSpine = true)
+    (familyType : env.IsType source.uvars []
+      (canonicalizeFamilyParams nparams params run.view).type)
+    (metadata :
+      closedOK (canonicalizeFamilyParams nparams params run.view) = true ∧
+        levelsOK source.uvars
+          (canonicalizeFamilyParams nparams params run.view) = true)
+    (fresh : ∀ name ∈ familyNames source.types,
+      env.constants name = none)
+    (constructors : ∀ constructor ∈
+      (canonicalizeFamilyParams nparams params run.view).ctors,
+      blockStage3Ctor source.uvars source.nparams
+        (familyHeaders source.nparams source.types)
+        (familyNames source.types) ordinal 0
+        (VExpr.dropN source.nparams constructor.type) = true) :
+    blockFamilyCore source params ordinal
+      (canonicalizeFamilyParams nparams params run.view) = true := by
+  obtain ⟨viewLevel, resultEq, viewLevelWF⟩ :=
+    run.canonicalResultSort terminal generation paramsLength
+  have resultEq' : VExpr.resultOf
+      (VExpr.dropN source.nparams
+        (canonicalizeFamilyParams nparams params run.view).type) =
+      .sort viewLevel := by
+    simpa only [sourceNparams] using resultEq
+  have viewLevelWF' : viewLevel.WF source.uvars := by
+    simpa only [sourceUvars] using viewLevelWF
+  have familyUvars :
+      (canonicalizeFamilyParams nparams params run.view).uvars =
+        source.uvars := by
+    simp only [canonicalizeFamilyParams,
+      CandidateBlockFamilySemanticRun.view]
+    exact run.uvars_eq.trans sourceUvars.symm
+  have parameterLength : params.length = source.nparams :=
+    paramsLength.trans sourceNparams.symm
+  have parameterSurface :
+      VExpr.telN source.nparams
+        (canonicalizeFamilyParams nparams params run.view).type = params := by
+    rw [sourceNparams]
+    exact canonicalizeFamilyParams_telN paramsLength
+  have former : blockTypeFormerOK source.nparams
+      (familyNames source.types)
+      (canonicalizeFamilyParams nparams params run.view) = true := by
+    exact blockTypeFormerOK_of_isType henv familyType fresh
+  have constructorCore : ∀ constructor ∈
+      (canonicalizeFamilyParams nparams params run.view).ctors,
+      constructor.uvars = source.uvars ∧
+        VExpr.telN source.nparams constructor.type = params ∧
+        blockStage3Ctor source.uvars source.nparams
+          (familyHeaders source.nparams source.types)
+          (familyNames source.types) ordinal 0
+          (VExpr.dropN source.nparams constructor.type) = true := by
+    intro constructor member
+    simp only [canonicalizeFamilyParams] at member
+    obtain ⟨viewConstructor, viewMember, rfl⟩ := List.mem_map.mp member
+    refine ⟨?_, ?_, constructors _ (by
+      simp only [canonicalizeFamilyParams]
+      exact List.mem_map.mpr ⟨viewConstructor, viewMember, rfl⟩)⟩
+    · simp only [canonicalizeConstructorParams]
+      exact (run.constructors.viewUvars viewConstructor viewMember).trans
+        sourceUvars.symm
+    · rw [sourceNparams]
+      exact canonicalizeConstructorParams_telN paramsLength
+  simp only [blockFamilyCore, familyUvars, parameterLength,
+    parameterSurface, resultEq', viewLevelWF', former, metadata.1,
+    metadata.2, beq_self_eq_true, decide_true,
+    Bool.true_and, List.all_eq_true]
+  intro constructor member
+  obtain ⟨uvars, parameterSurface, stage3⟩ :=
+    constructorCore constructor member
+  simp only [Bool.and_eq_true, beq_iff_eq]
+  exact ⟨⟨uvars, parameterSurface⟩, stage3⟩
+
+/-- Family-type relocation evidence ending in a sort gives literal `IsType`
+evidence for every canonical family at the same source position. -/
+theorem canonicalFamilyTypes_of_defeq
+    {env : VEnv} {U nparams : Nat} {params : List VExpr}
+    {families : List VInductiveType}
+    (evidence : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env U [] family.type
+          (canonicalizeFamilyParams nparams params family).type
+          (.sort resultLevel))
+      families) :
+    List.All (fun family => env.IsType U [] family.type)
+      (canonicalizeFamilyParamsList nparams params families) := by
+  induction families with
+  | nil => trivial
+  | cons family families ih =>
+      obtain ⟨resultLevel, familyEvidence⟩ := evidence.1
+      exact ⟨⟨resultLevel, familyEvidence.isDefEq.hasType.2⟩,
+        ih evidence.2⟩
+
+/-- Exact residual constructor-stage certificate for a source-ordered
+canonical family list.  The ordinal advances in the type, preventing a
+family's owning-result proof from being reused at another block position. -/
+inductive CanonicalConstructorStage3List (source : VInductDecl) :
+    Nat → List VInductiveType → Prop where
+  | nil {ordinal : Nat} :
+      CanonicalConstructorStage3List source ordinal []
+  | cons {ordinal : Nat} {family : VInductiveType}
+      {families : List VInductiveType}
+      (head : ∀ constructor ∈ family.ctors,
+        blockStage3Ctor source.uvars source.nparams
+          (familyHeaders source.nparams source.types)
+          (familyNames source.types) ordinal 0
+          (VExpr.dropN source.nparams constructor.type) = true)
+      (tail : CanonicalConstructorStage3List source (ordinal + 1) families) :
+      CanonicalConstructorStage3List source ordinal (family :: families)
+
+theorem CandidateBlockFamilyTerminalSortList.head
+    {kernelSource : InductiveType} {kernelSources : List InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    (terminals : CandidateBlockFamilyTerminalSortList
+      (.cons candidate candidates)) :
+    ∃ resultLevel,
+      candidate.familyType.type.trace.terminalResult = .sort resultLevel := by
+  cases terminals with
+  | cons terminal tail => exact ⟨_, terminal⟩
+
+theorem CandidateBlockFamilyTerminalSortList.tail
+    {kernelSource : InductiveType} {kernelSources : List InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    (terminals : CandidateBlockFamilyTerminalSortList
+      (.cons candidate candidates)) :
+    CandidateBlockFamilyTerminalSortList candidates := by
+  cases terminals with
+  | cons terminal tail => exact tail
+
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyGenerationSpineList.familyHead
+    {kernelSource : InductiveType} {kernelSources : List InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      (.cons candidate candidates)) :
+    candidate.familyType.type.trace.generationSpine = true := by
+  cases spines with
+  | cons family constructors tail => exact family
+
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyGenerationSpineList.tailExact
+    {kernelSource : InductiveType} {kernelSources : List InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      (.cons candidate candidates)) :
+    AddInductive.CandidateFamilyGenerationSpineList candidates := by
+  cases spines with
+  | cons family constructors tail => exact tail
+
+theorem CanonicalConstructorStage3List.head
+    (stage3 : CanonicalConstructorStage3List source ordinal
+      (family :: families)) :
+    ∀ constructor ∈ family.ctors,
+      blockStage3Ctor source.uvars source.nparams
+        (familyHeaders source.nparams source.types)
+        (familyNames source.types) ordinal 0
+        (VExpr.dropN source.nparams constructor.type) = true := by
+  cases stage3 with
+  | cons head tail => exact head
+
+theorem CanonicalConstructorStage3List.tail
+    (stage3 : CanonicalConstructorStage3List source ordinal
+      (family :: families)) :
+    CanonicalConstructorStage3List source (ordinal + 1) families := by
+  cases stage3 with
+  | cons head tail => exact tail
+
+/-- Assemble the dependent checked-family spine from the producer's exact
+semantic family list.  Terminal sorts and generation spines discharge the
+family result shape; the canonical normalization supplies type/metadata
+facts; only the explicitly indexed constructor stage-3 residual is consumed. -/
+noncomputable def CandidateBlockFamilySemanticListRun.canonicalCheckedFamilies
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    {source : VInductDecl} {nparams ordinal : Nat}
+    {params : List VExpr}
+    (henv : VEnv.WF env)
+    (sourceUvars : source.uvars = Us.length)
+    (sourceNparams : source.nparams = nparams)
+    (paramsLength : params.length = nparams)
+    (terminals : CandidateBlockFamilyTerminalSortList candidates)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList candidates)
+    (familyTypes : List.All (fun family =>
+      env.IsType source.uvars [] family.type)
+      (canonicalizeFamilyParamsList nparams params run.views))
+    (metadata : List.All (fun family =>
+      closedOK family = true ∧ levelsOK source.uvars family = true)
+      (canonicalizeFamilyParamsList nparams params run.views))
+    (fresh : ∀ name ∈ familyNames source.types,
+      env.constants name = none)
+    (stage3 : CanonicalConstructorStage3List source ordinal
+      (canonicalizeFamilyParamsList nparams params run.views)) :
+    CheckedFamilies source params ordinal
+      (canonicalizeFamilyParamsList nparams params run.views) := by
+  induction run generalizing ordinal with
+  | nil => exact .nil
+  | @cons kernelSource kernelSources candidate candidates raw raws head tail ih =>
+      let checkedHead : CheckedFamily source params ordinal
+          (canonicalizeFamilyParams nparams params head.view) := {
+        params_eq := by
+          rw [sourceNparams]
+          exact canonicalizeFamilyParams_telN paramsLength
+        indices := ctorFields
+          (VExpr.dropN source.nparams
+            (canonicalizeFamilyParams nparams params head.view).type)
+        indices_eq := rfl
+        resultLevel := sortLevel source.nparams
+          (canonicalizeFamilyParams nparams params head.view)
+        result_eq := by
+          obtain ⟨kernelLevel, terminal⟩ := terminals.head
+          obtain ⟨viewLevel, resultEq, _resultWF⟩ :=
+            head.canonicalResultSort terminal spines.familyHead paramsLength
+          have resultEq' : VExpr.resultOf
+              (VExpr.dropN source.nparams
+                (canonicalizeFamilyParams nparams params head.view).type) =
+              .sort viewLevel := by
+            simpa only [sourceNparams] using resultEq
+          unfold sortLevel
+          rw [resultEq']
+        constructors :=
+          (canonicalizeFamilyParams nparams params head.view).ctors.map
+            (CheckedCtor.ofBlock source)
+        constructors_eq := rfl
+        accepted := by
+          obtain ⟨kernelLevel, terminal⟩ := terminals.head
+          exact head.canonicalBlockFamilyCore henv sourceUvars sourceNparams
+            paramsLength terminal spines.familyHead familyTypes.1 metadata.1
+            fresh stage3.head }
+      exact .cons checkedHead
+        (ih terminals.tail spines.tailExact familyTypes.2 metadata.2
+          stage3.tail)
+
+/-- Producer-facing canonical checked-family spine.  All family-side facts
+come from the exact normalization/relocation runs; the sole remaining input
+is the source-indexed constructor stage-3 certificate. -/
+noncomputable def
+    NormalizationCandidateBlockSemanticRun.canonicalCheckedFamilies
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us candidate
+      rawDecl)
+    (henv : VEnv.WF env) (hblockEnv : VEnv.WF blockEnv)
+    (normalization : NormalizationBlockRun run.canonicalNormalization env
+      blockEnv)
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams rawDecl.nparams
+            (blockParams rawDecl.nparams run.families.views) family).type
+          (.sort resultLevel))
+      run.families.views)
+    (paramsLength :
+      (blockParams rawDecl.nparams run.families.views).length =
+        rawDecl.nparams)
+    (terminals : CandidateBlockFamilyTerminalSortList candidate.families)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      candidate.families)
+    (stage3 : CanonicalConstructorStage3List
+      run.canonicalNormalization.view 0
+      run.canonicalNormalization.view.types) :
+    CheckedFamilies run.canonicalNormalization.view
+      (blockParams rawDecl.nparams run.families.views) 0
+      run.canonicalNormalization.view.types := by
+  have sourceUvars : run.canonicalNormalization.view.uvars = Us.length := by
+    simpa only [
+      NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+      Normalization.canonicalizeSharedParams,
+      VInductDecl.canonicalizeSharedParams,
+      NormalizationCandidateBlockSemanticRun.normalization,
+      NormalizationCandidateBlockSemanticRun.viewDecl] using run.uvars_eq
+  have sourceNparams : run.canonicalNormalization.view.nparams =
+      rawDecl.nparams := by
+    rfl
+  have familyTypesUs := canonicalFamilyTypes_of_defeq canonical
+  have familyTypes : List.All (fun family =>
+      env.IsType run.canonicalNormalization.view.uvars [] family.type)
+      (canonicalizeFamilyParamsList rawDecl.nparams
+        (blockParams rawDecl.nparams run.families.views)
+        run.families.views) := by
+    simpa only [sourceUvars] using familyTypesUs
+  have metadata : List.All (fun family =>
+      closedOK family = true ∧
+        levelsOK run.canonicalNormalization.view.uvars family = true)
+      (canonicalizeFamilyParamsList rawDecl.nparams
+        (blockParams rawDecl.nparams run.families.views)
+        run.families.views) := by
+    simpa only [
+      NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+      Normalization.canonicalizeSharedParams,
+      VInductDecl.canonicalizeSharedParams,
+      NormalizationCandidateBlockSemanticRun.normalization,
+      NormalizationCandidateBlockSemanticRun.viewDecl] using
+      normalization.viewMetadataOK henv hblockEnv
+  have stage3' : CanonicalConstructorStage3List
+      run.canonicalNormalization.view 0
+      (canonicalizeFamilyParamsList rawDecl.nparams
+        (blockParams rawDecl.nparams run.families.views)
+        run.families.views) := by
+    simpa only [
+      NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+      Normalization.canonicalizeSharedParams,
+      VInductDecl.canonicalizeSharedParams,
+      NormalizationCandidateBlockSemanticRun.normalization,
+      NormalizationCandidateBlockSemanticRun.viewDecl] using stage3
+  have checked := run.families.canonicalCheckedFamilies henv sourceUvars
+    sourceNparams paramsLength terminals spines familyTypes metadata
+    run.canonicalFamilyNames_fresh stage3'
+  simpa only [
+    NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+    Normalization.canonicalizeSharedParams,
+    VInductDecl.canonicalizeSharedParams,
+    NormalizationCandidateBlockSemanticRun.normalization,
+    NormalizationCandidateBlockSemanticRun.viewDecl] using checked
+
+/-- The producer-facing checked spine replays through the exact executable
+`checkedFamilies?` boundary with no separately selected analyzer result. -/
+theorem NormalizationCandidateBlockSemanticRun.canonicalCheckedFamilies_check
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us candidate
+      rawDecl)
+    (henv : VEnv.WF env) (hblockEnv : VEnv.WF blockEnv)
+    (normalization : NormalizationBlockRun run.canonicalNormalization env
+      blockEnv)
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams rawDecl.nparams
+            (blockParams rawDecl.nparams run.families.views) family).type
+          (.sort resultLevel))
+      run.families.views)
+    (paramsLength :
+      (blockParams rawDecl.nparams run.families.views).length =
+        rawDecl.nparams)
+    (terminals : CandidateBlockFamilyTerminalSortList candidate.families)
+    (spines : AddInductive.CandidateFamilyGenerationSpineList
+      candidate.families)
+    (stage3 : CanonicalConstructorStage3List
+      run.canonicalNormalization.view 0
+      run.canonicalNormalization.view.types) :
+    checkedFamilies? run.canonicalNormalization.view
+        (blockParams rawDecl.nparams run.families.views) 0
+        run.canonicalNormalization.view.types =
+      some (run.canonicalCheckedFamilies henv hblockEnv normalization canonical
+        paramsLength terminals spines stage3) :=
+  (run.canonicalCheckedFamilies henv hblockEnv normalization canonical
+    paramsLength terminals spines stage3).checkedFamilies?
+
 /-- One retained block-family semantic root aligned with the exact normalized
 family selected by dependent block analysis.  All component equations are at
 the candidate trace's own stored-spine length; no family can be substituted
@@ -16055,6 +20037,313 @@ theorem CandidateBlockNormalizedFamilyRun.normalizedFamilyRun
     familyResult := by
       simpa only [List.append_nil] using commonEvidence.result }
 
+/-- The checked datum paired with a normalized mutual family exposes its
+complete shared-parameter/index telescope and terminal result sort. -/
+theorem BlockGenerationChecked.viewFamilyType_eq
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families) :
+    family.view.value.type =
+      VExpr.forallN generation.block.checked.params
+        (VExpr.forallN family.view.indices
+          (.sort family.view.resultLevel)) := by
+  obtain ⟨ordinal, type, checked, checkedEq⟩ :=
+    generation.exists_checkedFamily familyMember
+  rw [← checkedEq]
+  exact checked.type_eq
+
+/-- One candidate family aligned with the canonical shared-parameter view
+used by a generation-ready block.  Unlike `CandidateBlockNormalizedFamilyRun`,
+the semantic root still names the producer's original normalized view; the
+`parameters` field records the validator-owned equality from the canonical
+prefix back to that original prefix. -/
+structure CandidateCanonicalBlockNormalizedFamilyRun
+    {source : VInductDecl}
+    (generation : BlockGenerationChecked source)
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    (family : NormalizedFamily) where
+  uvars_eq : source.uvars = Us.length
+  raw_eq : family.raw = raw
+  view_eq : family.view.value =
+    canonicalizeFamilyParams source.nparams
+      generation.block.checked.params root.view
+  parameters : TypeChecker.TelDefEqEvidence env Us.length []
+    generation.block.checked.params
+    (VExpr.telN source.nparams root.type.view)
+  constructorParameters : CandidateConstructorViewParameterDefEqList blockEnv
+    Us source.nparams generation.block.checked.params root.constructors
+  storedSpine : candidate.familyType.type.trace.storedSpine = true
+  rawTel : VExpr.telN candidate.familyType.type.trace.spineLength raw.type =
+    family.rawParams source.nparams ++ family.rawIndices source.nparams
+  rawResult : VExpr.dropN candidate.familyType.type.trace.spineLength
+    raw.type = family.rawResult source.nparams
+  viewTel : VExpr.telN candidate.familyType.type.trace.spineLength
+    root.type.view =
+      VExpr.telN source.nparams root.type.view ++ family.view.indices
+  viewResult : VExpr.dropN candidate.familyType.type.trace.spineLength
+    root.type.view = .sort family.view.resultLevel
+  resultLevelWF : family.view.resultLevel.WF source.uvars
+  resultLevelEq : family.view.resultLevel ≈
+    generation.validated.resultLevel
+  familyOnTel : env.OnTel source.uvars []
+    (generation.block.checked.params ++ family.view.indices)
+  constructors : ∀ constructor ∈ family.view.constructors,
+    checkedBlockFieldsWF env source.uvars
+        generation.validated.resultLevel
+        generation.block.checked.families.indices constructor.fields
+        constructor.recursiveAt generation.block.checked.params.reverse 0 ∧
+      env.SpineWF source.uvars
+        (constructor.fields.reverse ++
+          generation.block.checked.params.reverse)
+        (VExpr.forallN
+          (VExpr.liftTelN constructor.fields.length family.view.indices 0)
+          (.sort generation.validated.resultLevel))
+        constructor.resultIndices
+        (.sort generation.validated.resultLevel)
+  constructorShapes : CandidateConstructorSemanticGenerationShapeList source
+    blockEnv Us root.constructors
+
+/-- Retarget a producer spine from its original family parameter prefix to
+the canonical block prefix, preserving the raw telescope and result. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRun.evidence
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars) :
+    TypeChecker.TelResultDefEqEvidence env source.uvars []
+      (family.rawParams source.nparams ++
+        family.rawIndices source.nparams)
+      (generation.block.checked.params ++ family.view.indices)
+      (family.rawResult source.nparams)
+      (.sort generation.validated.resultLevel)
+      (.sort (.succ generation.validated.resultLevel)) := by
+  rw [run.uvars_eq] at commonResultLevelWF ⊢
+  have rightType : env.HasType Us.length
+      (family.rawParams source.nparams ++
+        family.rawIndices source.nparams).reverse
+      (.sort family.view.resultLevel)
+      (.sort (.succ family.view.resultLevel)) := by
+    apply VEnv.HasType.sort
+    simpa only [run.uvars_eq] using run.resultLevelWF
+  have original : TypeChecker.TelResultDefEqEvidence env Us.length []
+      (family.rawParams source.nparams ++
+        family.rawIndices source.nparams)
+      (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+      (family.rawResult source.nparams)
+      (.sort family.view.resultLevel)
+      (.sort (.succ family.view.resultLevel)) :=
+    (root.type.spine run.storedSpine).evidenceAt run.rawTel run.viewTel
+      run.rawResult run.viewResult rightType
+  have canonical := original.replaceViewPrefix henv run.parameters
+  exact canonical.resultSortEquiv
+    (by simpa only [run.uvars_eq] using run.resultLevelWF)
+    commonResultLevelWF run.resultLevelEq
+
+/-- Erase canonical candidate provenance to the family run consumed by the
+generic block-generation assembler. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRun.normalizedFamilyRun
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars) :
+    NormalizedFamilyRun generation family env := by
+  have evidence := run.evidence henv commonResultLevelWF
+  exact {
+    familyTel := evidence.telescope
+    familyResult := by simpa only [List.append_nil] using evidence.result }
+
+/-- Build the canonical family adapter from one exact structural candidate
+position and the dependent checked family selected at that position. -/
+def CandidateBlockFamilySemanticGenerationShape.canonicalAlignedRun
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    (input : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root)
+    (family : NormalizedFamily) (familyMember : family ∈ generation.families)
+    {ordinal : Nat}
+    (checked : CheckedFamily generation.block.normalization.view
+      generation.block.checked.params ordinal
+      (canonicalizeFamilyParams source.nparams
+        generation.block.checked.params root.view))
+    (checkedRun : CheckedBlockFamilyRun checked env
+      generation.validated.resultLevel
+      generation.block.checked.families.indices)
+    (raw_eq : family.raw = raw)
+    (view_eq : family.view = checked.data)
+    (parameters : TypeChecker.TelDefEqEvidence env Us.length []
+      generation.block.checked.params
+      (VExpr.telN source.nparams root.type.view))
+    (constructorParameters : CandidateConstructorViewParameterDefEqList
+      blockEnv Us source.nparams generation.block.checked.params
+      root.constructors)
+    (uvars_eq : source.uvars = Us.length) :
+    CandidateCanonicalBlockNormalizedFamilyRun generation root family := by
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have paramsLength : generation.block.checked.params.length =
+      source.nparams := generation.shape.2.1.symm.trans generation.shape.1
+  have originalParamsLength :
+      (VExpr.telN source.nparams root.type.view).length = source.nparams := by
+    calc
+      _ = generation.block.checked.params.length := parameters.length_eq.symm
+      _ = source.nparams := paramsLength
+  have fullLength : candidate.familyType.type.trace.spineLength =
+      (VExpr.telN source.nparams root.type.view ++
+        family.view.indices).length := by
+    calc
+      candidate.familyType.type.trace.spineLength =
+          (VExpr.telN source.nparams raw.type ++
+            ctorFields (VExpr.dropN source.nparams raw.type)).length :=
+        input.spineLength_eq
+      _ = (family.rawParams source.nparams ++
+          family.rawIndices source.nparams).length := by
+        simp only [NormalizedFamily.rawParams,
+          NormalizedFamily.rawIndices, raw_eq]
+      _ = source.nparams + family.view.indices.length := by
+        simp only [List.length_append]
+        rw [familyShape.2.2.1, familyShape.2.2.2.1]
+      _ = (VExpr.telN source.nparams root.type.view).length +
+          family.view.indices.length := by rw [originalParamsLength]
+      _ = _ := by simp only [List.length_append]
+  have canonicalValueEq : family.view.value =
+      canonicalizeFamilyParams source.nparams
+        generation.block.checked.params root.view := by
+    rw [view_eq]
+    rfl
+  have canonicalType :
+      (canonicalizeFamilyParams source.nparams
+        generation.block.checked.params root.view).type =
+      VExpr.forallN generation.block.checked.params
+        (VExpr.forallN family.view.indices
+          (.sort family.view.resultLevel)) := by
+    rw [← canonicalValueEq]
+    exact generation.viewFamilyType_eq familyMember
+  have bodyEq : VExpr.dropN source.nparams root.type.view =
+      VExpr.forallN family.view.indices (.sort family.view.resultLevel) := by
+    calc
+      VExpr.dropN source.nparams root.type.view =
+          VExpr.dropN source.nparams
+            (canonicalizeFamilyParams source.nparams
+              generation.block.checked.params root.view).type :=
+        (canonicalizeFamilyParams_dropN
+          (family := root.view) paramsLength).symm
+      _ = VExpr.dropN source.nparams
+          (VExpr.forallN generation.block.checked.params
+            (VExpr.forallN family.view.indices
+              (.sort family.view.resultLevel))) :=
+        congrArg (VExpr.dropN source.nparams) canonicalType
+      _ = _ := by
+        rw [← paramsLength]
+        exact VExpr.dropN_forallN_length _ _
+  have viewType : root.type.view =
+      VExpr.forallN
+        (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+        (.sort family.view.resultLevel) := by
+    calc
+      root.type.view = VExpr.forallN
+          (VExpr.telN source.nparams root.type.view)
+          (VExpr.dropN source.nparams root.type.view) :=
+        (VExpr.forallN_telN_dropN source.nparams root.type.view).symm
+      _ = VExpr.forallN (VExpr.telN source.nparams root.type.view)
+          (VExpr.forallN family.view.indices
+            (.sort family.view.resultLevel)) := by rw [bodyEq]
+      _ = _ := by rw [VExpr.forallN_append]
+  refine {
+    uvars_eq
+    raw_eq
+    view_eq := canonicalValueEq
+    parameters
+    constructorParameters
+    storedSpine := input.storedSpine
+    rawTel := ?_
+    rawResult := ?_
+    viewTel := ?_
+    viewResult := ?_
+    resultLevelWF := ?_
+    resultLevelEq := ?_
+    familyOnTel := ?_
+    constructors := ?_
+    constructorShapes := input.constructors }
+  · have components := candidateFullTelComponents source.nparams
+      candidate.familyType.type.trace.spineLength raw.type
+        input.spineLength_eq
+    simpa only [NormalizedFamily.rawParams,
+      NormalizedFamily.rawIndices, raw_eq] using components.1
+  · have components := candidateFullTelComponents source.nparams
+      candidate.familyType.type.trace.spineLength raw.type
+        input.spineLength_eq
+    simpa only [NormalizedFamily.rawResult, raw_eq] using components.2
+  · -- `rw` would also rewrite the named old-prefix occurrence in the target.
+    -- Keep that occurrence fixed while changing only the candidate endpoint.
+    show VExpr.telN candidate.familyType.type.trace.spineLength
+        root.type.view = _
+    calc
+      _ = VExpr.telN candidate.familyType.type.trace.spineLength
+          (VExpr.forallN
+            (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+            (.sort family.view.resultLevel)) :=
+        congrArg (VExpr.telN candidate.familyType.type.trace.spineLength)
+          viewType
+      _ = VExpr.telN
+          (VExpr.telN source.nparams root.type.view ++
+            family.view.indices).length
+          (VExpr.forallN
+            (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+            (.sort family.view.resultLevel)) := by rw [fullLength]
+      _ = _ := generationTelNForallNLength _ _
+  · calc
+      VExpr.dropN candidate.familyType.type.trace.spineLength
+          root.type.view =
+        VExpr.dropN candidate.familyType.type.trace.spineLength
+          (VExpr.forallN
+            (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+            (.sort family.view.resultLevel)) :=
+        congrArg (VExpr.dropN candidate.familyType.type.trace.spineLength)
+          viewType
+      _ = VExpr.dropN
+          (VExpr.telN source.nparams root.type.view ++
+            family.view.indices).length
+          (VExpr.forallN
+            (VExpr.telN source.nparams root.type.view ++ family.view.indices)
+            (.sort family.view.resultLevel)) := by rw [fullLength]
+      _ = _ := generationDropNForallNLength _ _
+  · rw [view_eq]
+    rw [generation.block.normalization.shape.1]
+    exact checked.resultLevel_wf
+  · simpa only [view_eq, CheckedFamily.data] using checkedRun.resultLevelEq
+  · rw [generation.block.normalization.shape.1]
+    simpa only [view_eq, CheckedFamily.data] using checkedRun.familyOnTel
+  · intro constructor member
+    have semantics := checkedRun.constructors constructor (by
+      simpa only [view_eq, CheckedFamily.data] using member)
+    have indicesEq : family.view.indices = checked.indices :=
+      congrArg CheckedFamilyData.indices view_eq
+    rw [← indicesEq] at semantics
+    simpa only [generation.block.normalization.shape.1] using semantics
+
 /-- Type a staged raw family constant at the common normalized family type
 selected jointly by candidate evidence and block validation. -/
 theorem CandidateBlockNormalizedFamilyRun.familyConstCommon_hasType
@@ -16090,6 +20379,54 @@ theorem CandidateBlockNormalizedFamilyRun.familyConstCommon_hasType
     simpa only [generation.family_uvars familyMember] using rawConst
   have familyEvidence := (run.evidence commonResultLevelWF).mono
     (VEnv.stageInductiveTypes_le normalization.stage)
+  obtain ⟨_, fullEq⟩ :=
+    familyEvidence.telescope.telDefEq.forallN_defeq
+      familyEvidence.result.isDefEq
+  have rawConstFull : blockEnv.HasType source.uvars []
+      (.const family.raw.name (VLevel.params source.uvars))
+      (VExpr.forallN
+        (family.rawParams source.nparams ++ family.rawIndices source.nparams)
+        (family.rawResult source.nparams)) := by
+    rw [family.rawType_eq] at rawConst'
+    simpa only [VExpr.forallN_append] using rawConst'
+  simpa only [VExpr.forallN_append] using fullEq.defeq rawConstFull
+
+/-- Canonical-prefix analogue of `familyConstCommon_hasType`. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRun.familyConstCommon_hasType
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (familyMember : family ∈ generation.families)
+    (blockWF : VEnv.WF blockEnv) :
+    blockEnv.HasType source.uvars []
+      (.const family.raw.name (VLevel.params source.uvars))
+      (VExpr.forallN generation.block.checked.params
+        (VExpr.forallN family.view.indices
+          (.sort generation.validated.resultLevel))) := by
+  have rawMember : family.raw ∈ source.types := by
+    rw [← generation.families_map_raw]
+    exact List.mem_map.mpr ⟨family, familyMember, rfl⟩
+  have lookup := VEnv.stageInductiveTypes_constants normalization.stage
+    family.raw rawMember
+  have rawConst := VEnv.HasType.const0 lookup
+    (blockWF.ordered.constWF lookup)
+  have rawConst' : blockEnv.HasType source.uvars []
+      (.const family.raw.name (VLevel.params source.uvars)) family.raw.type := by
+    simpa only [generation.family_uvars familyMember] using rawConst
+  have familyEvidence :=
+    (run.evidence henv commonResultLevelWF).mono
+      (VEnv.stageInductiveTypes_le normalization.stage)
   obtain ⟨_, fullEq⟩ :=
     familyEvidence.telescope.telDefEq.forallN_defeq
       familyEvidence.result.isDefEq
@@ -16288,6 +20625,166 @@ private theorem CandidateConstructorSemanticGenerationShape.blockRun
   · rw [viewType, fullLength]
     exact generationDropNForallNLength As result
 
+/-- One constructor candidate aligned with a canonical shared-parameter
+view.  The producer root keeps its original normalized prefix; `parameters`
+is the exact post-family validator equality used to retarget that prefix. -/
+structure CandidateCanonicalBlockNormalizedCtorRun
+    {source : VInductDecl}
+    (generation : BlockGenerationChecked source)
+    {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun env Us candidate raw)
+    (family : NormalizedFamily) (constructor : NormalizedCtor) where
+  raw_eq : constructor.raw = raw
+  view_eq : constructor.view.value =
+    canonicalizeConstructorParams source.nparams
+      generation.block.checked.params root.root.view
+  parameters : TypeChecker.TelDefEqEvidence env Us.length []
+    generation.block.checked.params
+    (VExpr.telN source.nparams root.type.view)
+  storedSpine : candidate.type.trace.storedSpine = true
+  rawTel : VExpr.telN candidate.type.trace.spineLength raw.type =
+    constructor.declaredBinders source.nparams
+  rawResult : VExpr.dropN candidate.type.trace.spineLength raw.type =
+    constructor.rawResult source.nparams
+  viewTel : VExpr.telN candidate.type.trace.spineLength root.type.view =
+    VExpr.telN source.nparams root.type.view ++ constructor.view.fields
+  viewResult : VExpr.dropN candidate.type.trace.spineLength root.type.view =
+    VExpr.appN
+      (.const family.raw.name (VLevel.params source.uvars))
+      (VExpr.bvarRevRange
+          (constructor.rawFields source.nparams).length source.nparams ++
+        constructor.view.resultIndices)
+
+/-- Derive the canonical constructor adapter at one exact family-local
+source position. -/
+private theorem CandidateConstructorSemanticGenerationShape.canonicalBlockRun
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env : VEnv} {Us : List Name}
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    (input : CandidateConstructorSemanticGenerationShape
+      (source := source) env Us root)
+    (family : NormalizedFamily) (familyMember : family ∈ generation.families)
+    (constructor : NormalizedCtor)
+    (constructorMember : constructor ∈ family.ctorPairs)
+    (raw_eq : constructor.raw = raw)
+    (view_eq : constructor.view.value =
+      canonicalizeConstructorParams source.nparams
+        generation.block.checked.params root.root.view)
+    (parameters : TypeChecker.TelDefEqEvidence env Us.length []
+      generation.block.checked.params
+      (VExpr.telN source.nparams root.type.view)) :
+    CandidateCanonicalBlockNormalizedCtorRun generation root family
+      constructor := by
+  let oldParams := VExpr.telN source.nparams root.type.view
+  let result := VExpr.appN
+    (.const family.raw.name (VLevel.params source.uvars))
+    (VExpr.bvarRevRange
+        (constructor.rawFields source.nparams).length source.nparams ++
+      constructor.view.resultIndices)
+  have paramsLength : generation.block.checked.params.length =
+      source.nparams := generation.shape.2.1.symm.trans generation.shape.1
+  have oldParamsLength : oldParams.length = source.nparams := by
+    calc
+      oldParams.length = generation.block.checked.params.length :=
+        parameters.length_eq.symm
+      _ = source.nparams := paramsLength
+  have constructorShape :=
+    (generation.shape.2.2.2.2 family familyMember).2.2.2.2.2.2
+      constructor constructorMember
+  have fieldsLength : (constructor.rawFields source.nparams).length =
+      constructor.view.fields.length := constructorShape.2.2.2
+  have fullLength : candidate.type.trace.spineLength =
+      (oldParams ++ constructor.view.fields).length := by
+    calc
+      candidate.type.trace.spineLength =
+          (VExpr.telN source.nparams raw.type ++
+            ctorFields (VExpr.dropN source.nparams raw.type)).length :=
+        input.spineLength_eq
+      _ = (constructor.declaredBinders source.nparams).length := by
+        simp only [NormalizedCtor.declaredBinders,
+          NormalizedCtor.rawFields, raw_eq]
+      _ = source.nparams +
+          (constructor.rawFields source.nparams).length := by
+        simp only [NormalizedCtor.declaredBinders, List.length_append]
+        rw [constructorShape.2.2.1]
+      _ = oldParams.length + constructor.view.fields.length := by
+        rw [oldParamsLength, fieldsLength]
+      _ = _ := by simp only [List.length_append]
+  have canonicalType :
+      (canonicalizeConstructorParams source.nparams
+        generation.block.checked.params root.root.view).type =
+      VExpr.forallN generation.block.checked.params
+        (VExpr.forallN constructor.view.fields result) := by
+    rw [← view_eq, generation.viewCtorType_eq familyMember constructorMember]
+    simp only [result]
+    rw [fieldsLength]
+  have bodyEq : VExpr.dropN source.nparams root.type.view =
+      VExpr.forallN constructor.view.fields result := by
+    calc
+      VExpr.dropN source.nparams root.type.view =
+          VExpr.dropN source.nparams
+            (canonicalizeConstructorParams source.nparams
+              generation.block.checked.params root.root.view).type :=
+        (canonicalizeConstructorParams_dropN
+          (constructor := root.root.view) paramsLength).symm
+      _ = VExpr.dropN source.nparams
+          (VExpr.forallN generation.block.checked.params
+            (VExpr.forallN constructor.view.fields result)) :=
+        congrArg (VExpr.dropN source.nparams) canonicalType
+      _ = _ := by
+        rw [← paramsLength]
+        exact VExpr.dropN_forallN_length _ _
+  have viewType : root.type.view =
+      VExpr.forallN (oldParams ++ constructor.view.fields) result := by
+    calc
+      root.type.view = VExpr.forallN oldParams
+          (VExpr.dropN source.nparams root.type.view) :=
+        (VExpr.forallN_telN_dropN source.nparams root.type.view).symm
+      _ = VExpr.forallN oldParams
+          (VExpr.forallN constructor.view.fields result) := by rw [bodyEq]
+      _ = _ := by rw [VExpr.forallN_append]
+  refine {
+    raw_eq
+    view_eq
+    parameters
+    storedSpine := input.storedSpine
+    rawTel := ?_
+    rawResult := ?_
+    viewTel := ?_
+    viewResult := ?_ }
+  · have components := candidateFullTelComponents source.nparams
+      candidate.type.trace.spineLength raw.type input.spineLength_eq
+    simpa only [NormalizedCtor.declaredBinders,
+      NormalizedCtor.rawFields, raw_eq] using components.1
+  · have components := candidateFullTelComponents source.nparams
+      candidate.type.trace.spineLength raw.type input.spineLength_eq
+    simpa only [NormalizedCtor.rawResult, raw_eq] using components.2
+  · calc
+      VExpr.telN candidate.type.trace.spineLength root.type.view =
+          VExpr.telN candidate.type.trace.spineLength
+            (VExpr.forallN (oldParams ++ constructor.view.fields) result) :=
+        congrArg (VExpr.telN candidate.type.trace.spineLength) viewType
+      _ = VExpr.telN (oldParams ++ constructor.view.fields).length
+            (VExpr.forallN (oldParams ++ constructor.view.fields) result) := by
+        rw [fullLength]
+      _ = _ := generationTelNForallNLength _ _
+  · calc
+      VExpr.dropN candidate.type.trace.spineLength root.type.view =
+          VExpr.dropN candidate.type.trace.spineLength
+            (VExpr.forallN (oldParams ++ constructor.view.fields) result) :=
+        congrArg (VExpr.dropN candidate.type.trace.spineLength) viewType
+      _ = VExpr.dropN (oldParams ++ constructor.view.fields).length
+            (VExpr.forallN (oldParams ++ constructor.view.fields) result) := by
+        rw [fullLength]
+      _ = _ := generationDropNForallNLength _ _
+
 /-- Apply the staged owning-family constant to the checked parameter spine,
 then consume the analyzer-owned result-index spine. -/
 theorem CandidateBlockNormalizedFamilyRun.constructorResult_hasType
@@ -16317,6 +20814,82 @@ theorem CandidateBlockNormalizedFamilyRun.constructorResult_hasType
           constructor.view.resultIndices))
       (.sort generation.validated.resultLevel) := by
   have familyConst := run.familyConstCommon_hasType normalization
+    commonResultLevelWF familyMember blockWF
+  have familyConstClosed :
+      (VExpr.forallN generation.block.checked.params
+        (VExpr.forallN family.view.indices
+          (.sort generation.validated.resultLevel))).ClosedN 0 :=
+    (familyConst.closedN' blockWF.ordered.closed trivial).2.2
+  have familyConstWeak := familyConst.weak0 blockWF.ordered
+    (Γ := constructor.view.fields.reverse ++
+      generation.block.checked.params.reverse)
+  have familyApp := VEnv.HasType.appN_selfSpine'
+    (As := generation.block.checked.params)
+    (B := VExpr.forallN family.view.indices
+      (.sort generation.validated.resultLevel))
+    (Δ := constructor.view.fields.reverse) (Γ := [])
+    familyConstClosed (by simpa using familyConstWeak)
+  rw [List.length_reverse, VExpr.liftN_forallN] at familyApp
+  have familyApp' : blockEnv.HasType source.uvars
+      (constructor.view.fields.reverse ++
+        generation.block.checked.params.reverse)
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange constructor.view.fields.length
+          generation.block.checked.params.length))
+      (VExpr.forallN
+        (VExpr.liftTelN constructor.view.fields.length
+          family.view.indices 0)
+        (.sort generation.validated.resultLevel)) := by
+    simpa [VExpr.liftN] using familyApp
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have viewsEq : family.ctorPairs.map (fun ctor => ctor.view) =
+      family.view.constructors := by
+    apply pairNormalizedCtors_map_view
+    exact familyShape.2.2.2.2.1.symm.trans familyShape.2.2.2.2.2.1
+  have viewMember : constructor.view ∈ family.view.constructors := by
+    rw [← viewsEq]
+    exact List.mem_map.mpr ⟨constructor, constructorMember, rfl⟩
+  have resultSpine := (run.constructors constructor.view viewMember).2.mono
+    (VEnv.stageInductiveTypes_le normalization.stage)
+  have resultType := resultSpine.hasType_appN familyApp'
+  rw [← VExpr.appN_append] at resultType
+  have paramsLength : generation.block.checked.params.length =
+      source.nparams := generation.shape.2.1.symm.trans generation.shape.1
+  have fieldsLength := (familyShape.2.2.2.2.2.2
+    constructor constructorMember).2.2.2
+  simpa only [List.reverse_append, paramsLength, ← fieldsLength] using
+    resultType
+
+/-- Canonical-prefix analogue of `constructorResult_hasType`. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRun.constructorResult_hasType
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (familyMember : family ∈ generation.families)
+    (blockWF : VEnv.WF blockEnv)
+    (constructor : NormalizedCtor)
+    (constructorMember : constructor ∈ family.ctorPairs) :
+    blockEnv.HasType source.uvars
+      (generation.block.checked.params ++ constructor.view.fields).reverse
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (constructor.rawFields source.nparams).length source.nparams ++
+          constructor.view.resultIndices))
+      (.sort generation.validated.resultLevel) := by
+  have familyConst := run.familyConstCommon_hasType normalization henv
     commonResultLevelWF familyMember blockWF
   have familyConstClosed :
       (VExpr.forallN generation.block.checked.params
@@ -16650,6 +21223,717 @@ theorem CandidateBlockNormalizedCtorRun.normalizedRun
       constructor constructorMember
     resultSpine := (familyRun.constructors constructor.view viewMember).2.mono
       (VEnv.stageInductiveTypes_le normalization.stage) }
+
+/-- Exact declared telescope/result evidence after retargeting an original
+constructor candidate to the canonical block parameter prefix. -/
+theorem CandidateCanonicalBlockNormalizedCtorRun.declaredEvidence
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {familyKernelSource : InductiveType}
+    {familyCandidate : AddInductive.CandidateFamily familyKernelSource}
+    {familyRaw : VInductiveType}
+    {familyRoot : CandidateBlockFamilySemanticRun env blockEnv Us
+      familyCandidate familyRaw}
+    {family : NormalizedFamily}
+    (familyRun : CandidateCanonicalBlockNormalizedFamilyRun generation
+      familyRoot family)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun blockEnv Us candidate raw}
+    {constructor : NormalizedCtor}
+    (run : CandidateCanonicalBlockNormalizedCtorRun generation root family
+      constructor)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (familyMember : family ∈ generation.families)
+    (constructorMember : constructor ∈ family.ctorPairs)
+    (blockWF : VEnv.WF blockEnv) :
+    TypeChecker.TelResultDefEqEvidence blockEnv source.uvars []
+      (constructor.declaredBinders source.nparams)
+      (generation.block.checked.params ++ constructor.view.fields)
+      (constructor.rawResult source.nparams)
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (constructor.rawFields source.nparams).length source.nparams ++
+          constructor.view.resultIndices))
+      (.sort generation.validated.resultLevel) := by
+  obtain ⟨inferred, original⟩ := (root.type.spine run.storedSpine).evidence
+  have original' : TypeChecker.TelResultDefEqEvidence blockEnv Us.length []
+      (constructor.declaredBinders source.nparams)
+      (VExpr.telN source.nparams root.type.view ++ constructor.view.fields)
+      (constructor.rawResult source.nparams)
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (constructor.rawFields source.nparams).length source.nparams ++
+          constructor.view.resultIndices)) inferred := by
+    simpa only [run.rawTel, run.rawResult, run.viewTel, run.viewResult] using
+      original
+  have canonical := original'.replaceViewPrefix blockWF run.parameters
+  have viewRight := familyRun.constructorResult_hasType normalization henv
+    commonResultLevelWF familyMember blockWF constructor constructorMember
+  have viewRight' : blockEnv.HasType Us.length
+      (generation.block.checked.params ++ constructor.view.fields).reverse
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (constructor.rawFields source.nparams).length source.nparams ++
+          constructor.view.resultIndices))
+      (.sort generation.validated.resultLevel) := by
+    simpa only [← familyRun.uvars_eq] using viewRight
+  have context : blockEnv.IsDefEqCtx Us.length []
+      (constructor.declaredBinders source.nparams).reverse
+      (generation.block.checked.params ++ constructor.view.fields).reverse := by
+    simpa using canonical.telescope.telDefEq.ctx
+  have rightType := viewRight'.defeqDFC blockWF.ordered
+    (context.symm blockWF.ordered)
+  have exact := canonical.ofRightType blockWF trivial (by
+    simpa using rightType)
+  simpa only [familyRun.uvars_eq] using exact
+
+/-- Recursive descriptors are unaffected by canonical parameter rewriting:
+all classification and result-spine data live strictly after that prefix. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRun.recursive
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (familyMember : family ∈ generation.families)
+    (constructor : NormalizedCtor)
+    (constructorMember : constructor ∈ family.ctorPairs) :
+    ∀ recursive ∈ constructor.view.recursive,
+      ∃ targetFamily ∈ generation.families,
+        targetFamily.view.ordinal = recursive.targetType ∧
+          (∃ field,
+            constructor.view.fields[recursive.fieldIndex]? = some field ∧
+              field = VExpr.forallN recursive.binders
+                (VExpr.appN
+                  (.const targetFamily.raw.name
+                    (VLevel.params source.uvars))
+                  (VExpr.bvarRevRange
+                      (recursive.fieldIndex + recursive.binders.length)
+                      source.nparams ++ recursive.indices))) ∧
+          recursive.WF source.uvars blockEnv
+            generation.validated.resultLevel targetFamily.view.indices
+            ((constructor.view.fields.take recursive.fieldIndex).reverse ++
+              generation.block.checked.params.reverse) := by
+  intro recursive recursiveMember
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have viewsEq : family.ctorPairs.map (fun ctor => ctor.view) =
+      family.view.constructors := by
+    apply pairNormalizedCtors_map_view
+    exact familyShape.2.2.2.2.1.symm.trans familyShape.2.2.2.2.2.1
+  have viewMember : constructor.view ∈ family.view.constructors := by
+    rw [← viewsEq]
+    exact List.mem_map.mpr ⟨constructor, constructorMember, rfl⟩
+  have analyzerEq := generation.viewCtor_ofBlock familyMember constructorMember
+  have analyzerMember : recursive ∈
+      (CheckedCtor.ofBlock generation.block.normalization.view
+        constructor.view.value).recursive := by
+    simpa only [← analyzerEq] using recursiveMember
+  obtain ⟨field, analyzerFieldAt, analyzed⟩ :=
+    CheckedCtor.ofBlock_recursive_field analyzerMember
+  have fieldAt : constructor.view.fields[recursive.fieldIndex]? =
+      some field := by
+    simpa only [← analyzerEq] using analyzerFieldAt
+  obtain ⟨_, header, headerAt, fieldShape⟩ := blockRecArg?_eq_some analyzed
+  have positionalAnalyzer :=
+    CheckedCtor.ofBlock_recursive_mem_recursiveAt analyzerMember
+  have positional : some recursive ∈ constructor.view.recursiveAt := by
+    simpa only [← analyzerEq] using positionalAnalyzer
+  obtain ⟨k, semanticField, indices, fieldIndex, semanticFieldAt,
+      targetAt, recursiveWF⟩ :=
+    checkedBlockFieldsWF_some_mem
+      (run.constructors constructor.view viewMember).1 positional
+  have kEq : k = recursive.fieldIndex := by omega
+  subst k
+  obtain ⟨targetFamily, targetMember, targetOrdinal, targetIndices⟩ :=
+    generation.exists_family_of_indices_get? targetAt
+  have headerAt' :
+      (familyHeaders generation.block.normalization.view.nparams
+        generation.block.normalization.view.types)[targetFamily.view.ordinal]? =
+          some header := by
+    simpa only [targetOrdinal] using headerAt
+  have headerName := generation.familyHeader_name targetMember headerAt'
+  have exactFieldShape : field = VExpr.forallN recursive.binders
+      (VExpr.appN
+        (.const targetFamily.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (recursive.fieldIndex + recursive.binders.length)
+            source.nparams ++ recursive.indices)) := by
+    simpa only [← generation.block.normalization.shape.1,
+      ← generation.block.normalization.shape.2.1, headerName] using fieldShape
+  refine ⟨targetFamily, targetMember, targetOrdinal, ⟨field, fieldAt,
+    exactFieldShape⟩, ?_⟩
+  have recursiveWF' := recursiveWF.mono
+    (VEnv.stageInductiveTypes_le normalization.stage)
+  simpa only [targetIndices] using recursiveWF'
+
+/-- Assemble the four constructor equality paths and analyzer semantics for a
+canonical-prefix candidate. -/
+theorem CandidateCanonicalBlockNormalizedCtorRun.normalizedRun
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {familyKernelSource : InductiveType}
+    {familyCandidate : AddInductive.CandidateFamily familyKernelSource}
+    {familyRaw : VInductiveType}
+    {familyRoot : CandidateBlockFamilySemanticRun env blockEnv Us
+      familyCandidate familyRaw}
+    {family : NormalizedFamily}
+    (familyRun : CandidateCanonicalBlockNormalizedFamilyRun generation
+      familyRoot family)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun blockEnv Us candidate raw}
+    {constructor : NormalizedCtor}
+    (run : CandidateCanonicalBlockNormalizedCtorRun generation root family
+      constructor)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params)
+    (familyMember : family ∈ generation.families)
+    (constructorMember : constructor ∈ family.ctorPairs) :
+    NormalizedBlockCtorRun generation
+      { owner := family.view.ordinal
+        familyName := family.raw.name
+        familyIndices := family.view.indices
+        ctor := constructor }
+      blockEnv := by
+  have henv : VEnv.WF env := by
+    obtain ⟨_, recursive⟩ := familyRoot.type.recursive
+    exact recursive.env_wf
+  have blockWF : VEnv.WF blockEnv := by
+    obtain ⟨_, recursive⟩ := root.type.recursive
+    exact recursive.env_wf
+  have declared := run.declaredEvidence familyRun normalization henv
+    commonResultLevelWF familyMember constructorMember blockWF
+  have declaredSplit : TypeChecker.TelResultDefEqEvidence blockEnv
+      source.uvars []
+      (VExpr.telN source.nparams constructor.raw.type ++
+        constructor.rawFields source.nparams)
+      (generation.block.checked.params ++ constructor.view.fields)
+      (constructor.rawResult source.nparams)
+      (VExpr.appN
+        (.const family.raw.name (VLevel.params source.uvars))
+        (VExpr.bvarRevRange
+            (constructor.rawFields source.nparams).length source.nparams ++
+          constructor.view.resultIndices))
+      (.sort generation.validated.resultLevel) := by
+    simpa only [NormalizedCtor.declaredBinders] using declared
+  have paramsTelBlock := paramsTel.mono
+    (VEnv.stageInductiveTypes_le normalization.stage)
+  have checkedParams : TypeChecker.TelDefEqEvidence blockEnv source.uvars []
+      generation.block.checked.params generation.block.checked.params :=
+    .ofTelDefEq <|
+      (paramsTelBlock.telDefEq.view_onTel blockWF.ordered).telDefEq_refl
+  have familyShape := generation.shape.2.2.2.2 family familyMember
+  have prefixLength : (VExpr.telN source.nparams constructor.raw.type).length =
+      generation.block.checked.params.length :=
+    (familyShape.2.2.2.2.2.2 constructor constructorMember).2.2.1.trans
+      (generation.shape.1.symm.trans generation.shape.2.1)
+  have emitted := declaredSplit.replacePrefix blockWF checkedParams prefixLength
+  have viewsEq : family.ctorPairs.map (fun ctor => ctor.view) =
+      family.view.constructors := by
+    apply pairNormalizedCtors_map_view
+    exact familyShape.2.2.2.2.1.symm.trans familyShape.2.2.2.2.2.1
+  have viewMember : constructor.view ∈ family.view.constructors := by
+    rw [← viewsEq]
+    exact List.mem_map.mpr ⟨constructor, constructorMember, rfl⟩
+  exact {
+    declaredTel := by
+      simpa only [NormalizedBlockCtor.declaredBinders,
+        NormalizedBlockCtor.viewBinders] using declared.telescope
+    declaredResult := by
+      simpa only [NormalizedBlockCtor.declaredBinders,
+        NormalizedBlockCtor.rawResult, NormalizedBlockCtor.resultTarget,
+        List.append_nil] using declared.result
+    emittedTel := by
+      simpa only [NormalizedBlockCtor.emittedBinders,
+        NormalizedBlockCtor.viewBinders] using emitted.telescope
+    emittedResult := by
+      simpa only [NormalizedBlockCtor.emittedBinders,
+        NormalizedBlockCtor.rawResult, NormalizedBlockCtor.resultTarget,
+        List.append_nil] using emitted.result
+    owner := ⟨family, familyMember, rfl, rfl, rfl⟩
+    recursive := familyRun.recursive normalization familyMember
+      constructor constructorMember
+    resultSpine := (familyRun.constructors constructor.view viewMember).2.mono
+      (VEnv.stageInductiveTypes_le normalization.stage) }
+
+/-- Exact source order for canonical-prefix family adapters. -/
+inductive CandidateCanonicalBlockNormalizedFamilyRunList
+    {source : VInductDecl}
+    (generation : BlockGenerationChecked source)
+    (env blockEnv : VEnv) (Us : List Name) :
+    {kernelSources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources} →
+    {raws : List VInductiveType} →
+    (roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) →
+    List NormalizedFamily → Type where
+  | nil : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us .nil []
+  | cons
+      (head : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+      (tail : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+        blockEnv Us roots families) :
+      CandidateCanonicalBlockNormalizedFamilyRunList generation env blockEnv
+        Us (.cons root roots) (family :: families)
+
+/-- Erase canonical producer alignment while preserving the exact generation
+family-list index. -/
+def CandidateCanonicalBlockNormalizedFamilyRunList.normalizedFamilyRuns
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {families : List NormalizedFamily}
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots families)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars) :
+    NormalizedFamilyRunList generation env families :=
+  match runs with
+  | .nil => .nil
+  | .cons head tail =>
+      .cons (head.normalizedFamilyRun henv commonResultLevelWF)
+        (tail.normalizedFamilyRuns henv commonResultLevelWF)
+
+/-- The first canonical family adapter still owns the raw/shared parameter
+equality.  Canonicalization changes only the view prefix, so taking the first
+`nparams` entries of its complete certificate yields the block-level path. -/
+theorem CandidateCanonicalBlockNormalizedFamilyRunList.paramsTel
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots generation.families)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars) :
+    TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params := by
+  generalize hfamilies : generation.families = families at runs
+  cases runs with
+  | nil =>
+      have hlen : source.types.length = 0 := by
+        calc
+          source.types.length = generation.families.length :=
+            generation.shape.2.2.1.symm
+          _ = 0 := by simp [hfamilies]
+      have hviewLen : generation.block.normalization.view.types.length = 0 :=
+        (Lean4Lean.List.Forall₂.length_eq
+          generation.block.normalization.shape.2.2).symm.trans hlen
+      have hviewEmpty : generation.block.normalization.view.types = [] :=
+        List.eq_nil_of_length_eq_zero hviewLen
+      have hnonempty := generation.block.checked.nonempty
+      simp [hviewEmpty] at hnonempty
+  | @cons _ _ _ _ family _ _ _ _ families head tail =>
+      have evidence :=
+        (head.evidence henv commonResultLevelWF).telescope.take source.nparams
+      have hrawLen : (family.rawParams source.nparams).length =
+          source.nparams :=
+        (generation.shape.2.2.2.2 family (by
+          rw [hfamilies]
+          exact .head _)).2.2.1
+      have hviewLen : generation.block.checked.params.length =
+          source.nparams :=
+        generation.shape.2.1.symm.trans generation.shape.1
+      have hraw :
+          (family.rawParams source.nparams ++
+              family.rawIndices source.nparams).take source.nparams =
+            family.rawParams source.nparams := by
+        let Ps := family.rawParams source.nparams
+        let Is := family.rawIndices source.nparams
+        have hlen : Ps.length = source.nparams := by
+          simpa only [Ps] using hrawLen
+        change (Ps ++ Is).take source.nparams = Ps
+        rw [← hlen, List.take_append, List.take_length]
+        simp
+      have hview :
+          (generation.block.checked.params ++ family.view.indices).take
+              source.nparams = generation.block.checked.params := by
+        rw [← hviewLen, List.take_append, List.take_length]
+        simp
+      have sourceTypes :
+          source.types = family.raw :: families.map (·.raw) := by
+        rw [← generation.families_map_raw, hfamilies]
+        rfl
+      have hblock : generation.block.rawParams =
+          family.rawParams source.nparams := by
+        simp only [NormalizedCheckedBlock.rawParams,
+          sourceTypes, blockParams, NormalizedFamily.rawParams]
+      rw [hraw, hview] at evidence
+      simpa only [hblock] using evidence
+
+/-- Recursively align one canonical family's constructor roots with its
+normalized constructor pairs. -/
+private theorem
+    CandidateConstructorSemanticGenerationShapeList.canonicalBlockRuns_nonempty
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {familyKernelSource : InductiveType}
+    {familyCandidate : AddInductive.CandidateFamily familyKernelSource}
+    {familyRaw : VInductiveType}
+    {familyRoot : CandidateBlockFamilySemanticRun env blockEnv Us
+      familyCandidate familyRaw}
+    {family : NormalizedFamily}
+    (familyRun : CandidateCanonicalBlockNormalizedFamilyRun generation
+      familyRoot family)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params)
+    (familyMember : family ∈ generation.families)
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {roots : CandidateConstructorSemanticListRun blockEnv Us candidates raws} :
+    (input : CandidateConstructorSemanticGenerationShapeList
+      source blockEnv Us roots) →
+    (parameters : CandidateConstructorViewParameterDefEqList blockEnv Us
+      source.nparams generation.block.checked.params roots) →
+    (constructors : List NormalizedCtor) →
+    (raws_eq : constructors.map (fun constructor => constructor.raw) = raws) →
+    (views_eq : constructors.map (fun constructor => constructor.view.value) =
+      roots.roots.views.map (canonicalizeConstructorParams source.nparams
+        generation.block.checked.params)) →
+    (membership : ∀ constructor ∈ constructors,
+      constructor ∈ family.ctorPairs) →
+    Nonempty (NormalizedBlockCtorRunList generation blockEnv
+      (constructors.map fun constructor =>
+        { owner := family.view.ordinal
+          familyName := family.raw.name
+          familyIndices := family.view.indices
+          ctor := constructor }))
+  | .nil, .nil, [], _, _, _ => ⟨.nil⟩
+  | .nil, .nil, _ :: _, raws_eq, _, _ => by simp at raws_eq
+  | .cons _ _, .cons _ _ _, [], raws_eq, _, _ => by simp at raws_eq
+  | .cons head tail, .cons _ headParameters tailParameters,
+      constructor :: constructors, raws_eq, views_eq, membership => by
+    simp only [List.map_cons, List.cons.injEq] at raws_eq
+    simp only [List.map_cons,
+      CandidateConstructorSemanticListRun.roots,
+      CandidateConstructorListRun.views, List.cons.injEq] at views_eq
+    obtain ⟨tailRuns⟩ := tail.canonicalBlockRuns_nonempty familyRun
+      normalization commonResultLevelWF paramsTel familyMember tailParameters
+      constructors raws_eq.2 views_eq.2 (fun constructor member =>
+        membership constructor (.tail _ member))
+    exact ⟨.cons
+      ((head.canonicalBlockRun family familyMember constructor
+          (membership constructor (.head _)) raws_eq.1 views_eq.1
+          headParameters).normalizedRun familyRun normalization
+        commonResultLevelWF paramsTel familyMember
+        (membership constructor (.head _)))
+      tailRuns⟩
+
+/-- Assemble all constructor runs owned by one canonical family adapter. -/
+noncomputable def CandidateCanonicalBlockNormalizedFamilyRun.constructorRuns
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {family : NormalizedFamily}
+    (run : CandidateCanonicalBlockNormalizedFamilyRun generation root family)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params)
+    (familyMember : family ∈ generation.families) :
+    NormalizedBlockCtorRunList generation blockEnv family.blockCtors := by
+  apply Classical.choice
+  apply run.constructorShapes.canonicalBlockRuns_nonempty run normalization
+    commonResultLevelWF paramsTel familyMember run.constructorParameters
+    family.ctorPairs
+  · simpa only [run.raw_eq] using family.ctorPairs_map_raw familyMember
+  · calc
+      family.ctorPairs.map (fun constructor => constructor.view.value) =
+          family.view.value.ctors :=
+        family.ctorPairs_map_view_value familyMember
+      _ = (canonicalizeFamilyParams source.nparams
+          generation.block.checked.params root.view).ctors :=
+        congrArg VInductiveType.ctors run.view_eq
+      _ = root.constructors.roots.views.map
+          (canonicalizeConstructorParams source.nparams
+            generation.block.checked.params) := by
+        rfl
+  · exact fun _ member => member
+
+private def NormalizedBlockCtorRunList.appendCanonical
+    (left : NormalizedBlockCtorRunList generation env leftConstructors)
+    (right : NormalizedBlockCtorRunList generation env rightConstructors) :
+    NormalizedBlockCtorRunList generation env
+      (leftConstructors ++ rightConstructors) :=
+  match left with
+  | .nil => right
+  | .cons head tail => .cons head (tail.appendCanonical right)
+
+private noncomputable def
+    CandidateCanonicalBlockNormalizedFamilyRunList.constructorRunsAux
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {families : List NormalizedFamily}
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots families)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params)
+    (membership : ∀ family ∈ families,
+      family ∈ generation.families) :
+    NormalizedBlockCtorRunList generation blockEnv
+      (families.flatMap (fun family => family.blockCtors)) :=
+  match runs with
+  | .nil => .nil
+  | .cons head tail =>
+      (head.constructorRuns normalization commonResultLevelWF paramsTel
+          (membership _ (.head _))).appendCanonical
+        (tail.constructorRunsAux normalization commonResultLevelWF paramsTel
+          (fun family member => membership family (.tail _ member)))
+
+/-- Flatten every canonical family-local constructor run in generation
+order. -/
+noncomputable def CandidateCanonicalBlockNormalizedFamilyRunList.constructorRuns
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots generation.families)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params) :
+    NormalizedBlockCtorRunList generation blockEnv generation.flatCtors := by
+  simpa only [BlockGenerationChecked.flatCtors,
+    NormalizedCheckedBlock.flatCtors,
+    NormalizedCheckedBlock.familyPairs,
+    BlockGenerationChecked.families] using
+      runs.constructorRunsAux normalization commonResultLevelWF paramsTel
+        (fun _ member => member)
+
+/-- Align the original semantic hierarchy with the canonical dependent
+checked-family spine.  The result is existential because both parameter
+inventories live in `Prop`; choosing the resulting proof object is harmless
+and keeps those validation relations proof-irrelevant. -/
+private theorem
+    CandidateCanonicalBlockNormalizedFamilyRunList.ofCheckedAux_nonempty
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {firstView : VExpr}
+    (input : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots)
+    (familyParameters : CandidateBlockFamilyViewParameterDefEqList env
+      blockEnv Us source.nparams firstView roots)
+    (constructorParameters : CandidateBlockConstructorViewParameterDefEqLists
+      env blockEnv Us source.nparams generation.block.checked.params roots)
+    {ordinal : Nat}
+    (checked : CheckedFamilies generation.block.normalization.view
+      generation.block.checked.params ordinal
+      (canonicalizeFamilyParamsList source.nparams
+        generation.block.checked.params roots.views))
+    (checkedRuns : CheckedBlockFamilyRunList env
+      generation.validated.resultLevel
+      generation.block.checked.families.indices checked)
+    (params_eq : generation.block.checked.params =
+      VExpr.telN source.nparams firstView)
+    (uvars_eq : source.uvars = Us.length)
+    (membership : ∀ family ∈ pairNormalizedFamilies raws checked.data,
+      family ∈ generation.families) :
+    Nonempty (CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots (pairNormalizedFamilies raws checked.data)) := by
+  induction roots generalizing ordinal with
+  | nil =>
+      cases input
+      cases familyParameters
+      cases constructorParameters
+      cases checked
+      cases checkedRuns
+      exact ⟨.nil⟩
+  | cons root roots ih =>
+      cases input with
+      | cons headShape tailShapes =>
+          cases familyParameters with
+          | cons headParameters tailFamilyParameters =>
+              cases constructorParameters with
+              | cons headConstructorParameters tailConstructorParameters =>
+                  cases checked with
+                  | cons checkedHead checkedTail =>
+                      cases checkedRuns with
+                      | cons checkedHeadRun checkedTailRuns =>
+                          have headMember :
+                              ({ raw := _
+                                 view := checkedHead.data } :
+                                NormalizedFamily) ∈ generation.families :=
+                            membership _ (.head _)
+                          have canonicalParameters :
+                              TypeChecker.TelDefEqEvidence env Us.length []
+                                generation.block.checked.params
+                                (VExpr.telN source.nparams
+                                  root.type.view) := by
+                            rw [params_eq]
+                            exact headParameters
+                          let headRun := headShape.canonicalAlignedRun
+                            { raw := _, view := checkedHead.data }
+                            headMember checkedHead checkedHeadRun rfl rfl
+                            canonicalParameters headConstructorParameters
+                            uvars_eq
+                          obtain ⟨tailRun⟩ := ih tailShapes
+                            tailFamilyParameters tailConstructorParameters
+                            checkedTail checkedTailRuns
+                            (fun family member =>
+                              membership family (.tail _ member))
+                          exact ⟨.cons headRun tailRun⟩
+
+/-- Choose the exact canonical family alignment reconstructed by
+`ofCheckedAux_nonempty`. -/
+noncomputable def
+    CandidateCanonicalBlockNormalizedFamilyRunList.ofCheckedAux
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {firstView : VExpr}
+    (input : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots)
+    (familyParameters : CandidateBlockFamilyViewParameterDefEqList env
+      blockEnv Us source.nparams firstView roots)
+    (constructorParameters : CandidateBlockConstructorViewParameterDefEqLists
+      env blockEnv Us source.nparams generation.block.checked.params roots)
+    {ordinal : Nat}
+    (checked : CheckedFamilies generation.block.normalization.view
+      generation.block.checked.params ordinal
+      (canonicalizeFamilyParamsList source.nparams
+        generation.block.checked.params roots.views))
+    (checkedRuns : CheckedBlockFamilyRunList env
+      generation.validated.resultLevel
+      generation.block.checked.families.indices checked)
+    (params_eq : generation.block.checked.params =
+      VExpr.telN source.nparams firstView)
+    (uvars_eq : source.uvars = Us.length)
+    (membership : ∀ family ∈ pairNormalizedFamilies raws checked.data,
+      family ∈ generation.families) :
+    CandidateCanonicalBlockNormalizedFamilyRunList generation env blockEnv Us
+      roots (pairNormalizedFamilies raws checked.data) :=
+  Classical.choice
+    (CandidateCanonicalBlockNormalizedFamilyRunList.ofCheckedAux_nonempty
+      input familyParameters constructorParameters checked checkedRuns
+      params_eq uvars_eq membership)
+
+/-- Assemble the ordinary generation run from one exact canonical family
+alignment. -/
+noncomputable def
+    CandidateCanonicalBlockNormalizedFamilyRunList.blockGenerationRun
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots generation.families)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (checked : generation.block.checked.WF env
+      generation.validated.resultLevel)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params)
+    (generatedIndicesTel : ∀ family ∈ generation.families,
+      TypeChecker.TelDefEqEvidence env source.uvars
+        generation.generatedParams.reverse
+        (family.rawIndices source.nparams) (generation.generatedIndices family))
+    (generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+      TypeChecker.TelDefEqEvidence blockEnv source.uvars
+        generation.generatedParams.reverse
+        (constructor.ctor.rawFields source.nparams)
+        (generation.generatedFields constructor)) :
+    BlockGenerationRun generation env blockEnv := by
+  let paramsTel := runs.paramsTel henv commonResultLevelWF
+  exact {
+    normalization
+    checked
+    resultLevelWF := commonResultLevelWF
+    paramsTel
+    generatedParamsTel
+    generatedIndicesTel
+    generatedFieldsTel
+    families := runs.normalizedFamilyRuns henv commonResultLevelWF
+    constructors := runs.constructorRuns normalization commonResultLevelWF
+      paramsTel }
 
 /-- Exact source-order alignment between every retained block-family root and
 the normalized-family list selected by generation analysis. -/
@@ -17078,7 +22362,18 @@ def NormalizationCandidateBlockSemanticRun.blockGenerationRun
     (checkedWF : generation.block.checked.WF env
       generation.validated.resultLevel)
     (commonResultLevelWF :
-      generation.validated.resultLevel.WF source.uvars) :
+      generation.validated.resultLevel.WF source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params)
+    (generatedIndicesTel : ∀ family ∈ generation.families,
+      TypeChecker.TelDefEqEvidence env source.uvars
+        generation.generatedParams.reverse
+        (family.rawIndices source.nparams) (generation.generatedIndices family))
+    (generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+      TypeChecker.TelDefEqEvidence blockEnv source.uvars
+        generation.generatedParams.reverse
+        (constructor.ctor.rawFields source.nparams)
+        (generation.generatedFields constructor)) :
     BlockGenerationRun generation env blockEnv := by
   have normalizationRun : NormalizationBlockRun
       generation.block.normalization env blockEnv := by
@@ -17093,6 +22388,9 @@ def NormalizationCandidateBlockSemanticRun.blockGenerationRun
     checked := checkedWF
     resultLevelWF := commonResultLevelWF
     paramsTel := paramsTel
+    generatedParamsTel := generatedParamsTel
+    generatedIndicesTel := generatedIndicesTel
+    generatedFieldsTel := generatedFieldsTel
     families := aligned.normalizedFamilyRuns commonResultLevelWF
     constructors := aligned.constructorRuns normalizationRun
       commonResultLevelWF paramsTel }
@@ -17111,10 +22409,22 @@ theorem NormalizationCandidateBlockSemanticRun.generationWF
     (checkedWF : generation.block.checked.WF env
       generation.validated.resultLevel)
     (commonResultLevelWF :
-      generation.validated.resultLevel.WF source.uvars) :
+      generation.validated.resultLevel.WF source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params)
+    (generatedIndicesTel : ∀ family ∈ generation.families,
+      TypeChecker.TelDefEqEvidence env source.uvars
+        generation.generatedParams.reverse
+        (family.rawIndices source.nparams) (generation.generatedIndices family))
+    (generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+      TypeChecker.TelDefEqEvidence blockEnv source.uvars
+        generation.generatedParams.reverse
+        (constructor.ctor.rawFields source.nparams)
+        (generation.generatedFields constructor)) :
     generation.WF env blockEnv :=
   (normalization.blockGenerationRun generation analysis shape checkedWF
-    commonResultLevelWF).wf
+    commonResultLevelWF generatedParamsTel generatedIndicesTel
+      generatedFieldsTel).wf
 
 /-- Exact dependent closure of one retained arbitrary-block producer result.
 The semantic hierarchy is indexed by the candidate stored in that execution,
@@ -17136,6 +22446,75 @@ structure ExactProducedBlockGenerationRun
   checked : generation.block.checked.WF env
     generation.validated.resultLevel
   resultLevelWF : generation.validated.resultLevel.WF source.uvars
+  generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+    generation.generatedParams generation.block.checked.params
+  generatedIndicesTel : ∀ family ∈ generation.families,
+    TypeChecker.TelDefEqEvidence env source.uvars
+      generation.generatedParams.reverse
+      (family.rawIndices source.nparams) (generation.generatedIndices family)
+  generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+    TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      generation.generatedParams.reverse
+      (constructor.ctor.rawFields source.nparams)
+      (generation.generatedFields constructor)
+
+/-- The exact analyzer result stores the shared parameter telescope selected
+by the first family of this producer's semantic normalization view.  This
+projection avoids dependent rewriting through `NormalizedCheckedBlock` when
+later audit phases identify that first-family telescope more precisely. -/
+theorem ExactProducedBlockGenerationRun.checkedParams_eq_semanticBlockParams
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {producedCandidate : ProducedBlockGenerationShapeCandidate source
+      kernelSources numNested isUnsafe context}
+    {generation : BlockGenerationChecked source}
+    (run : ExactProducedBlockGenerationRun env blockEnv Us producedCandidate
+      generation) :
+    generation.block.checked.params = blockParams source.nparams
+      run.producedSemantic.semantic.families.views := by
+  have normalizationEq :=
+    Normalization.checkBlock?_normalization run.analysis
+  have viewEq := congrArg Normalization.view normalizationEq
+  calc
+    generation.block.checked.params =
+        blockParams generation.block.normalization.view.nparams
+          generation.block.normalization.view.types :=
+      generation.block.checked.params_eq
+    _ = blockParams run.producedSemantic.semantic.normalization.view.nparams
+          run.producedSemantic.semantic.normalization.view.types :=
+      congrArg (fun view : VInductDecl =>
+        blockParams view.nparams view.types) viewEq
+    _ = blockParams source.nparams
+          run.producedSemantic.semantic.families.views := by
+      rfl
+
+/-- The validator's exact index-count array transported to every raw Theory
+family owned by this exact producer.  This is derived solely from the
+execution's positional candidate audit and the semantic generation-shape
+hierarchy; no consumer-selected family or canonical replay is involved. -/
+theorem ExactProducedBlockGenerationRun.rawIndexCounts
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {producedCandidate : ProducedBlockGenerationShapeCandidate source
+      kernelSources numNested isUnsafe context}
+    {generation : BlockGenerationChecked source}
+    (run : ExactProducedBlockGenerationRun env blockEnv Us producedCandidate
+      generation) :
+    CanonicalFamilyIndexCountList producedCandidate.execution.stats
+      source.nparams 0 source.types := by
+  let semantic := run.producedSemantic.semantic
+  have shapes := semantic.generationShapes (by
+    simpa only [NormalizationCandidateBlockSemanticRun.generationShape,
+      normalizationCandidateBlockGenerationShape,
+      ProducedBlockGenerationShapeCandidate.candidate] using
+      producedCandidate.shape)
+  exact semantic.families.rawIndexCounts shapes
+    producedCandidate.execution.familyParameterSpines
+    producedCandidate.execution.familyIndexCounts
 
 /-- Assemble the complete generic generation run retained by an exact outer
 producer closure. -/
@@ -17147,6 +22526,7 @@ def ExactProducedBlockGenerationRun.blockGenerationRun
     simpa only [NormalizationCandidateBlockSemanticRun.generationShape,
       ProducedBlockGenerationShapeCandidate.candidate] using
         producedCandidate.shape) run.checked run.resultLevelWF
+    run.generatedParamsTel run.generatedIndicesTel run.generatedFieldsTel
 
 /-- Erase checker provenance to the consumer-facing Theory certificate. -/
 def ExactProducedBlockGenerationRun.certificate
@@ -17224,7 +22604,18 @@ theorem ProducedBlockGenerationShapeCandidate.exactBlockGenerationRun_nonempty
       semantic.normalization.checkBlock? = some generation.block)
     (checked : generation.block.checked.WF env
       generation.validated.resultLevel)
-    (resultLevelWF : generation.validated.resultLevel.WF source.uvars) :
+    (resultLevelWF : generation.validated.resultLevel.WF source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params)
+    (generatedIndicesTel : ∀ family ∈ generation.families,
+      TypeChecker.TelDefEqEvidence env source.uvars
+        generation.generatedParams.reverse
+        (family.rawIndices source.nparams) (generation.generatedIndices family))
+    (generatedFieldsTel : ∀ constructor ∈ generation.flatCtors,
+      TypeChecker.TelDefEqEvidence blockEnv source.uvars
+        generation.generatedParams.reverse
+        (constructor.ctor.rawFields source.nparams)
+        (generation.generatedFields constructor)) :
     Nonempty (ExactProducedBlockGenerationRun env blockEnv Us
       producedCandidate generation) := by
   have familyTypesProduced :
@@ -17242,7 +22633,10 @@ theorem ProducedBlockGenerationShapeCandidate.exactBlockGenerationRun_nonempty
     producedSemantic
     analysis := analysis producedSemantic.semantic
     checked
-    resultLevelWF }⟩
+    resultLevelWF
+    generatedParamsTel
+    generatedIndicesTel
+    generatedFieldsTel }⟩
 
 /-- Derive every family component equation from the minimal structural shape
 and the exact dependent analyzer result. -/

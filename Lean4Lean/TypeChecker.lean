@@ -274,7 +274,7 @@ def inferProjFields (proj : Expr) (typeName : Name)
   | _, 0, r => pure r
   | fieldIdx, count + 1, r => do
     let .forallE _ dom body _ ← whnf r | invalidProj proj
-    if body.hasLooseBVars && maybePropType then
+    if body.hasLooseBVar 0 && maybePropType then
       -- prop structs cannot have non-prop dependent fields
       if !(← isProp dom) then invalidProj proj
     inferProjFields proj typeName struct maybePropType (fieldIdx + 1) count
@@ -295,9 +295,18 @@ def inferProj (typeName : Name) (idx : Nat) (struct structType : Expr) : RecM Ex
   let c_info ← env.get c
   let .ctorInfo ctorInfo := c_info | invalidProj e
   unless idx < ctorInfo.numFields do invalidProj e
+  let rec_info ← env.get (mkRecName I_name)
+  let .recInfo recInfo := rec_info | invalidProj e
   let r ← inferProjParams e (args.toList.take I_val.numParams)
     (c_info.instantiateTypeLevelParamsCpp I_levels)
   let maybePropType := !(← getSortLevel type).isNeverZero
+  -- A small recursor has no fresh motive universe.  Reject a definitely
+  -- non-Prop instance before attempting to model its primitive projection;
+  -- elaborated structures already satisfy this condition, while low-level
+  -- declarations may bypass that elaborator restriction.
+  if !maybePropType &&
+      recInfo.levelParams.length == I_val.levelParams.length then
+    invalidProj e
   let r ← inferProjFields e I_name struct maybePropType 0 idx r
   let .forallE _ dom _ _ ← whnf r | invalidProj e
   if maybePropType then if !(← isProp dom) then invalidProj e
@@ -698,7 +707,7 @@ def tryEtaStructCore (t s : Expr) : RecM Bool := do
   let env ← getEnv
   let .ctorInfo fInfo ← env.get f | return false
   unless s.getAppNumArgs == fInfo.numParams + fInfo.numFields do return false
-  unless env.isNonRecStructureConstructor fInfo.induct f do return false
+  unless env.isStructureEtaReadyConstructor fInfo.induct f do return false
   unless ← isDefEq (← inferType t) (← inferType s) do return false
   let args := s.getAppArgs
   -- since `t` is in WHNF, and assuming it is not a constructor application, this projection
@@ -896,7 +905,7 @@ def isDefEqUnitLike (t s : Expr) : RecM Bool := do
   let .inductInfo { isRec := false, ctors := [c], numIndices := 0, .. } ← env.get I
     | return false
   let .ctorInfo { numFields := 0, .. } ← env.get c | return false
-  unless env.isNonRecStructureConstructor I c do return false
+  unless env.isStructureEtaReadyConstructor I c do return false
   isDefEqCore tType (← inferType s)
 
 @[inherit_doc isDefEqCore]

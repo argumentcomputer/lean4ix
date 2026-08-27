@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0 AND (MIT OR Apache-2.0)
 -/
 
 import Lean4Lean.Environment
+import Lean4Lean.Inductive.EliminationTrace
 
 /-!
 Executable regressions for the kernel hardening merged between Lean v4.32.2 and
@@ -15,6 +16,7 @@ v4.33.0-rc2.  The declarations are assembled manually so they exercise
 namespace Lean4Lean.Tests.KernelHardening
 
 open Lean Lean4Lean TypeChecker
+open private Lean.Kernel.Environment.add from Lean.Environment
 
 private def errorOf (r : Except Kernel.Exception α) : MetaM (Option String) := do
   match r with
@@ -84,6 +86,27 @@ private def nestedAuxProjDecl : Declaration :=
           (.const `L4LKNProj []) .default) .default }]
   }] false
 
+/-- Declaration heads are part of the restoration domain too.  Empty source
+families make the family-head check observable independently of constructor
+types. -/
+private def nestedAuxFamilyHeadDecl : Declaration :=
+  .inductDecl [] 0 [{
+    name := `_nested.L4LFamilyHead
+    type := .sort 1
+    ctors := []
+  }] false
+
+/-- A reserved constructor head is observable independently of its ordinary
+source type, which mentions only the non-reserved family head. -/
+private def nestedAuxConstructorHeadDecl : Declaration :=
+  .inductDecl [] 0 [{
+    name := `L4LConstructorHead
+    type := .sort 1
+    ctors := [{
+      name := `_nested.L4LConstructorHead
+      type := .const `L4LConstructorHead [] }]
+  }] false
+
 private def nestedBadDecl (bad : Expr) (name : Name) : Declaration :=
   let ind := fun a => .app (.const name []) a
   .inductDecl [] 1 [{
@@ -95,6 +118,33 @@ private def nestedBadDecl (bad : Expr) (name : Name) : Declaration :=
         (.forallE `xs (.app (.const ``Array [.zero]) (ind bad))
           (ind (.bvar 1)) .default) .default }]
   }] false
+
+/-- lean4#14582: every recursive occurrence in an original constructor must
+use the declaration's shared parameters.  This deliberately uses `Nat`
+instead of the surrounding `α`; later normalization must not get a chance to
+hide that non-uniform occurrence. -/
+private def nonUniformOccurrenceDecl : Declaration :=
+  let family := fun argument => .app (.const `L4LNonUniform []) argument
+  .inductDecl [] 1 [{
+    name := `L4LNonUniform
+    type := .forallE `α (.sort 1) (.sort 1) .default
+    ctors := [{
+      name := `L4LNonUniform.mk
+      type := .forallE `α (.sort 1)
+        (.forallE `recursive (family (.const ``Nat []))
+          (family (.bvar 1)) .default) .default }]
+  }] false
+
+/-- Small ordinary block used to exercise the generated-recursor guard through
+the exact retained producer before corrupting one rule in an isolated test
+environment. -/
+private def generatedRecursorGuardTypes : List InductiveType := [{
+  name := `L4LGeneratedRecursorGuard
+  type := .sort 1
+  ctors := [{
+    name := `L4LGeneratedRecursorGuard.mk
+    type := .const `L4LGeneratedRecursorGuard [] }]
+}]
 
 /-- lean4#14613: projecting the field back out of a `Sort (imax 1 0)` proof would break proof
 irrelevance, so `inferProj` must reject it. -/
@@ -130,6 +180,14 @@ private def nestedIllTypedParams : Declaration :=
 private partial def deepNat : Nat → Expr
   | 0 => .const ``Nat.zero []
   | n + 1 => .app (.const ``Nat.succ []) (deepNat n)
+
+/-- Preserve a generated rule's argument telescope while replacing its
+terminal reduct by a closed term of the wrong type. -/
+private partial def malformedRuleRhs : Expr → Expr
+  | .lam name type body binderInfo =>
+      .lam name type (malformedRuleRhs body) binderInfo
+  | .mdata data body => .mdata data (malformedRuleRhs body)
+  | _ => .const ``Nat.zero []
 
 structure ProjB where b : Nat
 
@@ -173,6 +231,10 @@ run_meta do
   -- unknown constant.
   expectError "constructor naming a nested auxiliary in a projection" "reserved prefix '_nested'" <|
     Lean4Lean.addDecl env nestedAuxProjDecl
+  expectError "inductive family using a reserved nested head" "reserved prefix '_nested'" <|
+    Lean4Lean.addDecl env nestedAuxFamilyHeadDecl
+  expectError "constructor using a reserved nested head" "reserved prefix '_nested'" <|
+    Lean4Lean.addDecl env nestedAuxConstructorHeadDecl
 
   -- lean4#14576/#14577: parametric arguments dropped from the auxiliary declaration.
   expectError "nested inductive with ill-typed dropped parameters" "invalid projection" <|
@@ -183,6 +245,50 @@ run_meta do
     Lean4Lean.addDecl env <| nestedBadDecl (.fvar { name := `l4lBadFVar }) `L4LNestedFVar
   expectError "nested inductive containing a metavariable" "metavariables" <|
     Lean4Lean.addDecl env <| nestedBadDecl (.mvar { name := `l4lBadMVar }) `L4LNestedMVar
+
+  -- lean4#14582: reject the source occurrence itself, before nested
+  -- elimination or constructor normalization can alter what is inspected.
+  expectError "inductive with a non-uniform recursive occurrence"
+    "must be applied to the parameters and universe levels" <|
+    Lean4Lean.addDecl env nonUniformOccurrenceDecl
+
+  -- lean4#14808: generated computation rules must preserve the type inferred
+  -- for the unreduced recursor application.  Start from one genuinely
+  -- synthesized retained execution, then alter only the stored rule RHS in a
+  -- private environment and rerun the public data-bearing guard.
+  let generated ← runM <|
+    AddInductive.EnvironmentInductiveExecution.buildExecution env [] 0
+      generatedRecursorGuardTypes false false
+  let generatedExecution := generated.2
+  let checked := generatedExecution.flattened.recursorCheck
+  let recName := mkRecName generatedRecursorGuardTypes.head!.name
+  let some (.recInfo recursor) := checked.recursors.env.find? recName
+    | throwError "generated-recursor fixture did not emit its recursor"
+  let rule :: rules := recursor.rules
+    | throwError "generated-recursor fixture did not emit a computation rule"
+  let malformedRecursor : RecursorVal := {
+    recursor with
+    rules := { rule with rhs := malformedRuleRhs rule.rhs } :: rules }
+  let malformedEnv := checked.recursors.env.add (.recInfo malformedRecursor)
+  let malformedContext : AddInductive.Context := {
+    checked.synthesis.synthesisContext with env := malformedEnv }
+  expectError "generated recursor with a non-type-preserving rule"
+    "is not type-preserving" <|
+    AddInductive.checkGeneratedRecursorsAt
+      generatedExecution.flattened.eliminationExecution.normalization.stats
+      generatedExecution.nested.types.toArray
+      generatedExecution.flattened.eliminationExecution.elimination.level
+      (checked.synthesis.recInfos.map (·.motive))
+      (checked.synthesis.recInfos.flatMap (·.minors)) 0 malformedContext
+
+  -- lean4#14577: the final restored-artifact pass is itself rejecting, not
+  -- merely a trace wrapper around unchecked expressions.
+  expectError "restored constructor artifact with an unknown constant"
+    "unknown constant" <|
+    Lean4Lean.checkRestoredArtifactSources env .safe {} [{
+      origin := .constructorType `L4LMalformedRestoredConstructor
+      lparams := []
+      expression := .const `L4LMissingRestoredType [] }]
 
   -- lean4#14632: projection indices are `Nat` throughout lean4lean, so an index past `2^32`
   -- is stuck rather than truncated.  The structure *name* is deliberately not compared here;

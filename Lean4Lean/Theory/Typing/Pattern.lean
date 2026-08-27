@@ -248,6 +248,7 @@ theorem Pattern.Check.OK.map
 inductive SimplePattern where
   | iota (recursor : Name) (major : Nat) (constr : Name) (args : Nat)
   | defn (head : Name)
+  deriving DecidableEq
 
 @[reducible] def SimplePattern.toPattern : SimplePattern → Pattern
   | .defn c => .const c

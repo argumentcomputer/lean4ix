@@ -426,7 +426,7 @@ private theorem AddQuot.mono
 
 /-! ## Readiness across the quotient-initialized flag -/
 
-private noncomputable def ProjectionArtifact.markQuotInit
+private def ProjectionArtifact.markQuotInit
     (self : ProjectionArtifact env name info venv) :
     ProjectionArtifact (markQuotInit env) name info venv where
   view := self.view
@@ -434,15 +434,16 @@ private noncomputable def ProjectionArtifact.markQuotInit
   viewWF := self.viewWF
   constructorInfo := self.constructorInfo
   constructor_find := self.constructor_find
+  recursorInfo := self.recursorInfo
+  recursor_find := self.recursor_find
+  recursor_levelParams_length := self.recursor_levelParams_length
   constructor_numParams_eq := self.constructor_numParams_eq
   constructor_numFields_eq := self.constructor_numFields_eq
   levelParams_length := self.levelParams_length
   numParams_eq := self.numParams_eq
   numIndices_eq := self.numIndices_eq
   ctors_eq := self.ctors_eq
-  rawResult_sort := self.rawResult_sort
-  programsWF := self.programsWF
-  programsWF_mono := self.programsWF_mono
+  programs := self.programs
 
 private theorem ProjectionReady.markQuotInit (self : ProjectionReady env venv) :
     ProjectionReady (markQuotInit env) venv where
@@ -451,12 +452,47 @@ private theorem ProjectionReady.markQuotInit (self : ProjectionReady env venv) :
     exact ⟨artifact.markQuotInit⟩
   constructorHead name info hfind :=
     self.constructorHead name info hfind
-  constructorNumParams view info hview hfields hfind :=
-    self.constructorNumParams view info hview hfields hfind
-  constructorNumParams_mono hle view info hview hfields hfind :=
-    self.constructorNumParams_mono hle view info hview hfields hfind
 
-private noncomputable def StructureEtaArtifact.markQuotInit
+private def RestoredProjectionArtifact.markQuotInit
+    (self : RestoredProjectionArtifact env name info venv) :
+    RestoredProjectionArtifact (markQuotInit env) name info venv where
+  view := self.view
+  name_eq := self.name_eq
+  viewWF := self.viewWF
+  constructorInfo := self.constructorInfo
+  constructor_find := self.constructor_find
+  recursorInfo := self.recursorInfo
+  recursor_find := self.recursor_find
+  recursor_levelParams_length := self.recursor_levelParams_length
+  constructor_numParams_eq := self.constructor_numParams_eq
+  constructor_numFields_eq := self.constructor_numFields_eq
+  levelParams_length := self.levelParams_length
+  numParams_eq := self.numParams_eq
+  numIndices_eq := self.numIndices_eq
+  ctors_eq := self.ctors_eq
+  recEntriesClosed := self.recEntriesClosed
+  codeNaturality := self.codeNaturality
+  parameterLayout := self.parameterLayout
+  largeRebuilds := self.largeRebuilds
+  programs := self.programs
+
+private def ProjectionArtifactResolution.markQuotInit
+    (self : ProjectionArtifactResolution env name info venv) :
+    ProjectionArtifactResolution (markQuotInit env) name info venv := by
+  cases self with
+  | ordinary artifact => exact .ordinary artifact.markQuotInit
+  | restored artifact => exact .restored artifact.markQuotInit
+
+private theorem ProjectionResolutionReady.markQuotInit
+    (self : ProjectionResolutionReady env venv) :
+    ProjectionResolutionReady (markQuotInit env) venv where
+  infer name info hfind hready := by
+    obtain ⟨artifact⟩ := self.infer name info hfind hready
+    exact ⟨artifact.markQuotInit⟩
+  constructorHead name info hfind :=
+    self.constructorHead name info hfind
+
+private def StructureEtaArtifact.markQuotInit
     (self : StructureEtaArtifact env familyName familyInfo
       constructorName constructorInfo venv) :
     StructureEtaArtifact (markQuotInit env) familyName familyInfo
@@ -464,8 +500,30 @@ private noncomputable def StructureEtaArtifact.markQuotInit
   projection := self.projection.markQuotInit
   constructor_name_eq := self.constructor_name_eq
   constructor_info_eq := self.constructor_info_eq
+  large := self.large
   etaOrdered := self.etaOrdered
   etaRegistered := self.etaRegistered
+
+private def RestoredStructureEtaArtifact.markQuotInit
+    (self : RestoredStructureEtaArtifact env familyName familyInfo
+      constructorName constructorInfo venv) :
+    RestoredStructureEtaArtifact (markQuotInit env) familyName familyInfo
+      constructorName constructorInfo venv where
+  projection := self.projection.markQuotInit
+  constructor_name_eq := self.constructor_name_eq
+  constructor_info_eq := self.constructor_info_eq
+  large := self.large
+  etaOrdered := self.etaOrdered
+  etaRegistered := self.etaRegistered
+
+private theorem StructureEtaArtifactResolution.markQuotInit
+    (self : StructureEtaArtifactResolution env familyName familyInfo
+      constructorName constructorInfo venv) :
+    StructureEtaArtifactResolution (markQuotInit env) familyName familyInfo
+      constructorName constructorInfo venv := by
+  cases self with
+  | ordinary artifact => exact .ordinary artifact.markQuotInit
+  | restored artifact => exact .restored artifact.markQuotInit
 
 private theorem StructureEtaReady.markQuotInit (self : StructureEtaReady env venv) :
     StructureEtaReady (markQuotInit env) venv where
@@ -573,7 +631,7 @@ private theorem VEnvs.WF.addQuot
     safePrimitives_add' mapWF₃ safePrimitives₃ quotIndInfo hind₃
       (by native_decide) hfind hp
   have readiness (safety) :
-      ProjectionReady (markQuotInit env₄) (ves'.venv safety) ∧
+      ProjectionResolutionReady (markQuotInit env₄) (ves'.venv safety) ∧
       StructureEtaReady (markQuotInit env₄) (ves'.venv safety) := by
     have r₁ := Readiness.add (ci := quotTypeInfo) mapWF hquot
       (by simp [quotTypeInfo, Lean.ConstantInfo.ReadinessTransparent])

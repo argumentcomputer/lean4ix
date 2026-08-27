@@ -1195,12 +1195,22 @@ private def analyzeInductiveBlock (ctx : Context) (initial : Environment)
           diagnostic := s!"Theory generation-shape check rejected the nested block containing {
             selected.name}"
         }
-    let nested : source.NestedBlockChecked := { elim := elimination, generation }
-    compareTheoryBlock ctx selected familyInfos source normalized
-      "nested-elimination+normalization" elimination.numNested generation
-      nested.recursors nested.generatedRules
-      (generation.flatCtors.map fun constructor =>
-        restoredNestedConstructorName nested constructor.ctor.raw.name)
+    if sourceRestoreSafe : source.nestedRestoreSafe elimination.specs = true then
+      let nested : source.NestedBlockChecked := {
+        elim := elimination
+        generation
+        source_restore_safe := sourceRestoreSafe }
+      compareTheoryBlock ctx selected familyInfos source normalized
+        "nested-elimination+normalization" elimination.numNested generation
+        nested.recursors nested.generatedRules
+        (generation.flatCtors.map fun constructor =>
+          restoredNestedConstructorName nested constructor.ctor.raw.name)
+    else
+      throw {
+        phase := .theoryGeneration
+        diagnostic := s!"Theory restoration-safety check rejected the nested block containing {
+          selected.name}"
+      }
 
 private def analyzeSelectedInductive (ctx : Context) (initial : Environment)
     (decl : Name) : Except Differential.PhaseFailure AnalysisArtifacts :=

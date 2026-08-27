@@ -17,8 +17,6 @@ namespace Lean4Lean.InductivePatternFixtures
 open Lean4Lean.VInductDecl
 open Lean4Lean.VInductDecl.BlockGenerationChecked
 
-deriving instance DecidableEq for SimplePattern
-
 /-- `mutual inductive PatTree (α : Type u) | node : α → PatForest α → PatTree α
 inductive PatForest (α : Type u) | nil | cons : PatTree α → PatForest α →
 PatForest α end` -/

@@ -623,8 +623,8 @@ theorem symbolicKeyProjector_hasType :
     have hfamilyClosed :
         (dependentRecordView.familyType.instL symbolicLevels).ClosedN 0 := by
       simpa using
-        (dependentRecordEnv_ordered.closedC
-          dependentRecord_view_wf.family).instL
+        (dependentRecord_view_wf.familyType_closed
+          dependentRecordEnv_ordered).instL
     have hspine' := hspine.weakN dependentRecordEnv_ordered W
     rw [hfamilyClosed.liftN_eq (Nat.zero_le _)] at hspine'
     simpa [VExpr.liftN] using hspine'
@@ -939,8 +939,8 @@ theorem symbolicValueProjector_hasType :
     have hfamilyClosed :
         (dependentRecordView.familyType.instL symbolicLevels).ClosedN 0 := by
       simpa using
-        (dependentRecordEnv_ordered.closedC
-          dependentRecord_view_wf.family).instL
+        (dependentRecord_view_wf.familyType_closed
+          dependentRecordEnv_ordered).instL
     have hspine' := hspine.weakN dependentRecordEnv_ordered W
     rw [hfamilyClosed.liftN_eq (Nat.zero_le _)] at hspine'
     simpa [VExpr.liftN] using hspine'

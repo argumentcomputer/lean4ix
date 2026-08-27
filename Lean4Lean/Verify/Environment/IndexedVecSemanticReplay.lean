@@ -412,7 +412,7 @@ completed Nat inductive transaction. -/
 private theorem natMap_constructorHead
     {name : Name} {info : ConstructorVal}
     (hfind : natMap.find? name = some (.ctorInfo info)) :
-    natFinalEnv.ConstructorHead name := by
+    natFinalEnv.ConstructorHeadArity name info.numParams := by
   rw [natMap, natCtorMap_wf.find?_insert] at hfind
   split at hfind
   · cases hfind
@@ -422,7 +422,9 @@ private theorem natMap_constructorHead
       have hname : name = ``Nat.succ :=
         (LawfulBEq.eq_of_beq hsucc).symm
       subst name
-      exact nat_addInduct.constructorHead ⟨[], .empty⟩
+      simp [natSuccInfo] at hfind
+      subst info
+      exact nat_addInduct.constructorHeadArity ⟨[], .empty⟩
         (constructor := natType.ctors[1]) (by
           simp [VInductDecl.blockConstructorConstants, natDecl, natType])
     · rw [natZeroMap, natTypeMap_wf.find?_insert] at hfind
@@ -431,7 +433,9 @@ private theorem natMap_constructorHead
         have hname : name = ``Nat.zero :=
           (LawfulBEq.eq_of_beq hzero).symm
         subst name
-        exact nat_addInduct.constructorHead ⟨[], .empty⟩
+        simp [natZeroInfo] at hfind
+        subst info
+        exact nat_addInduct.constructorHeadArity ⟨[], .empty⟩
           (constructor := natType.ctors[0]) (by
             simp [VInductDecl.blockConstructorConstants, natDecl, natType])
       · rw [natTypeMap,
@@ -461,20 +465,7 @@ theorem indexedVecSemanticNatVEnvsWF : indexedVecSemanticNatVEnvs.WF indexedVecK
       intro name info hfind
       change natMap.find?' name = some (.ctorInfo info) at hfind
       rw [natMap_wf.find?'_eq_find?] at hfind
-      exact natMap_constructorHead hfind
-    constructorNumParams := by
-      intro view info hview _hfields hfind
-      change natMap.find?' view.constructorName =
-        some (.ctorInfo info) at hfind
-      rw [natMap_wf.find?'_eq_find?] at hfind
-      exact natMap_constructor_numParams
-        (natFinalEnv_structureView_nparams_eq_zero hview) hfind
-    constructorNumParams_mono := by
-      intro venv' hle view info hview hfields hfind
-      change natMap.find?' view.constructorName =
-        some (.ctorInfo info) at hfind
-      rw [natMap_wf.find?'_eq_find?] at hfind
-      exact natMap_constructor_numParams_mono hle hview hfields hfind }
+      exact natMap_constructorHead hfind }
   structureEtaReady := StructureEtaReady.of_no_nonRecStructure
     indexedVecKernelEnv_noStructureEta
 
@@ -551,30 +542,7 @@ def indexedVecFamilyStage :
       · exact (natMap_constructorHead hfind).mono
           (VEnv.addConst_le
             (show natFinalEnv.addConst indexedVecType.name
-              indexedVecType.toVConstant = some indexedVecTypeEnv from rfl))
-    constructorNumParams := by
-      intro view info hview _hfields hfind
-      change indexedVecTypeMap.find?' view.constructorName =
-        some (.ctorInfo info) at hfind
-      rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
-        natMap_wf.find?_insert] at hfind
-      split at hfind
-      · cases hfind
-      · exact natMap_constructor_numParams
-          (indexedVecTypeEnv_structureView_nparams_eq_zero hview) hfind
-    constructorNumParams_mono := by
-      intro venv' hle view info hview hfields hfind
-      change indexedVecTypeMap.find?' view.constructorName =
-        some (.ctorInfo info) at hfind
-      rw [indexedVecTypeMap_wf.find?'_eq_find?, indexedVecTypeMap,
-        natMap_wf.find?_insert] at hfind
-      split at hfind
-      · cases hfind
-      · exact natMap_constructor_numParams_mono
-          ((VEnv.addConst_le
-            (show natFinalEnv.addConst indexedVecType.name
-              indexedVecType.toVConstant = some indexedVecTypeEnv from rfl)).trans hle)
-          hview hfields hfind }
+              indexedVecType.toVConstant = some indexedVecTypeEnv from rfl)) }
   structureEtaReady := StructureEtaReady.of_no_nonRecStructure
     indexedVecTypeEnv_noStructureEta
   family_lctx_eq := rfl

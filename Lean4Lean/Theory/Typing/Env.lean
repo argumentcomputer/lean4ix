@@ -89,6 +89,24 @@ def VEnv.ConstructorHead (env : VEnv) (name : Name) : Prop :=
       constructor.name = name ∧
       after ≤ env
 
+/-- A genuine completed inductive constructor together with the shared
+parameter count of the transaction which installed it.
+
+This is the metadata-sensitive form of `ConstructorHead`.  Keeping the count
+attached to the completed declaration avoids quantifying over unrelated
+structure views in arbitrary future extensions: typed head inversion is the
+single place which must align this retained count with a selected view. -/
+def VEnv.ConstructorHeadArity (env : VEnv) (name : Name)
+    (numParams : Nat) : Prop :=
+  ∃ (source : VInductDecl) (before after : VEnv)
+      (constructor : VConstVal),
+    before.WF ∧
+      VDecl.WF before (.induct source) after ∧
+      source.nparams = numParams ∧
+      constructor ∈ source.blockConstructorConstants ∧
+      constructor.name = name ∧
+      after ≤ env
+
 namespace VEnv.ConstructorHead
 
 /-- Constructor-head classification persists under Theory-environment
@@ -102,6 +120,32 @@ theorem mono {env env' : VEnv} (self : env.ConstructorHead name)
     hconstructor, hname, hle.trans henv⟩
 
 end VEnv.ConstructorHead
+
+namespace VEnv.ConstructorHeadArity
+
+/-- Forget only the retained parameter count. -/
+theorem toConstructorHead
+    (self : _root_.Lean4Lean.VEnv.ConstructorHeadArity env name numParams) :
+    _root_.Lean4Lean.VEnv.ConstructorHead env name := by
+  rcases self with
+    ⟨source, before, after, constructor, hbefore, hdecl, _hnparams,
+      hconstructor, hname, hle⟩
+  exact ⟨source, before, after, constructor, hbefore, hdecl,
+    hconstructor, hname, hle⟩
+
+/-- Constructor-head arity classification persists under Theory-environment
+extension. -/
+theorem mono {env env' : VEnv}
+    (self : _root_.Lean4Lean.VEnv.ConstructorHeadArity env name numParams)
+    (henv : env ≤ env') :
+    _root_.Lean4Lean.VEnv.ConstructorHeadArity env' name numParams := by
+  rcases self with
+    ⟨source, before, after, constructor, hbefore, hdecl, hnparams,
+      hconstructor, hname, hle⟩
+  exact ⟨source, before, after, constructor, hbefore, hdecl, hnparams,
+    hconstructor, hname, hle.trans henv⟩
+
+end VEnv.ConstructorHeadArity
 
 /- A normalized inductive history entry carries only the standard Theory
 logical baseline; in particular it cannot import Verify's implementation

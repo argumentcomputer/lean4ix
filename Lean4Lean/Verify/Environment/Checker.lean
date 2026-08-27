@@ -907,33 +907,6 @@ theorem checkDefinition.WF_of_not_primitive
       fun _ _ _ hcheckedName =>
         ⟨ci', hu, htype, hname, hvalue, hci, hcheckedName.1⟩
 
-theorem checkDefinition.WF {env : Environment} {ves : VEnvs} (wf : ves.WF env)
-    (v : DefinitionVal) :
-    ((do
-      checkDefinitionBody env v
-      let allowPrimitive ← Environment.checkPrimitiveDef v
-      Environment.checkName env v.name allowPrimitive) : TypeChecker.M Unit).WF
-      (.mk' wf .safe v.levelParams) {} fun _ _ =>
-        ∃ allow : Bool, ∃ ci' : VDefVal, PrimitiveResult (ves.venv .safe) v allow ∧
-          v.levelParams.length = ci'.uvars ∧
-          TrExprS (ves.venv .safe) v.levelParams [] v.type ci'.type ∧
-          v.name = ci'.name ∧
-          TrExprS (ves.venv .safe) v.levelParams [] v.value ci'.value ∧
-          ci'.WF (ves.venv .safe) ∧ env.find? v.name = none ∧
-          (allow = false → Environment.primitives.contains v.name = false) := by
-  refine (checkDefinitionBody.WF wf v).bind fun _ state _ hbody => ?_
-  obtain ⟨ci', hu, htype, hname, hvalue, hci⟩ := hbody
-  have hvalueType : (ves.venv .safe).HasType v.levelParams.length [] ci'.value ci'.type := by
-    rw [hu]
-    exact hci
-  refine (checkPrimitiveDef.WF wf v htype hvalue hvalueType state).bind
-    fun allow _ _ hp => ?_
-  exact (TypeChecker.M.WF.liftExcept
-    (checkName.WF (wf.tr (safety := .safe)).map_wf v.name allow)).mono
-      fun _ _ _ hcheckedName =>
-        ⟨allow, ci', hp, hu, htype, hname, hvalue, hci,
-          hcheckedName.1, hcheckedName.2⟩
-
 /-- Verify the complete opaque-declaration check. The body is checked, so it is packaged into
 the resulting `VDefVal`; `TrEnv'.opaque` consumes it. An opaque body still contributes no
 definitional equality -- that is `TrEnv'.opaque` adding no `addDefEq`, not the body going

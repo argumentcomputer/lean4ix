@@ -12,6 +12,10 @@ namespace Lean4Lean.Tests.ReadinessStaging
 
 #check AddInductive.declaredInductiveInfos_singleton
 #check ProjectionReady.of_constants_eq
+#check ProjectionArtifactResolver
+#check ProjectionArtifactInventoryResolver
+#check ProjectionArtifactResolver.toInventory
+#check ProjectionArtifactResolver.toResolutionReady
 #check StructureEtaReady.of_constants_eq
 #check ProjectionReady.addInductInfo
 #check StructureEtaReady.addInductInfo
@@ -25,14 +29,23 @@ namespace Lean4Lean.Tests.ReadinessStaging
 #check VEnv.AddStructEtas.exists_of_forallWF
 #check StructureEtaRegistrationArtifact.ofProjection
 #check StructureEtaRegistrationArtifact.ofProjectionReady
+#check StructureEtaRegistrationArtifactResolution.ofProjectionResolution
 #check StructureEtaRegistrationArtifact.toStructureEtaArtifact_of_completion
 #check StructureEtaRegistrationEntry.ruleWF
+#check StructureEtaRegistrationObservationData.find?
+#check StructureEtaRegistrationObservationData.toObservation
 #check StructureEtaRegistrationObservation.toEntry
-#check StructureEtaRegistrationPlan.entryForFamily?
-#check StructureEtaRegistrationPlan.entriesForFamilies
+#check StructureEtaRegistrationObservation.toEntryOfInventory
+#check StructureEtaRegistrationObservation.toEntryNonempty
+#check StructureEtaRegistrationEntryBatch.ofResolver
+#check StructureEtaRegistrationEntryBatch.ofInventoryResolver
+#check StructureEtaRegistrationEntryBatch.nonempty
 #check StructureEtaRegistrationPlan.rules
 #check StructureEtaRegistrationPlan.rulesWF
 #check StructureEtaRegistrationPlan.toCoverage
+#check StructureEtaRegistrationPlan.ofFamilyNamesWithResolver
+#check StructureEtaRegistrationPlan.ofFamilyNamesWithInventoryResolver
+#check StructureEtaRegistrationPlan.nonemptyOfFamilyNames
 #check StructureEtaRegistrationPlan.ofFamilyNames
 #check StructureEtaRegistrationCoverage.mono
 #check StructureEtaRegistrationCoverage.toStructureEtaReady
@@ -121,6 +134,20 @@ info: 'Lean4Lean.StructureEtaRegistrationArtifact.toStructureEtaArtifact_of_comp
 -/
 #guard_msgs in
 #print axioms StructureEtaRegistrationArtifact.toStructureEtaArtifact_of_completion
+
+/--
+info: 'Lean4Lean.StructureEtaRegistrationObservationData.find?' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms StructureEtaRegistrationObservationData.find?
+
+/--
+info: 'Lean4Lean.StructureEtaRegistrationPlan.nonemptyOfFamilyNames' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms StructureEtaRegistrationPlan.nonemptyOfFamilyNames
 
 /--
 info: 'Lean4Lean.StructureEtaRegistrationPlan.rulesWF' depends on axioms: [propext, Classical.choice, Quot.sound]
