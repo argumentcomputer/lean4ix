@@ -8994,6 +8994,35 @@ inductive CandidateBlockFamilySemanticListRun
       CandidateBlockFamilySemanticListRun env blockEnv Us
         (.cons candidate candidates) (raw :: raws)
 
+/-- Exact validator annotation provenance for every family candidate in
+source order. -/
+inductive CandidateFamilyValidationAnnotationList :
+    {sources : List InductiveType} →
+      AddInductive.CandidateList AddInductive.CandidateFamily sources →
+      Prop where
+  | nil : CandidateFamilyValidationAnnotationList .nil
+  | cons
+      (head : candidate.familyType.type.trace.validationAnnotations)
+      (tail : CandidateFamilyValidationAnnotationList candidates) :
+      CandidateFamilyValidationAnnotationList (.cons candidate candidates)
+
+/-- Project the exact validation annotations from the retained family-type
+normalization traversal. -/
+theorem CandidateFamilyValidationAnnotationList.ofProduced
+    {candidateContext : AddInductive.Context}
+    {sources : List InductiveType}
+    (candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources)
+    (produced : AddInductive.CandidateFamilyTypeListProduced candidateContext
+      candidates.familyTypes) :
+    CandidateFamilyValidationAnnotationList candidates := by
+  induction candidates with
+  | nil => exact .nil
+  | cons candidate candidates ih =>
+    exact .cons
+      (candidate.familyType.validationAnnotations_of_normalize produced.head)
+      (ih produced.tail)
+
 /-- Exact semantic family at the head of a nonempty dependent list. -/
 def CandidateBlockFamilySemanticListRun.head
     (run : CandidateBlockFamilySemanticListRun env blockEnv Us
@@ -13181,6 +13210,74 @@ theorem CandidateBlockFamilySemanticGenerationShape.spineLength_eq_ctorFields
   exact congrArg List.length
     (TypeChecker.candidateCtorFields_split source.nparams raw.type).symm
 
+/-- Generic annotation-consumed telescope ownership for one exact semantic
+family position.
+
+The source-indexed semantic root fixes the raw Theory family and recursive
+checker run, while the matching generation-shape witness proves that the
+stored candidate spine covers the complete raw Pi telescope.  This package is
+independent of the family's ordinal position and can therefore be threaded by
+the later-family validation cursor. -/
+structure CandidateBlockFamilyAnnotationSpine
+    (source : VInductDecl) (env blockEnv : VEnv) (Us : List Name)
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    (shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root) where
+  validation_annotations :
+    candidate.familyType.type.trace.validationAnnotations
+  storedBinders : List VExpr
+  telescope : TypeChecker.TelDefEqEvidence env Us.length []
+    (VExpr.telN (ctorFields raw.type).length raw.type) storedBinders
+  stored_length : storedBinders.length = (ctorFields raw.type).length
+  terminalRun : TypeChecker.CandidateContextRun
+    candidate.familyType.type.trace.terminalContext
+  terminal_venv : terminalRun.context.venv = env
+  terminal_lparams : terminalRun.context.lparams = Us
+  terminal_vlctx : terminalRun.context.vlctx.toCtx = storedBinders.reverse
+  inferred : VExpr
+  recursive : TypeChecker.CandidateExprRun env Us
+    candidate.familyType.type.trace [] raw.type root.type.view inferred
+  annotation_spine : TypeChecker.CandidateAnnotationSpine env Us
+    candidate.familyType.type.trace [] terminalRun.context.vlctx
+      storedBinders
+
+/-- Construct the generic annotation owner directly from a semantic family,
+its exact generation-shape position, and the validator-produced annotation
+provenance for that candidate. -/
+theorem CandidateBlockFamilyAnnotationSpine.exists
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    (shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root)
+    (validationAnnotations :
+      candidate.familyType.type.trace.validationAnnotations) :
+    Nonempty (CandidateBlockFamilyAnnotationSpine source env blockEnv Us root
+      shape) := by
+  obtain ⟨inferred, recursive⟩ := root.type.recursive
+  obtain ⟨terminalRun, storedBinders, terminalVenv, terminalLparams,
+      telescope, storedLength, terminalVlctx, annotationSpine⟩ :=
+    root.type.annotationSpineContext shape.storedSpine
+  have spineLength := shape.spineLength_eq_ctorFields
+  rw [spineLength] at telescope storedLength
+  exact ⟨{
+    validation_annotations := validationAnnotations
+    storedBinders := storedBinders
+    telescope := telescope
+    stored_length := storedLength
+    terminalRun := terminalRun
+    terminal_venv := terminalVenv
+    terminal_lparams := terminalLparams
+    terminal_vlctx := terminalVlctx
+    inferred := inferred
+    recursive := recursive
+    annotation_spine := annotationSpine }⟩
+
 /-- Exact source-order structural generation evidence for every family in a
 retained mutual semantic hierarchy. -/
 inductive CandidateBlockFamilySemanticGenerationShapeList
@@ -13200,6 +13297,77 @@ inductive CandidateBlockFamilySemanticGenerationShapeList
         blockEnv Us roots) :
       CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
         (.cons root roots)
+
+/-- Exact source-order annotation ownership for every semantic family in a
+generation-shape spine. -/
+inductive CandidateBlockFamilyAnnotationSpineList
+    (source : VInductDecl) (env blockEnv : VEnv) (Us : List Name) :
+    {kernelSources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources} →
+    {raws : List VInductiveType} →
+    (roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) →
+    CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
+      roots → Type where
+  | nil : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      .nil .nil
+  | cons
+      (head : CandidateBlockFamilyAnnotationSpine source env blockEnv Us
+        root shape)
+      (tail : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+        roots shapes) :
+      CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+        (.cons root roots) (.cons shape shapes)
+
+/-- Generic annotation owner at the head of a nonempty source-order spine. -/
+def CandidateBlockFamilyAnnotationSpineList.head
+    (run : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      (.cons root roots) (.cons shape shapes)) :
+    CandidateBlockFamilyAnnotationSpine source env blockEnv Us root shape := by
+  cases run with
+  | cons head tail => exact head
+
+/-- Generic annotation spine after the head of a nonempty source-order
+spine. -/
+def CandidateBlockFamilyAnnotationSpineList.tail
+    (run : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      (.cons root roots) (.cons shape shapes)) :
+    CandidateBlockFamilyAnnotationSpineList source env blockEnv Us roots
+      shapes := by
+  cases run with
+  | cons head tail => exact tail
+
+/-- Build the complete generic annotation spine from the semantic roots,
+their source-indexed generation shapes, and the validator's exact annotation
+provenance list. -/
+theorem CandidateBlockFamilyAnnotationSpineList.exists
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    (roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws)
+    (shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots)
+    (annotations : CandidateFamilyValidationAnnotationList candidates) :
+    Nonempty (CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      roots shapes) := by
+  induction roots with
+  | nil =>
+    cases shapes
+    exact ⟨.nil⟩
+  | @cons kernelSource kernelSources candidate candidates raw raws root roots
+      ih =>
+    cases shapes with
+    | cons shape shapes =>
+      cases annotations with
+      | cons validationAnnotation annotations =>
+        obtain ⟨head⟩ := CandidateBlockFamilyAnnotationSpine.exists root shape
+          validationAnnotation
+        obtain ⟨tail⟩ := ih shapes annotations
+        exact ⟨.cons head tail⟩
 
 /-- One executable constructor-list shape check determines every dependent
 per-position shape record required by semantic generation. -/
@@ -18374,6 +18542,47 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advance' 
 -/
 #guard_msgs in
 #print axioms CandidateBlockLaterFamilyValidationCursor.advance
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyValidationAnnotationList.ofProduced' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyValidationAnnotationList.ofProduced
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyAnnotationSpineList.exists' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyAnnotationSpineList.exists
 
 
 end VInductDecl

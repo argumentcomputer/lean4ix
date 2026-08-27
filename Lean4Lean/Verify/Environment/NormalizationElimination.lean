@@ -2022,8 +2022,14 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     secondCandidate secondRaw
   remainingSemantics : CandidateBlockFamilySemanticListRun env blockEnv Us
     remainingCandidates remainingRaws
+  firstShape : CandidateBlockFamilySemanticGenerationShape source env
+    blockEnv Us firstSemantic
+  secondShape : CandidateBlockFamilySemanticGenerationShape source env
+    blockEnv Us secondSemantic
   remainingShapes : CandidateBlockFamilySemanticGenerationShapeList source
     env blockEnv Us remainingSemantics
+  remainingValidationAnnotations :
+    CandidateFamilyValidationAnnotationList remainingCandidates
   firstSpineLength_eq :
     firstCandidate.familyType.type.trace.spineLength =
       (VInductDecl.ctorFields firstRaw.type).length
@@ -2177,7 +2183,12 @@ theorem
                     firstSemantic := firstRoot
                     secondSemantic := secondRoot
                     remainingSemantics := remainingRoots
+                    firstShape := firstShape
+                    secondShape := secondShape
                     remainingShapes := remainingShapes
+                    remainingValidationAnnotations :=
+                      CandidateFamilyValidationAnnotationList.ofProduced
+                        remainingCandidates familyTypesProduced.tail.tail
                     firstSpineLength_eq := firstSpineLength
                     firstStoredBinders := firstStoredBinders
                     firstTelescope := firstTelescope
@@ -2205,6 +2216,61 @@ theorem
                     terminal_venv := terminalVenv
                     terminal_lparams := terminalLparams
                     terminal_vlctx := terminalVlctx }⟩
+
+/-- Forget the positional duplication in the two-family staging package and
+recover the generic annotation owner for its exact second semantic family. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.familyAnnotationSpine
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    Nonempty (CandidateBlockFamilyAnnotationSpine source env blockEnv Us
+      annotation.secondSemantic annotation.secondShape) :=
+  CandidateBlockFamilyAnnotationSpine.exists annotation.secondSemantic
+    annotation.secondShape annotation.validation_annotations
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.familyAnnotationSpine' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.familyAnnotationSpine
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.semanticSecondFamilyAnnotationSpine' depends on axioms: [propext,
@@ -5740,6 +5806,92 @@ def
   rw [cursor.semantics_eq]
   exact staging.annotation.remainingShapes
 
+/-- Construct the complete source-ordered annotation spine for every family
+remaining after the second-family terminal handoff. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.annotationSpines
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    Nonempty (CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      cursor.cursor.semantics cursor.generationShapes) :=
+  CandidateBlockFamilyAnnotationSpineList.exists cursor.cursor.semantics
+    cursor.generationShapes
+    staging.annotation.remainingValidationAnnotations
+
+/-- Joint source-order staging for the next later family.  The annotation
+spine and outer continuation are both selected from the same recursive
+cursor, so downstream semantic interpretation cannot pair a family root with
+a validator node from another position. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) where
+  annotations : CandidateBlockFamilyAnnotationSpineList source env blockEnv
+    Us cursor.cursor.semantics cursor.generationShapes
+  continuation :
+    AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+      source.nparams
+      (firstSource :: secondSource :: remainingSources).toArray
+  selected : cursor.validation.continuation.tail.headContinuation? =
+    some continuation
+  invariant : continuation.LaterInvariant
+
+/-- Select the next joint family staging whenever the remaining source suffix
+is nonempty. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.nextFamilyStaging
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor)
+    (nonempty : remainingSources.isEmpty = false) :
+    Nonempty cursor.NextFamilyStaging := by
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  obtain ⟨continuation, selected, invariant⟩ :=
+    cursor.cursor.headContinuation nonempty
+  exact ⟨{
+    annotations := annotations
+    continuation := continuation
+    selected := selected
+    invariant := invariant }⟩
+
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root
 context. -/
@@ -6164,6 +6316,74 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.generationShapes
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.annotationSpines' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.annotationSpines
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.nextFamilyStaging' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.nextFamilyStaging
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
