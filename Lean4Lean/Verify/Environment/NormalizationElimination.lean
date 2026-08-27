@@ -7323,8 +7323,163 @@ theorem CompletionSpine.viewParameterTelescopeDefEqs
                   exact .cons
                     headEvidence ih
 
+/-- The completed traversal consumes every remaining family, so its final
+verified context is a run of the exact terminal validation context recorded
+by the whole-block result.  Family nodes are impossible at the endpoint: the
+exhausted source suffix contradicts their in-bounds index. -/
+theorem CompletionSpine.terminalValidationContextRun
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext}
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (spine : CompletionSpine iteration) :
+    ∃ terminalRun : TypeChecker.CandidateContextRun
+        trace.result.validationContext,
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us := by
+  induction spine with
+  | @nil dIdx stats candidateContext trace iteration =>
+      have suffix := iteration.cursor.sourceSuffix_eq
+      have lengthLe :
+          (firstSource :: secondSource :: allLaterSources).toArray.size ≤
+            dIdx := by
+        have suffixLength := congrArg List.length suffix
+        simp only [List.length_drop, List.length_nil] at suffixLength
+        simp only [List.size_toArray]
+        omega
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.result_validationContext_of_length_le
+        trace lengthLe]
+      exact ⟨iteration.cursor.contextRun, iteration.cursor.venv_eq,
+        iteration.cursor.lparams_eq⟩
+  | @cons nextSource laterSources candidates raws dIdx stats candidateContext
+      trace iteration head parameter domain tail ih =>
+      rw [←
+        AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+          head.selected]
+      exact ih
+
 end
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
+
+/-- The complete later-family traversal reaches the block validator's exact
+terminal context: a verified context run exists at
+`normalization.validationContext` itself, connected through the retained
+whole-block result rather than an extensionally similar rebuild. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContextRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ terminalRun : TypeChecker.CandidateContextRun
+        (produced.execution.eliminationExecution.normalization
+          |>.validationContext),
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us := by
+  obtain ⟨cursor⟩ :=
+    completion.remainingFamilyValidationCursor context_lctx_eq
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  obtain ⟨spine⟩ :=
+    (cursor.iterationCursorExact annotations).completionSpine context_lctx_eq
+  have endpoint := spine.terminalValidationContextRun
+  rw [AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
+    cursor.validation.selected] at endpoint
+  have canonicalEq :
+      ((produced.execution.eliminationExecution.normalization).familyParameterComparisonTrace
+          (produced.execution.normalization_run produced.producedExecution)
+          produced.kernelSources_nonempty).result =
+        (produced.execution.eliminationExecution.normalization).familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result _
+  rw [canonicalEq] at endpoint
+  exact endpoint
+
+/-- The block validator's terminal context preserves the entry checker
+safety mode: family validation only extends local state. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContext_safety
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (_completion : staging.TerminalIndexDomainCompletion raw) :
+    (produced.execution.eliminationExecution.normalization
+      |>.validationContext).safety = context.safety := by
+  have canonicalEq :
+      ((produced.execution.eliminationExecution.normalization).familyParameterComparisonTrace
+          (produced.execution.normalization_run produced.producedExecution)
+          produced.kernelSources_nonempty).result =
+        (produced.execution.eliminationExecution.normalization).familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result _
+  have safety :=
+    ((produced.execution.eliminationExecution.normalization).familyParameterComparisonTrace
+        (produced.execution.normalization_run produced.producedExecution)
+        produced.kernelSources_nonempty).result_safety
+  rw [canonicalEq] at safety
+  exact safety
+
+/-- The exact context in which the block's `checkConstructors` runs is
+verified at the staged Theory environments: the traversal endpoint's context
+run is rebased onto the post-family kernel/Theory pair while keeping the
+validator's accumulated local telescope. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationContextRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {})
+    (stagingInput : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source) :
+    ∃ validationRun : TypeChecker.CandidateContextRun
+        { (produced.execution.eliminationExecution.normalization
+            |>.validationContext) with
+          env := produced.execution.eliminationExecution.normalization
+            |>.familyEnv },
+      validationRun.context.venv = blockEnv ∧
+      validationRun.context.lparams = Us := by
+  obtain ⟨terminalRun, terminalVenv, terminalLparams⟩ :=
+    completion.blockValidationContextRun context_lctx_eq
+  obtain ⟨validationRun, validationVenv, validationLparams, _⟩ :=
+    stagingInput.validationContextRunFrom terminalRun terminalVenv
+      terminalLparams completion.blockValidationContext_safety
+  exact ⟨validationRun, validationVenv, validationLparams⟩
 
 /-- Collect dependent shared-parameter equality for the exact semantic family
 hierarchy.  The first family contributes reflexivity, the second uses the
@@ -7854,6 +8009,104 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalNormalizationBlockRun
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalValidationContextRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalValidationContextRun
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContextRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContextRun
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContext_safety' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationContext_safety
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationContextRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationContextRun
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor' depends on axioms: [propext,

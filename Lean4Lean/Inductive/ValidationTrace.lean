@@ -1442,6 +1442,26 @@ theorem result_context_fuel
     simpa [result, Context.pushLocalDecl] using ih
   | terminal => rfl
 
+/-- Family-telescope traversal changes local declarations and the fresh-name
+counter only; it preserves the checker safety mode at the exact continuation
+context. -/
+theorem result_context_safety
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel) :
+    trace.result.context.safety = context.safety := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    simpa [result, Context.pushLocalDecl] using ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    simpa [result, Context.pushLocalDecl] using ih
+  | terminal => rfl
+
 /-- Traversing one family telescope never changes the already-accepted
 family-constant inventory. -/
 theorem result_indConsts_eq
@@ -1888,6 +1908,24 @@ def result :
   | .terminal _ stats context _ =>
     { stats := familyValidationTerminalStats nparams indTypes stats context
       validationContext := context }
+
+/-- Outer family validation extends local state only; the terminal reader
+context retained by its result keeps the caller's checker safety mode. -/
+theorem result_safety
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) :
+    trace.result.validationContext.safety = context.safety := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+    exact (show _ = telescope.result.context.safety from ih).trans
+      telescope.result_context_safety
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible
+      tail ih =>
+    exact (show _ = telescope.result.context.safety from ih).trans
+      telescope.result_context_safety
+  | terminal dIdx stats context outOfBounds => rfl
 
 /-- Reader context reached after the current family's complete telescope.
 
@@ -4287,6 +4325,22 @@ info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_context_
 -/
 #guard_msgs in
 #print axioms FamilyTypeParameterComparisonTrace.result_context_fuel
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_context_safety' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyTypeParameterComparisonTrace.result_context_safety
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.result_safety' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms FamilyParameterComparisonBlockTrace.result_safety
 
 /--
 info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.startIndex_le_nparams' depends on axioms: [propext,

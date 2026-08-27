@@ -3975,6 +3975,31 @@ theorem headContinuation?_nextParams_eq
     simp only [headContinuation?] at selected
     contradiction
 
+/-- Erasing one selected family node preserves the exact terminal result of
+the outer traversal: the block result is computed from the retained tail. -/
+theorem headContinuation?_result
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation) :
+    continuation.tail.result = trace.result := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    rfl
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    rfl
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
 /-- Select the second source family together with the exact outer trace that
 starts after its telescope. -/
 def secondContinuation?
@@ -3999,6 +4024,37 @@ theorem exists_predecessor_of_secondContinuation?
   | some first =>
     simp only [firstEq] at selected
     exact ⟨first, rfl, selected⟩
+
+/-- Once the source index is exhausted, the outer trace must be its terminal
+node, so the retained result's validation context is the exact reader context
+at that index. -/
+theorem result_validationContext_of_length_le
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context)
+    (lengthLe : indTypes.size ≤ dIdx) :
+    trace.result.validationContext = context := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    omega
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible
+      tail =>
+    omega
+  | terminal dIdx stats context outOfBounds => rfl
+
+/-- Erasing the two leading family nodes still reaches the exact terminal
+result of the outer traversal. -/
+theorem secondContinuation?_result
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation) :
+    continuation.tail.result = trace.result := by
+  obtain ⟨first, firstSelected, headSelected⟩ :=
+    exists_predecessor_of_secondContinuation? selected
+  exact (headContinuation?_result headSelected).trans
+    (headContinuation?_result firstSelected)
 
 /-- The continuation selected at the second source position retains that
 exact outer index.  This is the counter fact needed to identify the suffix
@@ -20296,6 +20352,30 @@ info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuati
 -/
 #guard_msgs in
 #print axioms AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextLocalState
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.result_validationContext_of_length_le' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyParameterComparisonBlockTrace.result_validationContext_of_length_le
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
 
 /--
 info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_nextParams_eq' depends on axioms: [propext,
