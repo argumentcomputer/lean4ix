@@ -2622,6 +2622,26 @@ structure FamilyParameterIndexBoundary.Terminal
     (boundary : FamilyParameterIndexBoundary outer contextRun) : Type where
   notForall : boundary.source.isForall = false
 
+/-- The family telescope's index counter is monotone.  Shared parameters do
+not change it, while every index constructor advances it exactly once. -/
+theorem _root_.Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_nindices_ge
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel) :
+    nindices ≤ trace.result.nindices := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    exact ih
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    simp only [AddInductive.FamilyTypeParameterComparisonTrace.result]
+    omega
+  | terminal => exact Nat.le_refl _
+
 /-- A terminal index boundary is already at the reader context stored by its
 trace result.  The dependent counter rules out parameter constructors, and
 the non-Pi witness rules out an index constructor. -/
@@ -2653,6 +2673,44 @@ theorem FamilyParameterIndexBoundary.Terminal.result_context_eq
     simp only [Lean.Expr.isForall] at boundaryNotForall
     contradiction
   | terminal => rfl
+
+/-- If an index-only suffix reaches the same index counter at its final
+result, it is already terminal.  An `index` constructor would force the
+counter to grow, while parameter constructors are impossible at the retained
+`i = nparams` boundary. -/
+theorem FamilyParameterIndexBoundary.terminal_of_result_nindices_eq
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    (boundary : FamilyParameterIndexBoundary outer contextRun)
+    (complete : boundary.trace.result.nindices = nindices) :
+    Nonempty boundary.Terminal := by
+  rcases boundary with
+    ⟨boundarySource, boundaryFuel, boundaryTrace, boundarySource',
+      boundarySourceTr, boundaryParameters, boundaryParameterTr,
+      boundaryParametersLength, boundaryParamsSize,
+      boundaryParameterSourcesEq, boundaryPrefixPath, boundaryLocalState,
+      boundaryResultEq, boundaryComparisons⟩
+  cases boundaryTrace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail =>
+    omega
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail =>
+    omega
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail =>
+    have tailBound := tail.result_nindices_ge
+    simp only [AddInductive.FamilyTypeParameterComparisonTrace.result]
+      at complete
+    omega
+  | terminal stats context source i nindices fuel notForall
+      parametersComplete =>
+    exact ⟨{ notForall := notForall }⟩
 
 /-- At `i = nparams`, the retained family trace is either the next exact index
 Pi or its exact terminal continuation.  Fresh/shared-parameter constructors
@@ -4413,7 +4471,9 @@ inductive CandidateAnnotationSpine (env : VEnv) (Us : List Name) :
     {candidateContext : AddInductive.Context} → {source : Expr} →
       AddInductive.CandidateExprTrace candidateContext source →
       VLCtx → VLCtx → List VExpr → Prop where
-  | terminal : CandidateAnnotationSpine env Us
+  | terminal
+      (node : CandidateNodeRun env Us Δ context source inferred result
+        source' result' inferred') : CandidateAnnotationSpine env Us
       (.terminal context source inferred result checked normalized) Δ Δ []
   | forallE
       (domainCandidate : AddInductive.CandidateExprTrace context domain)
@@ -4447,6 +4507,8 @@ structure CandidateAnnotationCursor (env : VEnv) (Us : List Name)
   shape : Δ.FVarLamOnly
   stored : trace.storedSpine = true
   annotations : trace.validationAnnotations
+  resultLevel : Level
+  terminal_eq : trace.terminalResult = .sort resultLevel
   terminal_notForall : trace.terminalResult.isForall = false
 
 /-- The exact suffix selected by a structural annotation position, together
@@ -4462,6 +4524,7 @@ structure CandidateAnnotationSpine.PositionSuffix
   root_eq : position.root = cursor.trace.rootWhnf
   context_eq : cursor.Δ.toCtx =
     (domains.take count).reverse ++ Δ.toCtx
+  domains_eq : cursor.domains = domains.drop count
   fvars_eq : cursor.Δ.fvars.map Expr.fvar =
     (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
   fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
@@ -4477,7 +4540,7 @@ theorem CandidateAnnotationSpine.positionSuffix
     (initialShape : Δ.FVarLamOnly)
     (stored : trace.storedSpine = true)
     (annotations : trace.validationAnnotations)
-    (terminalNotForall : trace.terminalResult.isForall = false)
+    (terminalEq : trace.terminalResult = .sort resultLevel)
     {count : Nat} (position : trace.AnnotationAt count) :
     Nonempty (spine.PositionSuffix position) := by
   induction position generalizing Δ terminalΔ domains with
@@ -4493,9 +4556,12 @@ theorem CandidateAnnotationSpine.positionSuffix
           shape := initialShape
           stored := stored
           annotations := annotations
-          terminal_notForall := terminalNotForall }
+          resultLevel := resultLevel
+          terminal_eq := terminalEq
+          terminal_notForall := by rw [terminalEq]; rfl }
         root_eq := rfl
         context_eq := rfl
+        domains_eq := rfl
         fvars_eq := rfl
         fuel_eq := rfl }⟩
   | succ bodyCandidate position ih =>
@@ -4505,7 +4571,7 @@ theorem CandidateAnnotationSpine.positionSuffix
             Bool.and_eq_true] at stored
           rcases annotations with ⟨annotationMatch, tailAnnotations⟩
           obtain ⟨suffix⟩ := ih tail (.cons initialShape) stored.2
-            tailAnnotations terminalNotForall
+            tailAnnotations terminalEq
           exact ⟨{
             cursor := suffix.cursor
             root_eq := suffix.root_eq
@@ -4513,6 +4579,8 @@ theorem CandidateAnnotationSpine.positionSuffix
               simpa only [List.take_succ_cons, List.reverse_cons,
                 List.singleton_append, List.append_assoc, VLCtx.toCtx] using
                 suffix.context_eq
+            domains_eq := by
+              simpa only [List.drop_succ_cons] using suffix.domains_eq
             fvars_eq := by
               simpa [VLCtx.fvars, List.append_assoc,
                 AddInductive.Context.freshExpr,
@@ -5012,6 +5080,38 @@ def FamilyParameterIndexBoundary.IndexDomainChain.endpoint
       boundary := boundary }
   | .step _ _ tail => tail.endpoint
 
+/-- Number of exact validator index constructors consumed by a chain. -/
+def FamilyParameterIndexBoundary.IndexDomainChain.length
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun} :
+    boundary.IndexDomainChain → Nat
+  | .done => 0
+  | .step _ _ tail => tail.length + 1
+
+/-- The endpoint counter is the initial counter plus the exact number of
+consumed validator index constructors. -/
+theorem FamilyParameterIndexBoundary.IndexDomainChain.endpoint_nindices
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (chain : boundary.IndexDomainChain) :
+    chain.endpoint.nindices = nindices + chain.length := by
+  induction chain with
+  | done => rfl
+  | step run advance tail ih =>
+    simp only [FamilyParameterIndexBoundary.IndexDomainChain.endpoint,
+      FamilyParameterIndexBoundary.IndexDomainChain.length]
+    omega
+
 /-- Index traversal preserves the semantic environment stored by the initial
 verified context. -/
 theorem FamilyParameterIndexBoundary.IndexDomainChain.endpoint_venv
@@ -5062,6 +5162,25 @@ theorem FamilyParameterIndexBoundary.IndexDomainChain.endpoint_result_eq
       simpa only [FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
         boundary.result_eq
   | step run advance tail ih => exact ih.trans advance.result_eq
+
+/-- A chain which accounts for the outer telescope's complete final index
+counter has reached the exact terminal boundary.  This turns endpoint shape
+into a purely arithmetic producer obligation. -/
+theorem
+    FamilyParameterIndexBoundary.IndexDomainChain.endpoint_terminal_of_result_nindices_eq
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    (chain : boundary.IndexDomainChain)
+    (complete : outer.result.nindices = nindices + chain.length) :
+    Nonempty chain.endpoint.boundary.Terminal := by
+  apply chain.endpoint.boundary.terminal_of_result_nindices_eq
+  rw [chain.endpoint_result_eq, chain.endpoint_nindices]
+  exact complete
 
 /-- Reindex the endpoint's verified context onto the original family
 telescope result once the exact endpoint has been shown terminal. -/
@@ -5149,6 +5268,40 @@ structure FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment
   root_reference_lift : VLCtx.FVLift' rootBase reference 0 rootLift 0
   current_reference : VLCtx.IsDefEq env Us.length
     chain.endpoint.contextRun.context.vlctx reference
+  sort : VLevel
+  endpoint_sort : env.IsDefEqU Us.length
+    chain.endpoint.contextRun.context.vlctx.toCtx
+    chain.endpoint.boundary.source' (.sort sort)
+
+/-- A Theory endpoint definitionally equal to a sort cannot translate a
+remaining kernel Pi.  Hence the aligned chain has reached the exact terminal
+constructor of the validator's retained index suffix. -/
+theorem
+    FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment.terminal
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context rootSource i nindices rootFuel}
+    {contextRun : CandidateContextRun context}
+    {boundary : FamilyParameterIndexBoundary outer contextRun}
+    {chain : boundary.IndexDomainChain}
+    {env : VEnv} {Us : List Name} {terminalΔ rootBase : VLCtx}
+    (alignment : chain.EndpointAlignment env Us terminalΔ rootBase)
+    (henv : VEnv.WF env) :
+    Nonempty chain.endpoint.boundary.Terminal := by
+  rcases chain.endpoint.boundary.progress with sourceForall | terminal
+  · obtain ⟨translation⟩ :=
+      chain.endpoint.boundary.indexDomainTranslation_of_forall sourceForall
+    have impossible : env.IsDefEqU Us.length
+        chain.endpoint.contextRun.context.vlctx.toCtx
+        (.sort alignment.sort)
+        (.forallE translation.domain' translation.body') := by
+      rw [← translation.source'_eq]
+      exact alignment.endpoint_sort.symm
+    exact (VEnv.IsDefEqU.sort_forallE_inv henv
+      alignment.current_reference.wf.toCtx impossible).elim
+  · exact terminal
 
 /-- Lowered data needed to extend an alpha cursor after one exact domain. -/
 structure FamilyParameterIndexBoundary.IndexDomainAlphaPreparation
@@ -5312,6 +5465,69 @@ theorem FamilyParameterIndexBoundary.IndexDomainRun.alphaPreparation
     base_consumed_candidate := baseConsumedCandidate
     current_consumed_reference := currentConsumedReference }⟩
 
+/-- Compare strict translations of alpha-aligned kernel expressions after
+lowering the validator expression to the shared base and re-inserting the
+validator-owned reference locals. -/
+private theorem alphaLift
+    {env : VEnv} {Us : List Name}
+    {current base reference candidate : VLCtx} {lift : Lift}
+    {currentSource candidateSource : Lean.Expr}
+    {currentTarget candidateTarget : VExpr}
+    (henv : VEnv.WF env)
+    (currentWF : VLCtx.WF env Us.length current)
+    (currentNoBV : current.NoBV)
+    (currentTr : TrExprS env Us current currentSource currentTarget)
+    (baseShape : base.FVarLamOnly)
+    (candidateShape : candidate.FVarLamOnly)
+    (relation : VLCtx.FVarAlpha env Us.length base candidate)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length current reference)
+    (sourceScope : currentSource.FVarsIn (· ∈ base.fvars))
+    (candidateTr : TrExprS env Us candidate candidateSource candidateTarget)
+    (sourceAlpha : Lean.Expr.abstractFVars base currentSource =
+      Lean.Expr.abstractFVars candidate candidateSource) :
+    env.IsDefEqU Us.length current.toCtx currentTarget
+      (candidateTarget.lift' lift) := by
+  have referenceWF : VLCtx.WF env Us.length reference :=
+    (currentReference.symm henv.ordered).wf
+  have sourceClosed : Closed currentSource 0 := by
+    simpa only [currentNoBV] using currentTr.closed
+  obtain ⟨baseTarget, baseTr⟩ :=
+    currentTr.weakFV'_inv henv referenceLift currentReference sourceClosed
+      sourceScope
+  have baseCandidate : env.IsDefEqU Us.length base.toCtx
+      baseTarget candidateTarget :=
+    baseTr.uniqAlpha henv relation baseShape candidateShape candidateTr
+      sourceAlpha
+  have baseAtReference :=
+    baseTr.weakFV' henv.ordered referenceLift referenceWF
+  have currentBase := currentTr.uniq henv currentReference baseAtReference
+  have candidateAtReference :=
+    baseCandidate.weak' henv.ordered referenceLift.toCtx
+  have candidateAtCurrent := candidateAtReference.defeqDFC henv.ordered
+    ((currentReference.symm henv.ordered).defeqCtx)
+  exact currentBase.trans henv currentWF.toCtx (by
+    simpa using candidateAtCurrent)
+
+/-- Transport a Theory equality from the producer's alpha context through
+the same base/reference embedding into the current validator context. -/
+private theorem transportAlphaLift
+    {env : VEnv} {Us : List Name}
+    {current base reference candidate : VLCtx} {lift : Lift}
+    {left right : VExpr}
+    (henv : VEnv.WF env)
+    (relation : VLCtx.FVarAlpha env Us.length base candidate)
+    (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length current reference)
+    (proof : env.IsDefEqU Us.length candidate.toCtx left right) :
+    env.IsDefEqU Us.length current.toCtx
+      (left.lift' lift) (right.lift' lift) := by
+  have atBase := proof.defeqDFC henv.ordered
+    (relation.defeqCtx.symm henv.ordered)
+  have atReference := atBase.weak' henv.ordered referenceLift.toCtx
+  exact atReference.defeqDFC henv.ordered
+    ((currentReference.symm henv.ordered).defeqCtx)
+
 /-- Consume every Pi node in an exact producer annotation cursor through the
 validator's retained index trace.
 
@@ -5347,27 +5563,56 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
     (candidateDepth : cursor.candidateContext.fuel.recDepth =
       whnfFuel + 1) :
     Nonempty (Sigma fun chain : boundary.IndexDomainChain =>
-      chain.EndpointAlignment env Us terminalΔ rootBase) := by
+      { _alignment : chain.EndpointAlignment env Us terminalΔ rootBase //
+        chain.length = cursor.domains.length }) := by
   rcases cursor with ⟨candidateContext, candidateSource, candidateTrace,
     candidateΔ, candidateDomains, spine, candidateShape, stored,
-    annotations, terminalNotForall⟩
+    annotations, resultLevel, terminalEq, terminalNotForall⟩
   induction spine generalizing nparams stats context rootSource i nindices
       rootFuel outer contextRun boundary base reference lift rootLift with
-  | terminal =>
-      let chain : boundary.IndexDomainChain := .done
-      exact ⟨⟨chain, {
-        base := base
-        reference := reference
-        lift := lift
-        rootLift := rootLift
-        base_shape := baseShape
-        terminal_shape := candidateShape
-        relation := relation
-        reference_lift := referenceLift
-        root_reference_lift := rootReferenceLift
-        current_reference := by
-          simpa only [chain, FamilyParameterIndexBoundary.IndexDomainChain.endpoint]
-            using currentReference }⟩⟩
+  | terminal node =>
+      have henv : VEnv.WF env := by
+        simpa only [venv_eq] using contextRun.context.Ewf
+      have currentWF : VLCtx.WF env Us.length
+          contextRun.context.vlctx := by
+        simpa only [venv_eq, lparams_eq] using contextRun.context.Δwf
+      have currentNoBV : contextRun.context.vlctx.NoBV :=
+        contextRun.context.mlctx.noBV
+      have currentSourceTr : TrExprS env Us contextRun.context.vlctx
+          boundary.source boundary.source' := by
+        simpa only [VContext.TrExprS, venv_eq, lparams_eq] using
+          boundary.source_tr
+      have candidateResultTr := node.whnf.rhs_tr
+      simp only [AddInductive.CandidateExprTrace.terminalResult]
+        at terminalEq
+      rw [terminalEq] at candidateResultTr
+      cases candidateResultTr with
+      | sort level_tr =>
+        have endpointSort := alphaLift henv currentWF currentNoBV
+          currentSourceTr baseShape candidateShape relation referenceLift
+          currentReference sourceScope (by exact node.whnf.rhs_tr) (by
+            simpa only [AddInductive.CandidateExprTrace.rootWhnf] using
+              sourceAlpha)
+        let chain : boundary.IndexDomainChain := .done
+        exact ⟨⟨chain, {
+          base := base
+          reference := reference
+          lift := lift
+          rootLift := rootLift
+          base_shape := baseShape
+          terminal_shape := candidateShape
+          relation := relation
+          reference_lift := referenceLift
+          root_reference_lift := rootReferenceLift
+          current_reference := by
+            simpa only [chain,
+              FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+              currentReference
+          sort := _
+          endpoint_sort := by
+            simpa only [chain,
+              FamilyParameterIndexBoundary.IndexDomainChain.endpoint,
+              VExpr.lift'] using endpointSort }, rfl⟩⟩
   | @forallE candidateContext candidateDomain candidateName
       candidateBinderInfo candidateBody candidateΔ terminalΔ candidateSource
       candidateInferred candidateFresh annotationsNode annotationsEq
@@ -5460,101 +5705,152 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
               annotationsNode.consumed.fvarsList),
             VLocalDecl.vlam storedDomain) :: snapshot.Δ) := by
         exact .cons candidateShape
+      have currentSourceScope := sourceScope
+      rw [run.translation.source_eq] at currentSourceScope
+      have validatorBodyScope : run.translation.body.FVarsIn
+          (· ∈ base.fvars) := currentSourceScope.2
+      have freshBase : context.freshFVarId ∉ base.fvars := by
+        intro present
+        have presentReference : context.freshFVarId ∈ reference.fvars :=
+          referenceLift.fvars_sublist.subset present
+        have presentCurrent : context.freshFVarId ∈
+            contextRun.context.vlctx.fvars := by
+          rw [currentReference.fvars]
+          exact presentReference
+        exact (pushedWF.2.1 _ _ rfl).1 presentCurrent
+      have validatorBodyAvoid : run.translation.body.FVarsIn
+          (· ≠ context.freshFVarId) := by
+        exact validatorBodyScope.mono (by
+          intro fv member equal
+          subst fv
+          exact freshBase member)
+      have freshCandidate : candidateContext.freshFVarId ∉
+          snapshot.Δ.fvars := by
+        exact (candidateTailWF.2.1 _ _ rfl).1
+      have snapshotRoot := snapshot.root_eq
+      simp only [Lean.Expr.forallE.injEq] at snapshotRoot
+      obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
+        _snapshotBinder⟩ := snapshotRoot
+      have candidateBodyScope : candidateBody.FVarsIn
+          (· ∈ snapshot.Δ.fvars) := by
+        simpa only [snapshotBody] using snapshot.body_fvars
+      have candidateBodyAvoid : candidateBody.FVarsIn
+          (· ≠ candidateContext.freshFVarId) := by
+        exact candidateBodyScope.mono (by
+          intro fv member equal
+          subst fv
+          exact freshCandidate member)
+      have rootAlpha : Lean.Expr.abstractFVars base
+          (.forallE run.translation.name run.translation.domain
+            run.translation.body run.translation.binderInfo) =
+          Lean.Expr.abstractFVars snapshot.Δ
+            (.forallE candidateName candidateDomain candidateBody
+              candidateBinderInfo) := by
+        calc
+          _ = Lean.Expr.abstractFVars base boundary.source :=
+            congrArg (Lean.Expr.abstractFVars base)
+              run.translation.source_eq.symm
+          _ = Lean.Expr.abstractFVars snapshot.Δ
+              (AddInductive.CandidateExprTrace.forallE candidateContext
+                candidateSource candidateInferred candidateName
+                candidateDomain candidateBody candidateBinderInfo
+                candidateFresh annotationsNode annotationsEq
+                candidateChecked candidateNormalized domainCandidate
+                candidateTailTrace).rootWhnf := sourceAlpha
+          _ = _ := rfl
+      rw [Lean.Expr.abstractFVars_forallE,
+        Lean.Expr.abstractFVars_forallE] at rootAlpha
+      simp only [Lean.Expr.forallE.injEq] at rootAlpha
+      obtain ⟨_alphaName, _alphaDomain, bodyAlpha,
+        _alphaBinder⟩ := rootAlpha
+      have preWhnfAlpha : Lean.Expr.abstractFVars nextBase
+          (run.translation.body.instantiate1 context.freshExpr) =
+          Lean.Expr.abstractFVars
+            ((some (candidateContext.freshFVarId,
+              annotationsNode.consumed.fvarsList),
+              .vlam storedDomain) :: snapshot.Δ)
+            (candidateBody.instantiate1 candidateContext.freshExpr) := by
+        calc
+          _ = Lean.Expr.abstractFVarsAux 1 base.fvars
+              run.translation.body := by
+            exact Lean.Expr.abstractFVars_cons_instantiate1
+              validatorBodyAvoid
+          _ = Lean.Expr.abstractFVarsAux 1 snapshot.Δ.fvars
+              candidateBody := bodyAlpha
+          _ = _ := (Lean.Expr.abstractFVars_cons_instantiate1
+            candidateBodyAvoid).symm
       cases tail with
-      | terminal =>
-          let tailChain : advance.toBoundary.IndexDomainChain := .done
-          let chain : boundary.IndexDomainChain :=
-            .step run advance tailChain
-          exact ⟨⟨chain, {
-            base := nextBase
-            reference := nextReference
-            lift := .consN lift 1
-            rootLift := .skipN rootLift 1
-            base_shape := nextBaseShape
-            terminal_shape := nextCandidateShape
-            relation := nextRelation
-            reference_lift := nextReferenceLift
-            root_reference_lift := nextRootReferenceLift
-            current_reference := by
-              simpa only [chain, tailChain,
-                FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
-                nextCurrentReference }⟩⟩
+      | terminal node =>
+          have validatorInputScope :
+              (run.translation.body.instantiate1
+                context.freshExpr).FVarsIn (· ∈ nextBase.fvars) := by
+            have bodyScope : run.translation.body.FVarsIn
+                (· ∈ nextBase.fvars) :=
+              validatorBodyScope.mono (by
+                intro fv member
+                simp only [nextBase, VLCtx.fvars]
+                exact .tail _ member)
+            have freshScope : context.freshExpr.FVarsIn
+                (· ∈ nextBase.fvars) := by
+              simp [AddInductive.Context.freshExpr, nextBase, VLCtx.fvars,
+                FVarsIn]
+            simpa only [Lean.Expr.instantiate1_eq] using
+              bodyScope.instantiate1 freshScope
+          have validatorInputTr : TrExprS env Us
+              run.pushContext.context.vlctx
+              (run.translation.body.instantiate1 context.freshExpr)
+              advance.body' := by
+            simpa only [VContext.TrExprS, pushedVenv, pushedLparams] using
+              advance.body_tr
+          have currentNoBV : run.pushContext.context.vlctx.NoBV :=
+            run.pushContext.context.mlctx.noBV
+          have inputAlpha := alphaLift henv pushedWF currentNoBV
+            validatorInputTr nextBaseShape nextCandidateShape nextRelation
+            nextReferenceLift nextCurrentReference validatorInputScope
+            node.whnf.lhs_tr preWhnfAlpha
+          obtain ⟨validatorWhnf⟩ := advance.whnf
+          have candidateResultTr := node.whnf.rhs_tr
+          simp only [AddInductive.CandidateExprTrace.terminalResult]
+            at terminalEq
+          rw [terminalEq] at candidateResultTr
+          cases candidateResultTr with
+          | sort level_tr =>
+            have candidateWhnf := transportAlphaLift henv nextRelation
+              nextReferenceLift nextCurrentReference node.whnf.isDefEqU
+            have inputToSort := inputAlpha.trans henv pushedWF.toCtx
+              candidateWhnf
+            have validatorWhnfDef : env.IsDefEqU Us.length
+                run.pushContext.context.vlctx.toCtx advance.body'
+                advance.view' := by
+              simpa only [pushedVenv, pushedLparams] using
+                validatorWhnf.isDefEqU
+            have viewToSort := validatorWhnfDef.symm.trans henv
+              pushedWF.toCtx inputToSort
+            let tailChain : advance.toBoundary.IndexDomainChain := .done
+            let chain : boundary.IndexDomainChain :=
+              .step run advance tailChain
+            exact ⟨⟨chain, {
+              base := nextBase
+              reference := nextReference
+              lift := .consN lift 1
+              rootLift := .skipN rootLift 1
+              base_shape := nextBaseShape
+              terminal_shape := nextCandidateShape
+              relation := nextRelation
+              reference_lift := nextReferenceLift
+              root_reference_lift := nextRootReferenceLift
+              current_reference := by
+                simpa only [chain, tailChain,
+                  FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+                  nextCurrentReference
+              sort := _
+              endpoint_sort := by
+                simpa only [chain, tailChain,
+                  FamilyParameterIndexBoundary.IndexDomainChain.endpoint,
+                  FamilyParameterIndexBoundary.IndexDomainAdvance.toBoundary,
+                  VExpr.lift'] using viewToSort }, rfl⟩⟩
       | forallE nextDomainCandidate nextBodyCandidate nextStoredDomain
           nextDomains nextHead nextTail =>
-          have currentSourceScope := sourceScope
-          rw [run.translation.source_eq] at currentSourceScope
-          have validatorBodyScope : run.translation.body.FVarsIn
-              (· ∈ base.fvars) := currentSourceScope.2
-          have freshBase : context.freshFVarId ∉ base.fvars := by
-            intro present
-            have presentReference : context.freshFVarId ∈ reference.fvars :=
-              referenceLift.fvars_sublist.subset present
-            have presentCurrent : context.freshFVarId ∈
-                contextRun.context.vlctx.fvars := by
-              rw [currentReference.fvars]
-              exact presentReference
-            exact (pushedWF.2.1 _ _ rfl).1 presentCurrent
-          have validatorBodyAvoid : run.translation.body.FVarsIn
-              (· ≠ context.freshFVarId) := by
-            exact validatorBodyScope.mono (by
-              intro fv member equal
-              subst fv
-              exact freshBase member)
-          have freshCandidate : candidateContext.freshFVarId ∉
-              snapshot.Δ.fvars := by
-            exact (candidateTailWF.2.1 _ _ rfl).1
-          have snapshotRoot := snapshot.root_eq
-          simp only [Lean.Expr.forallE.injEq] at snapshotRoot
-          obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
-            _snapshotBinder⟩ := snapshotRoot
-          have candidateBodyScope : candidateBody.FVarsIn
-              (· ∈ snapshot.Δ.fvars) := by
-            simpa only [snapshotBody] using snapshot.body_fvars
-          have candidateBodyAvoid : candidateBody.FVarsIn
-              (· ≠ candidateContext.freshFVarId) := by
-            exact candidateBodyScope.mono (by
-              intro fv member equal
-              subst fv
-              exact freshCandidate member)
-          have rootAlpha : Lean.Expr.abstractFVars base
-              (.forallE run.translation.name run.translation.domain
-                run.translation.body run.translation.binderInfo) =
-              Lean.Expr.abstractFVars snapshot.Δ
-                (.forallE candidateName candidateDomain candidateBody
-                  candidateBinderInfo) := by
-            calc
-              _ = Lean.Expr.abstractFVars base boundary.source :=
-                congrArg (Lean.Expr.abstractFVars base)
-                  run.translation.source_eq.symm
-              _ = Lean.Expr.abstractFVars snapshot.Δ
-                  (AddInductive.CandidateExprTrace.forallE candidateContext
-                    candidateSource candidateInferred candidateName
-                    candidateDomain candidateBody candidateBinderInfo
-                    candidateFresh annotationsNode annotationsEq
-                    candidateChecked candidateNormalized domainCandidate
-                    candidateTailTrace).rootWhnf := sourceAlpha
-              _ = _ := rfl
-          rw [Lean.Expr.abstractFVars_forallE,
-            Lean.Expr.abstractFVars_forallE] at rootAlpha
-          simp only [Lean.Expr.forallE.injEq] at rootAlpha
-          obtain ⟨_alphaName, _alphaDomain, bodyAlpha,
-            _alphaBinder⟩ := rootAlpha
-          have preWhnfAlpha : Lean.Expr.abstractFVars nextBase
-              (run.translation.body.instantiate1 context.freshExpr) =
-              Lean.Expr.abstractFVars
-                ((some (candidateContext.freshFVarId,
-                  annotationsNode.consumed.fvarsList),
-                  .vlam storedDomain) :: snapshot.Δ)
-                (candidateBody.instantiate1 candidateContext.freshExpr) := by
-            calc
-              _ = Lean.Expr.abstractFVarsAux 1 base.fvars
-                  run.translation.body := by
-                exact Lean.Expr.abstractFVars_cons_instantiate1
-                  validatorBodyAvoid
-              _ = Lean.Expr.abstractFVarsAux 1 snapshot.Δ.fvars
-                  candidateBody := bodyAlpha
-              _ = _ := (Lean.Expr.abstractFVars_cons_instantiate1
-                candidateBodyAvoid).symm
           have tailStored := stored.2
           simp only [AddInductive.CandidateExprTrace.storedSpine,
             Bool.and_eq_true] at tailStored
@@ -5620,13 +5916,14 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
               run.pushContext.context.venv = env := pushedVenv
           have nextValidatorLparams :
               run.pushContext.context.lparams = Us := pushedLparams
-          obtain ⟨⟨tailChain, tailAlignment⟩⟩ :=
+          obtain ⟨⟨tailChain, tailAlignment, tailLength⟩⟩ :=
             ih terminalWF advance.toBoundary
             nextValidatorVenv nextValidatorLparams nextBaseShape
             nextReferenceLift nextRootReferenceLift nextCurrentReference
             nextSourceScope
             nextValidatorDepth nextCandidateShape stored.2 tailAnnotations
-            terminalNotForall nextRelation nextSourceAlpha nextCandidateDepth
+            terminalEq terminalNotForall nextRelation nextSourceAlpha
+            nextCandidateDepth
           let chain : boundary.IndexDomainChain :=
             .step run advance tailChain
           exact ⟨⟨chain, {
@@ -5642,7 +5939,16 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
             current_reference := by
               simpa only [chain,
                 FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
-                tailAlignment.current_reference }⟩⟩
+                tailAlignment.current_reference
+            sort := tailAlignment.sort
+            endpoint_sort := by
+              simpa only [chain,
+                FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+                tailAlignment.endpoint_sort }, by
+              simpa only [chain,
+                FamilyParameterIndexBoundary.IndexDomainChain.length,
+                List.length_cons] using
+                congrArg (fun length => length + 1) tailLength⟩⟩
 
 /-- Compatibility projection of the endpoint-aligned traversal. -/
 theorem CandidateAnnotationCursor.indexDomainChain
@@ -5672,7 +5978,7 @@ theorem CandidateAnnotationCursor.indexDomainChain
     (candidateDepth : cursor.candidateContext.fuel.recDepth =
       whnfFuel + 1) :
     Nonempty boundary.IndexDomainChain := by
-  obtain ⟨⟨chain, _alignment⟩⟩ :=
+  obtain ⟨⟨chain, _alignment, _length⟩⟩ :=
     cursor.indexDomainChainAligned terminalWF boundary venv_eq lparams_eq
       baseShape relation referenceLift referenceLift currentReference
       sourceScope sourceAlpha whnfFuel validatorDepth candidateDepth
@@ -5777,6 +6083,22 @@ info: 'Lean4Lean.TypeChecker.CandidateAnnotationCursor.indexDomainChain' depends
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateAnnotationCursor.indexDomainChain
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment.terminal' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment.terminal
 
 /--
 info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.indexDomainRun_of_alpha' depends on axioms: [propext,
@@ -6538,7 +6860,7 @@ private theorem CandidateExprRun.annotationSpineContextAux
     change contextRun.context.vlctx.toCtx = Δ.toCtx
     rw [vlctx_eq]
     rw [terminalVlctx]
-    exact .terminal
+    exact .terminal node
   | @forallE domain context name binderInfo Δ source inferred body
       source' domain' body' inferred' domainView' domainInferred'
       storedDomain' bodyΔ storedBody' bodyView' bodyInferred' u v fresh

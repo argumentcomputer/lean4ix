@@ -5253,6 +5253,41 @@ theorem
   exact staging.firstIndexDomainRun_of_parameterTelescopeDefEq raw prefixes
     (staging.parameterTelescopeDefEq raw prefixes context_lctx_eq)
 
+/-- The second producer annotation spine retains the exact terminal sort
+selected by the family normalization run. -/
+theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_sort
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    ∃ resultLevel,
+      annotation.secondCandidate.familyType.type.trace.terminalResult =
+        .sort resultLevel := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have terminals := normalization.familyTerminals
+  rw [← normalization.families.produced.familyTypes_eq] at terminals
+  have candidatesEq := annotation.candidates_eq
+  change normalization.families.candidates =
+    .cons annotation.firstCandidate
+      (.cons annotation.secondCandidate annotation.remainingCandidates)
+    at candidatesEq
+  rw [candidatesEq] at terminals
+  simp only [AddInductive.CandidateList.familyTypes] at terminals
+  cases terminals with
+  | cons firstTerminal remainingTerminals =>
+    cases remainingTerminals with
+    | cons secondTerminal remainingTerminals =>
+      exact ⟨_, secondTerminal⟩
+
 /-- The producer annotation spine stops at the same non-Pi result recorded by
 the family normalization run. -/
 theorem ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall
@@ -5309,6 +5344,8 @@ structure
     (raw : staging.annotation.RawFirstIndexDomain) where
   prefixes : staging.RawFirstIndexPrefixContexts raw
   chain : staging.boundary.IndexDomainChain
+  chain_length : chain.length =
+    (staging.annotation.storedBinders.drop source.nparams).length
   alignment : chain.EndpointAlignment env Us
     staging.annotation.terminalRun.context.vlctx prefixes.firstParameterΔ
 
@@ -5565,10 +5602,10 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
     Nonempty (staging.IndexDomainCompletion raw) := by
   obtain ⟨prefixes⟩ :=
     staging.rawFirstIndexPrefixContexts raw context_lctx_eq
-  have terminalNotForall := staging.annotation.terminal_notForall
+  obtain ⟨resultLevel, terminalEq⟩ := staging.annotation.terminal_sort
   obtain ⟨suffix⟩ := staging.annotation.annotation_spine.positionSuffix
     .nil staging.annotation.stored_spine
-    staging.annotation.validation_annotations terminalNotForall
+    staging.annotation.validation_annotations terminalEq
     prefixes.position
   have cursorContext : suffix.cursor.Δ.toCtx =
       (staging.annotation.storedBinders.take source.nparams).reverse := by
@@ -5649,7 +5686,38 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
   exact ⟨{
     prefixes := prefixes
     chain := chain
-    alignment := alignment }⟩
+    chain_length := alignment.property.trans
+      (congrArg List.length suffix.domains_eq)
+    alignment := alignment.val }⟩
+
+/-- The complete producer suffix reaches the validator's exact terminal node,
+so the aligned endpoint is immediately usable as the source-order family
+continuation. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.terminalIndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (staging.TerminalIndexDomainCompletion raw) := by
+  obtain ⟨completion⟩ :=
+    staging.indexDomainCompletion raw context_lctx_eq
+  have henv : VEnv.WF env := by
+    simpa only [staging.current_venv] using staging.currentRun.context.Ewf
+  obtain ⟨terminal⟩ := completion.alignment.terminal henv
+  exact ⟨{
+    toIndexDomainCompletion := completion
+    terminal := terminal }⟩
 
 /-- Compatibility projection of the endpoint-aligned second-family run. -/
 theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain
@@ -5670,6 +5738,15 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
     Nonempty staging.boundary.IndexDomainChain := by
   obtain ⟨completion⟩ := staging.indexDomainCompletion raw context_lctx_eq
   exact ⟨completion.chain⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_sort' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_sort
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.terminal_notForall' depends on axioms: [propext,
@@ -5713,6 +5790,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.terminalIndexDomainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.terminalIndexDomainCompletion
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomainChain' depends on axioms: [propext,
