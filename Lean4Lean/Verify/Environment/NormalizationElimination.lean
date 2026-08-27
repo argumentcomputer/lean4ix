@@ -6482,6 +6482,79 @@ theorem HeadStaging.parameterTelescopeDefEq
     (.nil) iteration.origin_reference_lift currentReference
   simpa only [VLCtx.toCtx] using evidence
 
+/-- Relocate the annotation-consumed shared-parameter equality onto the
+actual normalized views of the first family and an arbitrary recursive
+family.  Both sides pass through their exact raw telescope; no kernel
+definitional equality is reinterpreted as syntactic equality. -/
+theorem HeadStaging.viewParameterTelescopeDefEq
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (head : iteration.HeadStaging)
+    (parameter : HeadParameterBoundary head)
+    (candidate : HeadCandidateParameterSuffix head)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view)
+      (VExpr.telN source.nparams head.position.semantic.type.view) := by
+  have currentVenv : head.currentRun.context.venv = env :=
+    iteration.cursor.headContextRun_venv head.continuation head.selected
+  have henv : VEnv.WF env := by
+    simpa only [currentVenv] using head.currentRun.context.Ewf
+  have firstBound :=
+    staging.annotation.first_nparams_le_spineLength context_lctx_eq
+  have firstRawBound : source.nparams ≤
+      (VInductDecl.ctorFields staging.annotation.firstRaw.type).length := by
+    rw [← staging.annotation.firstSpineLength_eq]
+    exact firstBound
+  have firstRawStored :=
+    staging.annotation.firstTelescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstRawBound]
+    at firstRawStored
+  obtain ⟨firstInferred, firstRecursive⟩ :=
+    staging.annotation.firstSemantic.type.recursive
+  obtain ⟨firstResultType, firstFullView⟩ :=
+    firstRecursive.spineEvidence staging.annotation.first_stored_spine
+  have firstRawView := firstFullView.telescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstBound,
+    telN_take_of_le staging.annotation.firstSemantic.type.view firstBound]
+    at firstRawView
+  have firstStoredView : TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view) :=
+    (firstRawStored.symm henv trivial).trans henv trivial firstRawView
+  have currentRawBound : source.nparams ≤
+      (VInductDecl.ctorFields
+        iteration.cursor.semantics.headPosition.raw.type).length := by
+    rw [← iteration.generationShapes.head.spineLength_eq_ctorFields]
+    exact head.nparams_le_spineLength
+  have currentRawStored :=
+    iteration.annotations.head.telescope.take source.nparams
+  rw [telN_take_of_le
+    iteration.cursor.semantics.headPosition.raw.type currentRawBound]
+    at currentRawStored
+  obtain ⟨currentResultType, currentFullView⟩ :=
+    iteration.annotations.head.recursive.spineEvidence
+      iteration.generationShapes.head.storedSpine
+  have currentRawView := currentFullView.telescope.take source.nparams
+  rw [telN_take_of_le iteration.cursor.semantics.headPosition.raw.type
+      head.nparams_le_spineLength,
+    telN_take_of_le iteration.cursor.semantics.headPosition.semantic.type.view
+      head.nparams_le_spineLength] at currentRawView
+  have currentStoredView : TypeChecker.TelDefEqEvidence env Us.length []
+      (iteration.annotations.head.storedBinders.take source.nparams)
+      (VExpr.telN source.nparams
+        iteration.cursor.semantics.headPosition.semantic.type.view) :=
+    (currentRawStored.symm henv trivial).trans henv trivial currentRawView
+  have storedParameters :=
+    head.parameterTelescopeDefEq parameter candidate context_lctx_eq
+  change TypeChecker.TelDefEqEvidence env Us.length []
+    (VExpr.telN source.nparams staging.annotation.firstSemantic.type.view)
+    (VExpr.telN source.nparams
+      iteration.cursor.semantics.headPosition.semantic.type.view)
+  exact ((firstStoredView.symm henv trivial).trans henv trivial
+      storedParameters).trans henv trivial currentStoredView
+
 /-- Uniform completed index suffix at an arbitrary recursive family head. -/
 structure HeadDomainCompletion
     {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
@@ -7096,6 +7169,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.parameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.viewParameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.viewParameterTelescopeDefEq
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.HeadStaging.domainCompletion' depends on axioms: [propext,

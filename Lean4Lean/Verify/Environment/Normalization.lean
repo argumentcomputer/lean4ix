@@ -6973,7 +6973,7 @@ private theorem candidateDefEqCtx_trans (henv : VEnv.WF env) :
       head₁₂ head₂₃')
 
 private theorem candidateTelDefEq_defeqDFC (henv : VEnv.WF env)
-    (hctx : env.IsDefEqCtx U [] Γ₁ Γ₂) :
+    (hctx : env.IsDefEqCtx U Γ₀ Γ₁ Γ₂) :
     ∀ {As As'}, env.TelDefEq U Γ₁ As As' →
       env.TelDefEq U Γ₂ As As'
   | [], [], _ => trivial
@@ -6981,6 +6981,59 @@ private theorem candidateTelDefEq_defeqDFC (henv : VEnv.WF env)
     ⟨⟨u, head.defeqDFC henv hctx⟩,
       candidateTelDefEq_defeqDFC henv
         (.succ hctx head.hasType.1) tail⟩
+
+private theorem candidateTelDefEq_symm (henv : VEnv.WF env) :
+    ∀ {Γ As As'}, OnCtx Γ (env.IsType U) →
+      env.TelDefEq U Γ As As' → env.TelDefEq U Γ As' As
+  | _, [], [], _, _ => trivial
+  | Γ, A :: As, A' :: As', contextWF,
+      ⟨⟨u, head⟩, tail⟩ => by
+    have headContext : env.IsDefEqCtx U Γ
+        (A :: Γ) (A' :: Γ) :=
+      .succ .zero head
+    have tailAtView : env.TelDefEq U (A' :: Γ) As As' :=
+      candidateTelDefEq_defeqDFC henv headContext tail
+    exact ⟨⟨u, head.symm⟩,
+      candidateTelDefEq_symm henv
+        ⟨contextWF, u, head.hasType.2⟩ tailAtView⟩
+
+private theorem candidateTelDefEq_trans (henv : VEnv.WF env) :
+    ∀ {Γ As Bs Cs}, OnCtx Γ (env.IsType U) →
+      env.TelDefEq U Γ As Bs → env.TelDefEq U Γ Bs Cs →
+        env.TelDefEq U Γ As Cs
+  | _, [], [], [], _, _, _ => trivial
+  | Γ, A :: As, B :: Bs, C :: Cs, contextWF,
+      ⟨⟨uAB, headAB⟩, tailAB⟩,
+      ⟨⟨uBC, headBC⟩, tailBC⟩ => by
+    have headContext : env.IsDefEqCtx U Γ
+        (A :: Γ) (B :: Γ) :=
+      .succ .zero headAB
+    have tailBCAtRaw : env.TelDefEq U (A :: Γ) Bs Cs :=
+      candidateTelDefEq_defeqDFC henv (headContext.symm henv) tailBC
+    have headAC : env.IsDefEq U Γ A C (.sort uAB) :=
+      VEnv.IsDefEq.trans_l henv contextWF headAB headBC
+    exact ⟨⟨uAB, headAC⟩,
+      candidateTelDefEq_trans henv
+        ⟨contextWF, uAB, headAB.hasType.1⟩ tailAB tailBCAtRaw⟩
+
+/-- Reverse a checker-produced dependent telescope equality, transporting
+each recursive tail into the preceding view context. -/
+theorem TelDefEqEvidence.symm
+    (run : TelDefEqEvidence env U Γ As As')
+    (henv : VEnv.WF env) (contextWF : OnCtx Γ (env.IsType U)) :
+    TelDefEqEvidence env U Γ As' As :=
+  .ofTelDefEq (candidateTelDefEq_symm henv contextWF run.telDefEq)
+
+/-- Compose checker-produced dependent telescope equalities.  The middle
+telescope is eliminated only after its recursive context has been
+transported to the first equality's raw side. -/
+theorem TelDefEqEvidence.trans
+    (left : TelDefEqEvidence env U Γ As Bs)
+    (henv : VEnv.WF env) (contextWF : OnCtx Γ (env.IsType U))
+    (right : TelDefEqEvidence env U Γ Bs Cs) :
+    TelDefEqEvidence env U Γ As Cs :=
+  .ofTelDefEq
+    (candidateTelDefEq_trans henv contextWF left.telDefEq right.telDefEq)
 
 private theorem candidateTelDefEq_append
     {env : VEnv} {U : Nat} {Γ : List VExpr} :
@@ -19945,6 +19998,72 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyAnnotationSpineList.tailExact' 
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilyAnnotationSpineList.tailExact
+
+/--
+info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.symm' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.TelDefEqEvidence.symm
+
+/--
+info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.trans' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.TelDefEqEvidence.trans
 
 
 end VInductDecl
