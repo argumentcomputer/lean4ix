@@ -7086,6 +7086,50 @@ theorem TelDefEqEvidence.rebuildForallNPrefix
   refine ⟨fullLevel, .ofDefEq ?_⟩
   simpa only [VExpr.forallN_telN_dropN] using full
 
+/-- Replace a leading Pi telescope when the original expression is already
+definitionally equal to a checker-selected source.
+
+For a nonempty prefix, the retained telescope length forces the selected
+source to be a Pi, so regularity of the supplied equality reconstructs its
+`IsType` premise.  For an empty prefix canonicalization is the identity and
+the original equality is returned directly.  This is the constructor-facing
+form of `rebuildForallNPrefix`: constructor roots carry whole-expression
+equality but do not retain a terminal-sort witness like family roots do. -/
+theorem TelDefEqEvidence.rebuildForallNPrefix_of_sourceDefEq
+    (run : TelDefEqEvidence env U Γ params (VExpr.telN n type))
+    (paramsLength : params.length = n)
+    (henv : VEnv.WF env) (contextWF : OnCtx Γ (env.IsType U))
+    (sourceView : DefEqEvidence env U Γ source type resultType) :
+    ∃ resultType', DefEqEvidence env U Γ source
+      (VExpr.forallN params (VExpr.dropN n type)) resultType' := by
+  cases n with
+  | zero =>
+      cases params with
+      | nil =>
+          exact ⟨resultType, by
+            simp only [VExpr.forallN, VExpr.dropN]
+            exact sourceView⟩
+      | cons head tail => simp at paramsLength
+  | succ n =>
+      have viewTelLength : (VExpr.telN (n + 1) type).length = n + 1 :=
+        run.length_eq.symm.trans paramsLength
+      cases type with
+      | forallE domain body =>
+          have viewType : env.IsType U Γ (.forallE domain body) := by
+            obtain ⟨domainType, bodyType⟩ :=
+              sourceView.isDefEq.hasType.2.forallE_inv henv.ordered
+            exact VEnv.IsType.forallE domainType bodyType
+          obtain ⟨_, canonical⟩ :=
+            run.rebuildForallNPrefix henv contextWF viewType
+          exact ⟨resultType, .ofDefEq
+            (sourceView.isDefEq.transU_l henv contextWF
+              canonical.isDefEq.toU)⟩
+      | bvar index => simp [VExpr.telN] at viewTelLength
+      | sort level => simp [VExpr.telN] at viewTelLength
+      | const name levels => simp [VExpr.telN] at viewTelLength
+      | app fn arg => simp [VExpr.telN] at viewTelLength
+      | lam domain body => simp [VExpr.telN] at viewTelLength
+
 private theorem candidateTelDefEq_append
     {env : VEnv} {U : Nat} {Γ : List VExpr} :
     ∀ {As As' Bs Bs'}, env.TelDefEq U Γ As As' →
@@ -10553,6 +10597,64 @@ telescope. -/
 def canonicalizeFamilyParamsList (nparams : Nat) (params : List VExpr)
     (families : List VInductiveType) : List VInductiveType :=
   families.map (canonicalizeFamilyParams nparams params)
+
+/-- Exact source-order evidence that every constructor view has a parameter
+telescope definitionally equal to one distinguished block telescope.  The
+semantic list remains an index, so a prefix proof cannot be moved to another
+constructor position or used to truncate the raw inventory. -/
+inductive CandidateConstructorViewParameterDefEqList
+    (env : VEnv) (Us : List Name) (nparams : Nat) (params : List VExpr) :
+    {sources : List Constructor} →
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateConstructor sources} →
+      {raws : List VConstVal} →
+      CandidateConstructorSemanticListRun env Us candidates raws → Prop where
+  | nil : CandidateConstructorViewParameterDefEqList env Us nparams params .nil
+  | cons
+      (head : TypeChecker.TelDefEqEvidence env Us.length [] params
+        (VExpr.telN nparams semantic.type.view))
+      (tail : CandidateConstructorViewParameterDefEqList env Us nparams params
+        semantics) :
+      CandidateConstructorViewParameterDefEqList env Us nparams params
+        (.cons semantic semantics)
+
+/-- Compose every raw/view constructor equality with its canonical shared
+parameter rewrite.  The zero-parameter case reuses the original equality;
+nonzero prefixes derive view well-formedness from the retained constructor
+root instead of assuming a separate constructor-type certificate. -/
+theorem CandidateConstructorSemanticListRun.canonicalConstructorEvidence
+    {nparams : Nat} {params : List VExpr}
+    (run : CandidateConstructorSemanticListRun env Us candidates raws)
+    (parameters : CandidateConstructorViewParameterDefEqList env Us nparams
+      params run)
+    (paramsLength : params.length = nparams)
+    (henv : VEnv.WF env) :
+    List.Forall₂
+      (fun raw view => ∃ resultType,
+        TypeChecker.DefEqEvidence env Us.length [] raw.type view.type
+          resultType)
+      raws
+      (run.roots.views.map
+        (canonicalizeConstructorParams nparams params)) := by
+  induction run with
+  | nil =>
+      cases parameters
+      exact .nil
+  | cons head tail ih =>
+      cases parameters with
+      | cons headParameters tailParameters =>
+          obtain ⟨resultType, rawView⟩ := head.type.root.evidence
+          obtain ⟨canonicalType, rawCanonical⟩ :=
+            headParameters.rebuildForallNPrefix_of_sourceDefEq paramsLength
+              henv trivial rawView
+          exact .cons
+            ⟨canonicalType, by
+              simpa only [CandidateConstructorSemanticListRun.roots,
+                CandidateConstructorListRun.views, List.map_cons,
+                CandidateConstructorSemanticRun.root,
+                CandidateConstructorRun.view,
+                canonicalizeConstructorParams] using rawCanonical⟩
+            (ih tailParameters)
 
 /-- Canonical block view whose shared parameter telescope is selected from
 the first family exactly as `blockParams` selects it for analysis. -/
@@ -20384,6 +20486,39 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.rebuildForallNPrefix' depends on a
 #print axioms TypeChecker.TelDefEqEvidence.rebuildForallNPrefix
 
 /--
+info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.rebuildForallNPrefix_of_sourceDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.TelDefEqEvidence.rebuildForallNPrefix_of_sourceDefEq
+
+/--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.headPosition_cons_view' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -20505,6 +20640,39 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.canonicalFamily
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilySemanticListRun.canonicalFamilyEvidence
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateConstructorSemanticListRun.canonicalConstructorEvidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateConstructorSemanticListRun.canonicalConstructorEvidence
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.forall_views' depends on axioms: [propext,
