@@ -7485,6 +7485,44 @@ theorem
     NormalizationCandidateBlockSemanticRun.normalization,
     NormalizationCandidateBlockSemanticRun.viewDecl] using evidence
 
+/-- Assemble the checker-valid canonical block normalization from the
+completed family traversal.  The family-type relocations are discharged by
+the canonical evidence above; the per-family constructor telescope inventory
+and well-formedness of the staged constructor environment remain the
+producer's outstanding obligations and are taken as explicit premises. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalNormalizationBlockRun
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {})
+    (hblockEnv : VEnv.WF blockEnv)
+    (constructorParameters :
+      CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
+        source.nparams
+        (blockParams source.nparams semantic.families.views)
+        semantic.families) :
+    NormalizationBlockRun semantic.canonicalNormalization env blockEnv := by
+  have henv : VEnv.WF env := by
+    simpa only [staging.annotation.firstSemantic.type.venv_eq] using
+      staging.annotation.firstSemantic.type.contextRun.context.Ewf
+  have canonical := completion.canonicalFamilyTypeDefEqs context_lctx_eq
+  have paramsLength :=
+    produced.semanticViewParams_length semantic context_lctx_eq
+  exact semantic.canonicalNormalizationRun henv hblockEnv canonical
+    constructorParameters paramsLength
+
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq' depends on axioms: [propext,
  sorryAx,
@@ -7782,6 +7820,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.rawCanonicalFamilyTypeDefEqs
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalNormalizationBlockRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalNormalizationBlockRun
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor' depends on axioms: [propext,
