@@ -374,10 +374,108 @@ structure CandidateBlockConstructorPostFamilySemanticState
     (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
       candidates raws) where
   contextRun : AddInductive.ConstructorContextRun blockEnv Us context
+  parameterLocalState : TypeChecker.FamilyParameterLocalState stats context
   alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace stats
     isUnsafe context validation candidates
   constructors : CandidateBlockConstructorPostFamilySemanticRuns env blockEnv
     Us stats isUnsafe context contextRun validation alignment semantics
+
+/-- The exact constructor-validation context viewed as an extension of the
+shared first-family parameter context.  The intermediate reference absorbs
+all family-index locals and their definitional rewrites while the root lift
+retains the literal parameter declarations used for telescope relocation. -/
+structure ConstructorSharedParameterContextAlignment
+    (env : VEnv) (Us : List Name) (base : VLCtx)
+    {context : AddInductive.Context}
+    (contextRun : AddInductive.ConstructorContextRun env Us context) where
+  reference : VLCtx
+  rootLift : Lift
+  root_reference_lift : VLCtx.FVLift' base reference 0 rootLift 0
+  current_reference : VLCtx.IsDefEq env Us.length
+    contextRun.candidate.context.vlctx reference
+
+/-- Block-wide constructor semantics bundled with the exact shared-parameter
+inventory and prefix-context alignment consumed by those same retained
+validation traces.  The statistics and context-run indices are shared with
+`semantic`, so none of these witnesses can come from a parallel execution. -/
+structure CandidateBlockConstructorPostFamilySemanticInventoryState
+    (env blockEnv : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats) (isUnsafe : Bool)
+    (context : AddInductive.Context) (base : VLCtx) (nparams : Nat)
+    (parameterSources : List Expr)
+    {familyIdx : Nat} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources)
+    (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) where
+  semantic : CandidateBlockConstructorPostFamilySemanticState env blockEnv Us
+    stats isUnsafe context validation semantics
+  parameterContext : ConstructorSharedParameterContextAlignment blockEnv Us
+    base semantic.contextRun
+  parameterSources_eq : stats.params.toList = parameterSources
+  params_size : stats.params.size = nparams
+
+namespace TypeChecker.CandidateParameterContext
+
+/-- Extend a source-ordered parameter context by one final parameter while
+the verified `VLCtx` stores that newest declaration at its head. -/
+theorem snoc
+    {base final : VLCtx} {parameters : List Expr} {types : List VExpr}
+    {fv : FVarId} {deps : List FVarId} {type : VExpr}
+    (run : TypeChecker.CandidateParameterContext base parameters types final) :
+    TypeChecker.CandidateParameterContext base
+      (parameters ++ [.fvar fv]) (types ++ [type])
+      ((some (fv, deps), .vlam type) :: final) := by
+  induction run with
+  | nil => exact .cons .nil
+  | cons tail ih => exact .cons ih
+
+/-- Reconstruct the source-ordered parameter-context witness from the exact
+free-assumption shape plus its reversed source/type inventories. -/
+theorem of_fvarLamOnly
+    {Δ : VLCtx} {parameters : List Expr} {types : List VExpr}
+    (shape : Δ.FVarLamOnly)
+    (context_eq : Δ.toCtx = types.reverse)
+    (parameters_eq : Δ.fvars.map Expr.fvar = parameters.reverse) :
+    TypeChecker.CandidateParameterContext [] parameters types Δ := by
+  induction shape generalizing parameters types with
+  | nil =>
+      have types_eq : types = [] := by
+        have reversed := congrArg List.reverse context_eq
+        simpa [VLCtx.toCtx] using reversed.symm
+      have parameters_eq' : parameters = [] := by
+        have reversed := congrArg List.reverse parameters_eq
+        simpa using reversed.symm
+      subst types
+      subst parameters
+      exact .nil
+  | @cons tail fv deps type shape ih =>
+      let tailTypes : List VExpr := tail.toCtx.reverse
+      let tailParameters : List Expr :=
+        (tail.fvars.map Expr.fvar).reverse
+      have tailContext : tail.toCtx = tailTypes.reverse := by
+        simp only [tailTypes, List.reverse_reverse]
+      have tailSources : tail.fvars.map Expr.fvar =
+          tailParameters.reverse := by
+        simp only [tailParameters, List.reverse_reverse]
+      have tailRun := ih tailContext tailSources
+      have types_eq : types = tailTypes ++ [type] := by
+        have reversed := congrArg List.reverse context_eq
+        simpa only [VLCtx.toCtx, List.reverse_cons, List.reverse_reverse,
+          tailTypes] using reversed.symm
+      have parameters_eq' : parameters =
+          tailParameters ++ [.fvar fv] := by
+        have reversed := congrArg List.reverse parameters_eq
+        simpa only [VLCtx.fvars_cons_some, List.map_cons,
+          List.reverse_cons, List.reverse_reverse, tailParameters] using
+          reversed.symm
+      rw [types_eq, parameters_eq']
+      exact TypeChecker.CandidateParameterContext.snoc tailRun
+
+end TypeChecker.CandidateParameterContext
 
 /-- One exact kernel constructor record translates to a raw Theory
 constructor when their source headers and strict types agree.  This is the
@@ -5373,6 +5471,50 @@ theorem
     (staging.current_firstTerminal_defeq context_lctx_eq)
   simpa only [VLCtx.toCtx] using evidence.telDefEq
 
+/-- The first normalized family view is pointwise equal to the exact
+annotation-consumed parameter telescope whose free variables populate every
+later family and constructor validation context. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstStoredViewParameterTelescopeDefEq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view) := by
+  have henv : VEnv.WF env := by
+    simpa only [staging.current_venv] using staging.currentRun.context.Ewf
+  have firstBound :=
+    staging.annotation.first_nparams_le_spineLength context_lctx_eq
+  have firstRawBound : source.nparams ≤
+      (VInductDecl.ctorFields staging.annotation.firstRaw.type).length := by
+    rw [← staging.annotation.firstSpineLength_eq]
+    exact firstBound
+  have firstRawStored :=
+    staging.annotation.firstTelescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstRawBound]
+    at firstRawStored
+  obtain ⟨firstInferred, firstRecursive⟩ :=
+    staging.annotation.firstSemantic.type.recursive
+  obtain ⟨firstResultType, firstFullView⟩ :=
+    firstRecursive.spineEvidence staging.annotation.first_stored_spine
+  have firstRawView := firstFullView.telescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstBound,
+    telN_take_of_le staging.annotation.firstSemantic.type.view firstBound]
+    at firstRawView
+  exact (firstRawStored.symm henv trivial).trans henv trivial firstRawView
+
 /-- Relocate the validator's first/second shared-parameter comparison from
 the annotation-consumed binders onto both families' actual normalized views.
 Each endpoint is connected through its exact raw telescope. -/
@@ -5400,29 +5542,11 @@ theorem
         staging.annotation.secondSemantic.type.view) := by
   have henv : VEnv.WF env := by
     simpa only [staging.current_venv] using staging.currentRun.context.Ewf
-  have firstBound :=
-    staging.annotation.first_nparams_le_spineLength context_lctx_eq
-  have firstRawBound : source.nparams ≤
-      (VInductDecl.ctorFields staging.annotation.firstRaw.type).length := by
-    rw [← staging.annotation.firstSpineLength_eq]
-    exact firstBound
-  have firstRawStored :=
-    staging.annotation.firstTelescope.take source.nparams
-  rw [telN_take_of_le staging.annotation.firstRaw.type firstRawBound]
-    at firstRawStored
-  obtain ⟨firstInferred, firstRecursive⟩ :=
-    staging.annotation.firstSemantic.type.recursive
-  obtain ⟨firstResultType, firstFullView⟩ :=
-    firstRecursive.spineEvidence staging.annotation.first_stored_spine
-  have firstRawView := firstFullView.telescope.take source.nparams
-  rw [telN_take_of_le staging.annotation.firstRaw.type firstBound,
-    telN_take_of_le staging.annotation.firstSemantic.type.view firstBound]
-    at firstRawView
   have firstStoredView : TypeChecker.TelDefEqEvidence env Us.length []
       (staging.annotation.firstStoredBinders.take source.nparams)
       (VExpr.telN source.nparams
         staging.annotation.firstSemantic.type.view) :=
-    (firstRawStored.symm henv trivial).trans henv trivial firstRawView
+    staging.firstStoredViewParameterTelescopeDefEq context_lctx_eq
   have secondRawStored := staging.annotation.parameterTelescope
   have secondBound := staging.annotation.second_nparams_le_spineLength
   obtain ⟨secondInferred, secondRecursive⟩ :=
@@ -5822,6 +5946,34 @@ def
     (completion : staging.TerminalIndexDomainCompletion raw) :
     TypeChecker.CandidateContextRun staging.position.trace.result.context :=
   completion.chain.endpointContextRun completion.terminal
+
+/-- Source-ordered reconstruction of the first family's exact shared
+parameter context.  This turns the stored reverse `VLCtx` inventory back into
+the forward parameter/type pairing consumed by constructor-prefix folding. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.firstParameterContext
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw) :
+    TypeChecker.CandidateParameterContext []
+      (staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams)
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      completion.prefixes.firstParameterΔ :=
+  TypeChecker.CandidateParameterContext.of_fvarLamOnly
+    completion.prefixes.first_shape completion.prefixes.first_context
+    completion.prefixes.first_fvars
 
 /-- The exact continuation context retains the semantic environment. -/
 theorem
@@ -7559,6 +7711,53 @@ theorem CompletionSpine.terminalValidationContextRun
           head.selected]
       exact ih
 
+/-- The terminal family-validation context remains connected to the exact
+first-family parameter prefix through the evolving reference carried by the
+source-ordered traversal.  Both the reference and its lift are existentially
+owned by the completed spine, so downstream constructor proofs cannot choose
+an extension unrelated to the validator endpoint. -/
+theorem CompletionSpine.terminalParameterContextAlignment
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext}
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (spine : CompletionSpine iteration) :
+    ∃ terminalRun : TypeChecker.CandidateContextRun
+        trace.result.validationContext,
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us ∧
+      ∃ (reference : VLCtx) (rootLift : Lift),
+        VLCtx.FVLift' completion.prefixes.firstParameterΔ reference 0
+            rootLift 0 ∧
+          VLCtx.IsDefEq env Us.length terminalRun.context.vlctx reference := by
+  induction spine with
+  | @nil dIdx stats candidateContext trace iteration =>
+      have suffix := iteration.cursor.sourceSuffix_eq
+      have lengthLe :
+          (firstSource :: secondSource :: allLaterSources).toArray.size ≤
+            dIdx := by
+        have suffixLength := congrArg List.length suffix
+        simp only [List.length_drop, List.length_nil] at suffixLength
+        simp only [List.size_toArray]
+        omega
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.result_validationContext_of_length_le
+        trace lengthLe]
+      exact ⟨iteration.cursor.contextRun, iteration.cursor.venv_eq,
+        iteration.cursor.lparams_eq, iteration.reference, iteration.rootLift,
+        iteration.root_reference_lift, iteration.current_reference⟩
+  | @cons nextSource laterSources candidates raws dIdx stats candidateContext
+      trace iteration head parameter domain tail ih =>
+      rw [←
+        AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+          head.selected]
+      exact ih
+
 /-- The completed traversal's endpoint also retains the validator's exact
 shared-parameter inventory: the terminal statistics still list the first
 candidate family's parameter free variables, and every one of them remains
@@ -7710,6 +7909,53 @@ theorem
   obtain ⟨spine⟩ :=
     (cursor.iterationCursorExact annotations).completionSpine context_lctx_eq
   have endpoint := spine.terminalValidationContextRun
+  rw [AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
+    cursor.validation.selected] at endpoint
+  have canonicalEq :
+      ((produced.execution.eliminationExecution.normalization).familyParameterComparisonTrace
+          (produced.execution.normalization_run produced.producedExecution)
+          produced.kernelSources_nonempty).result =
+        (produced.execution.eliminationExecution.normalization).familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result _
+  rw [canonicalEq] at endpoint
+  exact endpoint
+
+/-- Strengthen the terminal context run with the exact extension/alignment
+from the first family's parameter prefix.  This is the relocation witness
+needed by constructor parameter equalities; it is derived from the same
+completed family traversal as the terminal context itself. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationParameterContextAlignment
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    ∃ terminalRun : TypeChecker.CandidateContextRun
+        (produced.execution.eliminationExecution.normalization
+          |>.validationContext),
+      terminalRun.context.venv = env ∧
+      terminalRun.context.lparams = Us ∧
+      ∃ (reference : VLCtx) (rootLift : Lift),
+        VLCtx.FVLift' completion.prefixes.firstParameterΔ reference 0
+            rootLift 0 ∧
+          VLCtx.IsDefEq env Us.length terminalRun.context.vlctx reference := by
+  obtain ⟨cursor⟩ :=
+    completion.remainingFamilyValidationCursor context_lctx_eq
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  obtain ⟨spine⟩ :=
+    (cursor.iterationCursorExact annotations).completionSpine context_lctx_eq
+  have endpoint := spine.terminalParameterContextAlignment
   rw [AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
     cursor.validation.selected] at endpoint
   have canonicalEq :
@@ -7893,6 +8139,61 @@ theorem
       terminalLparams completion.blockValidationContext_safety
   exact ⟨validationRun, validationVenv, validationLparams⟩
 
+/-- Rebase the terminal parameter-context alignment onto the exact staged
+constructor environment.  The raw-family insertion is used only
+monotonically; the local telescope, reference, and root lift remain the ones
+carried by the completed family-validation traversal. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationParameterContextAlignment
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {})
+    (stagingInput : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source) :
+    ∃ contextRun : AddInductive.ConstructorContextRun blockEnv Us
+        { (produced.execution.eliminationExecution.normalization
+            |>.validationContext) with
+          env := produced.execution.eliminationExecution.normalization
+            |>.familyEnv },
+      Nonempty (ConstructorSharedParameterContextAlignment blockEnv Us
+        completion.prefixes.firstParameterΔ contextRun) := by
+  obtain ⟨terminalRun, terminalVenv, terminalLparams, reference, rootLift,
+      rootReferenceLift, currentReference⟩ :=
+    completion.blockValidationParameterContextAlignment context_lctx_eq
+  obtain ⟨validationRun, validationVenv, validationLparams,
+      validationVlctx⟩ :=
+    stagingInput.validationContextRunFrom terminalRun terminalVenv
+      terminalLparams completion.blockValidationContext_safety
+  let contextRun : AddInductive.ConstructorContextRun blockEnv Us
+      { (produced.execution.eliminationExecution.normalization
+          |>.validationContext) with
+        env := produced.execution.eliminationExecution.normalization
+          |>.familyEnv } := ⟨validationRun, validationVenv,
+            validationLparams⟩
+  have currentReference' : VLCtx.IsDefEq blockEnv Us.length
+      validationRun.context.vlctx reference := by
+    rw [validationVlctx]
+    exact currentReference.mono
+      (VEnv.stageInductiveTypes_le stagingInput.stage)
+  exact ⟨contextRun, ⟨{
+    reference := reference
+    rootLift := rootLift
+    root_reference_lift := rootReferenceLift
+    current_reference := currentReference' }⟩⟩
+
 /-- Interpret every retained constructor-validation trace at the exact staged
 block context once the supplemental source/view alignment audit has fixed all
 dependent family and constructor positions.  This is the arbitrary-block
@@ -7982,26 +8283,31 @@ theorem
         (produced.execution.eliminationExecution.normalization
           |>.constructorValidation.traces)
         produced.candidate.families = .ok ()) :
-    Nonempty (CandidateBlockConstructorPostFamilySemanticState env blockEnv Us
-      produced.execution.eliminationExecution.normalization.stats isUnsafe
-      { (produced.execution.eliminationExecution.normalization
-          |>.validationContext) with
-        env := produced.execution.eliminationExecution.normalization
-          |>.familyEnv }
+    Nonempty
+      (CandidateBlockConstructorPostFamilySemanticInventoryState env blockEnv
+        Us produced.execution.eliminationExecution.normalization.stats
+        isUnsafe
+        { (produced.execution.eliminationExecution.normalization
+            |>.validationContext) with
+          env := produced.execution.eliminationExecution.normalization
+            |>.familyEnv }
+        completion.prefixes.firstParameterΔ
+        source.nparams
+        (staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams)
       (produced.execution.eliminationExecution.normalization
         |>.constructorValidation.traces)
       semantic.families) := by
-  obtain ⟨candidateRun, venv_eq, lparams_eq⟩ :=
-    completion.constructorValidationContextRun context_lctx_eq stagingInput
-  let contextRun : AddInductive.ConstructorContextRun blockEnv Us
-      { (produced.execution.eliminationExecution.normalization
-          |>.validationContext) with
-        env := produced.execution.eliminationExecution.normalization
-          |>.familyEnv } := ⟨candidateRun, venv_eq, lparams_eq⟩
+  obtain ⟨contextRun, ⟨parameterContext⟩⟩ :=
+    completion.constructorValidationParameterContextAlignment context_lctx_eq
+      stagingInput
   obtain ⟨alignment, ⟨constructors⟩⟩ :=
     CandidateBlockConstructorPostFamilySemanticRuns.nonempty_of_check
       contextRun alignmentRun semantic.families
-  exact ⟨⟨contextRun, alignment, constructors⟩⟩
+  obtain ⟨localState, parameterSources, paramsSize⟩ :=
+    completion.blockValidationLocalStateExact context_lctx_eq
+  exact ⟨⟨⟨contextRun, localState.withEnv _, alignment, constructors⟩,
+    parameterContext, parameterSources, paramsSize⟩⟩
 
 /-- Complete verified state at the exact `checkConstructors` context: the
 staged context run together with the validator's shared-parameter inventory,
@@ -8026,28 +8332,29 @@ theorem
     (stagingInput : NormalizationCandidateBlockStagingInput context
       produced.execution.eliminationExecution.normalization env blockEnv Us
       source) :
-    ∃ (validationRun : TypeChecker.CandidateContextRun
+    ∃ validationRun : TypeChecker.CandidateContextRun
         { (produced.execution.eliminationExecution.normalization
             |>.validationContext) with
           env := produced.execution.eliminationExecution.normalization
-            |>.familyEnv })
-      (endStats : AddInductive.InductiveStats),
+            |>.familyEnv },
       validationRun.context.venv = blockEnv ∧
       validationRun.context.lparams = Us ∧
-      TypeChecker.FamilyParameterLocalState endStats
+      TypeChecker.FamilyParameterLocalState
+        produced.execution.eliminationExecution.normalization.stats
         { (produced.execution.eliminationExecution.normalization
             |>.validationContext) with
           env := produced.execution.eliminationExecution.normalization
             |>.familyEnv } ∧
-      endStats.params.toList =
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
         staging.annotation.firstCandidate.familyType.type.trace.parameterList
           source.nparams ∧
-      endStats.params.size = source.nparams := by
+      produced.execution.eliminationExecution.normalization.stats.params.size =
+        source.nparams := by
   obtain ⟨validationRun, validationVenv, validationLparams⟩ :=
     completion.constructorValidationContextRun context_lctx_eq stagingInput
-  obtain ⟨endStats, localState, paramsList, paramsSize⟩ :=
-    completion.blockValidationLocalState context_lctx_eq
-  exact ⟨validationRun, endStats, validationVenv, validationLparams,
+  obtain ⟨localState, paramsList, paramsSize⟩ :=
+    completion.blockValidationLocalStateExact context_lctx_eq
+  exact ⟨validationRun, validationVenv, validationLparams,
     localState.withEnv _, paramsList, paramsSize⟩
 
 /-- Collect dependent shared-parameter equality for the exact semantic family
@@ -8246,6 +8553,150 @@ theorem
     produced.semanticViewParams_length semantic context_lctx_eq
   exact semantic.canonicalNormalizationRun henv hblockEnv canonical
     constructorParameters paramsLength
+
+/--
+info: 'Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.snoc' does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateParameterContext.snoc
+
+/--
+info: 'Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.of_fvarLamOnly' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateParameterContext.of_fvarLamOnly
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstStoredViewParameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstStoredViewParameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.firstParameterContext' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.firstParameterContext
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalParameterContextAlignment' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalParameterContextAlignment
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationParameterContextAlignment' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationParameterContextAlignment
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationParameterContextAlignment' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationParameterContextAlignment
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq' depends on axioms: [propext,
