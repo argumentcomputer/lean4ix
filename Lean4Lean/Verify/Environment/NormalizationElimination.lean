@@ -3138,35 +3138,43 @@ private theorem sharedParameterTelescopeDefEqAux
       firstΔ firstTerminalΔ firstDomains)
     (firstAnnotations : firstTrace.validationAnnotations)
     (firstLocalRun : TypeChecker.CandidateLocalContextRun firstContext)
-    (validatorFirstTerminal : validatorContext = firstTrace.terminalContext)
+    (firstTerminalFind : ∀ {fv : FVarId} {decl : LocalDecl},
+      firstTrace.terminalContext.lctx.find? fv = some decl →
+        validatorContext.lctx.find? fv = some decl)
     {secondContext : AddInductive.Context} {secondSource : Expr}
     {secondTrace : AddInductive.CandidateExprTrace secondContext secondSource}
     {secondΔ secondTerminalΔ : VLCtx} {secondDomains : List VExpr}
     (secondSpine : TypeChecker.CandidateAnnotationSpine env Us secondTrace
       secondΔ secondTerminalΔ secondDomains)
     (secondAnnotations : secondTrace.validationAnnotations)
-    (secondPosition : secondTrace.AnnotationAt count)
+    (secondPosition : secondTrace.MainSpineAt count)
     (secondAligned : secondTrace.storedSpine = true)
     (secondDepth : secondContext.fuel.recDepth = recursionFuel + 1)
-    (validatorSecondRoot : validatorSource = secondTrace.rootWhnf)
+    (validatorSecondRoot : 0 < count →
+      validatorSource = secondTrace.rootWhnf)
     (parametersFirst : parameters = firstTrace.parameterList count)
     (parametersSecond : parameters = secondTrace.parameterList count)
     (contextRelation : VLCtx.IsDefEqFVars env Us.length firstΔ secondΔ)
-    (currentFirstTerminal : VLCtx.IsDefEq env Us.length
-      currentRun.context.vlctx firstTerminalΔ) :
+    {reference : VLCtx} {firstReferenceLift : Lift}
+    (firstTerminalReference : VLCtx.FVLift' firstTerminalΔ reference 0
+      firstReferenceLift 0)
+    (currentReference : VLCtx.IsDefEq env Us.length
+      currentRun.context.vlctx reference) :
     TypeChecker.TelDefEqEvidence env Us.length firstΔ.toCtx
       (firstDomains.take count) (secondDomains.take count) := by
   have henv : VEnv.WF env := by
     simpa only [currentVenv] using currentRun.context.Ewf
   have currentWF : VLCtx.WF env Us.length currentRun.context.vlctx := by
     simpa only [currentVenv, currentLparams] using currentRun.context.Δwf
+  have referenceWF : VLCtx.WF env Us.length reference :=
+    (currentReference.symm henv.ordered).wf
   have firstTerminalWF : VLCtx.WF env Us.length firstTerminalΔ :=
-    (currentFirstTerminal.symm henv.ordered).wf
+    firstTerminalReference.wf henv referenceWF
   induction secondPosition generalizing stats validatorSource i fuel outer
       suffixSource suffixFuel suffix parameters validatorSource'
       firstContext firstSource firstTrace firstΔ firstDomains
       secondΔ secondDomains with
-  | zero annotationMatch =>
+  | zero trace =>
       cases path with
       | done => exact .nil
       | shared =>
@@ -3219,7 +3227,7 @@ private theorem sharedParameterTelescopeDefEqAux
                   have parametersSecondTail : parametersTail =
                       bodyCandidate.parameterList n :=
                     (List.cons.inj parametersSecond).2
-                  have sourceParts := validatorSecondRoot
+                  have sourceParts := validatorSecondRoot (by omega)
                   simp only [AddInductive.CandidateExprTrace.rootWhnf,
                     Expr.forallE.injEq] at sourceParts
                   rcases sourceParts with
@@ -3257,18 +3265,26 @@ private theorem sharedParameterTelescopeDefEqAux
                           firstSnapshotDomainEq
                       _ = firstSnapshot.consumed :=
                         firstSnapshot.annotation_match.symm
-                  have firstParameterTypeRun :=
-                    TypeChecker.CandidateExprTrace.head_getType_terminal
+                  have firstParameterFind :=
+                    TypeChecker.CandidateExprTrace.head_find_terminal
                       firstName firstBinderInfo firstAnnotationsNode
                       firstBodyCandidate firstLocalRun
+                  have validatorParameterFind :=
+                    firstTerminalFind firstParameterFind
+                  have validatorFirstParameterTypeRun :
+                      AddInductive.getType firstContext.freshExpr
+                        validatorContext =
+                          .ok firstAnnotationsNode.consumed := by
+                    simpa [AddInductive.Context.freshExpr, LocalDecl.type]
+                      using TypeChecker.getType_fvar_of_find
+                        validatorParameterFind
                   have parameterTypeEq : parameterType =
                       firstAnnotationsNode.consumed := by
                     have validatorParameterTypeRun := parameterTypeRun
-                    rw [parameterFirst, validatorFirstTerminal]
-                      at validatorParameterTypeRun
+                    rw [parameterFirst] at validatorParameterTypeRun
                     exact Except.ok.inj
                       (validatorParameterTypeRun.symm.trans
-                        firstParameterTypeRun)
+                        validatorFirstParameterTypeRun)
                   have parameterSnapshotEq : parameterType =
                       firstSnapshot.consumed :=
                     parameterTypeEq.trans firstConsumedSourceEq
@@ -3375,6 +3391,13 @@ private theorem sharedParameterTelescopeDefEqAux
                     simpa only [List.length_cons, Lift.comp_skipN,
                       Lift.comp, Lift.skipN_skipN, VLocalDecl.depth,
                       Nat.one_add] using combined
+                  have firstReference : VLCtx.FVLift' firstSnapshot.Δ
+                      reference 0
+                      ((Lift.skipN Lift.refl
+                        (firstStoredDomain ::
+                          firstStoredDomains).length).comp
+                        firstReferenceLift) 0 :=
+                    firstLift.comp firstTerminalReference
                   have firstWF : VLCtx.WF env Us.length firstSnapshot.Δ :=
                     firstLift.wf henv firstTerminalWF
                   have validatorDomainClosed : Closed validatorDomain 0 := by
@@ -3397,55 +3420,57 @@ private theorem sharedParameterTelescopeDefEqAux
                     rw [parameterSnapshotEq]
                     exact firstSnapshot.consumed_tr.fvarsIn
                   obtain ⟨baseDomain, baseDomainTr⟩ :=
-                    validatorDomainTrEnv.weakFV'_inv henv firstLift
-                      currentFirstTerminal validatorDomainClosed
+                    validatorDomainTrEnv.weakFV'_inv henv firstReference
+                      currentReference validatorDomainClosed
                       validatorDomainFVars
                   obtain ⟨baseParameterType, baseParameterTypeTr⟩ :=
-                    parameterTypeTrEnv.weakFV'_inv henv firstLift
-                      currentFirstTerminal parameterTypeClosed
+                    parameterTypeTrEnv.weakFV'_inv henv firstReference
+                      currentReference parameterTypeClosed
                       parameterTypeFVars
                   have comparisonCurrent : env.IsDefEqU Us.length
                       currentRun.context.vlctx.toCtx validatorDomain'
                       parameterType' := by
                     simpa only [currentVenv, currentLparams] using
                       comparisonRun.isDefEqU
-                  have baseDomainAtTerminal :=
-                    baseDomainTr.weakFV' henv.ordered firstLift
-                      firstTerminalWF
-                  have baseParameterTypeAtTerminal :=
-                    baseParameterTypeTr.weakFV' henv.ordered firstLift
-                      firstTerminalWF
+                  have baseDomainAtReference :=
+                    baseDomainTr.weakFV' henv.ordered firstReference
+                      referenceWF
+                  have baseParameterTypeAtReference :=
+                    baseParameterTypeTr.weakFV' henv.ordered firstReference
+                      referenceWF
                   have currentDomainEq :=
-                    validatorDomainTrEnv.uniq henv currentFirstTerminal
-                      baseDomainAtTerminal
+                    validatorDomainTrEnv.uniq henv currentReference
+                      baseDomainAtReference
                   have currentParameterTypeEq :=
-                    parameterTypeTrEnv.uniq henv currentFirstTerminal
-                      baseParameterTypeAtTerminal
-                  have comparisonAtTerminal :=
+                    parameterTypeTrEnv.uniq henv currentReference
+                      baseParameterTypeAtReference
+                  have comparisonAtReference :=
                     comparisonCurrent.defeqDFC henv.ordered
-                      currentFirstTerminal.defeqCtx
-                  have currentDomainEqAtTerminal :=
+                      currentReference.defeqCtx
+                  have currentDomainEqAtReference :=
                     currentDomainEq.defeqDFC henv.ordered
-                      currentFirstTerminal.defeqCtx
-                  have currentParameterTypeEqAtTerminal :=
+                      currentReference.defeqCtx
+                  have currentParameterTypeEqAtReference :=
                     currentParameterTypeEq.defeqDFC henv.ordered
-                      currentFirstTerminal.defeqCtx
+                      currentReference.defeqCtx
                   have liftedComparison : env.IsDefEqU Us.length
-                      firstTerminalΔ.toCtx
+                      reference.toCtx
                       (baseDomain.lift'
-                        ((Lift.skipN Lift.refl
-                          (firstStoredDomain :: firstStoredDomains).length).consN 0))
+                        (((Lift.skipN Lift.refl
+                          (firstStoredDomain :: firstStoredDomains).length).comp
+                            firstReferenceLift).consN 0))
                       (baseParameterType.lift'
-                        ((Lift.skipN Lift.refl
-                          (firstStoredDomain :: firstStoredDomains).length).consN 0)) :=
-                    (currentDomainEqAtTerminal.symm.trans henv
-                      firstTerminalWF.toCtx comparisonAtTerminal).trans henv
-                        firstTerminalWF.toCtx
-                        currentParameterTypeEqAtTerminal
+                        (((Lift.skipN Lift.refl
+                          (firstStoredDomain :: firstStoredDomains).length).comp
+                            firstReferenceLift).consN 0)) :=
+                    (currentDomainEqAtReference.symm.trans henv
+                      referenceWF.toCtx comparisonAtReference).trans henv
+                        referenceWF.toCtx
+                        currentParameterTypeEqAtReference
                   have comparisonAtBase : env.IsDefEqU Us.length
                       firstSnapshot.Δ.toCtx baseDomain baseParameterType :=
-                    (VEnv.IsDefEqU.weak'_iff henv firstTerminalWF.toCtx
-                      firstLift.toCtx).1 liftedComparison
+                    (VEnv.IsDefEqU.weak'_iff henv referenceWF.toCtx
+                      firstReference.toCtx).1 liftedComparison
                   have snapshotDomainTr : TrExprS env Us secondSnapshot.Δ
                       validatorDomain secondSnapshot.domain' := by
                     rw [validatorSnapshotDomainEq]
@@ -3485,59 +3510,82 @@ private theorem sharedParameterTelescopeDefEqAux
                     storedDomainsU.of_l henv firstWF.toCtx
                       firstAnnotation.hasType.2
                   rw [firstStoredEq, secondStoredEq] at storedDomainsDef
-                  have candidateTailIsForall :
-                      (secondBody.instantiate1
-                        secondCandidateContext.freshExpr).isForall = true :=
-                    secondPosition.traceSource_isForall secondBodyAligned
-                  have candidateBodyEq :=
-                    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
-                      bodyCandidate.rootWhnf_valid recursionFuel (by
-                        simpa [AddInductive.Context.pushLocalDecl] using
-                          secondDepth) candidateTailIsForall
-                  have validatorTailIsForall :
-                      (validatorBody.instantiate1
-                        stats.params[i]!).isForall = true := by
-                    rw [parameterSecond, validatorBodyEq]
-                    exact candidateTailIsForall
-                  have validatorBodyWhnfEq :=
-                    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
-                      whnf recursionFuel validatorDepth validatorTailIsForall
-                  have nextSourceEq : validatorView =
-                      bodyCandidate.rootWhnf :=
-                    validatorBodyWhnfEq.trans (by
-                      rw [parameterSecond, validatorBodyEq]
-                      exact candidateBodyEq.symm)
-                  have freshIdEq : firstContext.freshFVarId =
-                      secondCandidateContext.freshFVarId := by
-                    apply Expr.fvar.inj
-                    exact parameterFirst.symm.trans parameterSecond
-                  have nextRelation : VLCtx.IsDefEqFVars env Us.length
-                      ((some (firstContext.freshFVarId,
-                          firstAnnotationsNode.consumed.fvarsList),
-                        .vlam firstStoredDomain) :: firstSnapshot.Δ)
-                      ((some (secondCandidateContext.freshFVarId,
-                          secondAnnotationsNode.consumed.fvarsList),
-                        .vlam secondStoredDomain) :: secondSnapshot.Δ) := by
-                    rw [← freshIdEq]
-                    exact .cons_fvar contextRelation (.vlam storedDomainsDef)
-                  have tailEvidence := ih pathTail paramsSize localState
-                    validatorViewTr firstTail firstTailAnnotations
-                    (firstLocalRun.push firstName firstBinderInfo
-                      firstAnnotationsNode.consumed)
-                    (by simpa only [
-                      AddInductive.CandidateExprTrace.terminalContext] using
-                        validatorFirstTerminal)
-                    secondTail secondTailAnnotations secondBodyAligned
-                    (by simpa [AddInductive.Context.pushLocalDecl] using
-                      secondDepth)
-                    nextSourceEq parametersFirstTail parametersSecondTail
-                    nextRelation
-                  have combined : TypeChecker.TelDefEqEvidence env Us.length
-                      firstSnapshot.Δ.toCtx
-                      (firstStoredDomain :: firstStoredDomains.take n)
-                      (secondStoredDomain :: secondStoredDomains.take n) :=
-                    .cons (.ofDefEq storedDomainsDef) tailEvidence
-                  simpa only [List.take_succ_cons] using combined
+                  cases n with
+                  | zero =>
+                      have combined :
+                          TypeChecker.TelDefEqEvidence env Us.length
+                            firstSnapshot.Δ.toCtx
+                            (firstStoredDomain ::
+                              firstStoredDomains.take 0)
+                            (secondStoredDomain ::
+                              secondStoredDomains.take 0) :=
+                        .cons (.ofDefEq storedDomainsDef) .nil
+                      simpa only [List.take_succ_cons] using combined
+                  | succ n =>
+                      have candidateTailIsForall :
+                          (secondBody.instantiate1
+                            secondCandidateContext.freshExpr).isForall =
+                              true :=
+                        secondPosition.traceSource_isForall (by omega)
+                          secondBodyAligned
+                      have candidateBodyEq :=
+                        AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                          bodyCandidate.rootWhnf_valid recursionFuel (by
+                            simpa [AddInductive.Context.pushLocalDecl] using
+                              secondDepth) candidateTailIsForall
+                      have validatorTailIsForall :
+                          (validatorBody.instantiate1
+                            stats.params[i]!).isForall = true := by
+                        rw [parameterSecond, validatorBodyEq]
+                        exact candidateTailIsForall
+                      have validatorBodyWhnfEq :=
+                        AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                          whnf recursionFuel validatorDepth
+                          validatorTailIsForall
+                      have nextSourceEq : validatorView =
+                          bodyCandidate.rootWhnf :=
+                        validatorBodyWhnfEq.trans (by
+                          rw [parameterSecond, validatorBodyEq]
+                          exact candidateBodyEq.symm)
+                      have freshIdEq : firstContext.freshFVarId =
+                          secondCandidateContext.freshFVarId := by
+                        apply Expr.fvar.inj
+                        exact parameterFirst.symm.trans parameterSecond
+                      have nextRelation :
+                          VLCtx.IsDefEqFVars env Us.length
+                            ((some (firstContext.freshFVarId,
+                                firstAnnotationsNode.consumed.fvarsList),
+                              .vlam firstStoredDomain) :: firstSnapshot.Δ)
+                            ((some (secondCandidateContext.freshFVarId,
+                                secondAnnotationsNode.consumed.fvarsList),
+                              .vlam secondStoredDomain) ::
+                                secondSnapshot.Δ) := by
+                        rw [← freshIdEq]
+                        exact .cons_fvar contextRelation
+                          (.vlam storedDomainsDef)
+                      have tailEvidence := ih pathTail paramsSize localState
+                        validatorViewTr firstTail firstTailAnnotations
+                        (firstLocalRun.push firstName firstBinderInfo
+                          firstAnnotationsNode.consumed)
+                        (fun found => firstTerminalFind (by
+                          simpa only [
+                            AddInductive.CandidateExprTrace.terminalContext]
+                            using found))
+                        secondTail secondTailAnnotations secondBodyAligned
+                        (by simpa [AddInductive.Context.pushLocalDecl] using
+                          secondDepth)
+                        (fun _ => nextSourceEq) parametersFirstTail
+                        parametersSecondTail
+                        nextRelation
+                      have combined :
+                          TypeChecker.TelDefEqEvidence env Us.length
+                            firstSnapshot.Δ.toCtx
+                            (firstStoredDomain ::
+                              firstStoredDomains.take (n + 1))
+                            (secondStoredDomain ::
+                              secondStoredDomains.take (n + 1)) :=
+                        .cons (.ofDefEq storedDomainsDef) tailEvidence
+                      simpa only [List.take_succ_cons] using combined
 
 /-- A selected second-family telescope starts in the exact reader context
 reached after the first family's complete telescope. -/
@@ -5101,11 +5149,14 @@ theorem
     staging.annotation.first_annotation_spine
     staging.annotation.first_validation_annotations
     (TypeChecker.CandidateLocalContextRun.empty _ firstRootLctx)
-    (staging.position_context_eq_firstTerminal context_lctx_eq)
+    (fun found => by
+      rw [staging.position_context_eq_firstTerminal context_lctx_eq]
+      exact found)
     staging.annotation.annotation_spine staging.annotation.validation_annotations
-    prefixes.position staging.annotation.stored_spine
-    staging.annotation.whnfDepth validatorSecondRoot parameterSourcesFirst
-    parameterSourcesSecond (.nil)
+    prefixes.position.toMainSpineAt staging.annotation.stored_spine
+    staging.annotation.whnfDepth (fun _ => validatorSecondRoot)
+    parameterSourcesFirst
+    parameterSourcesSecond (.nil) VLCtx.FVLift'.refl
     (staging.current_firstTerminal_defeq context_lctx_eq)
   simpa only [VLCtx.toCtx] using evidence.telDefEq
 
@@ -5445,6 +5496,7 @@ structure
     (staging.annotation.storedBinders.drop source.nparams).length
   alignment : chain.EndpointAlignment env Us
     staging.annotation.terminalRun.context.vlctx prefixes.firstParameterΔ
+      staging.annotation.firstTerminalRun.context.vlctx
 
 /-- A completed index chain whose retained endpoint is also the validator's
 exact terminal node.  This is the source-order handoff consumed by the next
@@ -5710,6 +5762,11 @@ structure
     staging.boundary.parameters.map Prod.fst
   context_eq_terminal : cursor.contextRun.context =
     completion.terminalRun.context
+  firstTerminal_find : ∀ {fv : FVarId} {decl : LocalDecl},
+    staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+          fv = some decl →
+      validation.continuation.telescope.result.context.lctx.find? fv =
+        some decl
 
 /-- Construct the source-order cursor at the exact terminal context reached
 after the second family's complete index telescope. -/
@@ -5728,7 +5785,8 @@ theorem
       produced.candidate source}
     {staging : produced.SecondFamilyIndexStaging semantic}
     {raw : staging.annotation.RawFirstIndexDomain}
-    (completion : staging.TerminalIndexDomainCompletion raw) :
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
     Nonempty completion.RemainingFamilyValidationCursor := by
   obtain ⟨validation⟩ := staging.validationContinuation
   have dIdxEq :=
@@ -5786,6 +5844,13 @@ theorem
       AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation.position]
       using congrArg (fun position => position.context.fuel)
         validation.position_eq
+  have validationResultContextEq : staging.position.trace.result.context =
+      validation.continuation.telescope.result.context :=
+    congrArg (fun position => position.trace.result.context)
+      validation.position_eq.symm
+  have positionFirstTerminal : staging.position.context =
+      staging.annotation.firstCandidate.familyType.type.trace.terminalContext :=
+    staging.position_context_eq_firstTerminal context_lctx_eq
   refine ⟨{
     validation := validation
     cursor := {
@@ -5824,7 +5889,14 @@ theorem
         _ = context.fuel := staging.position_fuel_eq
     parameterSources_eq_boundary := rfl
     context_eq_terminal :=
-      completion.continuationRun_context validation }⟩
+      completion.continuationRun_context validation
+    firstTerminal_find := by
+      intro fv decl found
+      rw [← validationResultContextEq]
+      exact staging.position.trace.result_findOld
+        staging.boundary.localState.localContext (by
+          rw [positionFirstTerminal]
+          exact found) }⟩
   simp [dIdxEq]
 
 /-- The cursor is based on the same verified context as the completed second
@@ -6369,6 +6441,821 @@ theorem
           source.nparams :=
       next.parameterLists_eq context_lctx_eq
 
+/-- The exact next-family parameter boundary retains the original first
+candidate's producer-allocated shared-parameter inventory. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyParameterBoundary.parameterSources_eq_firstParameterList
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    (parameter : cursor.NextFamilyParameterBoundary next) :
+    parameter.boundary.parameters.map Prod.fst =
+      staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams := by
+  calc
+    parameter.boundary.parameters.map Prod.fst =
+        next.continuation.stats.params.toList := by
+      simpa using parameter.boundary.parameter_sources_eq
+    _ = cursor.cursor.parameterSources := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+        next.selected]
+      exact cursor.cursor.current_parameterSources_eq
+    _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams := cursor.parameterSources_eq_firstParameterList
+
+/-- The exact producer annotation suffix at the canonical next family's
+parameter boundary.  The terminal-inclusive position makes this package
+available whether or not the family declares any indices. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyCandidateParameterSuffix
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging) where
+  position :
+    staging.annotation.remainingCandidates.head.familyType.type.trace.MainSpineAt
+      source.nparams
+  suffix : next.annotations.head.annotation_spine.MainPositionSuffix position
+
+/-- Select the next candidate's literal parameter-boundary cursor from its
+producer-owned parameter bound, terminal sort, and annotation traversal. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.candidateParameterSuffix
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging) :
+    Nonempty (cursor.NextFamilyCandidateParameterSuffix next) := by
+  obtain ⟨position⟩ :=
+    AddInductive.CandidateExprTrace.mainSpineAt
+      (next.nparams_le_spineLength)
+  obtain ⟨resultLevel, terminalEq⟩ := next.validation.head_terminal
+  obtain ⟨suffix⟩ :=
+    next.annotations.head.annotation_spine.mainPositionSuffix .nil
+      cursor.generationShapes.head.storedSpine
+      next.annotations.head.validation_annotations terminalEq position
+  exact ⟨{ position := position, suffix := suffix }⟩
+
+/-- The validator's retained shared-parameter comparisons construct the
+exact telescope equality between the first producer family and the canonical
+next family.  The first-terminal origin lift permits arbitrary prior-family
+indices in the current validator context. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterTelescopeDefEq
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (candidate : cursor.NextFamilyCandidateParameterSuffix next)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (next.annotations.head.storedBinders.take source.nparams) := by
+  have currentVenv : next.currentRun.context.venv = env :=
+    cursor.cursor.headContextRun_venv next.continuation next.selected
+  have currentLparams : next.currentRun.context.lparams = Us :=
+    cursor.cursor.headContextRun_lparams next.continuation next.selected
+  have firstRootLctx :
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+        ({} : LocalContext) := by
+    calc
+      staging.annotation.firstCandidate.familyType.type.context.lctx =
+          staging.annotation.remainingCandidates.head.familyType.type.context.lctx :=
+        congrArg AddInductive.Context.lctx next.firstCandidate_context_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).lctx :=
+        congrArg AddInductive.Context.lctx
+          next.validation.head_context_eq
+      _ = {} := rfl
+  have firstTerminalFind : ∀ {fv : FVarId} {decl : LocalDecl},
+      staging.annotation.firstCandidate.familyType.type.trace.terminalContext.lctx.find?
+          fv = some decl →
+        next.continuation.context.lctx.find? fv = some decl := by
+    intro fv decl found
+    rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+      next.selected]
+    exact cursor.firstTerminal_find found
+  have currentReference : VLCtx.IsDefEq env Us.length
+      next.currentRun.context.vlctx completion.alignment.reference := by
+    change VLCtx.IsDefEq env Us.length
+      (cursor.cursor.headContextRun next.continuation next.selected).context.vlctx
+        completion.alignment.reference
+    rw [cursor.cursor.headContextRun_context next.continuation next.selected]
+    rw [cursor.context_eq_terminal]
+    exact completion.current_reference
+  have validatorCandidateRoot : 0 < source.nparams →
+      next.continuation.source =
+        staging.annotation.remainingCandidates.head.familyType.type.trace.rootWhnf := by
+    intro positive
+    have candidateIsForall : nextSource.type.isForall = true :=
+      candidate.position.traceSource_isForall positive
+        cursor.generationShapes.head.storedSpine
+    have validatorRootEq : next.continuation.source = nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        (cursor.cursor.headRootWhnf next.continuation next.selected)
+        next.position.semantic.type.whnfFuel next.whnfDepth
+        candidateIsForall
+    have candidateRootEq :
+        staging.annotation.remainingCandidates.head.familyType.type.trace.rootWhnf =
+          nextSource.type :=
+      AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+        staging.annotation.remainingCandidates.head.familyType.type.trace.rootWhnf_valid
+        next.position.semantic.type.whnfFuel
+        next.position.semantic.type.whnfDepth candidateIsForall
+    exact validatorRootEq.trans candidateRootEq.symm
+  have evidence := sharedParameterTelescopeDefEqAux
+    parameter.boundary.prefix_path parameter.boundary.params_size
+    parameter.boundary.localState next.currentRun currentVenv currentLparams
+    parameter.root_tr next.position.semantic.type.whnfFuel next.whnfDepth
+    staging.annotation.first_annotation_spine
+    staging.annotation.first_validation_annotations
+    (TypeChecker.CandidateLocalContextRun.empty _ firstRootLctx)
+    firstTerminalFind next.annotations.head.annotation_spine
+    next.annotations.head.validation_annotations candidate.position
+    cursor.generationShapes.head.storedSpine
+    next.position.semantic.type.whnfDepth validatorCandidateRoot
+    parameter.parameterSources_eq_firstParameterList
+    (parameter.parameterSources_eq_candidateParameterList context_lctx_eq)
+    (.nil) completion.alignment.origin_reference_lift currentReference
+  simpa only [VLCtx.toCtx] using evidence
+
+/-- Exact endpoint package for a later family whose parameter boundary is
+followed by at least one index.  The retained root base is still the first
+family's shared-parameter prefix, while the origin base records the complete
+first-family terminal context across all intervening family indices. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyIndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next) where
+  position :
+    staging.annotation.remainingCandidates.head.familyType.type.trace.AnnotationAt
+      source.nparams
+  suffix : next.annotations.head.annotation_spine.PositionSuffix position
+  chain : parameter.boundary.IndexDomainChain
+  chain_length : chain.length =
+    (next.annotations.head.storedBinders.drop source.nparams).length
+  alignment : chain.EndpointAlignment env Us
+    next.annotations.head.terminalRun.context.vlctx
+    completion.prefixes.firstParameterΔ
+    staging.annotation.firstTerminalRun.context.vlctx
+
+/-- Consume the indexed suffix of the canonical next family through its exact
+validator continuation.  All roots, contexts, and positional evidence are
+selected from the same source-order staging. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.indexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (candidate : cursor.NextFamilyCandidateParameterSuffix next)
+    (context_lctx_eq : context.lctx = {})
+    (hasIndex : source.nparams <
+      staging.annotation.remainingCandidates.head.familyType.type.trace.spineLength) :
+    Nonempty (cursor.NextFamilyIndexDomainCompletion next parameter) := by
+  obtain ⟨position⟩ :=
+    AddInductive.CandidateExprTrace.annotationAt
+      next.annotations.head.validation_annotations hasIndex
+  obtain ⟨resultLevel, terminalEq⟩ := next.validation.head_terminal
+  obtain ⟨suffix⟩ :=
+    next.annotations.head.annotation_spine.positionSuffix .nil
+      cursor.generationShapes.head.storedSpine
+      next.annotations.head.validation_annotations terminalEq position
+  have currentVenv : next.currentRun.context.venv = env :=
+    cursor.cursor.headContextRun_venv next.continuation next.selected
+  have currentLparams : next.currentRun.context.lparams = Us :=
+    cursor.cursor.headContextRun_lparams next.continuation next.selected
+  have candidateIsForall : nextSource.type.isForall = true :=
+    position.traceSource_isForall
+      cursor.generationShapes.head.storedSpine
+  have validatorRootEq : next.continuation.source = nextSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      (cursor.cursor.headRootWhnf next.continuation next.selected)
+      next.position.semantic.type.whnfFuel next.whnfDepth candidateIsForall
+  have candidateRootEq :
+      staging.annotation.remainingCandidates.head.familyType.type.trace.rootWhnf =
+        nextSource.type :=
+    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+      staging.annotation.remainingCandidates.head.familyType.type.trace.rootWhnf_valid
+      next.position.semantic.type.whnfFuel
+      next.position.semantic.type.whnfDepth candidateIsForall
+  have boundaryRootEq :=
+    parameter.boundary.prefix_path.annotationAt_root_eq
+      (parameter.parameterSources_eq_candidateParameterList context_lctx_eq)
+      position cursor.generationShapes.head.storedSpine
+      (validatorRootEq.trans candidateRootEq.symm)
+      next.position.semantic.type.whnfFuel next.whnfDepth
+      next.position.semantic.type.whnfDepth
+  have cursorContext : suffix.cursor.Δ.toCtx =
+      (next.annotations.head.storedBinders.take source.nparams).reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using suffix.context_eq
+  have parameterTelescope :=
+    next.parameterTelescopeDefEq parameter candidate context_lctx_eq
+  have parameterContext : env.IsDefEqCtx Us.length []
+      completion.prefixes.firstParameterΔ.toCtx suffix.cursor.Δ.toCtx := by
+    simpa only [List.append_nil, completion.prefixes.first_context,
+      cursorContext] using parameterTelescope.telDefEq.ctx
+  have relation : VLCtx.FVarAlpha env Us.length
+      completion.prefixes.firstParameterΔ suffix.cursor.Δ :=
+    VLCtx.FVarAlpha.of_defeqCtx completion.prefixes.first_shape
+      suffix.cursor.shape parameterContext
+  have mappedFVars :
+      completion.prefixes.firstParameterΔ.fvars.map Expr.fvar =
+        suffix.cursor.Δ.fvars.map Expr.fvar := by
+    calc
+      completion.prefixes.firstParameterΔ.fvars.map Expr.fvar =
+          (staging.annotation.firstCandidate.familyType.type.trace
+            |>.parameterList source.nparams).reverse :=
+        completion.prefixes.first_fvars
+      _ = (parameter.boundary.parameters.map Prod.fst).reverse :=
+        congrArg List.reverse
+          parameter.parameterSources_eq_firstParameterList.symm
+      _ = (staging.annotation.remainingCandidates.head.familyType.type.trace
+            |>.parameterList source.nparams).reverse :=
+        congrArg List.reverse
+          (parameter.parameterSources_eq_candidateParameterList
+            context_lctx_eq)
+      _ = suffix.cursor.Δ.fvars.map Expr.fvar := by
+        have suffixFVars := suffix.fvars_eq
+        change suffix.cursor.Δ.fvars.map Expr.fvar =
+          (staging.annotation.remainingCandidates.head.familyType.type.trace
+            |>.parameterList source.nparams).reverse ++ [] at suffixFVars
+        simpa only [List.append_nil] using suffixFVars.symm
+  have cursorFVars : completion.prefixes.firstParameterΔ.fvars =
+      suffix.cursor.Δ.fvars :=
+    list_map_fvar_injective mappedFVars
+  have currentReference : VLCtx.IsDefEq env Us.length
+      next.currentRun.context.vlctx completion.alignment.reference := by
+    change VLCtx.IsDefEq env Us.length
+      (cursor.cursor.headContextRun next.continuation next.selected).context.vlctx
+        completion.alignment.reference
+    rw [cursor.cursor.headContextRun_context next.continuation next.selected]
+    rw [cursor.context_eq_terminal]
+    exact completion.current_reference
+  have sourceScope : parameter.boundary.source.FVarsIn
+      (· ∈ completion.prefixes.firstParameterΔ.fvars) := by
+    rw [boundaryRootEq, suffix.root_eq, cursorFVars]
+    exact suffix.cursor.root_fvars
+  have sourceAlpha :
+      Lean.Expr.abstractFVars completion.prefixes.firstParameterΔ
+          parameter.boundary.source =
+        Lean.Expr.abstractFVars suffix.cursor.Δ
+          suffix.cursor.trace.rootWhnf := by
+    rw [boundaryRootEq, suffix.root_eq]
+    simp only [Lean.Expr.abstractFVars, cursorFVars]
+  have terminalWF : VLCtx.WF env Us.length
+      next.annotations.head.terminalRun.context.vlctx := by
+    simpa only [next.annotations.head.terminal_venv,
+      next.annotations.head.terminal_lparams] using
+      next.annotations.head.terminalRun.context.Δwf
+  have candidateDepth : suffix.cursor.candidateContext.fuel.recDepth =
+      next.position.semantic.type.whnfFuel + 1 := by
+    calc
+      suffix.cursor.candidateContext.fuel.recDepth =
+          staging.annotation.remainingCandidates.head.familyType.type.context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
+      _ = next.position.semantic.type.whnfFuel + 1 :=
+        next.position.semantic.type.whnfDepth
+  obtain ⟨⟨chain, alignment⟩⟩ :=
+    suffix.cursor.indexDomainChainAligned terminalWF parameter.boundary
+      currentVenv currentLparams completion.prefixes.first_shape relation
+      completion.alignment.root_reference_lift
+      completion.alignment.root_reference_lift
+      completion.alignment.origin_reference_lift currentReference sourceScope
+      sourceAlpha next.position.semantic.type.whnfFuel next.whnfDepth
+      candidateDepth
+  exact ⟨{
+    position := position
+    suffix := suffix
+    chain := chain
+    chain_length := alignment.property.trans
+      (congrArg List.length suffix.domains_eq)
+    alignment := alignment.val }⟩
+
+/-- Exact endpoint package for a later family whose complete telescope ends
+at the shared-parameter boundary.  Its index chain is empty, but it carries
+the same endpoint alignment as an indexed family. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyZeroIndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (candidate : cursor.NextFamilyCandidateParameterSuffix next) where
+  no_indices : source.nparams =
+    staging.annotation.remainingCandidates.head.familyType.type.trace.spineLength
+  chain : parameter.boundary.IndexDomainChain
+  chain_length : chain.length =
+    (next.annotations.head.storedBinders.drop source.nparams).length
+  alignment : chain.EndpointAlignment env Us
+    next.annotations.head.terminalRun.context.vlctx
+    completion.prefixes.firstParameterΔ
+    staging.annotation.firstTerminalRun.context.vlctx
+
+/-- Close a canonical later family directly at its terminal sort when it has
+no indices.  The terminal equality is specialized along the validator's
+producer-owned parameter spine, so this branch does not invent a Pi position
+at the endpoint. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.zeroIndexDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (candidate : cursor.NextFamilyCandidateParameterSuffix next)
+    (context_lctx_eq : context.lctx = {})
+    (noIndices : source.nparams =
+      staging.annotation.remainingCandidates.head.familyType.type.trace.spineLength) :
+    Nonempty
+      (cursor.NextFamilyZeroIndexDomainCompletion next parameter candidate) := by
+  have currentVenv : next.currentRun.context.venv = env :=
+    cursor.cursor.headContextRun_venv next.continuation next.selected
+  have currentLparams : next.currentRun.context.lparams = Us :=
+    cursor.cursor.headContextRun_lparams next.continuation next.selected
+  have henv : VEnv.WF env := by
+    simpa only [currentVenv] using next.currentRun.context.Ewf
+  have currentWF : VLCtx.WF env Us.length
+      next.currentRun.context.vlctx := by
+    simpa only [currentVenv, currentLparams] using
+      next.currentRun.context.Δwf
+  have currentReference : VLCtx.IsDefEq env Us.length
+      next.currentRun.context.vlctx completion.alignment.reference := by
+    change VLCtx.IsDefEq env Us.length
+      (cursor.cursor.headContextRun next.continuation next.selected).context.vlctx
+        completion.alignment.reference
+    rw [cursor.cursor.headContextRun_context next.continuation next.selected]
+    rw [cursor.context_eq_terminal]
+    exact completion.current_reference
+  have binderCount : source.nparams =
+      (VInductDecl.ctorFields next.position.raw.type).length :=
+    noIndices.trans
+      cursor.generationShapes.head.spineLength_eq_ctorFields
+  have storedLength : next.annotations.head.storedBinders.length =
+      source.nparams := by
+    calc
+      next.annotations.head.storedBinders.length =
+          (VInductDecl.ctorFields next.position.raw.type).length :=
+        next.annotations.head.stored_length
+      _ = source.nparams := binderCount.symm
+  have takeAll :
+      next.annotations.head.storedBinders.take source.nparams =
+        next.annotations.head.storedBinders :=
+    List.take_of_length_le (by omega)
+  have parameterTelescope :=
+    next.parameterTelescopeDefEq parameter candidate context_lctx_eq
+  have terminalShape :
+      next.annotations.head.terminalRun.context.vlctx.FVarLamOnly :=
+    next.annotations.head.annotation_spine.terminalShape .nil
+  have parameterContext : env.IsDefEqCtx Us.length []
+      completion.prefixes.firstParameterΔ.toCtx
+      next.annotations.head.terminalRun.context.vlctx.toCtx := by
+    simpa only [List.append_nil, completion.prefixes.first_context,
+      next.annotations.head.terminal_vlctx, takeAll] using
+      parameterTelescope.telDefEq.ctx
+  have relation : VLCtx.FVarAlpha env Us.length
+      completion.prefixes.firstParameterΔ
+      next.annotations.head.terminalRun.context.vlctx :=
+    VLCtx.FVarAlpha.of_defeqCtx completion.prefixes.first_shape
+      terminalShape parameterContext
+  let rawBinders := VExpr.telN source.nparams next.position.raw.type
+  let arguments := parameter.boundary.parameters.map Prod.snd
+  have positionRawEq : next.position.raw.type =
+      cursor.cursor.semantics.headPosition.raw.type := rfl
+  have fullRawLength :
+      (VExpr.telN (VInductDecl.ctorFields next.position.raw.type).length
+        next.position.raw.type).length =
+        (VInductDecl.ctorFields next.position.raw.type).length :=
+    next.annotations.head.telescope.length_eq.trans
+      next.annotations.head.stored_length
+  have rawBindersLength : rawBinders.length = source.nparams := by
+    simpa only [rawBinders, binderCount] using fullRawLength
+  have argumentsLength : arguments.length = rawBinders.length := by
+    calc
+      arguments.length = parameter.boundary.parameters.length := by
+        simp only [arguments, List.length_map]
+      _ = source.nparams := by
+        simpa only [Nat.sub_zero] using
+          parameter.boundary.parameters_length
+      _ = rawBinders.length := rawBindersLength.symm
+  have rootDef : env.IsDefEqU Us.length next.currentRun.context.vlctx.toCtx
+      (VExpr.forallN rawBinders
+        (VExpr.dropN source.nparams next.position.raw.type))
+      parameter.root := by
+    simpa only [currentVenv, currentLparams, rawBinders,
+      VExpr.forallN_telN_dropN] using parameter.rawRoot_def
+  have parameterSpine : TypeChecker.FamilyParameterSemanticSpine env
+      Us.length next.currentRun.context.vlctx.toCtx parameter.root arguments
+      parameter.boundary.source' := by
+    simpa only [currentVenv, currentLparams, arguments] using
+      parameter.parameterSpine
+  have rawOnTel := next.annotations.head.telescope.telDefEq.raw_onTel
+  have rawContext : OnCtx rawBinders.reverse (env.IsType Us.length) := by
+    simpa only [rawBinders, positionRawEq, binderCount, List.append_nil] using
+      rawOnTel.onCtx
+        (show OnCtx ([] : List VExpr) (env.IsType Us.length) from trivial)
+  have rawClosed := VEnv.CtxWF.closed henv.ordered rawContext
+  obtain ⟨resultLevel, terminalEq⟩ := next.validation.head_terminal
+  obtain ⟨resultType, fullEvidence⟩ :=
+    next.annotations.head.recursive.spineEvidence
+      cursor.generationShapes.head.storedSpine
+  obtain ⟨viewLevel, _levelTr, viewResultEq⟩ :=
+    next.annotations.head.recursive.viewResult_of_terminalSort terminalEq
+  have resultDef := fullEvidence.result.isDefEq
+  rw [viewResultEq] at resultDef
+  have resultDefAtRaw : env.IsDefEq Us.length rawBinders.reverse
+      (VExpr.dropN source.nparams next.position.raw.type)
+      (.sort viewLevel) resultType := by
+    simpa only [rawBinders, positionRawEq, noIndices, VLCtx.toCtx,
+      List.append_nil] using resultDef
+  have terminalDef : env.IsDefEq Us.length
+      (rawBinders.reverse ++ next.currentRun.context.vlctx.toCtx)
+      (VExpr.dropN source.nparams next.position.raw.type)
+      (.sort viewLevel) resultType :=
+    resultDefAtRaw.weakR henv.ordered rawClosed
+      next.currentRun.context.vlctx.toCtx
+  have specialized := parameterSpine.specializeTerminalDefEq henv
+    currentWF.toCtx rootDef argumentsLength terminalDef
+  rw [VExpr.instRev_closedN arguments (C := .sort viewLevel) trivial]
+    at specialized
+  have rawToSort : env.IsDefEqU Us.length
+      next.currentRun.context.vlctx.toCtx
+      (VExpr.instRev
+        (VExpr.dropN source.nparams next.position.raw.type) arguments)
+      (.sort viewLevel) := specialized.toU
+  have rawToBoundary := parameterSpine.rawTerminal_defeq henv
+    currentWF.toCtx rootDef argumentsLength
+  have endpointSort : env.IsDefEqU Us.length
+      next.currentRun.context.vlctx.toCtx parameter.boundary.source'
+      (.sort viewLevel) :=
+    rawToBoundary.symm.trans henv currentWF.toCtx rawToSort
+  let chain : parameter.boundary.IndexDomainChain := .done
+  exact ⟨{
+    no_indices := noIndices
+    chain := chain
+    chain_length := by
+      simp only [chain,
+        TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.length,
+        List.length_drop, storedLength]
+      omega
+    alignment := {
+      base := completion.prefixes.firstParameterΔ
+      reference := completion.alignment.reference
+      lift := completion.alignment.rootLift
+      rootLift := completion.alignment.rootLift
+      originLift := completion.alignment.originLift
+      base_shape := completion.prefixes.first_shape
+      terminal_shape := terminalShape
+      relation := relation
+      reference_lift := completion.alignment.root_reference_lift
+      root_reference_lift := completion.alignment.root_reference_lift
+      origin_reference_lift := completion.alignment.origin_reference_lift
+      current_reference := by
+        simpa only [chain,
+          TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+          currentReference
+      sort := viewLevel
+      endpoint_sort := by
+        simpa only [chain,
+          TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
+          endpointSort } }⟩
+
+/-- Uniform endpoint package for one canonical later family.  The stored
+terminal-inclusive candidate suffix is shared by the indexed and zero-index
+branches; downstream source-order iteration consumes only this interface. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next) where
+  candidate : cursor.NextFamilyCandidateParameterSuffix next
+  chain : parameter.boundary.IndexDomainChain
+  chain_length : chain.length =
+    (next.annotations.head.storedBinders.drop source.nparams).length
+  alignment : chain.EndpointAlignment env Us
+    next.annotations.head.terminalRun.context.vlctx
+    completion.prefixes.firstParameterΔ
+    staging.annotation.firstTerminalRun.context.vlctx
+
+/-- Complete the canonical later family regardless of whether its parameter
+boundary exposes an index Pi or its terminal sort. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.domainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (cursor.NextFamilyDomainCompletion next parameter) := by
+  obtain ⟨candidate⟩ := next.candidateParameterSuffix
+  rcases Nat.lt_or_eq_of_le next.nparams_le_spineLength with hasIndex |
+      noIndices
+  · obtain ⟨indexed⟩ := next.indexDomainCompletion parameter candidate
+      context_lctx_eq hasIndex
+    exact ⟨{
+      candidate := candidate
+      chain := indexed.chain
+      chain_length := indexed.chain_length
+      alignment := indexed.alignment }⟩
+  · obtain ⟨zero⟩ := next.zeroIndexDomainCompletion parameter candidate
+      context_lctx_eq noIndices
+    exact ⟨{
+      candidate := candidate
+      chain := zero.chain
+      chain_length := zero.chain_length
+      alignment := zero.alignment }⟩
+
+/-- The uniform later-family completion with its exact validator terminal
+witness attached. -/
+structure
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    extends cursor.NextFamilyDomainCompletion next parameter where
+  terminal : toNextFamilyDomainCompletion.chain.endpoint.boundary.Terminal
+
+/-- Attach the exact terminal constructor to a completed canonical later
+family. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.terminalDomainCompletion
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (context_lctx_eq : context.lctx = {}) :
+    Nonempty (next.TerminalDomainCompletion parameter) := by
+  obtain ⟨domain⟩ := next.domainCompletion parameter context_lctx_eq
+  have henv : VEnv.WF env := by
+    have currentVenv : next.currentRun.context.venv = env :=
+      cursor.cursor.headContextRun_venv next.continuation next.selected
+    simpa only [currentVenv] using next.currentRun.context.Ewf
+  obtain ⟨terminal⟩ := domain.alignment.terminal henv
+  exact ⟨{
+    toNextFamilyDomainCompletion := domain
+    terminal := terminal }⟩
+
+/-- Exact verified context reached after the canonical later family's complete
+telescope. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.terminalRun
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    TypeChecker.CandidateContextRun next.continuation.telescope.result.context :=
+  domain.chain.endpointContextRun domain.terminal
+
+/-- The completed later-family endpoint retains the semantic environment. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.terminal_venv
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    domain.terminalRun.context.venv = env := by
+  exact (domain.chain.endpointContextRun_venv domain.terminal).trans
+    (cursor.cursor.headContextRun_venv next.continuation next.selected)
+
+/-- The completed later-family endpoint retains the semantic universe
+parameters. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.terminal_lparams
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    domain.terminalRun.context.lparams = Us := by
+  exact (domain.chain.endpointContextRun_lparams domain.terminal).trans
+    (cursor.cursor.headContextRun_lparams next.continuation next.selected)
+
+/-- Advance the source-order validator/semantic cursor through one completed
+later family. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.advance
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    {parameter : cursor.NextFamilyParameterBoundary next}
+    (domain : next.TerminalDomainCompletion parameter) :
+    CandidateBlockLaterFamilyValidationCursor env blockEnv Us source.nparams
+      (firstSource :: secondSource :: nextSource :: laterSources)
+      staging.annotation.remainingCandidates.tail
+      staging.annotation.remainingRaws.tail next.continuation.tail :=
+  cursor.cursor.advanceHead next.continuation next.selected next.invariant
+    domain.terminalRun domain.terminal_venv domain.terminal_lparams
+
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root
 context. -/
@@ -6547,7 +7434,8 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
     suffix.cursor.indexDomainChainAligned terminalWF staging.boundary
       staging.current_venv staging.current_lparams prefixes.first_shape
       relation prefixes.first_terminal_lift prefixes.first_terminal_lift
-      prefixes.current_firstTerminal_defeq sourceScope sourceAlpha
+      VLCtx.FVLift'.refl prefixes.current_firstTerminal_defeq sourceScope
+      sourceAlpha
       staging.annotation.whnfFuel validatorDepth candidateDepth
   exact ⟨{
     prefixes := prefixes
@@ -7079,6 +7967,206 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.headContinuation
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.indexDomainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.indexDomainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.zeroIndexDomainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.zeroIndexDomainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.domainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.domainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.terminalDomainCompletion' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.terminalDomainCompletion
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.terminalRun' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.terminalRun
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.advance' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.TerminalDomainCompletion.advance
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq' depends on axioms: [propext,

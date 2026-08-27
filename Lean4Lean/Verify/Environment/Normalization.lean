@@ -635,6 +635,63 @@ theorem CandidateExprTrace.head_getType_terminal
     context.freshFVarId).type) = _
   simp [LocalContext.get!, foundAtTerminal, LocalDecl.type]
 
+/-- The terminal context retains the literal local declaration allocated by
+the head candidate binder. -/
+theorem CandidateExprTrace.head_find_terminal
+    {context : AddInductive.Context} (name : Name)
+    (binderInfo : BinderInfo) {domain bodySource : Expr}
+    (annotations : AddInductive.CandidateTypeAnnotations domain)
+    (bodyCandidate : AddInductive.CandidateExprTrace
+      (context.pushLocalDecl name binderInfo annotations.consumed) bodySource)
+    (localRun : CandidateLocalContextRun context) :
+    bodyCandidate.terminalContext.lctx.find? context.freshFVarId =
+      some (.cdecl context.lctx.decls.size context.freshFVarId
+        name annotations.consumed binderInfo .default) := by
+  exact CandidateExprTrace.terminal_findOld bodyCandidate
+    (localRun.push name binderInfo annotations.consumed)
+    (localRun.push_findNew name binderInfo annotations.consumed)
+
+/-- A literal local-context lookup determines the executable free-variable
+type query without any additional context reconstruction. -/
+theorem getType_fvar_of_find
+    {context : AddInductive.Context} {fv : FVarId} {decl : LocalDecl}
+    (found : context.lctx.find? fv = some decl) :
+    AddInductive.getType (.fvar fv) context = .ok decl.type := by
+  unfold AddInductive.getType
+  simp only [ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
+    Except.bind, Except.pure, getLCtx]
+  change Except.ok ((context.lctx.get! fv).type) = .ok decl.type
+  simp [LocalContext.get!, found]
+
+/-- Every pre-existing local declaration survives a complete family
+telescope traversal.  Only fresh-parameter and index constructors extend the
+reader context; shared parameters leave it unchanged. -/
+theorem _root_.Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_findOld
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context source i nindices fuel)
+    (localRun : CandidateLocalContextRun context)
+    {fv : FVarId} {decl : LocalDecl}
+    (found : context.lctx.find? fv = some decl) :
+    trace.result.context.lctx.find? fv = some decl := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+      exact ih (localRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain))
+        (localRun.push_findOld name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) found)
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+      exact ih localRun found
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+      exact ih (localRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain))
+        (localRun.push_findOld name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) found)
+  | terminal => exact found
+
 /-- Positional verified context for an executable normalization candidate.
 
 The equality pins every checker-visible field (environment, local context,
@@ -4138,6 +4195,34 @@ def MainSpineAt.position :
   | _, _, _, _, .zero trace => ⟨_, _, trace⟩
   | _, _, _, _, .succ _ tail => tail.position
 
+/-- Forget the annotation witness while retaining the same exact main-spine
+path. -/
+def AnnotationAt.toMainSpineAt :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      {trace : AddInductive.CandidateExprTrace candidateContext source} →
+      {count : Nat} → AnnotationAt trace count → MainSpineAt trace count
+  | _, _, _, _, .zero _ => .zero _
+  | _, _, _, _, .succ bodyCandidate tail =>
+      .succ bodyCandidate tail.toMainSpineAt
+
+/-- A positive terminal-inclusive position still certifies that the current
+candidate source is a genuine stored Pi. -/
+theorem MainSpineAt.traceSource_isForall
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {count : Nat}
+    (position : trace.MainSpineAt count)
+    (positive : 0 < count)
+    (aligned : trace.storedSpine = true) :
+    source.isForall = true := by
+  cases position with
+  | zero => omega
+  | succ bodyCandidate tail =>
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at aligned
+      exact AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+        aligned.1
+
 /-- The exact kernel Pi exposed at a selected annotation position. -/
 def AnnotationAt.root :
     {candidateContext : AddInductive.Context} → {source : Expr} →
@@ -5057,6 +5142,52 @@ theorem CandidateAnnotationSpine.mainPositionSuffix
               simpa [AddInductive.Context.pushLocalDecl] using
                 suffix.fuel_eq }⟩
 
+/-- The WHNF root selected by an annotation spine mentions only the free
+variables in that spine's exact initial verified context. -/
+theorem CandidateAnnotationSpine.root_fvars
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (annotations : trace.validationAnnotations) :
+    trace.rootWhnf.FVarsIn (· ∈ Δ.fvars) := by
+  cases spine with
+  | terminal node =>
+      simpa only [AddInductive.CandidateExprTrace.rootWhnf] using
+        node.whnf.rhs_tr.fvarsIn
+  | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
+      rename_i candidateDomain candidateName candidateBinderInfo candidateBody
+        candidateInferred candidateAnnotations candidateFresh
+        candidateAnnotationsEq candidateChecked candidateNormalized
+      rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      subst Δ
+      have rootParts := snapshot.root_eq
+      simp only [Expr.forallE.injEq] at rootParts
+      rcases rootParts with
+        ⟨_nameEq, domainEq, bodyEq, _binderInfoEq⟩
+      have domainFVars : candidateDomain.FVarsIn
+          (· ∈ snapshot.Δ.fvars) :=
+        (congrArg (fun expression =>
+          expression.FVarsIn (· ∈ snapshot.Δ.fvars)) domainEq).mpr
+            snapshot.domain_tr.fvarsIn
+      have bodyFVars : candidateBody.FVarsIn (· ∈ snapshot.Δ.fvars) :=
+        (congrArg (fun expression =>
+          expression.FVarsIn (· ∈ snapshot.Δ.fvars)) bodyEq).mpr
+            snapshot.body_fvars
+      simp only [AddInductive.CandidateExprTrace.rootWhnf]
+      exact ⟨domainFVars, bodyFVars⟩
+
+/-- The WHNF root selected by any producer annotation cursor mentions only
+the free variables in that cursor's exact verified context. -/
+theorem CandidateAnnotationCursor.root_fvars
+    {env : VEnv} {Us : List Name} {terminalΔ : VLCtx}
+    (cursor : CandidateAnnotationCursor env Us terminalΔ) :
+    cursor.trace.rootWhnf.FVarsIn (· ∈ cursor.Δ.fvars) :=
+  cursor.spine.root_fvars cursor.annotations
+
 /--
 info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.positionSuffix' depends on axioms: [propext,
  Classical.choice,
@@ -5083,6 +5214,21 @@ theorem CandidateAnnotationSpine.terminalLift
           VLCtx.FVLift'.refl).comp ih
       simpa only [List.length_cons, Lift.comp_skipN, Lift.comp,
         Lift.skipN_skipN, VLocalDecl.depth, Nat.one_add] using combined
+
+/-- A producer annotation telescope that starts with only free assumptions
+also ends with only free assumptions.  Each traversed Pi contributes exactly
+one free lambda declaration to the verified terminal context. -/
+theorem CandidateAnnotationSpine.terminalShape
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly) : terminalΔ.FVarLamOnly := by
+  induction spine with
+  | terminal => exact initialShape
+  | forallE domainCandidate bodyCandidate storedDomain domains head tail ih =>
+      exact ih (.cons initialShape)
 
 /-- Recover the exact verified context after any bounded prefix of a
 producer-owned annotation telescope.
@@ -5723,16 +5869,20 @@ structure FamilyParameterIndexBoundary.IndexDomainChain.EndpointAlignment
     {contextRun : CandidateContextRun context}
     {boundary : FamilyParameterIndexBoundary outer contextRun}
     (chain : boundary.IndexDomainChain)
-    (env : VEnv) (Us : List Name) (terminalΔ rootBase : VLCtx) where
+    (env : VEnv) (Us : List Name)
+    (terminalΔ rootBase originBase : VLCtx) where
   base : VLCtx
   reference : VLCtx
   lift : Lift
   rootLift : Lift
+  originLift : Lift
   base_shape : base.FVarLamOnly
   terminal_shape : terminalΔ.FVarLamOnly
   relation : VLCtx.FVarAlpha env Us.length base terminalΔ
   reference_lift : VLCtx.FVLift' base reference 0 lift 0
   root_reference_lift : VLCtx.FVLift' rootBase reference 0 rootLift 0
+  origin_reference_lift :
+    VLCtx.FVLift' originBase reference 0 originLift 0
   current_reference : VLCtx.IsDefEq env Us.length
     chain.endpoint.contextRun.context.vlctx reference
   sort : VLevel
@@ -5753,8 +5903,10 @@ theorem
     {contextRun : CandidateContextRun context}
     {boundary : FamilyParameterIndexBoundary outer contextRun}
     {chain : boundary.IndexDomainChain}
-    {env : VEnv} {Us : List Name} {terminalΔ rootBase : VLCtx}
-    (alignment : chain.EndpointAlignment env Us terminalΔ rootBase)
+    {env : VEnv} {Us : List Name}
+    {terminalΔ rootBase originBase : VLCtx}
+    (alignment : chain.EndpointAlignment env Us terminalΔ rootBase
+      originBase)
     (henv : VEnv.WF env) :
     Nonempty chain.endpoint.boundary.Terminal := by
   rcases chain.endpoint.boundary.progress with sourceForall | terminal
@@ -6020,6 +6172,9 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
     (referenceLift : VLCtx.FVLift' base reference 0 lift 0)
     {rootBase : VLCtx} {rootLift : Lift}
     (rootReferenceLift : VLCtx.FVLift' rootBase reference 0 rootLift 0)
+    {originBase : VLCtx} {originLift : Lift}
+    (originReferenceLift :
+      VLCtx.FVLift' originBase reference 0 originLift 0)
     (currentReference : VLCtx.IsDefEq env Us.length
       contextRun.context.vlctx reference)
     (sourceScope : boundary.source.FVarsIn (· ∈ base.fvars))
@@ -6030,13 +6185,15 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
     (candidateDepth : cursor.candidateContext.fuel.recDepth =
       whnfFuel + 1) :
     Nonempty (Sigma fun chain : boundary.IndexDomainChain =>
-      { _alignment : chain.EndpointAlignment env Us terminalΔ rootBase //
+      { _alignment : chain.EndpointAlignment env Us terminalΔ rootBase
+          originBase //
         chain.length = cursor.domains.length }) := by
   rcases cursor with ⟨candidateContext, candidateSource, candidateTrace,
     candidateΔ, candidateDomains, spine, candidateShape, stored,
     annotations, resultLevel, terminalEq, terminalNotForall⟩
   induction spine generalizing nparams stats context rootSource i nindices
-      rootFuel outer contextRun boundary base reference lift rootLift with
+      rootFuel outer contextRun boundary base reference lift rootLift
+      originLift with
   | terminal node =>
       have henv : VEnv.WF env := by
         simpa only [venv_eq] using contextRun.context.Ewf
@@ -6066,11 +6223,13 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           reference := reference
           lift := lift
           rootLift := rootLift
+          originLift := originLift
           base_shape := baseShape
           terminal_shape := candidateShape
           relation := relation
           reference_lift := referenceLift
           root_reference_lift := rootReferenceLift
+          origin_reference_lift := originReferenceLift
           current_reference := by
             simpa only [chain,
               FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
@@ -6133,6 +6292,12 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           (.skipN rootLift 1) 0 := by
         simpa only [nextReference, VLocalDecl.depth] using
           rootReferenceLift.skip_fvar (context.freshFVarId, deps)
+            (.vlam (preparation.baseConsumed.lift' lift))
+      have nextOriginReferenceLift :
+          VLCtx.FVLift' originBase nextReference 0
+            (.skipN originLift 1) 0 := by
+        simpa only [nextReference, VLocalDecl.depth] using
+          originReferenceLift.skip_fvar (context.freshFVarId, deps)
             (.vlam (preparation.baseConsumed.lift' lift))
       have pushedVenv : run.pushContext.context.venv = env := by
         change contextRun.context.venv = env
@@ -6301,11 +6466,13 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
               reference := nextReference
               lift := .consN lift 1
               rootLift := .skipN rootLift 1
+              originLift := .skipN originLift 1
               base_shape := nextBaseShape
               terminal_shape := nextCandidateShape
               relation := nextRelation
               reference_lift := nextReferenceLift
               root_reference_lift := nextRootReferenceLift
+              origin_reference_lift := nextOriginReferenceLift
               current_reference := by
                 simpa only [chain, tailChain,
                   FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
@@ -6386,7 +6553,8 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
           obtain ⟨⟨tailChain, tailAlignment, tailLength⟩⟩ :=
             ih terminalWF advance.toBoundary
             nextValidatorVenv nextValidatorLparams nextBaseShape
-            nextReferenceLift nextRootReferenceLift nextCurrentReference
+            nextReferenceLift nextRootReferenceLift nextOriginReferenceLift
+            nextCurrentReference
             nextSourceScope
             nextValidatorDepth nextCandidateShape stored.2 tailAnnotations
             terminalEq terminalNotForall nextRelation nextSourceAlpha
@@ -6398,11 +6566,13 @@ theorem CandidateAnnotationCursor.indexDomainChainAligned
             reference := tailAlignment.reference
             lift := tailAlignment.lift
             rootLift := tailAlignment.rootLift
+            originLift := tailAlignment.originLift
             base_shape := tailAlignment.base_shape
             terminal_shape := tailAlignment.terminal_shape
             relation := tailAlignment.relation
             reference_lift := tailAlignment.reference_lift
             root_reference_lift := tailAlignment.root_reference_lift
+            origin_reference_lift := tailAlignment.origin_reference_lift
             current_reference := by
               simpa only [chain,
                 FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
@@ -6447,7 +6617,8 @@ theorem CandidateAnnotationCursor.indexDomainChain
     Nonempty boundary.IndexDomainChain := by
   obtain ⟨⟨chain, _alignment, _length⟩⟩ :=
     cursor.indexDomainChainAligned terminalWF boundary venv_eq lparams_eq
-      baseShape relation referenceLift referenceLift currentReference
+      baseShape relation referenceLift referenceLift referenceLift
+      currentReference
       sourceScope sourceAlpha whnfFuel validatorDepth candidateDepth
   exact ⟨chain⟩
 
@@ -9751,6 +9922,41 @@ def CandidateBlockLaterFamilyValidationCursor.advance
     current_params_size := invariant.next_params_size }
   have suffixEq := congrArg (List.drop 1) cursor.sourceSuffix_eq
   simpa [List.drop_drop, dIdxEq] using suffixEq
+
+/-- Projection-friendly form of `advance` for a source-indexed nonempty
+cursor.  The semantic list rules out an empty raw list and supplies the
+dependent candidate/raw head decomposition internally. -/
+def CandidateBlockLaterFamilyValidationCursor.advanceHead
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {source : InductiveType} {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (source :: remainingSources)}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams fullSources.toArray)
+    (selected : trace.headContinuation? = some continuation)
+    (invariant : continuation.LaterInvariant)
+    (nextRun : TypeChecker.CandidateContextRun
+      continuation.telescope.result.context)
+    (next_venv : nextRun.context.venv = env)
+    (next_lparams : nextRun.context.lparams = Us) :
+    CandidateBlockLaterFamilyValidationCursor env blockEnv Us nparams
+      fullSources candidates.tail raws.tail continuation.tail := by
+  cases candidates with
+  | cons candidate candidates =>
+      cases raws with
+      | nil => cases cursor.semantics
+      | cons raw raws =>
+          exact cursor.advance continuation selected invariant nextRun
+            next_venv next_lparams
 
 /-- The semantic raw family at a nonempty cursor head is translated in the
 cursor's exact verified validator context. -/
@@ -19387,6 +19593,65 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advance' 
 -/
 #guard_msgs in
 #print axioms CandidateBlockLaterFamilyValidationCursor.advance
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateExprTrace.head_find_terminal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateExprTrace.head_find_terminal
+
+/--
+info: 'Lean4Lean.TypeChecker.getType_fvar_of_find' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.getType_fvar_of_find
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_findOld' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms AddInductive.FamilyTypeParameterComparisonTrace.result_findOld
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.root_fvars' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.root_fvars
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationCursor.root_fvars' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationCursor.root_fvars
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.terminalShape' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.terminalShape
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.advanceHead' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.advanceHead
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateFamilyValidationAnnotationList.ofProduced' depends on axioms: [propext,
