@@ -475,6 +475,25 @@ theorem of_fvarLamOnly
       rw [types_eq, parameters_eq']
       exact TypeChecker.CandidateParameterContext.snoc tailRun
 
+/-- Every source-ordered parameter-context witness is a literal
+free-variable extension of its starting context.  The accumulated `Lift`
+records precisely the binders skipped between the current parameter prefix
+and the terminal shared-parameter context. -/
+theorem extension
+    {base final : VLCtx} {parameters : List Expr} {types : List VExpr}
+    (run : TypeChecker.CandidateParameterContext base parameters types final) :
+    ∃ lift, VLCtx.FVLift' base final 0 lift 0 := by
+  induction run with
+  | nil => exact ⟨.refl, .refl⟩
+  | @cons fv deps type base parameters types final tail ih =>
+      obtain ⟨tailLift, tailExtension⟩ := ih
+      let headExtension : VLCtx.FVLift' base
+          ((some (fv, deps), .vlam type) :: base) 0
+            (Lift.skipN Lift.refl 1) 0 :=
+        .skip_fvar _ _ .refl
+      exact ⟨(Lift.skipN Lift.refl 1).comp tailLift,
+        headExtension.comp tailExtension⟩
+
 end TypeChecker.CandidateParameterContext
 
 /-- One exact kernel constructor record translates to a raw Theory
@@ -8565,6 +8584,12 @@ info: 'Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.of_fvarLamOnl
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateParameterContext.of_fvarLamOnly
+
+/--
+info: 'Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.extension' depends on axioms: [propext]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateParameterContext.extension
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstStoredViewParameterTelescopeDefEq' depends on axioms: [propext,
