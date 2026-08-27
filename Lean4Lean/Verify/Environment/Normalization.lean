@@ -9733,6 +9733,72 @@ def CandidateBlockFamilySemanticListRun.headPosition
       semantic := head
       tail := tail }
 
+/-- The canonical head projection of a concrete semantic cons returns that
+cons cell's exact normalized family view. -/
+theorem CandidateBlockFamilySemanticListRun.headPosition_cons_view
+    (semantic : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) :
+    (CandidateBlockFamilySemanticListRun.cons semantic semantics
+      |>.headPosition.semantic.type.view) = semantic.type.view := by
+  rfl
+
+/-- Lightweight evidence that one semantic hierarchy consists of two exact
+heads followed by one exact dependent suffix.  The relation retains all
+source, candidate, and raw indices without placing a computed erasure in
+downstream structure types. -/
+inductive CandidateBlockFamilySemanticListRun.TwoHead
+    (env blockEnv : VEnv) (Us : List Name) :
+    {sources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources} →
+    {raws : List VInductiveType} →
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
+    {firstSource : InductiveType} →
+    {firstCandidate : AddInductive.CandidateFamily firstSource} →
+    {firstRaw : VInductiveType} →
+    CandidateBlockFamilySemanticRun env blockEnv Us firstCandidate firstRaw →
+    {secondSource : InductiveType} →
+    {secondCandidate : AddInductive.CandidateFamily secondSource} →
+    {secondRaw : VInductiveType} →
+    CandidateBlockFamilySemanticRun env blockEnv Us secondCandidate secondRaw →
+    {remainingSources : List InductiveType} →
+    {remainingCandidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily remainingSources} →
+    {remainingRaws : List VInductiveType} →
+    CandidateBlockFamilySemanticListRun env blockEnv Us remainingCandidates
+      remainingRaws → Prop where
+  | cons
+      (first : CandidateBlockFamilySemanticRun env blockEnv Us
+        firstCandidate firstRaw)
+      (second : CandidateBlockFamilySemanticRun env blockEnv Us
+        secondCandidate secondRaw)
+      (remaining : CandidateBlockFamilySemanticListRun env blockEnv Us
+        remainingCandidates remainingRaws) :
+      CandidateBlockFamilySemanticListRun.TwoHead env blockEnv Us
+        (CandidateBlockFamilySemanticListRun.cons first
+          (CandidateBlockFamilySemanticListRun.cons second remaining))
+        first second remaining
+
+/-- Select the lightweight two-head decomposition at the canonical first and
+second positions of any semantic hierarchy with at least two sources. -/
+theorem CandidateBlockFamilySemanticListRun.twoHeadPositions
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      (firstSource :: secondSource :: remainingSources)}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws) :
+    CandidateBlockFamilySemanticListRun.TwoHead env blockEnv Us run
+      run.headPosition.semantic
+      run.headPosition.tail.headPosition.semantic
+      run.headPosition.tail.headPosition.tail := by
+  cases run with
+  | cons first tail =>
+    cases tail with
+    | cons second remaining => exact .cons first second remaining
+
 /-- Projection-friendly semantic tail for a source-indexed nonempty list.
 The semantic proof rules out an empty raw list internally. -/
 def CandidateBlockFamilySemanticListRun.tailExact
@@ -9776,6 +9842,65 @@ def CandidateBlockFamilySemanticListRun.views :
       List VInductiveType
   | .nil => []
   | .cons head tail => head.view :: tail.views
+
+/-- Erasing a lightweight two-head decomposition yields the corresponding
+normalized family views in exact source order. -/
+theorem CandidateBlockFamilySemanticListRun.TwoHead.views_eq
+    {run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws}
+    {first : CandidateBlockFamilySemanticRun env blockEnv Us
+      firstCandidate firstRaw}
+    {second : CandidateBlockFamilySemanticRun env blockEnv Us
+      secondCandidate secondRaw}
+    {remaining : CandidateBlockFamilySemanticListRun env blockEnv Us
+      remainingCandidates remainingRaws}
+    (decomposition : CandidateBlockFamilySemanticListRun.TwoHead env
+      blockEnv Us run first second remaining) :
+    run.views = first.view :: second.view :: remaining.views := by
+  cases decomposition
+  rfl
+
+/-- Exact source-order evidence that every family view uses a parameter
+telescope definitionally equal to one distinguished family view.  The
+semantic list is an index, so entries cannot be reordered, truncated, or
+paired with a view from another candidate position. -/
+inductive CandidateBlockFamilyViewParameterDefEqList
+    (env blockEnv : VEnv) (Us : List Name) (nparams : Nat)
+    (firstView : VExpr) :
+    {sources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources} →
+    {raws : List VInductiveType} →
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
+      Prop where
+  | nil : CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+      nparams firstView .nil
+  | cons
+      (head : TypeChecker.TelDefEqEvidence env Us.length []
+        (VExpr.telN nparams firstView)
+        (VExpr.telN nparams semantic.type.view))
+      (tail : CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+        nparams firstView semantics) :
+      CandidateBlockFamilyViewParameterDefEqList env blockEnv Us nparams
+        firstView (.cons semantic semantics)
+
+/-- Erase the dependent semantic indices while retaining exact source-order
+parameter-telescope equality for every normalized family view. -/
+theorem CandidateBlockFamilyViewParameterDefEqList.forall_views
+    {nparams : Nat} {firstView : VExpr}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (evidence : CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+      nparams firstView semantics) :
+    List.All
+      (fun family => TypeChecker.TelDefEqEvidence env Us.length []
+        (VExpr.telN nparams firstView)
+        (VExpr.telN nparams family.type))
+      semantics.views := by
+  induction evidence with
+  | nil => trivial
+  | cons head tail ih =>
+    exact ⟨by
+      simpa only [CandidateBlockFamilySemanticRun.view] using head, ih⟩
 
 /-- Translate every stored family source at one arbitrary verified validation
 context with the same Theory environment and level parameters.
@@ -20064,6 +20189,88 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.trans' depends on axioms: [propext
 -/
 #guard_msgs in
 #print axioms TypeChecker.TelDefEqEvidence.trans
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.headPosition_cons_view' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.headPosition_cons_view
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.twoHeadPositions' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.twoHeadPositions
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.TwoHead.views_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.TwoHead.views_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.forall_views' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyViewParameterDefEqList.forall_views
 
 
 end VInductDecl

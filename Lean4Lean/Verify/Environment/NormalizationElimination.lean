@@ -2022,6 +2022,9 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
     secondCandidate secondRaw
   remainingSemantics : CandidateBlockFamilySemanticListRun env blockEnv Us
     remainingCandidates remainingRaws
+  semantic_families : CandidateBlockFamilySemanticListRun.TwoHead env
+    blockEnv Us semantic.families firstSemantic secondSemantic
+      remainingSemantics
   firstShape : CandidateBlockFamilySemanticGenerationShape source env
     blockEnv Us firstSemantic
   secondShape : CandidateBlockFamilySemanticGenerationShape source env
@@ -2102,133 +2105,148 @@ theorem
     (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source) :
     Nonempty (produced.SecondFamilyAnnotationSpine semantic) := by
-  have roots := semantic.families
   have blockShape : candidateBlockFamilySemanticGenerationShape source
       produced.candidate.families source.types = true := by
     simpa only [ProducedBlockRecursorShapeCandidate.candidate,
       normalizationCandidateBlockGenerationShape] using produced.shape
-  cases hCandidates : produced.candidate.families with
-  | cons firstCandidate remainingCandidates =>
-    rw [hCandidates] at roots blockShape
-    cases remainingCandidates with
-    | cons secondCandidate remainingCandidates =>
-      let normalization :=
-        produced.execution.eliminationExecution.normalization
-      have familyTypesProduced := normalization.familyTypes.produced
-      rw [← normalization.families.produced.familyTypes_eq]
-        at familyTypesProduced
-      have candidatesEq := hCandidates
-      change normalization.families.candidates =
-        .cons firstCandidate (.cons secondCandidate remainingCandidates)
-        at candidatesEq
-      rw [candidatesEq] at familyTypesProduced
-      simp only [AddInductive.CandidateList.familyTypes]
-        at familyTypesProduced
-      have secondProduced := familyTypesProduced.tail.head
-      have secondAnnotations :=
-        secondCandidate.familyType.validationAnnotations_of_normalize
-          secondProduced
-      have firstProduced := familyTypesProduced.head
-      have firstAnnotations :=
-        firstCandidate.familyType.validationAnnotations_of_normalize
-          firstProduced
-      have parameterSpines := normalization.familyParameterSpines
-      rw [candidatesEq] at parameterSpines
-      have familyTerminals := normalization.familyTerminals
-      rw [← normalization.families.produced.familyTypes_eq]
-        at familyTerminals
-      rw [candidatesEq] at familyTerminals
-      simp only [AddInductive.CandidateList.familyTypes] at familyTerminals
-      cases hRawTypes : source.types with
-      | nil =>
-        rw [hRawTypes] at roots
-        nomatch roots
-      | cons firstRaw rawTypes =>
-        rw [hRawTypes] at roots blockShape
-        cases hRawTypesTail : rawTypes with
-        | nil =>
-          rw [hRawTypesTail] at roots
-          cases roots with
-          | cons firstRoot remainingRoots => nomatch remainingRoots
-        | cons secondRaw remainingRaws =>
-          rw [hRawTypesTail] at roots blockShape
-          have shapes :=
-            CandidateBlockFamilySemanticGenerationShapeList.ofCheck roots
-              blockShape
-          cases roots with
-          | cons firstRoot remainingRoots =>
-            cases shapes with
-            | cons firstShape remainingShapes =>
-              cases remainingRoots with
-              | cons secondRoot remainingRoots =>
-                cases remainingShapes with
-                | cons secondShape remainingShapes =>
-                  obtain ⟨firstTerminalRun, firstStoredBinders,
-                      firstTerminalVenv, firstTerminalLparams,
-                      firstTelescope, firstStoredLength,
-                      firstTerminalVlctx, firstAnnotationSpine⟩ :=
-                    firstRoot.type.annotationSpineContext
-                      firstShape.storedSpine
-                  obtain ⟨secondInferred, secondRun⟩ :=
-                    secondRoot.type.recursive
-                  obtain ⟨terminalRun, storedBinders, terminalVenv,
-                      terminalLparams, telescope, storedLength,
-                      terminalVlctx, annotationSpine⟩ :=
-                    secondRoot.type.annotationSpineContext
-                      secondShape.storedSpine
-                  have spineLength :=
-                    secondShape.spineLength_eq_ctorFields
-                  have firstSpineLength :=
-                    firstShape.spineLength_eq_ctorFields
-                  rw [firstSpineLength] at firstTelescope firstStoredLength
-                  rw [spineLength] at telescope storedLength
-                  exact ⟨{
-                    firstCandidate := firstCandidate
-                    secondCandidate := secondCandidate
-                    remainingCandidates := remainingCandidates
-                    candidates_eq := hCandidates
-                    firstRaw := firstRaw
-                    secondRaw := secondRaw
-                    remainingRaws := remainingRaws
-                    raws_eq := by rw [hRawTypes, hRawTypesTail]
-                    firstSemantic := firstRoot
-                    secondSemantic := secondRoot
-                    remainingSemantics := remainingRoots
-                    firstShape := firstShape
-                    secondShape := secondShape
-                    remainingShapes := remainingShapes
-                    remainingValidationAnnotations :=
-                      CandidateFamilyValidationAnnotationList.ofProduced
-                        remainingCandidates familyTypesProduced.tail.tail
-                        familyTerminals.tail.tail
-                    remainingParameterSpines := parameterSpines.tail.tail
-                    firstSpineLength_eq := firstSpineLength
-                    firstStoredBinders := firstStoredBinders
-                    firstTelescope := firstTelescope
-                    firstStoredLength := firstStoredLength
-                    firstTerminalRun := firstTerminalRun
-                    first_stored_spine := firstShape.storedSpine
-                    first_validation_annotations := firstAnnotations
-                    first_annotation_spine := firstAnnotationSpine
-                    first_terminal_venv := firstTerminalVenv
-                    first_terminal_lparams := firstTerminalLparams
-                    first_terminal_vlctx := firstTerminalVlctx
-                    spineLength_eq := spineLength
-                    storedBinders := storedBinders
-                    telescope := telescope
-                    stored_length := storedLength
-                    terminalRun := terminalRun
-                    secondView := secondRoot.type.view
-                    secondInferred := secondInferred
-                    secondRun := secondRun
-                    stored_spine := secondShape.storedSpine
-                    whnfFuel := secondRoot.type.whnfFuel
-                    whnfDepth := secondRoot.type.whnfDepth
-                    validation_annotations := secondAnnotations
-                    annotation_spine := annotationSpine
-                    terminal_venv := terminalVenv
-                    terminal_lparams := terminalLparams
-                    terminal_vlctx := terminalVlctx }⟩
+  let firstCandidate := produced.candidate.families.head
+  let secondCandidate := produced.candidate.families.tail.head
+  let remainingCandidates := produced.candidate.families.tail.tail
+  let firstPosition := semantic.families.headPosition
+  let secondPosition := firstPosition.tail.headPosition
+  have shapes := CandidateBlockFamilySemanticGenerationShapeList.ofCheck
+    semantic.families blockShape
+  let firstShape := shapes.head
+  let secondShape := shapes.tail.head
+  let remainingShapes := shapes.tail.tail
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have candidatesEq : normalization.families.candidates =
+      .cons firstCandidate (.cons secondCandidate remainingCandidates) := by
+    change produced.candidate.families =
+      .cons firstCandidate (.cons secondCandidate remainingCandidates)
+    calc
+      produced.candidate.families =
+          .cons produced.candidate.families.head
+            produced.candidate.families.tail :=
+        AddInductive.CandidateList.cons_eta _
+      _ = .cons firstCandidate
+          (.cons secondCandidate remainingCandidates) := by
+        rw [AddInductive.CandidateList.cons_eta
+          produced.candidate.families.tail]
+  have familyTypesProduced := normalization.familyTypes.produced
+  rw [← normalization.families.produced.familyTypes_eq]
+    at familyTypesProduced
+  rw [candidatesEq] at familyTypesProduced
+  simp only [AddInductive.CandidateList.familyTypes] at familyTypesProduced
+  have secondProduced := familyTypesProduced.tail.head
+  have secondAnnotations :=
+    secondCandidate.familyType.validationAnnotations_of_normalize
+      secondProduced
+  have firstProduced := familyTypesProduced.head
+  have firstAnnotations :=
+    firstCandidate.familyType.validationAnnotations_of_normalize
+      firstProduced
+  have parameterSpines := normalization.familyParameterSpines
+  rw [candidatesEq] at parameterSpines
+  have familyTerminals := normalization.familyTerminals
+  rw [← normalization.families.produced.familyTypes_eq]
+    at familyTerminals
+  rw [candidatesEq] at familyTerminals
+  simp only [AddInductive.CandidateList.familyTypes] at familyTerminals
+  obtain ⟨firstTerminalRun, firstStoredBinders,
+      firstTerminalVenv, firstTerminalLparams,
+      firstTelescope, firstStoredLength,
+      firstTerminalVlctx, firstAnnotationSpine⟩ :=
+    firstPosition.semantic.type.annotationSpineContext firstShape.storedSpine
+  obtain ⟨secondInferred, secondRun⟩ :=
+    secondPosition.semantic.type.recursive
+  obtain ⟨terminalRun, storedBinders, terminalVenv,
+      terminalLparams, telescope, storedLength,
+      terminalVlctx, annotationSpine⟩ :=
+    secondPosition.semantic.type.annotationSpineContext
+      secondShape.storedSpine
+  have spineLength := secondShape.spineLength_eq_ctorFields
+  have firstSpineLength := firstShape.spineLength_eq_ctorFields
+  rw [firstSpineLength] at firstTelescope firstStoredLength
+  rw [spineLength] at telescope storedLength
+  exact ⟨{
+    firstCandidate := firstCandidate
+    secondCandidate := secondCandidate
+    remainingCandidates := remainingCandidates
+    candidates_eq := by
+      change produced.candidate.families = _
+      exact candidatesEq
+    firstRaw := firstPosition.raw
+    secondRaw := secondPosition.raw
+    remainingRaws := secondPosition.remainingRaws
+    raws_eq := by
+      calc
+        source.types =
+            firstPosition.raw :: firstPosition.remainingRaws :=
+          firstPosition.raws_eq
+        _ = firstPosition.raw :: secondPosition.raw ::
+              secondPosition.remainingRaws :=
+          congrArg (List.cons firstPosition.raw) secondPosition.raws_eq
+    firstSemantic := firstPosition.semantic
+    secondSemantic := secondPosition.semantic
+    remainingSemantics := secondPosition.tail
+    semantic_families := semantic.families.twoHeadPositions
+    firstShape := firstShape
+    secondShape := secondShape
+    remainingShapes := remainingShapes
+    remainingValidationAnnotations :=
+      CandidateFamilyValidationAnnotationList.ofProduced
+        remainingCandidates familyTypesProduced.tail.tail
+        familyTerminals.tail.tail
+    remainingParameterSpines := parameterSpines.tail.tail
+    firstSpineLength_eq := firstSpineLength
+    firstStoredBinders := firstStoredBinders
+    firstTelescope := firstTelescope
+    firstStoredLength := firstStoredLength
+    firstTerminalRun := firstTerminalRun
+    first_stored_spine := firstShape.storedSpine
+    first_validation_annotations := firstAnnotations
+    first_annotation_spine := firstAnnotationSpine
+    first_terminal_venv := firstTerminalVenv
+    first_terminal_lparams := firstTerminalLparams
+    first_terminal_vlctx := firstTerminalVlctx
+    spineLength_eq := spineLength
+    storedBinders := storedBinders
+    telescope := telescope
+    stored_length := storedLength
+    terminalRun := terminalRun
+    secondView := secondPosition.semantic.type.view
+    secondInferred := secondInferred
+    secondRun := secondRun
+    stored_spine := secondShape.storedSpine
+    whnfFuel := secondPosition.semantic.type.whnfFuel
+    whnfDepth := secondPosition.semantic.type.whnfDepth
+    validation_annotations := secondAnnotations
+    annotation_spine := annotationSpine
+    terminal_venv := terminalVenv
+    terminal_lparams := terminalLparams
+    terminal_vlctx := terminalVlctx }⟩
+
+/-- Erase the lightweight semantic-family decomposition certificate to the
+exact normalized views selected in source order. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (annotation : produced.SecondFamilyAnnotationSpine semantic) :
+    semantic.families.views = annotation.firstSemantic.view ::
+      annotation.secondSemantic.view :: annotation.remainingSemantics.views := by
+  exact annotation.semantic_families.views_eq
 
 /-- Forget the positional duplication in the two-family staging package and
 recover the generic annotation owner for its exact second semantic family. -/
@@ -5160,6 +5178,76 @@ theorem
     (staging.current_firstTerminal_defeq context_lctx_eq)
   simpa only [VLCtx.toCtx] using evidence.telDefEq
 
+/-- Relocate the validator's first/second shared-parameter comparison from
+the annotation-consumed binders onto both families' actual normalized views.
+Each endpoint is connected through its exact raw telescope. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.viewParameterTelescopeDefEq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (staging : produced.SecondFamilyIndexStaging semantic)
+    (raw : staging.annotation.RawFirstIndexDomain)
+    (prefixes : staging.RawFirstIndexPrefixContexts raw)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view)
+      (VExpr.telN source.nparams
+        staging.annotation.secondSemantic.type.view) := by
+  have henv : VEnv.WF env := by
+    simpa only [staging.current_venv] using staging.currentRun.context.Ewf
+  have firstBound :=
+    staging.annotation.first_nparams_le_spineLength context_lctx_eq
+  have firstRawBound : source.nparams ≤
+      (VInductDecl.ctorFields staging.annotation.firstRaw.type).length := by
+    rw [← staging.annotation.firstSpineLength_eq]
+    exact firstBound
+  have firstRawStored :=
+    staging.annotation.firstTelescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstRawBound]
+    at firstRawStored
+  obtain ⟨firstInferred, firstRecursive⟩ :=
+    staging.annotation.firstSemantic.type.recursive
+  obtain ⟨firstResultType, firstFullView⟩ :=
+    firstRecursive.spineEvidence staging.annotation.first_stored_spine
+  have firstRawView := firstFullView.telescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.firstRaw.type firstBound,
+    telN_take_of_le staging.annotation.firstSemantic.type.view firstBound]
+    at firstRawView
+  have firstStoredView : TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.firstStoredBinders.take source.nparams)
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view) :=
+    (firstRawStored.symm henv trivial).trans henv trivial firstRawView
+  have secondRawStored := staging.annotation.parameterTelescope
+  have secondBound := staging.annotation.second_nparams_le_spineLength
+  obtain ⟨secondInferred, secondRecursive⟩ :=
+    staging.annotation.secondSemantic.type.recursive
+  obtain ⟨secondResultType, secondFullView⟩ :=
+    secondRecursive.spineEvidence staging.annotation.stored_spine
+  have secondRawView := secondFullView.telescope.take source.nparams
+  rw [telN_take_of_le staging.annotation.secondRaw.type secondBound,
+    telN_take_of_le staging.annotation.secondSemantic.type.view secondBound]
+    at secondRawView
+  have secondStoredView : TypeChecker.TelDefEqEvidence env Us.length []
+      (staging.annotation.storedBinders.take source.nparams)
+      (VExpr.telN source.nparams
+        staging.annotation.secondSemantic.type.view) :=
+    (secondRawStored.symm henv trivial).trans henv trivial secondRawView
+  have storedParameters := TypeChecker.TelDefEqEvidence.ofTelDefEq
+    (staging.parameterTelescopeDefEq raw prefixes context_lctx_eq)
+  exact ((firstStoredView.symm henv trivial).trans henv trivial
+      storedParameters).trans henv trivial secondStoredView
+
 /-- Complete the validator's exact first index once the two producer-owned
 shared-parameter contexts are known definitionally equal.
 
@@ -6113,6 +6201,75 @@ structure
   current_reference : VLCtx.IsDefEq env Us.length
     cursor.contextRun.context.vlctx reference
 
+/-- Assemble the initial later-family iteration state from one exact
+annotation spine.  Keeping the constructor as data exposes the semantic
+suffix selected by the completed second-family handoff. -/
+def
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor)
+    (annotations : CandidateBlockFamilyAnnotationSpineList source env
+      blockEnv Us cursor.cursor.semantics cursor.generationShapes) :
+    completion.LaterFamilyIterationCursor
+      staging.annotation.remainingCandidates staging.annotation.remainingRaws
+      cursor.validation.continuation.tail :=
+  {
+    cursor := cursor.cursor
+    validation := staging.annotation.remainingValidationAnnotations
+    parameterSpines := staging.annotation.remainingParameterSpines
+    generationShapes := cursor.generationShapes
+    annotations := annotations
+    parameterSources_eq_firstParameterList :=
+      cursor.parameterSources_eq_firstParameterList
+    candidate_fuel_eq := cursor.cursor_fuel_eq
+    firstTerminal_find := cursor.firstTerminal_find
+    reference := completion.alignment.reference
+    rootLift := completion.alignment.rootLift
+    originLift := completion.alignment.originLift
+    root_reference_lift := completion.alignment.root_reference_lift
+    origin_reference_lift := completion.alignment.origin_reference_lift
+    current_reference := by
+      rw [cursor.context_eq_terminal]
+      exact completion.current_reference }
+
+/-- The exact initial iteration state retains precisely the remaining semantic
+suffix selected by the second-family annotation. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact_semantics
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor)
+    (annotations : CandidateBlockFamilyAnnotationSpineList source env
+      blockEnv Us cursor.cursor.semantics cursor.generationShapes) :
+    (cursor.iterationCursorExact annotations).cursor.semantics =
+      staging.annotation.remainingSemantics :=
+  cursor.semantics_eq
+
 /-- Package the exact suffix handed off by the completed second family as
 the initial recursion-ready later-family state. -/
 theorem
@@ -6136,24 +6293,7 @@ theorem
       staging.annotation.remainingCandidates staging.annotation.remainingRaws
       cursor.validation.continuation.tail) := by
   obtain ⟨annotations⟩ := cursor.annotationSpines
-  exact ⟨{
-    cursor := cursor.cursor
-    validation := staging.annotation.remainingValidationAnnotations
-    parameterSpines := staging.annotation.remainingParameterSpines
-    generationShapes := cursor.generationShapes
-    annotations := annotations
-    parameterSources_eq_firstParameterList :=
-      cursor.parameterSources_eq_firstParameterList
-    candidate_fuel_eq := cursor.cursor_fuel_eq
-    firstTerminal_find := cursor.firstTerminal_find
-    reference := completion.alignment.reference
-    rootLift := completion.alignment.rootLift
-    originLift := completion.alignment.originLift
-    root_reference_lift := completion.alignment.root_reference_lift
-    origin_reference_lift := completion.alignment.origin_reference_lift
-    current_reference := by
-      rw [cursor.context_eq_terminal]
-      exact completion.current_reference }⟩
+  exact ⟨cursor.iterationCursorExact annotations⟩
 
 namespace
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
@@ -6934,14 +7074,16 @@ def TerminalHeadDomainCompletion.advance
     domain.terminalRun domain.terminal_venv domain.terminal_lparams
 
 /-- Thread every invariant through one arbitrary completed recursive family,
-yielding the exact source-order state for the remaining suffix. -/
-theorem TerminalHeadDomainCompletion.advanceIterationCursor
+yielding the exact source-order state for the remaining suffix.  The record is
+constructed directly so its semantic cursor remains transparent to dependent
+source-order consumers. -/
+def TerminalHeadDomainCompletion.advanceIterationCursorExact
     {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
     {head : iteration.HeadStaging}
     {parameter : HeadParameterBoundary head}
     (domain : TerminalHeadDomainCompletion head parameter) :
-    Nonempty (completion.LaterFamilyIterationCursor
-      candidates.tail raws.tail head.continuation.tail) := by
+    completion.LaterFamilyIterationCursor candidates.tail raws.tail
+      head.continuation.tail := by
   have parameterSources : domain.advance.parameterSources =
       staging.annotation.firstCandidate.familyType.type.trace.parameterList
         source.nparams := by
@@ -6998,7 +7140,7 @@ theorem TerminalHeadDomainCompletion.advanceIterationCursor
     rw [advanceSemantics]
     exact ⟨iteration.generationShapes.tailExact,
       iteration.annotations.tailExact⟩
-  exact ⟨{
+  exact {
     cursor := domain.advance
     validation := iteration.validation.tail
     parameterSpines := iteration.parameterSpines.tail
@@ -7012,19 +7154,44 @@ theorem TerminalHeadDomainCompletion.advanceIterationCursor
     originLift := domain.alignment.originLift
     root_reference_lift := domain.alignment.root_reference_lift
     origin_reference_lift := domain.alignment.origin_reference_lift
-    current_reference := currentReference }⟩
+    current_reference := currentReference }
+
+/-- Proposition-level compatibility wrapper for consumers that need only
+inhabitation of the exact advanced state. -/
+theorem TerminalHeadDomainCompletion.advanceIterationCursor
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    Nonempty (completion.LaterFamilyIterationCursor
+      candidates.tail raws.tail head.continuation.tail) :=
+  ⟨domain.advanceIterationCursorExact⟩
 
 /-- Canonical recursion state selected from the exact one-head advancement
 proof.  Keeping this choice named makes the tail of a completion spine
 definitionally tied to the endpoint that produced it. -/
-noncomputable def TerminalHeadDomainCompletion.nextIteration
+def TerminalHeadDomainCompletion.nextIteration
     {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
     {head : iteration.HeadStaging}
     {parameter : HeadParameterBoundary head}
     (domain : TerminalHeadDomainCompletion head parameter) :
     completion.LaterFamilyIterationCursor candidates.tail raws.tail
       head.continuation.tail :=
-  Classical.choice domain.advanceIterationCursor
+  domain.advanceIterationCursorExact
+
+/-- The direct recursive-tail state stores precisely the semantic suffix of
+the completed head. -/
+theorem TerminalHeadDomainCompletion.nextIteration_semantics
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    {head : iteration.HeadStaging}
+    {parameter : HeadParameterBoundary head}
+    (domain : TerminalHeadDomainCompletion head parameter) :
+    domain.nextIteration.cursor.semantics =
+      iteration.cursor.semantics.tailExact := by
+  unfold nextIteration advanceIterationCursorExact
+  exact iteration.cursor.advanceHead_semantics head.continuation head.selected
+    head.invariant domain.terminalRun domain.terminal_venv
+    domain.terminal_lparams
 
 /-- Complete every family in an arbitrary later-family suffix in source
 order.  Each recursive tail is the exact state produced by the preceding
@@ -7099,8 +7266,311 @@ theorem completionSpine
       obtain ⟨tail⟩ := ih domain.nextIteration
       exact ⟨.cons head parameter domain tail⟩
 
+/-- Collect the normalized-view shared-parameter equalities from a completed
+later-family traversal.  The result is indexed by the cursor's exact semantic
+suffix, preserving family order and preventing evidence from being reused at
+another source position. -/
+theorem CompletionSpine.viewParameterTelescopeDefEqs
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext}
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (spine : CompletionSpine iteration)
+    (context_lctx_eq : context.lctx = {}) :
+    CandidateBlockFamilyViewParameterDefEqList env blockEnv Us source.nparams
+      staging.annotation.firstSemantic.type.view
+      iteration.cursor.semantics := by
+  induction spine with
+  | nil iteration =>
+      cases iteration.cursor.semantics
+      exact .nil
+  | @cons nextSource laterSources candidates raws dIdx stats candidateContext
+      trace iteration head parameter domain tail ih =>
+      cases candidates with
+      | cons candidate candidates =>
+          cases raws with
+          | nil => cases iteration.cursor.semantics
+          | cons raw raws =>
+              cases semanticEq : iteration.cursor.semantics with
+              | cons semantic semantics =>
+                  rw [domain.nextIteration_semantics, semanticEq] at ih
+                  change CandidateBlockFamilyViewParameterDefEqList env
+                    blockEnv Us source.nparams
+                    staging.annotation.firstSemantic.type.view semantics at ih
+                  have headViewEq : head.position.semantic.type.view =
+                      semantic.type.view := by
+                    calc
+                      head.position.semantic.type.view =
+                          iteration.cursor.semantics.headPosition.semantic.type.view :=
+                        rfl
+                      _ = (CandidateBlockFamilySemanticListRun.cons semantic
+                            semantics).headPosition.semantic.type.view :=
+                        congrArg (fun roots =>
+                          roots.headPosition.semantic.type.view) semanticEq
+                      _ = semantic.type.view :=
+                        CandidateBlockFamilySemanticListRun.headPosition_cons_view
+                          semantic semantics
+                  have headEvidence :=
+                    head.viewParameterTelescopeDefEq parameter
+                      domain.candidate context_lctx_eq
+                  rw [headViewEq] at headEvidence
+                  exact .cons
+                    headEvidence ih
+
 end
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
+
+/-- Collect shared-parameter equality for every normalized family view in the
+complete block.  The first family contributes reflexivity, the second uses
+the validator's original comparison, and the exact terminal handoff supplies
+all later families in source order. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    List.All
+      (fun family => TypeChecker.TelDefEqEvidence env Us.length []
+        (VExpr.telN source.nparams
+          staging.annotation.firstSemantic.type.view)
+        (VExpr.telN source.nparams family.type))
+      semantic.families.views := by
+  have firstSecond := staging.viewParameterTelescopeDefEq raw
+    completion.prefixes context_lctx_eq
+  have firstFirst : TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view)
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view) :=
+    .ofTelDefEq firstSecond.telDefEq.raw_onTel.telDefEq_refl
+  obtain ⟨cursor⟩ :=
+    completion.remainingFamilyValidationCursor context_lctx_eq
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  let iteration := cursor.iterationCursorExact annotations
+  obtain ⟨spine⟩ := iteration.completionSpine context_lctx_eq
+  have remaining :=
+    spine.viewParameterTelescopeDefEqs context_lctx_eq
+  change CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+    source.nparams staging.annotation.firstSemantic.type.view
+    (cursor.iterationCursorExact annotations).cursor.semantics at remaining
+  rw [cursor.iterationCursorExact_semantics annotations] at remaining
+  have remainingViews := remaining.forall_views
+  rw [staging.annotation.semantic_views_eq]
+  exact ⟨firstFirst, ⟨firstSecond, remainingViews⟩⟩
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.viewParameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.viewParameterTelescopeDefEq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact_semantics' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursorExact_semantics
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.advanceIterationCursorExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.advanceIterationCursorExact
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.nextIteration_semantics' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.TerminalHeadDomainCompletion.nextIteration_semantics
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.viewParameterTelescopeDefEqs' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.viewParameterTelescopeDefEqs
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor' depends on axioms: [propext,
