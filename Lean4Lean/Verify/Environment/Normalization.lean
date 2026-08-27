@@ -871,6 +871,15 @@ theorem empty (context : AddInductive.Context) (levels : List Level)
   localContext := CandidateLocalContextRun.empty context h
   parameters := by simp [AddInductive.InductiveStats.initial]
 
+/-- Replacing only the kernel environment preserves the local-context and
+name-generator state, so the shared-parameter inventory carries over to the
+staged constructor-validation context unchanged. -/
+theorem withEnv (run : FamilyParameterLocalState stats context)
+    (env : Environment) :
+    FamilyParameterLocalState stats { context with env := env } where
+  localContext := ⟨run.localContext.wf, run.localContext.reserves⟩
+  parameters := run.parameters
+
 theorem pushLocal (run : FamilyParameterLocalState stats context)
     (name : Name) (binderInfo : BinderInfo) (type : Expr) :
     FamilyParameterLocalState stats
@@ -21083,6 +21092,12 @@ info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockStagingInput.validationC
 -/
 #guard_msgs in
 #print axioms NormalizationCandidateBlockStagingInput.validationContextRunFrom
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterLocalState.withEnv' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyParameterLocalState.withEnv
 
 
 end VInductDecl
