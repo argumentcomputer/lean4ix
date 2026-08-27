@@ -11515,6 +11515,124 @@ theorem CandidateBlockFamilySemanticListRun.canonicalFamilyEvidence
                 viewCanonical.isDefEq.toU)⟩
             (ih tailCanonical)
 
+/-- Exact source-order evidence that every family's constructor views share
+one distinguished parameter telescope in the staged constructor environment.
+The block semantic list is an index, so per-family constructor evidence
+cannot migrate to another family position or truncate a raw inventory. -/
+inductive CandidateBlockConstructorViewParameterDefEqLists
+    (env blockEnv : VEnv) (Us : List Name) (nparams : Nat)
+    (params : List VExpr) :
+    {sources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources} →
+    {raws : List VInductiveType} →
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
+      Prop where
+  | nil : CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
+      nparams params .nil
+  | cons
+      (head : CandidateConstructorViewParameterDefEqList blockEnv Us nparams
+        params semantic.constructors)
+      (tail : CandidateBlockConstructorViewParameterDefEqLists env blockEnv
+        Us nparams params semantics) :
+      CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
+        nparams params (.cons semantic semantics)
+
+/-- Compose the complete canonical raw/view block evidence at the exact
+dependent source positions: every family type relocates onto the shared
+telescope in the input environment, and every constructor relocates in the
+staged constructor environment.  This is precisely the family shape consumed
+by `NormalizationBlockRun` at the canonical view. -/
+theorem CandidateBlockFamilySemanticListRun.canonicalBlockEvidence
+    {env blockEnv : VEnv} {Us : List Name}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws)
+    (henv : VEnv.WF env) (hblockEnv : VEnv.WF blockEnv)
+    {nparams : Nat} {params : List VExpr}
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams nparams params family).type
+          (.sort resultLevel))
+      run.views)
+    (parameters : CandidateBlockConstructorViewParameterDefEqLists env
+      blockEnv Us nparams params run)
+    (paramsLength : params.length = nparams) :
+    List.Forall₂
+      (fun raw family =>
+        (∃ resultType,
+          TypeChecker.DefEqEvidence env Us.length [] raw.type family.type
+            resultType) ∧
+        List.Forall₂
+          (fun rawCtor viewCtor => ∃ resultType,
+            TypeChecker.DefEqEvidence blockEnv Us.length []
+              rawCtor.type viewCtor.type resultType)
+          raw.ctors family.ctors)
+      raws (canonicalizeFamilyParamsList nparams params run.views) := by
+  induction run with
+  | nil =>
+      cases parameters
+      exact .nil
+  | cons head tail ih =>
+      cases parameters with
+      | cons headParameters tailParameters =>
+          cases canonical with
+          | intro viewCanonical tailCanonical =>
+              obtain ⟨resultType, rawView⟩ := head.type.root.evidence
+              obtain ⟨_, viewCanonical⟩ := viewCanonical
+              have constructors :=
+                head.constructors.canonicalConstructorEvidence headParameters
+                  paramsLength hblockEnv
+              exact .cons
+                ⟨⟨resultType, .ofDefEq
+                    (rawView.isDefEq.transU_l henv trivial
+                      viewCanonical.isDefEq.toU)⟩,
+                  by
+                    simpa only [CandidateBlockFamilySemanticRun.view,
+                      canonicalizeFamilyParams] using constructors⟩
+                (ih tailCanonical tailParameters)
+
+/-- The canonical normalization is checker-valid whenever the two
+producer-owned evidence halves are supplied: the family-type relocations in
+the input environment and the per-family constructor relocations in the
+staged block environment.  The stage fold is unchanged because
+canonicalization rewrites only the view. -/
+theorem NormalizationCandidateBlockSemanticRun.canonicalNormalizationRun
+    {sources : List InductiveType}
+    {candidate : AddInductive.NormalizationCandidate sources}
+    {rawDecl : VInductDecl}
+    (run : NormalizationCandidateBlockSemanticRun env blockEnv Us candidate
+      rawDecl)
+    (henv : VEnv.WF env) (hblockEnv : VEnv.WF blockEnv)
+    (canonical : List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams rawDecl.nparams
+            (blockParams rawDecl.nparams run.families.views) family).type
+          (.sort resultLevel))
+      run.families.views)
+    (parameters : CandidateBlockConstructorViewParameterDefEqLists env
+      blockEnv Us rawDecl.nparams
+      (blockParams rawDecl.nparams run.families.views) run.families)
+    (paramsLength :
+      (blockParams rawDecl.nparams run.families.views).length =
+        rawDecl.nparams) :
+    NormalizationBlockRun run.canonicalNormalization env blockEnv where
+  stage := run.stage
+  families := by
+    simpa only [run.uvars_eq,
+      NormalizationCandidateBlockSemanticRun.canonicalNormalization,
+      Normalization.canonicalizeSharedParams,
+      VInductDecl.canonicalizeSharedParams,
+      NormalizationCandidateBlockSemanticRun.normalization,
+      NormalizationCandidateBlockSemanticRun.viewDecl] using
+      run.families.canonicalBlockEvidence henv hblockEnv canonical
+        parameters paramsLength
+
 /-- Executable shape check for the terminal-sort evidence of a complete
 source-indexed family list.  The result universe remains owned by each exact
 candidate trace; the check only recognizes its terminal constructor. -/
@@ -20706,6 +20824,72 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.forall_v
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilyViewParameterDefEqList.forall_views
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.canonicalBlockEvidence' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.canonicalBlockEvidence
+
+/--
+info: 'Lean4Lean.VInductDecl.NormalizationCandidateBlockSemanticRun.canonicalNormalizationRun' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms NormalizationCandidateBlockSemanticRun.canonicalNormalizationRun
 
 
 end VInductDecl
