@@ -13,6 +13,64 @@ open private Lean.Kernel.Environment.add from Lean.Environment
 
 namespace AddInductive
 
+/-- One executable step of the shared-parameter comparison loop in
+`isValidIndAppIdx`. -/
+private def isValidIndAppIdxParameterStep (bad : Nat → Bool) (i : Nat)
+    (_ : Option Bool × Unit) :
+    Id (ForInStep (Option Bool × Unit)) :=
+  if bad i then pure (.done (some false, ()))
+  else pure (.yield (none, ()))
+
+/-- Closed form of the shared-parameter comparison loop. -/
+private theorem bindList_isValidIndAppIdxParameterStep
+    (bad : Nat → Bool) (indices : List Nat) :
+    (ForInStep.yield (none, ())).bindList
+        (isValidIndAppIdxParameterStep bad) indices =
+      if indices.any bad then .done (some false, ())
+      else .yield (none, ()) := by
+  induction indices with
+  | nil => rfl
+  | cons head tail ih =>
+      simp only [ForInStep.bindList_cons, ForInStep.bind_yield,
+        isValidIndAppIdxParameterStep, List.any_cons]
+      split
+      · simp_all [Bind.bind, Pure.pure]
+      · simp_all [Bind.bind, Pure.pure]
+
+/-- Acceptance of an inductive terminal application means that every shared
+parameter argument is expression-equivalent to the corresponding parameter
+stored in the validator statistics. -/
+theorem isValidIndAppIdx_parameter_eqv
+    {stats : InductiveStats} {source : Expr} {familyIdx i : Nat}
+    (valid : isValidIndAppIdx stats source familyIdx = true)
+    (hi : i < stats.params.size) :
+    (stats.params[i]! == source.getAppArgs[i]!) = true := by
+  unfold isValidIndAppIdx at valid
+  rw [Expr.withApp_eq] at valid
+  simp only [Id.run] at valid
+  split at valid
+  · simp only [Std.Legacy.Range.forIn_eq_forIn_range'] at valid
+    rw [List.forIn_eq_bindList] at valid
+    let bad := fun (i : Nat) =>
+      stats.params[i]! != source.getAppArgs[i]!
+    have stepEq :
+        (fun i (_ : Option Bool × Unit) =>
+          if bad i then pure (.done (some false, ()))
+          else pure (.yield (none, ()))) =
+          isValidIndAppIdxParameterStep bad := rfl
+    rw [stepEq] at valid
+    rw [bindList_isValidIndAppIdxParameterStep] at valid
+    split at valid
+    · change false = true at valid
+      simp at valid
+    · rename_i allGood
+      have badFalse : bad i = false := by
+        have allGood' : ∀ x, x < stats.params.size → bad x = false := by
+          simpa [List.any_eq_false] using allGood
+        exact allGood' i hi
+      simpa [bad, bne] using badFalse
+  · simp at valid
+
 /-- Exact alignment between the post-constructor elimination decisions of the
 ordinary kernel execution and the corresponding fields of a Theory mutual
 generation.  This is the block analogue of `CheckerEliminationRun`. -/
@@ -495,6 +553,347 @@ theorem extension
         headExtension.comp tailExtension⟩
 
 end TypeChecker.CandidateParameterContext
+
+private theorem array_getElem?_eq_some_of_drop_eq_cons
+    {values : Array α} {index : Nat} {head : α} {tail : List α}
+    (equality : values.toList.drop index = head :: tail) :
+    values[index]? = some head := by
+  rw [← Array.getElem?_toList]
+  have atDrop := congrArg (fun entries : List α => entries[0]?) equality
+  simpa using atDrop
+
+/-- A constructor validation trace cannot reach its terminal application while
+the retained shared-parameter context still contains a binder. -/
+private theorem constructorTerminalBeforeSharedParameters_impossible
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {source : Expr} {familyIdx argIdx : Nat}
+    {rawΔ base final : VLCtx} {rawType : VExpr}
+    {fv : FVarId} {deps : List FVarId} {A : VExpr}
+    {parameters : List Expr} {types : List VExpr}
+    (tail : TypeChecker.CandidateParameterContext
+      ((some (fv, deps), .vlam A) :: base) parameters types final)
+    (finalWF : VLCtx.WF env Us.length final)
+    (rawStored : VLCtx.IsDefEq env Us.length rawΔ base)
+    (paramsEq : stats.params.toList.drop argIdx =
+      .fvar fv :: parameters)
+    (sourceTr : TrExprS env Us rawΔ source rawType)
+    (valid : AddInductive.isValidIndAppIdx stats source familyIdx = true) :
+    False := by
+  have argIdxLt : argIdx < stats.params.size := by
+    have listLt : argIdx < stats.params.toList.length := by
+      by_contra notLt
+      have dropNil : stats.params.toList.drop argIdx = [] :=
+        List.drop_eq_nil_of_le (Nat.le_of_not_gt notLt)
+      rw [dropNil] at paramsEq
+      contradiction
+    simpa using listLt
+  have parameterAt : stats.params[argIdx]? = some (.fvar fv) := by
+    rw [← Array.getElem?_toList]
+    have atDrop := congrArg (fun values : List Expr => values[0]?) paramsEq
+    simpa using atDrop
+  have parameterGet : stats.params[argIdx]! = .fvar fv := by
+    rw [Array.getElem?_eq_getElem argIdxLt] at parameterAt
+    injection parameterAt with parameterGetElem
+    simpa [getElem!_def, argIdxLt] using parameterGetElem
+  have shape := ConstructorValidation.isValidIndAppIdx_shape valid
+  have argHi : argIdx < source.getAppArgs.size := by
+    rw [shape.2]
+    omega
+  obtain ⟨argumentType, argumentTr⟩ := sourceTr.getAppArg
+    (Array.getElem?_eq_getElem argHi)
+  have argumentEqv :=
+    AddInductive.isValidIndAppIdx_parameter_eqv valid argIdxLt
+  rw [parameterGet] at argumentEqv
+  have argumentEqv' :
+      ((.fvar fv : Expr) == source.getAppArgs[argIdx]) = true := by
+    simpa [getElem!_def, argHi] using argumentEqv
+  have parameterTr : TrExprS env Us rawΔ (.fvar fv) argumentType :=
+    argumentTr.eqv (BEq.symm argumentEqv')
+  have fvMember : fv ∈ rawΔ.fvars :=
+    parameterTr.fvarsList (by simp [Expr.fvarsList])
+  rw [rawStored.fvars] at fvMember
+  have pushedWF := tail.initialWF finalWF
+  exact (pushedWF.2.1 fv deps rfl).1 fvMember
+
+private theorem constructorRawParameterTelescopeDefEqAux
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {familyIdx : Nat} {ctor : Name}
+    {context : AddInductive.Context}
+    {contextRun : AddInductive.ConstructorContextRun env Us context}
+    {source view : Expr} {argIdx fuel whnfFuel : Nat}
+    {trace : AddInductive.ConstructorTypeValidationTrace stats isUnsafe
+      familyIdx ctor context source argIdx fuel}
+    {rawΔ base final : VLCtx} {rawType : VExpr}
+    {parameters : List Expr} {types : List VExpr}
+    (params : TypeChecker.CandidateParameterContext base parameters types final)
+    (localState : TypeChecker.FamilyParameterLocalState stats context)
+    (alignment : ConstructorSharedParameterContextAlignment env Us final
+      contextRun)
+    (rawStored : VLCtx.IsDefEq env Us.length rawΔ base)
+    (paramsEq : stats.params.toList.drop argIdx = parameters)
+    (sourceTr : TrExprS env Us rawΔ source rawType)
+    (semantic : AddInductive.ConstructorViewSemanticRun env Us whnfFuel
+      contextRun trace view) :
+    TypeChecker.TelDefEqEvidence env Us.length rawΔ.toCtx
+        (VExpr.telN parameters.length rawType) types ∧
+      parameters.length ≤ trace.spineLength := by
+  induction params generalizing rawΔ rawType source argIdx fuel trace view with
+  | nil => exact ⟨.nil, Nat.zero_le _⟩
+  | @cons fv deps A base parameters types final tail ih =>
+      cases semantic with
+      | parameter domainRun viewDomainRun parameterTypeSemantic validationRun
+          tailSemantic =>
+          rename_i traceFuel binderName domain body binderInfo param
+            parameterType viewName viewDomain viewBody viewBinderInfo
+            parameterTypeGet validationDefEq domainCheck viewDomainCheck
+            parameterTypeCheck parameterAt tailTrace
+          have parameterExpected :=
+            array_getElem?_eq_some_of_drop_eq_cons paramsEq
+          have paramEq : param = .fvar fv :=
+            Option.some.inj (parameterAt.symm.trans parameterExpected)
+          subst param
+          have tailParamsEq : stats.params.toList.drop (argIdx + 1) =
+              parameters := by
+            have tails := congrArg List.tail paramsEq
+            simpa only [List.tail_drop, List.tail_cons] using tails
+          obtain ⟨rawDomain, rawBody, rawTypeEq, rawDomainType,
+              rawBodyType, rawDomainTr, rawBodyTr⟩ :=
+            TypeChecker.TrExprS.forallE_components sourceTr
+          subst rawType
+          have henv : VEnv.WF env := by
+            simpa only [contextRun.venv_eq] using
+              contextRun.candidate.context.Ewf
+          have currentWF : VLCtx.WF env Us.length
+              contextRun.candidate.context.vlctx := by
+            simpa only [contextRun.venv_eq, contextRun.lparams_eq] using
+              contextRun.candidate.context.Δwf
+          have referenceWF : VLCtx.WF env Us.length alignment.reference :=
+            (alignment.current_reference.symm henv.ordered).wf
+          have finalWF : VLCtx.WF env Us.length final :=
+            alignment.root_reference_lift.wf henv referenceWF
+          obtain ⟨tailLift, tailExtension⟩ :=
+            TypeChecker.CandidateParameterContext.extension tail
+          let tailReferenceLift :=
+            tailExtension.comp alignment.root_reference_lift
+          let headExtension : VLCtx.FVLift' base
+              ((some (fv, deps), .vlam A) :: base) 0
+                (Lift.skipN Lift.refl 1) 0 :=
+            .skip_fvar _ _ .refl
+          let baseReferenceLift :=
+            headExtension.comp tailReferenceLift
+          have domainScope : domain.FVarsIn (· ∈ VLCtx.fvars base) := by
+            simpa only [rawStored.fvars] using rawDomainTr.fvarsIn
+          have currentNoBV : contextRun.candidate.context.vlctx.NoBV :=
+            contextRun.candidate.context.mlctx.noBV
+          have currentDomainTr : TrExprS env Us
+              contextRun.candidate.context.vlctx domain domainRun.source' := by
+            simpa only [TypeChecker.VContext.TrExprS,
+              contextRun.venv_eq, contextRun.lparams_eq] using
+                domainRun.check.expr_tr
+          have domainClosed : Closed domain 0 := by
+            simpa only [currentNoBV] using currentDomainTr.closed
+          obtain ⟨baseDomain, baseDomainTr⟩ :=
+            currentDomainTr.weakFV'_inv henv baseReferenceLift
+              alignment.current_reference domainClosed domainScope
+          have rawBaseDomain : env.IsDefEqU Us.length rawΔ.toCtx rawDomain
+              baseDomain :=
+            rawDomainTr.uniq henv rawStored baseDomainTr
+          have baseDomainAtReference :=
+            baseDomainTr.weakFV' henv.ordered baseReferenceLift referenceWF
+          have currentBaseDomain :=
+            currentDomainTr.uniq henv alignment.current_reference
+              baseDomainAtReference
+          have parameterMember : (.fvar fv : Expr) ∈ stats.params.toList :=
+            List.mem_of_mem_drop (by rw [paramsEq]; simp)
+          obtain ⟨localFv, decl, localEq, parameterFind⟩ :=
+            localState.parameters parameterMember
+          have localFvEq : localFv = fv :=
+            Expr.fvar.inj localEq.symm
+          subst localFv
+          obtain ⟨fvValue, lookupType, fvFind, lookupTypeTr⟩ :=
+            contextRun.candidate.getTypeTranslation parameterFind
+              parameterTypeGet
+          have parameterTypeTr : TrExprS env Us
+              contextRun.candidate.context.vlctx parameterType
+              parameterTypeSemantic.source' := by
+            simpa only [TypeChecker.VContext.TrExprS,
+              contextRun.venv_eq, contextRun.lparams_eq] using
+                parameterTypeSemantic.check.expr_tr
+          have lookupTypeTr' : TrExprS env Us
+              contextRun.candidate.context.vlctx parameterType lookupType := by
+            simpa only [TypeChecker.VContext.TrExprS,
+              contextRun.venv_eq, contextRun.lparams_eq] using lookupTypeTr
+          have parameterLookup : env.IsDefEqU Us.length
+              contextRun.candidate.context.vlctx.toCtx
+              parameterTypeSemantic.source' lookupType :=
+            parameterTypeTr.uniq henv (.refl henv currentWF) lookupTypeTr'
+          have validationEq : env.IsDefEqU Us.length
+              contextRun.candidate.context.vlctx.toCtx domainRun.source'
+              parameterTypeSemantic.source' := by
+            simpa only [contextRun.venv_eq, contextRun.lparams_eq] using
+              validationRun.isDefEqU
+          have domainLookup : env.IsDefEqU Us.length
+              contextRun.candidate.context.vlctx.toCtx domainRun.source'
+              lookupType :=
+            validationEq.trans henv currentWF.toCtx parameterLookup
+          have nextFind :
+              VLCtx.find? ((some (fv, deps), .vlam A) :: base : VLCtx)
+                (Sum.inr fv : Nat ⊕ FVarId) =
+                  some (VExpr.bvar 0, A.lift) := by
+            simp [VLCtx.find?, VLCtx.next, VLocalDecl.value,
+              VLocalDecl.type]
+          have referenceFind :=
+            tailReferenceLift.find? referenceWF nextFind
+          have lookupReference :=
+            (alignment.current_reference.find?_uniq henv fvFind
+              referenceFind).1
+          have referenceTypeEq :
+              A.lift.lift' ((tailLift.comp alignment.rootLift).consN 0) =
+                A.lift' (((Lift.skipN Lift.refl 1).comp
+                  (tailLift.comp alignment.rootLift)).consN 0) := by
+            simp only [Lift.consN, Lift.skipN_one, VExpr.lift_eq_lift',
+              VExpr.lift'_comp]
+          rw [referenceTypeEq] at lookupReference
+          have domainReference : env.IsDefEqU Us.length
+              contextRun.candidate.context.vlctx.toCtx domainRun.source'
+              (A.lift' (((Lift.skipN Lift.refl 1).comp
+                (tailLift.comp alignment.rootLift)).consN 0)) :=
+            domainLookup.trans henv currentWF.toCtx lookupReference
+          have liftedBaseStored : env.IsDefEqU Us.length
+              contextRun.candidate.context.vlctx.toCtx
+              (baseDomain.lift' (((Lift.skipN Lift.refl 1).comp
+                (tailLift.comp alignment.rootLift)).consN 0))
+              (A.lift' (((Lift.skipN Lift.refl 1).comp
+                (tailLift.comp alignment.rootLift)).consN 0)) :=
+            currentBaseDomain.symm.trans henv currentWF.toCtx domainReference
+          have liftedAtReference : env.IsDefEqU Us.length
+              alignment.reference.toCtx
+              (baseDomain.lift' (((Lift.skipN Lift.refl 1).comp
+                (tailLift.comp alignment.rootLift)).consN 0))
+              (A.lift' (((Lift.skipN Lift.refl 1).comp
+                (tailLift.comp alignment.rootLift)).consN 0)) :=
+            liftedBaseStored.defeqDFC henv.ordered
+              alignment.current_reference.defeqCtx
+          have baseStored : env.IsDefEqU Us.length (VLCtx.toCtx base)
+              baseDomain A :=
+            (VEnv.IsDefEqU.weak'_iff henv referenceWF.toCtx
+              baseReferenceLift.toCtx).1 liftedAtReference
+          have baseStoredAtRaw : env.IsDefEqU Us.length rawΔ.toCtx
+              baseDomain A :=
+            baseStored.defeqDFC henv.ordered
+              (rawStored.defeqCtx.symm henv.ordered)
+          have rawStoredU : env.IsDefEqU Us.length rawΔ.toCtx rawDomain A :=
+            rawBaseDomain.trans henv rawStored.wf.toCtx baseStoredAtRaw
+          obtain ⟨domainLevel, rawDomainHasType⟩ := rawDomainType
+          have rawStoredDef : env.IsDefEq Us.length rawΔ.toCtx rawDomain A
+              (.sort domainLevel) :=
+            rawStoredU.of_l henv rawStored.wf.toCtx rawDomainHasType
+          have pushedFVars :
+              ∀ currentFv currentDeps,
+                some (fv, deps) = some (currentFv, currentDeps) →
+                  currentFv ∉ rawΔ.fvars ∧ currentDeps ⊆ rawΔ.fvars := by
+            intro currentFv currentDeps equality
+            have pairEq : (fv, deps) = (currentFv, currentDeps) :=
+              Option.some.inj equality
+            injection pairEq with currentFvEq currentDepsEq
+            subst currentFv
+            subst currentDeps
+            simpa only [rawStored.fvars] using
+              (tail.initialWF finalWF).2.1 fv deps rfl
+          have rawNextStored : VLCtx.IsDefEq env Us.length
+              ((some (fv, deps), .vlam rawDomain) :: rawΔ)
+              ((some (fv, deps), .vlam A) :: base) :=
+            .cons rawStored pushedFVars (.vlam rawStoredDef)
+          have bodyInstTr : TrExprS env Us
+              ((some (fv, deps), .vlam rawDomain) :: rawΔ)
+              (body.instantiate1 (.fvar fv)) rawBody := by
+            simpa only [Expr.instantiate1_eq] using
+              rawBodyTr.inst_fvar henv.ordered rawNextStored.wf
+          have tailResult := ih alignment rawNextStored tailParamsEq
+            bodyInstTr tailSemantic
+          have combined : TypeChecker.TelDefEqEvidence env Us.length
+              rawΔ.toCtx (rawDomain :: VExpr.telN parameters.length rawBody)
+              (A :: types) :=
+            .cons (.ofDefEq rawStoredDef) tailResult.1
+          exact ⟨by
+              simpa only [List.length_cons, VExpr.telN] using combined,
+            by
+              simpa only [List.length_cons,
+                AddInductive.ConstructorTypeValidationTrace.spineLength]
+                using Nat.succ_le_succ tailResult.2⟩
+      | ordinary domainRun viewDomainRun viewEqualityRun consumedRun
+          ensureTypeRun positivity annotationsRun consumedType tailSemantic =>
+          have parameterAt :=
+            array_getElem?_eq_some_of_drop_eq_cons paramsEq
+          simp_all
+      | terminal sourceRun viewRun =>
+          have henv : VEnv.WF env := by
+            simpa only [contextRun.venv_eq] using
+              contextRun.candidate.context.Ewf
+          have referenceWF : VLCtx.WF env Us.length alignment.reference :=
+            (alignment.current_reference.symm henv.ordered).wf
+          have finalWF : VLCtx.WF env Us.length final :=
+            alignment.root_reference_lift.wf henv referenceWF
+          exact False.elim
+            (constructorTerminalBeforeSharedParameters_impossible tail finalWF
+              rawStored paramsEq sourceTr (by assumption))
+
+/-- Fold the shared-parameter prefix of one retained constructor-validation
+trace into telescope definitional equality against the stored parameter
+binders.  Parameter branches instantiate their free variables before the
+recursive step, so the public telescope remains in the original raw context. -/
+theorem ConstructorSharedParameterContextAlignment.rawParameterTelescopeDefEq
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {familyIdx : Nat} {ctor : Name}
+    {context : AddInductive.Context}
+    {contextRun : AddInductive.ConstructorContextRun env Us context}
+    {source view : Expr} {argIdx fuel whnfFuel : Nat}
+    {trace : AddInductive.ConstructorTypeValidationTrace stats isUnsafe
+      familyIdx ctor context source argIdx fuel}
+    {rawΔ base final : VLCtx} {rawType : VExpr}
+    {parameters : List Expr} {types : List VExpr}
+    (params : TypeChecker.CandidateParameterContext base parameters types final)
+    (localState : TypeChecker.FamilyParameterLocalState stats context)
+    (alignment : ConstructorSharedParameterContextAlignment env Us final
+      contextRun)
+    (rawStored : VLCtx.IsDefEq env Us.length rawΔ base)
+    (paramsEq : stats.params.toList.drop argIdx = parameters)
+    (sourceTr : TrExprS env Us rawΔ source rawType)
+    (semantic : AddInductive.ConstructorViewSemanticRun env Us whnfFuel
+      contextRun trace view) :
+    TypeChecker.TelDefEqEvidence env Us.length rawΔ.toCtx
+      (VExpr.telN parameters.length rawType) types :=
+  (constructorRawParameterTelescopeDefEqAux params localState alignment
+    rawStored paramsEq sourceTr semantic).1
+
+/-- The retained constructor validator consumes at least the complete shared
+parameter prefix before reaching its terminal family application. -/
+theorem ConstructorSharedParameterContextAlignment.sharedParameterCount_le_spineLength
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {familyIdx : Nat} {ctor : Name}
+    {context : AddInductive.Context}
+    {contextRun : AddInductive.ConstructorContextRun env Us context}
+    {source view : Expr} {argIdx fuel whnfFuel : Nat}
+    {trace : AddInductive.ConstructorTypeValidationTrace stats isUnsafe
+      familyIdx ctor context source argIdx fuel}
+    {rawΔ base final : VLCtx} {rawType : VExpr}
+    {parameters : List Expr} {types : List VExpr}
+    (params : TypeChecker.CandidateParameterContext base parameters types final)
+    (localState : TypeChecker.FamilyParameterLocalState stats context)
+    (alignment : ConstructorSharedParameterContextAlignment env Us final
+      contextRun)
+    (rawStored : VLCtx.IsDefEq env Us.length rawΔ base)
+    (paramsEq : stats.params.toList.drop argIdx = parameters)
+    (sourceTr : TrExprS env Us rawΔ source rawType)
+    (semantic : AddInductive.ConstructorViewSemanticRun env Us whnfFuel
+      contextRun trace view) :
+    parameters.length ≤ trace.spineLength :=
+  (constructorRawParameterTelescopeDefEqAux params localState alignment
+    rawStored paramsEq sourceTr semantic).2
 
 /-- One exact kernel constructor record translates to a raw Theory
 constructor when their source headers and strict types agree.  This is the
@@ -2840,6 +3239,183 @@ private theorem telN_take_of_le (expression : VExpr) {count total : Nat}
       | zero => omega
       | succ total =>
           cases expression <;> simp_all [VExpr.telN]
+
+/-- Assemble stored-parameter equality for every constructor view in one
+family directly from the retained post-family validation semantics. -/
+theorem constructorPostFamilyParameterDefEqList
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {familyIdx : Nat} {context : AddInductive.Context}
+    {contextRun : AddInductive.ConstructorContextRun env Us context}
+    {seen : NameSet} {constructors : List Constructor}
+    {validation : AddInductive.ConstructorListValidationTrace stats isUnsafe
+      familyIdx context seen constructors}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor constructors}
+    {raws : List VConstVal}
+    {candidateAlignment : AddInductive.ConstructorCandidateAlignmentTrace
+      stats isUnsafe familyIdx context validation candidates}
+    {semantics : CandidateConstructorSemanticListRun env Us candidates raws}
+    {base : VLCtx} {nparams : Nat}
+    {parameterSources : List Expr} {storedTypes : List VExpr}
+    (run : AddInductive.ConstructorPostFamilySemanticListRun env Us stats
+      isUnsafe familyIdx context contextRun validation candidates
+      candidateAlignment semantics)
+    (params : TypeChecker.CandidateParameterContext [] parameterSources
+      storedTypes base)
+    (localState : TypeChecker.FamilyParameterLocalState stats context)
+    (alignment : ConstructorSharedParameterContextAlignment env Us base
+      contextRun)
+    (parameterSources_eq : stats.params.toList = parameterSources)
+    (params_size : stats.params.size = nparams) :
+    CandidateConstructorViewParameterDefEqList env Us nparams storedTypes
+      semantics := by
+  have henv : VEnv.WF env := by
+    simpa only [contextRun.venv_eq] using
+      contextRun.candidate.context.Ewf
+  have paramsLength : parameterSources.length = nparams := by
+    calc
+      parameterSources.length = stats.params.toList.length :=
+        congrArg List.length parameterSources_eq.symm
+      _ = stats.params.size := by simp
+      _ = nparams := params_size
+  have paramsEq : stats.params.toList.drop 0 = parameterSources := by
+    simpa only [List.drop_zero] using parameterSources_eq
+  have emptyStored : VLCtx.IsDefEq env Us.length ([] : VLCtx) [] :=
+    .refl henv (by trivial)
+  induction run with
+  | nil => exact .nil
+  | @cons seen head tail freshName closed rootCheck typeTrace tailTrace
+      candidate candidates raw raws rootScope storedSpine spineLength
+      candidateDepth headAlignment tailAlignment headSemantic tailSemantic
+      root telescope spine tailRun ih =>
+      have rawStored := alignment.rawParameterTelescopeDefEq params localState
+        emptyStored paramsEq headSemantic.type.source_tr telescope
+      rw [paramsLength] at rawStored
+      have validationBound :=
+        alignment.sharedParameterCount_le_spineLength params localState
+          emptyStored paramsEq headSemantic.type.source_tr telescope
+      have candidateBound : nparams ≤ candidate.type.trace.spineLength := by
+        rw [spineLength]
+        simpa only [paramsLength] using validationBound
+      obtain ⟨resultType, fullSpine⟩ := spine
+      have rawView := fullSpine.telescope.take nparams
+      rw [telN_take_of_le raw.type candidateBound,
+        telN_take_of_le headSemantic.type.view candidateBound] at rawView
+      have storedView :=
+        (rawStored.symm henv trivial).trans henv trivial rawView
+      exact .cons storedView ih
+
+/-- Assemble stored-parameter equality for every constructor view across the
+complete family-major post-validation semantic list. -/
+theorem CandidateBlockConstructorPostFamilySemanticRuns.storedParameterDefEqLists
+    {env blockEnv : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {contextRun : AddInductive.ConstructorContextRun blockEnv Us context}
+    {familyIdx : Nat} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    {validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources}
+    {candidateAlignment :
+      AddInductive.ConstructorBlockCandidateAlignmentTrace stats isUnsafe
+        context validation candidates}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {base : VLCtx} {nparams : Nat}
+    {parameterSources : List Expr} {storedTypes : List VExpr}
+    (run : CandidateBlockConstructorPostFamilySemanticRuns env blockEnv Us
+      stats isUnsafe context contextRun validation candidateAlignment semantics)
+    (params : TypeChecker.CandidateParameterContext [] parameterSources
+      storedTypes base)
+    (localState : TypeChecker.FamilyParameterLocalState stats context)
+    (alignment : ConstructorSharedParameterContextAlignment blockEnv Us base
+      contextRun)
+    (parameterSources_eq : stats.params.toList = parameterSources)
+    (params_size : stats.params.size = nparams) :
+    CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us nparams
+      storedTypes semantics := by
+  induction run with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons
+        (constructorPostFamilyParameterDefEqList head params localState
+          alignment parameterSources_eq params_size)
+        ih
+
+/-- Project complete stored-parameter constructor evidence from the bundled
+post-family inventory produced by the same validation execution. -/
+theorem CandidateBlockConstructorPostFamilySemanticInventoryState.storedParameterDefEqLists
+    {env blockEnv : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {isUnsafe : Bool}
+    {context : AddInductive.Context} {base : VLCtx} {nparams : Nat}
+    {parameterSources : List Expr}
+    {familyIdx : Nat} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    {validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (inventory : CandidateBlockConstructorPostFamilySemanticInventoryState
+      env blockEnv Us stats isUnsafe context base nparams parameterSources
+      validation semantics)
+    {storedTypes : List VExpr}
+    (params : TypeChecker.CandidateParameterContext [] parameterSources
+      storedTypes base) :
+    CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us nparams
+      storedTypes semantics :=
+  inventory.semantic.constructors.storedParameterDefEqLists params
+    inventory.semantic.parameterLocalState inventory.parameterContext
+    inventory.parameterSources_eq inventory.params_size
+
+/-- Precompose one family's constructor-prefix inventory with a common
+dependent telescope equality. -/
+theorem CandidateConstructorViewParameterDefEqList.precompose
+    {env : VEnv} {Us : List Name} {nparams : Nat}
+    {canonicalParams stored : List VExpr}
+    {sources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor sources}
+    {raws : List VConstVal}
+    {semantics : CandidateConstructorSemanticListRun env Us candidates raws}
+    (run : CandidateConstructorViewParameterDefEqList env Us nparams stored
+      semantics)
+    (canonicalStored : TypeChecker.TelDefEqEvidence env Us.length []
+      canonicalParams stored)
+    (henv : VEnv.WF env) :
+    CandidateConstructorViewParameterDefEqList env Us nparams canonicalParams
+      semantics := by
+  induction run with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons (canonicalStored.trans henv trivial head) ih
+
+/-- Precompose every family-major constructor-prefix inventory with the same
+canonical-to-stored dependent telescope equality. -/
+theorem CandidateBlockConstructorViewParameterDefEqLists.precompose
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {canonicalParams stored : List VExpr}
+    {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (run : CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
+      nparams stored semantics)
+    (canonicalStored : TypeChecker.TelDefEqEvidence blockEnv Us.length []
+      canonicalParams stored)
+    (hblockEnv : VEnv.WF blockEnv) :
+    CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us nparams
+      canonicalParams semantics := by
+  induction run with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons (head.precompose canonicalStored hblockEnv) ih
 
 private theorem telDefEqEvidence_takeDirect
     (run : TypeChecker.TelDefEqEvidence env U Γ As As') (count : Nat) :
@@ -8536,10 +9112,10 @@ theorem
     NormalizationCandidateBlockSemanticRun.viewDecl] using evidence
 
 /-- Assemble the checker-valid canonical block normalization from the
-completed family traversal.  The family-type relocations are discharged by
-the canonical evidence above; the per-family constructor telescope inventory
-and well-formedness of the staged constructor environment remain the
-producer's outstanding obligations and are taken as explicit premises. -/
+completed family traversal and the exact staged constructor audit.  The
+constructor roots supply staged-environment well-formedness; their retained
+parameter traces are folded against the first stored telescope and then
+precomposed with the first normalized family telescope. -/
 theorem
     ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalNormalizationBlockRun
     {source : VInductDecl}
@@ -8557,16 +9133,46 @@ theorem
     {raw : staging.annotation.RawFirstIndexDomain}
     (completion : staging.TerminalIndexDomainCompletion raw)
     (context_lctx_eq : context.lctx = {})
-    (hblockEnv : VEnv.WF blockEnv)
-    (constructorParameters :
-      CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
-        source.nparams
-        (blockParams source.nparams semantic.families.views)
-        semantic.families) :
+    (stagingInput : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (alignmentRun :
+      AddInductive.ConstructorBlockCandidateAlignmentTrace.check
+        (produced.execution.eliminationExecution.normalization
+          |>.constructorValidation.traces)
+        produced.candidate.families = .ok ()) :
     NormalizationBlockRun semantic.canonicalNormalization env blockEnv := by
   have henv : VEnv.WF env := by
     simpa only [staging.annotation.firstSemantic.type.venv_eq] using
       staging.annotation.firstSemantic.type.contextRun.context.Ewf
+  obtain ⟨inventory⟩ :=
+    completion.constructorValidationSemanticState context_lctx_eq stagingInput
+      alignmentRun
+  have hblockEnv : VEnv.WF blockEnv := by
+    simpa only [inventory.semantic.contextRun.venv_eq] using
+      inventory.semantic.contextRun.candidate.context.Ewf
+  have storedConstructors := inventory.storedParameterDefEqLists
+    completion.firstParameterContext
+  have firstStoredView :=
+    staging.firstStoredViewParameterTelescopeDefEq context_lctx_eq
+  have firstViewStored :=
+    (firstStoredView.symm henv trivial).mono
+      (VEnv.stageInductiveTypes_le stagingInput.stage)
+  have firstViewConstructors :=
+    storedConstructors.precompose firstViewStored hblockEnv
+  have params_eq :
+      blockParams source.nparams semantic.families.views =
+        VExpr.telN source.nparams
+          staging.annotation.firstSemantic.type.view := by
+    rw [staging.annotation.semantic_views_eq]
+    rfl
+  have constructorParameters :
+      CandidateBlockConstructorViewParameterDefEqLists env blockEnv Us
+        source.nparams
+        (blockParams source.nparams semantic.families.views)
+        semantic.families := by
+    rw [params_eq]
+    exact firstViewConstructors
   have canonical := completion.canonicalFamilyTypeDefEqs context_lctx_eq
   have paramsLength :=
     produced.semanticViewParams_length semantic context_lctx_eq
@@ -8590,6 +9196,46 @@ info: 'Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.extension' de
 -/
 #guard_msgs in
 #print axioms TypeChecker.CandidateParameterContext.extension
+
+/--
+info: 'Lean4Lean.AddInductive.isValidIndAppIdx_parameter_eqv' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms _root_.Lean4Lean.AddInductive.isValidIndAppIdx_parameter_eqv
+
+/--
+info: 'Lean4Lean.VInductDecl.ConstructorSharedParameterContextAlignment.rawParameterTelescopeDefEq' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ConstructorSharedParameterContextAlignment.rawParameterTelescopeDefEq
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.firstStoredViewParameterTelescopeDefEq' depends on axioms: [propext,
@@ -9041,6 +9687,7 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
  Expr.mkAppData_eq,
  Expr.mkData_eq,
  Expr.replace_eq,
+ Level.hasMVar_eq,
  Level.hasParam_eq,
  Level.instLawfulBEqLevel,
  Level.isExplicitSubsumedAux_eq,
