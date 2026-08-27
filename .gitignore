@@ -5,6 +5,5 @@
 /.lake
 /result*
 /.direnv
-# Keep scratch plans local while versioning the authoritative roadmap.
+# Keep planning documents local.
 /plans/*
-!/plans/roadmap.md
