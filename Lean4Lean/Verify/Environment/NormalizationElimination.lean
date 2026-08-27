@@ -1,4 +1,5 @@
 import Lean4Lean.Verify.Environment.Normalization
+import Lean4Lean.Verify.Environment.ConstructorValidation
 import Lean4Lean.Verify.Environment.Elimination
 import Lean4Lean.Verify.Environment.Lemmas
 import Lean4Lean.Theory.Typing.InductiveCertificate
@@ -89,6 +90,69 @@ theorem kTarget_result_iff
   rw [run.kTarget_eq]
 
 end CheckerBlockEliminationRun
+
+/-- Family-indexed alignment between every constructor-validation trace in a
+mutual block and the analyzer-owned constructor candidates at the same source
+positions.  Both lists remain dependent indices, so neither a family nor a
+constructor alignment can be reordered, duplicated, or dropped. -/
+inductive ConstructorBlockCandidateAlignmentTrace
+    (stats : InductiveStats) (isUnsafe : Bool) (context : Context) :
+    {familyIdx : Nat} → {sources : List InductiveType} →
+    ConstructorBlockValidationTraces stats isUnsafe context familyIdx sources →
+    CandidateList CandidateFamily sources → Type where
+  | nil : ConstructorBlockCandidateAlignmentTrace stats isUnsafe context
+      .nil .nil
+  | cons
+      (head : ConstructorCandidateAlignmentTrace stats isUnsafe familyIdx
+        context validationHead candidate.constructors)
+      (tail : ConstructorBlockCandidateAlignmentTrace stats isUnsafe context
+        validationTail candidates) :
+      ConstructorBlockCandidateAlignmentTrace stats isUnsafe context
+        (.cons validationHead validationTail) (.cons candidate candidates)
+
+namespace ConstructorBlockCandidateAlignmentTrace
+
+/-- Execute the supplemental constructor-view audit in exact family and
+constructor source order.  The ordinary validator trace remains the authority
+for acceptance; this pass only connects its positions to retained views. -/
+def build :
+    (validation : ConstructorBlockValidationTraces stats isUnsafe context
+      familyIdx sources) →
+    (candidates : CandidateList CandidateFamily sources) →
+      Except Exception
+        (ConstructorBlockCandidateAlignmentTrace stats isUnsafe context
+          validation candidates)
+  | .nil, .nil => .ok .nil
+  | .cons validationHead validationTail, .cons candidate candidates => do
+      let head ← ConstructorCandidateAlignmentTrace.build validationHead
+        candidate.constructors
+      let tail ← build validationTail candidates
+      pure (.cons head tail)
+
+/-- Erased executable audit for the complete dependent block alignment. -/
+def check
+    (validation : ConstructorBlockValidationTraces stats isUnsafe context
+      familyIdx sources)
+    (candidates : CandidateList CandidateFamily sources) : Except Exception Unit :=
+  (build validation candidates).map fun _ => ()
+
+/-- A successful block audit retains the exact dependent alignment selected
+by the builder. -/
+theorem nonempty_of_check
+    {validation : ConstructorBlockValidationTraces stats isUnsafe context
+      familyIdx sources}
+    {candidates : CandidateList CandidateFamily sources}
+    (success : check validation candidates = .ok ()) :
+    Nonempty (ConstructorBlockCandidateAlignmentTrace stats isUnsafe context
+      validation candidates) := by
+  unfold check at success
+  cases h : build validation candidates with
+  | error error =>
+      rw [h] at success
+      contradiction
+  | ok alignment => exact ⟨alignment⟩
+
+end ConstructorBlockCandidateAlignmentTrace
 
 /-- Recompose a retained outer inductive execution through the public
 `addDecl` dispatcher.  Primitive recognition is retained as an explicit
@@ -183,6 +247,137 @@ end EnvironmentInductiveExecution.ExactSemanticTransaction
 end AddInductive
 
 namespace VInductDecl
+
+/-- Verified post-family constructor semantics for every family in an exact
+mutual block.  The retained validation trace, candidate alignment, and
+normalization semantic hierarchy are all dependent indices, preserving the
+family ordinal and every constructor source position. -/
+inductive CandidateBlockConstructorPostFamilySemanticRuns
+    (env blockEnv : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats) (isUnsafe : Bool)
+    (context : AddInductive.Context)
+    (contextRun : AddInductive.ConstructorContextRun blockEnv Us context) :
+    {familyIdx : Nat} → {sources : List InductiveType} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources} →
+    {raws : List VInductiveType} →
+    (validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources) →
+    (alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace stats
+      isUnsafe context validation candidates) →
+    CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws →
+      Type where
+  | nil : CandidateBlockConstructorPostFamilySemanticRuns env blockEnv Us
+      stats isUnsafe context contextRun .nil .nil .nil
+  | cons
+      {familyIdx : Nat} {source : InductiveType}
+      {sources : List InductiveType}
+      {validationHead : AddInductive.ConstructorListValidationTrace stats
+        isUnsafe familyIdx context {} source.ctors}
+      {validationTail : AddInductive.ConstructorBlockValidationTraces stats
+        isUnsafe context (familyIdx + 1) sources}
+      {candidate : AddInductive.CandidateFamily source}
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateFamily sources}
+      {raw : VInductiveType} {raws : List VInductiveType}
+      {alignmentHead : AddInductive.ConstructorCandidateAlignmentTrace stats
+        isUnsafe familyIdx context validationHead candidate.constructors}
+      {alignmentTail : AddInductive.ConstructorBlockCandidateAlignmentTrace
+        stats isUnsafe context validationTail candidates}
+      {semanticHead : CandidateBlockFamilySemanticRun env blockEnv Us
+        candidate raw}
+      {semanticTail : CandidateBlockFamilySemanticListRun env blockEnv Us
+        candidates raws}
+      (head : AddInductive.ConstructorPostFamilySemanticListRun blockEnv Us
+        stats isUnsafe familyIdx context contextRun validationHead
+        candidate.constructors alignmentHead semanticHead.constructors)
+      (tail : CandidateBlockConstructorPostFamilySemanticRuns env blockEnv Us
+        stats isUnsafe context contextRun validationTail alignmentTail
+        semanticTail) :
+      CandidateBlockConstructorPostFamilySemanticRuns env blockEnv Us stats
+        isUnsafe context contextRun
+        (.cons validationHead validationTail)
+        (.cons alignmentHead alignmentTail)
+        (.cons semanticHead semanticTail)
+
+namespace CandidateBlockConstructorPostFamilySemanticRuns
+
+/-- Interpret a complete block alignment in the one verified staged context
+shared by `checkConstructors`.  Each family delegates to the established
+constructor-list interpreter at its exact natural-number family index. -/
+theorem nonempty_of_alignment
+    (contextRun : AddInductive.ConstructorContextRun blockEnv Us context)
+    {validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace stats
+      isUnsafe context validation candidates)
+    (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) :
+    Nonempty (CandidateBlockConstructorPostFamilySemanticRuns env blockEnv Us
+      stats isUnsafe context contextRun validation alignment semantics) := by
+  induction alignment generalizing raws with
+  | nil =>
+      cases semantics
+      exact ⟨.nil⟩
+  | cons headAlignment tailAlignment ih =>
+      cases semantics with
+      | cons headSemantic tailSemantic =>
+          obtain ⟨head⟩ :=
+            AddInductive.ConstructorPostFamilySemanticListRun.nonempty_of_alignment
+              contextRun headAlignment headSemantic.constructors
+          obtain ⟨tail⟩ := ih tailSemantic
+          exact ⟨.cons head tail⟩
+
+/-- Run the block alignment audit and immediately interpret the retained
+result in a verified staged context.  The existential alignment is the exact
+dependent value returned by the executable builder. -/
+theorem nonempty_of_check
+    (contextRun : AddInductive.ConstructorContextRun blockEnv Us context)
+    {validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (success : AddInductive.ConstructorBlockCandidateAlignmentTrace.check
+      validation candidates = .ok ())
+    (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) :
+    ∃ alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace stats
+        isUnsafe context validation candidates,
+      Nonempty (CandidateBlockConstructorPostFamilySemanticRuns env blockEnv
+        Us stats isUnsafe context contextRun validation alignment semantics) := by
+  obtain ⟨alignment⟩ :=
+    AddInductive.ConstructorBlockCandidateAlignmentTrace.nonempty_of_check
+      success
+  exact ⟨alignment,
+    nonempty_of_alignment contextRun alignment semantics⟩
+
+end CandidateBlockConstructorPostFamilySemanticRuns
+
+/-- Existentially owned block-wide constructor semantics at one staged
+validation context.  The context run, exact executable alignment, and its
+semantic interpretation are packaged together so no dependent witness is
+caller-selectable downstream. -/
+structure CandidateBlockConstructorPostFamilySemanticState
+    (env blockEnv : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats) (isUnsafe : Bool)
+    (context : AddInductive.Context)
+    {familyIdx : Nat} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    (validation : AddInductive.ConstructorBlockValidationTraces stats
+      isUnsafe context familyIdx sources)
+    (semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws) where
+  contextRun : AddInductive.ConstructorContextRun blockEnv Us context
+  alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace stats
+    isUnsafe context validation candidates
+  constructors : CandidateBlockConstructorPostFamilySemanticRuns env blockEnv
+    Us stats isUnsafe context contextRun validation alignment semantics
 
 /-- One exact kernel constructor record translates to a raw Theory
 constructor when their source headers and strict types agree.  This is the
@@ -7572,6 +7767,116 @@ theorem
       terminalLparams completion.blockValidationContext_safety
   exact ⟨validationRun, validationVenv, validationLparams⟩
 
+/-- Interpret every retained constructor-validation trace at the exact staged
+block context once the supplemental source/view alignment audit has fixed all
+dependent family and constructor positions.  This is the arbitrary-block
+counterpart of the singleton post-family semantic owner. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemantics
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {})
+    (stagingInput : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (alignment : AddInductive.ConstructorBlockCandidateAlignmentTrace
+      produced.execution.eliminationExecution.normalization.stats isUnsafe
+      { (produced.execution.eliminationExecution.normalization
+          |>.validationContext) with
+        env := produced.execution.eliminationExecution.normalization
+          |>.familyEnv }
+      (produced.execution.eliminationExecution.normalization
+        |>.constructorValidation.traces)
+      produced.candidate.families) :
+    ∃ contextRun : AddInductive.ConstructorContextRun blockEnv Us
+        { (produced.execution.eliminationExecution.normalization
+            |>.validationContext) with
+          env := produced.execution.eliminationExecution.normalization
+            |>.familyEnv },
+      Nonempty (CandidateBlockConstructorPostFamilySemanticRuns env blockEnv
+        Us produced.execution.eliminationExecution.normalization.stats
+        isUnsafe
+        { (produced.execution.eliminationExecution.normalization
+            |>.validationContext) with
+          env := produced.execution.eliminationExecution.normalization
+            |>.familyEnv }
+        contextRun
+        (produced.execution.eliminationExecution.normalization
+          |>.constructorValidation.traces)
+        alignment semantic.families) := by
+  obtain ⟨candidateRun, venv_eq, lparams_eq⟩ :=
+    completion.constructorValidationContextRun context_lctx_eq stagingInput
+  let contextRun : AddInductive.ConstructorContextRun blockEnv Us
+      { (produced.execution.eliminationExecution.normalization
+          |>.validationContext) with
+        env := produced.execution.eliminationExecution.normalization
+          |>.familyEnv } := ⟨candidateRun, venv_eq, lparams_eq⟩
+  exact ⟨contextRun,
+    CandidateBlockConstructorPostFamilySemanticRuns.nonempty_of_alignment
+      contextRun alignment semantic.families⟩
+
+/-- Execute the block-wide source/view audit and package its exact alignment
+together with the verified staged context and semantic interpretation.  This
+is the producer-facing V3.3b handoff: downstream prefix folding receives one
+owned state rather than independently chosen family witnesses. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemanticState
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {})
+    (stagingInput : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (alignmentRun :
+      AddInductive.ConstructorBlockCandidateAlignmentTrace.check
+        (produced.execution.eliminationExecution.normalization
+          |>.constructorValidation.traces)
+        produced.candidate.families = .ok ()) :
+    Nonempty (CandidateBlockConstructorPostFamilySemanticState env blockEnv Us
+      produced.execution.eliminationExecution.normalization.stats isUnsafe
+      { (produced.execution.eliminationExecution.normalization
+          |>.validationContext) with
+        env := produced.execution.eliminationExecution.normalization
+          |>.familyEnv }
+      (produced.execution.eliminationExecution.normalization
+        |>.constructorValidation.traces)
+      semantic.families) := by
+  obtain ⟨candidateRun, venv_eq, lparams_eq⟩ :=
+    completion.constructorValidationContextRun context_lctx_eq stagingInput
+  let contextRun : AddInductive.ConstructorContextRun blockEnv Us
+      { (produced.execution.eliminationExecution.normalization
+          |>.validationContext) with
+        env := produced.execution.eliminationExecution.normalization
+          |>.familyEnv } := ⟨candidateRun, venv_eq, lparams_eq⟩
+  obtain ⟨alignment, ⟨constructors⟩⟩ :=
+    CandidateBlockConstructorPostFamilySemanticRuns.nonempty_of_check
+      contextRun alignmentRun semantic.families
+  exact ⟨⟨contextRun, alignment, constructors⟩⟩
+
 /-- Complete verified state at the exact `checkConstructors` context: the
 staged context run together with the validator's shared-parameter inventory,
 both at the same environment-swapped reader context. -/
@@ -8245,6 +8550,121 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationContextRun
+
+/--
+info: 'Lean4Lean.AddInductive.ConstructorBlockCandidateAlignmentTrace.nonempty_of_check' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Level.hasMVar_eq]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.ConstructorBlockCandidateAlignmentTrace.nonempty_of_check
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockConstructorPostFamilySemanticRuns.nonempty_of_alignment' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  CandidateBlockConstructorPostFamilySemanticRuns.nonempty_of_alignment
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemantics' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemantics
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemanticState' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasMVar_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationSemanticState
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalLocalState' depends on axioms: [propext,
