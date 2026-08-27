@@ -7605,6 +7605,76 @@ theorem CompletionSpine.terminalLocalState
           head.selected]
       exact ih
 
+/-- Reindex the completed local inventory onto the exact terminal statistics
+consumed by `checkConstructors`.  The output-size premise is supplied by the
+retained family-validation run and rules out any nontrivial assertion fallback. -/
+theorem CompletionSpine.terminalLocalStateExact
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace source.nparams
+      (firstSource :: secondSource :: allLaterSources).toArray dIdx stats
+      candidateContext}
+    {iteration : completion.LaterFamilyIterationCursor candidates raws trace}
+    (spine : CompletionSpine iteration)
+    (resultParamsSize : trace.result.stats.params.size = source.nparams) :
+    TypeChecker.FamilyParameterLocalState trace.result.stats
+        trace.result.validationContext ∧
+      trace.result.stats.params.toList =
+        staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams ∧
+      trace.result.stats.params.size = source.nparams := by
+  induction spine with
+  | @nil dIdx stats candidateContext trace iteration =>
+      have suffix := iteration.cursor.sourceSuffix_eq
+      have lengthLe :
+          (firstSource :: secondSource :: allLaterSources).toArray.size ≤
+            dIdx := by
+        have suffixLength := congrArg List.length suffix
+        simp only [List.length_drop, List.length_nil] at suffixLength
+        simp only [List.size_toArray]
+        omega
+      cases trace with
+      | firstFamily dIdx stats candidateContext inBounds closed inferred root
+          checkType rootWhnf telescope sorted ensureSort isFirst tail =>
+          omega
+      | laterFamily dIdx stats candidateContext inBounds closed inferred root
+          checkType rootWhnf telescope sorted ensureSort isLater
+          resultLevelCompatible tail =>
+          omega
+      | terminal dIdx stats candidateContext outOfBounds =>
+          have params_eq :
+              (AddInductive.familyValidationTerminalStats source.nparams
+                (firstSource :: secondSource :: allLaterSources).toArray stats
+                candidateContext).params = stats.params :=
+            AddInductive.familyValidationTerminalStats_params_eq_of_sizes
+              stats candidateContext iteration.cursor.current_params_size
+              (by
+                simpa only [
+                  AddInductive.FamilyParameterComparisonBlockTrace.result]
+                  using resultParamsSize)
+          have localState : TypeChecker.FamilyParameterLocalState
+              (AddInductive.familyValidationTerminalStats source.nparams
+                (firstSource :: secondSource :: allLaterSources).toArray stats
+                candidateContext) candidateContext :=
+            iteration.cursor.current_localState.of_params_eq params_eq
+          refine ⟨?_, ?_, resultParamsSize⟩
+          · simpa only [
+              AddInductive.FamilyParameterComparisonBlockTrace.result] using
+              localState
+          · exact (congrArg Array.toList params_eq).trans
+              (iteration.cursor.current_parameterSources_eq.trans
+                iteration.parameterSources_eq_firstParameterList)
+  | @cons nextSource laterSources candidates raws dIdx stats candidateContext
+      trace iteration head parameter domain tail ih =>
+      rw [←
+        AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+          head.selected] at resultParamsSize ⊢
+      exact ih resultParamsSize
+
 end
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
 
@@ -7728,6 +7798,62 @@ theorem
     AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result _
   rw [canonicalEq] at endpoint
   exact endpoint
+
+/-- Exact-index form of the terminal parameter inventory: the statistics are
+the same `NormalizationCandidateExecution.stats` used by every retained
+constructor trace, not an existentially hidden pre-assertion value. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationLocalStateExact
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    TypeChecker.FamilyParameterLocalState
+        produced.execution.eliminationExecution.normalization.stats
+        (produced.execution.eliminationExecution.normalization
+          |>.validationContext) ∧
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
+        staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams ∧
+      produced.execution.eliminationExecution.normalization.stats.params.size =
+        source.nparams := by
+  obtain ⟨cursor⟩ :=
+    completion.remainingFamilyValidationCursor context_lctx_eq
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  obtain ⟨spine⟩ :=
+    (cursor.iterationCursorExact annotations).completionSpine context_lctx_eq
+  have canonicalEq :
+      ((produced.execution.eliminationExecution.normalization).familyParameterComparisonTrace
+          (produced.execution.normalization_run produced.producedExecution)
+          produced.kernelSources_nonempty).result =
+        (produced.execution.eliminationExecution.normalization).familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result _
+  have endpointSize :
+      cursor.validation.continuation.tail.result.stats.params.size =
+        source.nparams := by
+    rw [AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
+      cursor.validation.selected, canonicalEq]
+    exact ((produced.execution.eliminationExecution.normalization
+      ).familyValidationBlockRun
+        (produced.execution.normalization_run produced.producedExecution)
+        produced.kernelSources_nonempty).params_size
+  have endpoint := spine.terminalLocalStateExact endpointSize
+  rw [AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_result
+    cursor.validation.selected, canonicalEq] at endpoint
+  simpa only [
+    AddInductive.NormalizationCandidateExecution.familyValidationResult] using
+    endpoint
 
 /-- The exact context in which the block's `checkConstructors` runs is
 verified at the staged Theory environments: the traversal endpoint's context
@@ -8682,6 +8808,21 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalLocalState
 
 /--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalLocalStateExact' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.terminalLocalStateExact
+
+/--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationLocalState' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -8714,6 +8855,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationLocalState
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationLocalStateExact' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.blockValidationLocalStateExact
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.constructorValidationState' depends on axioms: [propext,

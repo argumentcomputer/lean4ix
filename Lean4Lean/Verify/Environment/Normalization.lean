@@ -880,6 +880,17 @@ theorem withEnv (run : FamilyParameterLocalState stats context)
   localContext := ⟨run.localContext.wf, run.localContext.reserves⟩
   parameters := run.parameters
 
+/-- Reindex a local parameter inventory when only the enclosing statistics
+record changes and its literal parameter array is preserved. -/
+theorem of_params_eq (run : FamilyParameterLocalState stats context)
+    (params_eq : stats'.params = stats.params) :
+    FamilyParameterLocalState stats' context where
+  localContext := run.localContext
+  parameters := by
+    intro parameter member
+    apply run.parameters
+    simpa only [params_eq] using member
+
 theorem pushLocal (run : FamilyParameterLocalState stats context)
     (name : Name) (binderInfo : BinderInfo) (type : Expr) :
     FamilyParameterLocalState stats
@@ -3698,6 +3709,57 @@ def CandidateExprStagedInput.rootInput
     whnfDepth := input.whnfDepth }
 
 end TypeChecker
+
+namespace AddInductive
+
+/-- The terminal assertion wrapper preserves the literal shared-parameter
+array whenever both its input and output have the validator-required size.
+If an earlier assertion selected the inhabited fallback, the output-size
+hypothesis forces the zero-parameter case, where both arrays are empty. -/
+theorem familyValidationTerminalStats_params_eq_of_sizes
+    (stats : InductiveStats) (context : Context)
+    (rawSize : stats.params.size = nparams)
+    (resultSize :
+      (familyValidationTerminalStats nparams indTypes stats context).params.size =
+        nparams) :
+    (familyValidationTerminalStats nparams indTypes stats context).params =
+      stats.params := by
+  unfold familyValidationTerminalStats at resultSize ⊢
+  split <;> rename_i hlevels
+  · split <;> rename_i hnindices
+    · split <;> rename_i hindConsts
+      · split <;> rename_i hparams
+        · rfl
+        · simp only [hlevels, hnindices, hindConsts, hparams] at resultSize
+          change 0 = nparams at resultSize
+          have nparams_eq : nparams = 0 := resultSize.symm
+          have params_eq : stats.params = #[] :=
+            Array.size_eq_zero_iff.mp (rawSize.trans nparams_eq)
+          rw [params_eq]
+          rfl
+      · simp only [hlevels, hnindices, hindConsts] at resultSize
+        change 0 = nparams at resultSize
+        have nparams_eq : nparams = 0 := resultSize.symm
+        have params_eq : stats.params = #[] :=
+          Array.size_eq_zero_iff.mp (rawSize.trans nparams_eq)
+        rw [params_eq]
+        rfl
+    · simp only [hlevels, hnindices] at resultSize
+      change 0 = nparams at resultSize
+      have nparams_eq : nparams = 0 := resultSize.symm
+      have params_eq : stats.params = #[] :=
+        Array.size_eq_zero_iff.mp (rawSize.trans nparams_eq)
+      rw [params_eq]
+      rfl
+  · simp only [hlevels] at resultSize
+    change 0 = nparams at resultSize
+    have nparams_eq : nparams = 0 := resultSize.symm
+    have params_eq : stats.params = #[] :=
+      Array.size_eq_zero_iff.mp (rawSize.trans nparams_eq)
+    rw [params_eq]
+    rfl
+
+end AddInductive
 
 namespace AddInductive.FamilyTypeParameterComparisonTrace
 
@@ -21098,6 +21160,22 @@ info: 'Lean4Lean.TypeChecker.FamilyParameterLocalState.withEnv' depends on axiom
 -/
 #guard_msgs in
 #print axioms TypeChecker.FamilyParameterLocalState.withEnv
+
+/--
+info: 'Lean4Lean.TypeChecker.FamilyParameterLocalState.of_params_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.FamilyParameterLocalState.of_params_eq
+
+/--
+info: 'Lean4Lean.AddInductive.familyValidationTerminalStats_params_eq_of_sizes' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.familyValidationTerminalStats_params_eq_of_sizes
 
 
 end VInductDecl
