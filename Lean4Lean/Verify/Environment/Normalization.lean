@@ -7035,6 +7035,57 @@ theorem TelDefEqEvidence.trans
   .ofTelDefEq
     (candidateTelDefEq_trans henv contextWF left.telDefEq right.telDefEq)
 
+private theorem isType_telN_dropN
+    {env : VEnv} {U : Nat} (henv : env.Ordered) :
+    ∀ (n : Nat) { Γ : List VExpr } (e : VExpr),
+      env.IsType U Γ e →
+        env.OnTel U Γ (VExpr.telN n e) ∧
+          env.IsType U ((VExpr.telN n e).reverse ++ Γ)
+            (VExpr.dropN n e)
+  | 0, _, _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+  | n + 1, Γ, .forallE domain body, type => by
+      obtain ⟨domainType, bodyType⟩ := type.forallE_inv henv
+      obtain ⟨bodyTel, resultType⟩ :=
+        isType_telN_dropN henv n body bodyType
+      exact ⟨⟨domainType, bodyTel⟩, by
+        simpa only [VExpr.telN, VExpr.dropN, List.reverse_cons,
+          List.append_assoc, List.singleton_append] using resultType⟩
+  | _ + 1, _, .bvar _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+  | _ + 1, _, .sort _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+  | _ + 1, _, .const _ _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+  | _ + 1, _, .app _ _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+  | _ + 1, _, .lam _ _, type => ⟨trivial, by
+      simpa only [VExpr.telN, VExpr.dropN, List.reverse_nil,
+        List.nil_append] using type⟩
+
+/-- Replace a type's leading Pi telescope by a definitionally equal prefix,
+retaining its exact post-prefix body.  The input direction matches family
+validation: the replacement prefix is compared to the type's original
+prefix. -/
+theorem TelDefEqEvidence.rebuildForallNPrefix
+    (run : TelDefEqEvidence env U Γ params (VExpr.telN n type))
+    (henv : VEnv.WF env) (contextWF : OnCtx Γ (env.IsType U))
+    (typeWF : env.IsType U Γ type) :
+  ∃ resultLevel, DefEqEvidence env U Γ type
+      (VExpr.forallN params (VExpr.dropN n type)) (.sort resultLevel) := by
+  have components := isType_telN_dropN henv.ordered n type typeWF
+  have reversedPrefix := run.symm henv contextWF
+  obtain ⟨resultLevel, resultType⟩ := components.2
+  obtain ⟨fullLevel, full⟩ :=
+    reversedPrefix.telDefEq.forallN_defeq resultType
+  refine ⟨fullLevel, .ofDefEq ?_⟩
+  simpa only [VExpr.forallN_telN_dropN] using full
+
 private theorem candidateTelDefEq_append
     {env : VEnv} {U : Nat} {Γ : List VExpr} :
     ∀ {As As' Bs Bs'}, env.TelDefEq U Γ As As' →
@@ -9883,6 +9934,33 @@ inductive CandidateBlockFamilyViewParameterDefEqList
       CandidateBlockFamilyViewParameterDefEqList env blockEnv Us nparams
         firstView (.cons semantic semantics)
 
+/-- Reassemble two distinguished family heads and their exact dependent tail
+without asking the consumer to eliminate a fixed producer-owned candidate
+index. -/
+theorem CandidateBlockFamilySemanticListRun.TwoHead.parameterDefEqList
+    {run : CandidateBlockFamilySemanticListRun env blockEnv Us candidates raws}
+    {first : CandidateBlockFamilySemanticRun env blockEnv Us
+      firstCandidate firstRaw}
+    {second : CandidateBlockFamilySemanticRun env blockEnv Us
+      secondCandidate secondRaw}
+    {remaining : CandidateBlockFamilySemanticListRun env blockEnv Us
+      remainingCandidates remainingRaws}
+    (decomposition : CandidateBlockFamilySemanticListRun.TwoHead env
+      blockEnv Us run first second remaining)
+    {nparams : Nat} {firstView : VExpr}
+    (firstEvidence : TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN nparams firstView)
+      (VExpr.telN nparams first.type.view))
+    (secondEvidence : TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN nparams firstView)
+      (VExpr.telN nparams second.type.view))
+    (remainingEvidence : CandidateBlockFamilyViewParameterDefEqList env
+      blockEnv Us nparams firstView remaining) :
+    CandidateBlockFamilyViewParameterDefEqList env blockEnv Us nparams
+      firstView run := by
+  cases decomposition
+  exact .cons firstEvidence (.cons secondEvidence remainingEvidence)
+
 /-- Erase the dependent semantic indices while retaining exact source-order
 parameter-telescope equality for every normalized family view. -/
 theorem CandidateBlockFamilyViewParameterDefEqList.forall_views
@@ -11252,6 +11330,49 @@ theorem CandidateBlockFamilySemanticListRun.headResultLevel
           obtain ⟨viewLevel, level_tr, _viewResult⟩ :=
             head.type.viewResult_of_terminalSort terminal
           exact ⟨_, viewLevel, terminal, level_tr⟩
+
+/-- Relocate every family view onto one distinguished parameter telescope.
+The terminal-sort inventory supplies well-formedness at the same dependent
+candidate positions; no erased list can pair a family with another trace. -/
+theorem
+    CandidateBlockFamilyViewParameterDefEqList.canonicalFamilyTypeDefEqs
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {firstView : VExpr} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily sources}
+    {raws : List VInductiveType}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    (parameters : CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+      nparams firstView semantics)
+    (henv : VEnv.WF env)
+    (terminals : CandidateBlockFamilyTerminalSortList candidates) :
+    List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams nparams
+            (VExpr.telN nparams firstView) family).type
+          (.sort resultLevel))
+      semantics.views := by
+  induction semantics with
+  | nil =>
+      cases parameters
+      cases terminals
+      exact trivial
+  | cons semantic semantics ih =>
+      cases parameters with
+      | cons head tail =>
+          cases terminals with
+          | cons terminal terminalTail =>
+              obtain ⟨_, recursive⟩ := semantic.type.recursive
+              have viewType :=
+                recursive.view_isType_of_terminalSort terminal
+              have canonical :=
+                head.rebuildForallNPrefix henv trivial viewType
+              exact ⟨by
+                simpa only [CandidateBlockFamilySemanticRun.view,
+                  canonicalizeFamilyParams] using canonical,
+                ih tail terminalTail⟩
 
 /-- Executable shape check for the terminal-sort evidence of a complete
 source-indexed family list.  The result universe remains owned by each exact
@@ -20191,6 +20312,39 @@ info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.trans' depends on axioms: [propext
 #print axioms TypeChecker.TelDefEqEvidence.trans
 
 /--
+info: 'Lean4Lean.TypeChecker.TelDefEqEvidence.rebuildForallNPrefix' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms TypeChecker.TelDefEqEvidence.rebuildForallNPrefix
+
+/--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.headPosition_cons_view' depends on axioms: [propext,
  Classical.choice,
  Quot.sound]
@@ -20238,6 +20392,47 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.TwoHead.views_e
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilySemanticListRun.TwoHead.views_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilySemanticListRun.TwoHead.parameterDefEqList' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilySemanticListRun.TwoHead.parameterDefEqList
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.canonicalFamilyTypeDefEqs' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyViewParameterDefEqList.canonicalFamilyTypeDefEqs
 
 /--
 info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyViewParameterDefEqList.forall_views' depends on axioms: [propext,

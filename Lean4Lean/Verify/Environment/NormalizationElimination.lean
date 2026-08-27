@@ -7326,10 +7326,54 @@ theorem CompletionSpine.viewParameterTelescopeDefEqs
 end
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor
 
-/-- Collect shared-parameter equality for every normalized family view in the
-complete block.  The first family contributes reflexivity, the second uses
-the validator's original comparison, and the exact terminal handoff supplies
-all later families in source order. -/
+/-- Collect dependent shared-parameter equality for the exact semantic family
+hierarchy.  The first family contributes reflexivity, the second uses the
+validator's original comparison, and the terminal handoff supplies every
+later family in source order. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqList
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+      source.nparams staging.annotation.firstSemantic.type.view
+      semantic.families := by
+  have firstSecond := staging.viewParameterTelescopeDefEq raw
+    completion.prefixes context_lctx_eq
+  have firstFirst : TypeChecker.TelDefEqEvidence env Us.length []
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view)
+      (VExpr.telN source.nparams
+        staging.annotation.firstSemantic.type.view) :=
+    .ofTelDefEq firstSecond.telDefEq.raw_onTel.telDefEq_refl
+  obtain ⟨cursor⟩ :=
+    completion.remainingFamilyValidationCursor context_lctx_eq
+  obtain ⟨annotations⟩ := cursor.annotationSpines
+  let iteration := cursor.iterationCursorExact annotations
+  obtain ⟨spine⟩ := iteration.completionSpine context_lctx_eq
+  have remaining :=
+    spine.viewParameterTelescopeDefEqs context_lctx_eq
+  change CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
+    source.nparams staging.annotation.firstSemantic.type.view
+    (cursor.iterationCursorExact annotations).cursor.semantics at remaining
+  rw [cursor.iterationCursorExact_semantics annotations] at remaining
+  exact staging.annotation.semantic_families.parameterDefEqList
+    firstFirst firstSecond remaining
+
+/-- Erase the dependent family indices while retaining shared-parameter
+equality for every normalized view in source order. -/
 theorem
     ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs
     {source : VInductDecl}
@@ -7352,29 +7396,55 @@ theorem
         (VExpr.telN source.nparams
           staging.annotation.firstSemantic.type.view)
         (VExpr.telN source.nparams family.type))
+      semantic.families.views :=
+  (completion.viewParameterTelescopeDefEqList context_lctx_eq).forall_views
+
+/-- Rebuild every normalized family type with the canonical first-family
+parameter telescope.  This is the whole-family semantic half of the eventual
+canonical `Normalization.BlockWF`; constructor payloads remain a separate
+validator-owned obligation. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalFamilyTypeDefEqs
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    (completion : staging.TerminalIndexDomainCompletion raw)
+    (context_lctx_eq : context.lctx = {}) :
+    List.All
+      (fun family => ∃ resultLevel,
+        TypeChecker.DefEqEvidence env Us.length [] family.type
+          (canonicalizeFamilyParams source.nparams
+            (blockParams source.nparams semantic.families.views)
+            family).type
+          (.sort resultLevel))
       semantic.families.views := by
-  have firstSecond := staging.viewParameterTelescopeDefEq raw
-    completion.prefixes context_lctx_eq
-  have firstFirst : TypeChecker.TelDefEqEvidence env Us.length []
-      (VExpr.telN source.nparams
-        staging.annotation.firstSemantic.type.view)
-      (VExpr.telN source.nparams
-        staging.annotation.firstSemantic.type.view) :=
-    .ofTelDefEq firstSecond.telDefEq.raw_onTel.telDefEq_refl
-  obtain ⟨cursor⟩ :=
-    completion.remainingFamilyValidationCursor context_lctx_eq
-  obtain ⟨annotations⟩ := cursor.annotationSpines
-  let iteration := cursor.iterationCursorExact annotations
-  obtain ⟨spine⟩ := iteration.completionSpine context_lctx_eq
-  have remaining :=
-    spine.viewParameterTelescopeDefEqs context_lctx_eq
-  change CandidateBlockFamilyViewParameterDefEqList env blockEnv Us
-    source.nparams staging.annotation.firstSemantic.type.view
-    (cursor.iterationCursorExact annotations).cursor.semantics at remaining
-  rw [cursor.iterationCursorExact_semantics annotations] at remaining
-  have remainingViews := remaining.forall_views
-  rw [staging.annotation.semantic_views_eq]
-  exact ⟨firstFirst, ⟨firstSecond, remainingViews⟩⟩
+  have parameters :=
+    completion.viewParameterTelescopeDefEqList context_lctx_eq
+  have henv : VEnv.WF env := by
+    simpa only [staging.annotation.firstSemantic.type.venv_eq] using
+      staging.annotation.firstSemantic.type.contextRun.context.Ewf
+  have terminals := produced.execution.eliminationExecution.normalization
+    |>.familyTerminalSorts
+  have canonical :=
+    parameters.canonicalFamilyTypeDefEqs henv terminals
+  have params_eq :
+      blockParams source.nparams semantic.families.views =
+        VExpr.telN source.nparams
+          staging.annotation.firstSemantic.type.view := by
+    rw [staging.annotation.semantic_views_eq]
+    rfl
+  rw [params_eq]
+  exact canonical
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine.semantic_views_eq' depends on axioms: [propext,
@@ -7539,6 +7609,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.LaterFamilyIterationCursor.CompletionSpine.viewParameterTelescopeDefEqs
 
 /--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqList' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqList
+
+/--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs' depends on axioms: [propext,
  sorryAx,
  Classical.choice,
@@ -7571,6 +7675,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.viewParameterTelescopeDefEqs
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalFamilyTypeDefEqs' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.canonicalFamilyTypeDefEqs
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.iterationCursor' depends on axioms: [propext,
