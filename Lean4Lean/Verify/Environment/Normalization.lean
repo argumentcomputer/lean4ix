@@ -3612,6 +3612,34 @@ def CandidateExprStagedInput.rootInput
 
 end TypeChecker
 
+namespace AddInductive.FamilyTypeParameterComparisonTrace
+
+/-- A later-family telescope preserves the already completed shared-parameter
+array.  Fresh-parameter nodes are impossible once the family inventory is
+nonempty; shared-parameter and index nodes leave the statistics unchanged. -/
+theorem result_params_size_of_later
+    (trace : FamilyTypeParameterComparisonTrace nparams stats context source
+      i nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (paramsSize : stats.params.size = nparams) :
+    trace.result.stats.params.size = nparams := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    rw [later] at firstFamily
+    contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih later paramsSize
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    exact ih later paramsSize
+  | terminal =>
+    exact paramsSize
+
+end AddInductive.FamilyTypeParameterComparisonTrace
+
 namespace AddInductive.FamilyParameterComparisonBlockTrace
 
 /-- One exact source-order family node together with the dependent outer
@@ -3629,6 +3657,17 @@ structure FamilyContinuation (nparams : Nat)
   nextStats : InductiveStats
   tail : FamilyParameterComparisonBlockTrace nparams indTypes (dIdx + 1)
     nextStats telescope.result.context
+
+/-- Stable later-family state owned by one exact outer continuation.  The
+second pair is the induction invariant for the tail after this family. -/
+structure FamilyContinuation.LaterInvariant
+    (continuation : FamilyContinuation nparams indTypes) where
+  current_indConsts_nonempty :
+    continuation.stats.indConsts.isEmpty = false
+  current_params_size : continuation.stats.params.size = nparams
+  next_indConsts_nonempty :
+    continuation.nextStats.indConsts.isEmpty = false
+  next_params_size : continuation.nextStats.params.size = nparams
 
 /-- Forget the retained outer tail while preserving the exact dependent
 telescope position. -/
@@ -3649,6 +3688,39 @@ def headContinuation? :
       some ⟨dIdx, stats, context, _, telescope, _, tail⟩
   | .terminal .. => none
 
+/-- Selecting a later-family head preserves both stable validation counters
+for the exact outer tail. -/
+theorem headContinuation?_laterInvariant
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.headContinuation? = some continuation)
+    (later : continuation.stats.indConsts.isEmpty = false)
+    (paramsSize : continuation.stats.params.size = nparams) :
+    continuation.LaterInvariant := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [headContinuation?] at selected
+    have selected' := Option.some.inj selected
+    cases selected'
+    refine ⟨later, paramsSize, ?_, ?_⟩
+    · simp
+    · exact telescope.result_params_size_of_later later paramsSize
+  | terminal =>
+    simp only [headContinuation?] at selected
+    contradiction
+
 /-- Select the second source family together with the exact outer trace that
 starts after its telescope. -/
 def secondContinuation?
@@ -3657,6 +3729,22 @@ def secondContinuation?
   match trace.headContinuation? with
   | some first => first.tail.headContinuation?
   | none => none
+
+/-- A successful second-position selection exposes its exact first
+continuation and the head selection on that continuation's dependent tail. -/
+theorem exists_predecessor_of_secondContinuation?
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation) :
+    ∃ first, trace.headContinuation? = some first ∧
+      first.tail.headContinuation? = some continuation := by
+  unfold secondContinuation? at selected
+  cases firstEq : trace.headContinuation? with
+  | none => simp [firstEq] at selected
+  | some first =>
+    simp only [firstEq] at selected
+    exact ⟨first, rfl, selected⟩
 
 /-- The continuation selected at the second source position retains that
 exact outer index.  This is the counter fact needed to identify the suffix
@@ -8944,6 +9032,74 @@ structure CandidateBlockFamilyValidationCursor
   contextRun : TypeChecker.CandidateContextRun candidateContext
   venv_eq : contextRun.context.venv = env
   lparams_eq : contextRun.context.lparams = Us
+
+/-- A family-validation cursor whose current statistics are already in the
+later-family phase.  These two counters are precisely the invariant preserved
+by `FamilyContinuation.LaterInvariant` when the cursor advances. -/
+structure CandidateBlockLaterFamilyValidationCursor
+    (env blockEnv : VEnv) (Us : List Name)
+    (nparams : Nat) (fullSources : List InductiveType)
+    {remainingSources : List InductiveType}
+    (candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily remainingSources)
+    (raws : List VInductiveType)
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext)
+    extends CandidateBlockFamilyValidationCursor env blockEnv Us nparams
+      fullSources candidates raws trace where
+  current_indConsts_nonempty : stats.indConsts.isEmpty = false
+  current_params_size : stats.params.size = nparams
+
+/-- A nonempty later-family cursor exposes the exact outer continuation at its
+semantic head, together with the stable counters required by its dependent
+tail. -/
+theorem CandidateBlockLaterFamilyValidationCursor.headContinuation
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
+      nparams fullSources candidates raws trace)
+    (nonempty : remainingSources.isEmpty = false) :
+    ∃ continuation, trace.headContinuation? = some continuation ∧
+      continuation.LaterInvariant := by
+  have remainingLengthPos : 0 < remainingSources.length := by
+    cases remainingSources with
+    | nil => simp at nonempty
+    | cons => simp
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    refine ⟨_, rfl, ?_⟩
+    have first : stats.indConsts.isEmpty = true := by
+      rw [← telescope.result_indConsts_eq]
+      exact isFirst
+    have later := cursor.current_indConsts_nonempty
+    rw [first] at later
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    refine ⟨_, rfl, ?_⟩
+    refine ⟨cursor.current_indConsts_nonempty, cursor.current_params_size,
+      ?_, ?_⟩
+    · simp
+    · exact telescope.result_params_size_of_later
+        cursor.current_indConsts_nonempty cursor.current_params_size
+  | terminal dIdx stats context outOfBounds =>
+    have sourceLength := congrArg List.length cursor.sourceSuffix_eq
+    have lengthLe : fullSources.length ≤ dIdx := by
+      apply Nat.le_of_not_gt
+      simpa using outOfBounds
+    simp only [List.length_drop] at sourceLength
+    omega
 
 /-- Every remaining semantic family root translates in the cursor's exact
 validator context. -/
@@ -16685,6 +16841,33 @@ info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.secondContinua
   AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_dIdx
 
 /--
+info: 'Lean4Lean.AddInductive.FamilyTypeParameterComparisonTrace.result_params_size_of_later' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyTypeParameterComparisonTrace.result_params_size_of_later
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_laterInvariant' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_laterInvariant
+
+/--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.exists_predecessor_of_secondContinuation?' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyParameterComparisonBlockTrace.exists_predecessor_of_secondContinuation?
+
+/--
 info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -18080,6 +18263,14 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyValidationCursor.comparisons_le
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilyValidationCursor.comparisons_length
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockLaterFamilyValidationCursor.headContinuation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockLaterFamilyValidationCursor.headContinuation
 
 
 end VInductDecl

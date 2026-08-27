@@ -3597,9 +3597,10 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
       ∃ position,
         (produced.execution.eliminationExecution.normalization
           |>.familyParameterComparisonTrace
-            (produced.execution.normalization_run produced.producedExecution)
+          (produced.execution.normalization_run produced.producedExecution)
             produced.kernelSources_nonempty).secondTelescope? =
           some position ∧
+        position.stats.indConsts.isEmpty = false ∧
         position.stats.params.size = source.nparams ∧
         position.i = 0 ∧
         position.nindices = 0 ∧
@@ -3635,6 +3636,7 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
       TypeChecker.FamilyComparisonSemanticRun step) ∧
     ∃ position,
       comparisonTrace.secondTelescope? = some position ∧
+      position.stats.indConsts.isEmpty = false ∧
       position.stats.params.size = source.nparams ∧
       position.i = 0 ∧
       position.nindices = 0 ∧
@@ -3805,7 +3807,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyParameterCompari
                     fuel := telescope.result.context.fuel.inductiveFuel
                     trace := secondTelescope }
                   refine ⟨secondTelescope.comparisons, tail.comparisons, ?_,
-                    secondRuns, secondPosition, (by rfl), paramsSize,
+                    secondRuns, secondPosition, (by rfl), statsLater,
+                    paramsSize,
                     (by rfl), (by rfl), telescope.result_context_fuel,
                     secondRootWhnf,
                     currentRun, currentVenv, currentLparams,
@@ -3908,6 +3911,7 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging
       |>.familyParameterComparisonTrace
         (produced.execution.normalization_run produced.producedExecution)
         produced.kernelSources_nonempty).secondTelescope? = some position
+  position_later : position.stats.indConsts.isEmpty = false
   position_params_size : position.stats.params.size = source.nparams
   position_i_eq : position.i = 0
   position_nindices_eq : position.nindices = 0
@@ -3998,7 +4002,8 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
   obtain ⟨annotation⟩ :=
     produced.semanticSecondFamilyAnnotationSpine semantic
   obtain ⟨secondComparisons, remainingComparisons, comparisonsEq,
-      comparisonRuns, position, positionEq, positionParamsSize, positionIEq,
+      comparisonRuns, position, positionEq, positionLater,
+      positionParamsSize, positionIEq,
       positionNindicesEq, positionFuelEq, positionRootWhnf, currentRun,
       currentVenv, currentLparams,
       parameterRoot, boundary,
@@ -4013,6 +4018,7 @@ theorem ProducedBlockRecursorShapeCandidate.semanticSecondFamilyIndexStaging
     comparisonRuns := comparisonRuns
     position := position
     position_eq := positionEq
+    position_later := positionLater
     position_params_size := positionParamsSize
     position_i_eq := positionIEq
     position_nindices_eq := positionNindicesEq
@@ -5610,7 +5616,7 @@ structure
     {raw : staging.annotation.RawFirstIndexDomain}
     (completion : staging.TerminalIndexDomainCompletion raw) where
   validation : staging.ValidationContinuation
-  cursor : CandidateBlockFamilyValidationCursor env blockEnv Us
+  cursor : CandidateBlockLaterFamilyValidationCursor env blockEnv Us
     source.nparams (firstSource :: secondSource :: remainingSources)
     staging.annotation.remainingCandidates
     staging.annotation.remainingRaws validation.continuation.tail
@@ -5640,6 +5646,33 @@ theorem
   have dIdxEq :=
     AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_dIdx
       validation.selected
+  obtain ⟨_, _, secondSelected⟩ :=
+    AddInductive.FamilyParameterComparisonBlockTrace.exists_predecessor_of_secondContinuation?
+      validation.selected
+  have continuationLater :
+      validation.continuation.stats.indConsts.isEmpty = false := by
+    calc
+      validation.continuation.stats.indConsts.isEmpty =
+          staging.position.stats.indConsts.isEmpty := by
+        simpa only [
+          AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation.position]
+          using congrArg
+            (fun position => position.stats.indConsts.isEmpty)
+            validation.position_eq
+      _ = false := staging.position_later
+  have continuationParams :
+      validation.continuation.stats.params.size = source.nparams := by
+    calc
+      validation.continuation.stats.params.size =
+          staging.position.stats.params.size := by
+        simpa only [
+          AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation.position]
+          using congrArg (fun position => position.stats.params.size)
+            validation.position_eq
+      _ = source.nparams := staging.position_params_size
+  have laterInvariant :=
+    AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_laterInvariant
+      secondSelected continuationLater continuationParams
   refine ⟨{
     validation := validation
     cursor := {
@@ -5647,7 +5680,10 @@ theorem
       semantics := staging.annotation.remainingSemantics
       contextRun := completion.continuationRun validation
       venv_eq := completion.continuation_venv validation
-      lparams_eq := completion.continuation_lparams validation }
+      lparams_eq := completion.continuation_lparams validation
+      current_indConsts_nonempty :=
+        laterInvariant.next_indConsts_nonempty
+      current_params_size := laterInvariant.next_params_size }
     context_eq_terminal :=
       completion.continuationRun_context validation }⟩
   simp [dIdxEq]
@@ -5673,6 +5709,84 @@ theorem
     (cursor : completion.RemainingFamilyValidationCursor) :
     cursor.cursor.contextRun.context = completion.terminalRun.context :=
   cursor.context_eq_terminal
+
+/-- Every remaining source root is translated at the exact second-family
+terminal context, rather than merely at an extensionally similar root
+context. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    List.Forall₂
+      (fun source raw =>
+        completion.terminalRun.context.TrExprS source.type raw.type)
+      remainingSources staging.annotation.remainingRaws := by
+  have translated := cursor.cursor.sourceTranslations
+  rw [cursor.context_eq_terminal] at translated
+  exact translated
+
+/-- The exact retained validator suffix contains one comparison group for
+every semantic family still to be consumed. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.comparisons_length
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    cursor.validation.continuation.tail.comparisons.length =
+      remainingSources.length :=
+  cursor.cursor.toCandidateBlockFamilyValidationCursor.comparisons_length
+
+/-- Whenever a remaining family exists, the cursor exposes its exact
+dependent outer continuation and the invariant required by the following
+tail. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.headContinuation
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor)
+    (nonempty : remainingSources.isEmpty = false) :
+    ∃ continuation,
+      cursor.validation.continuation.tail.headContinuation? =
+        some continuation ∧
+      continuation.LaterInvariant :=
+  cursor.cursor.headContinuation nonempty
 
 /-- Consume the complete second-family producer index suffix through the
 validator's retained trace.  The initial alpha cursor is recovered from the
@@ -6005,6 +6119,51 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_eq_terminal
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.comparisons_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.comparisons_length
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.headContinuation' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.headContinuation
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.parameterTelescopeDefEq' depends on axioms: [propext,
