@@ -2134,6 +2134,11 @@ theorem
           firstProduced
       have parameterSpines := normalization.familyParameterSpines
       rw [candidatesEq] at parameterSpines
+      have familyTerminals := normalization.familyTerminals
+      rw [← normalization.families.produced.familyTypes_eq]
+        at familyTerminals
+      rw [candidatesEq] at familyTerminals
+      simp only [AddInductive.CandidateList.familyTypes] at familyTerminals
       cases hRawTypes : source.types with
       | nil =>
         rw [hRawTypes] at roots
@@ -2195,6 +2200,7 @@ theorem
                     remainingValidationAnnotations :=
                       CandidateFamilyValidationAnnotationList.ofProduced
                         remainingCandidates familyTypesProduced.tail.tail
+                        familyTerminals.tail.tail
                     remainingParameterSpines := parameterSpines.tail.tail
                     firstSpineLength_eq := firstSpineLength
                     firstStoredBinders := firstStoredBinders
@@ -6242,6 +6248,127 @@ theorem
     boundary := boundary
     parameterSpine := parameterSpine }⟩
 
+/-- The producer's parameter-prefix gate applies to the exact candidate at
+the canonical next-family head. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.nparams_le_spineLength
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (_next : cursor.NextFamilyStaging) :
+    source.nparams ≤
+      staging.annotation.remainingCandidates.head.familyType.type.trace.spineLength :=
+  staging.annotation.remainingParameterSpines.head
+
+/-- The first and canonical next family candidates were normalized in the
+same producer-owned reader context. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.firstCandidate_context_eq
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging) :
+    staging.annotation.firstCandidate.familyType.type.context =
+      staging.annotation.remainingCandidates.head.familyType.type.context :=
+  (staging.annotation.candidate_context_eq.trans
+      staging.annotation.second_candidate_context_eq).trans
+    next.validation.head_context_eq.symm
+
+/-- Every later family candidate allocates the same exact shared-parameter
+free variables as the first producer family. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterLists_eq
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging)
+    (context_lctx_eq : context.lctx = {}) :
+    staging.annotation.firstCandidate.familyType.type.trace.parameterList
+        source.nparams =
+      staging.annotation.remainingCandidates.head.familyType.type.trace.parameterList
+        source.nparams :=
+  AddInductive.CandidateExprTrace.parameterList_eq_of_ngen_eq
+    staging.annotation.firstCandidate.familyType.type.trace
+    staging.annotation.remainingCandidates.head.familyType.type.trace
+    (congrArg AddInductive.Context.ngen next.firstCandidate_context_eq)
+    (staging.annotation.first_nparams_le_spineLength context_lctx_eq)
+    next.nparams_le_spineLength
+
+/-- The exact validator parameter boundary and the canonical next candidate
+name the same producer-allocated kernel parameter prefix. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyParameterBoundary.parameterSources_eq_candidateParameterList
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    {next : cursor.NextFamilyStaging}
+    (parameter : cursor.NextFamilyParameterBoundary next)
+    (context_lctx_eq : context.lctx = {}) :
+    parameter.boundary.parameters.map Prod.fst =
+      staging.annotation.remainingCandidates.head.familyType.type.trace.parameterList
+        source.nparams := by
+  calc
+    parameter.boundary.parameters.map Prod.fst =
+        next.continuation.stats.params.toList := by
+      simpa using parameter.boundary.parameter_sources_eq
+    _ = cursor.cursor.parameterSources := by
+      rw [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_stats
+        next.selected]
+      exact cursor.cursor.current_parameterSources_eq
+    _ = staging.annotation.firstCandidate.familyType.type.trace.parameterList
+          source.nparams := cursor.parameterSources_eq_firstParameterList
+    _ = staging.annotation.remainingCandidates.head.familyType.type.trace.parameterList
+          source.nparams :=
+      next.parameterLists_eq context_lctx_eq
+
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root
 context. -/
@@ -6847,6 +6974,66 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterBoundary
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.nparams_le_spineLength' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.nparams_le_spineLength
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.firstCandidate_context_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.firstCandidate_context_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterLists_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.parameterLists_eq
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyParameterBoundary.parameterSources_eq_candidateParameterList' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyParameterBoundary.parameterSources_eq_candidateParameterList
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,

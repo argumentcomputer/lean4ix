@@ -4078,6 +4078,66 @@ theorem annotationAt
           simpa [AddInductive.CandidateExprTrace.spineLength] using count_lt)
         exact ⟨.succ bodyCandidate tailAt⟩
 
+/-- A source-indexed position on a candidate's main Pi spine, including the
+terminal position just after its final binder.  Unlike `AnnotationAt`, the
+zero constructor does not require a Pi node, so a parameter boundary can name
+a family with no indices. -/
+inductive MainSpineAt :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      (trace : AddInductive.CandidateExprTrace candidateContext source) →
+      Nat → Type where
+  | zero
+      (trace : AddInductive.CandidateExprTrace candidateContext source) :
+      MainSpineAt trace 0
+  | succ
+      (bodyCandidate : AddInductive.CandidateExprTrace
+        (context.pushLocalDecl name binderInfo annotations.consumed)
+        (body.instantiate1 context.freshExpr))
+      (tail : MainSpineAt bodyCandidate n) :
+      MainSpineAt
+        (.forallE context source inferred name domain body binderInfo fresh
+          annotations annotationsEq checked normalized domainCandidate
+          bodyCandidate) (n + 1)
+
+/-- Every main-spine position through the terminal endpoint has an exact
+source-indexed path in the candidate tree. -/
+theorem mainSpineAt
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    (count_le : count ≤ trace.spineLength) :
+    Nonempty (MainSpineAt trace count) := by
+  induction trace generalizing count with
+  | terminal =>
+      simp only [AddInductive.CandidateExprTrace.spineLength] at count_le
+      have count_eq : count = 0 := Nat.eq_zero_of_le_zero count_le
+      subst count
+      exact ⟨.zero _⟩
+  | forallE context source inferred name domain body binderInfo fresh
+      annotations annotationsEq checked normalized domainCandidate
+      bodyCandidate domainIH bodyIH =>
+    cases count with
+    | zero => exact ⟨.zero _⟩
+    | succ count =>
+        obtain ⟨tailAt⟩ := bodyIH (by
+          simpa [AddInductive.CandidateExprTrace.spineLength] using count_le)
+        exact ⟨.succ bodyCandidate tailAt⟩
+
+/-- The dependent candidate trace selected by a terminal-inclusive main-spine
+position. -/
+structure MainSpinePosition where
+  candidateContext : AddInductive.Context
+  source : Expr
+  trace : AddInductive.CandidateExprTrace candidateContext source
+
+/-- Forget the path prefix while retaining its exact selected candidate
+suffix. -/
+def MainSpineAt.position :
+    {candidateContext : AddInductive.Context} → {source : Expr} →
+      {trace : AddInductive.CandidateExprTrace candidateContext source} →
+      {count : Nat} → MainSpineAt trace count → MainSpinePosition
+  | _, _, _, _, .zero trace => ⟨_, _, trace⟩
+  | _, _, _, _, .succ _ tail => tail.position
+
 /-- The exact kernel Pi exposed at a selected annotation position. -/
 def AnnotationAt.root :
     {candidateContext : AddInductive.Context} → {source : Expr} →
@@ -4855,6 +4915,25 @@ structure CandidateAnnotationSpine.PositionSuffix
     (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
   fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
 
+/-- A terminal-inclusive annotation-spine suffix.  The selected structural
+position may be either a Pi node or the terminal candidate reached after all
+binders. -/
+structure CandidateAnnotationSpine.MainPositionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    {count : Nat} (position : trace.MainSpineAt count) where
+  cursor : CandidateAnnotationCursor env Us terminalΔ
+  root_eq : position.position.trace.rootWhnf = cursor.trace.rootWhnf
+  context_eq : cursor.Δ.toCtx =
+    (domains.take count).reverse ++ Δ.toCtx
+  domains_eq : cursor.domains = domains.drop count
+  fvars_eq : cursor.Δ.fvars.map Expr.fvar =
+    (trace.parameterList count).reverse ++ Δ.fvars.map Expr.fvar
+  fuel_eq : cursor.candidateContext.fuel = candidateContext.fuel
+
 /-- Follow an annotation path into the literal recursive spine.  No suffix
 trace, context, or semantic snapshot is independently reselected. -/
 theorem CandidateAnnotationSpine.positionSuffix
@@ -4876,6 +4955,68 @@ theorem CandidateAnnotationSpine.positionSuffix
           candidateContext := _
           source := _
           trace := _
+          Δ := Δ
+          domains := domains
+          spine := spine
+          shape := initialShape
+          stored := stored
+          annotations := annotations
+          resultLevel := resultLevel
+          terminal_eq := terminalEq
+          terminal_notForall := by rw [terminalEq]; rfl }
+        root_eq := rfl
+        context_eq := rfl
+        domains_eq := rfl
+        fvars_eq := rfl
+        fuel_eq := rfl }⟩
+  | succ bodyCandidate position ih =>
+      cases spine with
+      | forallE domainCandidate bodyCandidate storedDomain domains head tail =>
+          simp only [AddInductive.CandidateExprTrace.storedSpine,
+            Bool.and_eq_true] at stored
+          rcases annotations with ⟨annotationMatch, tailAnnotations⟩
+          obtain ⟨suffix⟩ := ih tail (.cons initialShape) stored.2
+            tailAnnotations terminalEq
+          exact ⟨{
+            cursor := suffix.cursor
+            root_eq := suffix.root_eq
+            context_eq := by
+              simpa only [List.take_succ_cons, List.reverse_cons,
+                List.singleton_append, List.append_assoc, VLCtx.toCtx] using
+                suffix.context_eq
+            domains_eq := by
+              simpa only [List.drop_succ_cons] using suffix.domains_eq
+            fvars_eq := by
+              simpa [VLCtx.fvars, List.append_assoc,
+                AddInductive.Context.freshExpr,
+                AddInductive.CandidateExprTrace.parameterList] using
+                suffix.fvars_eq
+            fuel_eq := by
+              simpa [AddInductive.Context.pushLocalDecl] using
+                suffix.fuel_eq }⟩
+
+/-- Follow a terminal-inclusive main-spine path into the literal recursive
+annotation spine.  In particular, selecting the complete spine length yields
+the terminal candidate cursor with an empty domain suffix. -/
+theorem CandidateAnnotationSpine.mainPositionSuffix
+    {env : VEnv} {Us : List Name}
+    {candidateContext : AddInductive.Context} {source : Expr}
+    {trace : AddInductive.CandidateExprTrace candidateContext source}
+    {Δ terminalΔ : VLCtx} {domains : List VExpr}
+    (spine : CandidateAnnotationSpine env Us trace Δ terminalΔ domains)
+    (initialShape : Δ.FVarLamOnly)
+    (stored : trace.storedSpine = true)
+    (annotations : trace.validationAnnotations)
+    (terminalEq : trace.terminalResult = .sort resultLevel)
+    {count : Nat} (position : trace.MainSpineAt count) :
+    Nonempty (spine.MainPositionSuffix position) := by
+  induction position generalizing Δ terminalΔ domains with
+  | zero trace =>
+      exact ⟨{
+        cursor := {
+          candidateContext := _
+          source := _
+          trace := trace
           Δ := Δ
           domains := domains
           spine := spine
@@ -9209,6 +9350,29 @@ theorem _root_.Lean4Lean.AddInductive.CandidateFamilyParameterSpineList.tail
   cases run with
   | cons family tail => exact tail
 
+/-- Terminal-sort evidence at the head of a nonempty family-type candidate
+list. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyTypeTerminalSortList.head
+    {source : InductiveType} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamilyType (source :: sources)}
+    (run : AddInductive.CandidateFamilyTypeTerminalSortList candidates) :
+    ∃ resultLevel,
+      candidates.head.type.trace.terminalResult = .sort resultLevel := by
+  cases run with
+  | cons terminal tail => exact ⟨_, terminal⟩
+
+/-- Terminal-sort evidence after the head of a nonempty family-type
+candidate list. -/
+theorem _root_.Lean4Lean.AddInductive.CandidateFamilyTypeTerminalSortList.tail
+    {source : InductiveType} {sources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamilyType (source :: sources)}
+    (run : AddInductive.CandidateFamilyTypeTerminalSortList candidates) :
+    AddInductive.CandidateFamilyTypeTerminalSortList candidates.tail := by
+  cases run with
+  | cons terminal tail => exact tail
+
 /-- Exact validator annotation provenance for every family candidate in
 source order. -/
 inductive CandidateFamilyValidationAnnotationList
@@ -9220,6 +9384,9 @@ inductive CandidateFamilyValidationAnnotationList
   | cons
       (head : candidate.familyType.type.trace.validationAnnotations)
       (context_eq : candidate.familyType.type.context = candidateContext)
+      (resultLevel : Level)
+      (terminal_eq : candidate.familyType.type.trace.terminalResult =
+        .sort resultLevel)
       (tail : CandidateFamilyValidationAnnotationList candidateContext
         candidates) :
       CandidateFamilyValidationAnnotationList candidateContext
@@ -9233,15 +9400,19 @@ theorem CandidateFamilyValidationAnnotationList.ofProduced
     (candidates : AddInductive.CandidateList
       AddInductive.CandidateFamily sources)
     (produced : AddInductive.CandidateFamilyTypeListProduced candidateContext
+      candidates.familyTypes)
+    (terminals : AddInductive.CandidateFamilyTypeTerminalSortList
       candidates.familyTypes) :
     CandidateFamilyValidationAnnotationList candidateContext candidates := by
   induction candidates with
   | nil => exact .nil
   | cons candidate candidates ih =>
+    obtain ⟨resultLevel, terminalEq⟩ := terminals.head
     exact .cons
       (candidate.familyType.validationAnnotations_of_normalize produced.head)
       (candidate.familyType.context_eq_of_normalize produced.head)
-      (ih produced.tail)
+      resultLevel terminalEq
+      (ih produced.tail terminals.tail)
 
 /-- Annotation provenance at the head of a nonempty family candidate list. -/
 theorem CandidateFamilyValidationAnnotationList.head
@@ -9250,7 +9421,7 @@ theorem CandidateFamilyValidationAnnotationList.head
         (source :: sources))) :
     candidates.head.familyType.type.trace.validationAnnotations := by
   cases run with
-  | cons head contextEq tail => exact head
+  | cons head contextEq resultLevel terminalEq tail => exact head
 
 /-- The exact producer context stored by the head family candidate. -/
 theorem CandidateFamilyValidationAnnotationList.head_context_eq
@@ -9259,7 +9430,19 @@ theorem CandidateFamilyValidationAnnotationList.head_context_eq
         (source :: sources))) :
     candidates.head.familyType.type.context = candidateContext := by
   cases run with
-  | cons head contextEq tail => exact contextEq
+  | cons head contextEq resultLevel terminalEq tail => exact contextEq
+
+/-- The exact terminal sort retained by the head family candidate. -/
+theorem CandidateFamilyValidationAnnotationList.head_terminal
+    (run : CandidateFamilyValidationAnnotationList candidateContext
+      (candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+        (source :: sources))) :
+    ∃ resultLevel,
+      candidates.head.familyType.type.trace.terminalResult =
+        .sort resultLevel := by
+  cases run with
+  | cons head contextEq resultLevel terminalEq tail =>
+    exact ⟨resultLevel, terminalEq⟩
 
 /-- Validation provenance after the head family. -/
 theorem CandidateFamilyValidationAnnotationList.tail
@@ -9269,7 +9452,7 @@ theorem CandidateFamilyValidationAnnotationList.tail
     CandidateFamilyValidationAnnotationList candidateContext
       candidates.tail := by
   cases run with
-  | cons head contextEq tail => exact tail
+  | cons head contextEq resultLevel terminalEq tail => exact tail
 
 /-- Exact semantic family at the head of a nonempty dependent list. -/
 def CandidateBlockFamilySemanticListRun.head
@@ -13938,7 +14121,7 @@ theorem CandidateBlockFamilyAnnotationSpineList.exists
     cases shapes with
     | cons shape shapes =>
       cases annotations with
-      | cons validationAnnotation contextEq annotations =>
+      | cons validationAnnotation contextEq resultLevel terminalEq annotations =>
         obtain ⟨head⟩ := CandidateBlockFamilyAnnotationSpine.exists root shape
           validationAnnotation
         obtain ⟨tail⟩ := ih shapes annotations
@@ -19245,6 +19428,36 @@ info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyAnnotationSpineList.exists' dep
 -/
 #guard_msgs in
 #print axioms CandidateBlockFamilyAnnotationSpineList.exists
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.mainSpineAt' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.CandidateExprTrace.mainSpineAt
+
+/--
+info: 'Lean4Lean.AddInductive.CandidateExprTrace.MainSpineAt.position' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms AddInductive.CandidateExprTrace.MainSpineAt.position
+
+/--
+info: 'Lean4Lean.TypeChecker.CandidateAnnotationSpine.mainPositionSuffix' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms TypeChecker.CandidateAnnotationSpine.mainPositionSuffix
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateFamilyValidationAnnotationList.head_terminal' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateFamilyValidationAnnotationList.head_terminal
 
 
 end VInductDecl
