@@ -2029,7 +2029,8 @@ structure ProducedBlockRecursorShapeCandidate.SecondFamilyAnnotationSpine
   remainingShapes : CandidateBlockFamilySemanticGenerationShapeList source
     env blockEnv Us remainingSemantics
   remainingValidationAnnotations :
-    CandidateFamilyValidationAnnotationList remainingCandidates
+    CandidateFamilyValidationAnnotationList { context with lctx := {} }
+      remainingCandidates
   firstSpineLength_eq :
     firstCandidate.familyType.type.trace.spineLength =
       (VInductDecl.ctorFields firstRaw.type).length
@@ -5691,6 +5692,8 @@ structure
     staging.annotation.remainingRaws validation.continuation.tail
   semantics_eq : cursor.semantics =
     staging.annotation.remainingSemantics
+  cursor_fuel_eq :
+    validation.continuation.telescope.result.context.fuel = context.fuel
   context_eq_terminal : cursor.contextRun.context =
     completion.terminalRun.context
 
@@ -5744,6 +5747,12 @@ theorem
   have laterInvariant :=
     AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_laterInvariant
       secondSelected continuationLater continuationParams
+  have continuationContextFuel : validation.continuation.context.fuel =
+      staging.position.context.fuel := by
+    simpa only [
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation.position]
+      using congrArg (fun position => position.context.fuel)
+        validation.position_eq
   refine ⟨{
     validation := validation
     cursor := {
@@ -5756,6 +5765,13 @@ theorem
         laterInvariant.next_indConsts_nonempty
       current_params_size := laterInvariant.next_params_size }
     semantics_eq := rfl
+    cursor_fuel_eq := by
+      calc
+        validation.continuation.telescope.result.context.fuel =
+            validation.continuation.context.fuel :=
+          validation.continuation.telescope.result_context_fuel
+        _ = staging.position.context.fuel := continuationContextFuel
+        _ = context.fuel := staging.position_fuel_eq
     context_eq_terminal :=
       completion.continuationRun_context validation }⟩
   simp [dIdxEq]
@@ -5781,6 +5797,29 @@ theorem
     (cursor : completion.RemainingFamilyValidationCursor) :
     cursor.cursor.contextRun.context = completion.terminalRun.context :=
   cursor.context_eq_terminal
+
+/-- The verified context stored by the recursive cursor retains the original
+producer fuel configuration. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_fuel_eq
+    {source : VInductDecl}
+    {firstSource secondSource : InductiveType}
+    {remainingSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: remainingSources) numNested isUnsafe
+      context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    (cursor : completion.RemainingFamilyValidationCursor) :
+    cursor.cursor.contextRun.context.fuel = context.fuel := by
+  rw [TypeChecker.CandidateContextRun.context_fuel]
+  exact cursor.cursor_fuel_eq
 
 /-- Reindex the producer's complete generation-spine suffix onto the exact
 semantic proof object stored in the recursive validation cursor. -/
@@ -5854,6 +5893,8 @@ structure
     (cursor : completion.RemainingFamilyValidationCursor) where
   annotations : CandidateBlockFamilyAnnotationSpineList source env blockEnv
     Us cursor.cursor.semantics cursor.generationShapes
+  validation : CandidateFamilyValidationAnnotationList
+    { context with lctx := {} } staging.annotation.remainingCandidates
   continuation :
     AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
       source.nparams
@@ -5888,9 +5929,71 @@ theorem
     cursor.cursor.headContinuation nonempty
   exact ⟨{
     annotations := annotations
+    validation := staging.annotation.remainingValidationAnnotations
     continuation := continuation
     selected := selected
     invariant := invariant }⟩
+
+/-- Execute the validator's retained root WHNF observation for the exact next
+semantic family selected by the recursive cursor.
+
+The semantic head supplies the raw Theory source and WHNF budget; validation
+provenance identifies its original candidate context; the cursor supplies the
+current verified context, source-order array identity, and preserved fuel.
+No positional source, raw family, or WHNF result is selected by the caller. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.rootWhnf
+    {source : VInductDecl}
+    {firstSource secondSource nextSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: secondSource :: nextSource :: laterSources) numNested
+      isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {staging : produced.SecondFamilyIndexStaging semantic}
+    {raw : staging.annotation.RawFirstIndexDomain}
+    {completion : staging.TerminalIndexDomainCompletion raw}
+    {cursor : completion.RemainingFamilyValidationCursor}
+    (next : cursor.NextFamilyStaging) :
+    let position := cursor.cursor.semantics.headPosition
+    let currentRun := cursor.cursor.headContextRun next.continuation
+      next.selected
+    ∃ root', currentRun.context.TrExprS next.continuation.source root' ∧
+      Nonempty (TypeChecker.WhnfRun currentRun.context.venv
+        currentRun.context.lparams currentRun.context.vlctx nextSource.type
+        next.continuation.source position.raw.type root') := by
+  let position := cursor.cursor.semantics.headPosition
+  let currentRun := cursor.cursor.headContextRun next.continuation
+    next.selected
+  have sourceTr : currentRun.context.TrExprS nextSource.type
+      position.raw.type := by
+    rw [cursor.cursor.headContextRun_context next.continuation next.selected]
+    exact cursor.cursor.headSourceTranslation
+  have depth : next.continuation.context.fuel.recDepth =
+      position.semantic.type.whnfFuel + 1 := by
+    calc
+      next.continuation.context.fuel.recDepth =
+          cursor.validation.continuation.telescope.result.context.fuel.recDepth :=
+        congrArg (fun candidateContext => candidateContext.fuel.recDepth)
+          (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_context
+            next.selected)
+      _ = context.fuel.recDepth :=
+        congrArg (fun fuel => fuel.recDepth) cursor.cursor_fuel_eq
+      _ = ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth :=
+        rfl
+      _ = staging.annotation.remainingCandidates.head.familyType.type.context.fuel.recDepth :=
+        (congrArg (fun candidateContext => candidateContext.fuel.recDepth)
+          next.validation.head_context_eq).symm
+      _ = position.semantic.type.whnfFuel + 1 :=
+        position.semantic.type.whnfDepth
+  exact TypeChecker.WhnfRun.exists_ofCandidateStep
+    ⟨next.continuation.context, nextSource.type, next.continuation.source⟩
+    (cursor.cursor.headRootWhnf next.continuation next.selected)
+    currentRun position.raw.type sourceTr position.semantic.type.whnfFuel depth
 
 /-- Every remaining source root is translated at the exact second-family
 terminal context, rather than merely at an extensionally similar root
@@ -6303,6 +6406,21 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_eq_terminal
 
 /--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_fuel_eq' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ Expr.eqv_eq,
+ Level.instLawfulBEqLevel,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.contextRun_fuel_eq
+
+/--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.generationShapes' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -6384,6 +6502,40 @@ info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyInd
 #guard_msgs in
 #print axioms
   ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.nextFamilyStaging
+
+/--
+info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.rootWhnf' depends on axioms: [propext,
+ sorryAx,
+ Classical.choice,
+ ptrEqConstantInfo_eq,
+ ptrEqExpr_eq,
+ Quot.sound,
+ Expr.abstractRange_eq,
+ Expr.abstract_eq,
+ Expr.eqv_eq,
+ Expr.hasLooseBVar_eq,
+ Expr.instantiate1_eq,
+ Expr.instantiateRange_eq,
+ Expr.instantiateRevRange_eq,
+ Expr.instantiateRev_eq,
+ Expr.instantiate_eq,
+ Expr.lowerLooseBVars_eq,
+ Expr.mkAppData_eq,
+ Expr.mkData_eq,
+ Expr.replace_eq,
+ Level.hasParam_eq,
+ Level.instLawfulBEqLevel,
+ Level.isExplicitSubsumedAux_eq,
+ Level.normalize_eq,
+ PersistentHashMap.findAux_isSome,
+ Syntax.structEq_eq,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms
+  ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.NextFamilyStaging.rootWhnf
 
 /--
 info: 'Lean4Lean.VInductDecl.ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.TerminalIndexDomainCompletion.RemainingFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
