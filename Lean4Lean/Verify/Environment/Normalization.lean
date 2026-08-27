@@ -3658,6 +3658,47 @@ def secondContinuation?
   | some first => first.tail.headContinuation?
   | none => none
 
+/-- The continuation selected at the second source position retains that
+exact outer index.  This is the counter fact needed to identify the suffix
+after its telescope with the source list after two elements. -/
+theorem secondContinuation?_dIdx
+    {trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context}
+    {continuation : FamilyContinuation nparams indTypes}
+    (selected : trace.secondContinuation? = some continuation) :
+    continuation.dIdx = dIdx + 1 := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    cases tail
+    case firstFamily =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      have selected' := Option.some.inj selected
+      exact (congrArg FamilyContinuation.dIdx selected').symm
+    case laterFamily =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      have selected' := Option.some.inj selected
+      exact (congrArg FamilyContinuation.dIdx selected').symm
+    case terminal =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    cases tail
+    case firstFamily =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      have selected' := Option.some.inj selected
+      exact (congrArg FamilyContinuation.dIdx selected').symm
+    case laterFamily =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      have selected' := Option.some.inj selected
+      exact (congrArg FamilyContinuation.dIdx selected').symm
+    case terminal =>
+      simp only [secondContinuation?, headContinuation?] at selected
+      contradiction
+  | terminal =>
+    simp_all [secondContinuation?, headContinuation?]
+
 /-- Forgetting the second continuation produces exactly the existing second
 telescope selector. -/
 theorem secondTelescope?_eq_map_position
@@ -8877,6 +8918,76 @@ theorem CandidateBlockFamilySemanticListRun.sourceTranslations
         (contextRun.rootTranslation venv_eq lparams_eq
           head.type.source_tr)
         ih
+
+/-- A source-order cursor pairing one exact suffix of the outer family
+validator with the matching suffix of the dependent semantic family list.
+
+The `drop` equation prevents a terminal context from being attached to a
+different family position.  The verified context is indexed by the reader
+context at which the retained outer trace resumes, so recursive consumers can
+advance through the trace without selecting another context or semantic
+family list. -/
+structure CandidateBlockFamilyValidationCursor
+    (env blockEnv : VEnv) (Us : List Name)
+    (nparams : Nat) (fullSources : List InductiveType)
+    {remainingSources : List InductiveType}
+    (candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily remainingSources)
+    (raws : List VInductiveType)
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext) where
+  sourceSuffix_eq : fullSources.drop dIdx = remainingSources
+  semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+    candidates raws
+  contextRun : TypeChecker.CandidateContextRun candidateContext
+  venv_eq : contextRun.context.venv = env
+  lparams_eq : contextRun.context.lparams = Us
+
+/-- Every remaining semantic family root translates in the cursor's exact
+validator context. -/
+theorem CandidateBlockFamilyValidationCursor.sourceTranslations
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockFamilyValidationCursor env blockEnv Us nparams
+      fullSources candidates raws trace) :
+    List.Forall₂
+      (fun source raw =>
+        cursor.contextRun.context.TrExprS source.type raw.type)
+      remainingSources raws :=
+  cursor.semantics.sourceTranslations cursor.contextRun cursor.venv_eq
+    cursor.lparams_eq
+
+/-- The retained outer comparison suffix has exactly one group per semantic
+family remaining at the cursor. -/
+theorem CandidateBlockFamilyValidationCursor.comparisons_length
+    {env blockEnv : VEnv} {Us : List Name} {nparams : Nat}
+    {fullSources : List InductiveType}
+    {remainingSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily remainingSources}
+    {raws : List VInductiveType}
+    {dIdx : Nat} {stats : AddInductive.InductiveStats}
+    {candidateContext : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      fullSources.toArray dIdx stats candidateContext}
+    (cursor : CandidateBlockFamilyValidationCursor env blockEnv Us nparams
+      fullSources candidates raws trace) :
+    trace.comparisons.length = remainingSources.length := by
+  calc
+    trace.comparisons.length = fullSources.length - dIdx := by
+      simpa using trace.comparisons_length
+    _ = (fullSources.drop dIdx).length := by simp
+    _ = remainingSources.length := congrArg List.length cursor.sourceSuffix_eq
 
 /-- Replace one constructor's parameter prefix by an explicitly shared
 telescope while retaining its terminal fields/result and every declaration
@@ -16565,6 +16676,15 @@ info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.exists_secondC
   AddInductive.FamilyParameterComparisonBlockTrace.exists_secondContinuation_of_secondTelescope
 
 /--
+info: 'Lean4Lean.AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_dIdx' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms
+  AddInductive.FamilyParameterComparisonBlockTrace.secondContinuation?_dIdx
+
+/--
 info: 'Lean4Lean.TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpointContextRun' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
@@ -17941,6 +18061,25 @@ info: 'Lean4Lean.VInductDecl.Normalization.canonicalizeSharedParams' depends on 
 -/
 #guard_msgs in
 #print axioms Normalization.canonicalizeSharedParams
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyValidationCursor.sourceTranslations' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ PersistentArray.WF.toList'_push,
+ PersistentHashMap.WF.find?_eq,
+ PersistentHashMap.WF.toList'_insert]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyValidationCursor.sourceTranslations
+
+/--
+info: 'Lean4Lean.VInductDecl.CandidateBlockFamilyValidationCursor.comparisons_length' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+-/
+#guard_msgs in
+#print axioms CandidateBlockFamilyValidationCursor.comparisons_length
 
 
 end VInductDecl
