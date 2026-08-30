@@ -855,3 +855,65 @@ theorem lift_r_one (e : VExpr) (ρ : Lift) :
 theorem lift'_inst_hi (e1 e2 : VExpr) (ρ : Lift) :
     lift' (e1.inst e2) ρ = (lift' e1 ρ.cons).inst (lift' e2 ρ) := by
   simp [subst_lift', lift'_subst, lift_r_one, inst_eq]
+
+/-! ### The substitution monoid
+
+These are the mechanical `Subst` identities needed by simultaneous
+substitution into definitional equality. -/
+
+@[simp] theorem Subst.head_cons : (cons σ e).head = e := rfl
+@[simp] theorem Subst.tail_cons : (cons σ e).tail = σ := rfl
+
+theorem Subst.tail_eq_lift_l {σ : Subst} : σ.tail = σ.lift_l Lift.refl.skip := rfl
+
+theorem Subst.lift_r_tail {σ : Subst} {ρ : Lift} :
+    (σ.lift_r ρ).tail = σ.tail.lift_r ρ := by funext i; rfl
+
+def Subst.Fixes (σ : Subst) (n : Nat) := ∀ i < n, σ i = .bvar i
+
+theorem Subst.Fixes.zero : Fixes σ 0 := nofun
+
+theorem Subst.Fixes.lift {σ : Subst} (H : σ.Fixes n) : σ.lift.Fixes (n + 1) := fun
+  | 0, _ => rfl
+  | n+1, h => by simp [Subst.lift, H _ (Nat.lt_of_succ_lt_succ h), VExpr.lift, VExpr.liftN]
+
+theorem ClosedN.subst_eq {e : VExpr} (self : ClosedN e k) (h : σ.Fixes k) : e.subst σ = e := by
+  induction e generalizing k σ with (simp [ClosedN] at self; simp [*, VExpr.subst])
+  | bvar i => exact h _ self
+  | app _ _ ih1 ih2 => exact ⟨ih1 self.1 h, ih2 self.2 h⟩
+  | lam _ _ ih1 ih2 | forallE _ _ ih1 ih2 => exact ⟨ih1 self.1 h, ih2 self.2 h.lift⟩
+
+def Subst.comp (σ σ' : Subst) : Subst := fun x => (σ x).subst σ'
+
+theorem Subst.comp_lift {σ σ' : Subst} : (σ.comp σ').lift = σ.lift.comp σ'.lift := by
+  funext i; cases i <;> simp! [comp, Subst.lift]
+  rw [lift_eq_lift', lift_eq_lift', lift'_subst, subst_lift']
+  congr 1; funext x
+  simp [Subst.lift_r, Subst.lift_l, Subst.lift, lift_eq_lift']
+
+theorem subst_subst {e : VExpr} : (e.subst σ).subst σ' = subst e (.comp σ σ') := by
+  induction e generalizing σ σ' <;> simp! [*, Subst.comp, Subst.comp_lift]
+
+theorem lift_subst {e : VExpr} : e.lift.subst σ = e.subst σ.tail := by
+  rw [lift_eq_lift', subst_lift', ← Subst.tail_eq_lift_l]
+
+theorem lift_subst_cons {e : VExpr} : e.lift.subst (σ.cons t) = e.subst σ := by
+  rw [lift_subst, Subst.tail_cons]
+
+theorem lift_subst_lift {e : VExpr} {σ : Subst} : e.lift.subst σ.lift = (e.subst σ).lift := by
+  rw [lift_eq_lift', subst_lift', lift_eq_lift', lift'_subst]
+  congr 1; funext x
+  simp [Subst.lift_l, Subst.lift_r, Subst.lift, lift_eq_lift']
+
+theorem subst_inst {e : VExpr} : (e.inst a).subst σ = (e.subst σ.lift).inst (a.subst σ) := by
+  rw [inst_eq, inst_eq, subst_subst, subst_subst]; congr 1
+  funext i; obtain _|i := i <;> simp [Subst.comp, Subst.lift, VExpr.subst]
+  · simp [Subst.one, Subst.cons]
+  · simp [Subst.one, Subst.cons, lift_subst_cons]
+    simp [Subst.id, VExpr.subst]
+
+theorem inst_lift_cons {e : VExpr} {σ : Subst} :
+    (e.subst σ.lift).inst x = e.subst (σ.cons x) := by
+  rw [inst_eq, subst_subst, Subst.one]; congr 1
+  funext i; obtain _|i := i <;>
+    simp [Subst.comp, Subst.lift, VExpr.subst, Subst.cons, lift_subst_cons]

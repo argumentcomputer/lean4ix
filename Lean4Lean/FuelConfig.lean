@@ -29,3 +29,9 @@ structure FuelConfig where
   /-- Shared fuel for the structural loops in `Inductive/Add.lean`. -/
   inductiveFuel : Nat := 1000
   deriving Repr, Inhabited, Lean.FromJson, Lean.ToJson
+
+/-- Runtime default used by the verifier front end.  Keep this separate from
+the structure default: exact replay proofs historically expose the 10000-step
+counter, while production needs more headroom for deeply reducing inputs such
+as the arena church-numeral cases. -/
+def FuelConfig.production : FuelConfig := { recDepth := 50000 }

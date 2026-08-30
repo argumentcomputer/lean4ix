@@ -11,6 +11,7 @@ Authors: Scott Morrison
 -/
 import Lean4Lean.Replay
 import Lake.Load.Manifest
+import Export.Parse
 
 open Lean hiding Environment Exception
 open Kernel Lean4Lean.Replay
@@ -183,6 +184,9 @@ source path, fresh-mode flag, case identifier, and expected outcome/phase from
 a versioned corpus case. Source cases are elaborated with the pinned compiler
 in a private module root. A case run succeeds when the observed outcome and
 phase match its expectation, including for an expected rejection.
+
+Use `--import <file.ndjson>` to replay a Lean Kernel Arena export directly,
+without loading an `.olean` or initializing an imported environment.
 -/
 unsafe def mainCore (args : List String)
     (differentialState : Option Lean4Lean.Differential.CliState := none) : IO UInt32 := do
@@ -193,9 +197,10 @@ unsafe def mainCore (args : List String)
   let (flags, args) := args.partition fun s => s.startsWith "-"
   let verbose := "-v" ∈ flags || "--verbose" ∈ flags
   let freshFlag : Bool := "--fresh" ∈ flags
+  let readImport : Bool := "--import" ∈ flags
   let mut fresh := freshFlag
   let compare : Bool := "--compare" ∈ flags
-  let mut fuel : Lean4Lean.FuelConfig := {}
+  let mut fuel := Lean4Lean.FuelConfig.production
   let mut onlyDecl : Option Name := none
   let mut caseSpec : Option Lean4Lean.Differential.Case := none
   for flag in flags do
@@ -225,6 +230,28 @@ unsafe def mainCore (args : List String)
           declaration := case.declaration
           fresh := case.fresh
         })
+  if readImport then
+    if freshFlag then
+      throw <| IO.userError "--import and --fresh cannot be used together"
+    if onlyDecl.isSome then
+      throw <| IO.userError "--import and --decl cannot be used together"
+    if caseSpec.isSome then
+      throw <| IO.userError "--import and --case cannot be used together"
+    if "--json" ∈ flags then
+      throw <| IO.userError "--import and --json cannot be used together"
+    let [inputPath] := args
+      | throw <| IO.userError "--import expects exactly one NDJSON file"
+    let handle ← IO.FS.Handle.mk inputPath .read
+    let exported ← Export.parseStream (.ofHandle handle)
+    let mut constMap := exported.constMap
+    -- Lean's kernel interprets adding `Quot` as adding these declarations as
+    -- well, so replaying the separately exported entries would duplicate them.
+    constMap := constMap.erase `Quot.mk |>.erase `Quot.lift |>.erase `Quot.ind
+    let (n, _) ← replay
+      { newConstants := constMap, verbose, compare, checkQuot := false, fuel }
+      (.empty .anonymous)
+    println! "checked {n} declarations"
+    return 0
   if let some case := caseSpec then
     if onlyDecl.isSome || freshFlag || !args.isEmpty then
       throw <| IO.userError
@@ -364,7 +391,9 @@ def differentialInputFromArgs (args : List String) : Lean4Lean.Differential.Inpu
   }
 
 unsafe def main (args : List String) : IO UInt32 := do
-  if "--json" ∈ args || args.any (·.startsWith "--case=") then
+  if "--import" ∈ args then
+    mainCore args
+  else if "--json" ∈ args || args.any (·.startsWith "--case=") then
     let phase ← IO.mkRef Lean4Lean.Differential.Phase.selection
     let caseSpec ← IO.mkRef (none : Option Lean4Lean.Differential.Case)
     let input ← IO.mkRef (none : Option Lean4Lean.Differential.Input)

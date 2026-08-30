@@ -22,6 +22,9 @@ open Kernel
 
 namespace AddInductive.PrimitiveRecursorReplay
 
+/-- Exact fuel retained by the counter-indexed primitive replay fixtures. -/
+private def replayFuel : FuelConfig := { recDepth := 10000 }
+
 /-- Reconstruct the semantic generation environment from the exact family
 and constructor insertion folds. -/
 theorem generationEnv_of_insertion
@@ -513,7 +516,7 @@ private def boolGeneratedRecursorType (root : AddInductive.Context) : Expr :=
     (boolTrueContext root).lctx recInfos[0]!
 
 private def boolClosedRoot : AddInductive.Context :=
-  boolRoot (Environment.empty `_boolRecursorProof) false default
+  boolRoot (Environment.empty `_boolRecursorProof) false replayFuel
 
 private theorem localContextMkForall_empty (lctx : LocalContext) (e : Expr) :
     lctx.mkForall #[] e = e := by
@@ -1514,9 +1517,9 @@ theorem boolCandidateObserversComplete
     (env : Environment) (mapWF : env.constants.WF) :
     AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
       0 [boolSource] 0 false
-        (AddInductive.Context.forInductive env [] false true {}) := by
+        (AddInductive.Context.forInductive env [] false true replayFuel) := by
   let candidateContext :=
-    AddInductive.Context.forInductive env [] false true ({} : FuelConfig)
+    AddInductive.Context.forInductive env [] false true replayFuel
   intro validation validationRun familyEnv declareRun _constructorRun
   have familyObservable : AddInductive.CandidateFamilyType.Observable
       { candidateContext with lctx := {} } boolSource :=
@@ -1587,9 +1590,9 @@ theorem natCandidateObserversComplete
     (binderName : Name) (binderInfo : BinderInfo) :
     AddInductive.NormalizationCandidateExecution.CandidateObserversComplete
       0 [natSource binderName binderInfo] 0 false
-        (AddInductive.Context.forInductive env [] false true {}) := by
+        (AddInductive.Context.forInductive env [] false true replayFuel) := by
   let candidateContext :=
-    AddInductive.Context.forInductive env [] false true ({} : FuelConfig)
+    AddInductive.Context.forInductive env [] false true replayFuel
   intro validation validationRun familyEnv declareRun constructorRun
   have familyObservable : AddInductive.CandidateFamilyType.Observable
       { candidateContext with lctx := {} }

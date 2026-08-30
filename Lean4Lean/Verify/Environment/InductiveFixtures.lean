@@ -22,6 +22,11 @@ namespace Lean4Lean.InductiveReplayFixtures
 open Lean Meta Elab Term
 open Lean4Lean.InductiveFixtures
 
+/-- Exact fuel retained by executable replay witnesses. The production front
+end uses the larger `FuelConfig.production`; these fixtures deliberately pin
+the historical depth because their traces expose every decremented counter. -/
+private def replayFuel : FuelConfig := { recDepth := 10000 }
+
 /- These instances are used only by the elaborators below to quote the kernel
 metadata returned by `getConstInfo`. -/
 deriving instance ToExpr for ConstantVal
@@ -2371,6 +2376,7 @@ private def annotationCandidateContext : AddInductive.Context where
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 private def annotationNatExpr : Expr := .const ``Nat []
 
@@ -2610,6 +2616,7 @@ private def annotatedParamCandidateContext : AddInductive.Context where
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 private def annotatedParamExpectedFamilyView : Expr :=
   .forallE `alpha (.sort (.succ .zero))
@@ -2726,6 +2733,7 @@ private def annotatedParamCtorCandidateContext : AddInductive.Context where
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 private theorem annotatedParamType_lookup_outParam :
     annotatedParamTypeKernelEnv.find? ``outParam =
@@ -2803,6 +2811,7 @@ private def annotatedPiOpaqueOutParamContext : AddInductive.Context where
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 /- This is a complete family/constructor candidate rejection, not the earlier
 leaf-level `isDefEq` test. The dedicated message proves failure occurs at the
@@ -2868,12 +2877,14 @@ private def annotatedPiFamilyCandidateContext : AddInductive.Context where
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 private def annotatedPiCtorCandidateContext : AddInductive.Context where
   env := annotatedPiTypeKernelEnv
   lparams := []
   safety := .safe
   allowPrimitive := false
+  fuel := replayFuel
 
 private theorem annotatedPiType_lookup_outParam :
     annotatedPiTypeKernelEnv.find? ``outParam =
@@ -2934,7 +2945,8 @@ private theorem annotatedPiExceptPure
 @[simp] private theorem annotatedPiInferConstantOutParam
     (lctx : LocalContext) :
     TypeChecker.Inner.inferConstant
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         ``outParam [.succ .zero] false =
       .ok (.forallE `α (.sort (.succ .zero))
@@ -2953,7 +2965,8 @@ private theorem annotatedPiExceptPure
 @[simp] private theorem annotatedPiInferConstantFamily
     (lctx : LocalContext) :
     TypeChecker.Inner.inferConstant
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         ``AnnotatedPi [] false =
       .ok (.sort (.succ .zero)) := by
@@ -3265,7 +3278,8 @@ private theorem annotatedPiWithLocalDecl
       state.inferTypeC[(.const ``AnnotatedPi [] : Expr)]? = none) :
     TypeChecker.Inner.inferType' (.const ``AnnotatedPi []) false
         (TypeChecker.Methods.withFuel n)
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state =
       .ok (.sort (.succ .zero),
@@ -3282,7 +3296,8 @@ private theorem annotatedPiWithLocalDecl
       state.inferTypeC[(.const ``AnnotatedPi [] : Expr)]? = none) :
     TypeChecker.Inner.inferType (.const ``AnnotatedPi []) false
         (TypeChecker.Methods.withFuel (n + 1))
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state =
       .ok (.sort (.succ .zero),
@@ -3298,7 +3313,8 @@ private theorem annotatedPiWithLocalDecl
         some (.sort (.succ .zero))) :
     TypeChecker.Inner.inferType' (.const ``AnnotatedPi []) false
         (TypeChecker.Methods.withFuel n)
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state =
       .ok (.sort (.succ .zero), state) := by
@@ -3317,7 +3333,8 @@ private theorem annotatedPiWithLocalDecl
             (.forallE name dom body bi) result }
     TypeChecker.Inner.inferType' (.const ``AnnotatedPi []) false
         (TypeChecker.Methods.withFuel n)
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state' =
       .ok (.sort (.succ .zero), state') := by
@@ -3503,11 +3520,11 @@ private theorem aliasFormerNormalizationVEnvs_wf :
 
 private def aliasFormerNormalizationContext : TypeChecker.VContext :=
   TypeChecker.VContext.mk' aliasFormerNormalizationVEnvs_wf
-    (fuel := { whnf := 2 })
+    (fuel := { replayFuel with whnf := 2 })
 
 private def aliasFormerNormalizationRawContext : TypeChecker.Context where
   env := aliasFormerNormalizationKernelEnv
-  fuel := { whnf := 2 }
+  fuel := { replayFuel with whnf := 2 }
 
 private def aliasFormerCheckTypeState (state : TypeChecker.State) :
     TypeChecker.State :=
@@ -3534,7 +3551,7 @@ private def aliasFormerCtorNormalizationKernelEnv : Kernel.Environment :=
 
 private def aliasFormerCtorNormalizationRawContext : TypeChecker.Context where
   env := aliasFormerCtorNormalizationKernelEnv
-  fuel := { whnf := 2 }
+  fuel := { replayFuel with whnf := 2 }
 
 private def aliasFormerCtorCheckTypeState (state : TypeChecker.State) :
     TypeChecker.State :=
@@ -3639,25 +3656,25 @@ private theorem aliasRecNormalizationVEnvs_wf :
 
 private def aliasRecNormalizationContext : TypeChecker.VContext :=
   TypeChecker.VContext.mk' aliasRecNormalizationVEnvs_wf
-    (fuel := { whnf := 2 })
+    (fuel := { replayFuel with whnf := 2 })
 
 private def aliasRecNormalizationRawContext : TypeChecker.Context where
   env := aliasRecNormalizationKernelEnv
-  fuel := { whnf := 2 }
+  fuel := { replayFuel with whnf := 2 }
 
 private def aliasFormerCandidateContext : AddInductive.Context where
   env := aliasFormerNormalizationKernelEnv
   lparams := []
   safety := .safe
   allowPrimitive := false
-  fuel := { whnf := 2 }
+  fuel := { replayFuel with whnf := 2 }
 
 private def aliasFormerCtorCandidateContext : AddInductive.Context where
   env := aliasFormerCtorNormalizationKernelEnv
   lparams := []
   safety := .safe
   allowPrimitive := false
-  fuel := { whnf := 2 }
+  fuel := { replayFuel with whnf := 2 }
 
 /-- Exact kernel request indexed by the singleton normalization candidate. -/
 private def aliasFormerKernelCtor : Constructor where
@@ -4276,7 +4293,7 @@ theorem recAlias_whnf :
 
 private theorem aliasFormerFamily_whnfM :
     TypeChecker.M.run aliasFormerNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.whnf aliasFormerInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.whnf aliasFormerInfo.type) =
       .ok (.sort (.succ .zero)) := by
   change
     Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -4291,7 +4308,7 @@ private theorem aliasFormerFamily_whnfM :
 
 private theorem aliasFormerFamily_checkTypeM :
     TypeChecker.M.run aliasFormerNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.checkType aliasFormerInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.checkType aliasFormerInfo.type) =
       .ok (.sort (.succ (.succ .zero))) := by
   change
     Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -4306,7 +4323,7 @@ private theorem aliasFormerFamily_checkTypeM :
 
 private theorem aliasFormerCtor_checkTypeM :
     TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.checkType aliasFormerMkInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.checkType aliasFormerMkInfo.type) =
       .ok (.const ``TypeFamilyAlias []) := by
   change
     Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -4321,7 +4338,7 @@ private theorem aliasFormerCtor_checkTypeM :
 
 private theorem aliasFormerCtor_whnfM :
     TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
       .ok (.const ``AliasFormer []) := by
   change
     Except.map (fun x : Expr × TypeChecker.State => x.1)
@@ -5518,14 +5535,15 @@ private theorem annotatedPiInner_isDefEqM :
 
 private theorem annotatedPiConst_checkTypeM (lctx : LocalContext) :
     TypeChecker.M.run annotatedPiTypeKernelEnv .safe lctx []
-      ({} : FuelConfig)
+      replayFuel
       (TypeChecker.checkType (.const ``AnnotatedPi [])) =
         .ok (.sort (.succ .zero)) := by
   change
     Except.map (fun x : Expr × TypeChecker.State => x.1)
       (TypeChecker.Inner.inferType (.const ``AnnotatedPi []) false
         (TypeChecker.Methods.withFuel 10000)
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         ({} : TypeChecker.State)) =
       .ok (.sort (.succ .zero))
@@ -5535,7 +5553,7 @@ private theorem annotatedPiConst_checkTypeM (lctx : LocalContext) :
 
 private def annotatedPiNormalizationRawContext
     (lctx : LocalContext) : TypeChecker.Context :=
-  { env := annotatedPiTypeKernelEnv, lctx := lctx }
+  { env := annotatedPiTypeKernelEnv, lctx := lctx, fuel := replayFuel }
 
 private theorem unfoldAnnotatedPi (lctx methods state) :
     TypeChecker.Inner.unfoldDefinition (.const ``AnnotatedPi [])
@@ -5559,7 +5577,7 @@ private theorem whnfLoopAnnotatedPi (lctx methods state n) :
 
 private theorem annotatedPiConst_whnfM (lctx : LocalContext) :
     TypeChecker.M.run annotatedPiTypeKernelEnv .safe lctx []
-      ({} : FuelConfig)
+      replayFuel
       (TypeChecker.whnf (.const ``AnnotatedPi [])) =
         .ok (.const ``AnnotatedPi []) := by
   change
@@ -5971,7 +5989,8 @@ private theorem annotatedPiCtor_noMVarNoFVar :
 @[simp] private theorem annotatedPiInferConstantFamilyOnly
     (lctx : LocalContext) :
     TypeChecker.Inner.inferConstant
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         ``AnnotatedPi [] true =
       .ok (.sort (.succ .zero)) := by
@@ -5990,7 +6009,8 @@ private theorem annotatedPiInferTypeFamilyOnly
       state.inferTypeI[(.const ``AnnotatedPi [] : Expr)]? = none) :
     TypeChecker.Inner.inferType (.const ``AnnotatedPi []) true
         (TypeChecker.Methods.withFuel (n + 1))
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state =
       .ok (.sort (.succ .zero),
@@ -6000,7 +6020,8 @@ private theorem annotatedPiInferTypeFamilyOnly
   change
     TypeChecker.Inner.inferType' (.const ``AnnotatedPi []) true
         (TypeChecker.Methods.withFuel n)
-        ({ env := annotatedPiTypeKernelEnv, lctx := lctx } :
+        ({ env := annotatedPiTypeKernelEnv, lctx := lctx,
+           fuel := replayFuel } :
           TypeChecker.Context)
         state = _
   unfold TypeChecker.Inner.inferType'
@@ -6033,7 +6054,7 @@ private def annotatedPiFamilyInferOnlyState : TypeChecker.State :=
     TypeChecker.Inner.inferType' (.const ``AnnotatedPi []) true
         (TypeChecker.Methods.withFuel 9998)
         ({ env := annotatedPiTypeKernelEnv, lctx :=
-          annotatedPiInnerInferOnlyLCtx } :
+          annotatedPiInnerInferOnlyLCtx, fuel := replayFuel } :
           TypeChecker.Context)
         annotatedPiInnerInferOnlyState =
       .ok (.sort (.succ .zero), annotatedPiFamilyInferOnlyState) := by
@@ -6041,7 +6062,7 @@ private def annotatedPiFamilyInferOnlyState : TypeChecker.State :=
     TypeChecker.Inner.inferType (.const ``AnnotatedPi []) true
         (TypeChecker.Methods.withFuel 9999)
         ({ env := annotatedPiTypeKernelEnv, lctx :=
-          annotatedPiInnerInferOnlyLCtx } :
+          annotatedPiInnerInferOnlyLCtx, fuel := replayFuel } :
           TypeChecker.Context)
         annotatedPiInnerInferOnlyState = _
   simpa [annotatedPiFamilyInferOnlyState] using
@@ -6166,7 +6187,7 @@ private theorem annotatedPiInner_ensureTypeM :
       ({} : TypeChecker.State) =
         .ok (.sort (.succ .zero),
           annotatedPiInnerInferOnlyFinalState) by
-    simpa [annotatedPiCtorCandidateContext,
+    simpa [annotatedPiCtorCandidateContext, replayFuel,
       AddInductive.Context.toTypeChecker] using
         annotatedPiInner_inferTypeInner]
   rfl
@@ -6314,7 +6335,8 @@ private theorem annotatedPi_checkConstructors_terminal_expanded :
            lparams := []
            ngen := ({ namePrefix := `_ind_fresh } : NameGenerator).next
            safety := .safe
-           allowPrimitive := false } : AddInductive.Context) = .ok () := by
+           allowPrimitive := false
+           fuel := replayFuel } : AddInductive.Context) = .ok () := by
   simpa [annotatedPiOuterBodyCandidateContext,
     AddInductive.Context.pushLocalDecl,
     AddInductive.Context.freshFVarId,
@@ -6777,7 +6799,7 @@ private theorem aliasFormerFamilyCandidateStep_valid :
     aliasFormerFamilyCandidateStep.Valid := by
   change
     TypeChecker.M.run aliasFormerNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.whnf aliasFormerInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.whnf aliasFormerInfo.type) =
       .ok (.sort (.succ .zero))
   exact aliasFormerFamily_whnfM
 
@@ -6791,7 +6813,7 @@ private theorem aliasFormerFamilyCheckTypeStep_valid :
     aliasFormerFamilyCheckTypeStep.Valid := by
   change
     TypeChecker.M.run aliasFormerNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.checkType aliasFormerInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.checkType aliasFormerInfo.type) =
       .ok (.sort (.succ (.succ .zero)))
   exact aliasFormerFamily_checkTypeM
 
@@ -6805,7 +6827,7 @@ private theorem aliasFormerCtorCheckTypeStep_valid :
     aliasFormerCtorCheckTypeStep.Valid := by
   change
     TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.checkType aliasFormerMkInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.checkType aliasFormerMkInfo.type) =
       .ok (.const ``TypeFamilyAlias [])
   exact aliasFormerCtor_checkTypeM
 
@@ -6819,7 +6841,7 @@ private theorem aliasFormerCtorCandidateStep_valid :
     aliasFormerCtorCandidateStep.Valid := by
   change
     TypeChecker.M.run aliasFormerCtorNormalizationKernelEnv .safe {} []
-        { whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
+        { replayFuel with whnf := 2 } (TypeChecker.whnf aliasFormerMkInfo.type) =
       .ok (.const ``AliasFormer [])
   exact aliasFormerCtor_whnfM
 

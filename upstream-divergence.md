@@ -1111,6 +1111,18 @@ to the replacement.
   conclusions. `ProjectionReady` derives that certificate from every host
   `ctorInfo` lookup, excluding axiom heads and definition aliases before the
   still-open injectivity proof is attempted.
+  The stricter `isNeverZero` projection test also keeps `Expr.proj` no more
+  expressive than the recursor generated for the same declaration. For
+  `MaybeProp.{u} : Sort u` with a field in `PUnit.{u}`, the kernel cannot rule
+  out that the family is propositional and therefore generates a recursor with
+  small elimination into `Prop`; that recursor cannot define
+  `fun x => x.0 : MaybeProp.{u} → PUnit.{u}`. Lean nevertheless accepts the
+  projection because it tests `!isAlwaysZero`. This remains sound only because
+  the constructor-universe check separately rules out the dangerous cases;
+  the fork's `isNeverZero` rule makes projection strength agree directly with
+  elimination strength. A complete convergence would instead let recursors
+  eliminate large exactly when every field universe is bounded by the
+  inductive universe.
   Upstream has no counterpart; its projection handling is unverified executable
   code only.
 - **Ix impact:** downstream checkers obtain a concrete projection-laws package

@@ -11,6 +11,9 @@ active Lean4Ix working-copy line. It complements
 [`remaining-proof-experiments.md`](remaining-proof-experiments.md): that file
 tracks local proof experiments, while this file tracks upstream branch work.
 
+The resulting local implementation candidate is documented in
+[`digama0-integration.md`](digama0-integration.md).
+
 The comparison fork point is `e0e3f6bcccb840cb0ea6f11c2b274ada93a12e00`.
 The audited upstream master is `8223d223ed98`, and the active local change is
 the mutable Jujutsu change `rtxutvuv`. Re-check hashes before integrating: the
