@@ -5493,7 +5493,9 @@ theorem afterParameters
       (stats := stats) (isUnsafe := isUnsafe) (familyIdx := familyIdx)
       (ctor := ctor) (context := context) (contextRun := contextRun) rest,
       suffix.trace.universeSemantics = trace.universeSemantics ∧
-      suffix.semantic.fieldSorts = semantic.fieldSorts := by
+      suffix.semantic.fieldSorts = semantic.fieldSorts ∧
+      trace.spineLength =
+        stats.params.size - argIdx + suffix.trace.spineLength := by
   induction trace generalizing view rest with
   | parameter context fuel argIdx name domain body binderInfo param
       parameterType parameterAt parameterTypeRun validationDefEq tailTrace ih =>
@@ -5508,18 +5510,20 @@ theorem afterParameters
           have dropped := drop_eq_cons_of_getElem?_eq_some atList
           rw [dropped] at instantiation
           simp only [instantiateFamilyParameters] at instantiation
-          obtain ⟨suffix, suffixUniverse, suffixFieldSorts⟩ :=
-            ih tailAlignment tail (by
-            have argIdxLt : argIdx < stats.params.size := by
-              by_contra notLt
-              have argIdxEq : argIdx = stats.params.size := by omega
-              subst argIdx
-              simp at parameterAt
-            omega) instantiation
+          have argIdxLt : argIdx < stats.params.size := by
+            by_contra notLt
+            have argIdxEq : argIdx = stats.params.size := by omega
+            subst argIdx
+            simp at parameterAt
+          obtain ⟨suffix, suffixUniverse, suffixFieldSorts, suffixSpine⟩ :=
+            ih tailAlignment tail (by omega) instantiation
           exact ⟨suffix, by
             simpa only [ConstructorTypeValidationTrace.universeSemantics]
               using suffixUniverse, by
-            simpa only [fieldSorts] using suffixFieldSorts⟩
+            simpa only [fieldSorts] using suffixFieldSorts, by
+            simp only [ConstructorTypeValidationTrace.spineLength]
+            rw [suffixSpine]
+            omega⟩
   | ordinary context fuel argIdx name domain body binderInfo sortResult
       noParameter ensureTypeStep universeTrace positivityTrace tailTrace ih =>
       cases alignment with
@@ -5562,7 +5566,7 @@ theorem afterParameters
           exact ⟨⟨_, fuel + 1, suffixTrace, suffixAlignment,
             suffixSemantic⟩, rfl, by
               change ensureTypeRun.resultLevel' :: tail.fieldSorts = _
-              rfl⟩
+              rfl, by simp [suffixTrace]⟩
   | terminal context source fuel argIdx sourceTerminal sourceValid =>
       cases alignment with
       | terminal sourceCheck viewCheck viewTerminal viewValid =>
@@ -5590,7 +5594,7 @@ theorem afterParameters
             exact ⟨⟨source, fuel + 1, suffixTrace, suffixAlignment,
               suffixSemantic⟩, rfl, by
                 change ([] : List VLevel) = []
-                rfl⟩
+                rfl, by simp [suffixTrace]⟩
           · have argIdxLt : argIdx < stats.params.size := by omega
             obtain ⟨parameter, parameterAt⟩ :
                 ∃ parameter, stats.params.toList[argIdx]? = some parameter := by
@@ -7097,6 +7101,26 @@ def values :
   | _, _, .nil => []
   | _, _, .cons suffix _ tail => suffix :: tail.values
 
+/-- Family parameter suffixes are forced positionally by the candidate
+views.  Two construction-owned inventories over the same dependent family
+list therefore have the same erased suffix list. -/
+theorem values_eq
+    {sources : List InductiveType}
+    {candidates : CandidateList CandidateFamily sources}
+    (left right : ConstructorBlockResolvedFamilyParameterSuffixes stats
+      candidates) :
+    left.values = right.values := by
+  induction left with
+  | nil =>
+      cases right
+      rfl
+  | @cons source sources candidate candidates suffix parameters tail ih =>
+      cases right with
+      | cons otherSuffix otherParameters otherTail =>
+          have suffixEq : suffix = otherSuffix :=
+            Except.ok.inj (parameters.symm.trans otherParameters)
+          simp only [values, suffixEq, ih otherTail]
+
 /-- Collect every exact family suffix without applying the invalid global
 projection-uniqueness predicate. -/
 def build (stats : InductiveStats) :
@@ -7794,6 +7818,113 @@ theorem nonempty
       exact ⟨.cons head tail⟩
 
 end ConstructorMutualPreFamilyListSemanticRun
+
+/-- Source-ordered residual D3 evidence after every shared constructor
+parameter has already been consumed.  This is the exact field/result portion
+needed by semantic constructor reconstruction. -/
+inductive ConstructorMutualPreFamilyParameterSuffixList
+    (env : VEnv) (Us : List Name)
+    (stats : InductiveStats) (owner : Nat) (ownerSuffix : Expr)
+    (familySuffixes : List Expr) (context : Context)
+    (contextRun : ConstructorContextRun env Us context) :
+    {constructors : List Constructor} →
+      {candidates : CandidateList CandidateConstructor constructors} →
+      ConstructorCandidateParameterSuffixes stats candidates → Type where
+  | nil : ConstructorMutualPreFamilyParameterSuffixList env Us stats owner
+      ownerSuffix familySuffixes context contextRun
+      ConstructorCandidateParameterSuffixes.nil
+  | cons
+      {constructor : Constructor} {constructors : List Constructor}
+      {candidate : CandidateConstructor constructor}
+      {candidates : CandidateList CandidateConstructor constructors}
+      {suffix : Expr}
+      {parameters : instantiateFamilyParameters candidate.type.view
+        stats.params.toList = .ok suffix}
+      {suffixTail : ConstructorCandidateParameterSuffixes stats candidates}
+      (head : ConstructorMutualPreFamilyParameterSuffix
+        (env := env) (Us := Us) (stats := stats) (owner := owner)
+        (ownerSuffix := ownerSuffix) (familySuffixes := familySuffixes)
+        (context := context) (removed := []) (recursiveStarted := false)
+        (contextRun := contextRun) suffix)
+      (tail : ConstructorMutualPreFamilyParameterSuffixList env Us stats owner
+        ownerSuffix familySuffixes context contextRun suffixTail) :
+      ConstructorMutualPreFamilyParameterSuffixList env Us stats owner
+        ownerSuffix familySuffixes context contextRun
+        (.cons suffix parameters suffixTail)
+
+namespace ConstructorMutualPreFamilyListSemanticRun
+
+/-- Discard the already-discharged parameter prefix from every constructor
+in a verified pre-family traversal. -/
+theorem afterParameters
+    {env : VEnv} {Us : List Name}
+    {stats : InductiveStats} {owner : Nat} {ownerSuffix : Expr}
+    {familySuffixes : List Expr} {context : Context}
+    {contextRun : ConstructorContextRun env Us context}
+    {constructors : List Constructor}
+    {candidates : CandidateList CandidateConstructor constructors}
+    {trace : ConstructorMutualPreFamilyListTrace stats owner ownerSuffix
+      familySuffixes context candidates}
+    (semantic : ConstructorMutualPreFamilyListSemanticRun env Us stats owner
+      ownerSuffix familySuffixes context contextRun trace)
+    (suffixes : ConstructorCandidateParameterSuffixes stats candidates)
+    {familyName : Name} {familyLevels : List Level}
+    (familyHead : stats.indConsts[owner]! =
+      .const familyName familyLevels) :
+    Nonempty (ConstructorMutualPreFamilyParameterSuffixList env Us stats owner
+      ownerSuffix familySuffixes context contextRun suffixes) := by
+  induction semantic with
+  | nil =>
+      cases suffixes
+      exact ⟨.nil⟩
+  | cons head tail ih =>
+      cases suffixes with
+      | cons suffix parameters suffixTail =>
+          obtain ⟨headSuffix⟩ := head.afterParameters familyHead (by simp)
+            (by simpa using parameters)
+          obtain ⟨tailSuffixes⟩ := ih suffixTail
+          exact ⟨.cons headSuffix tailSuffixes⟩
+
+end ConstructorMutualPreFamilyListSemanticRun
+
+/-- Family-major residual D3 evidence, synchronized only with the
+construction-owned family and constructor parameter suffix inventories. -/
+inductive ConstructorMutualBlockPreFamilyParameterSuffixLists
+    (env : VEnv) (Us : List Name) (stats : InductiveStats)
+    (familySuffixes : List Expr) (context : Context)
+    (contextRun : ConstructorContextRun env Us context) :
+    {owner : Nat} → {sources : List InductiveType} →
+      {candidates : CandidateList CandidateFamily sources} →
+      ConstructorBlockResolvedFamilyParameterSuffixes stats candidates →
+      ConstructorBlockCandidateParameterSuffixes stats candidates → Type where
+  | nil {owner} :
+      ConstructorMutualBlockPreFamilyParameterSuffixLists env Us stats
+        familySuffixes context contextRun (owner := owner)
+        ConstructorBlockResolvedFamilyParameterSuffixes.nil
+        ConstructorBlockCandidateParameterSuffixes.nil
+  | cons
+      {owner : Nat} {source : InductiveType}
+      {sources : List InductiveType}
+      {candidate : CandidateFamily source}
+      {candidates : CandidateList CandidateFamily sources}
+      {ownerSuffix : Expr}
+      {parameters : instantiateFamilyParameters
+        candidate.familyType.type.view stats.params.toList = .ok ownerSuffix}
+      {familyTail : ConstructorBlockResolvedFamilyParameterSuffixes stats
+        candidates}
+      {headSuffixes : ConstructorCandidateParameterSuffixes stats
+        candidate.constructors}
+      {tailSuffixes : ConstructorBlockCandidateParameterSuffixes stats
+        candidates}
+      (head : ConstructorMutualPreFamilyParameterSuffixList env Us stats owner
+        ownerSuffix familySuffixes context contextRun headSuffixes)
+      (tail : ConstructorMutualBlockPreFamilyParameterSuffixLists env Us stats
+        familySuffixes context contextRun (owner := owner + 1) familyTail
+        tailSuffixes) :
+      ConstructorMutualBlockPreFamilyParameterSuffixLists env Us stats
+        familySuffixes context contextRun (owner := owner)
+        (.cons ownerSuffix parameters familyTail)
+        (.cons headSuffixes tailSuffixes)
 
 /-- Family-major arbitrary-target replay indexed by the complete global
 suffix inventory and by each owning source ordinal. -/
@@ -15493,7 +15624,7 @@ theorem CandidateSemanticNormalizedCtorRun.checkedConstructorWF
   obtain ⟨rest, instantiation, ⟨d3Suffix⟩, wholeTr⟩ :=
     genRun.preFamilySuffix addType parameterContext parameterWF unique d3
       hctor parametersEq indConsts
-  obtain ⟨d2Suffix, suffixUniverse, _suffixFieldSorts⟩ :=
+  obtain ⟨d2Suffix, suffixUniverse, _suffixFieldSorts, _suffixSpine⟩ :=
     d2.afterParameters d2Alignment (by omega) instantiation
   have instantiation' : instantiateFamilyParameters candidateCtor.type.view
       parameters = .ok rest := by

@@ -3408,10 +3408,9 @@ def
   (staged.recursorShape shape).auditResolvedCore? lparams
 
 /-- Once the three structural constructor checks have been recovered from
-retained staging, the two universe fields and the successful core-audit
-transaction require no additional premise.  Constructor-universe evidence is
-projected from the retained validation trace, and recursor-universe evidence
-is projected from the retained recursor execution. -/
+retained staging, the constructor-universe field and successful core-audit
+transaction require no additional premise.  Recursor-universe metadata is
+derived directly from the retained execution at the elimination boundary. -/
 theorem
     AddInductive.EnvironmentInductiveExecution.FlattenedEnrichedStagingResult.recursorResolvedCoreAudit?_success_of_structural
     {env : Environment} {lparams : List Name} {nparams : Nat}
@@ -3442,11 +3441,10 @@ theorem
       staged.recursorResolvedCoreAudit? shape = .ok audit := by
   let produced := staged.recursorShape shape
   have universeRun := produced.constructorUniverseRun
-  have recUniverseRun := staged.recursorShape_recUniverseRun shape
   simpa only [FlattenedEnrichedStagingResult.recursorResolvedCoreAudit?,
     produced] using
     produced.auditResolvedCore?_success lparams alignmentRun stage3Run
-      preFamilyRun universeRun recUniverseRun
+      preFamilyRun universeRun
 
 /-- Execute only the producer-owned raw host-parameter trace consumed by
 nested restoration.  The result remains indexed by the exact reindexed
