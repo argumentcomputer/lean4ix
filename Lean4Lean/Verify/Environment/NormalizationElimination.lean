@@ -30653,6 +30653,64 @@ theorem ProducedBlockSemanticEliminationRun.sourceLevels_relevel
         rw [sourceLevelsEq, sourceUvars]
         simpa only [paramsEq] using shifted
 
+/-- Translate the ordinary producer's elimination level in the exact
+recursor universe inventory.  Small elimination contributes `0`; large
+elimination contributes the freshly prepended universe slot. -/
+theorem ProducedBlockSemanticEliminationRun.motiveLevel_relevel
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation) :
+    VLevel.ofLevel produced.execution.recursors.levelParams
+        produced.execution.eliminationExecution.elimination.level =
+      some generation.motiveLevel := by
+  let execution := produced.execution.eliminationExecution
+  have levelParamsEq : produced.execution.recursors.levelParams =
+      execution.recLevelParams := by
+    simpa only [execution,
+      AddInductive.NormalizationEliminationExecution.recLevelParams,
+      AddInductive.NormalizationRecursorExecution.recursorContext] using
+      AddInductive.declareRecursors_levelParams_eq
+        produced.execution.recursorsRun
+  cases large : execution.elimination.large.result with
+  | false =>
+      have modeSmall : generation.elimination = ElimMode.small := by
+        simpa only [execution,
+          ProducedBlockRecursorShapeCandidate.eliminationBase, large,
+          ElimMode.ofBool_false] using run.elimination.mode_eq
+      have levelZero : execution.elimination.level = .zero :=
+        execution.elimination.level_eq_zero large
+      rw [levelParamsEq, levelZero]
+      change some (.zero : VLevel) = some generation.elimination.motiveLevel
+      rw [modeSmall]
+      rfl
+  | true =>
+      have modeLarge : generation.elimination = ElimMode.large := by
+        simpa only [execution,
+          ProducedBlockRecursorShapeCandidate.eliminationBase, large,
+          ElimMode.ofBool_true] using run.elimination.mode_eq
+      let fresh := AddInductive.getFreshElimParam
+        execution.normalization.validationContext.lparams
+      have paramsEq : execution.recLevelParams =
+          fresh :: execution.normalization.validationContext.lparams := by
+        unfold AddInductive.NormalizationEliminationExecution.recLevelParams
+        exact execution.elimination.recLevelParams_eq_large large _
+      have levelParam : execution.elimination.level = .param fresh := by
+        exact execution.elimination.level_eq_param large
+      rw [levelParamsEq, paramsEq, levelParam]
+      change VLevel.ofLevel
+          (fresh :: execution.normalization.validationContext.lparams)
+          (.param fresh) = some generation.elimination.motiveLevel
+      rw [modeLarge]
+      simp [VLevel.ofLevel]
+
 private theorem recursorInferImplicit_eqv (e : Expr) (numParams : Nat)
     (considerRange : Bool) :
     e.inferImplicit numParams considerRange == e := by
