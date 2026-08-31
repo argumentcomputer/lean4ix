@@ -36045,6 +36045,106 @@ private theorem recInfoPhaseOneIndex_localExtension
         congrArg Prod.snd pairEq
       exact contextEq ▸ extension
 
+/-- Annotation consumption is inert on a selected Pi telescope whose body is
+already inert.  Every selected declaration is a `cdecl`, so a nonempty
+selection exposes a `forallE`; the empty selection reduces to the supplied
+body equation. -/
+private theorem selectedForallArrayRun_consumeMkForall
+    {env : VEnv} {Us : List Name} {implementationLCtx : LocalContext}
+    {base final : VLCtx} {sources : Array Expr} {types : List VExpr}
+    (run : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
+      implementationLCtx base sources types final)
+    {body : Expr} {body' : VExpr}
+    (baseNoBV : base.NoBV)
+    (bodyTr : TrExprS env Us final body body')
+    (bodyConsumed : AddInductive.consumeTypeAnnotations body = body) :
+    AddInductive.consumeTypeAnnotations
+        (implementationLCtx.mkForall sources body) =
+      implementationLCtx.mkForall sources body := by
+  rcases run with ⟨fvars, selection, sourcesEq, nodup⟩
+  have finalNoBV := selection.final_noBV baseNoBV
+  have bodyClosed : body.looseBVarRange' = 0 :=
+    (finalNoBV ▸ bodyTr.closed).looseBVarRange_zero
+  have arrayEq : sources = ⟨fvars.map Expr.fvar⟩ := by
+    rw [← Array.toList_inj]
+    exact sourcesEq
+  rw [LocalContext.mkForall, arrayEq]
+  rw [LocalContext.mkBinding_eq bodyClosed nodup
+      (selection.lookup_closed baseNoBV),
+    LocalContext.mkBindingList_eq_fold selection.find_exists nodup]
+  cases selection with
+  | nil => simpa using bodyConsumed
+  | cons find domainTr domainType tail =>
+      simp [LocalContext.mkBindingList1, find,
+        AddInductive.consumeTypeAnnotations]
+
+/-- Once the index declarations selected by one phase-one family have been
+translated, the remaining motive construction is purely structural.  The
+fresh major declaration supplies the final Pi domain and the retained
+elimination level supplies its sort body; the two `mkForall` calls are then
+discharged by the generic selected-telescope API. -/
+private theorem recInfoPhaseOneStep_motiveTranslation
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {current : AddInductive.Context}
+    (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+      current)
+    {base indexContext : VLCtx} {indexTypes : List VExpr}
+    (indices : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
+      step.majorContext.lctx base step.indices indexTypes indexContext)
+    (indexLocal : TypeChecker.CandidateLocalContextRun step.indexContext)
+    {majorType : VExpr} {motiveLevel : VLevel}
+    (majorTr : TrExprS env Us indexContext
+      (AddInductive.consumeTypeAnnotations step.majorType) majorType)
+    (majorIsType : env.IsType Us.length indexContext.toCtx majorType)
+    (levelTr : VLevel.ofLevel Us elimLevel = some motiveLevel)
+    (motiveLevelWF : motiveLevel.WF Us.length)
+    (baseNoBV : base.NoBV) :
+    TrExprS env Us base
+      (AddInductive.consumeTypeAnnotations step.motiveType)
+      (VExpr.forallN indexTypes <|
+        .forallE majorType (.sort motiveLevel)) := by
+  let majorFVar := step.indexContext.freshFVarId
+  let finalContext : VLCtx :=
+    (some (majorFVar,
+        (AddInductive.consumeTypeAnnotations step.majorType).fvarsList),
+      .vlam majorType) :: indexContext
+  have majorFind : step.majorContext.lctx.find? majorFVar =
+      some (.cdecl step.indexContext.lctx.decls.size majorFVar `t
+        (AddInductive.consumeTypeAnnotations step.majorType)
+        .default .default) := by
+    simpa only [majorFVar,
+      AddInductive.RecInfoPhaseOneStep.majorContext] using
+      indexLocal.push_findNew `t .default
+        (AddInductive.consumeTypeAnnotations step.majorType)
+  let major : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
+      step.majorContext.lctx indexContext #[step.major] [majorType]
+      finalContext := {
+    fvars := [majorFVar]
+    selection := .cons majorFind majorTr majorIsType .nil
+    sources_eq := by
+      simp [AddInductive.RecInfoPhaseOneStep.major,
+        AddInductive.Context.freshExpr, majorFVar]
+    nodup := by simp }
+  have indexNoBV := indices.final_noBV baseNoBV
+  have sortTr : TrExprS env Us finalContext (.sort elimLevel)
+      (.sort motiveLevel) := .sort levelTr
+  have sortIsType : env.IsType Us.length finalContext.toCtx
+      (.sort motiveLevel) :=
+    ⟨_, VEnv.HasType.sort motiveLevelWF⟩
+  obtain ⟨majorTelTr, majorTelType⟩ :=
+    major.mkForall_trS indexNoBV sortTr sortIsType
+  have majorConsumed := selectedForallArrayRun_consumeMkForall major
+    indexNoBV sortTr (by simp [AddInductive.consumeTypeAnnotations])
+  obtain ⟨indexTelTr, _indexTelType⟩ :=
+    indices.mkForall_trS baseNoBV majorTelTr majorTelType
+  have consumedMotive := selectedForallArrayRun_consumeMkForall indices
+    baseNoBV majorTelTr majorConsumed
+  rw [AddInductive.RecInfoPhaseOneStep.motiveType, consumedMotive]
+  simpa only [major,
+    List.singleton_append, VExpr.forallN] using indexTelTr
+
 /-- Every complete phase-one decomposition exposes the exact push-only
 extension from its incoming reader context to its callback context. -/
 private theorem recInfoPhaseOne_localExtension
