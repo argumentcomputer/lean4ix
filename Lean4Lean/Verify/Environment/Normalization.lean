@@ -17943,6 +17943,27 @@ structure CandidateBlockFamilyAnnotationSpine
     candidate.familyType.type.trace [] terminalRun.context.vlctx
       storedBinders
 
+/-- Reindex an annotation-consumed telescope by the structural raw-telescope
+equality retained by its canonical family adapter. -/
+theorem CandidateBlockFamilyAnnotationSpine.telescope_of_rawTel
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root}
+    (annotation : CandidateBlockFamilyAnnotationSpine source env blockEnv Us
+      root shape)
+    {binders : List VExpr}
+    (rawTel : VExpr.telN candidate.familyType.type.trace.spineLength
+      raw.type = binders) :
+    TypeChecker.TelDefEqEvidence env Us.length [] binders
+      annotation.storedBinders := by
+  have telescope := annotation.telescope
+  rw [← shape.spineLength_eq_ctorFields, rawTel] at telescope
+  exact telescope
+
 /-- Construct the generic annotation owner directly from a semantic family,
 its exact generation-shape position, and the validator-produced annotation
 provenance for that candidate. -/
@@ -18152,6 +18173,27 @@ def CandidateBlockFamilyAnnotationSpineList.tailExact
               | cons shape shapes =>
                   cases run with
                   | cons head tail => exact tail
+
+/-- The exact strict index-binder surfaces retained by the annotation
+consumer, in source-family order.  Dropping the common parameter prefix here
+matches the split performed by recursor synthesis after `loopParams`. -/
+def CandidateBlockFamilyAnnotationSpineList.generatedIndexSurfaces
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    (run : CandidateBlockFamilyAnnotationSpineList source env blockEnv Us
+      roots shapes) : List (List VExpr) :=
+  match run with
+  | .nil => []
+  | .cons head tail =>
+      head.storedBinders.drop source.nparams ::
+        tail.generatedIndexSurfaces
 
 /-- Build the complete generic annotation spine from the semantic roots,
 their source-indexed generation shapes, and the validator's exact annotation
@@ -21523,6 +21565,103 @@ def CandidateCanonicalBlockNormalizedFamilyRunList.normalizedFamilyRuns
   | .cons head tail =>
       .cons (head.normalizedFamilyRun henv commonResultLevelWF)
         (tail.normalizedFamilyRuns henv commonResultLevelWF)
+
+/-- The annotation-consumed family binders supply the exact generated index
+surface for every canonical normalized family.  The complete annotation
+telescope is split after the common parameter prefix, then its base context
+is transported from raw parameters to the producer-owned generated
+parameters through the canonical family certificate. -/
+theorem CandidateBlockFamilyAnnotationSpineList.generatedIndicesTel
+    {source : VInductDecl}
+    {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateFamily kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    {families : List NormalizedFamily}
+    (annotations : CandidateBlockFamilyAnnotationSpineList source env
+      blockEnv Us roots shapes)
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots families)
+    (henv : VEnv.WF env)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.generatedParams generation.block.checked.params)
+    (membership : ∀ family ∈ families, family ∈ generation.families) :
+    List.Forall₂
+      (fun family indices =>
+        TypeChecker.TelDefEqEvidence env source.uvars
+          generation.generatedParams.reverse
+          (family.rawIndices source.nparams) indices)
+      families annotations.generatedIndexSurfaces := by
+  induction runs with
+  | nil =>
+      cases annotations
+      exact .nil
+  | @cons kernelSource candidate raw root family kernelSources candidates
+      raws roots families head tail ih =>
+      cases annotations with
+      | cons annotation annotations =>
+        apply List.Forall₂.cons
+        · have familyMember : family ∈ generation.families :=
+            membership family (.head _)
+          have hrawLen : (family.rawParams source.nparams).length =
+              source.nparams :=
+            (generation.shape.2.2.2.2 family familyMember).2.2.1
+          have annotationTel := annotation.telescope_of_rawTel head.rawTel
+          have suffix := annotationTel.drop source.nparams
+          have htake :
+              (family.rawParams source.nparams ++
+                  family.rawIndices source.nparams).take source.nparams =
+                family.rawParams source.nparams := by
+            let Ps := family.rawParams source.nparams
+            let Is := family.rawIndices source.nparams
+            have hlen : Ps.length = source.nparams := by
+              simpa only [Ps] using hrawLen
+            change (Ps ++ Is).take source.nparams = Ps
+            rw [← hlen, List.take_append, List.take_length]
+            simp
+          have hdrop :
+              (family.rawParams source.nparams ++
+                  family.rawIndices source.nparams).drop source.nparams =
+                family.rawIndices source.nparams := by
+            let Ps := family.rawParams source.nparams
+            let Is := family.rawIndices source.nparams
+            have hlen : Ps.length = source.nparams := by
+              simpa only [Ps] using hrawLen
+            change (Ps ++ Is).drop source.nparams = Is
+            rw [← hlen, List.drop_append, List.drop_length]
+            simp
+          rw [htake, hdrop, List.append_nil] at suffix
+          have familyRun := head.normalizedFamilyRun henv
+            commonResultLevelWF
+          have prefixEvidence := familyRun.familyTel.take source.nparams
+          have hviewLen : generation.block.checked.params.length =
+              source.nparams :=
+            generation.shape.2.1.symm.trans generation.shape.1
+          have hview :
+              (generation.block.checked.params ++ family.view.indices).take
+                  source.nparams = generation.block.checked.params := by
+            rw [← hviewLen, List.take_append, List.take_length]
+            simp
+          rw [htake, hview] at prefixEvidence
+          have generatedToRaw := generatedParamsTel.trans henv trivial
+            (prefixEvidence.symm henv trivial)
+          rw [head.uvars_eq] at generatedToRaw ⊢
+          have generatedContext : env.IsDefEqCtx Us.length []
+              generation.generatedParams.reverse
+              (family.rawParams source.nparams).reverse := by
+            simpa only [List.append_nil] using generatedToRaw.telDefEq.ctx
+          exact suffix.defeqDFC henv.ordered
+            (generatedContext.symm henv.ordered)
+        · exact ih annotations (fun family member =>
+            membership family (.tail _ member))
 
 /-- The first canonical family adapter still owns the raw/shared parameter
 equality.  Canonicalization changes only the view prefix, so taking the first

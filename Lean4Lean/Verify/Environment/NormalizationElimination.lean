@@ -35856,6 +35856,10 @@ structure ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport
     (semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source)
     (context_lctx_eq : context.lctx = {}) where
+  generationShapes : CandidateBlockFamilySemanticGenerationShapeList source
+    env blockEnv Us semantic.families
+  annotations : CandidateBlockFamilyAnnotationSpineList source env blockEnv
+    Us semantic.families generationShapes
   firstView : VExpr
   params_eq : blockParams source.nparams semantic.families.views =
     VExpr.telN source.nparams firstView
@@ -36434,6 +36438,8 @@ noncomputable def
     (owner : produced.FirstFamilyAnnotationSpine semantic)
     (context_lctx_eq : context.lctx = {}) :
     produced.CanonicalFamilyAssemblySupport semantic context_lctx_eq where
+  generationShapes := owner.generationShapes
+  annotations := owner.annotations
   firstView := owner.position.semantic.type.view
   params_eq := owner.singletonBlockParams_eq
   parameterDefEqs :=
@@ -37889,7 +37895,25 @@ noncomputable def
       ((produced.canonicalResultLevel_eq semantic context_lctx_eq).symm.trans
         (produced.canonicalResultLevel_eq endpoints.selectedSemantic
           context_lctx_eq))
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have familyTypesProduced := normalization.familyTypes.produced
+  rw [← normalization.families.produced.familyTypes_eq]
+    at familyTypesProduced
+  have terminals := normalization.familyTerminals
+  rw [← normalization.families.produced.familyTypes_eq] at terminals
+  let validationAnnotations :=
+    CandidateFamilyValidationAnnotationList.ofProduced
+      normalization.families.candidates familyTypesProduced terminals
+  let generationShapes :=
+    endpoints.selectedSemantic.generationShapes produced.shape
+  let annotations := Classical.choice
+    (CandidateBlockFamilyAnnotationSpineList.exists
+      endpoints.selectedSemantic.families generationShapes
+        validationAnnotations)
   exact {
+    generationShapes := generationShapes
+    annotations := annotations
     firstView := support.firstView
     params_eq := paramsEq.symm.trans support.params_eq
     parameterDefEqs := by
@@ -39616,6 +39640,9 @@ noncomputable def
   generatedParams := support.basis.storedTypes
   generatedParams_length := support.basis.storedCanonical.length_eq.trans
     (produced.semanticViewParams_length semantic context_lctx_eq)
+  generatedIndices := fun family =>
+    (support.annotations.generatedIndexSurfaces[family.view.ordinal]?).getD
+      (family.rawIndices source.nparams)
 
 /-- Interpret every family and constructor of the support-owned canonical
 layout, yielding the ordinary block-generation semantic run. -/
@@ -39715,16 +39742,25 @@ noncomputable def
     rw [firstParams, ← support.params_eq]
     simpa only [generation, canonicalBlockGenerationChecked,
       semantic.uvars_eq] using support.basis.storedCanonical
-  let familyRuns := aligned'.normalizedFamilyRuns henv commonResultLevelWF'
+  have generatedIndexTelescopes :=
+    support.annotations.generatedIndicesTel aligned' henv
+      commonResultLevelWF' generatedParamsTel' (fun _ member => member)
   have generatedIndicesTel' : ∀ family ∈ generation.families,
       TypeChecker.TelDefEqEvidence env source.uvars
         generation.generatedParams.reverse
         (family.rawIndices source.nparams)
         (generation.generatedIndices family) := by
     intro family member
-    simpa only [generation, canonicalBlockGenerationChecked] using
-      (familyRuns.get family member).rawIndicesTel_refl member henv
-        generatedParamsTel'
+    obtain ⟨indices, indicesAt, indicesTel⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_left generatedIndexTelescopes
+        (generation.family_getElem?_ordinal member)
+    change TypeChecker.TelDefEqEvidence env source.uvars
+      generation.generatedParams.reverse
+      (family.rawIndices source.nparams)
+      ((support.annotations.generatedIndexSurfaces[
+        family.view.ordinal]?).getD (family.rawIndices source.nparams))
+    rw [indicesAt]
+    exact indicesTel
   let paramsTel := aligned'.paramsTel henv commonResultLevelWF'
   let constructorRuns := aligned'.constructorRuns normalizationRun'
     commonResultLevelWF' paramsTel
@@ -40031,7 +40067,11 @@ noncomputable def
     rfl
   let basis := Classical.choice
     (completion.rawParameterAuditBasis_nonempty context_lctx_eq)
+  let owner := Classical.choice
+    (produced.semanticFirstFamilyAnnotationSpine semantic)
   exact {
+    generationShapes := owner.generationShapes
+    annotations := owner.annotations
     firstView := staging.annotation.firstSemantic.type.view
     params_eq := paramsEq
     parameterDefEqs :=
