@@ -35952,6 +35952,339 @@ theorem
     VLCtx.instL, List.map_nil, BlockGenerationChecked.paramsTel,
     generatedParamsEq] using relevelled
 
+/-! #### Motive selection from the retained phase-one trace -/
+
+/-- Compose two push-only inductive-synthesis context extensions. -/
+private theorem contextLocalExtension_trans
+    {root middle final : AddInductive.Context}
+    (left : root.LocalExtension middle)
+    (right : middle.LocalExtension final) :
+    root.LocalExtension final := by
+  induction right with
+  | refl => exact left
+  | push extension name binderInfo type ih =>
+      exact .push ih name binderInfo type
+
+/-- The aggregate index traversal retained by one phase-one family step
+reaches its recorded endpoint solely by local-declaration pushes. -/
+private theorem recInfoPhaseOneIndex_localExtension
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {current : AddInductive.Context}
+    (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+      current) :
+    current.LocalExtension step.indexContext := by
+  exact AddInductive.mkRecInfos.loopArgs1_localExtension .refl
+    step.indicesRun fun nextIndices nextContext extension callbackRun => by
+      have pairEq : (nextIndices, nextContext) =
+          (step.indices, step.indexContext) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = step.indexContext :=
+        congrArg Prod.snd pairEq
+      exact contextEq ▸ extension
+
+/-- Every complete phase-one decomposition exposes the exact push-only
+extension from its incoming reader context to its callback context. -/
+private theorem recInfoPhaseOne_localExtension
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done => exact .refl
+  | @next dIdx current finalInfos finalContext recInfos step tail ih =>
+      have indexExtension :
+          current.LocalExtension step.indexContext :=
+        recInfoPhaseOneIndex_localExtension step
+      have majorExtension :
+          current.LocalExtension step.majorContext :=
+        .push indexExtension `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveExtension :
+          current.LocalExtension step.motiveContext :=
+        .push majorExtension step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      exact contextLocalExtension_trans motiveExtension ih
+
+/-- Free-variable identifiers allocated for motives by a phase-one trace, in
+the same source order as `addedInfos`. -/
+private def recInfoPhaseOneMotiveFVars :
+    AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos
+      current finalInfos finalContext → List FVarId
+  | .done _ => []
+  | .next step tail =>
+      step.majorContext.freshFVarId :: recInfoPhaseOneMotiveFVars tail
+
+/-- The source expressions stored in the phase-one `RecInfo` inventory are
+exactly the free variables allocated by its motive pushes. -/
+private theorem recInfoPhaseOne_motiveSources
+    (trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext) :
+    trace.addedInfos.map (·.motive) =
+      (recInfoPhaseOneMotiveFVars trace).map Expr.fvar := by
+  induction trace with
+  | done => rfl
+  | next step tail ih =>
+      change step.info.motive :: tail.addedInfos.map (·.motive) =
+        Expr.fvar step.majorContext.freshFVarId ::
+          (recInfoPhaseOneMotiveFVars tail).map Expr.fvar
+      simp only [List.cons.injEq]
+      exact ⟨rfl, ih⟩
+
+/-- Every motive allocated after a reader context is fresh for that incoming
+context.  Later steps may see earlier motives, but never reuse their IDs. -/
+private theorem recInfoPhaseOneMotiveFVars_absent
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ recInfoPhaseOneMotiveFVars trace,
+      current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | @next dIdx current finalInfos finalContext recInfos step tail ih =>
+      have indexExtension :
+          current.LocalExtension step.indexContext :=
+        recInfoPhaseOneIndex_localExtension step
+      have indexRun : TypeChecker.CandidateLocalContextRun
+          step.indexContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          indexExtension
+      have majorRun : TypeChecker.CandidateLocalContextRun
+          step.majorContext := by
+        exact indexRun.push `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveRun : TypeChecker.CandidateLocalContextRun
+          step.motiveContext := by
+        exact majorRun.push step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      have majorExtension :
+          current.LocalExtension step.majorContext :=
+        .push indexExtension `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveExtension :
+          current.LocalExtension step.motiveContext :=
+        .push majorExtension step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · cases found : current.lctx.find?
+            step.majorContext.freshFVarId with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+                currentRun majorExtension found
+            have fresh : step.majorContext.lctx.find?
+                step.majorContext.freshFVarId = none := majorRun.fresh
+            rw [preserved] at fresh
+            contradiction
+      · have absent := ih motiveRun fv member
+        cases found : current.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+                currentRun motiveExtension found
+            rw [preserved] at absent
+            contradiction
+
+/-- Motive free variables selected from phase one are pairwise distinct. -/
+private theorem recInfoPhaseOneMotiveFVars_nodup
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (recInfoPhaseOneMotiveFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | @next dIdx current finalInfos finalContext recInfos step tail ih =>
+      have indexExtension :
+          current.LocalExtension step.indexContext :=
+        recInfoPhaseOneIndex_localExtension step
+      have indexRun : TypeChecker.CandidateLocalContextRun
+          step.indexContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          indexExtension
+      have majorRun : TypeChecker.CandidateLocalContextRun
+          step.majorContext := by
+        exact indexRun.push `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveRun : TypeChecker.CandidateLocalContextRun
+          step.motiveContext := by
+        exact majorRun.push step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      refine List.nodup_cons.mpr ⟨?_, ih motiveRun⟩
+      intro member
+      have absent := recInfoPhaseOneMotiveFVars_absent tail motiveRun
+        step.majorContext.freshFVarId member
+      have present : step.motiveContext.lctx.find?
+          step.majorContext.freshFVarId =
+          some (.cdecl step.majorContext.lctx.decls.size
+            step.majorContext.freshFVarId step.motiveName
+            (AddInductive.consumeTypeAnnotations step.motiveType)
+            .default .default) := by
+        simpa only [AddInductive.RecInfoPhaseOneStep.motiveContext] using
+          majorRun.push_findNew step.motiveName .default
+            (AddInductive.consumeTypeAnnotations step.motiveType)
+      rw [present] at absent
+      contradiction
+
+/-- Strict semantic translations of the motive declarations allocated by a
+phase-one trace.  The target list and compressed endpoint are indices, so a
+consumer cannot reorder, omit, or duplicate a family motive. -/
+private inductive RecInfoPhaseOneMotiveTranslationTrace
+    (env : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level) :
+    {dIdx : Nat} → {recInfos : Array AddInductive.RecInfo} →
+    {current : AddInductive.Context} →
+    {finalInfos : Array AddInductive.RecInfo} →
+    {finalContext : AddInductive.Context} →
+    AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos
+      current finalInfos finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {dIdx : Nat} {recInfos : Array AddInductive.RecInfo}
+      {current : AddInductive.Context}
+      (finished : ¬ dIdx < indTypes.size) (base : VLCtx) :
+      RecInfoPhaseOneMotiveTranslationTrace env Us stats indTypes elimLevel
+        (.done finished) base [] base
+  | next
+      {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+      {current finalContext : AddInductive.Context}
+      (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+        current)
+      (tail : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel
+        (dIdx + 1) (recInfos.push step.info) step.motiveContext finalInfos
+        finalContext)
+      {base : VLCtx} {target : VExpr} {targets : List VExpr}
+      {final : VLCtx}
+      (domainTr : TrExprS env Us base
+        (AddInductive.consumeTypeAnnotations step.motiveType) target)
+      (rest : RecInfoPhaseOneMotiveTranslationTrace env Us stats indTypes
+        elimLevel tail
+        ((some (step.majorContext.freshFVarId,
+          (AddInductive.consumeTypeAnnotations step.motiveType).fvarsList),
+          .vlam target) :: base) targets final) :
+      RecInfoPhaseOneMotiveTranslationTrace env Us stats indTypes elimLevel
+        (.next step tail) base (target :: targets) final
+
+/-- Erase phase-one semantic translations to the exact selected telescope
+consumed by `LocalContext.mkForall`.  Lookup preservation and target typing
+are derived respectively from the synthesis extension and `OnTel`. -/
+private theorem recInfoPhaseOneMotiveTranslation_selection
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext implementation : AddInductive.Context}
+    {trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoPhaseOneMotiveTranslationTrace env Us stats
+      indTypes elimLevel trace base types final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (endpointExtension : finalContext.LocalExtension implementation)
+    (typesOnTel : env.OnTel Us.length base.toCtx types) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (recInfoPhaseOneMotiveFVars trace) types final := by
+  induction translations with
+  | done => exact .nil
+  | @next dIdx recInfos finalInfos current finalContext step tail base target
+      targets final domainTr rest ih =>
+      rcases typesOnTel with ⟨targetType, targetsOnTel⟩
+      have indexExtension :
+          current.LocalExtension step.indexContext :=
+        recInfoPhaseOneIndex_localExtension step
+      have indexRun : TypeChecker.CandidateLocalContextRun
+          step.indexContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          indexExtension
+      have majorRun : TypeChecker.CandidateLocalContextRun
+          step.majorContext := by
+        exact indexRun.push `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveRun : TypeChecker.CandidateLocalContextRun
+          step.motiveContext := by
+        exact majorRun.push step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      have motiveToFinal : step.motiveContext.LocalExtension finalContext :=
+        recInfoPhaseOne_localExtension tail
+      have motiveToImplementation :
+          step.motiveContext.LocalExtension implementation :=
+        contextLocalExtension_trans motiveToFinal endpointExtension
+      have localFind : step.motiveContext.lctx.find?
+          step.majorContext.freshFVarId =
+          some (.cdecl step.majorContext.lctx.decls.size
+            step.majorContext.freshFVarId step.motiveName
+            (AddInductive.consumeTypeAnnotations step.motiveType)
+            .default .default) :=
+        by
+          simpa only [AddInductive.RecInfoPhaseOneStep.motiveContext] using
+            majorRun.push_findNew step.motiveName .default
+              (AddInductive.consumeTypeAnnotations step.motiveType)
+      have finalFind :=
+        TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+          motiveRun motiveToImplementation localFind
+      exact .cons finalFind domainTr targetType
+        (ih motiveRun endpointExtension targetsOnTel)
+
+/-- Package the retained phase-one motive inventory as one selected array.
+Only the strict per-family domain translations remain as semantic input. -/
+private def recInfoPhaseOneMotiveTranslation_arrayRun
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext implementation : AddInductive.Context}
+    {trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel dIdx
+      recInfos current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr} {sources : Array Expr}
+    (translations : RecInfoPhaseOneMotiveTranslationTrace env Us stats
+      indTypes elimLevel trace base types final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (endpointExtension : finalContext.LocalExtension implementation)
+    (typesOnTel : env.OnTel Us.length base.toCtx types)
+    (sourcesEq : sources.toList = trace.addedInfos.map (·.motive)) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us implementation.lctx base
+      sources types final where
+  fvars := recInfoPhaseOneMotiveFVars trace
+  selection := recInfoPhaseOneMotiveTranslation_selection translations
+    currentRun endpointExtension typesOnTel
+  sources_eq := sourcesEq.trans (recInfoPhaseOne_motiveSources trace)
+  nodup := recInfoPhaseOneMotiveFVars_nodup trace currentRun
+
+/-- The retained second synthesis phase is a push-only extension of its
+phase-one callback context. -/
+private theorem recInfoSynthesisPhaseTwo_localExtension
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {rootContext synthesisContext : AddInductive.Context}
+    {recInfos : Array AddInductive.RecInfo}
+    (trace : AddInductive.RecInfoSynthesisTrace stats indTypes elimLevel
+      rootContext recInfos synthesisContext) :
+    trace.phase1Context.LocalExtension synthesisContext := by
+  exact AddInductive.mkRecInfos.loopInd2_localExtension .refl trace.phase2Run
+    fun nextInfos nextContext extension callbackRun => by
+      have pairEq : (nextInfos, nextContext) =
+          (recInfos, synthesisContext) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = synthesisContext :=
+        congrArg Prod.snd pairEq
+      exact contextEq ▸ extension
+
 /-- The compressed endpoint selected for the emitted parameter array is the
 exact well-formed base of the generated motive telescope.  This connects the
 operational parameter phase to the constructor-end `BlockGenerationEnv`:
@@ -36005,6 +36338,86 @@ theorem
   rw [parameterContextEq, recursorArity]
   exact declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
     declarations.generationEnv.ord
+
+/-- Turn the retained phase-one trace and its strict per-family motive
+translations into the exact common motive selection consumed by every
+generated recursor telescope. -/
+private noncomputable def generatedRecursorMotiveSelection
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {context_lctx_eq : context.lctx = {}}
+    (support : produced.CanonicalFamilyAssemblySupport semantic
+      context_lctx_eq)
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (synthesis : ProducedBlockRecursorSynthesisRun produced)
+    {parameterContext motiveContext : VLCtx}
+    (parameters : TypeChecker.MLCtx.SelectedForall.ArrayRun
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      synthesis.synthesis.synthesisContext.lctx []
+      produced.execution.eliminationExecution.normalization.stats.params
+      generation.paramsTel parameterContext)
+    (phase1 : AddInductive.RecInfoPhaseOneTrace
+      produced.execution.eliminationExecution.normalization.stats
+      kernelSources.toArray
+      produced.execution.eliminationExecution.elimination.level 0 #[]
+      produced.execution.recursorContext
+      synthesis.synthesis.synthesisTrace.phase1Infos
+      synthesis.synthesis.synthesisTrace.phase1Context)
+    (translations : RecInfoPhaseOneMotiveTranslationTrace
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      produced.execution.eliminationExecution.normalization.stats
+      kernelSources.toArray
+      produced.execution.eliminationExecution.elimination.level phase1
+      parameterContext generation.generatedMotiveTypes motiveContext) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      synthesis.synthesis.synthesisContext.lctx parameterContext
+      (synthesis.synthesis.recInfos.map (·.motive))
+      generation.generatedMotiveTypes motiveContext := by
+  have rootRun : TypeChecker.CandidateLocalContextRun
+      produced.execution.recursorContext := by
+    exact ⟨support.basis.localState.localContext.wf,
+      support.basis.localState.localContext.reserves⟩
+  have endpointExtension :
+      synthesis.synthesis.synthesisTrace.phase1Context.LocalExtension
+        synthesis.synthesis.synthesisContext :=
+    recInfoSynthesisPhaseTwo_localExtension
+      synthesis.synthesis.synthesisTrace
+  have motiveTypesOnTel :=
+    produced.generatedRecursorMotiveTypes_onTel run staging parameters
+  have sourcesEq :
+      (synthesis.synthesis.recInfos.map (·.motive)).toList =
+        phase1.addedInfos.map (·.motive) := by
+    calc
+      (synthesis.synthesis.recInfos.map (·.motive)).toList =
+          (synthesis.synthesis.synthesisTrace.phase1Infos.map
+            (·.motive)).toList :=
+        congrArg Array.toList
+          synthesis.synthesis.synthesisTrace.motives_eq_phase1
+      _ = synthesis.synthesis.synthesisTrace.phase1Infos.toList.map
+          (·.motive) := Array.toList_map
+      _ = phase1.addedInfos.map (·.motive) := by
+        have infosEq :
+            synthesis.synthesis.synthesisTrace.phase1Infos.toList =
+              phase1.addedInfos := by
+          simpa using phase1.finalInfos_toList
+        exact congrArg _ infosEq
+  exact recInfoPhaseOneMotiveTranslation_arrayRun translations rootRun
+    endpointExtension motiveTypesOnTel sourcesEq
 
 /-- The generic singleton first-family owner constructs every family-side
 contract required by canonical checked-block assembly. -/
