@@ -5508,6 +5508,26 @@ theorem RecInfoPhaseOneTrace.of_run
     exact ⟨.done (by assumption)⟩
 termination_by indTypes.size - dIdx
 
+/-- Information records appended by a retained phase-one trace, in the same
+source order as the traversed kernel families. -/
+def RecInfoPhaseOneTrace.addedInfos :
+    RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos current
+      finalInfos finalContext → List RecInfo
+  | .done _ => []
+  | .next step tail => step.info :: tail.addedInfos
+
+/-- Phase one changes its incoming information array only by appending the
+source-ordered records exposed by `addedInfos`. -/
+theorem RecInfoPhaseOneTrace.finalInfos_toList
+    (trace : RecInfoPhaseOneTrace stats indTypes elimLevel dIdx recInfos
+      current finalInfos finalContext) :
+    finalInfos.toList = recInfos.toList ++ trace.addedInfos := by
+  induction trace with
+  | done => simp [RecInfoPhaseOneTrace.addedInfos]
+  | next step tail ih =>
+      rw [ih, Array.toList_push, List.append_assoc]
+      rfl
+
 /-- Exact boundary between the two operational halves of `mkRecInfos`.
 
 `loopInd1` creates every family index, major premise, and motive.  Only after
@@ -5617,6 +5637,57 @@ def nextInfos
   recInfos.modify dIdx fun info =>
     { info with minors := info.minors.push step.minor }
 
+private theorem map_modify_of_project_eq
+    (values : Array α) (index : Nat) (update : α → α)
+    (project : α → β) (preserved : ∀ value,
+      project (update value) = project value) :
+    (values.modify index update).map project = values.map project := by
+  rw [← Array.toList_inj]
+  simp only [Array.toList_map, Array.toList_modify]
+  apply List.ext_getElem?
+  intro current
+  simp only [List.getElem?_map, List.getElem?_modify]
+  by_cases selected : index = current
+  · simp only [selected, if_true]
+    cases valueAt : values.toList[current]? with
+    | none => rfl
+    | some value =>
+        change some (project (update value)) = some (project value)
+        exact congrArg some (preserved value)
+  · simp only [selected, if_false]
+    cases values.toList[current]? <;> rfl
+
+/-- Adding a constructor minor leaves the family motive inventory unchanged.
+This is the field-level invariant used to carry the phase-one motive
+telescope through the complete constructor traversal. -/
+theorem nextInfos_map_motive
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) :
+    step.nextInfos.map (·.motive) = recInfos.map (·.motive) := by
+  apply map_modify_of_project_eq
+  intro info
+  rfl
+
+/-- Constructor traversal also preserves every family index inventory
+selected by phase one. -/
+theorem nextInfos_map_indices
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) :
+    step.nextInfos.map (·.indices) = recInfos.map (·.indices) := by
+  apply map_modify_of_project_eq
+  intro info
+  rfl
+
+/-- Constructor traversal also preserves every family major premise selected
+by phase one. -/
+theorem nextInfos_map_major
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) :
+    step.nextInfos.map (·.major) = recInfos.map (·.major) := by
+  apply map_modify_of_project_eq
+  intro info
+  rfl
+
 end RecInfoConstructorStep
 
 /-- Complete source-ordered decomposition of one captured constructor-list
@@ -5710,6 +5781,36 @@ theorem RecInfoConstructorTrace.of_run
               obtain ⟨tail⟩ := ih tailRun
               exact ⟨.next step tail⟩
 
+/-- Traversing all constructors of one family changes only that family's
+minor array; the motive selected during phase one is preserved pointwise. -/
+theorem RecInfoConstructorTrace.map_motive_eq
+    (trace : RecInfoConstructorTrace stats indTypeName dIdx ctors recInfos
+      current finalInfos finalContext) :
+    finalInfos.map (·.motive) = recInfos.map (·.motive) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.nextInfos_map_motive
+
+/-- The family index arrays selected during phase one are stable throughout
+one family's constructor traversal. -/
+theorem RecInfoConstructorTrace.map_indices_eq
+    (trace : RecInfoConstructorTrace stats indTypeName dIdx ctors recInfos
+      current finalInfos finalContext) :
+    finalInfos.map (·.indices) = recInfos.map (·.indices) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.nextInfos_map_indices
+
+/-- The family major premises selected during phase one are stable throughout
+one family's constructor traversal. -/
+theorem RecInfoConstructorTrace.map_major_eq
+    (trace : RecInfoConstructorTrace stats indTypeName dIdx ctors recInfos
+      current finalInfos finalContext) :
+    finalInfos.map (·.major) = recInfos.map (·.major) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.nextInfos_map_major
+
 /-- One family step retained by the second half of recursor-info synthesis. -/
 structure RecInfoPhaseTwoStep
     (stats : InductiveStats) (indTypes : Array InductiveType)
@@ -5776,6 +5877,34 @@ theorem RecInfoPhaseTwoTrace.of_run
     exact ⟨.done (by assumption)⟩
 termination_by indTypes.size - dIdx
 
+/-- The complete second phase preserves the source-ordered motive array.
+Only the `minors` field of each `RecInfo` is extended. -/
+theorem RecInfoPhaseTwoTrace.map_motive_eq
+    (trace : RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext) :
+    finalInfos.map (·.motive) = recInfos.map (·.motive) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.constructors.map_motive_eq
+
+/-- The complete second phase preserves the family index arrays. -/
+theorem RecInfoPhaseTwoTrace.map_indices_eq
+    (trace : RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext) :
+    finalInfos.map (·.indices) = recInfos.map (·.indices) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.constructors.map_indices_eq
+
+/-- The complete second phase preserves the family major premises. -/
+theorem RecInfoPhaseTwoTrace.map_major_eq
+    (trace : RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext) :
+    finalInfos.map (·.major) = recInfos.map (·.major) := by
+  induction trace with
+  | done => rfl
+  | next step tail ih => exact ih.trans step.constructors.map_major_eq
+
 /-- Source-ordered family/constructor decomposition of the retained second
 phase. -/
 theorem RecInfoSynthesisTrace.phase2_trace
@@ -5784,6 +5913,68 @@ theorem RecInfoSynthesisTrace.phase2_trace
     Nonempty (RecInfoPhaseTwoTrace stats indTypes 0 trace.phase1Infos
       trace.phase1Context recInfos synthesisContext) :=
   RecInfoPhaseTwoTrace.of_run trace.phase2Run
+
+/-- The motive array used to assemble every emitted recursor is exactly the
+array allocated by the retained phase-one family traversal. -/
+theorem RecInfoSynthesisTrace.motives_eq_phase1
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    recInfos.map (·.motive) = trace.phase1Infos.map (·.motive) := by
+  obtain ⟨phase2⟩ := trace.phase2_trace
+  exact phase2.map_motive_eq
+
+/-- The final recursor inventory uses exactly the phase-one family indices. -/
+theorem RecInfoSynthesisTrace.indices_eq_phase1
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    recInfos.map (·.indices) = trace.phase1Infos.map (·.indices) := by
+  obtain ⟨phase2⟩ := trace.phase2_trace
+  exact phase2.map_indices_eq
+
+/-- The final recursor inventory uses exactly the phase-one major premises. -/
+theorem RecInfoSynthesisTrace.majors_eq_phase1
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    recInfos.map (·.major) = trace.phase1Infos.map (·.major) := by
+  obtain ⟨phase2⟩ := trace.phase2_trace
+  exact phase2.map_major_eq
+
+/-- One source-ordered phase-one trace simultaneously owns the motive,
+index, and major arrays consumed by every final generated recursor.  This is
+the operational handoff used by the family-wise semantic telescope loop. -/
+theorem RecInfoSynthesisTrace.phase1_inventory
+    (trace : RecInfoSynthesisTrace stats indTypes elimLevel rootContext
+      recInfos synthesisContext) :
+    ∃ phase1 : RecInfoPhaseOneTrace stats indTypes elimLevel 0 #[] rootContext
+        trace.phase1Infos trace.phase1Context,
+      (recInfos.map (·.motive)).toList =
+          phase1.addedInfos.map (·.motive) ∧
+        (recInfos.map (·.indices)).toList =
+          phase1.addedInfos.map (·.indices) ∧
+        (recInfos.map (·.major)).toList =
+          phase1.addedInfos.map (·.major) := by
+  obtain ⟨phase1⟩ := trace.phase1_trace
+  have infosEq : trace.phase1Infos.toList = phase1.addedInfos := by
+    simpa using phase1.finalInfos_toList
+  refine ⟨phase1, ?_, ?_, ?_⟩
+  · calc
+      (recInfos.map (·.motive)).toList =
+          (trace.phase1Infos.map (·.motive)).toList :=
+        congrArg Array.toList trace.motives_eq_phase1
+      _ = trace.phase1Infos.toList.map (·.motive) := Array.toList_map
+      _ = phase1.addedInfos.map (·.motive) := congrArg _ infosEq
+  · calc
+      (recInfos.map (·.indices)).toList =
+          (trace.phase1Infos.map (·.indices)).toList :=
+        congrArg Array.toList trace.indices_eq_phase1
+      _ = trace.phase1Infos.toList.map (·.indices) := Array.toList_map
+      _ = phase1.addedInfos.map (·.indices) := congrArg _ infosEq
+  · calc
+      (recInfos.map (·.major)).toList =
+          (trace.phase1Infos.map (·.major)).toList :=
+        congrArg Array.toList trace.majors_eq_phase1
+      _ = trace.phase1Infos.toList.map (·.major) := Array.toList_map
+      _ = phase1.addedInfos.map (·.major) := congrArg _ infosEq
 
 /-- The phase-one callback context is reached solely by local-declaration
 pushes from the recursor root. -/
