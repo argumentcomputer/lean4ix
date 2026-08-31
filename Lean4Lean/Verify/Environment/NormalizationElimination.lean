@@ -35952,6 +35952,60 @@ theorem
     VLCtx.instL, List.map_nil, BlockGenerationChecked.paramsTel,
     generatedParamsEq] using relevelled
 
+/-- The compressed endpoint selected for the emitted parameter array is the
+exact well-formed base of the generated motive telescope.  This connects the
+operational parameter phase to the constructor-end `BlockGenerationEnv`:
+subsequent phase-one steps only have to identify each selected host motive
+declaration, not re-establish Theory typing for the motive inventory. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.generatedRecursorMotiveTypes_onTel
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    {synthesis : ProducedBlockRecursorSynthesisRun produced}
+    {parameterContext : VLCtx}
+    (parameters : TypeChecker.MLCtx.SelectedForall.ArrayRun
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      synthesis.synthesis.synthesisContext.lctx []
+      produced.execution.eliminationExecution.normalization.stats.params
+      generation.paramsTel parameterContext) :
+    (run.declarationRun staging).constructors.ctorEnv.OnTel
+      produced.execution.recursors.levelParams.length parameterContext.toCtx
+      generation.generatedMotiveTypes := by
+  let declarations := run.declarationRun staging
+  let parameterShape :=
+    selectedForallArrayRun_candidateParameterContext parameters
+  have parameterContextEq : parameterContext.toCtx =
+      generation.paramsTel.reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using
+      VInductDecl.TypeChecker.CandidateParameterContext.toCtx parameterShape
+  have recursorLevels : produced.execution.recursors.levelParams =
+      produced.execution.eliminationExecution.recLevelParams := by
+    simpa only [AddInductive.NormalizationEliminationExecution.recLevelParams,
+      AddInductive.NormalizationRecursorExecution.recursorContext] using
+      AddInductive.declareRecursors_levelParams_eq
+        produced.execution.recursorsRun
+  have recursorArity : produced.execution.recursors.levelParams.length =
+      generation.recUvars := by
+    exact (congrArg List.length recursorLevels).trans <| by
+      simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+        run.elimination.recUvars_eq.symm
+  rw [parameterContextEq, recursorArity]
+  exact declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
+    declarations.generationEnv.ord
+
 /-- The generic singleton first-family owner constructs every family-side
 contract required by canonical checked-block assembly. -/
 noncomputable def
