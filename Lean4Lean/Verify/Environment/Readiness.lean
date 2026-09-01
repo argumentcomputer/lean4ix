@@ -57,6 +57,45 @@ theorem Environment.find?_of_add_structural
       subst ci <;> simp [Lean.ConstantInfo.ReadinessTransparent] at htransparent
   · exact hfind
 
+/-- Absence after a fresh insertion implies absence before it. -/
+theorem Environment.find?_eq_none_of_add
+    {env : Environment} (mapWF : env.constants.WF)
+    (ci : ConstantInfo) (hfresh : env.find? ci.name = none) {name : Name}
+    (hfind : (env.add ci).find? name = none) : env.find? name = none := by
+  rw [Environment.find?_add_eq mapWF ci hfresh name] at hfind
+  split at hfind
+  · contradiction
+  · exact hfind
+
+/-- A fresh ordinary insertion cannot create or alter recursor rules. -/
+theorem Environment.RecursorRulesReductionConstFree.add
+    {env : Environment} {name : Name}
+    (self : env.RecursorRulesReductionConstFree name)
+    (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci) :
+    (env.add ci).RecursorRulesReductionConstFree name := by
+  intro recursorName recursor hfind rule hrule
+  exact self recursorName recursor
+    (Environment.find?_of_add_structural mapWF hfresh htransparent
+      (.inr (.inr ⟨recursor, rfl⟩)) hfind)
+    rule hrule
+
+/-- Closing every old recursor payload over absent host names survives one
+fresh ordinary insertion. -/
+theorem Environment.recursorRulesClosed_add
+    {env : Environment} (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci)
+    (self : ∀ {name}, env.find? name = none →
+      env.RecursorRulesReductionConstFree name) :
+    ∀ {name}, (env.add ci).find? name = none →
+      (env.add ci).RecursorRulesReductionConstFree name := by
+  intro name hfind
+  exact Environment.RecursorRulesReductionConstFree.add
+    (self (Environment.find?_eq_none_of_add mapWF ci hfresh hfind))
+    mapWF hfresh htransparent
+
 /-- Inserting fresh family metadata does not change projection readiness for
 any other family.  At dependency names the new entry has inductive kind, so it
 cannot masquerade as the constructor or recursor required by the test. -/
@@ -1625,5 +1664,48 @@ theorem Readiness.addDefs
       (by simp [Lean.ConstantInfo.ReadinessTransparent]) hle wf' projection eta
     simpa only [List.foldl_cons] using
       ih mapWF' hfresh' hnd.2 VEnv.LE.rfl current.1 current.2
+
+/-- Closing old recursor payloads over absent names survives a fresh block of
+ordinary definitions. -/
+theorem Environment.recursorRulesClosed_addDefs :
+    ∀ {env : Environment} {vs : List DefinitionVal},
+    env.constants.WF →
+    (∀ v ∈ vs, env.find? v.name = none) →
+    (vs.map (·.name)).Nodup →
+    (∀ {name}, env.find? name = none →
+      env.RecursorRulesReductionConstFree name) →
+    ∀ {name},
+      (vs.foldl (fun e v => e.add (.defnInfo v)) env).find? name = none →
+      Environment.RecursorRulesReductionConstFree
+        (vs.foldl (fun e v => e.add (.defnInfo v)) env) name
+  | _, [], _, _, _, self => by simpa using self
+  | env, v :: vs, mapWF, hfresh, hnd, self => by
+    rw [List.map_cons, List.nodup_cons] at hnd
+    have hvFresh := hfresh v (.head _)
+    have hvFresh' : env.find? (ConstantInfo.defnInfo v).name = none := by
+      simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using hvFresh
+    have hnMap : env.constants.find? v.name = none := by
+      rw [← mapWF.find?'_eq_find?]
+      exact hvFresh
+    have mapWF' : (env.add (.defnInfo v)).constants.WF := by
+      change (env.constants.insert v.name (.defnInfo v)).WF
+      exact mapWF.insert _ _ hnMap
+    have hfresh' : ∀ w ∈ vs,
+        (env.add (.defnInfo v)).find? w.name = none := by
+      intro w hw
+      rw [Environment.find?_add_eq mapWF (.defnInfo v) hvFresh', if_neg]
+      · exact hfresh w (.tail _ hw)
+      · intro heq
+        simp only [ConstantInfo.name, ConstantInfo.toConstantVal] at heq
+        apply hnd.1
+        rw [heq]
+        exact List.mem_map.2 ⟨w, hw, rfl⟩
+    have current : ∀ {name},
+        (env.add (.defnInfo v)).find? name = none →
+        (env.add (.defnInfo v)).RecursorRulesReductionConstFree name :=
+      Environment.recursorRulesClosed_add mapWF hvFresh'
+        (by simp [Lean.ConstantInfo.ReadinessTransparent]) self
+    simpa only [List.foldl_cons] using
+      Environment.recursorRulesClosed_addDefs mapWF' hfresh' hnd.2 current
 
 end Lean4Lean

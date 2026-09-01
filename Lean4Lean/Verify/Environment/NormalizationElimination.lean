@@ -1259,24 +1259,6 @@ end AddInductive
 
 /-! ## Block-family occurrence transport -/
 
-/-- Kernel-expression support relevant to reduction.  Projection syntax
-stores a structure annotation, but `whnf` selects a constructor only from the
-major expression, so the annotation is deliberately not classified as a
-constant occurrence here.  Binder types and let payloads remain visible
-because reduction can reach them after substitution. -/
-def _root_.Lean.Expr.ReductionConstFree (name : Name) : Expr → Prop
-  | .const constant _ => constant ≠ name
-  | .app function argument =>
-      function.ReductionConstFree name ∧ argument.ReductionConstFree name
-  | .lam _ domain body _ | .forallE _ domain body _ =>
-      domain.ReductionConstFree name ∧ body.ReductionConstFree name
-  | .letE _ type value body _ =>
-      type.ReductionConstFree name ∧ value.ReductionConstFree name ∧
-        body.ReductionConstFree name
-  | .mdata _ expression | .proj _ _ expression =>
-      expression.ReductionConstFree name
-  | _ => True
-
 /-- If a reduction-safe expression has a constant application head, that
 head is not the excluded name. -/
 theorem _root_.Lean.Expr.ReductionConstFree.constName_ne_of_getAppFn_eq
@@ -1307,16 +1289,6 @@ def VInductDecl.BlockReductionConstFree
     expression.ReductionConstFree raw.name) ∧
   (∀ raw ∈ source.blockConstructorConstants,
     expression.ReductionConstFree raw.name)
-
-/-- Every rule carried by an implementation recursor is reduction-safe for
-one name.  `TrConstVal` intentionally models only a constant header, so this
-operational payload invariant is stated separately rather than smuggled into
-header translation. -/
-def _root_.Lean.Kernel.Environment.RecursorRulesReductionConstFree
-    (environment : Environment) (name : Name) : Prop :=
-  ∀ recursorName recursor,
-    environment.find? recursorName = some (.recInfo recursor) →
-      ∀ rule ∈ recursor.rules, rule.rhs.ReductionConstFree name
 
 /-- Pointwise recursor-rule support for all names introduced by one mutual
 block. -/

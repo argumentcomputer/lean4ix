@@ -13,6 +13,34 @@ namespace Lean4Lean
 open Lean hiding Environment Exception
 open Kernel
 
+/-- Kernel-expression support relevant to reduction.  Projection syntax
+stores a structure annotation, but `whnf` selects a constructor only from the
+major expression, so the annotation is deliberately not classified as a
+constant occurrence here.  Binder types and let payloads remain visible
+because reduction can reach them after substitution. -/
+def _root_.Lean.Expr.ReductionConstFree (name : Name) : Expr → Prop
+  | .const constant _ => constant ≠ name
+  | .app function argument =>
+      function.ReductionConstFree name ∧ argument.ReductionConstFree name
+  | .lam _ domain body _ | .forallE _ domain body _ =>
+      domain.ReductionConstFree name ∧ body.ReductionConstFree name
+  | .letE _ type value body _ =>
+      type.ReductionConstFree name ∧ value.ReductionConstFree name ∧
+        body.ReductionConstFree name
+  | .mdata _ expression | .proj _ _ expression =>
+      expression.ReductionConstFree name
+  | _ => True
+
+/-- Every rule carried by an implementation recursor is reduction-safe for
+one name.  `TrConstVal` intentionally models only a constant header, so this
+operational payload invariant is stated separately rather than smuggled into
+header translation. -/
+def _root_.Lean.Kernel.Environment.RecursorRulesReductionConstFree
+    (environment : Environment) (name : Name) : Prop :=
+  ∀ recursorName recursor,
+    environment.find? recursorName = some (.recInfo recursor) →
+      ∀ rule ∈ recursor.rules, rule.rhs.ReductionConstFree name
+
 structure VEnvs where
   venv : DefinitionSafety → VEnv
 
