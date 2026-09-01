@@ -40970,8 +40970,7 @@ private theorem loopArgs1_parameterSuffix_of_candidate
                           bodyStored.1
               cases trace with
               | done notForall =>
-                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
-                    Expr.forallE.injEq] at sourceEq
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf] at sourceEq
                   have impossible : true = false := by
                     calc
                       true = (Expr.forallE candidateName candidateDomain
@@ -46296,8 +46295,7 @@ private theorem loopCtorArgs_parameterSuffix_of_candidate
                   Nat.succ_lt_succ_iff] using strict
               cases trace with
               | done notForall =>
-                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
-                    Expr.forallE.injEq] at sourceEq
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf] at sourceEq
                   have impossible : true = false := by
                     calc
                       true = (Expr.forallE candidateName candidateDomain
@@ -47114,6 +47112,651 @@ private theorem candidateConstructorAnnotationSpine_fieldTranslations
     annotation.validation_annotations terminalWF henv primitives
     parameterBound domainsLength parameterSources parameterTel phaseRoot
     countEq whnfFuel candidateDepth
+
+/-! #### Minor telescope arithmetic
+
+The Theory minor of a constructor, exposed at its position inside the
+flattened minor inventory.  Every earlier minor sits between the motives and
+the constructor fields, so the minor at position `i` is the constructor
+minor whose motive depth is `familyCount + i`. -/
+
+/-- One constructor minor with an explicit motive depth. -/
+private def generatedMinorTypeAt {source : VInductDecl}
+    (generation : BlockGenerationChecked source) (d : Nat)
+    (constructor : NormalizedBlockCtor) : VExpr :=
+  let Bs := generation.generatedFieldsR constructor
+  let m := Bs.length
+  let rs := constructor.ctor.recArgsR source.uvars generation.elimination
+  let r := rs.length
+  VExpr.forallN (VExpr.liftTelN d Bs 0)
+    (VExpr.forallN (BlockGenerationChecked.blockIHsFromRecArgs d m rs 0)
+      (VExpr.appN (.bvar (d - 1 - constructor.owner + m + r))
+        ((constructor.ctor.resultIndicesR source.uvars generation.elimination
+            |>.map fun e => (e.liftN d m).liftN r) ++
+          [VExpr.appN (.const constructor.ctor.raw.name generation.sourceLevels)
+            (VExpr.bvarRevRange (r + m + d) source.nparams ++
+              VExpr.bvarRevRange r m)])))
+
+/-- The Theory minor is the explicit-depth minor at the family count. -/
+private theorem generatedMinorType_eq_at {source : VInductDecl}
+    (generation : BlockGenerationChecked source)
+    (constructor : NormalizedBlockCtor) :
+    generation.generatedMinorType constructor =
+      generatedMinorTypeAt generation generation.familyCount constructor :=
+  rfl
+
+/-- Telescope lifts commute when the outer cutoff lies below the inner one,
+exactly as `VExpr.liftN'_comm`. -/
+private theorem liftTelN_comm (n1 n2 : Nat) :
+    ∀ (tel : List VExpr) (k1 k2 : Nat), k2 ≤ k1 →
+      VExpr.liftTelN n2 (VExpr.liftTelN n1 tel k1) k2 =
+        VExpr.liftTelN n1 (VExpr.liftTelN n2 tel k2) (n2 + k1)
+  | [], _, _, _ => rfl
+  | A :: tel, k1, k2, h => by
+      show (A.liftN n1 k1).liftN n2 k2 :: _ =
+        (A.liftN n2 k2).liftN n1 (n2 + k1) :: _
+      rw [VExpr.liftN'_comm A n1 n2 k1 k2 h,
+        liftTelN_comm n1 n2 tel (k1 + 1) (k2 + 1) (Nat.succ_le_succ h)]
+      rfl
+
+/-- Lifting past ambient binders inserted below an outer lift deepens only
+that outer lift. -/
+private theorem liftN_liftN_comm_zero (e : VExpr) (d r i m : Nat) :
+    ((e.liftN d m).liftN r).liftN i (m + r) = (e.liftN (d + i) m).liftN r := by
+  rw [Nat.add_comm m r, ← VExpr.liftN'_comm (e.liftN d m) i r m 0 (Nat.zero_le _),
+    VExpr.liftN'_liftN_hi]
+
+/-- Lifting the binders of one mutual induction hypothesis past ambient
+binders inserted below the fields deepens only the shared-parameter shift. -/
+private theorem blockMinorBinders_liftN (d m p i : Nat) (r : RecArg)
+    (fieldBound : r.fieldIndex ≤ m) :
+    VExpr.liftTelN i (BlockGenerationChecked.blockMinorBinders d m p r)
+        (m + p) =
+      BlockGenerationChecked.blockMinorBinders (d + i) m p r := by
+  unfold BlockGenerationChecked.blockMinorBinders
+  have cut : m + p = (m - r.fieldIndex + p) + r.fieldIndex := by omega
+  rw [cut, ← liftTelN_comm i (m - r.fieldIndex + p)
+    (VExpr.liftTelN d r.binders r.fieldIndex) r.fieldIndex 0 (Nat.zero_le _),
+    VExpr.liftTelN_liftTelN]
+
+/-- Lifting one mutual induction hypothesis past ambient binders inserted
+below the fields deepens only its motive depth. -/
+private theorem blockMinorIH_liftN (d m p i : Nat) (r : RecArg)
+    (fieldBound : r.fieldIndex < m) (targetBound : r.targetType < d) :
+    (BlockGenerationChecked.blockMinorIH d m p r).liftN i (m + p) =
+      BlockGenerationChecked.blockMinorIH (d + i) m p r := by
+  simp only [BlockGenerationChecked.blockMinorIH, VExpr.liftN_forallN]
+  rw [blockMinorBinders_liftN d m p i r (Nat.le_of_lt fieldBound)]
+  rw [show (BlockGenerationChecked.blockMinorBinders d m p r).length =
+      r.binders.length by
+    simp [BlockGenerationChecked.blockMinorBinders, VExpr.liftTelN_length]]
+  apply congrArg (VExpr.forallN _)
+  rw [VExpr.liftN_appN, List.map_append, List.map_map]
+  show VExpr.appN _ (_ ++ [_]) = VExpr.appN _ (_ ++ [_])
+  congr 1
+  · simp only [VExpr.liftN]
+    rw [liftVar_le (by omega)]
+    congr 1
+    omega
+  · congr 1
+    · apply List.map_congr_left
+      intro e _
+      simp only [Function.comp_apply]
+      have cut : m + p + r.binders.length =
+          (m - r.fieldIndex + p) + (r.fieldIndex + r.binders.length) := by
+        omega
+      rw [cut, ← VExpr.liftN'_comm _ i (m - r.fieldIndex + p)
+        (r.fieldIndex + r.binders.length) r.binders.length (by omega),
+        VExpr.liftN'_liftN_hi]
+    · congr 1
+      simp only [VExpr.liftN_appN, VExpr.liftN]
+      rw [liftVar_lt (by omega),
+        VExpr.bvarRevRange_liftN_high _ _ _ _ (by omega)]
+
+/-- Lifting the complete induction-hypothesis telescope of one minor past
+ambient binders inserted below the fields deepens only its motive depth. -/
+private theorem blockIHsFromRecArgs_liftTelN (d m i : Nat) :
+    ∀ (rs : List RecArg) (p : Nat),
+      (∀ r ∈ rs, r.fieldIndex < m ∧ r.targetType < d) →
+      VExpr.liftTelN i (BlockGenerationChecked.blockIHsFromRecArgs d m rs p)
+          (m + p) =
+        BlockGenerationChecked.blockIHsFromRecArgs (d + i) m rs p
+  | [], _, _ => rfl
+  | r :: rs, p, bounds => by
+      show (BlockGenerationChecked.blockMinorIH d m p r).liftN i (m + p) ::
+          VExpr.liftTelN i
+            (BlockGenerationChecked.blockIHsFromRecArgs d m rs (p + 1))
+            (m + p + 1) =
+        BlockGenerationChecked.blockMinorIH (d + i) m p r ::
+          BlockGenerationChecked.blockIHsFromRecArgs (d + i) m rs (p + 1)
+      rw [blockMinorIH_liftN d m p i r (bounds r (.head _)).1
+        (bounds r (.head _)).2,
+        show m + p + 1 = m + (p + 1) from rfl,
+        blockIHsFromRecArgs_liftTelN d m i rs (p + 1)
+          (fun r' member => bounds r' (.tail _ member))]
+
+/-- Lifting an explicit-depth minor past `i` ambient binders inserted
+between the motives and the fields is the same minor at depth `d + i`. -/
+private theorem generatedMinorTypeAt_liftN {source : VInductDecl}
+    (generation : BlockGenerationChecked source) (d i : Nat)
+    (constructor : NormalizedBlockCtor)
+    (ownerBound : constructor.owner < d)
+    (recursiveBounds : ∀ r ∈ constructor.ctor.recArgsR source.uvars
+        generation.elimination,
+      r.fieldIndex < (generation.generatedFieldsR constructor).length ∧
+        r.targetType < d) :
+    (generatedMinorTypeAt generation d constructor).liftN i =
+      generatedMinorTypeAt generation (d + i) constructor := by
+  have ihLift := blockIHsFromRecArgs_liftTelN d
+    (generation.generatedFieldsR constructor).length i
+    (constructor.ctor.recArgsR source.uvars generation.elimination) 0
+    recursiveBounds
+  rw [Nat.add_zero] at ihLift
+  unfold generatedMinorTypeAt
+  simp only [VExpr.liftN_forallN, VExpr.liftTelN_liftTelN,
+    VExpr.liftTelN_length, Nat.zero_add,
+    BlockGenerationChecked.blockIHsFromRecArgs_length, ihLift]
+  apply congrArg (VExpr.forallN _)
+  apply congrArg (VExpr.forallN _)
+  rw [VExpr.liftN_appN, List.map_append, List.map_map]
+  show VExpr.appN _ (_ ++ [_]) = VExpr.appN _ (_ ++ [_])
+  congr 1
+  · simp only [VExpr.liftN]
+    rw [liftVar_le (by omega)]
+    congr 1
+    omega
+  · congr 1
+    · apply List.map_congr_left
+      intro e _
+      simp only [Function.comp_apply]
+      exact liftN_liftN_comm_zero e _ _ _ _
+    · congr 1
+      simp only [VExpr.liftN_appN, VExpr.liftN, List.map_append]
+      rw [bvarRevRange_liftN_ge _ _ _ _ (by omega),
+        VExpr.bvarRevRange_liftN_high _ _ _ _ (by omega)]
+      congr 3
+      omega
+
+/-! #### Constructor application and minor telescope translations -/
+
+/-- Annotation consumption is inert on any free-variable-headed application
+spine. -/
+private theorem consumeTypeAnnotations_of_getAppFn_fvar
+    {e : Expr} {fv : FVarId} (head : e.getAppFn = .fvar fv) :
+    AddInductive.consumeTypeAnnotations e = e := by
+  unfold AddInductive.consumeTypeAnnotations
+  split
+  · rename_i innerName innerLevels type defaultValue
+    have reduced : (Expr.app (.app (.const innerName innerLevels) type)
+        defaultValue).getAppFn = .const innerName innerLevels := rfl
+    rw [reduced] at head
+    cases head
+  · rename_i innerName innerLevels type
+    have reduced : (Expr.app (.const innerName innerLevels) type).getAppFn =
+        .const innerName innerLevels := rfl
+    rw [reduced] at head
+    cases head
+  · rfl
+
+/-- Strict translation of the constructor application assembled by one
+retained constructor step, from the translations of its constant head, the
+shared parameters, and its field locals. -/
+private theorem recInfoConstructorStep_constructorApplicationTranslation
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    {context : VLCtx} (contextWF : VLCtx.WF env Us.length context)
+    {head : VExpr} {parameterTargets fieldTargets : List VExpr}
+    (headTr : TrExprS env Us context (.const ctor.name stats.levels) head)
+    (parametersTr : List.Forall₂ (TrExprS env Us context)
+      stats.params.toList parameterTargets)
+    (fieldsTr : List.Forall₂ (TrExprS env Us context)
+      step.constructorArgs.toList fieldTargets)
+    (applicationWF : VExpr.WF env Us.length context.toCtx
+      (VExpr.appN head (parameterTargets ++ fieldTargets))) :
+    TrExprS env Us context step.constructorApplication
+      (VExpr.appN head (parameterTargets ++ fieldTargets)) := by
+  have argumentsTr : List.Forall₂ (TrExprS env Us context)
+      (stats.params.toList ++ step.constructorArgs.toList)
+      (parameterTargets ++ fieldTargets) :=
+    Lean4Lean.List.Forall₂.append parametersTr fieldsTr
+  have applicationTr := TrExprS.mkAppList_of_wf henv contextWF headTr
+    argumentsTr applicationWF
+  rw [AddInductive.RecInfoConstructorStep.constructorApplication]
+  simp only [Lean.mkAppN]
+  rw [← Array.foldl_toList, ← Array.foldl_toList]
+  change TrExprS env Us context
+    (List.foldl Expr.app
+      (List.foldl Expr.app (.const ctor.name stats.levels)
+        stats.params.toList)
+      step.constructorArgs.toList)
+    (VExpr.appN head (parameterTargets ++ fieldTargets))
+  rw [← Expr.mkAppList_eq_foldl, ← Expr.mkAppList_eq_foldl]
+  simpa only [Expr.mkAppList_append] using applicationTr
+
+/-- Strict translation of the motive application concluding one retained
+constructor step, from the translations of the target motive, its index
+spine, and the constructor application. -/
+private theorem recInfoConstructorStep_motiveApplicationTranslation
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    {context : VLCtx} (contextWF : VLCtx.WF env Us.length context)
+    {motive : VExpr} {indexTargets : List VExpr} {application : VExpr}
+    (motiveTr : TrExprS env Us context recInfos[step.targetIndex]!.motive
+      motive)
+    (indicesTr : List.Forall₂ (TrExprS env Us context)
+      step.targetIndices.toList indexTargets)
+    (applicationTr : TrExprS env Us context step.constructorApplication
+      application)
+    (bodyWF : VExpr.WF env Us.length context.toCtx
+      (VExpr.appN motive (indexTargets ++ [application]))) :
+    TrExprS env Us context step.motiveApplication
+      (VExpr.appN motive (indexTargets ++ [application])) := by
+  have argumentsTr : List.Forall₂ (TrExprS env Us context)
+      (step.targetIndices.toList ++ [step.constructorApplication])
+      (indexTargets ++ [application]) :=
+    Lean4Lean.List.Forall₂.append indicesTr (.cons applicationTr .nil)
+  have applied := TrExprS.mkAppList_of_wf henv contextWF motiveTr
+    argumentsTr bodyWF
+  rw [AddInductive.RecInfoConstructorStep.motiveApplication]
+  simp only [Lean.mkAppN]
+  rw [← Array.foldl_toList]
+  change TrExprS env Us context
+    (Expr.app
+      (List.foldl Expr.app recInfos[step.targetIndex]!.motive
+        step.targetIndices.toList)
+      step.constructorApplication)
+    (VExpr.appN motive (indexTargets ++ [application]))
+  rw [← Expr.mkAppList_eq_foldl]
+  simpa only [Expr.mkAppList_append, Expr.mkAppList] using applied
+
+/-- Once the field and induction-hypothesis declarations of one constructor
+step have been selected, the minor type is two structural `mkForall` calls
+around the translated motive application. -/
+private theorem recInfoConstructorStep_minorTranslation
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    {base fieldContext hypothesisContext : VLCtx}
+    {fieldTypes hypothesisTypes : List VExpr}
+    (fields : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
+      step.hypothesisContext.lctx base step.constructorArgs fieldTypes
+      fieldContext)
+    (hypotheses : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
+      step.hypothesisContext.lctx fieldContext step.hypotheses
+      hypothesisTypes hypothesisContext)
+    {body : VExpr}
+    (bodyTr : TrExprS env Us hypothesisContext step.motiveApplication body)
+    (bodyIsType : env.IsType Us.length hypothesisContext.toCtx body)
+    (bodyConsumed : AddInductive.consumeTypeAnnotations
+      step.motiveApplication = step.motiveApplication)
+    (baseNoBV : base.NoBV) :
+    TrExprS env Us base (AddInductive.consumeTypeAnnotations step.minorType)
+      (VExpr.forallN fieldTypes (VExpr.forallN hypothesisTypes body)) := by
+  have fieldNoBV := fields.final_noBV baseNoBV
+  obtain ⟨hypothesisTelTr, hypothesisTelType⟩ :=
+    hypotheses.mkForall_trS fieldNoBV bodyTr bodyIsType
+  have hypothesesConsumed := selectedForallArrayRun_consumeMkForall
+    hypotheses fieldNoBV bodyTr bodyConsumed
+  obtain ⟨fieldTelTr, _fieldTelType⟩ :=
+    fields.mkForall_trS baseNoBV hypothesisTelTr hypothesisTelType
+  have consumedMinor := selectedForallArrayRun_consumeMkForall fields
+    baseNoBV hypothesisTelTr hypothesesConsumed
+  rw [AddInductive.RecInfoConstructorStep.minorType, consumedMinor]
+  exact fieldTelTr
+
+/-! #### Induction-hypothesis telescope of one constructor traversal
+
+`loopU` pushes one hypothesis declaration per recursive argument.  The
+hypothesis inventory and its strict translations mirror the field layer;
+the hypothesis types themselves are supplied per step, since they embed
+normalization observations of the recursive-argument types. -/
+
+/-- Source-order free variables allocated by a retained `loopU`
+decomposition. -/
+private def loopUFVars :
+    AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current finalV
+      finalContext → List FVarId
+  | .done _ => []
+  | .step (current := current) _ _ _ tail =>
+      current.freshFVarId :: loopUFVars tail
+
+/-- The final hypothesis array retained by `loopU` is its incoming array
+followed by exactly the fresh variables of its steps. -/
+private theorem loopU_sources
+    (trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext) :
+    finalV.toList = v.toList ++ (loopUFVars trace).map Expr.fvar := by
+  induction trace with
+  | done => simp [loopUFVars]
+  | step inBounds hypothesisType hypothesisRun tail ih =>
+      rw [ih, Array.toList_push]
+      simp only [loopUFVars, List.map_cons]
+      rw [List.append_assoc]
+      rfl
+
+/-- A retained `loopU` decomposition reaches its final context solely by the
+recorded hypothesis pushes. -/
+private theorem loopUTrace_localExtension
+    (trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done => exact .refl
+  | @step i current finalV finalContext v inBounds hypothesisType
+      hypothesisRun tail ih =>
+      exact contextLocalExtension_trans
+        (.push .refl _ .default
+          (AddInductive.consumeTypeAnnotations hypothesisType)) ih
+
+/-- Every hypothesis variable is fresh for the reader context in which its
+`loopU` traversal starts. -/
+private theorem loopUFVars_absent
+    (trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ loopUFVars trace, current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | @step i current finalV finalContext v inBounds hypothesisType
+      hypothesisRun tail ih =>
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact currentRun.fresh
+      · have pushedRun := currentRun.push ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+          (AddInductive.consumeTypeAnnotations hypothesisType)
+        have absent := ih pushedRun fv member
+        cases found : current.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved := currentRun.push_findOld ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+              (AddInductive.consumeTypeAnnotations hypothesisType) found
+            rw [preserved] at absent
+            contradiction
+
+/-- The fresh variables accumulated by `loopU` are pairwise distinct. -/
+private theorem loopUFVars_nodup
+    (trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (loopUFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | @step i current finalV finalContext v inBounds hypothesisType
+      hypothesisRun tail ih =>
+      have pushedRun := currentRun.push ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+        (AddInductive.consumeTypeAnnotations hypothesisType)
+      refine List.nodup_cons.mpr ⟨?_, ih pushedRun⟩
+      intro member
+      have absent := loopUFVars_absent tail pushedRun current.freshFVarId
+        member
+      have present := currentRun.push_findNew ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+        (AddInductive.consumeTypeAnnotations hypothesisType)
+      rw [present] at absent
+      contradiction
+
+/-- Strict semantic translations of the hypothesis declarations pushed by a
+retained `loopU` decomposition.  Each step supplies the translation of its
+own hypothesis type; the compressed contexts are threaded exactly as the
+operational pushes. -/
+private inductive LoopUTranslationTrace
+    (env : VEnv) (Us : List Name) (stats : AddInductive.InductiveStats)
+    (u : Array Expr) (recInfos : Array AddInductive.RecInfo) :
+    {i : Nat} → {v : Array Expr} → {current : AddInductive.Context} →
+    {finalV : Array Expr} → {finalContext : AddInductive.Context} →
+    AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current finalV
+      finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+      (finished : ¬ i < u.size) (base : VLCtx) :
+      LoopUTranslationTrace env Us stats u recInfos
+        (AddInductive.mkRecInfos.LoopUTrace.done (i := i) (v := v)
+          (current := current) finished) base [] base
+  | step
+      {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+      {finalV : Array Expr} {finalContext : AddInductive.Context}
+      (inBounds : i < u.size)
+      (hypothesisType : Expr)
+      (hypothesisRun :
+        AddInductive.mkRecInfos.loopUArgs u[i] (fun uiType xs =>
+          ReaderT.bind Lean.getLCtx fun implementationLCtx =>
+            pure (implementationLCtx.mkForall xs <|
+              .app
+                (Lean.mkAppN
+                  recInfos[(AddInductive.getIIndices stats uiType).fst]!.motive
+                  (AddInductive.getIIndices stats uiType).snd)
+                (Lean.mkAppN u[i] xs))) current = .ok hypothesisType)
+      (tail : AddInductive.mkRecInfos.LoopUTrace stats u recInfos (i + 1)
+        (v.push current.freshExpr)
+        (current.pushLocalDecl
+          ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+          .default (AddInductive.consumeTypeAnnotations hypothesisType))
+        finalV finalContext)
+      {base final : VLCtx} {target : VExpr} {targets : List VExpr}
+      (hypothesisTr : TrExprS env Us base
+        (AddInductive.consumeTypeAnnotations hypothesisType) target)
+      (hypothesisIsType : env.IsType Us.length base.toCtx target)
+      (rest : LoopUTranslationTrace env Us stats u recInfos tail
+        ((some (current.freshFVarId,
+            (AddInductive.consumeTypeAnnotations hypothesisType).fvarsList),
+          .vlam target) :: base) targets final) :
+      LoopUTranslationTrace env Us stats u recInfos
+        (AddInductive.mkRecInfos.LoopUTrace.step inBounds hypothesisType
+          hypothesisRun tail) base (target :: targets) final
+
+/-- Erase a translated `loopU` decomposition to the exact selected
+hypothesis telescope consumed by `LocalContext.mkForall` at any push-only
+extension of its final context. -/
+private theorem loopUTranslation_selection
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (loopUFVars trace) targets final := by
+  induction translations with
+  | done => exact .nil
+  | @step i v current finalV finalContext inBounds hypothesisType
+      hypothesisRun tail base final target targets hypothesisTr
+      hypothesisIsType rest ih =>
+      have pushedRun := currentRun.push
+        ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+        (AddInductive.consumeTypeAnnotations hypothesisType)
+      have localFind := currentRun.push_findNew
+        ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+        (AddInductive.consumeTypeAnnotations hypothesisType)
+      have pushedToImplementation :
+          (current.pushLocalDecl
+            ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+            .default
+            (AddInductive.consumeTypeAnnotations hypothesisType)).LocalExtension
+              implementation :=
+        contextLocalExtension_trans (loopUTrace_localExtension tail)
+          endpointExtension
+      have finalFind :=
+        TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+          pushedRun pushedToImplementation localFind
+      exact .cons finalFind hypothesisTr hypothesisIsType
+        (ih pushedRun endpointExtension)
+
+/-- Package a translated hypothesis decomposition as the exact selected
+array of hypotheses emitted by its retained run. -/
+private def loopUTranslation_arrayRun
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i #[]
+      current finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us implementation.lctx base
+      finalV targets final where
+  fvars := loopUFVars trace
+  selection := loopUTranslation_selection translations currentRun
+    endpointExtension
+  sources_eq := by
+    simpa using loopU_sources trace
+  nodup := loopUFVars_nodup trace currentRun
+
+/-- The compressed endpoint of a translated hypothesis traversal binds
+exactly the allocated hypothesis variables above the base. -/
+private theorem loopUTranslation_final_fvars
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final) :
+    final.fvars = (loopUFVars trace).reverse ++ base.fvars := by
+  induction translations with
+  | done => simp [loopUFVars]
+  | @step i v current finalV finalContext inBounds hypothesisType
+      hypothesisRun tail base final target targets hypothesisTr
+      hypothesisIsType rest ih =>
+      rw [ih]
+      simp only [loopUFVars, VLCtx.fvars_cons_some, List.reverse_cons,
+        List.append_assoc, List.singleton_append]
+
+/-- A translated hypothesis traversal preserves the lambda-only compressed
+context shape. -/
+private theorem loopUTranslation_final_fvarLamOnly
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final)
+    (baseShape : base.FVarLamOnly) : final.FVarLamOnly := by
+  induction translations with
+  | done => exact baseShape
+  | step inBounds hypothesisType hypothesisRun tail hypothesisTr
+      hypothesisIsType rest ih =>
+      exact ih (.cons baseShape)
+
+/-- The compressed endpoint of a translated hypothesis traversal is well
+formed whenever its base is, its hypothesis variables are fresh for the
+operational reader context, and every base variable is declared there. -/
+private theorem loopUTranslation_final_wf
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseWF : VLCtx.WF env Us.length base)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    VLCtx.WF env Us.length final := by
+  induction translations with
+  | done => exact baseWF
+  | @step i v current finalV finalContext inBounds hypothesisType
+      hypothesisRun tail base final target targets hypothesisTr
+      hypothesisIsType rest ih =>
+      have fresh : current.freshFVarId ∉ base.fvars :=
+        compressedFVars_fresh currentRun baseFound
+      have depsSubset :
+          (AddInductive.consumeTypeAnnotations hypothesisType).fvarsList ⊆
+            base.fvars :=
+        hypothesisTr.fvarsList
+      have nextWF : VLCtx.WF env Us.length
+          ((some (current.freshFVarId,
+              (AddInductive.consumeTypeAnnotations hypothesisType).fvarsList),
+            .vlam target) :: base) := by
+        refine ⟨baseWF, ?_, hypothesisIsType⟩
+        intro fv foundDeps equality
+        cases equality
+        exact ⟨fresh, depsSubset⟩
+      exact ih
+        (currentRun.push ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih") .default
+          (AddInductive.consumeTypeAnnotations hypothesisType))
+        nextWF
+        (compressedFVars_push currentRun baseFound _ .default
+          (AddInductive.consumeTypeAnnotations hypothesisType) _ target)
+
+/-- A translated hypothesis traversal produces exactly one semantic target
+per allocated hypothesis variable. -/
+private theorem loopUTranslation_targets_length
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final) :
+    (loopUFVars trace).length = targets.length := by
+  induction translations with
+  | done => rfl
+  | step inBounds hypothesisType hypothesisRun tail hypothesisTr
+      hypothesisIsType rest ih =>
+      simpa only [loopUFVars, List.length_cons] using congrArg Nat.succ ih
+
+/-- The compressed endpoint of a translated hypothesis traversal extends the
+base Theory context by exactly the reversed target telescope. -/
+private theorem loopUTranslation_final_toCtx
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final) :
+    final.toCtx = targets.reverse ++ base.toCtx := by
+  induction translations with
+  | done => rfl
+  | @step i v current finalV finalContext inBounds hypothesisType
+      hypothesisRun tail base final target targets hypothesisTr
+      hypothesisIsType rest ih =>
+      rw [ih]
+      show targets.reverse ++ (target :: base.toCtx) = _
+      simp only [List.reverse_cons, List.append_assoc,
+        List.singleton_append]
 
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
