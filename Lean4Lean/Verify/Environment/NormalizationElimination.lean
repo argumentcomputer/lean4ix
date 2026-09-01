@@ -44241,6 +44241,523 @@ private theorem singletonMotiveInputList_of_head
               cases shapesTail
               exact ⟨.cons head .nil⟩
 
+/-- Any family's normalized view is pointwise equal to its generic
+annotation-consumed parameter prefix.  This is the family-generic form of
+`FirstFamilyAnnotationSpine.storedViewParameterTelescopeDefEq`: the raw/view
+alignment comes from the annotation's own retained recursive spine run, so
+no staging machinery beyond the annotation owner is consumed. -/
+private theorem candidateBlockFamilyAnnotationSpine_storedViewTel
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    (henv : VEnv.WF env)
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+    {shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root}
+    (annotation : CandidateBlockFamilyAnnotationSpine source env blockEnv Us
+      root shape)
+    (parameterBound : source.nparams ≤
+      candidate.familyType.type.trace.spineLength) :
+    TypeChecker.TelDefEqEvidence env Us.length []
+      (annotation.storedBinders.take source.nparams)
+      (VExpr.telN source.nparams root.type.view) := by
+  have rawBound : source.nparams ≤
+      (VInductDecl.ctorFields raw.type).length := by
+    rw [← shape.spineLength_eq_ctorFields]
+    exact parameterBound
+  have rawStored := annotation.telescope.take source.nparams
+  rw [telN_take_of_le raw.type rawBound] at rawStored
+  obtain ⟨_resultType, fullView⟩ :=
+    annotation.recursive.spineEvidence shape.storedSpine
+  have rawView := fullView.telescope.take source.nparams
+  rw [telN_take_of_le raw.type parameterBound,
+    telN_take_of_le root.type.view parameterBound] at rawView
+  exact (rawStored.symm henv trivial).trans henv trivial rawView
+
+/-- Construct one recorded motive-input package per family by walking the
+generic annotation spine list of a block.
+
+All family-local facts are derived from the walked per-family evidence: the
+annotation entry itself, the validator's per-family annotation provenance
+(context and terminal sort), the per-family view-parameter telescope, and
+the generation shape.  The positional inputs over the full source lists
+carry the head-constant inventory, the generated-index tie, the recorded
+index-count agreement, and the annotation-builder name exclusions. -/
+private theorem phaseOneFamilyMotiveInputList_ofAnnotations
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {generation : BlockGenerationChecked source}
+    {parameterTypes : List VExpr} {whnfFuel : Nat}
+    {rootContext blockContext : AddInductive.Context}
+    (blockDepth : blockContext.fuel.recDepth = whnfFuel + 1)
+    (paramsSize : stats.params.size = source.nparams)
+    {firstView : VExpr}
+    (storedCanonical : TypeChecker.TelDefEqEvidence env Us.length []
+      parameterTypes (VExpr.telN source.nparams firstView))
+    {firstContext : AddInductive.Context} {firstSource' : Expr}
+    (firstTrace : AddInductive.CandidateExprTrace firstContext firstSource')
+    (firstNgen : firstContext.ngen = blockContext.ngen)
+    (firstBound : source.nparams ≤ firstTrace.spineLength)
+    (firstParams : stats.params.toList =
+      firstTrace.parameterList source.nparams)
+    {kernelFull : List InductiveType} {rawsFull : List VInductiveType}
+    {surfacesFull : List (List VExpr)}
+    (rawNames : rawsFull.map (·.name) = kernelFull.map (·.name))
+    (headConsts : ∀ (i : Nat) (raw' : VInductiveType),
+      rawsFull[i]? = some raw' →
+      stats.indConsts[i]? = some (Expr.const raw'.name stats.levels))
+    (surfaceEq : ∀ (i : Nat) (family : NormalizedFamily),
+      generation.families[i]? = some family →
+      surfacesFull[i]? = some (generation.generatedIndices family))
+    (rawParamsLen : ∀ family ∈ generation.families,
+      (VExpr.telN source.nparams family.raw.type).length = source.nparams)
+    (notOptParam : ∀ kernelSource ∈ kernelFull,
+      kernelSource.name ≠ ``optParam)
+    (notAutoParam : ∀ kernelSource ∈ kernelFull,
+      kernelSource.name ≠ ``autoParam)
+    (notOutParam : ∀ kernelSource ∈ kernelFull,
+      kernelSource.name ≠ ``outParam)
+    (notSemiOutParam : ∀ kernelSource ∈ kernelFull,
+      kernelSource.name ≠ ``semiOutParam)
+    (countEq : ∀ (dIdx : Nat) {current : AddInductive.Context},
+      rootContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel
+          dIdx current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext)
+        (raw' : VInductiveType), rawsFull[dIdx]? = some raw' →
+        (loopArgs1IndexFVars argsTrace).length =
+          (VInductDecl.ctorFields raw'.type).length - source.nparams)
+    {kernelSuffix : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSuffix}
+    {rawsSuffix : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      rawsSuffix}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    (annotations : CandidateBlockFamilyAnnotationSpineList source env
+      blockEnv Us roots shapes)
+    (validations : CandidateFamilyValidationAnnotationList blockContext
+      candidates)
+    (parameterDefEqs : CandidateBlockFamilyViewParameterDefEqList env
+      blockEnv Us source.nparams firstView roots)
+    {dIdx : Nat} {familiesSuffix : List NormalizedFamily}
+    (kernelAlign : kernelFull.drop dIdx = kernelSuffix)
+    (rawsAlign : rawsFull.drop dIdx = rawsSuffix)
+    (famDrop : generation.families.drop dIdx = familiesSuffix)
+    (famRaw : rawsSuffix = familiesSuffix.map (·.raw))
+    (surfacesAlign : surfacesFull.drop dIdx =
+      annotations.generatedIndexSurfaces) :
+    Nonempty (PhaseOneFamilyMotiveInputList source env blockEnv Us stats
+      indTypes elimLevel generation parameterTypes whnfFuel rootContext
+      shapes dIdx) := by
+  induction annotations generalizing dIdx familiesSuffix with
+  | nil => exact ⟨.nil⟩
+  | @cons kernelSource candidate raw root shape remainingSources
+      candidatesTail rawsTail rootsTail shapesTail ann annTail ih =>
+      cases validations with
+      | cons headVal contextEq resultLevel terminalEq tailVal =>
+      cases parameterDefEqs with
+      | cons headDefEq tailDefEq =>
+      cases familiesSuffix with
+      | nil => simp at famRaw
+      | cons familyHead famRest =>
+      simp only [List.map_cons, List.cons.injEq] at famRaw
+      obtain ⟨rawHeadEq, famRawTail⟩ := famRaw
+      subst rawHeadEq
+      -- positional facts at the head ordinal
+      have rawsAt : rawsFull[dIdx]? = some familyHead.raw := by
+        have head0 : (rawsFull.drop dIdx)[0]? = some familyHead.raw := by
+          rw [rawsAlign]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have kernelAt : kernelFull[dIdx]? = some kernelSource := by
+        have head0 : (kernelFull.drop dIdx)[0]? = some kernelSource := by
+          rw [kernelAlign]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have familiesAt : generation.families[dIdx]? = some familyHead := by
+        have head0 : (generation.families.drop dIdx)[0]? =
+            some familyHead := by
+          rw [famDrop]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have familyMem : familyHead ∈ generation.families :=
+        List.mem_of_getElem? familiesAt
+      have kernelMem : kernelSource ∈ kernelFull :=
+        List.mem_of_getElem? kernelAt
+      have surfaceAt : surfacesFull[dIdx]? =
+          some (ann.storedBinders.drop source.nparams) := by
+        have head0 : (surfacesFull.drop dIdx)[0]? =
+            some (ann.storedBinders.drop source.nparams) := by
+          rw [surfacesAlign]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have rawNameEq : familyHead.raw.name = kernelSource.name := by
+        have rawsNameAt : (rawsFull.map (·.name))[dIdx]? =
+            some familyHead.raw.name := by
+          simp only [List.getElem?_map, rawsAt, Option.map_some]
+        have kernelNameAt : (kernelFull.map (·.name))[dIdx]? =
+            some kernelSource.name := by
+          simp only [List.getElem?_map, kernelAt, Option.map_some]
+        rw [rawNames] at rawsNameAt
+        exact Option.some.inj (rawsNameAt.symm.trans kernelNameAt)
+      -- family-local facts
+      have parameterBound' : source.nparams ≤
+          candidate.familyType.type.trace.spineLength := by
+        rw [shape.spineLength_eq]
+        rw [List.length_append, rawParamsLen familyHead familyMem]
+        omega
+      have parameterBound : stats.params.size ≤
+          candidate.familyType.type.trace.spineLength := by
+        rw [paramsSize]
+        exact parameterBound'
+      have parameterSources :
+          stats.params.toList =
+            candidate.familyType.type.trace.parameterList
+              stats.params.size := by
+        rw [paramsSize, firstParams]
+        exact AddInductive.CandidateExprTrace.parameterList_eq_of_ngen_eq
+          firstTrace candidate.familyType.type.trace
+          (by rw [firstNgen, ← contextEq]) firstBound parameterBound'
+      have parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+          parameterTypes
+          (ann.storedBinders.take stats.params.size) := by
+        rw [paramsSize]
+        have viewTel := candidateBlockFamilyAnnotationSpine_storedViewTel
+          henv ann parameterBound'
+        have canonicalToView := storedCanonical.trans henv trivial headDefEq
+        exact canonicalToView.trans henv trivial
+          (viewTel.symm henv trivial)
+      have candidateDepth :
+          candidate.familyType.type.context.fuel.recDepth = whnfFuel + 1 := by
+        rw [contextEq]
+        exact blockDepth
+      have headConstEq : stats.indConsts[dIdx]? =
+          some (.const familyHead.raw.name stats.levels) :=
+        headConsts dIdx familyHead.raw rawsAt
+      have indicesEq : ∀ family, generation.families[dIdx]? = some family →
+          generation.generatedIndices family =
+            ann.storedBinders.drop stats.params.size := by
+        intro family famAt
+        have familyEq : family = familyHead :=
+          Option.some.inj (famAt.symm.trans familiesAt)
+        subst familyEq
+        have surfaceValue := surfaceEq dIdx family familiesAt
+        rw [surfaceAt] at surfaceValue
+        rw [paramsSize]
+        exact (Option.some.inj surfaceValue).symm
+      have countEq' : ∀ {current : AddInductive.Context},
+          rootContext.LocalExtension current →
+          ∀ (step : AddInductive.RecInfoPhaseOneStep stats indTypes
+              elimLevel dIdx current)
+            (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace stats
+              step.normalizedType 0 #[] current.fuel.inductiveFuel current
+              step.indices step.indexContext),
+            (loopArgs1IndexFVars argsTrace).length =
+              (ann.storedBinders.drop stats.params.size).length := by
+        intro current extension step argsTrace
+        rw [List.length_drop, ann.stored_length, paramsSize]
+        exact countEq dIdx extension step argsTrace familyHead.raw rawsAt
+      -- tail alignments
+      have kernelAlign' : kernelFull.drop (dIdx + 1) = remainingSources := by
+        have dropSucc : kernelFull.drop (dIdx + 1) =
+            (kernelFull.drop dIdx).drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, kernelAlign]
+        rfl
+      have rawsAlign' : rawsFull.drop (dIdx + 1) = rawsTail := by
+        have dropSucc : rawsFull.drop (dIdx + 1) =
+            (rawsFull.drop dIdx).drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, rawsAlign]
+        rfl
+      have famDrop' : generation.families.drop (dIdx + 1) = famRest := by
+        have dropSucc : generation.families.drop (dIdx + 1) =
+            (generation.families.drop dIdx).drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, famDrop]
+        rfl
+      have surfacesAlign' : surfacesFull.drop (dIdx + 1) =
+          annTail.generatedIndexSurfaces := by
+        have dropSucc : surfacesFull.drop (dIdx + 1) =
+            (surfacesFull.drop dIdx).drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, surfacesAlign]
+        rfl
+      obtain ⟨tailPackages⟩ := ih tailVal tailDefEq kernelAlign' rawsAlign'
+        famDrop' famRawTail surfacesAlign'
+      exact ⟨.cons
+        { annotation := ann
+          resultLevel := resultLevel
+          terminalEq := terminalEq
+          parameterBound := parameterBound
+          parameterSources := parameterSources
+          parameterTel := parameterTel
+          candidateDepth := candidateDepth
+          headConstEq := headConstEq
+          rawNameEq := rawNameEq
+          indicesEq := indicesEq
+          countEq := countEq'
+          notOptParam := notOptParam kernelSource kernelMem
+          notAutoParam := notAutoParam kernelSource kernelMem
+          notOutParam := notOutParam kernelSource kernelMem
+          notSemiOutParam := notSemiOutParam kernelSource kernelMem }
+        tailPackages⟩
+
+/-- Construct the complete per-family motive input package list of a
+nonempty block from its canonical family assembly support.
+
+The recorded premises are: the first-family parameter identification (the
+final validator statistics name the head candidate's exact parameter
+allocation — dischargeable by a later-family statistics-preservation walk
+over the outer comparison trace), the generated-index surface tie, the
+positional index-count agreements, and the annotation-builder name
+exclusions.  Every family-local input is derived by walking the support's
+own annotation, validation-provenance, and parameter-telescope lists. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.motiveInputPackages
+    {source : VInductDecl} {firstSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: laterSources) numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {context_lctx_eq : context.lctx = {}}
+    (support : produced.CanonicalFamilyAssemblySupport semantic
+      context_lctx_eq)
+    {generation : BlockGenerationChecked source}
+    {whnfFuel : Nat}
+    (validationDepth :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
+        whnfFuel + 1)
+    (firstParams :
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
+        produced.candidate.families.head.familyType.type.trace.parameterList
+          source.nparams)
+    (surfaceEq : ∀ (i : Nat) (family : NormalizedFamily),
+      generation.families[i]? = some family →
+      support.annotations.generatedIndexSurfaces[i]? =
+        some (generation.generatedIndices family))
+    (countEq : ∀ (dIdx : Nat) {current : AddInductive.Context},
+      produced.execution.recursorContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep
+          produced.execution.eliminationExecution.normalization.stats
+          (firstSource :: laterSources).toArray
+          produced.execution.eliminationExecution.elimination.level dIdx
+          current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
+          produced.execution.eliminationExecution.normalization.stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext)
+        (raw' : VInductiveType), source.types[dIdx]? = some raw' →
+        (loopArgs1IndexFVars argsTrace).length =
+          (VInductDecl.ctorFields raw'.type).length - source.nparams)
+    (notOptParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``optParam)
+    (notAutoParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``autoParam)
+    (notOutParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``outParam)
+    (notSemiOutParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``semiOutParam) :
+    Nonempty (PhaseOneFamilyMotiveInputList source env blockEnv Us
+      produced.execution.eliminationExecution.normalization.stats
+      (firstSource :: laterSources).toArray
+      produced.execution.eliminationExecution.elimination.level
+      generation support.basis.storedTypes whnfFuel
+      produced.execution.recursorContext support.generationShapes 0) := by
+  classical
+  have henv : VEnv.WF env := by
+    simpa only [support.basis.contextRun.venv_eq] using
+      support.basis.contextRun.candidate.context.Ewf
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  have familyRun :=
+    produced.execution.eliminationExecution.normalization.familyValidationResult_run
+      normalizationProduced
+  -- validator per-family provenance for the complete candidate list
+  have validations : CandidateFamilyValidationAnnotationList
+      { context with lctx := {} } produced.candidate.families := by
+    have familyTypesProduced :=
+      produced.execution.eliminationExecution.normalization.familyTypes.produced
+    rw [← produced.execution.eliminationExecution.normalization.families.produced.familyTypes_eq]
+      at familyTypesProduced
+    have terminals :=
+      produced.execution.eliminationExecution.normalization.familyTerminals
+    rw [← produced.execution.eliminationExecution.normalization.families.produced.familyTypes_eq]
+      at terminals
+    exact CandidateFamilyValidationAnnotationList.ofProduced
+      produced.execution.eliminationExecution.normalization.families.candidates
+      familyTypesProduced terminals
+  -- checker fuel at the shared producer context
+  have validationFuel :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel =
+        context.fuel := by
+    have compRes :
+        (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+          normalizationProduced produced.kernelSources_nonempty).result =
+          produced.execution.eliminationExecution.normalization.familyValidationResult :=
+      AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
+        (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
+          normalizationProduced produced.kernelSources_nonempty)
+    have fuelEq :=
+      (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+        normalizationProduced
+        produced.kernelSources_nonempty).result_fuel
+    rw [compRes] at fuelEq
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using fuelEq
+  have blockDepth :
+      ({ context with lctx := {} } : AddInductive.Context).fuel.recDepth =
+        whnfFuel + 1 := by
+    show context.fuel.recDepth = whnfFuel + 1
+    rw [← validationFuel]
+    exact validationDepth
+  -- canonical parameter telescope against the first normalized view
+  have storedCanonical : TypeChecker.TelDefEqEvidence env Us.length []
+      support.basis.storedTypes
+      (VExpr.telN source.nparams support.firstView) := by
+    rw [← support.params_eq]
+    exact support.basis.storedCanonical
+  -- first-candidate reference for the shared parameter allocation
+  have firstNgen :
+      produced.candidate.families.head.familyType.type.context.ngen =
+        ({ context with lctx := {} } : AddInductive.Context).ngen := by
+    exact congrArg AddInductive.Context.ngen validations.head_context_eq
+  have rawParamsLen : ∀ family ∈ generation.families,
+      (VExpr.telN source.nparams family.raw.type).length =
+        source.nparams := by
+    intro family familyMem
+    exact (generation.shape.2.2.2.2 family familyMem).2.2.1
+  have famRaw : source.types = generation.families.map (·.raw) :=
+    generation.families_map_raw.symm
+  have rawNames : source.types.map (·.name) =
+      (firstSource :: laterSources).map (·.name) :=
+    semantic.families.rawHeaderNames.1
+  have headConsts : ∀ (i : Nat) (raw' : VInductiveType),
+      source.types[i]? = some raw' →
+      produced.execution.eliminationExecution.normalization.stats.indConsts[i]? =
+        some (Expr.const raw'.name
+          produced.execution.eliminationExecution.normalization.stats.levels) := by
+    intro i raw' rawAt
+    have inventory :=
+      CandidateBlockFamilySemanticListRun.rawFamilyConstantInventory
+        semantic.families produced.kernelSources_nonempty familyRun i raw'
+        rawAt
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using inventory
+  have firstBound : source.nparams ≤
+      produced.candidate.families.head.familyType.type.trace.spineLength := by
+    obtain ⟨owner⟩ := produced.semanticFirstFamilyAnnotationSpine semantic
+    exact owner.nparams_le_spineLength context_lctx_eq
+  exact phaseOneFamilyMotiveInputList_ofAnnotations henv blockDepth
+    support.basis.params_size storedCanonical
+    produced.candidate.families.head.familyType.type.trace firstNgen
+    firstBound firstParams rawNames headConsts surfaceEq rawParamsLen
+    notOptParam notAutoParam notOutParam notSemiOutParam countEq
+    support.annotations validations support.parameterDefEqs
+    (by simp) (by simp) (by simp) famRaw (by simp [List.drop_zero])
+
+/-- Construct the five-phase parameter and motive selections of any
+nonempty mutual block directly from its canonical family assembly support.
+
+This composes the per-family package walk with the mutual fold.  The
+recorded premises are the generation-tie equations, the first-family
+parameter identification, the positional index-count agreements, and the
+annotation-builder name exclusions; every family-local staging input is
+derived internally. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.generatedRecursorMotivePhaseOfRecorded
+    {source : VInductDecl} {firstSource : InductiveType}
+    {laterSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source
+      (firstSource :: laterSources) numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {context_lctx_eq : context.lctx = {}}
+    (support : produced.CanonicalFamilyAssemblySupport semantic
+      context_lctx_eq)
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (synthesis : ProducedBlockRecursorSynthesisRun produced)
+    (generatedParamsEq : generation.generatedParams =
+      support.basis.storedTypes)
+    {whnfFuel : Nat}
+    (validationDepth :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
+        whnfFuel + 1)
+    (firstParams :
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
+        produced.candidate.families.head.familyType.type.trace.parameterList
+          source.nparams)
+    (surfaceEq : ∀ (i : Nat) (family : NormalizedFamily),
+      generation.families[i]? = some family →
+      support.annotations.generatedIndexSurfaces[i]? =
+        some (generation.generatedIndices family))
+    (countEq : ∀ (dIdx : Nat) {current : AddInductive.Context},
+      produced.execution.recursorContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep
+          produced.execution.eliminationExecution.normalization.stats
+          (firstSource :: laterSources).toArray
+          produced.execution.eliminationExecution.elimination.level dIdx
+          current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
+          produced.execution.eliminationExecution.normalization.stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext)
+        (raw' : VInductiveType), source.types[dIdx]? = some raw' →
+        (loopArgs1IndexFVars argsTrace).length =
+          (VInductDecl.ctorFields raw'.type).length - source.nparams)
+    (notOptParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``optParam)
+    (notAutoParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``autoParam)
+    (notOutParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``outParam)
+    (notSemiOutParam : ∀ kernelSource ∈ firstSource :: laterSources,
+      kernelSource.name ≠ ``semiOutParam) :
+    Nonempty (Σ' (parameterContext : VLCtx)
+      (_ : TypeChecker.MLCtx.SelectedForall.ArrayRun
+        (run.declarationRun staging).constructors.ctorEnv
+        produced.execution.recursors.levelParams
+        synthesis.synthesis.synthesisContext.lctx []
+        produced.execution.eliminationExecution.normalization.stats.params
+        generation.paramsTel parameterContext)
+      (motiveContext : VLCtx),
+      TypeChecker.MLCtx.SelectedForall.ArrayRun
+        (run.declarationRun staging).constructors.ctorEnv
+        produced.execution.recursors.levelParams
+        synthesis.synthesis.synthesisContext.lctx parameterContext
+        (synthesis.synthesis.recInfos.map (·.motive))
+        generation.generatedMotiveTypes motiveContext) := by
+  obtain ⟨packages⟩ := support.motiveInputPackages validationDepth
+    firstParams surfaceEq countEq notOptParam notAutoParam notOutParam
+    notSemiOutParam
+  exact support.generatedRecursorMotivePhase run staging synthesis
+    generatedParamsEq validationDepth packages
+
 /-- Construct the first-family motive input package of a singleton block
 from the generic annotation owner.  The recorded premises are the
 index-count agreement, taken at any local extension of the retained
