@@ -1309,6 +1309,24 @@ def VInductDecl.BlockReductionPayloadFree
   (∀ raw ∈ source.blockConstructorConstants,
     environment.ReductionPayloadFree raw.name)
 
+/-- A constructor selected from an inductive payload cannot be a name which
+that payload is known not to mention. -/
+theorem _root_.Lean.Kernel.Environment.InductiveCtorNamesFree.ne_of_getFirstCtor_eq
+    {environment : Environment} {name family constructor : Name}
+    (safe : environment.InductiveCtorNamesFree name)
+    (selected : getFirstCtor environment family = some constructor) :
+    constructor ≠ name := by
+  cases found : environment.find? family with
+  | none => simp [getFirstCtor, found] at selected
+  | some info =>
+      cases info with
+      | inductInfo value =>
+          have member : constructor ∈ value.ctors := by
+            cases constructors : value.ctors <;>
+              simp_all [getFirstCtor]
+          exact safe family value found constructor member
+      | _ => simp_all [getFirstCtor]
+
 /-- Block reduction support is pointwise structural across applications. -/
 theorem VInductDecl.BlockReductionConstFree.app_iff
     {source : VInductDecl} {function argument : Expr} :
@@ -31488,6 +31506,61 @@ theorem ProducedBlockSemanticDeclarationRun.mkNullaryCtor_eq
   | const name levels =>
       simp only
       rw [declarations.getFirstCtor_eq pre familySafe constructorSafe head]
+  | _ => rfl
+
+/-- Structure eta expansion is unchanged across family/constructor staging
+when its type excludes the fresh block and the validation environment's old
+inductive payloads cannot name any member of that block. -/
+theorem ProducedBlockSemanticDeclarationRun.expandEtaStruct_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (payloadSafe : source.BlockReductionPayloadFree
+      produced.execution.normalization.validationContext.env)
+    (eType e : Expr)
+    (familySafe : ∀ raw ∈ source.blockTypeConstants,
+      eType.ReductionConstFree raw.name)
+    (constructorSafe : ∀ raw ∈ source.blockConstructorConstants,
+      eType.ReductionConstFree raw.name) :
+    expandEtaStruct produced.execution.constructorEnv eType e =
+      expandEtaStruct
+        produced.execution.normalization.validationContext.env eType e := by
+  unfold expandEtaStruct
+  simp only [Expr.withApp_eq]
+  cases head : eType.getAppFn with
+  | const family levels =>
+      simp only
+      rw [declarations.getFirstCtor_eq pre familySafe constructorSafe head]
+      cases selected : getFirstCtor
+          produced.execution.normalization.validationContext.env family with
+      | none => rfl
+      | some constructor =>
+          simp only
+          have familyFresh : ∀ raw ∈ source.blockTypeConstants,
+              raw.name ≠ constructor := by
+            intro raw member
+            exact (payloadSafe.1 raw member).1.ne_of_getFirstCtor_eq
+              selected |>.symm
+          have constructorFresh :
+              ∀ raw ∈ source.blockConstructorConstants,
+                raw.name ≠ constructor := by
+            intro raw member
+            exact (payloadSafe.2 raw member).1.ne_of_getFirstCtor_eq
+              selected |>.symm
+          rw [declarations.find?_eq_of_name_ne pre familyFresh
+            constructorFresh]
   | _ => rfl
 
 /-- Constructor-application recognition is unchanged for an expression
