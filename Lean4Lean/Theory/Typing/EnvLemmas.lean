@@ -109,6 +109,28 @@ theorem VEnv.exists_addConsts {env : VEnv} : ∀ {cis : List VDefVal},
       have : ci.name ≠ c.name := fun h => hnd.1 (List.mem_map.2 ⟨c, hc, h.symm⟩)
       simp [this, hfresh c (.tail _ hc)]
 
+/-- A source-ordered block of constant headers can be inserted whenever all
+of its names are initially fresh and pairwise distinct. -/
+theorem VEnv.exists_constFold {env : VEnv} : ∀ {cis : List VConstVal},
+    (∀ ci ∈ cis, env.constants ci.name = none) →
+      (cis.map (·.name)).Nodup →
+        ∃ env', cis.foldlM
+          (fun env ci => env.addConst ci.name ci.toVConstant) env = some env'
+  | [], _, _ => ⟨_, rfl⟩
+  | ci :: cis, hfresh, hnd => by
+    obtain ⟨env₁, h₁⟩ :=
+      VEnv.addConst_eq_none (ci := ci.toVConstant) (hfresh _ (.head _))
+    rw [List.map_cons, List.nodup_cons] at hnd
+    obtain ⟨env₂, h₂⟩ := VEnv.exists_constFold
+      (env := env₁) (cis := cis) (fun c hc => by
+        rw [VEnv.addConst_constants_eq h₁]
+        have hne : ci.name ≠ c.name := fun h =>
+          hnd.1 (List.mem_map.2 ⟨c, hc, h.symm⟩)
+        simp [hne, hfresh c (.tail _ hc)]) hnd.2
+    exact ⟨env₂, by
+      simp only [List.foldlM_cons, h₁]
+      exact h₂⟩
+
 theorem VEnv.addConsts_congr {env : VEnv} : ∀ {cis cis' : List VDefVal},
     List.Forall₂ (fun a b => a.toVConstVal = b.toVConstVal) cis cis' →
     env.addConsts cis = env.addConsts cis'

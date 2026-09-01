@@ -2,6 +2,7 @@ import Lean4Lean.Verify.Environment.Normalization
 import Lean4Lean.Verify.Environment.ConstructorValidation
 import Lean4Lean.Verify.Environment.Elimination
 import Lean4Lean.Verify.Environment.Lemmas
+import Lean4Lean.Verify.Environment.Readiness
 import Lean4Lean.Theory.Typing.InductiveCertificate
 import Lean4Lean.Environment
 
@@ -31923,6 +31924,519 @@ theorem ProducedBlockSemanticEliminationRun.recursorNames
   rw [← List.forall₂_eq, List.forall₂_map_left_iff,
     List.forall₂_map_right_iff] at namesEq
   exact namesEq
+
+/-- Every semantic generated recursor name is still absent at the retained
+host constructor boundary.  The name is aligned positionally with the
+subsequent host recursor fold, whose exact `checkName` trace supplies the
+freshness observation. -/
+theorem ProducedBlockSemanticDeclarationRun.generatedRecursor_name_absent
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    {raw : VConstVal} (member : raw ∈ generation.recursors) :
+    produced.execution.eliminationExecution.constructorEnv.find? raw.name =
+      none := by
+  obtain ⟨offset, rawAt⟩ := List.mem_iff_getElem?.1 member
+  obtain ⟨info, infoAt, nameEq⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_right run.recursorNames rawAt
+  have infoMember : info ∈ produced.execution.recursors.infos :=
+    List.mem_iff_getElem?.2 ⟨offset, infoAt⟩
+  have initialMapWF :
+      produced.execution.recursors.initialEnv.constants.WF := by
+    rw [produced.execution.recursor_initialEnv_eq]
+    exact declarations.constructors.addCtors.map_wf
+      declarations.families.trenv.map_wf
+  have hostFresh := produced.execution.recursors.trace.names_fresh
+    initialMapWF info infoMember
+  rw [produced.execution.recursor_initialEnv_eq] at hostFresh
+  have constructorMapWF :
+      produced.execution.eliminationExecution.constructorEnv.constants.WF := by
+    simpa only [produced.execution.recursor_initialEnv_eq] using initialMapWF
+  change produced.execution.eliminationExecution.constructorEnv.constants.find?'
+    raw.name = none
+  rw [constructorMapWF.find?'_eq_find?]
+  simpa only [nameEq] using hostFresh
+
+/-- Complete the producer-owned Theory block independently of the host
+recursor declaration phase.
+
+The family and constructor folds are the exact semantic interpretations of
+the retained host prefix.  Generated recursor names are fresh at that prefix
+because the subsequent host declaration trace checked them there, and
+environment alignment reflects that freshness into Theory.  Consequently the
+semantic recursor/rule suffix can be constructed before its host types have
+been translated.  This completed Theory environment is useful for verifying
+operations performed at the incomplete host constructor boundary: in
+particular, newly visible constructor heads already have genuine inductive
+provenance on the Theory side. -/
+theorem ProducedBlockSemanticDeclarationRun.semanticCompletion
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run) :
+    ∃ completedEnv,
+      env.addInductBlockGeneration generation = some completedEnv ∧
+        declarations.constructors.ctorEnv ≤ completedEnv := by
+  have constructorMapWF :
+      produced.execution.recursors.initialEnv.constants.WF := by
+    rw [produced.execution.recursor_initialEnv_eq]
+    exact declarations.constructors.addCtors.map_wf
+      declarations.families.trenv.map_wf
+  have recursorFresh : ∀ raw ∈ generation.recursors,
+      declarations.constructors.ctorEnv.constants raw.name = none := by
+    intro raw rawMember
+    obtain ⟨offset, rawAt⟩ := List.mem_iff_getElem?.1 rawMember
+    obtain ⟨info, infoAt, nameEq⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_right run.recursorNames rawAt
+    have infoMember : info ∈ produced.execution.recursors.infos :=
+      List.mem_iff_getElem?.2 ⟨offset, infoAt⟩
+    have hostFresh := produced.execution.recursors.trace.names_fresh
+      constructorMapWF info infoMember
+    rw [produced.execution.recursor_initialEnv_eq] at hostFresh
+    have hostFreshRaw :
+        produced.execution.eliminationExecution.constructorEnv.constants.find?
+          raw.name = none := by
+      simpa only [nameEq] using hostFresh
+    cases theoryFound :
+        declarations.constructors.ctorEnv.constants raw.name with
+    | none => rfl
+    | some constant =>
+        obtain ⟨hostInfo, hostFound, _safe⟩ :=
+          declarations.constructors.trenv.aligned.find?_iff.mpr
+            ⟨constant, theoryFound⟩
+        have hostFreshBase :
+            produced.eliminationBase.execution.constructorEnv.constants.find?
+              raw.name = none := by
+          simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+            using hostFreshRaw
+        rw [hostFreshBase] at hostFound
+        contradiction
+  have recursorNamesEq : generation.recursors.map (·.name) =
+      source.types.map (fun family => (.str family.name "rec" : Name)) := by
+    have names := congrArg
+      (List.map (fun family : VInductiveType =>
+        (.str family.name "rec" : Name))) generation.families_map_raw
+    simpa only [BlockGenerationChecked.recursors, List.map_map,
+      Function.comp_def] using names
+  have generatedNamesNodup := generation.blockGeneratedNames_nodup
+  rw [blockGeneratedNames, List.nodup_append] at generatedNamesNodup
+  have recursorNodup : (generation.recursors.map (·.name)).Nodup := by
+    rw [recursorNamesEq]
+    exact generatedNamesNodup.2.1
+  obtain ⟨recEnv, addRecursors⟩ :=
+    VEnv.exists_constFold recursorFresh recursorNodup
+  let completedEnv := generation.generatedRules.foldl VEnv.addDefEq recEnv
+  have completion : env.addInductBlockGeneration generation =
+      some completedEnv := by
+    simp [VEnv.addInductBlockGeneration,
+      declarations.families.addTypes.to_foldlM,
+      declarations.constructors.addCtors.to_foldlM, addRecursors,
+      completedEnv]
+  refine ⟨completedEnv, completion, ?_⟩
+  exact (VEnv.constFold_le addRecursors).trans
+    (VEnv.rulesFold_le recEnv generation.generatedRules)
+
+/-- The retained family-validation statistics use the source declaration's
+exact shared-parameter count. -/
+theorem ProducedBlockRecursorShapeCandidate.stats_params_size
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    (produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context) :
+    produced.execution.eliminationExecution.normalization.stats.params.size =
+      source.nparams := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  have familyRun := normalization.familyValidationResult_run
+    normalizationProduced
+  have sizes := normalization.familyValidationResult.sizes_of_run
+    produced.kernelSources_nonempty familyRun
+  simpa only [normalization,
+    AddInductive.NormalizationCandidateExecution.familyValidationResult]
+    using sizes.1
+
+/-- A constructor inserted by the current block cannot complete the host
+readiness observation of any family at the constructor-only boundary.
+
+If the family is old, payload closure says its stored constructor inventory
+cannot mention the newly fresh name.  If the family is new, its canonical
+recursor name is still absent by the retained subsequent name check. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.newReadyConstructor_impossible
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (payloadClosed :
+      produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
+    {familyName : Name} {familyInfo : InductiveVal}
+    {constructorName : Name} {constructorInfo : ConstructorVal}
+    {recursorInfo : RecursorVal}
+    (familyFound :
+      produced.execution.eliminationExecution.constructorEnv.find?
+        familyName = some (.inductInfo familyInfo))
+    (recursorFound :
+      produced.execution.eliminationExecution.constructorEnv.find?
+        (mkRecName familyName) = some (.recInfo recursorInfo))
+    (ctorsEq : familyInfo.ctors = [constructorName])
+    (constructorMember : constructorInfo ∈
+      produced.execution.eliminationExecution.declaredConstructorInfos)
+    (constructorNameEq : constructorInfo.name = constructorName) : False := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have familyMapWF : normalization.familyEnv.constants.WF :=
+    declarations.families.addTypes.map_wf staging.preTr.map_wf
+  have familyOld : normalization.familyEnv.find? familyName =
+      some (.inductInfo familyInfo) := by
+    apply declarations.constructors.old_of_not_ctor
+      declarations.families.trenv
+    · simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+        using familyFound
+    · simp [InductConstantKind.Matches]
+  obtain ⟨offset, constructorAt⟩ :=
+    List.mem_iff_getElem?.1 constructorMember
+  obtain ⟨raw, rawAt, rawTr⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_left
+      run.constructorDeclarationEvidence constructorAt
+  have rawNameEq : raw.name = constructorName :=
+    rawTr.2.symm.trans constructorNameEq
+  have familyFoundMap : normalization.familyEnv.constants.find? familyName =
+      some (.inductInfo familyInfo) := by
+    change normalization.familyEnv.constants.find?' familyName = _ at familyOld
+    rwa [familyMapWF.find?'_eq_find?] at familyOld
+  rcases declarations.families.addTypes.map_lookup_cases_kind
+      staging.preTr.map_wf familyFoundMap with oldFamilyMap |
+        ⟨rawFamily, rawFamilyMember, rawFamilyNameEq, _kind⟩
+  · have rawAbsentFamily :=
+      declarations.constructors.kernelTrace.names_fresh familyMapWF
+        constructorInfo constructorMember
+    have rawAbsentFamilyBase :
+        produced.execution.eliminationExecution.normalization.familyEnv.constants.find?
+          raw.name = none := by
+      rw [← rawTr.2]
+      simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase,
+        ConstantInfo.name, ConstantInfo.toConstantVal]
+        using rawAbsentFamily
+    have rawAbsentFamily' : normalization.familyEnv.constants.find?
+        raw.name = none := by
+      simpa only [normalization] using rawAbsentFamilyBase
+    have rawAbsentValidation :=
+      declarations.families.addTypes.input_map_none_of_output_none
+        staging.preTr.map_wf rawAbsentFamily'
+    have rawAbsentValidation' : normalization.validationContext.env.find?
+        raw.name = none := by
+      change normalization.validationContext.env.constants.find?' raw.name =
+        none
+      rw [staging.preTr.map_wf.find?'_eq_find?]
+      exact rawAbsentValidation
+    have oldFamily : normalization.validationContext.env.find? familyName =
+        some (.inductInfo familyInfo) := by
+      change normalization.validationContext.env.constants.find?' familyName = _
+      rw [staging.preTr.map_wf.find?'_eq_find?]
+      exact oldFamilyMap
+    have forbidden := (payloadClosed rawAbsentValidation').1 familyName
+      familyInfo oldFamily constructorName (by simp [ctorsEq])
+    exact forbidden rawNameEq.symm
+  · rw [VInductDecl.blockTypeConstants] at rawFamilyMember
+    obtain ⟨rawFamilyType, rawFamilyTypeMember, rfl⟩ :=
+      List.mem_map.mp rawFamilyMember
+    have normalizedMember :
+        rawFamilyType ∈ generation.families.map (·.raw) := by
+      rw [generation.families_map_raw]
+      exact rawFamilyTypeMember
+    obtain ⟨family, familyMember, familyRawEq⟩ :=
+      List.mem_map.mp normalizedMember
+    let recursor : VConstVal :=
+      ⟨generation.generatedRecursor family,
+        (.str family.raw.name "rec" : Name)⟩
+    have recursorMember : recursor ∈ generation.recursors :=
+      List.mem_map.mpr ⟨family, familyMember, rfl⟩
+    have recursorNameEq : recursor.name =
+        mkRecName rawFamilyType.toVConstVal.name := by
+      simp [recursor, mkRecName, familyRawEq]
+    have absent := declarations.generatedRecursor_name_absent recursorMember
+    have familyNameEq : rawFamilyType.toVConstVal.name = familyName :=
+      rawFamilyNameEq
+    rw [recursorNameEq, familyNameEq] at absent
+    rw [recursorFound] at absent
+    contradiction
+
+/-- Projection readiness at the incomplete host constructor boundary, using
+the completed semantic block as its Theory model.
+
+No new block family can satisfy the host readiness test before recursor
+metadata is installed.  An old family cannot be activated by a fresh block
+constructor because `ReductionPayloadClosed` excludes that name from its
+stored constructor inventory. -/
+theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (payloadClosed :
+      produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
+    {completedEnv : VEnv}
+    (completion : env.addInductBlockGeneration generation = some completedEnv)
+    (constructorLE : declarations.constructors.ctorEnv ≤ completedEnv) :
+    ProjectionResolutionReady
+      produced.execution.eliminationExecution.constructorEnv completedEnv := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have familyMapWF : normalization.familyEnv.constants.WF :=
+    declarations.families.addTypes.map_wf staging.preTr.map_wf
+  have constructorMapWF :
+      produced.execution.eliminationExecution.constructorEnv.constants.WF := by
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.addCtors.map_wf familyMapWF
+  have theoryLE : blockEnv ≤ completedEnv :=
+    declarations.constructors.addCtors.le.trans constructorLE
+  have preserveConstructor : ∀ {name info},
+      normalization.familyEnv.find? name = some (.ctorInfo info) →
+        produced.execution.eliminationExecution.constructorEnv.find? name =
+          some (.ctorInfo info) := by
+    intro name info found
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.preserve_find? declarations.families.trenv
+        found
+  have preserveRecursor : ∀ {name info},
+      normalization.familyEnv.find? name = some (.recInfo info) →
+        produced.execution.eliminationExecution.constructorEnv.find? name =
+          some (.recInfo info) := by
+    intro name info found
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.preserve_find? declarations.families.trenv
+        found
+  refine {
+    infer := ?_
+    constructorHead := ?_ }
+  · intro familyName familyInfo familyFound ready
+    have familyOld : normalization.familyEnv.find? familyName =
+        some (.inductInfo familyInfo) := by
+      apply declarations.constructors.old_of_not_ctor
+        declarations.families.trenv
+      · simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+          using familyFound
+      · simp [InductConstantKind.Matches]
+    obtain ⟨constructorName, constructorInfo, recursorInfo, ctorsEq,
+        indicesEq, constructorFound, recursorFound, owner,
+        familyRecursor⟩ :=
+      Kernel.Environment.isProjectionReadyStructure_info familyFound ready
+    have recursorOld : normalization.familyEnv.find?
+        (mkRecName familyName) = some (.recInfo recursorInfo) := by
+      apply declarations.constructors.old_of_not_ctor
+        declarations.families.trenv
+      · simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+          using recursorFound
+      · simp [InductConstantKind.Matches]
+    have constructorFoundMap :
+        produced.execution.eliminationExecution.constructorEnv.constants.find?
+          constructorName = some (.ctorInfo constructorInfo) := by
+      change produced.execution.eliminationExecution.constructorEnv.constants.find?'
+        constructorName = _ at constructorFound
+      rwa [constructorMapWF.find?'_eq_find?] at constructorFound
+    rcases declarations.constructors.kernelTrace.map_lookup_cases familyMapWF
+        constructorFoundMap with constructorOldMap |
+          ⟨constructorMember, constructorNameEq⟩
+    · have constructorOld : normalization.familyEnv.find? constructorName =
+          some (.ctorInfo constructorInfo) := by
+        change normalization.familyEnv.constants.find?' constructorName = _
+        rw [familyMapWF.find?'_eq_find?]
+        exact constructorOldMap
+      have oldReady : normalization.familyEnv.isProjectionReadyStructure
+          familyName = true :=
+        Kernel.Environment.isProjectionReadyStructure_of_info familyOld
+          ctorsEq indicesEq constructorOld recursorOld owner familyRecursor
+      obtain ⟨artifact⟩ := staging.projectionReady.infer familyName
+        familyInfo familyOld oldReady
+      exact ⟨artifact.retarget_of_preserved theoryLE preserveConstructor
+        preserveRecursor⟩
+    · exact (declarations.newReadyConstructor_impossible staging
+        payloadClosed familyFound recursorFound ctorsEq constructorMember
+          constructorNameEq).elim
+  · intro name info found
+    have foundMap :
+        produced.execution.eliminationExecution.constructorEnv.constants.find?
+          name = some (.ctorInfo info) := by
+      change produced.execution.eliminationExecution.constructorEnv.constants.find?'
+        name = _ at found
+      rwa [constructorMapWF.find?'_eq_find?] at found
+    rcases declarations.constructors.kernelTrace.map_lookup_cases familyMapWF
+        foundMap with oldMap | ⟨infoMember, infoName⟩
+    · have oldFound : normalization.familyEnv.find? name =
+          some (.ctorInfo info) := by
+        change normalization.familyEnv.constants.find?' name = _
+        rw [familyMapWF.find?'_eq_find?]
+        exact oldMap
+      exact (staging.projectionReady.constructorHead name info oldFound).mono
+        theoryLE
+    · obtain ⟨offset, infoAt⟩ := List.mem_iff_getElem?.1 infoMember
+      obtain ⟨raw, rawAt, rawTr⟩ :=
+        Lean4Lean.List.Forall₂.getElem?_left
+          run.constructorDeclarationEvidence infoAt
+      have rawMember : raw ∈ source.blockConstructorConstants :=
+        List.mem_iff_getElem?.2 ⟨offset, rawAt⟩
+      have rawName : raw.name = name := rawTr.2.symm.trans infoName
+      have infoParams : info.numParams = normalization.stats.params.size := by
+        simpa only [normalization,
+          AddInductive.NormalizationEliminationExecution.declaredConstructorInfos]
+          using AddInductive.declaredConstructorInfos_numParams
+            normalization.stats kernelSources.toArray isUnsafe
+            produced.execution.eliminationExecution.constructorContext
+            infoMember
+      have sourceParams : source.nparams = info.numParams :=
+        (infoParams.trans produced.stats_params_size).symm
+      have preWF : env.WF := by
+        simpa only [staging.preFamily.venv_eq] using
+          staging.preFamily.contextRun.context.Ewf
+      have declarationWF : VDecl.WF env (.induct source) completedEnv :=
+        .inductBlock run.block.wf completion
+      exact ⟨source, env, completedEnv, raw, preWF, declarationWF,
+        sourceParams, rawMember, rawName, .rfl⟩
+
+/-- Structure-eta readiness at the incomplete host constructor boundary,
+using the completed semantic block as its Theory model. -/
+theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (payloadClosed :
+      produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
+    {completedEnv : VEnv}
+    (completion : env.addInductBlockGeneration generation = some completedEnv)
+    (constructorLE : declarations.constructors.ctorEnv ≤ completedEnv) :
+    StructureEtaReady
+      produced.execution.eliminationExecution.constructorEnv completedEnv := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have familyMapWF : normalization.familyEnv.constants.WF :=
+    declarations.families.addTypes.map_wf staging.preTr.map_wf
+  have constructorMapWF :
+      produced.execution.eliminationExecution.constructorEnv.constants.WF := by
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.addCtors.map_wf familyMapWF
+  have theoryLE : blockEnv ≤ completedEnv :=
+    declarations.constructors.addCtors.le.trans constructorLE
+  have preOrdered : env.Ordered := by
+    simpa only [staging.preFamily.venv_eq] using
+      staging.preFamily.contextRun.context.Ewf.ordered
+  have completedOrdered : completedEnv.Ordered :=
+    VEnv.addInductBlockGeneration_WF preOrdered run.block.wf completion
+  have preserveConstructor : ∀ {name info},
+      normalization.familyEnv.find? name = some (.ctorInfo info) →
+        produced.execution.eliminationExecution.constructorEnv.find? name =
+          some (.ctorInfo info) := by
+    intro name info found
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.preserve_find? declarations.families.trenv
+        found
+  have preserveRecursor : ∀ {name info},
+      normalization.familyEnv.find? name = some (.recInfo info) →
+        produced.execution.eliminationExecution.constructorEnv.find? name =
+          some (.recInfo info) := by
+    intro name info found
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.preserve_find? declarations.families.trenv
+        found
+  refine { resolve := ?_ }
+  intro familyName familyInfo constructorName constructorInfo familyFound
+    constructorFound ready
+  have familyOld : normalization.familyEnv.find? familyName =
+      some (.inductInfo familyInfo) := by
+    apply declarations.constructors.old_of_not_ctor declarations.families.trenv
+    · simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+        using familyFound
+    · simp [InductConstantKind.Matches]
+  obtain ⟨recursorInfo, recursorFound, isRec, ctorsEq, indicesEq,
+      owner, large, familyRecursor⟩ :=
+    Kernel.Environment.isStructureEtaReadyConstructor_info familyFound
+      constructorFound ready
+  have recursorOld : normalization.familyEnv.find?
+      (mkRecName familyName) = some (.recInfo recursorInfo) := by
+    apply declarations.constructors.old_of_not_ctor declarations.families.trenv
+    · simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase]
+        using recursorFound
+    · simp [InductConstantKind.Matches]
+  have constructorFoundMap :
+      produced.execution.eliminationExecution.constructorEnv.constants.find?
+        constructorName = some (.ctorInfo constructorInfo) := by
+    change produced.execution.eliminationExecution.constructorEnv.constants.find?'
+      constructorName = _ at constructorFound
+    rwa [constructorMapWF.find?'_eq_find?] at constructorFound
+  rcases declarations.constructors.kernelTrace.map_lookup_cases familyMapWF
+      constructorFoundMap with constructorOldMap |
+        ⟨constructorMember, constructorNameEq⟩
+  · have constructorOld : normalization.familyEnv.find? constructorName =
+        some (.ctorInfo constructorInfo) := by
+      change normalization.familyEnv.constants.find?' constructorName = _
+      rw [familyMapWF.find?'_eq_find?]
+      exact constructorOldMap
+    have oldReady : normalization.familyEnv.isStructureEtaReadyConstructor
+        familyName constructorName = true :=
+      Kernel.Environment.isStructureEtaReadyConstructor_of_info familyOld
+        constructorOld recursorOld isRec ctorsEq indicesEq owner large
+          familyRecursor
+    obtain ⟨artifact⟩ := staging.structureEtaReady.resolve familyName
+      familyInfo constructorName constructorInfo familyOld constructorOld
+        oldReady
+    exact ⟨artifact.retarget_of_preserved theoryLE completedOrdered
+      preserveConstructor preserveRecursor⟩
+  · exact (declarations.newReadyConstructor_impossible staging
+      payloadClosed familyFound recursorFound ctorsEq constructorMember
+        constructorNameEq).elim
 
 /-- The actual `mkRecInfos` callback retained by the ordinary recursor
 producer, together with the exact generated type inventory it emitted.  This
