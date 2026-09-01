@@ -1277,6 +1277,132 @@ def _root_.Lean.Expr.ReductionConstFree (name : Name) : Expr → Prop
       expression.ReductionConstFree name
   | _ => True
 
+/-- Replacing a free variable by a bound variable does not change the
+reduction-relevant constant inventory. -/
+theorem _root_.Lean.Expr.reductionConstFree_abstract1
+    (expression : Expr) (fv : FVarId) (depth : Nat) (name : Name) :
+    (expression.abstract1 fv depth).ReductionConstFree name ↔
+      expression.ReductionConstFree name := by
+  induction expression generalizing depth with
+  | bvar => simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree]
+  | fvar =>
+      simp only [Lean.Expr.abstract1]
+      split <;> simp [Lean.Expr.ReductionConstFree]
+  | mvar => simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree]
+  | sort => simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree]
+  | const => simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree]
+  | app function argument functionIH argumentIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree,
+        functionIH, argumentIH]
+  | lam binder domain body binderInfo domainIH bodyIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree,
+        domainIH, bodyIH]
+  | forallE binder domain body binderInfo domainIH bodyIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree,
+        domainIH, bodyIH]
+  | letE binder type value body nondep typeIH valueIH bodyIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree,
+        typeIH, valueIH, bodyIH]
+  | lit => simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree]
+  | mdata data expression expressionIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree, expressionIH]
+  | proj structName index major majorIH =>
+      simp [Lean.Expr.abstract1, Lean.Expr.ReductionConstFree, majorIH]
+
+/-- Abstracting any source-ordered free-variable inventory preserves exactly
+the constants which reduction may inspect. -/
+theorem _root_.Lean.Expr.reductionConstFree_abstractFVarsAux
+    (depth : Nat) (fvars : List FVarId) (expression : Expr) (name : Name) :
+    (Lean.Expr.abstractFVarsAux depth fvars expression).ReductionConstFree
+        name ↔ expression.ReductionConstFree name := by
+  induction fvars generalizing depth expression with
+  | nil => rfl
+  | cons fv fvars ih =>
+      simp only [Lean.Expr.abstractFVarsAux, ih,
+        Lean.Expr.reductionConstFree_abstract1]
+
+/-- Alpha-normalizing through a verified context preserves exactly the
+reduction-relevant constant inventory. -/
+theorem _root_.Lean.Expr.reductionConstFree_abstractFVars
+    (context : VLCtx) (expression : Expr) (name : Name) :
+    (Lean.Expr.abstractFVars context expression).ReductionConstFree name ↔
+      expression.ReductionConstFree name := by
+  exact Lean.Expr.reductionConstFree_abstractFVarsAux 0 context.fvars
+    expression name
+
+/-- Shifting loose bound variables changes no constant names. -/
+theorem _root_.Lean.Expr.reductionConstFree_liftLooseBVars'
+    (expression : Expr) (start amount : Nat) (name : Name) :
+    (expression.liftLooseBVars' start amount).ReductionConstFree name ↔
+      expression.ReductionConstFree name := by
+  induction expression generalizing start with
+  | bvar => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | fvar => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | mvar => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | sort => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | const => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | app function argument functionIH argumentIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree,
+        functionIH, argumentIH]
+  | lam binder domain body binderInfo domainIH bodyIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree,
+        domainIH, bodyIH]
+  | forallE binder domain body binderInfo domainIH bodyIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree,
+        domainIH, bodyIH]
+  | letE binder type value body nondep typeIH valueIH bodyIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree,
+        typeIH, valueIH, bodyIH]
+  | lit => simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree]
+  | mdata data expression expressionIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree,
+        expressionIH]
+  | proj structName index major majorIH =>
+      simp [Lean.Expr.liftLooseBVars', Lean.Expr.ReductionConstFree, majorIH]
+
+/-- Substituting a reduction-safe expression into a reduction-safe body
+cannot introduce the excluded constant. -/
+theorem _root_.Lean.Expr.ReductionConstFree.instantiate1'
+    {body substitution : Expr} {name : Name} {depth : Nat}
+    (bodyFree : body.ReductionConstFree name)
+    (substitutionFree : substitution.ReductionConstFree name) :
+    (body.instantiate1' substitution depth).ReductionConstFree name := by
+  induction body generalizing depth with
+  | bvar index =>
+      simp only [Lean.Expr.instantiate1']
+      split
+      · trivial
+      · split
+        · exact (Lean.Expr.reductionConstFree_liftLooseBVars'
+            substitution 0 depth name).2 substitutionFree
+        · trivial
+  | fvar => exact bodyFree
+  | mvar => exact bodyFree
+  | sort => exact bodyFree
+  | const => exact bodyFree
+  | app function argument functionIH argumentIH =>
+      exact ⟨functionIH bodyFree.1, argumentIH bodyFree.2⟩
+  | lam binder domain body binderInfo domainIH bodyIH =>
+      exact ⟨domainIH bodyFree.1, bodyIH bodyFree.2⟩
+  | forallE binder domain body binderInfo domainIH bodyIH =>
+      exact ⟨domainIH bodyFree.1, bodyIH bodyFree.2⟩
+  | letE binder type value body nondep typeIH valueIH bodyIH =>
+      exact ⟨typeIH bodyFree.1, valueIH bodyFree.2.1,
+        bodyIH bodyFree.2.2⟩
+  | lit => exact bodyFree
+  | mdata data expression expressionIH => exact expressionIH bodyFree
+  | proj structName index major majorIH => exact majorIH bodyFree
+
+/-- Runtime single substitution has the same reduction-support law as its
+transparent verification model. -/
+theorem _root_.Lean.Expr.ReductionConstFree.instantiate1
+    {body substitution : Expr} {name : Name}
+    (bodyFree : body.ReductionConstFree name)
+    (substitutionFree : substitution.ReductionConstFree name) :
+    (body.instantiate1 substitution).ReductionConstFree name := by
+  rw [Lean.Expr.instantiate1_eq]
+  exact bodyFree.instantiate1' substitutionFree
+
 /-- A strictly translated source cannot mention, at any reduction-relevant
 position, a constant absent from the Theory environment.  This is a
 source-side support fact: unlike target occurrence transport it needs no
@@ -1323,6 +1449,25 @@ theorem TrExprS.source_reductionConstFree_of_absent
   | proj structName index major majorIH =>
       cases run with
       | proj majorTr projection => exact majorIH majorTr
+
+/-- Every declaration found in a translated local context has a
+reduction-safe type and value when the selected constant is absent.  For a
+local assumption `value'` is its free variable, matching the behavior of
+`whnfFVar`; for a let it is the actual unfoldable payload. -/
+theorem TrLCtx.find?_reductionConstFree_of_absent
+    {env : VEnv} {Us : List Name} {lctx : LocalContext} {context : VLCtx}
+    (run : TrLCtx env Us lctx context) (henv : env.WF)
+    {fv : FVarId} {declaration : LocalDecl}
+    (found : lctx.find? fv = some declaration)
+    {name : Name} (absent : env.constants name = none) :
+    declaration.type.ReductionConstFree name ∧
+      declaration.value'.ReductionConstFree name := by
+  have member : declaration ∈ lctx.toList :=
+    List.mem_of_find?_eq_some (run.1.find?_eq_find?_toList ▸ found)
+  obtain ⟨value, type, valueFound, valueBelow, typeBelow, valueTr, typeTr⟩ :=
+    run.find?_of_mem henv member
+  exact ⟨typeTr.source_reductionConstFree_of_absent absent,
+    valueTr.source_reductionConstFree_of_absent absent⟩
 
 /-- A literal accepted by strict translation cannot introduce a constant
 which is absent from the translated environment.  `ContainsLits` and the
