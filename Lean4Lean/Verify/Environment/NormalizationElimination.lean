@@ -47758,6 +47758,244 @@ private theorem loopUTranslation_final_toCtx
       simp only [List.reverse_cons, List.append_assoc,
         List.singleton_append]
 
+/-! #### Strict minor translations of the second synthesis phase
+
+The minor declarations are translated in source order along the retained
+phase-two decomposition; each constructor step supplies the strict
+translation of its own minor type at the growing minor-extended base. -/
+
+/-- Strict semantic translations of the minor declarations allocated by one
+family's constructor traversal. -/
+private inductive RecInfoConstructorMinorTranslationTrace
+    (env : VEnv) (Us : List Name) (stats : AddInductive.InductiveStats)
+    (indTypeName : Name) (dIdx : Nat) :
+    {ctors : List Constructor} → {recInfos : Array AddInductive.RecInfo} →
+    {current : AddInductive.Context} →
+    {finalInfos : Array AddInductive.RecInfo} →
+    {finalContext : AddInductive.Context} →
+    AddInductive.RecInfoConstructorTrace stats indTypeName dIdx ctors
+      recInfos current finalInfos finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {recInfos : Array AddInductive.RecInfo}
+      {current : AddInductive.Context} (base : VLCtx) :
+      RecInfoConstructorMinorTranslationTrace env Us stats indTypeName dIdx
+        (AddInductive.RecInfoConstructorTrace.done (recInfos := recInfos)
+          (current := current)) base [] base
+  | next
+      {ctor : Constructor} {ctors : List Constructor}
+      {recInfos finalInfos : Array AddInductive.RecInfo}
+      {current finalContext : AddInductive.Context}
+      (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+        recInfos current)
+      (tail : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+        ctors step.nextInfos step.minorContext finalInfos finalContext)
+      {base : VLCtx} {target : VExpr} {targets : List VExpr} {final : VLCtx}
+      (domainTr : TrExprS env Us base
+        (AddInductive.consumeTypeAnnotations step.minorType) target)
+      (rest : RecInfoConstructorMinorTranslationTrace env Us stats
+        indTypeName dIdx tail
+        ((some (step.hypothesisContext.freshFVarId,
+            (AddInductive.consumeTypeAnnotations step.minorType).fvarsList),
+          .vlam target) :: base) targets final) :
+      RecInfoConstructorMinorTranslationTrace env Us stats indTypeName dIdx
+        (.next step tail) base (target :: targets) final
+
+/-- The compressed endpoint of one family's minor translations extends the
+base Theory context by exactly the reversed minor telescope. -/
+private theorem recInfoConstructorMinorTranslation_final_toCtx
+    {env : VEnv} {Us : List Name} {stats : AddInductive.InductiveStats}
+    {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    {trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoConstructorMinorTranslationTrace env Us stats
+      indTypeName dIdx trace base types final) :
+    final.toCtx = types.reverse ++ base.toCtx := by
+  induction translations with
+  | done => rfl
+  | @next ctor ctors recInfos finalInfos current finalContext step tail base
+      target targets final domainTr rest ih =>
+      rw [ih]
+      show targets.reverse ++ (target :: base.toCtx) = _
+      simp only [List.reverse_cons, List.append_assoc,
+        List.singleton_append]
+
+/-- The compressed endpoint of one family's minor translations conses
+exactly its minor variables, most recent first, onto the base. -/
+private theorem recInfoConstructorMinorTranslation_final_fvars
+    {env : VEnv} {Us : List Name} {stats : AddInductive.InductiveStats}
+    {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    {trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoConstructorMinorTranslationTrace env Us stats
+      indTypeName dIdx trace base types final) :
+    final.fvars = (recInfoConstructorMinorFVars trace).reverse ++ base.fvars := by
+  induction translations with
+  | done => rfl
+  | @next ctor ctors recInfos finalInfos current finalContext step tail base
+      target targets final domainTr rest ih =>
+      rw [ih]
+      simp only [recInfoConstructorMinorFVars, VLCtx.fvars_cons_some,
+        List.reverse_cons, List.append_assoc, List.singleton_append]
+
+/-- Erase one family's minor translations to the exact selected telescope
+consumed by `LocalContext.mkForall` at any push-only extension of the
+family's final context. -/
+private theorem recInfoConstructorMinorTranslation_selection
+    {env : VEnv} {Us : List Name} {stats : AddInductive.InductiveStats}
+    {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext implementation : AddInductive.Context}
+    {trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoConstructorMinorTranslationTrace env Us stats
+      indTypeName dIdx trace base types final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (endpointExtension : finalContext.LocalExtension implementation)
+    (typesOnTel : env.OnTel Us.length base.toCtx types) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (recInfoConstructorMinorFVars trace) types final := by
+  induction translations with
+  | done => exact .nil
+  | @next ctor ctors recInfos finalInfos current finalContext step tail base
+      target targets final domainTr rest ih =>
+      rcases typesOnTel with ⟨targetType, targetsOnTel⟩
+      have minorRun : TypeChecker.CandidateLocalContextRun
+          step.minorContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          (recInfoConstructorStep_minorExtension step)
+      have minorToImplementation :
+          step.minorContext.LocalExtension implementation :=
+        contextLocalExtension_trans (recInfoConstructor_localExtension tail)
+          endpointExtension
+      have finalFind := recInfoConstructorStep_minorFind_ofLocalExtension
+        step currentRun minorToImplementation
+      exact .cons finalFind domainTr targetType
+        (ih minorRun endpointExtension targetsOnTel)
+
+/-- Selected telescopes compose end to end. -/
+private theorem selectedForall_append
+    {env : VEnv} {Us : List Name} {lctx : LocalContext}
+    {base middle final : VLCtx} {fvars₁ fvars₂ : List FVarId}
+    {types₁ types₂ : List VExpr}
+    (left : TypeChecker.MLCtx.SelectedForall env Us lctx base fvars₁ types₁
+      middle)
+    (right : TypeChecker.MLCtx.SelectedForall env Us lctx middle fvars₂
+      types₂ final) :
+    TypeChecker.MLCtx.SelectedForall env Us lctx base (fvars₁ ++ fvars₂)
+      (types₁ ++ types₂) final := by
+  induction left with
+  | nil => exact right
+  | cons find domainTr domainType tail ih =>
+      exact .cons find domainTr domainType (ih right)
+
+/-- Strict semantic translations of every minor declaration allocated by
+the complete second synthesis phase, family by family. -/
+private inductive RecInfoPhaseTwoMinorTranslationTrace
+    (env : VEnv) (Us : List Name) (stats : AddInductive.InductiveStats)
+    (indTypes : Array InductiveType) :
+    {dIdx : Nat} → {recInfos : Array AddInductive.RecInfo} →
+    {current : AddInductive.Context} →
+    {finalInfos : Array AddInductive.RecInfo} →
+    {finalContext : AddInductive.Context} →
+    AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {dIdx : Nat} {recInfos : Array AddInductive.RecInfo}
+      {current : AddInductive.Context}
+      (finished : ¬ dIdx < indTypes.size) (base : VLCtx) :
+      RecInfoPhaseTwoMinorTranslationTrace env Us stats indTypes
+        (AddInductive.RecInfoPhaseTwoTrace.done (dIdx := dIdx)
+          (recInfos := recInfos) (current := current) finished) base [] base
+  | next
+      {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+      {current finalContext : AddInductive.Context}
+      (step : AddInductive.RecInfoPhaseTwoStep stats indTypes dIdx recInfos
+        current)
+      (tail : AddInductive.RecInfoPhaseTwoTrace stats indTypes (dIdx + 1)
+        step.finalInfos step.finalContext finalInfos finalContext)
+      {base middle final : VLCtx} {familyTargets restTargets : List VExpr}
+      (family : RecInfoConstructorMinorTranslationTrace env Us stats
+        (indTypes[dIdx]'step.active).name dIdx step.constructors base
+        familyTargets middle)
+      (rest : RecInfoPhaseTwoMinorTranslationTrace env Us stats indTypes
+        tail middle restTargets final) :
+      RecInfoPhaseTwoMinorTranslationTrace env Us stats indTypes
+        (.next step tail) base (familyTargets ++ restTargets) final
+
+/-- Erase the phase-two minor translations to the exact selected telescope
+consumed by `LocalContext.mkForall` at any push-only extension of the final
+phase context. -/
+private theorem recInfoPhaseTwoMinorTranslation_selection
+    {env : VEnv} {Us : List Name} {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext implementation : AddInductive.Context}
+    {trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoPhaseTwoMinorTranslationTrace env Us stats
+      indTypes trace base types final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (endpointExtension : finalContext.LocalExtension implementation)
+    (typesOnTel : env.OnTel Us.length base.toCtx types) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (recInfoPhaseTwoMinorFVars trace) types final := by
+  induction translations with
+  | done => exact .nil
+  | @next dIdx recInfos finalInfos current finalContext step tail base middle
+      final familyTargets restTargets family rest ih =>
+      obtain ⟨familyOnTel, restOnTel⟩ := VEnv.OnTel.of_append typesOnTel
+      have familyRun : TypeChecker.CandidateLocalContextRun
+          step.finalContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          (recInfoConstructor_localExtension step.constructors)
+      have familyToImplementation :
+          step.finalContext.LocalExtension implementation :=
+        contextLocalExtension_trans (recInfoPhaseTwo_localExtension tail)
+          endpointExtension
+      have familySelection := recInfoConstructorMinorTranslation_selection
+        family currentRun familyToImplementation familyOnTel
+      have middleToCtx := recInfoConstructorMinorTranslation_final_toCtx
+        family
+      rw [← middleToCtx] at restOnTel
+      exact selectedForall_append familySelection
+        (ih familyRun endpointExtension restOnTel)
+
+/-- Package the retained phase-two minor inventory as one selected array at
+the synthesis endpoint.  Only the strict per-constructor minor translations
+remain as semantic input. -/
+private def recInfoPhaseTwoMinorTranslation_arrayRun
+    {env : VEnv} {Us : List Name} {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {rootContext synthesisContext : AddInductive.Context}
+    {recInfos : Array AddInductive.RecInfo}
+    {trace : AddInductive.RecInfoSynthesisTrace stats indTypes elimLevel
+      rootContext recInfos synthesisContext}
+    {phase2 : AddInductive.RecInfoPhaseTwoTrace stats indTypes 0
+      trace.phase1Infos trace.phase1Context recInfos synthesisContext}
+    {base final : VLCtx} {types : List VExpr}
+    (translations : RecInfoPhaseTwoMinorTranslationTrace env Us stats
+      indTypes phase2 base types final)
+    (rootRun : TypeChecker.CandidateLocalContextRun rootContext)
+    (typesOnTel : env.OnTel Us.length base.toCtx types) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us synthesisContext.lctx
+      base (recInfos.flatMap (·.minors)) types final where
+  fvars := recInfoPhaseTwoMinorFVars phase2
+  selection := recInfoPhaseTwoMinorTranslation_selection translations
+    (TypeChecker.CandidateLocalContextRun.ofLocalExtension rootRun
+      trace.phase1_localExtension) .refl typesOnTel
+  sources_eq := recInfoSynthesis_minorSources trace phase2
+  nodup := (recInfoSynthesis_minorFVars trace phase2 rootRun).1
+
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
 constructor audit.  Keeping the value transparent lets compatibility
