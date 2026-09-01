@@ -598,6 +598,34 @@ assumption on either child. -/
       (function.hasLevelMVar || argument.hasLevelMVar) := by
   exact mkAppData_hasLevelMVar
 
+/-- Exact expression-mvar cache equations for the remaining expression
+constructors used by reduction. -/
+@[simp] theorem mvar_hasExprMVar (id : MVarId) :
+    (Expr.mvar id).hasExprMVar = true := by
+  change (Expr.mvar id).data.hasExprMVar = true
+  simp only [Expr.data, mkData_hasExprMVar (Nat.zero_le _)]
+
+@[simp] theorem lit_hasExprMVar (literal : Literal) :
+    (Expr.lit literal).hasExprMVar = false := by
+  change (Expr.lit literal).data.hasExprMVar = false
+  simp only [Expr.data, mkData_hasExprMVar (Nat.zero_le _)]
+
+@[simp] theorem mdata_hasExprMVar (metadata : MData) (expression : Expr) :
+    (Expr.mdata metadata expression).hasExprMVar = expression.hasExprMVar := by
+  change (Expr.mdata metadata expression).data.hasExprMVar =
+    expression.data.hasExprMVar
+  simp only [Expr.data,
+    mkData_hasExprMVar (Data.looseBVarRange_le (d := expression.data))]
+
+@[simp] theorem proj_hasExprMVar (typeName : Name) (index : Nat)
+    (expression : Expr) :
+    (Expr.proj typeName index expression).hasExprMVar =
+      expression.hasExprMVar := by
+  change (Expr.proj typeName index expression).data.hasExprMVar =
+    expression.data.hasExprMVar
+  simp only [Expr.data,
+    mkData_hasExprMVar (Data.looseBVarRange_le (d := expression.data))]
+
 /-- Binder cache bits are exact functions of the child cache bits. The packed
 range used by `mkDataForBinder` is bounded by construction, even when a child
 was itself built from out-of-range raw bound-variable data. -/
@@ -654,6 +682,15 @@ was itself built from out-of-range raw bound-variable data. -/
     (type.data.hasLevelMVar || body.data.hasLevelMVar)
   simp only [Expr.data, mkDataForBinder,
     mkData_hasLevelMVar (binder_looseBVarRange_le type body)]
+
+@[simp] theorem letE_hasExprMVar (name : Name) (type value body : Expr)
+    (nondep : Bool) :
+    (Expr.letE name type value body nondep).hasExprMVar =
+      (type.hasExprMVar || value.hasExprMVar || body.hasExprMVar) := by
+  change (Expr.letE name type value body nondep).data.hasExprMVar =
+    (type.data.hasExprMVar || value.data.hasExprMVar || body.data.hasExprMVar)
+  simp only [Expr.data, mkDataForLet,
+    mkData_hasExprMVar (let_looseBVarRange_le type value body)]
 
 /-- Exact loose-bvar cache equations for leaves whose constructor metadata is
 always inside the packed-range bound. -/

@@ -1887,6 +1887,234 @@ where
               · exact ofPure expressionSafe expressionMVarFree run
               · exact ofPure constructorSafe constructorMVarFree run
 
+/-- Appending structure projections over a source-ordered index list
+preserves reduction support for the complete fresh block. -/
+private theorem VInductDecl.BlockReductionConstFree.foldl_etaFields
+    {source : VInductDecl} {typeName : Name} {expression seed : Expr}
+    (seedSafe : source.BlockReductionConstFree seed)
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (indices : List Nat) :
+    source.BlockReductionConstFree
+      (indices.foldl (fun result index =>
+        .app result (.proj typeName index expression)) seed) := by
+  induction indices generalizing seed with
+  | nil => exact seedSafe
+  | cons index indices ih =>
+      simp only [List.foldl_cons]
+      apply ih
+      apply VInductDecl.BlockReductionConstFree.app_iff.2
+      refine ⟨seedSafe, ?_⟩
+      exact ⟨fun raw member => expressionSafe.1 raw member,
+        fun raw member => expressionSafe.2 raw member⟩
+
+/-- The same structure-projection fold preserves the exact cached absence of
+expression metavariables. -/
+private theorem Lean.Expr.hasExprMVar_eq_false_foldl_etaFields
+    {typeName : Name} {expression seed : Expr}
+    (seedMVarFree : seed.hasExprMVar = false)
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (indices : List Nat) :
+    (indices.foldl (fun result index =>
+      .app result (.proj typeName index expression)) seed).hasExprMVar =
+        false := by
+  induction indices generalizing seed with
+  | nil => exact seedMVarFree
+  | cons index indices ih =>
+      simp only [List.foldl_cons]
+      apply ih
+      simp only [Lean.Expr.app_hasExprMVar, Lean.Expr.proj_hasExprMVar,
+        expressionMVarFree, Bool.or_false]
+      exact seedMVarFree
+
+/-- Structure eta expansion preserves block reduction support and the
+absence of expression metavariables.  Invalid constructor metadata follows
+Lean's actual `unreachable!` default; the explicit default support premise
+accounts for that total branch. -/
+theorem expandEtaStruct_reductionInvariant_of_default
+    {source : VInductDecl} {environment : Environment}
+    {type expression : Expr}
+    (typeSafe : source.BlockReductionConstFree type)
+    (typeMVarFree : type.hasExprMVar = false)
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr)) :
+    let result := expandEtaStruct environment type expression
+    source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+  unfold expandEtaStruct
+  simp only [Expr.withApp_eq]
+  cases head : type.getAppFn with
+  | const family levels =>
+      simp only [head]
+      cases selected : getFirstCtor environment family with
+      | none =>
+          simp only [selected]
+          exact ⟨expressionSafe, expressionMVarFree⟩
+      | some constructor =>
+          simp only [selected]
+          cases found : environment.find? constructor with
+          | none =>
+              simp only [found]
+              exact ⟨defaultSafe, Lean.Expr.const_hasExprMVar _ _⟩
+          | some info =>
+              cases info <;> simp only [found]
+              all_goals
+                try exact ⟨defaultSafe, Lean.Expr.const_hasExprMVar _ _⟩
+              rename_i constructorInfo
+              rw [Std.Legacy.Range.forIn_eq_forIn_range',
+                List.forIn_pure_yield_eq_foldl]
+              simp only [Std.Legacy.Range.size, Nat.zero_add, Nat.add_sub_cancel,
+                Nat.div_one, Id.run_pure]
+              have seedSafe : source.BlockReductionConstFree
+                  (mkAppRange (.const constructor levels) 0
+                    constructorInfo.numParams type.getAppArgs) := by
+                constructor
+                · intro raw member
+                  apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+                  · exact (payloadSafe.1 raw member).1.ne_of_getFirstCtor_eq
+                      selected
+                  · intro argument argumentMember
+                    exact (typeSafe.1 raw member).getAppArgs argumentMember
+                  · exact defaultSafe.1 raw member
+                · intro raw member
+                  apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+                  · exact (payloadSafe.2 raw member).1.ne_of_getFirstCtor_eq
+                      selected
+                  · intro argument argumentMember
+                    exact (typeSafe.2 raw member).getAppArgs argumentMember
+                  · exact defaultSafe.2 raw member
+              have seedMVarFree :
+                  (mkAppRange (.const constructor levels) 0
+                    constructorInfo.numParams type.getAppArgs).hasExprMVar =
+                      false := by
+                apply Lean.Expr.hasExprMVar_eq_false_mkAppRange
+                · exact Lean.Expr.const_hasExprMVar _ _
+                · intro argument argumentMember
+                  exact Lean.Expr.hasExprMVar_eq_false_getAppArgs
+                    typeMVarFree argumentMember
+              exact ⟨seedSafe.foldl_etaFields expressionSafe _,
+                Lean.Expr.hasExprMVar_eq_false_foldl_etaFields seedMVarFree
+                  expressionMVarFree _⟩
+  | _ => exact ⟨expressionSafe, expressionMVarFree⟩
+
+/-- A successful structure-style constructor conversion preserves both
+syntactic invariants needed by the staging replay. -/
+theorem TypeChecker.Inner.toCtorWhenStruct_reductionInvariant_of_default
+    {source : VInductDecl} {environment : Environment}
+    {inductName : Name} {expression result : Expr}
+    {methods : TypeChecker.Methods} {context : TypeChecker.Context}
+    {state state' : TypeChecker.State}
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+      TypeChecker.Inner.whnf)
+    (whnfMVarFree : TypeChecker.Inner.MVarFreePreserving
+      TypeChecker.Inner.whnf)
+    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (inferMVarFree : TypeChecker.Inner.MVarFreePreserving
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (run : toCtorWhenStruct environment TypeChecker.Inner.whnf
+      TypeChecker.Inner.inferType inductName expression methods context state =
+        .ok (result, state')) :
+    source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+  unfold toCtorWhenStruct at run
+  split at run
+  · exact ofPure expressionSafe expressionMVarFree run
+  · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind] at run
+    cases inferredRun : (TypeChecker.Inner.inferType expression
+        (inferOnly := true)) methods context state with
+    | error error =>
+        rw [inferredRun] at run
+        contradiction
+    | ok inferredState =>
+        rcases inferredState with ⟨inferred, inferredState⟩
+        rw [inferredRun] at run
+        simp only [Except.bind] at run
+        have inferredSafe := inferSafe expressionSafe methods context state
+          inferredRun
+        have inferredMVarFree := inferMVarFree expression expressionMVarFree
+          methods context state inferredRun
+        cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
+            inferredState with
+        | error error =>
+            rw [normalizedRun] at run
+            contradiction
+        | ok normalizedState =>
+            rcases normalizedState with ⟨normalized, normalizedState⟩
+            rw [normalizedRun] at run
+            simp only [Except.bind] at run
+            have normalizedSafe := whnfSafe inferredSafe methods context
+              inferredState normalizedRun
+            have normalizedMVarFree := whnfMVarFree inferred inferredMVarFree
+              methods context inferredState normalizedRun
+            split at run
+            · exact ofPure expressionSafe expressionMVarFree run
+            · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+                at run
+              cases sortInferredRun : (TypeChecker.Inner.inferType normalized
+                  (inferOnly := true)) methods context normalizedState with
+              | error error =>
+                  rw [sortInferredRun] at run
+                  contradiction
+              | ok sortInferredState =>
+                  rcases sortInferredState with
+                    ⟨sortInferred, sortInferredState⟩
+                  rw [sortInferredRun] at run
+                  simp only [Except.bind] at run
+                  have sortInferredSafe := inferSafe normalizedSafe methods
+                    context normalizedState sortInferredRun
+                  have sortInferredMVarFree := inferMVarFree normalized
+                    normalizedMVarFree methods context normalizedState
+                    sortInferredRun
+                  cases sortRun : (TypeChecker.Inner.whnf sortInferred) methods
+                      context sortInferredState with
+                  | error error =>
+                      rw [sortRun] at run
+                      contradiction
+                  | ok sortState =>
+                      rcases sortState with ⟨sortResult, sortState⟩
+                      rw [sortRun] at run
+                      simp only [Except.bind] at run
+                      have sortSafe := whnfSafe sortInferredSafe methods
+                        context sortInferredState sortRun
+                      have sortMVarFree := whnfMVarFree sortInferred
+                        sortInferredMVarFree methods context sortInferredState
+                        sortRun
+                      cases sortResult with
+                      | sort level =>
+                          cases neverZero : level.isNeverZero with
+                          | false =>
+                              simp [neverZero] at run
+                              exact ofPure expressionSafe expressionMVarFree run
+                          | true =>
+                              simp [neverZero] at run
+                              have expanded :=
+                                expandEtaStruct_reductionInvariant_of_default
+                                  normalizedSafe normalizedMVarFree
+                                  expressionSafe expressionMVarFree payloadSafe
+                                  defaultSafe
+                              exact ofPure expanded.1 expanded.2 run
+                      | _ =>
+                          exact ofPure defaultSafe
+                            (Lean.Expr.const_hasExprMVar _ _) run
+where
+  ofPure {value : Expr} {callbackState : TypeChecker.State}
+      (valueSafe : source.BlockReductionConstFree value)
+      (valueMVarFree : value.hasExprMVar = false)
+      (run : (pure value : TypeChecker.RecM Expr) methods context
+        callbackState = .ok (result, state')) :
+      source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+    change Except.ok (value, callbackState) =
+      Except.ok (result, state') at run
+    have resultEq : value = result := by
+      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
+    exact resultEq ▸ ⟨valueSafe, valueMVarFree⟩
+
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
 theorem _root_.Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
