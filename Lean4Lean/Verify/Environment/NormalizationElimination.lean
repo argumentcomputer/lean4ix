@@ -42881,6 +42881,71 @@ theorem
   exact declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
     declarations.generationEnv.ord
 
+/-- The compressed endpoint selected for the emitted motive array is the
+exact well-formed base of the generated minor telescope.  The Theory side
+supplies the minor inventory over the raw motive context; the motive-context
+identification transports it to the generated motive binders, so the
+phase-two steps only have to identify each selected host minor declaration. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.generatedRecursorMinorTypes_onTel
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    {synthesis : ProducedBlockRecursorSynthesisRun produced}
+    {parameterContext motiveContext : VLCtx} {motives : Array Expr}
+    (parameters : TypeChecker.MLCtx.SelectedForall.ArrayRun
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      synthesis.synthesis.synthesisContext.lctx []
+      produced.execution.eliminationExecution.normalization.stats.params
+      generation.paramsTel parameterContext)
+    (motiveRun : TypeChecker.MLCtx.SelectedForall.ArrayRun
+      (run.declarationRun staging).constructors.ctorEnv
+      produced.execution.recursors.levelParams
+      synthesis.synthesis.synthesisContext.lctx parameterContext motives
+      generation.generatedMotiveTypes motiveContext) :
+    (run.declarationRun staging).constructors.ctorEnv.OnTel
+      produced.execution.recursors.levelParams.length motiveContext.toCtx
+      generation.generatedMinorTypes := by
+  let declarations := run.declarationRun staging
+  have parameterContextEq : parameterContext.toCtx =
+      generation.paramsTel.reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using
+      VInductDecl.TypeChecker.CandidateParameterContext.toCtx
+        (selectedForallArrayRun_candidateParameterContext parameters)
+  have motiveContextEq : motiveContext.toCtx =
+      generation.generatedMotiveTypes.reverse ++
+        generation.paramsTel.reverse := by
+    rw [VInductDecl.TypeChecker.CandidateParameterContext.toCtx
+      (selectedForallArrayRun_candidateParameterContext motiveRun),
+      parameterContextEq]
+  have recursorLevels : produced.execution.recursors.levelParams =
+      produced.execution.eliminationExecution.recLevelParams := by
+    simpa only [AddInductive.NormalizationEliminationExecution.recLevelParams,
+      AddInductive.NormalizationRecursorExecution.recursorContext] using
+      AddInductive.declareRecursors_levelParams_eq
+        produced.execution.recursorsRun
+  have recursorArity : produced.execution.recursors.levelParams.length =
+      generation.recUvars := by
+    exact (congrArg List.length recursorLevels).trans <| by
+      simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+        run.elimination.recUvars_eq.symm
+  rw [motiveContextEq, recursorArity]
+  exact (declarations.generationEnv.minorTypes_generated_defeq.view_onTel
+    declarations.generationEnv.ord).defeqDFC declarations.generationEnv.ord
+    declarations.generationEnv.motiveTypes_generated_defeq.ctx
+
 /-! #### General inputs for the phase-one motive translations -/
 
 /-- Annotation consumption is inert on any constant-headed application spine
