@@ -1345,6 +1345,112 @@ theorem VInductDecl.BlockReductionConstFree.app_iff
       fun raw member =>
         ⟨functionSafe.2 raw member, argumentSafe.2 raw member⟩⟩
 
+/-- Every argument exposed from a reduction-safe application spine remains
+reduction-safe. -/
+theorem _root_.Lean.Expr.ReductionConstFree.getAppArgsRevList
+    {expression argument : Expr} {name : Name}
+    (safe : expression.ReductionConstFree name)
+    (member : argument ∈ expression.getAppArgsRevList) :
+    argument.ReductionConstFree name := by
+  induction expression with
+  | app function supplied functionIH suppliedIH =>
+      simp only [Lean.Expr.getAppArgsRevList, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact safe.2
+      · exact functionIH safe.1 member
+  | _ => simp only [Lean.Expr.getAppArgsRevList, List.not_mem_nil] at member
+
+/-- Source-ordered application arguments inherit reduction support from the
+complete application. -/
+theorem _root_.Lean.Expr.ReductionConstFree.getAppArgsList
+    {expression argument : Expr} {name : Name}
+    (safe : expression.ReductionConstFree name)
+    (member : argument ∈ expression.getAppArgsList) :
+    argument.ReductionConstFree name := by
+  exact safe.getAppArgsRevList (by
+    simpa [← Lean.Expr.getAppArgsList_reverse] using member)
+
+/-- Array-valued application decomposition preserves reduction support. -/
+theorem _root_.Lean.Expr.ReductionConstFree.getAppArgs
+    {expression argument : Expr} {name : Name}
+    (safe : expression.ReductionConstFree name)
+    (member : argument ∈ expression.getAppArgs.toList) :
+    argument.ReductionConstFree name := by
+  rw [Lean.Expr.getAppArgs_toList] at member
+  exact safe.getAppArgsList member
+
+/-- Every argument exposed from a block-safe application is safe for the
+whole fresh block. -/
+theorem VInductDecl.BlockReductionConstFree.getAppArgs
+    {source : VInductDecl} {expression argument : Expr}
+    (safe : source.BlockReductionConstFree expression)
+    (member : argument ∈ expression.getAppArgs.toList) :
+    source.BlockReductionConstFree argument :=
+  ⟨fun raw rawMember => (safe.1 raw rawMember).getAppArgs member,
+    fun raw rawMember => (safe.2 raw rawMember).getAppArgs member⟩
+
+/-- The application head of a reduction-safe expression remains safe. -/
+theorem _root_.Lean.Expr.ReductionConstFree.getAppFn
+    {expression : Expr} {name : Name}
+    (safe : expression.ReductionConstFree name) :
+    expression.getAppFn.ReductionConstFree name := by
+  induction expression with
+  | app function argument functionIH argumentIH => exact functionIH safe.1
+  | _ => exact safe
+
+/-- Block support is inherited by the application head. -/
+theorem VInductDecl.BlockReductionConstFree.getAppFn
+    {source : VInductDecl} {expression : Expr}
+    (safe : source.BlockReductionConstFree expression) :
+    source.BlockReductionConstFree expression.getAppFn :=
+  ⟨fun raw member => (safe.1 raw member).getAppFn,
+    fun raw member => (safe.2 raw member).getAppFn⟩
+
+/-- Expanding a natural literal introduces only the two canonical natural
+constructor names. -/
+theorem _root_.Lean.Expr.reductionConstFree_natLitToConstructor
+    (value : Nat) (name : Name)
+    (zeroNe : ``Nat.zero ≠ name) (succNe : ``Nat.succ ≠ name) :
+    (Lean.Expr.natLitToConstructor value).ReductionConstFree name := by
+  cases value <;>
+    simp [Lean.Expr.natLitToConstructor, Lean.Expr.natZero,
+      Lean.Expr.natSucc, Lean.Expr.ReductionConstFree, zeroNe, succNe]
+
+/-- The list payload used by string-literal expansion mentions only the
+canonical character and list constants. -/
+private theorem reductionConstFree_strLitList
+    (characters : List Char) (name : Name)
+    (charNe : ``Char ≠ name) (nilNe : ``List.nil ≠ name)
+    (consNe : ``List.cons ≠ name) (ofNatNe : ``Char.ofNat ≠ name) :
+    (characters.foldr
+      (init := Expr.app (Expr.const ``List.nil [Level.zero])
+        (Expr.const ``Char []))
+      (fun character tail =>
+        Expr.app
+          (Expr.app
+            (Expr.app (Expr.const ``List.cons [Level.zero])
+              (Expr.const ``Char []))
+            (Expr.app (Expr.const ``Char.ofNat [])
+              (Expr.lit (.natVal character.toNat))))
+          tail)).ReductionConstFree name := by
+  induction characters with
+  | nil => simp [Lean.Expr.ReductionConstFree, charNe, nilNe]
+  | cons character characters ih =>
+      simp [Lean.Expr.ReductionConstFree, charNe, consNe, ofNatNe, ih]
+
+/-- Expanding a string literal introduces only its five canonical primitive
+support names. -/
+theorem _root_.Lean.Expr.reductionConstFree_strLitToConstructor
+    (value : String) (name : Name)
+    (charNe : ``Char ≠ name) (nilNe : ``List.nil ≠ name)
+    (consNe : ``List.cons ≠ name)
+    (stringNe : ``String.ofList ≠ name)
+    (ofNatNe : ``Char.ofNat ≠ name) :
+    (Lean.Expr.strLitToConstructor value).ReductionConstFree name := by
+  simp only [Lean.Expr.strLitToConstructor, Lean.Expr.ReductionConstFree]
+  exact ⟨stringNe, reductionConstFree_strLitList value.toList name charNe
+    nilNe consNe ofNatNe⟩
+
 /-- Application to a source-ordered argument list is reduction-safe exactly
 when its head and every argument are reduction-safe. -/
 theorem _root_.Lean.Expr.reductionConstFree_mkAppList_iff
