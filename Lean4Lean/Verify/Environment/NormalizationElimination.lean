@@ -1259,6 +1259,71 @@ end AddInductive
 
 /-! ## Block-family occurrence transport -/
 
+/-- Kernel-expression support relevant to reduction.  Projection syntax
+stores a structure annotation, but `whnf` selects a constructor only from the
+major expression, so the annotation is deliberately not classified as a
+constant occurrence here.  Binder types and let payloads remain visible
+because reduction can reach them after substitution. -/
+def _root_.Lean.Expr.ReductionConstFree (name : Name) : Expr → Prop
+  | .const constant _ => constant ≠ name
+  | .app function argument =>
+      function.ReductionConstFree name ∧ argument.ReductionConstFree name
+  | .lam _ domain body _ | .forallE _ domain body _ =>
+      domain.ReductionConstFree name ∧ body.ReductionConstFree name
+  | .letE _ type value body _ =>
+      type.ReductionConstFree name ∧ value.ReductionConstFree name ∧
+        body.ReductionConstFree name
+  | .mdata _ expression | .proj _ _ expression =>
+      expression.ReductionConstFree name
+  | _ => True
+
+/-- A strictly translated source cannot mention, at any reduction-relevant
+position, a constant absent from the Theory environment.  This is a
+source-side support fact: unlike target occurrence transport it needs no
+uniqueness, typing, primitive, or projection-readiness premise. -/
+theorem TrExprS.source_reductionConstFree_of_absent
+    {env : VEnv} {Us : List Name} {context : VLCtx}
+    {source : Expr} {target : VExpr}
+    (run : TrExprS env Us context source target)
+    {name : Name} (absent : env.constants name = none) :
+    source.ReductionConstFree name := by
+  induction source generalizing context target with
+  | bvar => trivial
+  | fvar => trivial
+  | mvar => cases run
+  | sort => trivial
+  | const constant levels =>
+      cases run with
+      | const found levelsTr levelsLength =>
+          simp only [Lean.Expr.ReductionConstFree]
+          intro equality
+          subst constant
+          rw [absent] at found
+          contradiction
+  | app function argument functionIH argumentIH =>
+      cases run with
+      | app functionType argumentType functionTr argumentTr =>
+          exact ⟨functionIH functionTr, argumentIH argumentTr⟩
+  | lam binder domain body binderInfo domainIH bodyIH =>
+      cases run with
+      | lam domainType domainTr bodyTr =>
+          exact ⟨domainIH domainTr, bodyIH bodyTr⟩
+  | forallE binder domain body binderInfo domainIH bodyIH =>
+      cases run with
+      | forallE domainType bodyType domainTr bodyTr =>
+          exact ⟨domainIH domainTr, bodyIH bodyTr⟩
+  | letE binder type value body nondep typeIH valueIH bodyIH =>
+      cases run with
+      | letE valueType typeTr valueTr bodyTr =>
+          exact ⟨typeIH typeTr, valueIH valueTr, bodyIH bodyTr⟩
+  | lit => trivial
+  | mdata data expression expressionIH =>
+      cases run with
+      | mdata expressionTr => exact expressionIH expressionTr
+  | proj structName index major majorIH =>
+      cases run with
+      | proj majorTr projection => exact majorIH majorTr
+
 /-- A literal accepted by strict translation cannot introduce a constant
 which is absent from the translated environment.  `ContainsLits` and the
 primitive contract reconstruct the canonical typed Theory literal; ordinary
