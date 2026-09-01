@@ -1299,6 +1299,33 @@ theorem _root_.Lean.Expr.ReductionConstFree.constName_ne_of_getAppFn_eq
   | mdata => cases head
   | proj => cases head
 
+/-- Finite reduction support for the family and constructor names owned by
+one raw mutual block. -/
+def VInductDecl.BlockReductionConstFree
+    (source : VInductDecl) (expression : Expr) : Prop :=
+  (∀ raw ∈ source.blockTypeConstants,
+    expression.ReductionConstFree raw.name) ∧
+  (∀ raw ∈ source.blockConstructorConstants,
+    expression.ReductionConstFree raw.name)
+
+/-- Block reduction support is pointwise structural across applications. -/
+theorem VInductDecl.BlockReductionConstFree.app_iff
+    {source : VInductDecl} {function argument : Expr} :
+    source.BlockReductionConstFree (.app function argument) ↔
+      source.BlockReductionConstFree function ∧
+        source.BlockReductionConstFree argument := by
+  constructor
+  · intro safe
+    exact ⟨⟨fun raw member => (safe.1 raw member).1,
+        fun raw member => (safe.2 raw member).1⟩,
+      ⟨fun raw member => (safe.1 raw member).2,
+        fun raw member => (safe.2 raw member).2⟩⟩
+  · rintro ⟨functionSafe, argumentSafe⟩
+    exact ⟨fun raw member =>
+        ⟨functionSafe.1 raw member, argumentSafe.1 raw member⟩,
+      fun raw member =>
+        ⟨functionSafe.2 raw member, argumentSafe.2 raw member⟩⟩
+
 /-- Replacing a free variable by a bound variable does not change the
 reduction-relevant constant inventory. -/
 theorem _root_.Lean.Expr.reductionConstFree_abstract1
@@ -1439,6 +1466,19 @@ theorem _root_.Lean.Expr.ReductionConstFree.instantiate1
   rw [Lean.Expr.instantiate1_eq]
   exact bodyFree.instantiate1' substitutionFree
 
+/-- Instantiating a block-safe body with a block-safe argument preserves the
+finite support invariant. -/
+theorem VInductDecl.BlockReductionConstFree.instantiate1
+    {source : VInductDecl} {body substitution : Expr}
+    (bodySafe : source.BlockReductionConstFree body)
+    (substitutionSafe : source.BlockReductionConstFree substitution) :
+    source.BlockReductionConstFree (body.instantiate1 substitution) := by
+  exact ⟨fun raw member =>
+      (bodySafe.1 raw member).instantiate1 (substitutionSafe.1 raw member),
+    fun raw member =>
+      (bodySafe.2 raw member).instantiate1
+        (substitutionSafe.2 raw member)⟩
+
 /-- A strictly translated source cannot mention, at any reduction-relevant
 position, a constant absent from the Theory environment.  This is a
 source-side support fact: unlike target occurrence transport it needs no
@@ -1485,6 +1525,22 @@ theorem TrExprS.source_reductionConstFree_of_absent
   | proj structName index major majorIH =>
       cases run with
       | proj majorTr projection => exact majorIH majorTr
+
+/-- A strict source translation is safe for a complete block inventory when
+every owned name is absent from the translation environment. -/
+theorem TrExprS.source_blockReductionConstFree_of_absent
+    {env : VEnv} {Us : List Name} {context : VLCtx}
+    {sourceExpr : Expr} {target : VExpr} {source : VInductDecl}
+    (run : TrExprS env Us context sourceExpr target)
+    (familyAbsent : ∀ raw ∈ source.blockTypeConstants,
+      env.constants raw.name = none)
+    (constructorAbsent : ∀ raw ∈ source.blockConstructorConstants,
+      env.constants raw.name = none) :
+    source.BlockReductionConstFree sourceExpr :=
+  ⟨fun raw member => run.source_reductionConstFree_of_absent
+      (familyAbsent raw member),
+    fun raw member => run.source_reductionConstFree_of_absent
+      (constructorAbsent raw member)⟩
 
 /-- Every declaration found in a translated local context has a
 reduction-safe type and value when the selected constant is absent.  For a
@@ -31413,6 +31469,79 @@ theorem ProducedBlockSemanticDeclarationRun.constructor_name_absent
     blockEnv.constants constructor.name = none :=
   declarations.constructors.raw_name_absent declarations.families.trenv
     member
+
+/-- Every family name owned by the semantic block was absent from the Theory
+environment in which candidate validation ran. -/
+theorem ProducedBlockSemanticDeclarationRun.family_name_absent_at_validation
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {family : VConstVal}
+    (member : family ∈ source.blockTypeConstants) :
+    env.constants family.name = none :=
+  declarations.families.raw_name_absent pre member
+
+/-- Constructor freshness at the family-only boundary pulls back to the
+Theory environment used by candidate validation. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.constructor_name_absent_at_validation
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    {constructor : VConstVal}
+    (member : constructor ∈ source.blockConstructorConstants) :
+    env.constants constructor.name = none :=
+  declarations.families.addTypes.le.constants_none
+    (declarations.constructor_name_absent member)
+
+/-- Any expression strictly translated during candidate validation is free
+of every family and constructor name subsequently staged for this block. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.source_blockReductionConstFree
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {Delta : VLCtx} {expression : Expr} {target : VExpr}
+    (translation : TrExprS env Us Delta expression target) :
+    source.BlockReductionConstFree expression :=
+  translation.source_blockReductionConstFree_of_absent
+    (fun _ member =>
+      declarations.family_name_absent_at_validation pre member)
+    (fun _ member =>
+      declarations.constructor_name_absent_at_validation member)
 
 /-- Assemble both declaration folds at the producer's exact family and
 constructor endpoints. -/
