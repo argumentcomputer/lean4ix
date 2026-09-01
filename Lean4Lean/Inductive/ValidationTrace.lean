@@ -1951,6 +1951,24 @@ theorem result_safety
       telescope.result_context_safety
   | terminal dIdx stats context outOfBounds => rfl
 
+/-- Outer family validation also preserves the checker fuel configuration in
+its terminal reader context. -/
+theorem result_fuel
+    (trace : FamilyParameterComparisonBlockTrace nparams indTypes dIdx stats
+      context) :
+    trace.result.validationContext.fuel = context.fuel := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+    exact (show _ = telescope.result.context.fuel from ih).trans
+      telescope.result_context_fuel
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible
+      tail ih =>
+    exact (show _ = telescope.result.context.fuel from ih).trans
+      telescope.result_context_fuel
+  | terminal dIdx stats context outOfBounds => rfl
+
 /-- Reader context reached after the current family's complete telescope.
 
 For an initial nonempty block this is the first-family terminal context.  The
