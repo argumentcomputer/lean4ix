@@ -36399,6 +36399,44 @@ private theorem forallBodyAlpha_after_fresh
     _ = _ :=
       (Lean.Expr.abstractFVars_cons_instantiate1 rightAvoid).symm
 
+/-- A compressed free-variable context backed by an operational local
+context cannot already contain that operational context's next fresh name. -/
+private theorem compressedFVars_fresh
+    {context : AddInductive.Context} {base : VLCtx}
+    (localRun : TypeChecker.CandidateLocalContextRun context)
+    (found : ∀ fv ∈ base.fvars,
+      ∃ declaration, context.lctx.find? fv = some declaration) :
+    context.freshFVarId ∉ base.fvars := by
+  intro member
+  obtain ⟨declaration, present⟩ := found context.freshFVarId member
+  rw [localRun.fresh] at present
+  contradiction
+
+/-- Extending an operational context and its compressed counterpart with the
+same fresh identifier preserves declaration coverage of every compressed
+free variable. -/
+private theorem compressedFVars_push
+    {context : AddInductive.Context} {base : VLCtx}
+    (localRun : TypeChecker.CandidateLocalContextRun context)
+    (found : ∀ fv ∈ base.fvars,
+      ∃ declaration, context.lctx.find? fv = some declaration)
+    (name : Name) (binderInfo : BinderInfo) (domain : Expr)
+    (deps : List FVarId) (target : VExpr) :
+    ∀ fv ∈ VLCtx.fvars
+        (((some (context.freshFVarId, deps), .vlam target) :: base) :
+          VLCtx),
+      ∃ declaration,
+        (context.pushLocalDecl name binderInfo domain).lctx.find? fv =
+          some declaration := by
+  intro fv member
+  change fv ∈ context.freshFVarId :: base.fvars at member
+  rcases List.mem_cons.mp member with freshEq | member
+  · subst fv
+    exact ⟨_, localRun.push_findNew name binderInfo domain⟩
+  · obtain ⟨declaration, present⟩ := found fv member
+    exact ⟨declaration,
+      localRun.push_findOld name binderInfo domain present⟩
+
 /-- Source-order free variables allocated by the index branches of a retained
 `loopArgs1` decomposition.  Shared-parameter branches substitute the already
 selected parameter array and therefore contribute no emitted index. -/
@@ -36736,6 +36774,488 @@ private inductive LoopArgs1IndexTranslationTrace
       LoopArgs1IndexTranslationTrace env Us stats
         (.index notParameter nextType whnfRun tail) base
         (target :: targets) final
+
+/-- Preserve a phase-one index translation trace when the Theory
+environment grows.  The operational source trace and compressed contexts are
+unchanged; only the semantic typing evidence is transported. -/
+private noncomputable def LoopArgs1IndexTranslationTrace.mono
+    {env postEnv : VEnv} (envLE : env ≤ postEnv) {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final) :
+    LoopArgs1IndexTranslationTrace postEnv Us stats trace base targets final := by
+  induction translations with
+  | @done outerI outerIndices outerFuel outerCurrent type i indices fuel
+      current notForall base =>
+      exact @LoopArgs1IndexTranslationTrace.done postEnv Us stats outerI
+        outerIndices outerFuel outerCurrent type i indices fuel current
+        notForall base
+  | @parameter outerName outerBody outerBinderInfo i indices fuel current
+      finalIndices finalContext name domain body binderInfo isParameter
+      nextType whnfRun tail base final targets rest ih =>
+      exact @LoopArgs1IndexTranslationTrace.parameter postEnv Us stats
+        outerName outerBody outerBinderInfo i indices fuel current finalIndices
+        finalContext name domain body binderInfo isParameter nextType whnfRun
+        tail base final targets ih
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      exact @LoopArgs1IndexTranslationTrace.index postEnv Us stats i indices
+        fuel current finalIndices finalContext name domain body binderInfo
+        notParameter nextType whnfRun tail base final target targets
+        (domainTr.mono envLE) (domainType.mono envLE) ih
+
+/-- Reindex every target in a phase-one index translation trace into a new
+universe inventory.  This is the index-phase counterpart of
+`MLCtx.SelectedForall.relevel`. -/
+private noncomputable def LoopArgs1IndexTranslationTrace.relevel
+    {env : VEnv} {ps Us : List Name} {extra : List VLevel}
+    (levelsWF : ∀ level ∈ extra, level.WF Us.length)
+    (levels : ∀ {source target},
+      VLevel.ofLevel ps source = some target →
+        VLevel.ofLevel Us source = some (target.inst extra))
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env ps stats trace base
+      targets final) :
+    LoopArgs1IndexTranslationTrace env Us stats trace (base.instL extra)
+      (targets.map (VExpr.instL extra)) (final.instL extra) := by
+  induction translations with
+  | @done outerI outerIndices outerFuel outerCurrent type i indices fuel
+      current notForall base =>
+      exact @LoopArgs1IndexTranslationTrace.done env Us stats outerI
+        outerIndices outerFuel outerCurrent type i indices fuel current
+        notForall (base.instL extra)
+  | @parameter outerName outerBody outerBinderInfo i indices fuel current
+      finalIndices finalContext name domain body binderInfo isParameter
+      nextType whnfRun tail base final targets rest ih =>
+      exact @LoopArgs1IndexTranslationTrace.parameter env Us stats outerName
+        outerBody outerBinderInfo i indices fuel current finalIndices
+        finalContext name domain body binderInfo isParameter nextType whnfRun
+        tail (base.instL extra) (final.instL extra)
+        (targets.map (VExpr.instL extra)) ih
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      exact @LoopArgs1IndexTranslationTrace.index env Us stats i indices fuel
+        current finalIndices finalContext name domain body binderInfo
+        notParameter nextType whnfRun tail (base.instL extra)
+        (final.instL extra) (target.instL extra)
+        (targets.map (VExpr.instL extra))
+        (domainTr.relevel levelsWF levels)
+        (VLCtx.instL_toCtx _ ▸ domainType.instL levelsWF)
+        (by simpa [VLCtx.instL, VLocalDecl.instL] using ih)
+
+/-- Transport a validator-owned exact index suffix onto the index branches
+retained by phase one.  The producer annotation spine is the common syntactic
+clock: while another domain remains, its next source is a stored Pi, so both
+WHNF executions reduce to their literal instantiated bodies. -/
+private theorem loopArgs1IndexTranslation_of_exact
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {indices : Array Expr} {fuel : Nat}
+    {phaseCurrent : AddInductive.Context}
+    {phaseFinalIndices : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    (phase : AddInductive.mkRecInfos.LoopArgs1Trace stats phaseType
+      stats.params.size indices fuel phaseCurrent phaseFinalIndices
+      phaseFinalContext)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {nparams : Nat} {validatorContext : AddInductive.Context}
+    {rootSource : Expr} {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      validatorContext rootSource i nindices rootFuel}
+    {validatorContextRun : TypeChecker.CandidateContextRun validatorContext}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer
+      validatorContextRun}
+    {env : VEnv} {Us : List Name}
+    {phaseBase validatorBase validatorFinal : VLCtx}
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidateTrace : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {candidateBase candidateTerminal : VLCtx}
+    {candidateDomains : List VExpr}
+    (candidateSpine : TypeChecker.CandidateAnnotationSpine env Us
+      candidateTrace candidateBase candidateTerminal candidateDomains)
+    (candidateShape : candidateBase.FVarLamOnly)
+    (candidateStored : candidateTrace.storedSpine = true)
+    (candidateAnnotations : candidateTrace.validationAnnotations)
+    (exact : boundary.ExactIndexDomainTrace env Us validatorBase
+      candidateDomains validatorFinal)
+    (terminalWF : VLCtx.WF env Us.length candidateTerminal)
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (phaseShape : phaseBase.FVarLamOnly)
+    (validatorShape : validatorBase.FVarLamOnly)
+    (phaseValidator : VLCtx.FVarAlpha env Us.length phaseBase validatorBase)
+    (phaseFound : ∀ fv ∈ phaseBase.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    (validatorFound : ∀ fv ∈ validatorBase.fvars,
+      ∃ declaration, validatorContext.lctx.find? fv = some declaration)
+    (phaseScope : phaseType.FVarsIn (· ∈ phaseBase.fvars))
+    (validatorScope : boundary.source.FVarsIn
+      (· ∈ validatorBase.fvars))
+    (phaseAlpha : Lean.Expr.abstractFVars phaseBase phaseType =
+      Lean.Expr.abstractFVars candidateBase candidateTrace.rootWhnf)
+    (validatorAlpha : Lean.Expr.abstractFVars validatorBase boundary.source =
+      Lean.Expr.abstractFVars candidateBase candidateTrace.rootWhnf)
+    (phaseLength : (loopArgs1IndexFVars phase).length =
+      candidateDomains.length)
+    (whnfFuel : Nat)
+    (phaseDepth : phaseCurrent.fuel.recDepth = whnfFuel + 1)
+    (validatorDepth : validatorContext.fuel.recDepth = whnfFuel + 1)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopArgs1IndexTranslationTrace env Us stats phase phaseBase
+        candidateDomains final) := by
+  induction candidateSpine generalizing stats phaseType indices fuel
+      phaseCurrent phaseFinalIndices phaseFinalContext validatorContext
+      rootSource i nindices rootFuel outer validatorContextRun boundary
+      phaseBase validatorBase validatorFinal whnfFuel with
+  | terminal node =>
+      cases exact with
+      | done =>
+          cases phase with
+          | done notForall =>
+              refine ⟨⟨phaseBase, ?_⟩⟩
+              exact LoopArgs1IndexTranslationTrace.done
+                (env := env) (Us := Us) (stats := stats)
+                (type := phaseType) (i := stats.params.size)
+                (indices := indices) (fuel := fuel)
+                (current := phaseCurrent) notForall phaseBase
+          | parameter isParameter nextType whnfRun tail =>
+              exact (Nat.lt_irrefl _ isParameter).elim
+          | index notParameter nextType whnfRun tail =>
+              simp only [loopArgs1IndexFVars, List.length_cons,
+                List.length_nil] at phaseLength
+              omega
+  | @forallE candidateContext candidateDomain candidateName
+      candidateBinderInfo candidateBody candidateBase candidateTerminal
+      candidateSource candidateInferred candidateFresh annotationsNode
+      annotationsEq candidateChecked candidateNormalized domainCandidate
+      bodyCandidate storedDomain candidateDomains head tail ih =>
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at candidateStored
+      rcases candidateAnnotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      subst candidateBase
+      cases exact with
+      | step run advance domainTr domainType exactTail =>
+          cases phase with
+          | done notForall =>
+              simp only [loopArgs1IndexFVars, List.length_nil,
+                List.length_cons] at phaseLength
+              omega
+          | parameter isParameter nextType whnfRun phaseTail =>
+              exact (Nat.lt_irrefl _ isParameter).elim
+          | @index phaseI phaseTailFuel phaseFinalIndices phaseFinalContext
+              phaseName phaseDomain phaseBody
+              phaseBinderInfo phaseIndices phaseCurrent notParameter
+              phaseNextType phaseWhnf phaseTail =>
+              have phaseValidatorAlpha : Lean.Expr.abstractFVars phaseBase
+                  (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+                  Lean.Expr.abstractFVars validatorBase boundary.source :=
+                phaseAlpha.trans validatorAlpha.symm
+              obtain ⟨phaseDomainTr, phaseDomainType⟩ :=
+                loopArgs1IndexDomain_of_exact run henv primitives
+                  phaseValidator phaseShape validatorShape
+                  phaseValidatorAlpha domainTr domainType
+              have phaseRootAlpha : Lean.Expr.abstractFVars phaseBase
+                  (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+                  Lean.Expr.abstractFVars snapshot.Δ
+                    (.forallE candidateName candidateDomain candidateBody
+                      candidateBinderInfo) := by
+                simpa only [AddInductive.CandidateExprTrace.rootWhnf] using
+                  phaseAlpha
+              have validatorRootAlpha :
+                  Lean.Expr.abstractFVars validatorBase
+                      (.forallE run.translation.name run.translation.domain
+                        run.translation.body run.translation.binderInfo) =
+                    Lean.Expr.abstractFVars snapshot.Δ
+                      (.forallE candidateName candidateDomain candidateBody
+                        candidateBinderInfo) := by
+                calc
+                  _ = Lean.Expr.abstractFVars validatorBase boundary.source :=
+                    congrArg (Lean.Expr.abstractFVars validatorBase)
+                      run.translation.source_eq.symm
+                  _ = Lean.Expr.abstractFVars snapshot.Δ
+                      (AddInductive.CandidateExprTrace.forallE
+                        candidateContext candidateSource candidateInferred
+                        candidateName candidateDomain candidateBody
+                        candidateBinderInfo candidateFresh annotationsNode
+                        annotationsEq candidateChecked candidateNormalized
+                        domainCandidate bodyCandidate).rootWhnf :=
+                    validatorAlpha
+                  _ = _ := rfl
+              have phaseFresh : phaseCurrent.freshFVarId ∉ phaseBase.fvars :=
+                compressedFVars_fresh phaseLocal phaseFound
+              have validatorFresh : validatorContext.freshFVarId ∉
+                  validatorBase.fvars :=
+                compressedFVars_fresh
+                  boundary.localState.localContext validatorFound
+              have candidateTailWF := tail.terminalLift.wf henv terminalWF
+              have candidateFreshAbsent : candidateContext.freshFVarId ∉
+                  snapshot.Δ.fvars :=
+                (candidateTailWF.2.1 _ _ rfl).1
+              have phaseBodyScope : phaseBody.FVarsIn
+                  (· ∈ phaseBase.fvars) := phaseScope.2
+              have phaseBodyAvoid : phaseBody.FVarsIn
+                  (· ≠ phaseCurrent.freshFVarId) :=
+                phaseBodyScope.mono (by
+                  intro fv member equal
+                  subst fv
+                  exact phaseFresh member)
+              have validatorSourceScope := validatorScope
+              rw [run.translation.source_eq] at validatorSourceScope
+              have validatorBodyScope : run.translation.body.FVarsIn
+                  (· ∈ validatorBase.fvars) := validatorSourceScope.2
+              have validatorBodyAvoid : run.translation.body.FVarsIn
+                  (· ≠ validatorContext.freshFVarId) :=
+                validatorBodyScope.mono (by
+                  intro fv member equal
+                  subst fv
+                  exact validatorFresh member)
+              have snapshotRoot := snapshot.root_eq
+              simp only [Expr.forallE.injEq] at snapshotRoot
+              obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
+                _snapshotBinder⟩ := snapshotRoot
+              have candidateBodyScope : candidateBody.FVarsIn
+                  (· ∈ snapshot.Δ.fvars) := by
+                simpa only [snapshotBody] using snapshot.body_fvars
+              have candidateBodyAvoid : candidateBody.FVarsIn
+                  (· ≠ candidateContext.freshFVarId) :=
+                candidateBodyScope.mono (by
+                  intro fv member equal
+                  subst fv
+                  exact candidateFreshAbsent member)
+              let phaseNextBase : VLCtx :=
+                (some (phaseCurrent.freshFVarId,
+                    (AddInductive.consumeTypeAnnotations
+                      phaseDomain).fvarsList),
+                  .vlam storedDomain) :: phaseBase
+              let validatorNextBase : VLCtx :=
+                (some (validatorContext.freshFVarId,
+                    (AddInductive.consumeTypeAnnotations
+                      run.translation.domain).fvarsList),
+                  .vlam storedDomain) :: validatorBase
+              let candidateNextBase : VLCtx :=
+                (some (candidateContext.freshFVarId,
+                    annotationsNode.consumed.fvarsList),
+                  .vlam storedDomain) :: snapshot.Δ
+              have phaseCandidateInputAlpha :
+                  Lean.Expr.abstractFVars phaseNextBase
+                      (phaseBody.instantiate1 phaseCurrent.freshExpr) =
+                    Lean.Expr.abstractFVars candidateNextBase
+                      (candidateBody.instantiate1
+                        candidateContext.freshExpr) := by
+                exact forallBodyAlpha_after_fresh phaseRootAlpha
+                  phaseBodyAvoid candidateBodyAvoid
+              have validatorCandidateInputAlpha :
+                  Lean.Expr.abstractFVars validatorNextBase
+                      (run.translation.body.instantiate1
+                        validatorContext.freshExpr) =
+                    Lean.Expr.abstractFVars candidateNextBase
+                      (candidateBody.instantiate1
+                        candidateContext.freshExpr) := by
+                exact forallBodyAlpha_after_fresh validatorRootAlpha
+                  validatorBodyAvoid candidateBodyAvoid
+              have phaseInputScope :
+                  (phaseBody.instantiate1
+                    phaseCurrent.freshExpr).FVarsIn
+                      (· ∈ phaseNextBase.fvars) := by
+                have bodyScope : phaseBody.FVarsIn
+                    (· ∈ phaseNextBase.fvars) :=
+                  phaseBodyScope.mono (by
+                    intro fv member
+                    simp only [phaseNextBase, VLCtx.fvars]
+                    exact .tail _ member)
+                have freshScope : phaseCurrent.freshExpr.FVarsIn
+                    (· ∈ phaseNextBase.fvars) := by
+                  simp [AddInductive.Context.freshExpr, phaseNextBase,
+                    VLCtx.fvars, FVarsIn]
+                simpa only [Lean.Expr.instantiate1_eq] using
+                  bodyScope.instantiate1 freshScope
+              have validatorInputScope :
+                  (run.translation.body.instantiate1
+                    validatorContext.freshExpr).FVarsIn
+                      (· ∈ validatorNextBase.fvars) := by
+                have bodyScope : run.translation.body.FVarsIn
+                    (· ∈ validatorNextBase.fvars) :=
+                  validatorBodyScope.mono (by
+                    intro fv member
+                    simp only [validatorNextBase, VLCtx.fvars]
+                    exact .tail _ member)
+                have freshScope : validatorContext.freshExpr.FVarsIn
+                    (· ∈ validatorNextBase.fvars) := by
+                  simp [AddInductive.Context.freshExpr, validatorNextBase,
+                    VLCtx.fvars, FVarsIn]
+                simpa only [Lean.Expr.instantiate1_eq] using
+                  bodyScope.instantiate1 freshScope
+              have nextPhaseShape : phaseNextBase.FVarLamOnly :=
+                .cons phaseShape
+              have nextValidatorShape : validatorNextBase.FVarLamOnly :=
+                .cons validatorShape
+              obtain ⟨targetSort, targetHasType⟩ := phaseDomainType
+              have nextRelation : VLCtx.FVarAlpha env Us.length
+                  phaseNextBase validatorNextBase := by
+                exact .cons phaseValidator (.vlam targetHasType)
+              have nextPhaseFound : ∀ fv ∈ phaseNextBase.fvars,
+                  ∃ declaration,
+                    (phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                      (AddInductive.consumeTypeAnnotations
+                        phaseDomain)).lctx.find? fv = some declaration := by
+                exact compressedFVars_push phaseLocal phaseFound phaseName
+                  phaseBinderInfo
+                  (AddInductive.consumeTypeAnnotations phaseDomain)
+                  (AddInductive.consumeTypeAnnotations phaseDomain).fvarsList
+                  storedDomain
+              have nextValidatorFound :
+                  ∀ fv ∈ validatorNextBase.fvars,
+                    ∃ declaration,
+                      (validatorContext.pushLocalDecl run.translation.name
+                        run.translation.binderInfo
+                        (AddInductive.consumeTypeAnnotations
+                          run.translation.domain)).lctx.find? fv =
+                            some declaration := by
+                exact compressedFVars_push
+                  boundary.localState.localContext validatorFound
+                  run.translation.name run.translation.binderInfo
+                  (AddInductive.consumeTypeAnnotations
+                    run.translation.domain)
+                  (AddInductive.consumeTypeAnnotations
+                    run.translation.domain).fvarsList storedDomain
+              have nextLength : (loopArgs1IndexFVars phaseTail).length =
+                  candidateDomains.length := by
+                simpa only [loopArgs1IndexFVars, List.length_cons,
+                  Nat.succ_inj] using phaseLength
+              by_cases domainsNil : candidateDomains = []
+              · subst candidateDomains
+                cases exactTail with
+                | done =>
+                    cases phaseTail with
+                    | done tailNotForall =>
+                        refine ⟨⟨phaseNextBase, .index notParameter
+                          phaseNextType phaseWhnf _ phaseDomainTr
+                          ⟨targetSort, targetHasType⟩ ?_⟩⟩
+                        exact LoopArgs1IndexTranslationTrace.done
+                          (env := env) (Us := Us) (stats := stats)
+                          (type := phaseNextType) (i := stats.params.size)
+                          (indices := indices.push
+                            phaseCurrent.freshExpr)
+                          (fuel := phaseTailFuel)
+                          (current := phaseCurrent.pushLocalDecl phaseName
+                            phaseBinderInfo
+                            (AddInductive.consumeTypeAnnotations phaseDomain))
+                          tailNotForall phaseNextBase
+                    | parameter tailIsParameter nextType whnfRun tail =>
+                        exact (Nat.lt_irrefl _ tailIsParameter).elim
+                    | index tailNotParameter nextType whnfRun tail =>
+                        simp only [loopArgs1IndexFVars, List.length_cons,
+                          List.length_nil] at nextLength
+                        omega
+              · have candidateRootEq :=
+                  tail.rootWhnf_eq_source_of_domains_ne_nil
+                    candidateStored.2 domainsNil whnfFuel (by
+                      simpa [AddInductive.Context.pushLocalDecl] using
+                        candidateDepth)
+                have candidateInputForall :
+                    (candidateBody.instantiate1
+                      candidateContext.freshExpr).isForall = true := by
+                  rw [← candidateRootEq]
+                  cases tail with
+                  | terminal => exact (domainsNil rfl).elim
+                  | forallE => rfl
+                have phaseInputForall :
+                    (phaseBody.instantiate1
+                      phaseCurrent.freshExpr).isForall = true := by
+                  have shapeEq := congrArg Expr.isForall
+                    phaseCandidateInputAlpha
+                  simpa only [Lean.Expr.abstractFVars_isForall,
+                    candidateInputForall] using shapeEq
+                have validatorInputForall :
+                    (run.translation.body.instantiate1
+                      validatorContext.freshExpr).isForall = true := by
+                  have shapeEq := congrArg Expr.isForall
+                    validatorCandidateInputAlpha
+                  simpa only [Lean.Expr.abstractFVars_isForall,
+                    candidateInputForall] using shapeEq
+                have nextPhaseDepth :
+                    (phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                      (AddInductive.consumeTypeAnnotations
+                        phaseDomain)).fuel.recDepth = whnfFuel + 1 := by
+                  simpa [AddInductive.Context.pushLocalDecl] using phaseDepth
+                have nextValidatorDepth :
+                    (validatorContext.pushLocalDecl run.translation.name
+                      run.translation.binderInfo
+                      (AddInductive.consumeTypeAnnotations
+                        run.translation.domain)).fuel.recDepth =
+                          whnfFuel + 1 := by
+                  simpa [AddInductive.Context.pushLocalDecl] using
+                    validatorDepth
+                have phaseWhnfValid : AddInductive.CandidateWhnfStep.Valid
+                    ⟨phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                        (AddInductive.consumeTypeAnnotations phaseDomain),
+                      phaseBody.instantiate1 phaseCurrent.freshExpr,
+                      phaseNextType⟩ := by
+                  simpa [AddInductive.CandidateWhnfStep.Valid] using phaseWhnf
+                have phaseViewEq : phaseNextType =
+                    phaseBody.instantiate1 phaseCurrent.freshExpr :=
+                  AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                    phaseWhnfValid whnfFuel nextPhaseDepth phaseInputForall
+                have validatorViewEq : advance.view =
+                    run.translation.body.instantiate1
+                      validatorContext.freshExpr :=
+                  AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                    advance.whnf_valid whnfFuel nextValidatorDepth
+                    validatorInputForall
+                have nextPhaseAlpha : Lean.Expr.abstractFVars phaseNextBase
+                    phaseNextType =
+                    Lean.Expr.abstractFVars candidateNextBase
+                      bodyCandidate.rootWhnf := by
+                  rw [phaseViewEq, candidateRootEq]
+                  exact phaseCandidateInputAlpha
+                have nextValidatorAlpha :
+                    Lean.Expr.abstractFVars validatorNextBase
+                        advance.toBoundary.source =
+                      Lean.Expr.abstractFVars candidateNextBase
+                        bodyCandidate.rootWhnf := by
+                  rw [show advance.toBoundary.source = advance.view by rfl,
+                    validatorViewEq, candidateRootEq]
+                  exact validatorCandidateInputAlpha
+                have nextPhaseScope : phaseNextType.FVarsIn
+                    (· ∈ phaseNextBase.fvars) := by
+                  rw [phaseViewEq]
+                  exact phaseInputScope
+                have nextValidatorScope :
+                    advance.toBoundary.source.FVarsIn
+                      (· ∈ validatorNextBase.fvars) := by
+                  rw [show advance.toBoundary.source = advance.view by rfl,
+                    validatorViewEq]
+                  exact validatorInputScope
+                obtain ⟨final, rest⟩ := ih phaseTail
+                  (phaseLocal.push phaseName phaseBinderInfo
+                    (AddInductive.consumeTypeAnnotations phaseDomain))
+                  (.cons candidateShape) candidateStored.2 tailAnnotations
+                  exactTail terminalWF nextPhaseShape nextValidatorShape
+                  nextRelation
+                  nextPhaseFound nextValidatorFound nextPhaseScope
+                  nextValidatorScope nextPhaseAlpha nextValidatorAlpha
+                  nextLength whnfFuel nextPhaseDepth nextValidatorDepth (by
+                    simpa [AddInductive.Context.pushLocalDecl] using
+                      candidateDepth)
+                exact ⟨⟨final, .index notParameter phaseNextType phaseWhnf
+                  phaseTail phaseDomainTr ⟨targetSort, targetHasType⟩
+                  rest⟩⟩
 
 /-- Erase the phase-one index translation trace to the selected telescope in
 any implementation context extending the exact `loopArgs1` endpoint. -/
