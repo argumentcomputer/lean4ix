@@ -36306,6 +36306,99 @@ private noncomputable def exactIndexDomain_relevel
         (VLCtx.instL_toCtx _ ▸ domainType.instL levelsWF)
         (by simpa [VLCtx.instL, VLocalDecl.instL] using ih)
 
+/-- Relocate one exact validator-selected index domain onto an
+alpha-equivalent phase-one Pi.  The target domain is retained literally;
+only the kernel source and its compressed free-variable context change. -/
+private theorem loopArgs1IndexDomain_of_exact
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {validatorContext : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      validatorContext rootSource i nindices rootFuel}
+    {validatorRun : TypeChecker.CandidateContextRun validatorContext}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer validatorRun}
+    (run : boundary.IndexDomainRun)
+    {env : VEnv} {Us : List Name}
+    {phaseBase validatorBase : VLCtx}
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (relation : VLCtx.FVarAlpha env Us.length phaseBase validatorBase)
+    (phaseShape : phaseBase.FVarLamOnly)
+    (validatorShape : validatorBase.FVarLamOnly)
+    {phaseName : Name} {phaseDomain phaseBody : Expr}
+    {phaseBinderInfo : BinderInfo}
+    (sourceAlpha : Lean.Expr.abstractFVars phaseBase
+        (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+      Lean.Expr.abstractFVars validatorBase boundary.source)
+    {target : VExpr}
+    (domainTr : TrExprS env Us validatorBase
+      (AddInductive.consumeTypeAnnotations run.translation.domain) target)
+    (domainType : env.IsType Us.length validatorBase.toCtx target) :
+    TrExprS env Us phaseBase
+        (AddInductive.consumeTypeAnnotations phaseDomain) target ∧
+      env.IsType Us.length phaseBase.toCtx target := by
+  rw [run.translation.source_eq] at sourceAlpha
+  rw [Lean.Expr.abstractFVars_forallE,
+    Lean.Expr.abstractFVars_forallE] at sourceAlpha
+  simp only [Lean.Expr.forallE.injEq] at sourceAlpha
+  obtain ⟨_nameAlpha, domainAlpha, _bodyAlpha, _binderAlpha⟩ :=
+    sourceAlpha
+  have consumedAlpha : Lean.Expr.abstractFVars phaseBase
+      (AddInductive.consumeTypeAnnotations phaseDomain) =
+      Lean.Expr.abstractFVars validatorBase
+        (AddInductive.consumeTypeAnnotations run.translation.domain) := by
+    calc
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars phaseBase phaseDomain) :=
+          (AddInductive.consumeTypeAnnotations_abstractFVars
+            phaseBase phaseDomain).symm
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars validatorBase
+              run.translation.domain) :=
+          congrArg AddInductive.consumeTypeAnnotations domainAlpha
+      _ = _ := AddInductive.consumeTypeAnnotations_abstractFVars
+        validatorBase run.translation.domain
+  have phaseTr := domainTr.ofAlpha henv primitives relation phaseShape
+    validatorShape consumedAlpha
+  obtain ⟨sort, targetType⟩ := domainType
+  have phaseType : env.IsType Us.length phaseBase.toCtx target :=
+    ⟨sort, targetType.defeqDFC henv.ordered
+      (relation.defeqCtx.symm henv.ordered)⟩
+  exact ⟨phaseTr, phaseType⟩
+
+/-- Positional alpha-equivalence of two Pi roots survives instantiation by
+the distinct fresh variables allocated on each side.  The new declarations
+may carry different dependency metadata, since `abstractFVars` observes only
+their source-order identifiers. -/
+private theorem forallBodyAlpha_after_fresh
+    {left right : VLCtx}
+    {leftName rightName : Name}
+    {leftDomain leftBody rightDomain rightBody : Expr}
+    {leftBinderInfo rightBinderInfo : BinderInfo}
+    (rootAlpha : Lean.Expr.abstractFVars left
+        (.forallE leftName leftDomain leftBody leftBinderInfo) =
+      Lean.Expr.abstractFVars right
+        (.forallE rightName rightDomain rightBody rightBinderInfo))
+    {leftFVar rightFVar : FVarId}
+    {leftDeps rightDeps : List FVarId} {target : VExpr}
+    (leftAvoid : leftBody.FVarsIn (· ≠ leftFVar))
+    (rightAvoid : rightBody.FVarsIn (· ≠ rightFVar)) :
+    Lean.Expr.abstractFVars
+        ((some (leftFVar, leftDeps), .vlam target) :: left)
+        (leftBody.instantiate1 (.fvar leftFVar)) =
+      Lean.Expr.abstractFVars
+        ((some (rightFVar, rightDeps), .vlam target) :: right)
+        (rightBody.instantiate1 (.fvar rightFVar)) := by
+  rw [Lean.Expr.abstractFVars_forallE,
+    Lean.Expr.abstractFVars_forallE] at rootAlpha
+  simp only [Lean.Expr.forallE.injEq] at rootAlpha
+  obtain ⟨_nameAlpha, _domainAlpha, bodyAlpha, _binderAlpha⟩ := rootAlpha
+  calc
+    _ = Lean.Expr.abstractFVarsAux 1 left.fvars leftBody :=
+      Lean.Expr.abstractFVars_cons_instantiate1 leftAvoid
+    _ = Lean.Expr.abstractFVarsAux 1 right.fvars rightBody := bodyAlpha
+    _ = _ :=
+      (Lean.Expr.abstractFVars_cons_instantiate1 rightAvoid).symm
+
 /-- Source-order free variables allocated by the index branches of a retained
 `loopArgs1` decomposition.  Shared-parameter branches substitute the already
 selected parameter array and therefore contribute no emitted index. -/
@@ -36316,6 +36409,184 @@ private def loopArgs1IndexFVars :
   | .parameter _ _ _ tail => loopArgs1IndexFVars tail
   | .index (current := current) _ _ _ tail =>
       current.freshFVarId :: loopArgs1IndexFVars tail
+
+/-- Exact post-parameter suffix selected inside a retained `loopArgs1`
+decomposition.  Parameter branches do not change either the reader context
+or the accumulated index array, so the suffix remains indexed by both
+literal operational endpoints. -/
+private structure LoopArgs1ParameterSuffix
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat}
+    (position : candidate.MainSpineAt remaining) where
+  type : Expr
+  fuel : Nat
+  suffix : AddInductive.mkRecInfos.LoopArgs1Trace stats type
+    stats.params.size indices fuel current finalIndices finalContext
+  source_eq : type = position.position.trace.rootWhnf
+
+/-- Synchronize the shared-parameter branches of recursor synthesis with the
+same strict main-spine position retained by the normalization candidate.
+
+The strict position hypothesis says that at least one family index follows
+the parameter prefix.  Consequently every WHNF input traversed here is
+already a Pi on both sides, so the two producer-owned WHNF equations reduce
+to literal instantiated bodies.  No determinism principle across reader
+contexts is required. -/
+private theorem loopArgs1_parameterSuffix_of_candidate
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat}
+    (position : candidate.MainSpineAt remaining)
+    (complete : i + remaining = stats.params.size)
+    (strict : remaining < candidate.spineLength)
+    (stored : candidate.storedSpine = true)
+    (sourceEq : type = candidate.rootWhnf)
+    (parametersEq : stats.params.toList.drop i =
+      candidate.parameterList remaining)
+    (whnfFuel : Nat)
+    (currentDepth : current.fuel.recDepth = whnfFuel + 1)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (LoopArgs1ParameterSuffix trace position) := by
+  induction candidate generalizing remaining i type indices fuel current
+      finalIndices finalContext with
+  | terminal candidateContext candidateSource inferred result checked valid =>
+      cases position with
+      | zero terminal =>
+          have indexEq : i = stats.params.size := by omega
+          subst i
+          exact ⟨{
+            type := type
+            fuel := fuel
+            suffix := trace
+            source_eq := sourceEq }⟩
+  | forallE candidateContext candidateSource inferred candidateName
+      candidateDomain candidateBody candidateBinderInfo candidateFresh
+      candidateAnnotations candidateAnnotationsEq candidateChecked
+      candidateNormalized candidateDomainCandidate candidateBodyCandidate
+      domainIH bodyIH =>
+      cases remaining with
+      | zero =>
+          cases position with
+          | zero candidate =>
+              have indexEq : i = stats.params.size := by omega
+              subst i
+              exact ⟨{
+                type := type
+                fuel := fuel
+                suffix := trace
+                source_eq := sourceEq }⟩
+      | succ remaining =>
+          cases position with
+          | succ _ tailPosition =>
+              simp only [AddInductive.CandidateExprTrace.storedSpine,
+                Bool.and_eq_true] at stored
+              obtain ⟨headStored, bodyStored⟩ := stored
+              have tailStrict :
+                  remaining < candidateBodyCandidate.spineLength := by
+                simpa only [AddInductive.CandidateExprTrace.spineLength,
+                  Nat.succ_lt_succ_iff] using strict
+              have candidateInputForall :
+                  (candidateBody.instantiate1
+                    candidateContext.freshExpr).isForall = true :=
+                by
+                  cases candidateBodyCandidate with
+                  | terminal =>
+                      simp [AddInductive.CandidateExprTrace.spineLength]
+                        at tailStrict
+                  | forallE =>
+                      simp only [
+                        AddInductive.CandidateExprTrace.storedSpine,
+                        Bool.and_eq_true] at bodyStored
+                      exact
+                        AddInductive.CandidateWhnfStep.isForall_of_structuralEq_forall
+                          bodyStored.1
+              cases trace with
+              | done notForall =>
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                    Expr.forallE.injEq] at sourceEq
+                  have impossible : true = false := by
+                    calc
+                      true = (Expr.forallE candidateName candidateDomain
+                          candidateBody candidateBinderInfo).isForall := rfl
+                      _ = type.isForall := congrArg Expr.isForall sourceEq.symm
+                      _ = false := notForall
+                  exact Bool.noConfusion impossible
+              | index notParameter nextType whnfRun tail =>
+                  have parameterLt : i < stats.params.size := by omega
+                  exact False.elim (notParameter parameterLt)
+              | @parameter _ _ _ _ _ _ phaseName phaseDomain
+                  phaseBody phaseBinderInfo isParameter nextType whnfRun tail =>
+                  simp only [AddInductive.CandidateExprTrace.parameterList]
+                    at parametersEq
+                  have parameterAt : stats.params[i]? =
+                      some candidateContext.freshExpr :=
+                    array_getElem?_eq_some_of_drop_eq_cons parametersEq
+                  have parameterEq : stats.params[i]! =
+                      candidateContext.freshExpr := by
+                    rw [Array.getElem?_eq_getElem isParameter] at parameterAt
+                    injection parameterAt with parameterGetElem
+                    simpa [getElem!_def, isParameter] using parameterGetElem
+                  have dropped :=
+                    validation_drop_eq_cons_of_getElem?_eq_some
+                      (by simpa only [← Array.getElem?_toList] using parameterAt)
+                  rw [dropped] at parametersEq
+                  simp only [List.cons.injEq] at parametersEq
+                  have sourceParts := sourceEq
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                    Expr.forallE.injEq] at sourceParts
+                  obtain ⟨_nameEq, _domainEq, bodyEq, _binderEq⟩ :=
+                    sourceParts
+                  have phaseInputForall :
+                      (phaseBody.instantiate1
+                        stats.params[i]!).isForall = true := by
+                    rw [parameterEq, bodyEq]
+                    exact candidateInputForall
+                  have phaseWhnfValid : AddInductive.CandidateWhnfStep.Valid
+                      ⟨current,
+                        phaseBody.instantiate1 stats.params[i]!,
+                        nextType⟩ := by
+                    simpa [AddInductive.CandidateWhnfStep.Valid] using whnfRun
+                  have phaseViewEq : nextType =
+                      phaseBody.instantiate1 stats.params[i]! :=
+                    AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                      phaseWhnfValid whnfFuel currentDepth phaseInputForall
+                  have candidateViewEq :
+                      candidateBodyCandidate.rootWhnf =
+                        candidateBody.instantiate1
+                          candidateContext.freshExpr :=
+                    candidateBodyCandidate
+                      |>.rootWhnf_eq_source_of_spineLength_pos bodyStored
+                        (by omega) whnfFuel (by
+                          simpa [AddInductive.Context.pushLocalDecl] using
+                            candidateDepth)
+                  have nextSourceEq : nextType =
+                      candidateBodyCandidate.rootWhnf := by
+                    rw [phaseViewEq, parameterEq, bodyEq, candidateViewEq]
+                  obtain ⟨suffix⟩ :=
+                    bodyIH tail tailPosition (by omega) tailStrict bodyStored
+                      nextSourceEq parametersEq.2 currentDepth (by
+                        simpa [AddInductive.Context.pushLocalDecl] using
+                          candidateDepth)
+                  exact ⟨{
+                    type := suffix.type
+                    fuel := suffix.fuel
+                    suffix := suffix.suffix
+                    source_eq := suffix.source_eq }⟩
 
 /-- The final index array retained by `loopArgs1` is its incoming array
 followed by exactly the fresh variables exposed by its index branches. -/
