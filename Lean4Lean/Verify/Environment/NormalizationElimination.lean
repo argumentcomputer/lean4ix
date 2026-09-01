@@ -45261,6 +45261,233 @@ theorem
       context_lctx_eq).generatedRecursorMotivePhase run staging synthesis
     generatedParamsEq validationDepth packages
 
+/-! #### Phase-two minor inventory
+
+Source-order bookkeeping for the constructor minors emitted by the second
+synthesis phase.  Each constructor traversal pushes exactly one minor free
+variable into its owning family's record; because families are processed in
+source order and later records are still empty, the flattened minor
+inventory of the final record array is exactly the source-ordered list of
+emitted free variables. -/
+
+/-- Source-order free variables allocated by one family's constructor
+traversal. -/
+private def recInfoConstructorMinorFVars :
+    AddInductive.RecInfoConstructorTrace stats indTypeName dIdx ctors
+      recInfos current finalInfos finalContext → List FVarId
+  | .done => []
+  | .next step tail =>
+      step.hypothesisContext.freshFVarId ::
+        recInfoConstructorMinorFVars tail
+
+/-- Source-order free variables allocated by the complete second synthesis
+phase. -/
+private def recInfoPhaseTwoMinorFVars :
+    AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos current
+      finalInfos finalContext → List FVarId
+  | .done _ => []
+  | .next step tail =>
+      recInfoConstructorMinorFVars step.constructors ++
+        recInfoPhaseTwoMinorFVars tail
+
+/-- A record inventory whose entries all carry empty minor arrays flattens
+to the empty list. -/
+private theorem list_flatMap_minors_nil
+    {values : List AddInductive.RecInfo}
+    (empty : ∀ j (h : j < values.length), values[j].minors = #[]) :
+    values.flatMap (fun info => info.minors.toList) = [] := by
+  induction values with
+  | nil => rfl
+  | cons head tail ih =>
+      have headEmpty : head.minors = #[] := empty 0 (by simp)
+      rw [List.flatMap_cons, headEmpty]
+      simp only [Array.toList_empty, List.nil_append]
+      exact ih fun j h => empty (j + 1) (by simpa using h)
+
+/-- Pushing one minor into the record at `index` appends exactly that minor
+to the flattened inventory, provided every later record is still empty. -/
+private theorem list_flatMap_modify_push
+    {values : List AddInductive.RecInfo} {index : Nat} {minor : Expr}
+    (bound : index < values.length)
+    (laterEmpty : ∀ j (h : j < values.length), index < j →
+      values[j].minors = #[]) :
+    (values.modify index (fun info =>
+        { info with minors := info.minors.push minor })).flatMap
+        (fun info => info.minors.toList) =
+      values.flatMap (fun info => info.minors.toList) ++ [minor] := by
+  induction values generalizing index with
+  | nil => cases bound
+  | cons head tail ih =>
+      cases index with
+      | zero =>
+          have tailNil : tail.flatMap (fun info => info.minors.toList) =
+              [] :=
+            list_flatMap_minors_nil fun j h =>
+              laterEmpty (j + 1) (by simpa using h) (by omega)
+          simp [List.modify, List.flatMap_cons, tailNil,
+            Array.toList_push]
+      | succ index =>
+          have tailEq := ih (index := index) (by simpa using bound)
+            (fun j h later =>
+              laterEmpty (j + 1) (by simpa using h) (by omega))
+          rw [show ((head :: tail).modify (index + 1) fun info =>
+              { info with minors := info.minors.push minor }) =
+                head :: (tail.modify index fun info =>
+                  { info with minors := info.minors.push minor }) from rfl,
+            List.flatMap_cons, List.flatMap_cons, tailEq,
+            List.append_assoc]
+
+/-- One family's constructor traversal appends its source-ordered minors to
+the flattened inventory and keeps every later family record empty. -/
+private theorem recInfoConstructor_minorSources
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext)
+    (bound : dIdx < recInfos.size)
+    (laterEmpty : ∀ j (h : j < recInfos.size), dIdx < j →
+      recInfos[j].minors = #[]) :
+    finalInfos.toList.flatMap (fun info => info.minors.toList) =
+        recInfos.toList.flatMap (fun info => info.minors.toList) ++
+          (recInfoConstructorMinorFVars trace).map Expr.fvar ∧
+      finalInfos.size = recInfos.size ∧
+      ∀ j (h : j < finalInfos.size), dIdx < j →
+        finalInfos[j].minors = #[] := by
+  induction trace with
+  | done =>
+      exact ⟨by simp [recInfoConstructorMinorFVars], rfl,
+        fun j h later => laterEmpty j h later⟩
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      have modifyEq : step.nextInfos = recInfos'.modify dIdx fun info =>
+          { info with minors := info.minors.push step.minor } := rfl
+      have sizeEq : step.nextInfos.size = recInfos'.size := by
+        rw [modifyEq, Array.size_modify]
+      have nextBound : dIdx < step.nextInfos.size := by
+        rw [sizeEq]
+        exact bound
+      have nextLater : ∀ j (h : j < step.nextInfos.size), dIdx < j →
+          step.nextInfos[j].minors = #[] := by
+        intro j h later
+        have oldBound : j < recInfos'.size := by
+          rw [← sizeEq]
+          exact h
+        have entrySome : step.nextInfos[j]? = recInfos'[j]? := by
+          rw [modifyEq, ← Array.getElem?_toList, ← Array.getElem?_toList,
+            Array.toList_modify, List.getElem?_modify]
+          simp [show ¬ dIdx = j from by omega]
+        have valueSome : recInfos'[j]? = some (step.nextInfos[j]) := by
+          rw [← entrySome]
+          exact (Array.getElem?_eq_getElem h).symm ▸ rfl
+        have valueEq : step.nextInfos[j] = recInfos'[j] := by
+          rw [Array.getElem?_eq_getElem oldBound] at valueSome
+          exact (Option.some.inj valueSome).symm
+        rw [valueEq]
+        exact laterEmpty j oldBound later
+      obtain ⟨sources, sizes, laters⟩ := ih nextBound nextLater
+      refine ⟨?_, sizes.trans sizeEq, laters⟩
+      rw [sources]
+      have pushEq :
+          step.nextInfos.toList.flatMap (fun info => info.minors.toList) =
+            recInfos'.toList.flatMap (fun info => info.minors.toList) ++
+              [step.minor] := by
+        rw [modifyEq, Array.toList_modify]
+        exact list_flatMap_modify_push (by simpa using bound)
+          (fun j h later => by
+            have oldBound : j < recInfos'.size := by simpa using h
+            simpa using laterEmpty j oldBound later)
+      rw [pushEq]
+      simp only [recInfoConstructorMinorFVars, List.map_cons,
+        List.append_assoc]
+      rfl
+
+/-- The second synthesis phase appends the complete source-ordered minor
+inventory to the flattened record array. -/
+private theorem recInfoPhaseTwo_minorSources
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext)
+    (sizeEq : recInfos.size = indTypes.size)
+    (laterEmpty : ∀ j (h : j < recInfos.size), dIdx ≤ j →
+      recInfos[j].minors = #[]) :
+    finalInfos.toList.flatMap (fun info => info.minors.toList) =
+      recInfos.toList.flatMap (fun info => info.minors.toList) ++
+        (recInfoPhaseTwoMinorFVars trace).map Expr.fvar := by
+  induction trace with
+  | done finished =>
+      simp [recInfoPhaseTwoMinorFVars]
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      have bound : dIdx' < recInfos'.size := by
+        rw [sizeEq]
+        exact step.active
+      obtain ⟨sources, sizes, laters⟩ :=
+        recInfoConstructor_minorSources step.constructors bound
+          (fun j h later => laterEmpty j h (Nat.le_of_lt later))
+      have tailEq := ih (sizes.trans sizeEq)
+        (fun j h later => laters j h (by omega))
+      rw [tailEq, sources]
+      simp [recInfoPhaseTwoMinorFVars, List.append_assoc]
+
+/-- Phase one seeds every family record with an empty minor array. -/
+private theorem recInfoPhaseOne_minors_empty
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level} {dIdx : Nat}
+    {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel
+      dIdx recInfos current finalInfos finalContext)
+    (empty : ∀ j (h : j < recInfos.size), recInfos[j].minors = #[]) :
+    (∀ j (h : j < finalInfos.size), finalInfos[j].minors = #[]) ∧
+      finalInfos.size = recInfos.size + (indTypes.size - dIdx) := by
+  induction trace with
+  | done finished =>
+      exact ⟨empty, by omega⟩
+  | @next dIdx' current' finalInfos' finalContext' recInfos' step tail ih =>
+      have pushedEmpty : ∀ j (h : j < (recInfos'.push step.info).size),
+          (recInfos'.push step.info)[j].minors = #[] := by
+        intro j h
+        rw [Array.getElem_push]
+        split
+        · exact empty j (by assumption)
+        · rfl
+      obtain ⟨finalEmpty, finalSize⟩ := ih pushedEmpty
+      have active := step.active
+      exact ⟨finalEmpty, by
+        rw [finalSize]
+        simp only [Array.size_push]
+        omega⟩
+
+/-- The retained synthesis endpoint flattens to exactly the phase-two minor
+inventory. -/
+private theorem recInfoSynthesis_minorSources
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level}
+    {rootContext synthesisContext : AddInductive.Context}
+    {recInfos : Array AddInductive.RecInfo}
+    (trace : AddInductive.RecInfoSynthesisTrace stats indTypes elimLevel
+      rootContext recInfos synthesisContext)
+    (phase2 : AddInductive.RecInfoPhaseTwoTrace stats indTypes 0
+      trace.phase1Infos trace.phase1Context recInfos synthesisContext) :
+    (recInfos.flatMap (·.minors)).toList =
+      (recInfoPhaseTwoMinorFVars phase2).map Expr.fvar := by
+  obtain ⟨phase1⟩ := trace.phase1_trace
+  obtain ⟨empties, sizeSum⟩ := recInfoPhaseOne_minors_empty phase1
+    (fun j h => by simp at h)
+  have size1 : trace.phase1Infos.size = indTypes.size := by
+    simpa using sizeSum
+  have base := recInfoPhaseTwo_minorSources phase2 size1
+    (fun j h _ => empties j h)
+  have startNil :
+      trace.phase1Infos.toList.flatMap (fun info => info.minors.toList) =
+        [] :=
+    list_flatMap_minors_nil (fun j h => empties j (by simpa using h))
+  rw [startNil, List.nil_append] at base
+  rw [Array.toList_flatMap]
+  exact base
+
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
 constructor audit.  Keeping the value transparent lets compatibility

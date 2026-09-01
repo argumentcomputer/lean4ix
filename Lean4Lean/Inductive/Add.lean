@@ -4526,6 +4526,106 @@ theorem loopCtorArgs_eq_capture
     Except.bind]
   exact loopCtorArgs_loop_eq_capture current
 
+/-- Complete source-ordered decomposition of a retained `loopCtorArgs`
+traversal.  Parameter branches instantiate the shared parameter array and
+leave both argument inventories unchanged; field branches push the
+annotation-consumed domain, retain the exact recursive-argument
+classification run, and extend the inventories accordingly.  The traversal
+itself never normalizes the constructor spine. -/
+inductive LoopCtorArgsTrace (stats : InductiveStats) :
+    (type : Expr) → (i : Nat) → (bu u : Array Expr) → (fuel : Nat) →
+      (current : Context) → (terminal : Expr) →
+      (finalBu finalU : Array Expr) → (finalContext : Context) → Type where
+  | done
+      (notForall : type.isForall = false) :
+      LoopCtorArgsTrace stats type i bu u fuel current type bu u current
+  | parameter
+      (parameter : Expr)
+      (isParameter : stats.params[i]? = some parameter)
+      (tail : LoopCtorArgsTrace stats (body.instantiate1 parameter) (i + 1)
+        bu u fuel current terminal finalBu finalU finalContext) :
+      LoopCtorArgsTrace stats (.forallE name domain body binderInfo) i bu u
+        (fuel + 1) current terminal finalBu finalU finalContext
+  | field
+      (noParameter : stats.params[i]? = none)
+      (recursive : Option Nat)
+      (recursiveRun :
+        isRecArg stats domain
+          (current.pushLocalDecl name binderInfo
+            (consumeTypeAnnotations domain)) = .ok recursive)
+      (tail : LoopCtorArgsTrace stats
+        (body.instantiate1 current.freshExpr) (i + 1)
+        (bu.push current.freshExpr)
+        (if recursive.isSome then u.push current.freshExpr else u) fuel
+        (current.pushLocalDecl name binderInfo
+          (consumeTypeAnnotations domain)) terminal finalBu finalU
+        finalContext) :
+      LoopCtorArgsTrace stats (.forallE name domain body binderInfo) i bu u
+        (fuel + 1) current terminal finalBu finalU finalContext
+
+/-- Recover the complete constructor-argument decomposition from the
+continuation-free capture used by recursor synthesis. -/
+theorem LoopCtorArgsTrace.of_run
+    {stats : InductiveStats} {t : Expr} {i : Nat} {bu u : Array Expr}
+    {fuel : Nat} {current : Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : Context}
+    (run : loopCtorArgs.loop stats
+      (fun nextTerminal nextBu nextU nextContext =>
+        .ok (nextTerminal, nextBu, nextU, nextContext)) t i bu u fuel
+      current = .ok (terminal, finalBu, finalU, finalContext)) :
+    Nonempty (LoopCtorArgsTrace stats t i bu u fuel current terminal
+      finalBu finalU finalContext) := by
+  induction fuel generalizing t i bu u current with
+  | zero =>
+      simp [loopCtorArgs.loop, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases t <;> simp only [loopCtorArgs.loop] at run
+      case forallE name dom body bi =>
+        cases parameterEq : stats.params[i]? with
+        | some parameter =>
+            simp only [parameterEq] at run
+            obtain ⟨tail⟩ := ih run
+            exact ⟨.parameter parameter parameterEq tail⟩
+        | none =>
+            simp only [parameterEq] at run
+            rw [withLocalDecl_apply] at run
+            simp only [ReaderT.bind, Bind.bind] at run
+            cases recursiveRun :
+                isRecArg stats dom
+                  (current.pushLocalDecl name bi
+                    (consumeTypeAnnotations dom)) with
+            | error error =>
+                rw [recursiveRun] at run
+                contradiction
+            | ok recursive =>
+                rw [recursiveRun] at run
+                simp only [Except.bind] at run
+                obtain ⟨tail⟩ := ih run
+                exact ⟨.field parameterEq recursive recursiveRun tail⟩
+      all_goals
+        have quadEq := Except.ok.inj run
+        cases quadEq
+        exact ⟨.done rfl⟩
+
+/-- Wrapper form of `LoopCtorArgsTrace.of_run` at the exact traversal
+entry. -/
+theorem LoopCtorArgsTrace.of_capture
+    {stats : InductiveStats} {t : Expr} {current : Context}
+    {terminal : Expr} {finalBu finalU : Array Expr}
+    {finalContext : Context}
+    (run : loopCtorArgs stats t
+      (fun nextTerminal nextBu nextU nextContext =>
+        .ok (nextTerminal, nextBu, nextU, nextContext)) current =
+      .ok (terminal, finalBu, finalU, finalContext)) :
+    Nonempty (LoopCtorArgsTrace stats t 0 #[] #[]
+      current.fuel.inductiveFuel current terminal finalBu finalU
+      finalContext) := by
+  unfold loopCtorArgs at run
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind] at run
+  exact LoopCtorArgsTrace.of_run run
+
 def loopUArgs (ui : Expr) (k : Expr → Array Expr → M α) : M α := do
   loop (← whnf (← inferType ui)) #[] (← readThe Context).fuel.inductiveFuel
 where
@@ -4656,6 +4756,113 @@ theorem loopUArgs_eq_capture
           simp only [whnfRun, Except.bind]
           exact loopUArgs_loop_eq_capture current
 
+/-- Complete decomposition of the inner recursive-argument index loop.
+Every step retains the exact WHNF observation that produced the next
+traversal source. -/
+inductive LoopUArgsInnerTrace :
+    (type : Expr) → (xs : Array Expr) → (fuel : Nat) →
+      (current : Context) → (terminal : Expr) → (finalXs : Array Expr) →
+      (finalContext : Context) → Type where
+  | done
+      (notForall : type.isForall = false) :
+      LoopUArgsInnerTrace type xs fuel current type xs current
+  | step
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 current.freshExpr) : M Expr)
+            (current.pushLocalDecl name binderInfo
+              (consumeTypeAnnotations domain)) = .ok nextType)
+      (tail : LoopUArgsInnerTrace nextType (xs.push current.freshExpr) fuel
+        (current.pushLocalDecl name binderInfo
+          (consumeTypeAnnotations domain)) terminal finalXs finalContext) :
+      LoopUArgsInnerTrace (.forallE name domain body binderInfo) xs
+        (fuel + 1) current terminal finalXs finalContext
+
+/-- Recover the inner index-loop decomposition from its continuation-free
+capture. -/
+theorem LoopUArgsInnerTrace.of_run
+    {uiType : Expr} {xs : Array Expr} {fuel : Nat} {current : Context}
+    {terminal : Expr} {finalXs : Array Expr} {finalContext : Context}
+    (run : loopUArgs.loop
+      (fun nextTerminal nextXs nextContext =>
+        .ok (nextTerminal, nextXs, nextContext)) uiType xs fuel current =
+      .ok (terminal, finalXs, finalContext)) :
+    Nonempty (LoopUArgsInnerTrace uiType xs fuel current terminal finalXs
+      finalContext) := by
+  induction fuel generalizing uiType xs current with
+  | zero =>
+      simp [loopUArgs.loop, throw, throwThe, MonadExceptOf.throw] at run
+  | succ fuel ih =>
+      cases uiType <;> simp only [loopUArgs.loop] at run
+      case forallE name dom body bi =>
+        rw [withLocalDecl_apply] at run
+        simp only [ReaderT.bind, Bind.bind] at run
+        cases whnfRun :
+            (liftM (TypeChecker.whnf <|
+              body.instantiate1 current.freshExpr) : M Expr)
+              (current.pushLocalDecl name bi
+                (consumeTypeAnnotations dom)) with
+        | error error =>
+            rw [whnfRun] at run
+            contradiction
+        | ok nextType =>
+            rw [whnfRun] at run
+            simp only [Except.bind] at run
+            obtain ⟨tail⟩ := ih run
+            exact ⟨.step nextType whnfRun tail⟩
+      all_goals
+        have tripleEq := Except.ok.inj run
+        cases tripleEq
+        exact ⟨.done rfl⟩
+
+/-- One retained recursive-argument index synthesis: the initial type
+inference and normalization observations, followed by the complete inner
+index loop. -/
+structure LoopUArgsTrace
+    (ui : Expr) (current : Context) (terminal : Expr)
+    (finalXs : Array Expr) (finalContext : Context) where
+  inferred : Expr
+  inferRun : (liftM (TypeChecker.inferType ui) : M Expr) current =
+    .ok inferred
+  normalized : Expr
+  whnfRun : (liftM (TypeChecker.whnf inferred) : M Expr) current =
+    .ok normalized
+  inner : LoopUArgsInnerTrace normalized #[] current.fuel.inductiveFuel
+    current terminal finalXs finalContext
+
+/-- Recover the complete recursive-argument index synthesis from its
+continuation-free capture. -/
+theorem LoopUArgsTrace.of_run
+    {ui : Expr} {current : Context} {terminal : Expr}
+    {finalXs : Array Expr} {finalContext : Context}
+    (run : loopUArgs ui
+      (fun nextTerminal nextXs nextContext =>
+        .ok (nextTerminal, nextXs, nextContext)) current =
+      .ok (terminal, finalXs, finalContext)) :
+    Nonempty (LoopUArgsTrace ui current terminal finalXs finalContext) := by
+  unfold loopUArgs at run
+  simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
+    ReaderT.bind, Bind.bind, Pure.pure, ReaderT.pure, Except.pure,
+    Except.bind] at run
+  cases inferRun : (liftM (TypeChecker.inferType ui) : M Expr) current with
+  | error error =>
+      rw [inferRun] at run
+      contradiction
+  | ok inferred =>
+      rw [inferRun] at run
+      simp only [Except.bind] at run
+      cases whnfRun :
+          (liftM (TypeChecker.whnf inferred) : M Expr) current with
+      | error error =>
+          rw [whnfRun] at run
+          contradiction
+      | ok normalized =>
+          rw [whnfRun] at run
+          simp only [Except.bind] at run
+          obtain ⟨inner⟩ := LoopUArgsInnerTrace.of_run run
+          exact ⟨⟨inferred, inferRun, normalized, whnfRun, inner⟩⟩
+
 variable (stats : InductiveStats) (u : Array Expr) (recInfos : Array RecInfo) in
 def loopU (i : Nat) (v : Array Expr) (k : Array Expr → M α) : M α := do
   if _h : i < u.size then
@@ -4741,6 +4948,72 @@ theorem loopU_eq_capture
             ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
             .default (consumeTypeAnnotations hypothesisType))
   · rfl
+termination_by u.size - i
+
+/-- Complete source-ordered decomposition of a retained `loopU` run.  Each
+step retains the exact captured hypothesis-type synthesis for one recursive
+argument and the local push that stores it. -/
+inductive LoopUTrace (stats : InductiveStats) (u : Array Expr)
+    (recInfos : Array RecInfo) :
+    (i : Nat) → (v : Array Expr) → (current : Context) →
+      (finalV : Array Expr) → (finalContext : Context) → Type where
+  | done
+      (finished : ¬ i < u.size) :
+      LoopUTrace stats u recInfos i v current v current
+  | step
+      (inBounds : i < u.size)
+      (hypothesisType : Expr)
+      (hypothesisRun :
+        loopUArgs u[i] (fun uiType xs =>
+          ReaderT.bind getLCtx fun implementationLCtx =>
+            pure (implementationLCtx.mkForall xs <|
+              .app
+                (mkAppN recInfos[(getIIndices stats uiType).fst]!.motive
+                  (getIIndices stats uiType).snd)
+                (mkAppN u[i] xs))) current = .ok hypothesisType)
+      (tail : LoopUTrace stats u recInfos (i + 1)
+        (v.push current.freshExpr)
+        (current.pushLocalDecl
+          ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+          .default (consumeTypeAnnotations hypothesisType))
+        finalV finalContext) :
+      LoopUTrace stats u recInfos i v current finalV finalContext
+
+/-- Recover the complete recursive-hypothesis decomposition from the
+continuation-free capture used by recursor synthesis. -/
+theorem LoopUTrace.of_run
+    {stats : InductiveStats} {u : Array Expr} {recInfos : Array RecInfo}
+    {i : Nat} {v : Array Expr} {current : Context}
+    {finalV : Array Expr} {finalContext : Context}
+    (run : loopU stats u recInfos i v
+      (fun nextV nextContext => .ok (nextV, nextContext)) current =
+      .ok (finalV, finalContext)) :
+    Nonempty (LoopUTrace stats u recInfos i v current finalV
+      finalContext) := by
+  rw [loopU.eq_1] at run
+  split at run
+  · simp only [ReaderT.bind, Bind.bind] at run
+    cases argsRun :
+        loopUArgs u[i] (fun uiType xs =>
+          ReaderT.bind getLCtx fun implementationLCtx =>
+            pure (implementationLCtx.mkForall xs <|
+              .app
+                (mkAppN recInfos[(getIIndices stats uiType).fst]!.motive
+                  (getIIndices stats uiType).snd)
+                (mkAppN u[i] xs))) current with
+    | error error =>
+        rw [argsRun] at run
+        contradiction
+    | ok hypothesisType =>
+        rw [argsRun] at run
+        simp only [Except.bind, getLCtx_apply, Pure.pure, ReaderT.pure,
+          Except.pure] at run
+        rw [withLocalDecl_apply] at run
+        obtain ⟨tail⟩ := LoopUTrace.of_run run
+        exact ⟨.step ‹_› hypothesisType argsRun tail⟩
+  · have pairEq := Except.ok.inj run
+    cases pairEq
+    exact ⟨.done ‹_›⟩
 termination_by u.size - i
 
 variable (stats : InductiveStats) (indTypeName : Name) (dIdx : Nat) in
@@ -5636,6 +5909,25 @@ def nextInfos
       current) : Array RecInfo :=
   recInfos.modify dIdx fun info =>
     { info with minors := info.minors.push step.minor }
+
+/-- Expand the retained aggregate constructor-argument run into its exact
+parameter/field branch trace. -/
+theorem argumentsTrace
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) :
+    Nonempty (mkRecInfos.LoopCtorArgsTrace stats ctor.type 0 #[] #[]
+      current.fuel.inductiveFuel current step.terminal
+      step.constructorArgs step.recursiveArgs step.argumentContext) :=
+  mkRecInfos.LoopCtorArgsTrace.of_capture step.argumentsRun
+
+/-- Expand the retained aggregate hypothesis run into its exact
+per-recursive-argument trace. -/
+theorem hypothesesTrace
+    (step : RecInfoConstructorStep stats indTypeName dIdx ctor recInfos
+      current) :
+    Nonempty (mkRecInfos.LoopUTrace stats step.recursiveArgs recInfos 0 #[]
+      step.argumentContext step.hypotheses step.hypothesisContext) :=
+  mkRecInfos.LoopUTrace.of_run step.hypothesesRun
 
 private theorem map_modify_of_project_eq
     (values : Array α) (index : Nat) (update : α → α)
