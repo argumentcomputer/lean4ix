@@ -20543,12 +20543,20 @@ structure
     (staging : produced.SecondFamilyIndexStaging semantic)
     (seed : Option staging.annotation.RawFirstIndexDomain) where
   prefixes : staging.FirstParameterAnchor
+  exactTargets : List VExpr
+  exactTargets_eq : exactTargets =
+    staging.annotation.storedBinders.drop source.nparams
+  exactFinal : VLCtx
+  exactTrace : staging.boundary.ExactIndexDomainTrace env Us
+    prefixes.firstParameterΔ exactTargets exactFinal
   chain : staging.boundary.IndexDomainChain
+  exactTrace_chain : exactTrace.chain = chain
   chain_length : chain.length =
     (staging.annotation.storedBinders.drop source.nparams).length
   alignment : chain.EndpointAlignment env Us
     staging.annotation.terminalRun.context.vlctx prefixes.firstParameterΔ
       staging.annotation.firstTerminalRun.context.vlctx
+  alignment_base : alignment.base = exactFinal
   alignment_sort_translation : ∃ resultLevel,
     staging.annotation.secondCandidate.familyType.type.trace.terminalResult =
         .sort resultLevel ∧
@@ -22016,13 +22024,21 @@ structure HeadDomainCompletion
     (head : iteration.HeadStaging)
     (parameter : HeadParameterBoundary head) where
   candidate : HeadCandidateParameterSuffix head
+  exactTargets : List VExpr
+  exactTargets_eq : exactTargets =
+    iteration.annotations.head.storedBinders.drop source.nparams
+  exactFinal : VLCtx
+  exactTrace : parameter.boundary.ExactIndexDomainTrace env Us
+    completion.prefixes.firstParameterΔ exactTargets exactFinal
   chain : parameter.boundary.IndexDomainChain
+  exactTrace_chain : exactTrace.chain = chain
   chain_length : chain.length =
     (iteration.annotations.head.storedBinders.drop source.nparams).length
   alignment : chain.EndpointAlignment env Us
     iteration.annotations.head.terminalRun.context.vlctx
     completion.prefixes.firstParameterΔ
     staging.annotation.firstTerminalRun.context.vlctx
+  alignment_base : alignment.base = exactFinal
   alignment_sort_translation : ∃ resultLevel,
     candidates.head.familyType.type.trace.terminalResult =
         .sort resultLevel ∧
@@ -22142,8 +22158,8 @@ theorem HeadStaging.domainCompletion
           congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
         _ = head.position.semantic.type.whnfFuel + 1 :=
           head.position.semantic.type.whnfDepth
-    obtain ⟨⟨chain, alignment⟩⟩ :=
-      suffix.cursor.indexDomainChainAligned terminalWF parameter.boundary
+    obtain ⟨exact⟩ :=
+      suffix.cursor.indexDomainChainAlignedExact terminalWF parameter.boundary
         currentVenv currentLparams completion.prefixes.first_shape relation
         iteration.root_reference_lift iteration.reference_shape
         iteration.root_reference_lift
@@ -22152,13 +22168,19 @@ theorem HeadStaging.domainCompletion
         candidateDepth
     exact ⟨{
       candidate := candidate
-      chain := chain
-      chain_length := alignment.property.1.trans
+      exactTargets := suffix.cursor.domains
+      exactTargets_eq := suffix.domains_eq
+      exactFinal := exact.final
+      exactTrace := exact.trace
+      chain := exact.trace.chain
+      exactTrace_chain := rfl
+      chain_length := exact.trace.chain_length.trans
         (congrArg List.length suffix.domains_eq)
-      alignment := alignment.val
+      alignment := exact.alignment
+      alignment_base := exact.alignment_base
       alignment_sort_translation := ⟨suffix.cursor.resultLevel,
         suffix.terminalResult_eq.symm.trans suffix.cursor.terminal_eq,
-        alignment.property.2⟩ }⟩
+        exact.resultLevel_tr⟩ }⟩
   · have currentVenv : head.currentRun.context.venv = env :=
       iteration.cursor.headContextRun_venv head.continuation head.selected
     have currentLparams : head.currentRun.context.lparams = Us :=
@@ -22280,12 +22302,25 @@ theorem HeadStaging.domainCompletion
         head.currentRun.context.vlctx.toCtx parameter.boundary.source'
         (.sort viewLevel) :=
       rawToBoundary.symm.trans henv currentWF.toCtx rawToSort
-    let chain : parameter.boundary.IndexDomainChain := .done
+    have dropNil :
+        iteration.annotations.head.storedBinders.drop source.nparams = [] :=
+      List.drop_eq_nil_of_le (by omega)
+    let exactTrace : parameter.boundary.ExactIndexDomainTrace env Us
+        completion.prefixes.firstParameterΔ []
+        completion.prefixes.firstParameterΔ :=
+      .done completion.prefixes.firstParameterΔ
+    let chain : parameter.boundary.IndexDomainChain := exactTrace.chain
     exact ⟨{
       candidate := candidate
+      exactTargets := []
+      exactTargets_eq := dropNil.symm
+      exactFinal := completion.prefixes.firstParameterΔ
+      exactTrace := exactTrace
       chain := chain
+      exactTrace_chain := rfl
       chain_length := by
-        simp only [chain,
+        simp only [chain, exactTrace,
+          TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
           TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.length,
           List.length_drop, storedLength]
         omega
@@ -22303,14 +22338,18 @@ theorem HeadStaging.domainCompletion
         root_reference_lift := iteration.root_reference_lift
         origin_reference_lift := iteration.origin_reference_lift
         current_reference := by
-          simpa only [chain,
+          simpa only [chain, exactTrace,
+            TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
             TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
             currentReference
         sort := viewLevel
         endpoint_sort := by
           simpa only [chain,
+            exactTrace,
+            TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
             TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
             endpointSort }
+      alignment_base := rfl
       alignment_sort_translation := ⟨resultLevel, terminalEq, levelTr⟩ }⟩
 
 /-- Generic recursive-head completion with its exact terminal witness. -/
@@ -27838,12 +27877,24 @@ theorem
       staging.currentRun.context.vlctx.toCtx staging.boundary.source'
       (.sort viewLevel) :=
     rawToBoundary.symm.trans henv currentWF.toCtx rawToSort
-  let chain : staging.boundary.IndexDomainChain := .done
+  have dropNil :
+      staging.annotation.storedBinders.drop source.nparams = [] :=
+    List.drop_eq_nil_of_le (by omega)
+  let exactTrace : staging.boundary.ExactIndexDomainTrace env Us
+      anchor.firstParameterΔ [] anchor.firstParameterΔ :=
+    .done anchor.firstParameterΔ
+  let chain : staging.boundary.IndexDomainChain := exactTrace.chain
   exact ⟨{
     prefixes := anchor
+    exactTargets := []
+    exactTargets_eq := dropNil.symm
+    exactFinal := anchor.firstParameterΔ
+    exactTrace := exactTrace
     chain := chain
+    exactTrace_chain := rfl
     chain_length := by
-      simp only [chain,
+      simp only [chain, exactTrace,
+        TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
         TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.length,
         List.length_drop, storedLength]
       omega
@@ -27864,14 +27915,17 @@ theorem
       root_reference_lift := anchor.first_terminal_lift
       origin_reference_lift := VLCtx.FVLift'.refl
       current_reference := by
-        simpa only [chain,
+        simpa only [chain, exactTrace,
+          TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
           TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
           anchor.current_firstTerminal_defeq
       sort := viewLevel
       endpoint_sort := by
-        simpa only [chain,
+        simpa only [chain, exactTrace,
+          TypeChecker.FamilyParameterIndexBoundary.ExactIndexDomainTrace.chain,
           TypeChecker.FamilyParameterIndexBoundary.IndexDomainChain.endpoint] using
           endpointSort }
+    alignment_base := rfl
     alignment_sort_translation := ⟨resultLevel, terminalEq, levelTr⟩ }⟩
 
 /-- Consume the complete second-family producer index suffix through the
@@ -27970,8 +28024,8 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
           staging.annotation.secondCandidate.familyType.type.context.fuel.recDepth :=
         congrArg (fun fuel => fuel.recDepth) suffix.fuel_eq
       _ = staging.annotation.whnfFuel + 1 := staging.annotation.whnfDepth
-  obtain ⟨⟨chain, alignment⟩⟩ :=
-    suffix.cursor.indexDomainChainAligned terminalWF staging.boundary
+  obtain ⟨exact⟩ :=
+    suffix.cursor.indexDomainChainAlignedExact terminalWF staging.boundary
       staging.current_venv staging.current_lparams prefixes.first_shape
       relation prefixes.first_terminal_lift
       (staging.annotation.first_annotation_spine.terminalShape .nil)
@@ -27981,13 +28035,19 @@ theorem ProducedBlockRecursorShapeCandidate.SecondFamilyIndexStaging.indexDomain
       staging.annotation.whnfFuel validatorDepth candidateDepth
   exact ⟨{
     prefixes := prefixes.toFirstParameterAnchor context_lctx_eq
-    chain := chain
-    chain_length := alignment.property.1.trans
+    exactTargets := suffix.cursor.domains
+    exactTargets_eq := suffix.domains_eq
+    exactFinal := exact.final
+    exactTrace := exact.trace
+    chain := exact.trace.chain
+    exactTrace_chain := rfl
+    chain_length := exact.trace.chain_length.trans
       (congrArg List.length suffix.domains_eq)
-    alignment := alignment.val
+    alignment := exact.alignment
+    alignment_base := exact.alignment_base
     alignment_sort_translation := ⟨suffix.cursor.resultLevel,
       suffix.terminalResult_eq.symm.trans suffix.cursor.terminal_eq,
-      alignment.property.2⟩ }⟩
+      exact.resultLevel_tr⟩ }⟩
 
 /-- The complete producer suffix reaches the validator's exact terminal node,
 so the aligned endpoint is immediately usable as the source-order family
