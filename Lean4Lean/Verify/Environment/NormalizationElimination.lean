@@ -49308,6 +49308,293 @@ theorem
       using support.canonicalCheckedBlockWF_of_constructorRuns stagingInput
         safetyEq audit constructors
 
+/-! #### Constructor field surfaces
+
+Recursor synthesis abstracts the annotation-consumed field declarations of
+every constructor.  The producer-owned `generatedFields` surface is therefore
+selected from the retained constructor annotation spines, exactly as the
+family index surface is selected from the family spines.  Each surface is
+certified against the raw constructor fields over the generated parameter
+context through the constructor's checked parameter prefix. -/
+
+/-- The complete Pi telescope of an expression is its own `telN` prefix. -/
+private theorem telN_ctorFields_length (e : VExpr) :
+    VExpr.telN (ctorFields e).length e = ctorFields e := by
+  induction e with
+  | forallE domain body _ ih =>
+      simp only [ctorFields, List.length_cons, VExpr.telN, List.cons.injEq,
+        true_and]
+      exact ih
+  | _ => rfl
+
+/-- The exact strict field-binder surfaces retained by the annotation
+consumer for one family's constructors, in source order.  Dropping the
+shared parameter prefix matches the split performed by `loopCtorArgs`. -/
+def CandidateConstructorAnnotationSpineList.generatedFieldSurfaces
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {semantics : CandidateConstructorSemanticListRun env Us candidates raws}
+    {shapes : CandidateConstructorSemanticGenerationShapeList source env Us
+      semantics}
+    (run : CandidateConstructorAnnotationSpineList source env Us semantics
+      shapes) : List (List VExpr) :=
+  match run with
+  | .nil => []
+  | .cons head tail =>
+      head.storedBinders.drop source.nparams :: tail.generatedFieldSurfaces
+
+/-- Family-major constructor field surfaces of a complete block. -/
+def CandidateBlockConstructorAnnotationSpineLists.generatedFieldSurfaces
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    {semantics : CandidateBlockFamilySemanticListRun env blockEnv Us
+      candidates raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us semantics}
+    (run : CandidateBlockConstructorAnnotationSpineLists source env blockEnv
+      Us semantics shapes) : List (List (List VExpr)) :=
+  match run with
+  | .nil => []
+  | .cons head tail =>
+      head.generatedFieldSurfaces :: tail.generatedFieldSurfaces
+
+/-- One annotation-consumed constructor spine supplies the generated field
+surface of its paired normalized constructor: the stored binders after the
+shared parameter prefix are definitionally equal to the raw constructor
+fields over the generated parameter context.  The raw parameter prefix is
+identified with the checked parameters through the constructor's declared
+telescope certificate. -/
+private theorem constructorAnnotationSpine_generatedFieldsTel
+    {source : VInductDecl} {generation : BlockGenerationChecked source}
+    {blockEnv : VEnv} {Us : List Name}
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families)
+    (hblockEnv : blockEnv.WF) (uvarsEq : source.uvars = Us.length)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      [] generation.generatedParams generation.block.checked.params)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun blockEnv Us candidate raw}
+    {shape : CandidateConstructorSemanticGenerationShape (source := source)
+      blockEnv Us root}
+    (annotation : CandidateConstructorAnnotationSpine source blockEnv Us root
+      shape)
+    {constructor : NormalizedCtor} (ctorMember : constructor ∈ family.ctorPairs)
+    (rawEq : constructor.raw = raw)
+    (run : NormalizedBlockCtorRun generation
+      { owner := family.view.ordinal
+        familyName := family.raw.name
+        familyIndices := family.view.indices
+        ctor := constructor } blockEnv) :
+    TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      generation.generatedParams.reverse
+      (constructor.rawFields source.nparams)
+      (annotation.storedBinders.drop source.nparams) := by
+  have ctorShape :=
+    (generation.shape.2.2.2.2 family familyMember).2.2.2.2.2.2 constructor
+      ctorMember
+  have prefixLen : (VExpr.telN source.nparams raw.type).length =
+      source.nparams := by
+    rw [← rawEq]
+    exact ctorShape.2.2.1
+  have viewLen : generation.block.checked.params.length = source.nparams :=
+    generation.shape.2.1.symm.trans generation.shape.1
+  have telescope := annotation.telescope
+  rw [telN_ctorFields_length,
+    VExpr.ctorFields_eq_telN_append source.nparams] at telescope
+  have suffix := telescope.drop source.nparams
+  have htake :
+      (VExpr.telN source.nparams raw.type ++
+          ctorFields (VExpr.dropN source.nparams raw.type)).take
+        source.nparams = VExpr.telN source.nparams raw.type := by
+    exact List.take_left' prefixLen
+  have hdrop :
+      (VExpr.telN source.nparams raw.type ++
+          ctorFields (VExpr.dropN source.nparams raw.type)).drop
+        source.nparams = ctorFields (VExpr.dropN source.nparams raw.type) := by
+    exact List.drop_left' prefixLen
+  rw [htake, hdrop, List.append_nil] at suffix
+  have declared := run.declaredTel.take source.nparams
+  have hdeclTake :
+      (NormalizedBlockCtor.declaredBinders (source := source)
+        { owner := family.view.ordinal
+          familyName := family.raw.name
+          familyIndices := family.view.indices
+          ctor := constructor }).take source.nparams =
+        VExpr.telN source.nparams raw.type := by
+    show (VExpr.telN source.nparams constructor.raw.type ++
+      constructor.rawFields source.nparams).take source.nparams = _
+    rw [rawEq]
+    exact List.take_left' prefixLen
+  have hviewTake :
+      (NormalizedBlockCtor.viewBinders generation
+        { owner := family.view.ordinal
+          familyName := family.raw.name
+          familyIndices := family.view.indices
+          ctor := constructor }).take source.nparams =
+        generation.block.checked.params := by
+    show (generation.block.checked.params ++
+      constructor.view.fields).take source.nparams = _
+    rw [← viewLen, List.take_append, List.take_length]
+    simp
+  rw [hdeclTake, hviewTake] at declared
+  have generatedToRaw := generatedParamsTel.trans hblockEnv trivial
+    (declared.symm hblockEnv trivial)
+  show TypeChecker.TelDefEqEvidence blockEnv source.uvars
+    generation.generatedParams.reverse
+    (ctorFields (VExpr.dropN source.nparams constructor.raw.type))
+    (annotation.storedBinders.drop source.nparams)
+  rw [rawEq, uvarsEq]
+  rw [uvarsEq] at generatedToRaw
+  have generatedContext : blockEnv.IsDefEqCtx Us.length []
+      generation.generatedParams.reverse
+      (VExpr.telN source.nparams raw.type).reverse := by
+    simpa only [List.append_nil] using generatedToRaw.telDefEq.ctx
+  exact suffix.defeqDFC hblockEnv.ordered
+    (generatedContext.symm hblockEnv.ordered)
+
+/-- Every constructor spine of one canonical family certifies its generated
+field surface against the paired normalized constructor. -/
+private theorem constructorAnnotationSpineList_generatedFieldsTel
+    {source : VInductDecl} {generation : BlockGenerationChecked source}
+    {blockEnv : VEnv} {Us : List Name}
+    {family : NormalizedFamily} (familyMember : family ∈ generation.families)
+    (hblockEnv : blockEnv.WF) (uvarsEq : source.uvars = Us.length)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      [] generation.generatedParams generation.block.checked.params)
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {roots : CandidateConstructorSemanticListRun blockEnv Us candidates raws}
+    {shapes : CandidateConstructorSemanticGenerationShapeList source blockEnv
+      Us roots}
+    (annotations : CandidateConstructorAnnotationSpineList source blockEnv Us
+      roots shapes)
+    (constructors : List NormalizedCtor)
+    (raws_eq : constructors.map (·.raw) = raws)
+    (membership : ∀ constructor ∈ constructors,
+      constructor ∈ family.ctorPairs)
+    (runs : NormalizedBlockCtorRunList generation blockEnv
+      (constructors.map fun constructor =>
+        { owner := family.view.ordinal
+          familyName := family.raw.name
+          familyIndices := family.view.indices
+          ctor := constructor })) :
+    List.Forall₂
+      (fun (constructor : NormalizedCtor) (fields : List VExpr) =>
+        TypeChecker.TelDefEqEvidence blockEnv source.uvars
+          generation.generatedParams.reverse
+          (constructor.rawFields source.nparams) fields)
+      constructors annotations.generatedFieldSurfaces := by
+  induction annotations generalizing constructors with
+  | nil =>
+      cases constructors with
+      | nil => exact .nil
+      | cons constructor constructors => simp at raws_eq
+  | cons head tail ih =>
+      cases constructors with
+      | nil => simp at raws_eq
+      | cons constructor constructors =>
+          simp only [List.map_cons, List.cons.injEq] at raws_eq
+          obtain ⟨rawEq, rawsEq⟩ := raws_eq
+          cases runs with
+          | cons run runs =>
+              exact List.Forall₂.cons
+                (constructorAnnotationSpine_generatedFieldsTel familyMember
+                  hblockEnv uvarsEq generatedParamsTel head
+                  (membership constructor (.head _)) rawEq run)
+                (ih constructors rawsEq
+                  (fun other member => membership other (.tail _ member))
+                  runs)
+
+/-- Family-major certification of every generated constructor field surface
+of a canonical block. -/
+private theorem blockConstructorAnnotationSpineLists_generatedFieldsTel
+    {source : VInductDecl} {generation : BlockGenerationChecked source}
+    {env blockEnv : VEnv} {Us : List Name}
+    {kernelSources : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    {families : List NormalizedFamily}
+    (lists : CandidateBlockConstructorAnnotationSpineLists source env blockEnv
+      Us roots shapes)
+    (runs : CandidateCanonicalBlockNormalizedFamilyRunList generation env
+      blockEnv Us roots families)
+    (normalization : NormalizationBlockRun
+      generation.block.normalization env blockEnv)
+    (commonResultLevelWF :
+      generation.validated.resultLevel.WF source.uvars)
+    (paramsTel : TypeChecker.TelDefEqEvidence env source.uvars []
+      generation.block.rawParams generation.block.checked.params)
+    (hblockEnv : blockEnv.WF)
+    (generatedParamsTel : TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      [] generation.generatedParams generation.block.checked.params)
+    (membership : ∀ family ∈ families, family ∈ generation.families) :
+    List.Forall₂
+      (fun (family : NormalizedFamily) (surfaces : List (List VExpr)) =>
+        List.Forall₂
+          (fun (constructor : NormalizedCtor) (fields : List VExpr) =>
+            TypeChecker.TelDefEqEvidence blockEnv source.uvars
+              generation.generatedParams.reverse
+              (constructor.rawFields source.nparams) fields)
+          family.ctorPairs surfaces)
+      families lists.generatedFieldSurfaces := by
+  induction runs with
+  | nil =>
+      cases lists
+      exact .nil
+  | @cons kernelSource candidate raw root family kernelSources candidates
+      raws roots families head tail ih =>
+      cases lists with
+      | cons headLists tailLists =>
+          have familyMember : family ∈ generation.families :=
+            membership family (.head _)
+          have ctorRuns := head.constructorRuns normalization
+            commonResultLevelWF paramsTel familyMember
+          refine List.Forall₂.cons ?_ (ih tailLists
+            (fun family member => membership family (.tail _ member)))
+          exact constructorAnnotationSpineList_generatedFieldsTel
+            familyMember hblockEnv head.uvars_eq generatedParamsTel headLists
+            family.ctorPairs
+            (by simpa only [head.raw_eq] using
+              family.ctorPairs_map_raw familyMember)
+            (fun _ member => member) ctorRuns
+
+/-- The producer-owned constructor annotation inventory of a canonical
+family assembly, selected from the exact retained constructor producer
+equations. -/
+noncomputable def
+    ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.constructorAnnotations
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {context_lctx_eq : context.lctx = {}}
+    (support : produced.CanonicalFamilyAssemblySupport semantic
+      context_lctx_eq) :
+    CandidateBlockConstructorAnnotationSpineLists source env blockEnv Us
+      semantic.families support.generationShapes :=
+  Classical.choice
+    (CandidateBlockConstructorAnnotationSpineLists.nonempty semantic.families
+      support.generationShapes
+      produced.execution.eliminationExecution.normalization.constructorListsProduced)
+
 /-- The support-selected canonical block has passed the complete executable
 mixed raw/view generation gate. -/
 noncomputable def
@@ -49351,6 +49638,12 @@ noncomputable def
   generatedIndices := fun family =>
     (support.annotations.generatedIndexSurfaces[family.view.ordinal]?).getD
       (family.rawIndices source.nparams)
+  generatedFields := fun constructor =>
+    ((support.constructorAnnotations.generatedFieldSurfaces[
+        constructor.owner]?).bind fun surfaces =>
+      (source.types[constructor.owner]?).bind fun rawFamily =>
+        surfaces[rawFamily.ctors.idxOf constructor.ctor.raw]?).getD
+      (constructor.ctor.rawFields source.nparams)
 
 /-- Interpret every family and constructor of the support-owned canonical
 layout, yielding the ordinary block-generation semantic run. -/
@@ -49474,15 +49767,57 @@ noncomputable def
     commonResultLevelWF' paramsTel
   have generatedParamsTelBlock := generatedParamsTel'.mono
     (VEnv.stageInductiveTypes_le normalizationRun'.stage)
+  have generatedFieldTelescopes :=
+    blockConstructorAnnotationSpineLists_generatedFieldsTel
+      support.constructorAnnotations aligned' normalizationRun'
+      commonResultLevelWF' paramsTel hblockEnv generatedParamsTelBlock
+      (fun _ member => member)
   have generatedFieldsTel' : ∀ constructor ∈ generation.flatCtors,
       TypeChecker.TelDefEqEvidence blockEnv source.uvars
         generation.generatedParams.reverse
         (constructor.ctor.rawFields source.nparams)
         (generation.generatedFields constructor) := by
     intro constructor member
-    simpa only [generation, canonicalBlockGenerationChecked] using
-      (constructorRuns.get constructor member).rawFieldsTel_refl hblockEnv
-        generatedParamsTelBlock
+    obtain ⟨t, family, familyAt, ownerEq, _, _, ctorMember⟩ :=
+      generation.flatCtors_anatomy member
+    have familyMember : family ∈ generation.families :=
+      List.mem_of_getElem? familyAt
+    obtain ⟨surfaces, surfacesAt, familyTel⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_left generatedFieldTelescopes familyAt
+    have rawAt : source.types[t]? = some family.raw := by
+      rw [← generation.families_map_raw, List.getElem?_map, familyAt]
+      rfl
+    have rawMember : constructor.ctor.raw ∈ family.raw.ctors := by
+      rw [← family.ctorPairs_map_raw familyMember]
+      exact List.mem_map.mpr ⟨constructor.ctor, ctorMember, rfl⟩
+    have idxLt : family.raw.ctors.idxOf constructor.ctor.raw <
+        family.raw.ctors.length :=
+      List.idxOf_lt_length_iff.mpr rawMember
+    have rawAtIdx :
+        family.raw.ctors[family.raw.ctors.idxOf constructor.ctor.raw]? =
+          some constructor.ctor.raw := by
+      rw [List.getElem?_eq_getElem idxLt, List.getElem_idxOf]
+    obtain ⟨pairCtor, pairAt, pairRaw⟩ :=
+      family.exists_ctor_getElem?_of_raw familyMember rawAtIdx
+    obtain ⟨fields, fieldsAt, fieldsTel⟩ :=
+      Lean4Lean.List.Forall₂.getElem?_left familyTel pairAt
+    change TypeChecker.TelDefEqEvidence blockEnv source.uvars
+      generation.generatedParams.reverse
+      (constructor.ctor.rawFields source.nparams)
+      (((support.constructorAnnotations.generatedFieldSurfaces[
+          constructor.owner]?).bind fun surfaces =>
+        (source.types[constructor.owner]?).bind fun rawFamily =>
+          surfaces[rawFamily.ctors.idxOf constructor.ctor.raw]?).getD
+        (constructor.ctor.rawFields source.nparams))
+    rw [ownerEq, surfacesAt, rawAt]
+    simp only [Option.bind]
+    rw [fieldsAt]
+    simp only [Option.getD]
+    have rawFieldsEq : constructor.ctor.rawFields source.nparams =
+        pairCtor.rawFields source.nparams := by
+      simp only [NormalizedCtor.rawFields, pairRaw]
+    rw [rawFieldsEq]
+    exact fieldsTel
   simpa only [generation] using aligned'.blockGenerationRun normalizationRun'
     checkedWF' henv commonResultLevelWF' generatedParamsTel'
       generatedIndicesTel' generatedFieldsTel'
