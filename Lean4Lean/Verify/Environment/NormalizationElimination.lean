@@ -36258,6 +36258,272 @@ private def exactIndexDomain_arrayRun
   sources_eq := sourcesEq
   nodup := exactIndexDomainFVars_nodup trace
 
+/-- Preserve an exact validator index trace when the semantic environment is
+extended without changing its local telescope. -/
+private noncomputable def exactIndexDomain_mono
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env postEnv : VEnv} {Us : List Name}
+    (envLE : env ≤ postEnv)
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final) :
+    boundary.ExactIndexDomainTrace postEnv Us base targets final := by
+  induction trace with
+  | done => exact .done _
+  | step run advance domainTr domainType tail ih =>
+      exact .step run advance (domainTr.mono envLE) (domainType.mono envLE) ih
+
+/-- Reindex every exact validator index target into the recursor's universe
+inventory while preserving the operational source trace. -/
+private noncomputable def exactIndexDomain_relevel
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {ps Us : List Name} {extra : List VLevel}
+    (levelsWF : ∀ level ∈ extra, level.WF Us.length)
+    (levels : ∀ {source target},
+      VLevel.ofLevel ps source = some target →
+        VLevel.ofLevel Us source = some (target.inst extra))
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env ps base targets final) :
+    boundary.ExactIndexDomainTrace env Us (base.instL extra)
+      (targets.map (VExpr.instL extra)) (final.instL extra) := by
+  induction trace with
+  | done => exact .done _
+  | @step current rootSource i nindices rootFuel outer currentRun boundary
+      run advance base target targets final domainTr domainType tail ih =>
+      exact .step run advance
+        (domainTr.relevel levelsWF levels)
+        (VLCtx.instL_toCtx _ ▸ domainType.instL levelsWF)
+        (by simpa [VLCtx.instL, VLocalDecl.instL] using ih)
+
+/-- Source-order free variables allocated by the index branches of a retained
+`loopArgs1` decomposition.  Shared-parameter branches substitute the already
+selected parameter array and therefore contribute no emitted index. -/
+private def loopArgs1IndexFVars :
+    AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel current
+      finalIndices finalContext → List FVarId
+  | .done _ => []
+  | .parameter _ _ _ tail => loopArgs1IndexFVars tail
+  | .index (current := current) _ _ _ tail =>
+      current.freshFVarId :: loopArgs1IndexFVars tail
+
+/-- The final index array retained by `loopArgs1` is its incoming array
+followed by exactly the fresh variables exposed by its index branches. -/
+private theorem loopArgs1Index_sources
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext) :
+    finalIndices.toList =
+      indices.toList ++ (loopArgs1IndexFVars trace).map Expr.fvar := by
+  induction trace with
+  | done => simp [loopArgs1IndexFVars]
+  | parameter isParameter nextType whnfRun tail ih =>
+      exact ih
+  | index notParameter nextType whnfRun tail ih =>
+      rw [ih, Array.toList_push]
+      simp only [loopArgs1IndexFVars, List.map_cons]
+      rw [List.append_assoc]
+      rfl
+
+/-- A retained `loopArgs1` decomposition changes its reader context only at
+its index branches, and each such change is the recorded local push. -/
+private theorem loopArgs1Trace_localExtension
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done => exact .refl
+  | parameter isParameter nextType whnfRun tail ih => exact ih
+  | @index i fuel finalIndices finalContext name domain body binderInfo
+      indices current notParameter nextType whnfRun tail ih =>
+      exact contextLocalExtension_trans
+        (.push .refl name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) ih
+
+/-- Every phase-one index variable is fresh for the reader context in which
+its `loopArgs1` traversal starts. -/
+private theorem loopArgs1IndexFVars_absent
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ loopArgs1IndexFVars trace, current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | parameter isParameter nextType whnfRun tail ih =>
+      exact ih currentRun
+  | @index i fuel finalIndices finalContext name domain body binderInfo
+      indices current notParameter nextType whnfRun tail ih =>
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact currentRun.fresh
+      · have pushedRun := currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)
+        have absent := ih pushedRun fv member
+        cases found : current.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved := currentRun.push_findOld name binderInfo
+              (AddInductive.consumeTypeAnnotations domain) found
+            rw [preserved] at absent
+            contradiction
+
+/-- The fresh variables accumulated by the index branches of `loopArgs1`
+are pairwise distinct. -/
+private theorem loopArgs1IndexFVars_nodup
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (loopArgs1IndexFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | parameter isParameter nextType whnfRun tail ih =>
+      exact ih currentRun
+  | @index i fuel finalIndices finalContext name domain body binderInfo
+      indices current notParameter nextType whnfRun tail ih =>
+      have pushedRun := currentRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      refine List.nodup_cons.mpr ⟨?_, ih pushedRun⟩
+      intro member
+      have absent := loopArgs1IndexFVars_absent tail pushedRun
+        current.freshFVarId member
+      have present := currentRun.push_findNew name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      rw [present] at absent
+      contradiction
+
+/-- Strict semantic translations for exactly the index branches of a retained
+`loopArgs1` decomposition.  Parameter branches are represented explicitly but
+leave both the compressed context and target telescope unchanged. -/
+private inductive LoopArgs1IndexTranslationTrace
+    (env : VEnv) (Us : List Name) (stats : AddInductive.InductiveStats) :
+    {type : Expr} → {i : Nat} → {indices : Array Expr} → {fuel : Nat} →
+    {current : AddInductive.Context} → {finalIndices : Array Expr} →
+    {finalContext : AddInductive.Context} →
+    AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel current
+      finalIndices finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context}
+      (notForall : type.isForall = false) (base : VLCtx) :
+      LoopArgs1IndexTranslationTrace env Us stats (.done notForall)
+        base [] base
+  | parameter
+      {i : Nat} {indices : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context}
+      {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (isParameter : i < stats.params.size)
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 stats.params[i]!) : AddInductive.M Expr) current =
+            .ok nextType)
+      (tail : AddInductive.mkRecInfos.LoopArgs1Trace stats nextType (i + 1)
+        indices fuel current finalIndices finalContext)
+      {base final : VLCtx} {targets : List VExpr}
+      (rest : LoopArgs1IndexTranslationTrace env Us stats tail base targets
+        final) :
+      LoopArgs1IndexTranslationTrace env Us stats
+        (.parameter isParameter nextType whnfRun tail) base targets final
+  | index
+      {i : Nat} {indices : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context}
+      {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (notParameter : ¬ i < stats.params.size)
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 current.freshExpr) : AddInductive.M Expr)
+            (current.pushLocalDecl name binderInfo
+              (AddInductive.consumeTypeAnnotations domain)) = .ok nextType)
+      (tail : AddInductive.mkRecInfos.LoopArgs1Trace stats nextType i
+        (indices.push current.freshExpr) fuel
+        (current.pushLocalDecl name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) finalIndices
+        finalContext)
+      {base final : VLCtx} {target : VExpr} {targets : List VExpr}
+      (domainTr : TrExprS env Us base
+        (AddInductive.consumeTypeAnnotations domain) target)
+      (domainType : env.IsType Us.length base.toCtx target)
+      (rest : LoopArgs1IndexTranslationTrace env Us stats tail
+        ((some (current.freshFVarId,
+            (AddInductive.consumeTypeAnnotations domain).fvarsList),
+          .vlam target) :: base) targets final) :
+      LoopArgs1IndexTranslationTrace env Us stats
+        (.index notParameter nextType whnfRun tail) base
+        (target :: targets) final
+
+/-- Erase the phase-one index translation trace to the selected telescope in
+any implementation context extending the exact `loopArgs1` endpoint. -/
+private theorem loopArgs1IndexTranslation_selection
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (loopArgs1IndexFVars trace) targets final := by
+  induction translations with
+  | done => exact .nil
+  | parameter isParameter nextType whnfRun tail rest ih =>
+      exact ih currentRun endpointExtension
+  | @index i indices fuel current finalIndices finalContext name domain
+      body binderInfo notParameter nextType whnfRun tail base final target
+      targets domainTr domainType rest ih =>
+      have pushedRun := currentRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      have localFind := currentRun.push_findNew name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      have pushedToImplementation :
+          (current.pushLocalDecl name binderInfo
+            (AddInductive.consumeTypeAnnotations domain)).LocalExtension
+              implementation :=
+        contextLocalExtension_trans (loopArgs1Trace_localExtension tail)
+          endpointExtension
+      have finalFind :=
+        TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+          pushedRun pushedToImplementation localFind
+      exact .cons finalFind domainTr domainType
+        (ih pushedRun endpointExtension)
+
+/-- Package a translated phase-one `loopArgs1` decomposition as the exact
+selected array emitted by its retained aggregate run. -/
+private def loopArgs1IndexTranslation_arrayRun
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i #[] fuel
+      current finalIndices finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us implementation.lctx base
+      finalIndices targets final where
+  fvars := loopArgs1IndexFVars trace
+  selection := loopArgs1IndexTranslation_selection translations currentRun
+    endpointExtension
+  sources_eq := by
+    simpa using loopArgs1Index_sources trace
+  nodup := loopArgs1IndexFVars_nodup trace currentRun
+
 /-- The aggregate index traversal retained by one phase-one family step
 reaches its recorded endpoint solely by local-declaration pushes. -/
 private theorem recInfoPhaseOneIndex_localExtension
@@ -36375,6 +36641,46 @@ private theorem recInfoPhaseOneStep_motiveTranslation
   rw [AddInductive.RecInfoPhaseOneStep.motiveType, consumedMotive]
   simpa only [major,
     List.singleton_append, VExpr.forallN] using indexTelTr
+
+/-- Build one phase-one motive directly from the retained `loopArgs1`
+decomposition and its strict index-domain translations.  This is the exact
+handoff between the operational index trace and the structural motive proof;
+all selected-array bookkeeping is derived internally. -/
+private theorem recInfoPhaseOneStep_motiveTranslation_of_indexTrace
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {current : AddInductive.Context}
+    (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+      current)
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats
+      step.normalizedType 0 #[] current.fuel.inductiveFuel current
+      step.indices step.indexContext)
+    {base indexContext : VLCtx} {indexTypes : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      indexTypes indexContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {majorType : VExpr} {motiveLevel : VLevel}
+    (majorTr : TrExprS env Us indexContext
+      (AddInductive.consumeTypeAnnotations step.majorType) majorType)
+    (majorIsType : env.IsType Us.length indexContext.toCtx majorType)
+    (levelTr : VLevel.ofLevel Us elimLevel = some motiveLevel)
+    (motiveLevelWF : motiveLevel.WF Us.length)
+    (baseNoBV : base.NoBV) :
+    TrExprS env Us base
+      (AddInductive.consumeTypeAnnotations step.motiveType)
+      (VExpr.forallN indexTypes <|
+        .forallE majorType (.sort motiveLevel)) := by
+  have indexToMajor : step.indexContext.LocalExtension step.majorContext :=
+    .push .refl `t .default
+      (AddInductive.consumeTypeAnnotations step.majorType)
+  let indices := loopArgs1IndexTranslation_arrayRun translations currentRun
+    indexToMajor
+  have indexLocal : TypeChecker.CandidateLocalContextRun step.indexContext :=
+    TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+      (loopArgs1Trace_localExtension trace)
+  exact recInfoPhaseOneStep_motiveTranslation step indices indexLocal majorTr
+    majorIsType levelTr motiveLevelWF baseNoBV
 
 /-- Every complete phase-one decomposition exposes the exact push-only
 extension from its incoming reader context to its callback context. -/
