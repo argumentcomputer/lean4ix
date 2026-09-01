@@ -41,6 +41,40 @@ def _root_.Lean.Kernel.Environment.RecursorRulesReductionConstFree
     environment.find? recursorName = some (.recInfo recursor) →
       ∀ rule ∈ recursor.rules, rule.rhs.ReductionConstFree name
 
+/-- No constructor name stored by an existing inductive declaration can be
+made live by inserting `name`.  Reduction consults this metadata through
+`getFirstCtor`, independently of the constant header translation. -/
+def _root_.Lean.Kernel.Environment.InductiveCtorNamesFree
+    (environment : Environment) (name : Name) : Prop :=
+  ∀ familyName family,
+    environment.find? familyName = some (.inductInfo family) →
+      ∀ ctor ∈ family.ctors, ctor ≠ name
+
+/-- No name selected by existing recursor metadata can be made live by
+inserting `name`.  The recursor's major family and rule-constructor keys are
+both operational inputs to `inductiveReduce`. -/
+def _root_.Lean.Kernel.Environment.RecursorNamesFree
+    (environment : Environment) (name : Name) : Prop :=
+  ∀ recursorName recursor,
+    environment.find? recursorName = some (.recInfo recursor) →
+      recursor.getMajorInduct ≠ name ∧
+        ∀ rule ∈ recursor.rules, rule.ctor ≠ name
+
+/-- All non-header data which reduction can expose after one formerly absent
+name is inserted. -/
+def _root_.Lean.Kernel.Environment.ReductionPayloadFree
+    (environment : Environment) (name : Name) : Prop :=
+  environment.InductiveCtorNamesFree name ∧
+    environment.RecursorNamesFree name ∧
+      environment.RecursorRulesReductionConstFree name
+
+/-- Every absent host name is absent from the operational payload of all
+existing inductive declarations and recursors. -/
+def _root_.Lean.Kernel.Environment.ReductionPayloadClosed
+    (environment : Environment) : Prop :=
+  ∀ {name}, environment.find? name = none →
+    environment.ReductionPayloadFree name
+
 structure VEnvs where
   venv : DefinitionSafety → VEnv
 

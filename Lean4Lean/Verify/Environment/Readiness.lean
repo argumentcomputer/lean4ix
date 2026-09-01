@@ -81,6 +81,62 @@ theorem Environment.RecursorRulesReductionConstFree.add
       (.inr (.inr ⟨recursor, rfl⟩)) hfind)
     rule hrule
 
+/-- A fresh ordinary insertion cannot create or alter the constructor-name
+inventory stored in an inductive declaration. -/
+theorem Environment.InductiveCtorNamesFree.add
+    {env : Environment} {name : Name}
+    (self : env.InductiveCtorNamesFree name)
+    (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci) :
+    (env.add ci).InductiveCtorNamesFree name := by
+  intro familyName family hfind ctor hctor
+  exact self familyName family
+    (Environment.find?_of_add_structural mapWF hfresh htransparent
+      (.inl ⟨family, rfl⟩) hfind)
+    ctor hctor
+
+/-- A fresh ordinary insertion cannot create or alter the family and
+constructor names selected by recursor metadata. -/
+theorem Environment.RecursorNamesFree.add
+    {env : Environment} {name : Name}
+    (self : env.RecursorNamesFree name)
+    (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci) :
+    (env.add ci).RecursorNamesFree name := by
+  intro recursorName recursor hfind
+  exact self recursorName recursor
+    (Environment.find?_of_add_structural mapWF hfresh htransparent
+      (.inr (.inr ⟨recursor, rfl⟩)) hfind)
+
+/-- A fresh ordinary insertion preserves all operational reduction payload
+support for one name. -/
+theorem Environment.ReductionPayloadFree.add
+    {env : Environment} {name : Name}
+    (self : env.ReductionPayloadFree name)
+    (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci) :
+    (env.add ci).ReductionPayloadFree name :=
+  ⟨Environment.InductiveCtorNamesFree.add self.1 mapWF hfresh htransparent,
+    Environment.RecursorNamesFree.add self.2.1 mapWF hfresh htransparent,
+    Environment.RecursorRulesReductionConstFree.add self.2.2 mapWF hfresh
+      htransparent⟩
+
+/-- Closing all operational reduction payloads over absent names survives
+one fresh ordinary insertion. -/
+theorem Environment.ReductionPayloadClosed.add
+    {env : Environment} (self : env.ReductionPayloadClosed)
+    (mapWF : env.constants.WF) {ci : ConstantInfo}
+    (hfresh : env.find? ci.name = none)
+    (htransparent : Lean.ConstantInfo.ReadinessTransparent ci) :
+    (env.add ci).ReductionPayloadClosed := by
+  intro name hfind
+  exact Environment.ReductionPayloadFree.add
+    (self (Environment.find?_eq_none_of_add mapWF ci hfresh hfind)) mapWF
+    hfresh htransparent
+
 /-- Closing every old recursor payload over absent host names survives one
 fresh ordinary insertion. -/
 theorem Environment.recursorRulesClosed_add
@@ -1707,5 +1763,44 @@ theorem Environment.recursorRulesClosed_addDefs :
         (by simp [Lean.ConstantInfo.ReadinessTransparent]) self
     simpa only [List.foldl_cons] using
       Environment.recursorRulesClosed_addDefs mapWF' hfresh' hnd.2 current
+
+/-- Operational reduction-payload closure survives a fresh block of ordinary
+definitions. -/
+theorem Environment.ReductionPayloadClosed.addDefs :
+    ∀ {env : Environment} {vs : List DefinitionVal},
+    env.constants.WF →
+    (∀ v ∈ vs, env.find? v.name = none) →
+    (vs.map (·.name)).Nodup →
+    env.ReductionPayloadClosed →
+    Environment.ReductionPayloadClosed
+      (vs.foldl (fun e v => e.add (.defnInfo v)) env)
+  | _, [], _, _, _, self => by simpa using self
+  | env, v :: vs, mapWF, hfresh, hnd, self => by
+    rw [List.map_cons, List.nodup_cons] at hnd
+    have hvFresh := hfresh v (.head _)
+    have hvFresh' : env.find? (ConstantInfo.defnInfo v).name = none := by
+      simpa [ConstantInfo.name, ConstantInfo.toConstantVal] using hvFresh
+    have hnMap : env.constants.find? v.name = none := by
+      rw [← mapWF.find?'_eq_find?]
+      exact hvFresh
+    have mapWF' : (env.add (.defnInfo v)).constants.WF := by
+      change (env.constants.insert v.name (.defnInfo v)).WF
+      exact mapWF.insert _ _ hnMap
+    have hfresh' : ∀ w ∈ vs,
+        (env.add (.defnInfo v)).find? w.name = none := by
+      intro w hw
+      rw [Environment.find?_add_eq mapWF (.defnInfo v) hvFresh', if_neg]
+      · exact hfresh w (.tail _ hw)
+      · intro heq
+        simp only [ConstantInfo.name, ConstantInfo.toConstantVal] at heq
+        apply hnd.1
+        rw [heq]
+        exact List.mem_map.2 ⟨w, hw, rfl⟩
+    have current : (env.add (.defnInfo v)).ReductionPayloadClosed :=
+      Environment.ReductionPayloadClosed.add self mapWF hvFresh'
+        (by simp [Lean.ConstantInfo.ReadinessTransparent])
+    simpa only [List.foldl_cons] using
+      Environment.ReductionPayloadClosed.addDefs mapWF' hfresh' hnd.2
+        current
 
 end Lean4Lean
