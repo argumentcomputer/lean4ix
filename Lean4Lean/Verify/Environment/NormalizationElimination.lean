@@ -45925,6 +45925,242 @@ private theorem recInfoSynthesis_minorFVars
   exact ⟨recInfoPhaseTwoMinorFVars_nodup phase2 phase1Run,
     recInfoPhaseTwoMinorFVars_present phase2 phase1Run⟩
 
+/-! #### Field telescope of one constructor traversal
+
+`loopCtorArgs` is purely syntactic: parameter binders are instantiated with
+the shared parameter locals and field binders are pushed as
+annotation-consumed local declarations.  The field inventory and its strict
+translations mirror the phase-one index machinery, without WHNF pinning. -/
+
+/-- Source-order free variables allocated by the field branches of a
+retained `loopCtorArgs` decomposition. -/
+private def loopCtorArgsFieldFVars :
+    AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel current
+      terminal finalBu finalU finalContext → List FVarId
+  | .done _ => []
+  | .parameter _ _ tail => loopCtorArgsFieldFVars tail
+  | .field (current := current) _ _ _ tail =>
+      current.freshFVarId :: loopCtorArgsFieldFVars tail
+
+/-- The final constructor-argument array retained by `loopCtorArgs` is its
+incoming array followed by exactly the fresh variables of its field
+branches. -/
+private theorem loopCtorArgsField_sources
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext) :
+    finalBu.toList =
+      bu.toList ++ (loopCtorArgsFieldFVars trace).map Expr.fvar := by
+  induction trace with
+  | done => simp [loopCtorArgsFieldFVars]
+  | parameter param isParameter tail ih => exact ih
+  | field noParameter recursive recursiveRun tail ih =>
+      rw [ih, Array.toList_push]
+      simp only [loopCtorArgsFieldFVars, List.map_cons]
+      rw [List.append_assoc]
+      rfl
+
+/-- A retained `loopCtorArgs` decomposition changes its reader context only
+at its field branches, and each such change is the recorded local push. -/
+private theorem loopCtorArgsTrace_localExtension
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done => exact .refl
+  | parameter param isParameter tail ih => exact ih
+  | @field i domain u fuel terminal finalBu finalU finalContext name body
+      binderInfo bu current noParameter recursive recursiveRun tail ih =>
+      exact contextLocalExtension_trans
+        (.push .refl name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) ih
+
+/-- Every constructor field variable is fresh for the reader context in
+which its `loopCtorArgs` traversal starts. -/
+private theorem loopCtorArgsFieldFVars_absent
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ loopCtorArgsFieldFVars trace, current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | parameter param isParameter tail ih => exact ih currentRun
+  | @field i domain u fuel terminal finalBu finalU finalContext name body
+      binderInfo bu current noParameter recursive recursiveRun tail ih =>
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact currentRun.fresh
+      · have pushedRun := currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)
+        have absent := ih pushedRun fv member
+        cases found : current.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved := currentRun.push_findOld name binderInfo
+              (AddInductive.consumeTypeAnnotations domain) found
+            rw [preserved] at absent
+            contradiction
+
+/-- The fresh variables accumulated by the field branches of `loopCtorArgs`
+are pairwise distinct. -/
+private theorem loopCtorArgsFieldFVars_nodup
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (loopCtorArgsFieldFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | parameter param isParameter tail ih => exact ih currentRun
+  | @field i domain u fuel terminal finalBu finalU finalContext name body
+      binderInfo bu current noParameter recursive recursiveRun tail ih =>
+      have pushedRun := currentRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      refine List.nodup_cons.mpr ⟨?_, ih pushedRun⟩
+      intro member
+      have absent := loopCtorArgsFieldFVars_absent tail pushedRun
+        current.freshFVarId member
+      have present := currentRun.push_findNew name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      rw [present] at absent
+      contradiction
+
+/-- Strict semantic translations for exactly the field branches of a
+retained `loopCtorArgs` decomposition.  Parameter branches are represented
+explicitly but leave both the compressed context and the target telescope
+unchanged; the recursive classification of each field is carried along
+untouched. -/
+private inductive LoopCtorArgsFieldTranslationTrace
+    (env : VEnv) (Us : List Name) (stats : AddInductive.InductiveStats) :
+    {type : Expr} → {i : Nat} → {bu u : Array Expr} → {fuel : Nat} →
+    {current : AddInductive.Context} → {terminal : Expr} →
+    {finalBu finalU : Array Expr} → {finalContext : AddInductive.Context} →
+    AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel current
+      terminal finalBu finalU finalContext →
+    VLCtx → List VExpr → VLCtx → Type where
+  | done
+      {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context}
+      (notForall : type.isForall = false) (base : VLCtx) :
+      LoopCtorArgsFieldTranslationTrace env Us stats (.done notForall)
+        base [] base
+  | parameter
+      {i : Nat} {bu u : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context} {terminal : Expr}
+      {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (param : Expr)
+      (isParameter : stats.params[i]? = some param)
+      (tail : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        (body.instantiate1 param) (i + 1) bu u fuel current terminal
+        finalBu finalU finalContext)
+      {base final : VLCtx} {targets : List VExpr}
+      (rest : LoopCtorArgsFieldTranslationTrace env Us stats tail base
+        targets final) :
+      LoopCtorArgsFieldTranslationTrace env Us stats
+        (AddInductive.mkRecInfos.LoopCtorArgsTrace.parameter
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo) param isParameter tail) base targets
+        final
+  | field
+      {i : Nat} {bu u : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context} {terminal : Expr}
+      {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (noParameter : stats.params[i]? = none)
+      (recursive : Option Nat)
+      (recursiveRun :
+        AddInductive.isRecArg stats domain
+          (current.pushLocalDecl name binderInfo
+            (AddInductive.consumeTypeAnnotations domain)) = .ok recursive)
+      (tail : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        (body.instantiate1 current.freshExpr) (i + 1)
+        (bu.push current.freshExpr)
+        (if recursive.isSome then u.push current.freshExpr else u) fuel
+        (current.pushLocalDecl name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) terminal finalBu
+        finalU finalContext)
+      {base final : VLCtx} {target : VExpr} {targets : List VExpr}
+      (domainTr : TrExprS env Us base
+        (AddInductive.consumeTypeAnnotations domain) target)
+      (domainType : env.IsType Us.length base.toCtx target)
+      (rest : LoopCtorArgsFieldTranslationTrace env Us stats tail
+        ((some (current.freshFVarId,
+            (AddInductive.consumeTypeAnnotations domain).fvarsList),
+          .vlam target) :: base) targets final) :
+      LoopCtorArgsFieldTranslationTrace env Us stats
+        (AddInductive.mkRecInfos.LoopCtorArgsTrace.field
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo) noParameter recursive recursiveRun
+          tail) base (target :: targets) final
+
+/-- Erase a translated `loopCtorArgs` decomposition to the exact selected
+field telescope consumed by `LocalContext.mkForall` at any push-only
+extension of its final context. -/
+private theorem loopCtorArgsFieldTranslation_selection
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (loopCtorArgsFieldFVars trace) targets final := by
+  induction translations with
+  | done => exact .nil
+  | parameter param isParameter tail rest ih =>
+      exact ih currentRun endpointExtension
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      have pushedRun := currentRun.push name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      have localFind := currentRun.push_findNew name binderInfo
+        (AddInductive.consumeTypeAnnotations domain)
+      have pushedToImplementation :
+          (current.pushLocalDecl name binderInfo
+            (AddInductive.consumeTypeAnnotations domain)).LocalExtension
+              implementation :=
+        contextLocalExtension_trans (loopCtorArgsTrace_localExtension tail)
+          endpointExtension
+      have finalFind :=
+        TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+          pushedRun pushedToImplementation localFind
+      exact .cons finalFind domainTr domainType
+        (ih pushedRun endpointExtension)
+
+/-- Package a translated constructor-argument decomposition as the exact
+selected array of constructor arguments emitted by its retained run. -/
+private def loopCtorArgsFieldTranslation_arrayRun
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i #[] u
+      fuel current terminal finalBu finalU finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (endpointExtension : finalContext.LocalExtension implementation) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us implementation.lctx base
+      finalBu targets final where
+  fvars := loopCtorArgsFieldFVars trace
+  selection := loopCtorArgsFieldTranslation_selection translations
+    currentRun endpointExtension
+  sources_eq := by
+    simpa using loopCtorArgsField_sources trace
+  nodup := loopCtorArgsFieldFVars_nodup trace currentRun
+
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
 constructor audit.  Keeping the value transparent lets compatibility
