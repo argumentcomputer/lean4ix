@@ -1763,6 +1763,117 @@ def TypeChecker.Inner.MVarFreePreserving
     operation input methods context state = .ok (output, state') →
       output.hasExprMVar = false
 
+/-- The early-return scan used by `toCtorWhenK` either finds the original
+expression or reaches the end without a result.  Its state is irrelevant to
+the support argument, but retaining the exact `RecM` equation makes the lemma
+rewrite the executable loop directly. -/
+private theorem toCtorWhenK_scan_loop_result
+    (arguments : Array Expr) (expression : Expr)
+    (methods : TypeChecker.Methods) (context : TypeChecker.Context)
+    (all indices : List Nat)
+    (bound : ∀ index ∈ all, index < arguments.size)
+    (suffix : ∃ pre, pre ++ indices = all)
+    (state : TypeChecker.State) {result : Option Expr × Unit}
+    {state' : TypeChecker.State}
+    (run : (List.forIn'.loop all
+      (fun i h (_ : Option Expr × Unit) =>
+        if (arguments[i]'(bound i h)).hasExprMVar then
+          pure (.done ⟨some expression, ()⟩)
+        else
+          pure (.yield ⟨none, ()⟩)) indices ⟨none, ()⟩ suffix :
+            TypeChecker.RecM _)
+        methods context state = .ok (result, state')) :
+    result.1 = none ∨ result.1 = some expression := by
+  induction indices generalizing state with
+  | nil =>
+      simp only [List.forIn'.loop, Pure.pure, ReaderT.pure, StateT.pure,
+        Except.pure] at run
+      cases Except.ok.inj run
+      exact .inl rfl
+  | cons index indices ih =>
+      by_cases hasMVar :
+          (arguments[index]'(bound index (by
+            obtain ⟨pre, rfl⟩ := suffix
+            simp))).hasExprMVar = true
+      · simp [List.forIn'.loop, hasMVar] at run
+        cases Except.ok.inj run
+        exact .inr rfl
+      · have hasMVarFalse :
+            (arguments[index]'(bound index (by
+              obtain ⟨pre, rfl⟩ := suffix
+              simp))).hasExprMVar = false := by
+          cases value :
+              (arguments[index]'(bound index (by
+                obtain ⟨pre, rfl⟩ := suffix
+                simp))).hasExprMVar <;>
+            simp_all
+        simp [List.forIn'.loop, hasMVarFalse] at run
+        apply ih
+        simpa only using run
+
+/-- List form of the cached-mvar scan invariant. -/
+private theorem toCtorWhenK_scan_list_result
+    (arguments : Array Expr) (expression : Expr)
+    (methods : TypeChecker.Methods) (context : TypeChecker.Context)
+    (indices : List Nat)
+    (bound : ∀ index ∈ indices, index < arguments.size)
+    (state : TypeChecker.State) {result : Option Expr × Unit}
+    {state' : TypeChecker.State}
+    (run : (forIn' indices ⟨none, ()⟩
+      (fun i h (_ : Option Expr × Unit) =>
+        if (arguments[i]'(bound i h)).hasExprMVar then
+          pure (.done ⟨some expression, ()⟩)
+        else
+          pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
+        methods context state = .ok (result, state')) :
+    result.1 = none ∨ result.1 = some expression := by
+  change (List.forIn' indices ⟨none, ()⟩
+      (fun i h (_ : Option Expr × Unit) =>
+        if (arguments[i]'(bound i h)).hasExprMVar then
+          pure (.done ⟨some expression, ()⟩)
+        else
+          pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
+        methods context state = .ok (result, state') at run
+  unfold List.forIn' at run
+  exact toCtorWhenK_scan_loop_result arguments expression methods context
+    indices indices bound ⟨[], rfl⟩ state run
+
+/-- Range form matching the loop emitted by `toCtorWhenK`. -/
+private theorem toCtorWhenK_scan_result
+    (arguments : Array Expr) (start : Nat) (expression : Expr)
+    (methods : TypeChecker.Methods) (context : TypeChecker.Context)
+    (state : TypeChecker.State) {result : Option Expr × Unit}
+    {state' : TypeChecker.State}
+    (run : (forIn' [start:arguments.size] ⟨none, ()⟩
+      (fun i h (_ : Option Expr × Unit) =>
+        if (arguments[i]).hasExprMVar then
+          pure (.done ⟨some expression, ()⟩)
+        else
+          pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
+        methods context state = .ok (result, state')) :
+    result.1 = none ∨ result.1 = some expression := by
+  rw [Std.Legacy.Range.forIn'_eq_forIn'_range'] at run
+  let indices := List.range' start
+    (Std.Legacy.Range.size [start:arguments.size]) 1
+  have bound : ∀ index ∈ indices, index < arguments.size := by
+    intro index member
+    have rangeMember : index ∈ ([start:arguments.size] :
+        Std.Legacy.Range) := by
+      apply Std.Legacy.Range.mem_of_mem_range'
+      simpa only [indices, Std.Legacy.Range.size,
+        Std.Legacy.Range.size.eq_1] using member
+    exact rangeMember.2.1
+  apply toCtorWhenK_scan_list_result arguments expression methods context
+    indices bound state
+  change (forIn' indices ⟨none, ()⟩
+      (fun i h (_ : Option Expr × Unit) =>
+        if (arguments[i]'(bound i h)).hasExprMVar then
+          pure (.done ⟨some expression, ()⟩)
+        else
+          pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
+        methods context state = .ok (result, state')
+  simpa only [indices] using run
+
 /-- A successful K-style constructor conversion preserves the two syntactic
 invariants needed by the environment-staging replay.  The callback premises
 account for the inferred and normalized types; the explicit default premise
@@ -1887,6 +1998,143 @@ where
               · exact ofPure expressionSafe expressionMVarFree run
               · exact ofPure constructorSafe constructorMVarFree run
 
+/-- K-style constructor conversion cannot introduce a name from the fresh
+block.  This support-only form deliberately makes no claim about Lean's
+cached metavariable bit: recursor staging needs lookup conservativity, while
+old rule payloads need not carry a cache invariant in `TrEnv`. -/
+theorem TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
+    {source : VInductDecl} {environment : Environment}
+    {info : RecursorVal} {expression result : Expr}
+    {methods : TypeChecker.Methods} {context : TypeChecker.Context}
+    {state state' : TypeChecker.State}
+    (infoK : info.k = true)
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+      TypeChecker.Inner.whnf)
+    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (run : toCtorWhenK environment TypeChecker.Inner.whnf
+      TypeChecker.Inner.inferType TypeChecker.Inner.isDefEq info expression
+        methods context state = .ok (result, state')) :
+    source.BlockReductionConstFree result := by
+  unfold toCtorWhenK at run
+  simp only [infoK, if_true, ReaderT.bind, StateT.bind, Except.bind,
+    Bind.bind] at run
+  cases inferredRun : (TypeChecker.Inner.inferType expression
+      (inferOnly := true)) methods context state with
+  | error error =>
+      rw [inferredRun] at run
+      contradiction
+  | ok inferredState =>
+      rcases inferredState with ⟨inferred, inferredState⟩
+      rw [inferredRun] at run
+      simp only [Except.bind] at run
+      have inferredSafe := inferSafe expressionSafe methods context state
+        inferredRun
+      cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
+          inferredState with
+      | error error =>
+          rw [normalizedRun] at run
+          contradiction
+      | ok normalizedState =>
+          rcases normalizedState with ⟨normalized, normalizedState⟩
+          rw [normalizedRun] at run
+          simp only [Except.bind] at run
+          have normalizedSafe := whnfSafe inferredSafe methods context
+            inferredState normalizedRun
+          cases head : normalized.getAppFn with
+          | const family levels =>
+              simp only [head] at run
+              split at run
+              · exact ofPure expressionSafe run
+              · split at run
+                · let arguments := normalized.getAppArgs
+                  simp only [ReaderT.bind, StateT.bind, Except.bind,
+                    Bind.bind] at run
+                  cases scanRun : (forIn'
+                      [info.numParams:arguments.size] ⟨none, ()⟩
+                      (fun i h (_ : Option Expr × Unit) =>
+                        if (arguments[i]).hasExprMVar then
+                          pure (.done ⟨some expression, ()⟩)
+                        else
+                          pure (.yield ⟨none, ()⟩)) :
+                        TypeChecker.RecM _) methods context normalizedState with
+                  | error error =>
+                      dsimp only [arguments] at scanRun
+                      rw [scanRun] at run
+                      contradiction
+                  | ok scanState =>
+                      rcases scanState with ⟨scan, scanState⟩
+                      dsimp only [arguments] at scanRun
+                      rw [scanRun] at run
+                      simp only [Except.bind] at run
+                      have scanShape := toCtorWhenK_scan_result arguments
+                        info.numParams expression methods context
+                        normalizedState scanRun
+                      rcases scanShape with scanNone | scanSome
+                      · rw [scanNone] at run
+                        exact finish normalizedSafe run
+                      · rw [scanSome] at run
+                        exact ofPure expressionSafe run
+                · exact finish normalizedSafe run
+          | _ =>
+              simp only [head] at run
+              exact ofPure expressionSafe run
+where
+  ofPure {value : Expr} {callbackState : TypeChecker.State}
+      (valueSafe : source.BlockReductionConstFree value)
+      (run : (pure value : TypeChecker.RecM Expr) methods context
+        callbackState = .ok (result, state')) :
+      source.BlockReductionConstFree result := by
+    change Except.ok (value, callbackState) =
+      Except.ok (result, state') at run
+    have resultEq : value = result := by
+      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
+    exact resultEq ▸ valueSafe
+
+  finish {normalized : Expr} {callbackState : TypeChecker.State}
+      (normalizedSafe : source.BlockReductionConstFree normalized)
+      (run : (do
+        let some newCtorApp := mkNullaryCtor environment normalized
+          info.numParams | return expression
+        unless ← TypeChecker.Inner.isDefEq normalized
+            (← TypeChecker.Inner.inferType newCtorApp) do
+          return expression
+        return newCtorApp) methods context callbackState =
+          .ok (result, state')) :
+      source.BlockReductionConstFree result := by
+    cases constructorRun : mkNullaryCtor environment normalized info.numParams
+    · simp [constructorRun] at run
+      exact ofPure expressionSafe run
+    · rename_i constructor
+      have constructorSafe := normalizedSafe.mkNullaryCtor_of_default
+        payloadSafe defaultSafe constructorRun
+      simp only [constructorRun, ReaderT.bind, StateT.bind, Except.bind,
+        Bind.bind] at run
+      cases inferredRun : (TypeChecker.Inner.inferType constructor
+          (inferOnly := true)) methods context callbackState with
+      | error error =>
+          rw [inferredRun] at run
+          contradiction
+      | ok inferredState =>
+          rcases inferredState with ⟨inferred, inferredState⟩
+          rw [inferredRun] at run
+          simp only [Except.bind] at run
+          cases equalRun : (TypeChecker.Inner.isDefEq normalized inferred)
+              methods context inferredState with
+          | error error =>
+              rw [equalRun] at run
+              contradiction
+          | ok equalState =>
+              rcases equalState with ⟨equal, equalState⟩
+              rw [equalRun] at run
+              cases equal
+              · exact ofPure expressionSafe run
+              · exact ofPure constructorSafe run
+
 /-- Appending structure projections over a source-ordered index list
 preserves reduction support for the complete fresh block. -/
 private theorem VInductDecl.BlockReductionConstFree.foldl_etaFields
@@ -1996,6 +2244,62 @@ theorem expandEtaStruct_reductionInvariant_of_default
                 Lean.Expr.hasExprMVar_eq_false_foldl_etaFields seedMVarFree
                   expressionMVarFree _⟩
   | _ => exact ⟨expressionSafe, expressionMVarFree⟩
+
+/-- Structure eta expansion cannot expose a fresh block name.  The only
+non-source expression is the selected old constructor application; payload
+closure and the explicit total-default premise account for its two heads. -/
+theorem expandEtaStruct_reductionConstFree_of_default
+    {source : VInductDecl} {environment : Environment}
+    {type expression : Expr}
+    (typeSafe : source.BlockReductionConstFree type)
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr)) :
+    source.BlockReductionConstFree
+      (expandEtaStruct environment type expression) := by
+  unfold expandEtaStruct
+  simp only [Expr.withApp_eq]
+  cases head : type.getAppFn with
+  | const family levels =>
+      simp only [head]
+      cases selected : getFirstCtor environment family with
+      | none =>
+          simp only [selected]
+          exact expressionSafe
+      | some constructor =>
+          simp only [selected]
+          cases found : environment.find? constructor with
+          | none =>
+              simp only [found]
+              exact defaultSafe
+          | some info =>
+              cases info <;> simp only [found]
+              all_goals try exact defaultSafe
+              rename_i constructorInfo
+              rw [Std.Legacy.Range.forIn_eq_forIn_range',
+                List.forIn_pure_yield_eq_foldl]
+              simp only [Std.Legacy.Range.size, Nat.zero_add,
+                Nat.add_sub_cancel, Nat.div_one, Id.run_pure]
+              have seedSafe : source.BlockReductionConstFree
+                  (mkAppRange (.const constructor levels) 0
+                    constructorInfo.numParams type.getAppArgs) := by
+                constructor
+                · intro raw member
+                  apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+                  · exact (payloadSafe.1 raw member).1
+                      |>.ne_of_getFirstCtor_eq selected
+                  · intro argument argumentMember
+                    exact (typeSafe.1 raw member).getAppArgs argumentMember
+                  · exact defaultSafe.1 raw member
+                · intro raw member
+                  apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+                  · exact (payloadSafe.2 raw member).1
+                      |>.ne_of_getFirstCtor_eq selected
+                  · intro argument argumentMember
+                    exact (typeSafe.2 raw member).getAppArgs argumentMember
+                  · exact defaultSafe.2 raw member
+              exact seedSafe.foldl_etaFields expressionSafe _
+  | _ => exact expressionSafe
 
 /-- A successful structure-style constructor conversion preserves both
 syntactic invariants needed by the staging replay. -/
@@ -2115,6 +2419,104 @@ where
       simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
     exact resultEq ▸ ⟨valueSafe, valueMVarFree⟩
 
+/-- Structure-style constructor conversion preserves fresh-block reduction
+support independently of expression cache bits. -/
+theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
+    {source : VInductDecl} {environment : Environment}
+    {inductName : Name} {expression result : Expr}
+    {methods : TypeChecker.Methods} {context : TypeChecker.Context}
+    {state state' : TypeChecker.State}
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+      TypeChecker.Inner.whnf)
+    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (run : toCtorWhenStruct environment TypeChecker.Inner.whnf
+      TypeChecker.Inner.inferType inductName expression methods context state =
+        .ok (result, state')) :
+    source.BlockReductionConstFree result := by
+  unfold toCtorWhenStruct at run
+  split at run
+  · exact ofPure expressionSafe run
+  · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind] at run
+    cases inferredRun : (TypeChecker.Inner.inferType expression
+        (inferOnly := true)) methods context state with
+    | error error =>
+        rw [inferredRun] at run
+        contradiction
+    | ok inferredState =>
+        rcases inferredState with ⟨inferred, inferredState⟩
+        rw [inferredRun] at run
+        simp only [Except.bind] at run
+        have inferredSafe := inferSafe expressionSafe methods context state
+          inferredRun
+        cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
+            inferredState with
+        | error error =>
+            rw [normalizedRun] at run
+            contradiction
+        | ok normalizedState =>
+            rcases normalizedState with ⟨normalized, normalizedState⟩
+            rw [normalizedRun] at run
+            simp only [Except.bind] at run
+            have normalizedSafe := whnfSafe inferredSafe methods context
+              inferredState normalizedRun
+            split at run
+            · exact ofPure expressionSafe run
+            · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+                at run
+              cases sortInferredRun : (TypeChecker.Inner.inferType normalized
+                  (inferOnly := true)) methods context normalizedState with
+              | error error =>
+                  rw [sortInferredRun] at run
+                  contradiction
+              | ok sortInferredState =>
+                  rcases sortInferredState with
+                    ⟨sortInferred, sortInferredState⟩
+                  rw [sortInferredRun] at run
+                  simp only [Except.bind] at run
+                  have sortInferredSafe := inferSafe normalizedSafe methods
+                    context normalizedState sortInferredRun
+                  cases sortRun : (TypeChecker.Inner.whnf sortInferred) methods
+                      context sortInferredState with
+                  | error error =>
+                      rw [sortRun] at run
+                      contradiction
+                  | ok sortState =>
+                      rcases sortState with ⟨sortResult, sortState⟩
+                      rw [sortRun] at run
+                      simp only [Except.bind] at run
+                      have sortSafe := whnfSafe sortInferredSafe methods
+                        context sortInferredState sortRun
+                      cases sortResult with
+                      | sort level =>
+                          cases neverZero : level.isNeverZero with
+                          | false =>
+                              simp [neverZero] at run
+                              exact ofPure expressionSafe run
+                          | true =>
+                              simp [neverZero] at run
+                              have expanded :=
+                                expandEtaStruct_reductionConstFree_of_default
+                                  normalizedSafe expressionSafe payloadSafe
+                                  defaultSafe
+                              exact ofPure expanded run
+                      | _ => exact ofPure defaultSafe run
+where
+  ofPure {value : Expr} {callbackState : TypeChecker.State}
+      (valueSafe : source.BlockReductionConstFree value)
+      (run : (pure value : TypeChecker.RecM Expr) methods context
+        callbackState = .ok (result, state')) :
+      source.BlockReductionConstFree result := by
+    change Except.ok (value, callbackState) =
+      Except.ok (result, state') at run
+    have resultEq : value = result := by
+      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
+    exact resultEq ▸ valueSafe
+
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
 theorem _root_.Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
@@ -2126,6 +2528,35 @@ theorem _root_.Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
   induction expression <;>
     simp_all [Lean.Expr.instantiateLevelParamsCoreCpp',
       Lean.Expr.ReductionConstFree]
+
+/-- Universe substitution does not change the cached occurrence of expression
+metavariables. -/
+theorem _root_.Lean.Expr.hasExprMVar_instantiateLevelParamsCpp
+    (expression : Expr) (parameters : List Name) (levels : List Level) :
+    (expression.instantiateLevelParamsCpp parameters levels).hasExprMVar =
+      expression.hasExprMVar := by
+  rw [Lean.Expr.instantiateLevelParamsCpp_eq]
+  induction expression <;>
+    simp_all [Lean.Expr.instantiateLevelParamsCoreCpp']
+
+/-- Application to a source-ordered list preserves a clear expression-mvar
+cache bit. -/
+theorem _root_.Lean.Expr.hasExprMVar_eq_false_mkAppList
+    {function : Expr} {arguments : List Expr}
+    (functionMVarFree : function.hasExprMVar = false)
+    (argumentsMVarFree : ∀ argument ∈ arguments,
+      argument.hasExprMVar = false) :
+    (function.mkAppList arguments).hasExprMVar = false := by
+  induction arguments generalizing function with
+  | nil => exact functionMVarFree
+  | cons argument arguments ih =>
+      rw [Lean.Expr.mkAppList]
+      apply ih
+      · rw [Lean.Expr.app_hasExprMVar, Bool.or_eq_false_iff]
+        exact ⟨functionMVarFree,
+          argumentsMVarFree argument (List.mem_cons_self)⟩
+      · intro remaining member
+        exact argumentsMVarFree remaining (List.mem_cons_of_mem argument member)
 
 /-- The pure recursor-rule tail preserves reduction support when its selected
 rule and every supplied argument have that support. -/
@@ -2179,6 +2610,325 @@ theorem VInductDecl.BlockReductionConstFree.applyRecursorRule
         (recArgsSafe argument argumentMember).2 raw member)
       (fun argument argumentMember =>
         (majorArgsSafe argument argumentMember).2 raw member)
+
+/-- The pure recursor-rule tail cannot introduce expression metavariables
+when its rule body and both argument inventories are clear. -/
+theorem TypeChecker.Inner.applyRecursorRule_hasExprMVar_eq_false
+    {info : RecursorVal} {rule : RecursorRule}
+    {levels : List Level} {recArgs majorArgs : Array Expr}
+    (firstIndexBound : info.getFirstIndexIdx ≤ recArgs.size)
+    (ruleMVarFree : rule.rhs.hasExprMVar = false)
+    (recArgsMVarFree : ∀ argument ∈ recArgs.toList,
+      argument.hasExprMVar = false)
+    (majorArgsMVarFree : ∀ argument ∈ majorArgs.toList,
+      argument.hasExprMVar = false) :
+    (applyRecursorRule info rule levels recArgs majorArgs).hasExprMVar =
+      false := by
+  rw [TypeChecker.Inner.applyRecursorRule_eq_slices firstIndexBound]
+  apply Lean.Expr.hasExprMVar_eq_false_mkAppList
+  · rw [Lean.Expr.hasExprMVar_instantiateLevelParamsCpp]
+    exact ruleMVarFree
+  · intro argument member
+    simp only [List.mem_append] at member
+    rcases member with (member | member) | member
+    · exact recArgsMVarFree argument (List.mem_of_mem_take member)
+    · exact majorArgsMVarFree argument (List.mem_of_mem_drop member)
+    · exact recArgsMVarFree argument (List.mem_of_mem_drop member)
+
+/-- A successful recursor reduction cannot introduce a family or constructor
+name from a fresh mutual block.  The recursive callbacks supply the same
+support invariant for inferred/normalized intermediates; old recursor-rule
+payloads and the two literal expansions account for every remaining source
+of constants in the executable reducer. -/
+theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
+    {source : VInductDecl} {environment : Environment}
+    {expression result : Expr}
+    {methods : TypeChecker.Methods} {context : TypeChecker.Context}
+    {state state' : TypeChecker.State}
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (rulesSafe : source.BlockRecursorRulesReductionConstFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (natSafe : ∀ value,
+      source.BlockReductionConstFree (.natLitToConstructor value))
+    (stringSafe : ∀ value,
+      source.BlockReductionConstFree (.strLitToConstructor value))
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+      TypeChecker.Inner.whnf)
+    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (run : inductiveReduceRec environment expression
+      TypeChecker.Inner.whnf TypeChecker.Inner.inferType
+      TypeChecker.Inner.isDefEq methods context state =
+        .ok (some result, state')) :
+    source.BlockReductionConstFree result := by
+  unfold inductiveReduceRec at run
+  cases head : expression.getAppFn with
+  | const recursorName levels =>
+      simp only [head] at run
+      cases found : environment.find? recursorName with
+      | none =>
+          simp only [found] at run
+          change Except.ok (none, state) =
+            Except.ok (some result, state') at run
+          cases Except.ok.inj run
+      | some constant =>
+          cases constant with
+          | recInfo info =>
+              simp only [found] at run
+              cases majorFound : expression.getAppArgs[info.getMajorIdx]? with
+              | none =>
+                  simp only [majorFound] at run
+                  change Except.ok (none, state) =
+                    Except.ok (some result, state') at run
+                  cases Except.ok.inj run
+              | some major =>
+                  have majorSafe : source.BlockReductionConstFree major := by
+                    apply expressionSafe.getAppArgs
+                    apply List.mem_of_getElem? (i := info.getMajorIdx)
+                    simpa only [Array.getElem?_toList] using majorFound
+                  have majorBound : info.getMajorIdx <
+                      expression.getAppArgs.size :=
+                    (Array.getElem?_eq_some_iff.mp majorFound).1
+                  have firstIndexBound : info.getFirstIndexIdx ≤
+                      expression.getAppArgs.size := by
+                    simp only [RecursorVal.getFirstIndexIdx,
+                      RecursorVal.getMajorIdx] at majorBound ⊢
+                    omega
+                  have finish {major : Expr} {callbackState : TypeChecker.State}
+                      (majorSafe : source.BlockReductionConstFree major)
+                      (tailRun : ((do
+                        let some rule := getRecRuleFor info major |
+                          return none
+                        let majorArgs := major.getAppArgs
+                        if rule.nfields > majorArgs.size then return none
+                        if levels.length != info.levelParams.length then
+                          return none
+                        return some (applyRecursorRule info rule levels
+                          expression.getAppArgs majorArgs)) :
+                            TypeChecker.RecM (Option Expr)) methods context
+                            callbackState = .ok (some result, state')) :
+                      source.BlockReductionConstFree result := by
+                    cases selected : getRecRuleFor info major with
+                    | none =>
+                        simp only [selected] at tailRun
+                        change Except.ok (none, callbackState) =
+                          Except.ok (some result, state') at tailRun
+                        cases Except.ok.inj tailRun
+                    | some rule =>
+                        by_cases fieldsOverflow :
+                            rule.nfields > major.getAppArgs.size
+                        · simp only [selected, fieldsOverflow, if_true]
+                            at tailRun
+                          change Except.ok (none, callbackState) =
+                            Except.ok (some result, state') at tailRun
+                          cases Except.ok.inj tailRun
+                        · by_cases levelsMismatch :
+                              levels.length != info.levelParams.length
+                          · simp only [selected, fieldsOverflow, if_false,
+                              levelsMismatch, if_true] at tailRun
+                            change Except.ok (none, callbackState) =
+                              Except.ok (some result, state') at tailRun
+                            cases Except.ok.inj tailRun
+                          · have ruleSafe :
+                                source.BlockReductionConstFree rule.rhs :=
+                              ⟨fun raw member => rulesSafe.1 raw member
+                                  recursorName info found rule
+                                    (getRecRuleFor_mem selected),
+                                fun raw member => rulesSafe.2 raw member
+                                  recursorName info found rule
+                                    (getRecRuleFor_mem selected)⟩
+                            have reductSafe := ruleSafe.applyRecursorRule
+                              (levels := levels) firstIndexBound
+                              (fun argument argumentMember =>
+                                expressionSafe.getAppArgs argumentMember)
+                              (fun argument argumentMember =>
+                                majorSafe.getAppArgs argumentMember)
+                            simp [selected, fieldsOverflow, levelsMismatch]
+                              at tailRun
+                            have resultEq :
+                                applyRecursorRule info rule levels
+                                    expression.getAppArgs major.getAppArgs =
+                                  result := by
+                              exact Option.some.inj (congrArg Prod.fst
+                                (Except.ok.inj tailRun))
+                            exact resultEq ▸ reductSafe
+                  simp only [majorFound, ReaderT.bind, StateT.bind,
+                    Except.bind, Bind.bind] at run
+                  cases kFlag : info.k with
+                  | false =>
+                      simp only [kFlag, Bool.false_eq_true, if_false] at run
+                      exact afterK majorSafe run finish
+                  | true =>
+                      simp only [kFlag, if_true] at run
+                      simp only [ReaderT.bind, StateT.bind, Except.bind,
+                        Bind.bind] at run
+                      cases kRun : toCtorWhenK environment
+                          TypeChecker.Inner.whnf TypeChecker.Inner.inferType
+                          TypeChecker.Inner.isDefEq info major methods context
+                            state with
+                      | error error =>
+                          rw [kRun] at run
+                          contradiction
+                      | ok convertedState =>
+                          rcases convertedState with
+                            ⟨converted, convertedState⟩
+                          rw [kRun] at run
+                          simp only [Except.bind] at run
+                          have convertedSafe :=
+                            TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
+                              kFlag majorSafe payloadSafe defaultSafe whnfSafe
+                                inferSafe kRun
+                          exact afterK convertedSafe run finish
+          | _ =>
+              simp only [found] at run
+              change Except.ok (none, state) =
+                Except.ok (some result, state') at run
+              cases Except.ok.inj run
+  | _ =>
+      simp only [head] at run
+      change Except.ok (none, state) =
+        Except.ok (some result, state') at run
+      cases Except.ok.inj run
+where
+  afterK
+      {major : Expr} {info : RecursorVal} {levels : List Level}
+      {callbackStart : TypeChecker.State}
+      (majorSafe : source.BlockReductionConstFree major)
+      (run : ((do
+        match ← TypeChecker.Inner.whnf major with
+        | .lit (.natVal value) =>
+            let major := Expr.natLitToConstructor value
+            let some rule := getRecRuleFor info major | return none
+            let majorArgs := major.getAppArgs
+            if rule.nfields > majorArgs.size then return none
+            if levels.length != info.levelParams.length then return none
+            return some (applyRecursorRule info rule levels
+              expression.getAppArgs majorArgs)
+        | .lit (.strVal value) =>
+            let major ← TypeChecker.Inner.whnf
+              (Expr.strLitToConstructor value)
+            let some rule := getRecRuleFor info major | return none
+            let majorArgs := major.getAppArgs
+            if rule.nfields > majorArgs.size then return none
+            if levels.length != info.levelParams.length then return none
+            return some (applyRecursorRule info rule levels
+              expression.getAppArgs majorArgs)
+        | normalized =>
+            let major ← toCtorWhenStruct environment
+              TypeChecker.Inner.whnf TypeChecker.Inner.inferType
+                info.getMajorInduct normalized
+            let some rule := getRecRuleFor info major | return none
+            let majorArgs := major.getAppArgs
+            if rule.nfields > majorArgs.size then return none
+            if levels.length != info.levelParams.length then return none
+            return some (applyRecursorRule info rule levels
+              expression.getAppArgs majorArgs)) :
+                TypeChecker.RecM (Option Expr)) methods context callbackStart =
+                  Except.ok (some result, state'))
+      (finish : ∀ {major : Expr} {callbackState : TypeChecker.State},
+        source.BlockReductionConstFree major →
+        ((do
+          let some rule := getRecRuleFor info major | return none
+          let majorArgs := major.getAppArgs
+          if rule.nfields > majorArgs.size then return none
+          if levels.length != info.levelParams.length then return none
+          return some (applyRecursorRule info rule levels
+            expression.getAppArgs majorArgs)) :
+              TypeChecker.RecM (Option Expr)) methods context callbackState =
+              Except.ok (some result, state') →
+        source.BlockReductionConstFree result) :
+      source.BlockReductionConstFree result := by
+    simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind] at run
+    cases normalizedRun : (TypeChecker.Inner.whnf major) methods context
+      callbackStart with
+    | error error =>
+        rw [normalizedRun] at run
+        contradiction
+    | ok normalizedState =>
+        rcases normalizedState with ⟨normalized, normalizedState⟩
+        rw [normalizedRun] at run
+        simp only [Except.bind] at run
+        have normalizedSafe := whnfSafe majorSafe methods context
+          callbackStart normalizedRun
+        have structureCase {normalized : Expr}
+            {callbackState : TypeChecker.State}
+            (normalizedSafe : source.BlockReductionConstFree normalized)
+            (structureTailRun : ((do
+              let major ← toCtorWhenStruct environment
+                TypeChecker.Inner.whnf TypeChecker.Inner.inferType
+                  info.getMajorInduct normalized
+              let some rule := getRecRuleFor info major | return none
+              let majorArgs := major.getAppArgs
+              if rule.nfields > majorArgs.size then return none
+              if levels.length != info.levelParams.length then return none
+              return some (applyRecursorRule info rule levels
+                expression.getAppArgs majorArgs)) :
+                  TypeChecker.RecM (Option Expr)) methods context
+                    callbackState = Except.ok (some result, state')) :
+            source.BlockReductionConstFree result := by
+          simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+            at structureTailRun
+          cases structureRun : toCtorWhenStruct environment
+              TypeChecker.Inner.whnf TypeChecker.Inner.inferType
+              info.getMajorInduct normalized methods context callbackState
+          with
+          | error error =>
+              rw [structureRun] at structureTailRun
+              contradiction
+          | ok structureState =>
+              rcases structureState with ⟨structureMajor, structureState⟩
+              rw [structureRun] at structureTailRun
+              simp only [Except.bind] at structureTailRun
+              have structureMajorSafe :=
+                TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
+                  normalizedSafe payloadSafe defaultSafe whnfSafe inferSafe
+                    structureRun
+              exact finish structureMajorSafe structureTailRun
+        cases normalized with
+        | lit literal =>
+            cases literal with
+            | natVal value =>
+                exact finish (natSafe value) (by simpa only using run)
+            | strVal value =>
+                simp only [ReaderT.bind, StateT.bind, Except.bind,
+                  Bind.bind] at run
+                cases stringRun : (TypeChecker.Inner.whnf
+                    (.strLitToConstructor value)) methods context
+                      normalizedState with
+                | error error =>
+                    rw [stringRun] at run
+                    contradiction
+                | ok stringState =>
+                    rcases stringState with ⟨stringMajor, stringState⟩
+                    rw [stringRun] at run
+                    simp only [Except.bind] at run
+                    have stringMajorSafe := whnfSafe (stringSafe value)
+                      methods context normalizedState stringRun
+                    exact finish stringMajorSafe run
+        | bvar => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | fvar => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | mvar => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | sort => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | const => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | app => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | lam => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | forallE => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | letE => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | mdata => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
+        | proj => exact structureCase normalizedSafe (by
+            simpa only [Bind.bind, ReaderT.bind] using run)
 
 /-- Replacing a free variable by a bound variable does not change the
 reduction-relevant constant inventory. -/
