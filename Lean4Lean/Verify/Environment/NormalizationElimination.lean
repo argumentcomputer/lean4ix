@@ -47996,6 +47996,304 @@ private def recInfoPhaseTwoMinorTranslation_arrayRun
   sources_eq := recInfoSynthesis_minorSources trace phase2
   nodup := (recInfoSynthesis_minorFVars trace phase2 rootRun).1
 
+/-- Every variable of the compressed endpoint of a translated field
+traversal is declared at the traversal's final reader context. -/
+private theorem loopCtorArgsFieldTranslation_final_found
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    ∀ fv ∈ final.fvars,
+      ∃ declaration, finalContext.lctx.find? fv = some declaration := by
+  induction translations with
+  | done => exact baseFound
+  | parameter param isParameter tail rest ih =>
+      exact ih currentRun baseFound
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      exact ih
+        (currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain))
+        (compressedFVars_push currentRun baseFound name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) _ target)
+
+/-- Every variable of the compressed endpoint of a translated hypothesis
+traversal is declared at the traversal's final reader context. -/
+private theorem loopUTranslation_final_found
+    {stats : AddInductive.InductiveStats} {u : Array Expr}
+    {recInfos : Array AddInductive.RecInfo}
+    {i : Nat} {v : Array Expr} {current : AddInductive.Context}
+    {finalV : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopUTrace stats u recInfos i v current
+      finalV finalContext}
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopUTranslationTrace env Us stats u recInfos trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    ∀ fv ∈ final.fvars,
+      ∃ declaration, finalContext.lctx.find? fv = some declaration := by
+  induction translations with
+  | done => exact baseFound
+  | @step i v current finalV finalContext inBounds hypothesisType
+      hypothesisRun tail base final target targets hypothesisTr
+      hypothesisIsType rest ih =>
+      exact ih
+        (currentRun.push
+          ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+          .default (AddInductive.consumeTypeAnnotations hypothesisType))
+        (compressedFVars_push currentRun baseFound
+          ((current.lctx.get! u[i].fvarId!).userName.appendAfter "_ih")
+          .default (AddInductive.consumeTypeAnnotations hypothesisType) _
+          target)
+
+/-- Build one constructor minor from the retained field and hypothesis
+traversals and their strict translations.  The constructor application is
+translated from the source-variable spine of the compressed endpoint; the
+target motive and its index spine are supplied as translations, and the
+Theory typing of the assembled minor supplies every well-formedness fact by
+inversion. -/
+private theorem recInfoConstructorStep_minorDomain
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    {argsTrace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats ctor.type 0
+      #[] #[] current.fuel.inductiveFuel current step.terminal
+      step.constructorArgs step.recursiveArgs step.argumentContext}
+    {base fieldFinal : VLCtx} {fieldTypes : List VExpr}
+    (fieldTranslations : LoopCtorArgsFieldTranslationTrace env Us stats
+      argsTrace base fieldTypes fieldFinal)
+    {hypTrace : AddInductive.mkRecInfos.LoopUTrace stats step.recursiveArgs
+      recInfos 0 #[] step.argumentContext step.hypotheses
+      step.hypothesisContext}
+    {hypothesisFinal : VLCtx} {hypothesisTypes : List VExpr}
+    (hypothesisTranslations : LoopUTranslationTrace env Us stats
+      step.recursiveArgs recInfos hypTrace fieldFinal hypothesisTypes
+      hypothesisFinal)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseWF : VLCtx.WF env Us.length base)
+    (baseShape : base.FVarLamOnly)
+    (baseNoBV : base.NoBV)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    {middleFVars paramFVars : List FVarId}
+    (baseFVarsEq : base.fvars = middleFVars ++ paramFVars)
+    (paramSources : paramFVars.reverse.map Expr.fvar = stats.params.toList)
+    {ci : VConstant} (constLookup : env.constants ctor.name = some ci)
+    {targetLevels : List VLevel}
+    (levelsTr : stats.levels.mapM (VLevel.ofLevel Us) = some targetLevels)
+    (arity : stats.levels.length = ci.uvars)
+    {motiveId : FVarId}
+    (motiveEq : recInfos[step.targetIndex]!.motive = .fvar motiveId)
+    {motive : VExpr}
+    (motiveTr : TrExprS env Us hypothesisFinal
+      recInfos[step.targetIndex]!.motive motive)
+    {indexTargets : List VExpr}
+    (indicesTr : List.Forall₂ (TrExprS env Us hypothesisFinal)
+      step.targetIndices.toList indexTargets)
+    (minorIsType : env.IsType Us.length base.toCtx
+      (VExpr.forallN fieldTypes
+        (VExpr.forallN hypothesisTypes
+          (VExpr.appN motive
+            (indexTargets ++
+              [VExpr.appN (.const ctor.name targetLevels)
+                (VExpr.bvarRevRange
+                    (hypothesisTypes.length + fieldTypes.length +
+                      middleFVars.length)
+                    paramFVars.length ++
+                  VExpr.bvarRevRange hypothesisTypes.length
+                    fieldTypes.length)]))))) :
+    TrExprS env Us base
+      (AddInductive.consumeTypeAnnotations step.minorType)
+      (VExpr.forallN fieldTypes
+        (VExpr.forallN hypothesisTypes
+          (VExpr.appN motive
+            (indexTargets ++
+              [VExpr.appN (.const ctor.name targetLevels)
+                (VExpr.bvarRevRange
+                    (hypothesisTypes.length + fieldTypes.length +
+                      middleFVars.length)
+                    paramFVars.length ++
+                  VExpr.bvarRevRange hypothesisTypes.length
+                    fieldTypes.length)])))) := by
+  have ord := henv.ordered
+  -- field endpoint facts
+  have fieldFVars := loopCtorArgsFieldTranslation_final_fvars fieldTranslations
+  have fieldWF := loopCtorArgsFieldTranslation_final_wf fieldTranslations
+    currentRun baseWF baseFound
+  have fieldShape := loopCtorArgsFieldTranslation_final_fvarLamOnly
+    fieldTranslations baseShape
+  have fieldToCtx := loopCtorArgsFieldTranslation_final_toCtx fieldTranslations
+  have fieldLen := loopCtorArgsFieldTranslation_targets_length
+    fieldTranslations
+  have fieldFound := loopCtorArgsFieldTranslation_final_found
+    fieldTranslations currentRun baseFound
+  have argumentRun : TypeChecker.CandidateLocalContextRun
+      step.argumentContext :=
+    TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+      (recInfoConstructorStep_argumentExtension step)
+  -- hypothesis endpoint facts
+  have hypothesisFVars := loopUTranslation_final_fvars hypothesisTranslations
+  have hypothesisWF := loopUTranslation_final_wf hypothesisTranslations
+    argumentRun fieldWF fieldFound
+  have hypothesisShape := loopUTranslation_final_fvarLamOnly
+    hypothesisTranslations fieldShape
+  have hypothesisToCtx := loopUTranslation_final_toCtx hypothesisTranslations
+  have hypothesisLen := loopUTranslation_targets_length hypothesisTranslations
+  have baseLen : base.toCtx.length =
+      middleFVars.length + paramFVars.length := by
+    rw [fvarLamOnly_toCtx_length baseShape, baseFVarsEq,
+      List.length_append]
+  have fieldCtxLen : fieldFinal.toCtx.length =
+      fieldTypes.length + (middleFVars.length + paramFVars.length) := by
+    rw [fieldToCtx, List.length_append, List.length_reverse, baseLen]
+  have finalLen : hypothesisFinal.toCtx.length =
+      hypothesisTypes.length +
+        (fieldTypes.length + (middleFVars.length + paramFVars.length)) := by
+    rw [hypothesisToCtx, List.length_append, List.length_reverse,
+      fieldCtxLen]
+  -- complete source-variable spine at the hypothesis endpoint
+  have spine := hypothesisShape.sourceTranslations henv hypothesisWF
+  have sourcesEq : hypothesisFinal.fvars.reverse.map Expr.fvar =
+      stats.params.toList ++
+        (middleFVars.reverse.map Expr.fvar ++
+          ((loopCtorArgsFieldFVars argsTrace).map Expr.fvar ++
+            (loopUFVars hypTrace).map Expr.fvar)) := by
+    rw [hypothesisFVars, fieldFVars, baseFVarsEq]
+    simp only [List.reverse_append, List.reverse_reverse, List.map_append,
+      List.append_assoc, paramSources]
+  have targetsEq : VExpr.bvarRevRange 0 hypothesisFinal.toCtx.length =
+      VExpr.bvarRevRange
+          (hypothesisTypes.length + fieldTypes.length + middleFVars.length)
+          paramFVars.length ++
+        (VExpr.bvarRevRange (hypothesisTypes.length + fieldTypes.length)
+            middleFVars.length ++
+          (VExpr.bvarRevRange hypothesisTypes.length fieldTypes.length ++
+            VExpr.bvarRevRange 0 hypothesisTypes.length)) := by
+    rw [VExpr.bvarRevRange_append fieldTypes.length hypothesisTypes.length,
+      VExpr.bvarRevRange_append middleFVars.length
+        (hypothesisTypes.length + fieldTypes.length),
+      VExpr.bvarRevRange_append paramFVars.length
+        (hypothesisTypes.length + fieldTypes.length + middleFVars.length)]
+    have arrange : hypothesisTypes.length + fieldTypes.length +
+        middleFVars.length + paramFVars.length =
+          hypothesisFinal.toCtx.length := by
+      rw [finalLen]
+      omega
+    rw [arrange]
+  rw [sourcesEq, targetsEq] at spine
+  have splitA := (List.Forall₂.append_of_left (by
+    simpa using (congrArg List.length paramSources).symm)).1 spine
+  have parametersTr := splitA.1
+  have splitB := (List.Forall₂.append_of_left (by
+    simp [List.length_reverse])).1 splitA.2
+  have splitC := (List.Forall₂.append_of_left (by
+    simp [fieldLen])).1 splitB.2
+  have fieldsTrRaw := splitC.1
+  have fieldSources : step.constructorArgs.toList =
+      (loopCtorArgsFieldFVars argsTrace).map Expr.fvar := by
+    simpa using loopCtorArgsField_sources argsTrace
+  have fieldsTr : List.Forall₂ (TrExprS env Us hypothesisFinal)
+      step.constructorArgs.toList
+      (VExpr.bvarRevRange hypothesisTypes.length fieldTypes.length) := by
+    rw [fieldSources]
+    exact fieldsTrRaw
+  -- constructor head
+  have headTr : TrExprS env Us hypothesisFinal (.const ctor.name stats.levels)
+      (.const ctor.name targetLevels) :=
+    .const constLookup levelsTr arity
+  -- typing of the assembled body by inversion
+  have peeledFields := isType_forallN_inv ord fieldTypes minorIsType
+  have peeledBody := isType_forallN_inv ord hypothesisTypes peeledFields
+  have bodyIsType : env.IsType Us.length hypothesisFinal.toCtx
+      (VExpr.appN motive
+        (indexTargets ++
+          [VExpr.appN (.const ctor.name targetLevels)
+            (VExpr.bvarRevRange
+                (hypothesisTypes.length + fieldTypes.length +
+                  middleFVars.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange hypothesisTypes.length
+                fieldTypes.length)])) := by
+    rw [hypothesisToCtx, fieldToCtx]
+    exact peeledBody
+  have bodyWF : VExpr.WF env Us.length hypothesisFinal.toCtx
+      (VExpr.appN motive
+        (indexTargets ++
+          [VExpr.appN (.const ctor.name targetLevels)
+            (VExpr.bvarRevRange
+                (hypothesisTypes.length + fieldTypes.length +
+                  middleFVars.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange hypothesisTypes.length
+                fieldTypes.length)])) := by
+    obtain ⟨sortLevel, hasType⟩ := bodyIsType
+    exact ⟨_, hasType⟩
+  have applicationWF : VExpr.WF env Us.length hypothesisFinal.toCtx
+      (VExpr.appN (.const ctor.name targetLevels)
+        (VExpr.bvarRevRange
+            (hypothesisTypes.length + fieldTypes.length +
+              middleFVars.length)
+            paramFVars.length ++
+          VExpr.bvarRevRange hypothesisTypes.length fieldTypes.length)) := by
+    have split : VExpr.appN motive
+        (indexTargets ++
+          [VExpr.appN (.const ctor.name targetLevels)
+            (VExpr.bvarRevRange
+                (hypothesisTypes.length + fieldTypes.length +
+                  middleFVars.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange hypothesisTypes.length
+                fieldTypes.length)]) =
+        VExpr.app (VExpr.appN motive indexTargets)
+          (VExpr.appN (.const ctor.name targetLevels)
+            (VExpr.bvarRevRange
+                (hypothesisTypes.length + fieldTypes.length +
+                  middleFVars.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange hypothesisTypes.length
+                fieldTypes.length)) := by
+      rw [VExpr.appN_append]
+      rfl
+    rw [split] at bodyWF
+    obtain ⟨A, B, _, argumentTyped⟩ :=
+      VExpr.WF.app_inv ord hypothesisWF.toCtx bodyWF
+    exact ⟨A, argumentTyped⟩
+  have applicationTr :=
+    recInfoConstructorStep_constructorApplicationTranslation henv step
+      hypothesisWF headTr parametersTr fieldsTr applicationWF
+  have motiveApplicationTr :=
+    recInfoConstructorStep_motiveApplicationTranslation henv step
+      hypothesisWF motiveTr indicesTr applicationTr bodyWF
+  have headFn : step.motiveApplication.getAppFn = .fvar motiveId := by
+    rw [AddInductive.RecInfoConstructorStep.motiveApplication]
+    show (Lean.mkAppN recInfos[step.targetIndex]!.motive
+      step.targetIndices).getAppFn = _
+    rw [getAppFn_mkAppN, motiveEq]
+    rfl
+  have bodyConsumed := consumeTypeAnnotations_of_getAppFn_fvar headFn
+  let fields := loopCtorArgsFieldTranslation_arrayRun fieldTranslations
+    currentRun (recInfoConstructorStep_hypothesisExtension step)
+  let hypotheses := loopUTranslation_arrayRun hypothesisTranslations
+    argumentRun .refl
+  exact recInfoConstructorStep_minorTranslation step fields hypotheses
+    motiveApplicationTr bodyIsType bodyConsumed baseNoBV
+
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
 constructor audit.  Keeping the value transparent lets compatibility
