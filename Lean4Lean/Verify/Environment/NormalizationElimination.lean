@@ -48106,18 +48106,20 @@ private theorem recInfoConstructorStep_minorDomain
     {indexTargets : List VExpr}
     (indicesTr : List.Forall₂ (TrExprS env Us hypothesisFinal)
       step.targetIndices.toList indexTargets)
+    {paramOffset paramCount hypothesisCount fieldCount : Nat}
+    (paramOffsetEq : paramOffset =
+      hypothesisTypes.length + fieldTypes.length + middleFVars.length)
+    (paramCountEq : paramCount = paramFVars.length)
+    (hypothesisCountEq : hypothesisCount = hypothesisTypes.length)
+    (fieldCountEq : fieldCount = fieldTypes.length)
     (minorIsType : env.IsType Us.length base.toCtx
       (VExpr.forallN fieldTypes
         (VExpr.forallN hypothesisTypes
           (VExpr.appN motive
             (indexTargets ++
               [VExpr.appN (.const ctor.name targetLevels)
-                (VExpr.bvarRevRange
-                    (hypothesisTypes.length + fieldTypes.length +
-                      middleFVars.length)
-                    paramFVars.length ++
-                  VExpr.bvarRevRange hypothesisTypes.length
-                    fieldTypes.length)]))))) :
+                (VExpr.bvarRevRange paramOffset paramCount ++
+                  VExpr.bvarRevRange hypothesisCount fieldCount)]))))) :
     TrExprS env Us base
       (AddInductive.consumeTypeAnnotations step.minorType)
       (VExpr.forallN fieldTypes
@@ -48125,12 +48127,9 @@ private theorem recInfoConstructorStep_minorDomain
           (VExpr.appN motive
             (indexTargets ++
               [VExpr.appN (.const ctor.name targetLevels)
-                (VExpr.bvarRevRange
-                    (hypothesisTypes.length + fieldTypes.length +
-                      middleFVars.length)
-                    paramFVars.length ++
-                  VExpr.bvarRevRange hypothesisTypes.length
-                    fieldTypes.length)])))) := by
+                (VExpr.bvarRevRange paramOffset paramCount ++
+                  VExpr.bvarRevRange hypothesisCount fieldCount)])))) := by
+  subst paramOffsetEq paramCountEq hypothesisCountEq fieldCountEq
   have ord := henv.ordered
   -- field endpoint facts
   have fieldFVars := loopCtorArgsFieldTranslation_final_fvars fieldTranslations
@@ -48293,6 +48292,1066 @@ private theorem recInfoConstructorStep_minorDomain
     argumentRun .refl
   exact recInfoConstructorStep_minorTranslation step fields hypotheses
     motiveApplicationTr bodyIsType bodyConsumed baseNoBV
+
+/-! #### Recorded per-constructor inputs of the minor phase
+
+Each constructor of the block contributes one recorded package: its strict
+annotation spine with the shared-parameter alignment and candidate fuel, the
+Theory identification of its flattened position, and the three
+keystone-shaped operational agreements (field count, hypothesis
+translations, terminal index translations).  The folds below thread every
+other fact as an invariant. -/
+
+/-- Positional lookup inside a reversed bound-variable range. -/
+private theorem bvarRevRange_getElem? (off : Nat) :
+    ∀ (m t : Nat), t < m →
+      (VExpr.bvarRevRange off m)[t]? = some (.bvar (off + (m - 1 - t)))
+  | 0, _, h => by omega
+  | m + 1, 0, _ => by
+      simp [VExpr.bvarRevRange]
+  | m + 1, t + 1, h => by
+      simp only [VExpr.bvarRevRange, List.getElem?_cons_succ]
+      rw [bvarRevRange_getElem? off m t (by omega)]
+      congr 3
+      omega
+
+/-- The flattened minor inventory of an appended constructor list is the
+appended inventory, with the second part shifted past the first. -/
+private theorem generatedMinorTypesAux_append {source : VInductDecl}
+    (generation : BlockGenerationChecked source) :
+    ∀ (first rest : List NormalizedBlockCtor) (i : Nat),
+      generation.generatedMinorTypesAux (first ++ rest) i =
+        generation.generatedMinorTypesAux first i ++
+          generation.generatedMinorTypesAux rest (i + first.length)
+  | [], _, _ => by simp [BlockGenerationChecked.generatedMinorTypesAux]
+  | constructor :: first, rest, i => by
+      simp only [List.cons_append, BlockGenerationChecked.generatedMinorTypesAux,
+        List.length_cons]
+      rw [generatedMinorTypesAux_append generation first rest (i + 1)]
+      simp [Nat.add_assoc, Nat.add_comm 1 first.length]
+
+/-- Extending the flattened prefix by one constructor appends its
+position-lifted minor. -/
+private theorem generatedMinorTypesAux_take_succ {source : VInductDecl}
+    (generation : BlockGenerationChecked source) {i : Nat}
+    {constructor : NormalizedBlockCtor}
+    (at_i : generation.flatCtors[i]? = some constructor) :
+    generation.generatedMinorTypesAux (generation.flatCtors.take (i + 1)) 0 =
+      generation.generatedMinorTypesAux (generation.flatCtors.take i) 0 ++
+        [(generation.generatedMinorType constructor).liftN i] := by
+  have bound : i < generation.flatCtors.length :=
+    (List.getElem?_eq_some_iff.mp at_i).1
+  rw [← List.take_append_getElem bound, generatedMinorTypesAux_append,
+    List.length_take, Nat.min_eq_left (Nat.le_of_lt bound)]
+  simp only [BlockGenerationChecked.generatedMinorTypesAux, Nat.zero_add]
+  rw [List.getElem?_eq_getElem bound] at at_i
+  rw [Option.some.inj at_i]
+
+/-- The compressed context reached after the fields of minor `i` of
+`constructor`, characterized by its variables and Theory context. -/
+private def MinorFieldBase {source : VInductDecl}
+    (generation : BlockGenerationChecked source) (i : Nat)
+    (constructor : NormalizedBlockCtor)
+    (fieldFVars middleFVars paramFVars : List FVarId) (base : VLCtx) : Prop :=
+  base.FVarLamOnly ∧
+    base.fvars = fieldFVars.reverse ++ (middleFVars ++ paramFVars) ∧
+    base.toCtx =
+      (VExpr.liftTelN (generation.familyCount + i)
+        (generation.generatedFieldsR constructor) 0).reverse ++
+        ((generation.generatedMinorTypesAux
+          (generation.flatCtors.take i) 0).reverse ++
+          (generation.generatedMotiveTypes.reverse ++
+            generation.paramsTel.reverse))
+
+/-- The compressed context reached after the induction hypotheses of minor
+`i` of `constructor`, characterized by its variables and Theory context. -/
+private def MinorHypothesisBase {source : VInductDecl}
+    (generation : BlockGenerationChecked source) (i : Nat)
+    (constructor : NormalizedBlockCtor)
+    (hypothesisFVars fieldFVars middleFVars paramFVars : List FVarId)
+    (base : VLCtx) : Prop :=
+  base.FVarLamOnly ∧
+    base.fvars =
+      hypothesisFVars.reverse ++
+        (fieldFVars.reverse ++ (middleFVars ++ paramFVars)) ∧
+    base.toCtx =
+      (BlockGenerationChecked.blockIHsFromRecArgs
+        (generation.familyCount + i)
+        (generation.generatedFieldsR constructor).length
+        (constructor.ctor.recArgsR source.uvars generation.elimination)
+        0).reverse ++
+        ((VExpr.liftTelN (generation.familyCount + i)
+          (generation.generatedFieldsR constructor) 0).reverse ++
+          ((generation.generatedMinorTypesAux
+            (generation.flatCtors.take i) 0).reverse ++
+            (generation.generatedMotiveTypes.reverse ++
+              generation.paramsTel.reverse)))
+
+/-- Recorded inputs for one constructor of the minor phase. -/
+private structure PhaseTwoConstructorMinorInput
+    (source : VInductDecl) (blockEnv ctorEnv : VEnv)
+    (Us recLevels : List Name)
+    (stats : AddInductive.InductiveStats)
+    (generation : BlockGenerationChecked source)
+    (parameterTypes : List VExpr) (whnfFuel : Nat)
+    (rootContext : AddInductive.Context) (dIdx i : Nat)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    (root : CandidateConstructorSemanticRun blockEnv Us candidate raw)
+    (shape : CandidateConstructorSemanticGenerationShape (source := source)
+      blockEnv Us root) where
+  annotation : CandidateConstructorAnnotationSpine source blockEnv Us root
+    shape
+  parameterBound : stats.params.size ≤ candidate.type.trace.spineLength
+  parameterSources : stats.params.toList =
+    candidate.type.trace.parameterList stats.params.size
+  parameterTel : TypeChecker.TelDefEqEvidence blockEnv Us.length []
+    parameterTypes (annotation.storedBinders.take stats.params.size)
+  candidateDepth : candidate.type.context.fuel.recDepth = whnfFuel + 1
+  rawNameEq : raw.name = kernelSource.name
+  constructorAt : ∀ constructor : NormalizedBlockCtor,
+    generation.flatCtors[i]? = some constructor →
+      constructor.ctor.raw = raw ∧
+        constructor.owner = dIdx ∧
+        generation.generatedFields constructor =
+          annotation.storedBinders.drop stats.params.size ∧
+        constructor.owner < generation.familyCount ∧
+        ∀ r ∈ constructor.ctor.recArgsR source.uvars generation.elimination,
+          r.fieldIndex < (generation.generatedFieldsR constructor).length ∧
+            r.targetType < generation.familyCount
+  countEq : ∀ {indTypeName : Name} {current : AddInductive.Context},
+    rootContext.LocalExtension current →
+    ∀ (recInfos : Array AddInductive.RecInfo)
+      (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx
+        kernelSource recInfos current)
+      (argsTrace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        kernelSource.type 0 #[] #[] current.fuel.inductiveFuel current
+        step.terminal step.constructorArgs step.recursiveArgs
+        step.argumentContext),
+      (loopCtorArgsFieldFVars argsTrace).length =
+        (annotation.storedBinders.drop stats.params.size).length
+  hypotheses : ∀ {indTypeName : Name} {current : AddInductive.Context},
+    rootContext.LocalExtension current →
+    ∀ (recInfos : Array AddInductive.RecInfo)
+      (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx
+        kernelSource recInfos current)
+      (argsTrace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        kernelSource.type 0 #[] #[] current.fuel.inductiveFuel current
+        step.terminal step.constructorArgs step.recursiveArgs
+        step.argumentContext)
+      (hypTrace : AddInductive.mkRecInfos.LoopUTrace stats
+        step.recursiveArgs recInfos 0 #[] step.argumentContext
+        step.hypotheses step.hypothesisContext)
+      (constructor : NormalizedBlockCtor),
+      generation.flatCtors[i]? = some constructor →
+      ∀ (middleFVars paramFVars : List FVarId) (fieldFinal : VLCtx),
+        MinorFieldBase generation i constructor
+          (loopCtorArgsFieldFVars argsTrace) middleFVars paramFVars
+          fieldFinal →
+        Nonempty (Σ final,
+          LoopUTranslationTrace ctorEnv recLevels stats step.recursiveArgs
+            recInfos hypTrace fieldFinal
+            (BlockGenerationChecked.blockIHsFromRecArgs
+              (generation.familyCount + i)
+              (generation.generatedFieldsR constructor).length
+              (constructor.ctor.recArgsR source.uvars generation.elimination)
+              0) final)
+  terminal : ∀ {indTypeName : Name} {current : AddInductive.Context},
+    rootContext.LocalExtension current →
+    ∀ (recInfos : Array AddInductive.RecInfo)
+      (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx
+        kernelSource recInfos current)
+      (argsTrace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        kernelSource.type 0 #[] #[] current.fuel.inductiveFuel current
+        step.terminal step.constructorArgs step.recursiveArgs
+        step.argumentContext)
+      (hypTrace : AddInductive.mkRecInfos.LoopUTrace stats
+        step.recursiveArgs recInfos 0 #[] step.argumentContext
+        step.hypotheses step.hypothesisContext)
+      (constructor : NormalizedBlockCtor),
+      generation.flatCtors[i]? = some constructor →
+      step.targetIndex = constructor.owner ∧
+      ∀ (middleFVars paramFVars : List FVarId) (hypothesisFinal : VLCtx),
+        MinorHypothesisBase generation i constructor (loopUFVars hypTrace)
+          (loopCtorArgsFieldFVars argsTrace) middleFVars paramFVars
+          hypothesisFinal →
+        List.Forall₂ (TrExprS ctorEnv recLevels hypothesisFinal)
+          step.targetIndices.toList
+          ((constructor.ctor.resultIndicesR source.uvars
+              generation.elimination).map fun e =>
+            (e.liftN (generation.familyCount + i)
+              (generation.generatedFieldsR constructor).length).liftN
+              (constructor.ctor.recArgsR source.uvars
+                generation.elimination).length)
+
+/-- Source-ordered constructor packages of one family, indexed by the
+flattened position of the first entry and of the position after the last. -/
+private inductive PhaseTwoConstructorMinorInputList
+    (source : VInductDecl) (blockEnv ctorEnv : VEnv)
+    (Us recLevels : List Name)
+    (stats : AddInductive.InductiveStats)
+    (generation : BlockGenerationChecked source)
+    (parameterTypes : List VExpr) (whnfFuel : Nat)
+    (rootContext : AddInductive.Context) (dIdx : Nat) :
+    {kernelSources : List Constructor} →
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources} →
+    {raws : List VConstVal} →
+    {roots : CandidateConstructorSemanticListRun blockEnv Us candidates raws} →
+    CandidateConstructorSemanticGenerationShapeList source blockEnv Us roots →
+    Nat → Nat → Type where
+  | nil {i : Nat} :
+      PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us recLevels
+        stats generation parameterTypes whnfFuel rootContext dIdx .nil i i
+  | cons
+      {kernelSource : Constructor} {remaining : List Constructor}
+      {candidate : AddInductive.CandidateConstructor kernelSource}
+      {candidates : AddInductive.CandidateList
+        AddInductive.CandidateConstructor remaining}
+      {raw : VConstVal} {raws : List VConstVal}
+      {root : CandidateConstructorSemanticRun blockEnv Us candidate raw}
+      {roots : CandidateConstructorSemanticListRun blockEnv Us candidates
+        raws}
+      {shape : CandidateConstructorSemanticGenerationShape (source := source)
+        blockEnv Us root}
+      {shapes : CandidateConstructorSemanticGenerationShapeList source
+        blockEnv Us roots}
+      {i j : Nat}
+      (head : PhaseTwoConstructorMinorInput source blockEnv ctorEnv Us
+        recLevels stats generation parameterTypes whnfFuel rootContext dIdx i
+        root shape)
+      (tail : PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us
+        recLevels stats generation parameterTypes whnfFuel rootContext dIdx
+        shapes (i + 1) j) :
+      PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us recLevels
+        stats generation parameterTypes whnfFuel rootContext dIdx
+        (.cons shape shapes) i j
+
+/-- Family-major constructor packages of every remaining family, indexed by
+the phase-two family ordinal and the flattened position of the first
+entry. -/
+private inductive PhaseTwoFamilyMinorInputList
+    (source : VInductDecl) (env blockEnv ctorEnv : VEnv)
+    (Us recLevels : List Name)
+    (stats : AddInductive.InductiveStats)
+    (generation : BlockGenerationChecked source)
+    (parameterTypes : List VExpr) (whnfFuel : Nat)
+    (rootContext : AddInductive.Context) :
+    {kernelSources : List InductiveType} →
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources} →
+    {raws : List VInductiveType} →
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws} →
+    CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
+      roots →
+    Nat → Nat → Type where
+  | nil {dIdx i : Nat} :
+      PhaseTwoFamilyMinorInputList source env blockEnv ctorEnv Us recLevels
+        stats generation parameterTypes whnfFuel rootContext .nil dIdx i
+  | cons
+      {kernelSource : InductiveType}
+      {remainingSources : List InductiveType}
+      {candidate : AddInductive.CandidateFamily kernelSource}
+      {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+        remainingSources}
+      {raw : VInductiveType} {raws : List VInductiveType}
+      {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+      {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+        candidates raws}
+      {shape : CandidateBlockFamilySemanticGenerationShape source env
+        blockEnv Us root}
+      {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+        blockEnv Us roots}
+      {dIdx i j : Nat}
+      (head : PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us
+        recLevels stats generation parameterTypes whnfFuel rootContext dIdx
+        shape.constructors i j)
+      (tail : PhaseTwoFamilyMinorInputList source env blockEnv ctorEnv Us
+        recLevels stats generation parameterTypes whnfFuel rootContext
+        shapes (dIdx + 1) j) :
+      PhaseTwoFamilyMinorInputList source env blockEnv ctorEnv Us recLevels
+        stats generation parameterTypes whnfFuel rootContext
+        (.cons shape shapes) dIdx i
+
+/-- The compressed-context invariants threaded through the minor folds:
+the base after `i` minors over all motives and the shared parameters. -/
+private structure MinorFoldState
+    (ctorEnv : VEnv) (recLevels : List Name)
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    (oldFinal : VLCtx) (motiveFVars : List FVarId)
+    (current : AddInductive.Context) (i : Nat) where
+  base : VLCtx
+  minorFVars : List FVarId
+  baseWF : VLCtx.WF ctorEnv recLevels.length base
+  baseShape : base.FVarLamOnly
+  baseFound : ∀ fv ∈ base.fvars,
+    ∃ declaration, current.lctx.find? fv = some declaration
+  baseFVarsEq : base.fvars =
+    minorFVars ++
+      (motiveFVars.reverse ++ (oldFinal.instL generation.sourceLevels).fvars)
+  minorLen : minorFVars.length = i
+  lift : VLCtx.FVLift' (oldFinal.instL generation.sourceLevels) base 0
+    (.consN (.skipN .refl (generation.familyCount + i)) 0) 0
+  baseToCtx : base.toCtx =
+    (generation.generatedMinorTypesAux (generation.flatCtors.take i)
+      0).reverse ++
+      (generation.generatedMotiveTypes.reverse ++
+        generation.paramsTel.reverse)
+
+
+/-- The translation of one motive local at a lambda-only compressed context
+whose variables are, innermost first, the hypotheses, the fields, the
+earlier minors, the motives, and the shared parameters. -/
+private theorem minorMotiveTranslation
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {Δ : VLCtx} (shape : Δ.FVarLamOnly) (wf : VLCtx.WF env Us.length Δ)
+    {hypothesisFVars fieldFVars minorFVars motiveFVars paramFVars :
+      List FVarId}
+    (fvarsEq : Δ.fvars =
+      hypothesisFVars.reverse ++
+        (fieldFVars.reverse ++
+          ((minorFVars ++ motiveFVars.reverse) ++ paramFVars)))
+    {owner : Nat} {motiveId : FVarId}
+    (motiveAt : motiveFVars[owner]? = some motiveId)
+    {position : Nat}
+    (positionEq : position = hypothesisFVars.length + fieldFVars.length +
+      minorFVars.length + (motiveFVars.length - 1 - owner)) :
+    TrExprS env Us Δ (.fvar motiveId) (.bvar position) := by
+  subst positionEq
+  have spine := shape.sourceTranslations henv wf
+  have ctxLen : Δ.toCtx.length = Δ.fvars.length :=
+    fvarLamOnly_toCtx_length shape
+  have sourcesEq : Δ.fvars.reverse.map Expr.fvar =
+      paramFVars.reverse.map Expr.fvar ++
+        (motiveFVars.map Expr.fvar ++
+          (minorFVars.reverse.map Expr.fvar ++
+            (fieldFVars.map Expr.fvar ++ hypothesisFVars.map Expr.fvar))) := by
+    rw [fvarsEq]
+    simp only [List.reverse_append, List.reverse_reverse, List.map_append,
+      List.append_assoc]
+  have totalLen : Δ.toCtx.length =
+      hypothesisFVars.length + fieldFVars.length + minorFVars.length +
+        motiveFVars.length + paramFVars.length := by
+    rw [ctxLen, fvarsEq]
+    simp only [List.length_append, List.length_reverse]
+    omega
+  have targetsEq : VExpr.bvarRevRange 0 Δ.toCtx.length =
+      VExpr.bvarRevRange
+          (hypothesisFVars.length + fieldFVars.length + minorFVars.length +
+            motiveFVars.length) paramFVars.length ++
+        (VExpr.bvarRevRange
+            (hypothesisFVars.length + fieldFVars.length + minorFVars.length)
+            motiveFVars.length ++
+          (VExpr.bvarRevRange (hypothesisFVars.length + fieldFVars.length)
+              minorFVars.length ++
+            (VExpr.bvarRevRange hypothesisFVars.length fieldFVars.length ++
+              VExpr.bvarRevRange 0 hypothesisFVars.length))) := by
+    rw [VExpr.bvarRevRange_append fieldFVars.length hypothesisFVars.length,
+      VExpr.bvarRevRange_append minorFVars.length
+        (hypothesisFVars.length + fieldFVars.length),
+      VExpr.bvarRevRange_append motiveFVars.length
+        (hypothesisFVars.length + fieldFVars.length + minorFVars.length),
+      VExpr.bvarRevRange_append paramFVars.length
+        (hypothesisFVars.length + fieldFVars.length + minorFVars.length +
+          motiveFVars.length),
+      totalLen]
+  rw [sourcesEq, targetsEq] at spine
+  have splitA := (List.Forall₂.append_of_left (by
+    simp [List.length_reverse])).1 spine
+  have splitB := (List.Forall₂.append_of_left (by simp)).1 splitA.2
+  have motivesTr := splitB.1
+  have sourceAt : (motiveFVars.map Expr.fvar)[owner]? =
+      some (Expr.fvar motiveId) := by
+    rw [List.getElem?_map, motiveAt]
+    rfl
+  have ownerBound : owner < motiveFVars.length :=
+    (List.getElem?_eq_some_iff.mp motiveAt).1
+  obtain ⟨target, targetAt, translation⟩ :=
+    Lean4Lean.List.Forall₂.getElem?_left motivesTr sourceAt
+  rw [bvarRevRange_getElem? _ _ _ ownerBound] at targetAt
+  rw [← Option.some.inj targetAt] at translation
+  exact translation
+
+/-- Walk one family's constructor traversal in source order, translating
+every constructor minor at the growing minor-extended base. -/
+private theorem recInfoConstructorMinorTranslations_fold
+    {source : VInductDecl} {blockEnv ctorEnv : VEnv}
+    {Us recLevels : List Name}
+    (hblockEnv : VEnv.WF blockEnv) (primitives : blockEnv.HasPrimitives)
+    (ctorEnvWF : VEnv.WF ctorEnv) (envLE : blockEnv ≤ ctorEnv)
+    {stats : AddInductive.InductiveStats}
+    {generation : BlockGenerationChecked source}
+    (levelsWF : ∀ level ∈ generation.sourceLevels,
+      level.WF recLevels.length)
+    (levels : ∀ {levelSource : Level} {levelTarget : VLevel},
+      VLevel.ofLevel Us levelSource = some levelTarget →
+        VLevel.ofLevel recLevels levelSource =
+          some (levelTarget.inst generation.sourceLevels))
+    (levelsTr : stats.levels.mapM (VLevel.ofLevel recLevels) =
+      some generation.sourceLevels)
+    (arityAll : ∀ constructor ∈ generation.flatCtors,
+      stats.levels.length = constructor.ctor.raw.toVConstant.uvars)
+    (constLookupAll : ∀ constructor ∈ generation.flatCtors,
+      ctorEnv.constants constructor.ctor.raw.name =
+        some constructor.ctor.raw.toVConstant)
+    {parameterTypes : List VExpr} {oldFinal : VLCtx}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes oldFinal)
+    (paramSourcesBase :
+      ((oldFinal.instL generation.sourceLevels).fvars).reverse.map
+          Expr.fvar = stats.params.toList)
+    (parameterFVarsLen :
+      ((oldFinal.instL generation.sourceLevels).fvars).length =
+        source.nparams)
+    (whnfFuel : Nat)
+    {rootContext : AddInductive.Context} {dIdx : Nat}
+    {indTypeName : Name}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {roots : CandidateConstructorSemanticListRun blockEnv Us candidates raws}
+    {shapes : CandidateConstructorSemanticGenerationShapeList source blockEnv
+      Us roots}
+    {i j : Nat}
+    (packages : PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us
+      recLevels stats generation parameterTypes whnfFuel rootContext dIdx
+      shapes i j)
+    {familyCtors : List NormalizedBlockCtor}
+    {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      kernelSources recInfos current finalInfos finalContext)
+    (ctorRaws : familyCtors.map (·.ctor.raw) = raws)
+    (ctorDrop : generation.flatCtors.drop i = familyCtors ++
+      generation.flatCtors.drop j)
+    (positionEq : j = i + familyCtors.length)
+    {motiveFVars : List FVarId}
+    (motiveLen : motiveFVars.length = generation.familyCount)
+    (motivesEq : (recInfos.map (·.motive)).toList =
+      motiveFVars.map Expr.fvar)
+    (currentLocal : TypeChecker.CandidateLocalContextRun current)
+    (currentDepth : current.fuel.recDepth = whnfFuel + 1)
+    (rootExt : rootContext.LocalExtension current)
+    (paramFound : ∀ fv ∈ oldFinal.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    (state : MinorFoldState ctorEnv recLevels generation oldFinal motiveFVars
+      current i)
+    (typesOnTel : ctorEnv.OnTel recLevels.length state.base.toCtx
+      (generation.generatedMinorTypesAux familyCtors i)) :
+    Nonempty (Σ' (next : MinorFoldState ctorEnv recLevels generation oldFinal
+        motiveFVars finalContext j),
+      RecInfoConstructorMinorTranslationTrace ctorEnv recLevels stats
+        indTypeName dIdx trace state.base
+        (generation.generatedMinorTypesAux familyCtors i) next.base) := by
+  induction trace generalizing raws i familyCtors with
+  | done =>
+      cases candidates
+      cases roots
+      cases shapes
+      cases packages
+      have ctorsNil : familyCtors = [] := by
+        cases familyCtors with
+        | nil => rfl
+        | cons head rest => simp at ctorRaws
+      subst ctorsNil
+      exact ⟨⟨state, .done state.base⟩⟩
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      cases candidates with
+      | cons candidateHead candidatesTail =>
+      cases roots with
+      | cons root rootsTail =>
+      cases shapes with
+      | cons shape shapesTail =>
+      cases packages with
+      | cons pkg pkgTail =>
+      cases familyCtors with
+      | nil => simp at ctorRaws
+      | cons constructor ctorsRest =>
+      simp only [List.map_cons, List.cons.injEq] at ctorRaws
+      obtain ⟨rawEqCtor, ctorRawsTail⟩ := ctorRaws
+      -- position of the constructor inside the flattened inventory
+      have at_i : generation.flatCtors[i]? = some constructor := by
+        have head0 : (generation.flatCtors.drop i)[0]? = some constructor := by
+          rw [ctorDrop]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have ctorMem : constructor ∈ generation.flatCtors :=
+        List.mem_of_getElem? at_i
+      obtain ⟨rawEq, ownerEq, fieldsEq, ownerBound, recursiveBounds⟩ :=
+        pkg.constructorAt constructor at_i
+      -- field translations at the shared parameter endpoint
+      obtain ⟨argsTrace⟩ := step.argumentsTrace
+      have phaseRoot : stats.params.size <
+          candidateHead.type.trace.spineLength →
+          ctor'.type = candidateHead.type.trace.rootWhnf := by
+        intro hasField
+        exact (candidateHead.type.trace.rootWhnf_eq_source_of_spineLength_pos
+          shape.storedSpine (by omega) whnfFuel pkg.candidateDepth).symm
+      obtain ⟨fieldFinal₀, fieldTranslations₀⟩ :=
+        candidateConstructorAnnotationSpine_fieldTranslations hblockEnv
+          primitives pkg.annotation argsTrace currentLocal parameters
+          paramFound pkg.parameterBound pkg.parameterSources pkg.parameterTel
+          phaseRoot (pkg.countEq rootExt recInfos' step argsTrace) whnfFuel
+          pkg.candidateDepth
+      have fieldRelevelled :=
+        (fieldTranslations₀.mono envLE).relevel levelsWF levels
+      have fieldsR : generation.generatedFieldsR constructor =
+          (pkg.annotation.storedBinders.drop stats.params.size).map
+            (VExpr.instL generation.sourceLevels) := by
+        show (generation.generatedFields constructor).map _ = _
+        rw [fieldsEq]
+      rw [← fieldsR] at fieldRelevelled
+      obtain ⟨fieldFinal, fieldTranslations⟩ :=
+        fieldRelevelled.weakFV ctorEnvWF state.lift state.baseWF currentLocal
+          state.baseFound
+      -- field endpoint facts
+      have fieldFVars := loopCtorArgsFieldTranslation_final_fvars
+        fieldTranslations
+      have fieldShape := loopCtorArgsFieldTranslation_final_fvarLamOnly
+        fieldTranslations state.baseShape
+      have fieldToCtx := loopCtorArgsFieldTranslation_final_toCtx
+        fieldTranslations
+      have fieldWF := loopCtorArgsFieldTranslation_final_wf fieldTranslations
+        currentLocal state.baseWF state.baseFound
+      have fieldFound := loopCtorArgsFieldTranslation_final_found
+        fieldTranslations currentLocal state.baseFound
+      have fieldLen := loopCtorArgsFieldTranslation_targets_length
+        fieldTranslations
+      have baseFVarsEq' : state.base.fvars =
+          (state.minorFVars ++ motiveFVars.reverse) ++
+            (oldFinal.instL generation.sourceLevels).fvars := by
+        rw [state.baseFVarsEq, List.append_assoc]
+      have fieldBase : MinorFieldBase generation i constructor
+          (loopCtorArgsFieldFVars argsTrace)
+          (state.minorFVars ++ motiveFVars.reverse)
+          (oldFinal.instL generation.sourceLevels).fvars fieldFinal := by
+        refine ⟨fieldShape, ?_, ?_⟩
+        · rw [fieldFVars, baseFVarsEq']
+        · rw [fieldToCtx, state.baseToCtx]
+      -- hypothesis translations from the recorded package
+      obtain ⟨hypTrace⟩ := step.hypothesesTrace
+      obtain ⟨hypothesisFinal, hypothesisTranslations⟩ :=
+        pkg.hypotheses rootExt recInfos' step argsTrace hypTrace constructor
+          at_i _ _ fieldFinal fieldBase
+      have argumentRun : TypeChecker.CandidateLocalContextRun
+          step.argumentContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentLocal
+          (recInfoConstructorStep_argumentExtension step)
+      have hypothesisFVars := loopUTranslation_final_fvars
+        hypothesisTranslations
+      have hypothesisShape := loopUTranslation_final_fvarLamOnly
+        hypothesisTranslations fieldShape
+      have hypothesisToCtx := loopUTranslation_final_toCtx
+        hypothesisTranslations
+      have hypothesisWF := loopUTranslation_final_wf hypothesisTranslations
+        argumentRun fieldWF fieldFound
+      have hypothesisLen := loopUTranslation_targets_length
+        hypothesisTranslations
+      have hypothesisFVarsEq : hypothesisFinal.fvars =
+          (loopUFVars hypTrace).reverse ++
+            ((loopCtorArgsFieldFVars argsTrace).reverse ++
+              ((state.minorFVars ++ motiveFVars.reverse) ++
+                (oldFinal.instL generation.sourceLevels).fvars)) := by
+        rw [hypothesisFVars, fieldFVars, baseFVarsEq']
+      have hypothesisBase : MinorHypothesisBase generation i constructor
+          (loopUFVars hypTrace) (loopCtorArgsFieldFVars argsTrace)
+          (state.minorFVars ++ motiveFVars.reverse)
+          (oldFinal.instL generation.sourceLevels).fvars hypothesisFinal := by
+        refine ⟨hypothesisShape, hypothesisFVarsEq, ?_⟩
+        rw [hypothesisToCtx, fieldToCtx, state.baseToCtx]
+      obtain ⟨targetIndexEq, indicesTrAt⟩ :=
+        pkg.terminal rootExt recInfos' step argsTrace hypTrace constructor
+          at_i
+      have indicesTr := indicesTrAt _ _ hypothesisFinal hypothesisBase
+      -- the target motive
+      have ownerLt : constructor.owner < motiveFVars.length := by
+        rw [motiveLen]
+        exact ownerBound
+      have motiveAt : motiveFVars[constructor.owner]? =
+          some (motiveFVars[constructor.owner]'ownerLt) :=
+        List.getElem?_eq_getElem ownerLt
+      have sizeEq : recInfos'.size = motiveFVars.length := by
+        have lengths := congrArg List.length motivesEq
+        simpa using lengths
+      have infoBound : constructor.owner < recInfos'.size := by
+        rw [sizeEq]
+        exact ownerLt
+      have motiveEq : recInfos'[step.targetIndex]!.motive =
+          .fvar (motiveFVars[constructor.owner]'ownerLt) := by
+        rw [targetIndexEq, getElem!_pos recInfos' constructor.owner infoBound]
+        have mapped := congrArg (fun entries => entries[constructor.owner]?)
+          motivesEq
+        simp only [Array.getElem?_toList, Array.getElem?_map,
+          Array.getElem?_eq_getElem infoBound, List.getElem?_map,
+          List.getElem?_eq_getElem ownerLt, Option.map_some] at mapped
+        exact Option.some.inj mapped
+      have ihLen := BlockGenerationChecked.blockIHsFromRecArgs_length
+        (generation.familyCount + i) (generation.generatedFieldsR constructor).length
+        (constructor.ctor.recArgsR source.uvars generation.elimination) 0
+      have fieldTypesLen := VExpr.liftTelN_length (generation.familyCount + i)
+        (generation.generatedFieldsR constructor) 0
+      have minorLenEq := state.minorLen
+      have motiveTr := minorMotiveTranslation ctorEnvWF hypothesisShape
+        hypothesisWF hypothesisFVarsEq motiveAt
+        (position := generation.familyCount + i - 1 - constructor.owner +
+          (generation.generatedFieldsR constructor).length +
+          (constructor.ctor.recArgsR source.uvars generation.elimination).length)
+        (by omega)
+      rw [← motiveEq] at motiveTr
+      -- the Theory target at this position
+      rcases typesOnTel with ⟨targetType, targetsOnTel⟩
+      have liftEq : (generation.generatedMinorType constructor).liftN i =
+          generatedMinorTypeAt generation (generation.familyCount + i)
+            constructor := by
+        rw [generatedMinorType_eq_at,
+          generatedMinorTypeAt_liftN generation generation.familyCount i
+            constructor ownerBound recursiveBounds]
+      have nameEq : constructor.ctor.raw.name = ctor'.name := by
+        rw [rawEq]
+        exact pkg.rawNameEq
+      have targetEq :
+          generatedMinorTypeAt generation (generation.familyCount + i)
+            constructor =
+          VExpr.forallN
+            (VExpr.liftTelN (generation.familyCount + i)
+              (generation.generatedFieldsR constructor) 0)
+            (VExpr.forallN
+              (BlockGenerationChecked.blockIHsFromRecArgs
+                (generation.familyCount + i)
+                (generation.generatedFieldsR constructor).length
+                (constructor.ctor.recArgsR source.uvars generation.elimination)
+                0)
+              (VExpr.appN
+                (.bvar (generation.familyCount + i - 1 - constructor.owner +
+                  (generation.generatedFieldsR constructor).length +
+                  (constructor.ctor.recArgsR source.uvars
+                    generation.elimination).length))
+                (((constructor.ctor.resultIndicesR source.uvars
+                    generation.elimination).map fun e =>
+                  (e.liftN (generation.familyCount + i)
+                    (generation.generatedFieldsR constructor).length).liftN
+                    (constructor.ctor.recArgsR source.uvars
+                      generation.elimination).length) ++
+                  [VExpr.appN (.const ctor'.name generation.sourceLevels)
+                    (VExpr.bvarRevRange
+                        ((constructor.ctor.recArgsR source.uvars
+                            generation.elimination).length +
+                          (generation.generatedFieldsR constructor).length +
+                          (generation.familyCount + i))
+                        source.nparams ++
+                      VExpr.bvarRevRange
+                        (constructor.ctor.recArgsR source.uvars
+                          generation.elimination).length
+                        (generation.generatedFieldsR constructor).length)]))) := by
+        unfold generatedMinorTypeAt
+        simp only [nameEq]
+      have minorIsType := targetType
+      rw [liftEq, targetEq] at minorIsType
+      have domainTr := recInfoConstructorStep_minorDomain ctorEnvWF step
+        fieldTranslations hypothesisTranslations currentLocal state.baseWF
+        state.baseShape state.baseShape.noBV state.baseFound
+        (middleFVars := state.minorFVars ++ motiveFVars.reverse) baseFVarsEq'
+        paramSourcesBase (by rw [← nameEq]; exact constLookupAll constructor ctorMem)
+        levelsTr (arityAll constructor ctorMem) motiveEq motiveTr indicesTr
+        (paramOffset :=
+          (constructor.ctor.recArgsR source.uvars generation.elimination).length +
+            (generation.generatedFieldsR constructor).length +
+            (generation.familyCount + i))
+        (paramCount := source.nparams)
+        (hypothesisCount :=
+          (constructor.ctor.recArgsR source.uvars generation.elimination).length)
+        (fieldCount := (generation.generatedFieldsR constructor).length)
+        (by
+          rw [ihLen, fieldTypesLen, List.length_append, List.length_reverse,
+            minorLenEq, motiveLen]
+          omega)
+        parameterFVarsLen.symm ihLen.symm fieldTypesLen.symm
+        minorIsType
+      have domainTr' : TrExprS ctorEnv recLevels state.base
+          (AddInductive.consumeTypeAnnotations step.minorType)
+          ((generation.generatedMinorType constructor).liftN i) := by
+        rw [liftEq, targetEq]
+        exact domainTr
+      -- operational context extension to the minor endpoint
+      have hypothesisExtension : current'.LocalExtension
+          step.hypothesisContext :=
+        recInfoConstructorStep_localExtension step
+      have hypothesisRun : TypeChecker.CandidateLocalContextRun
+          step.hypothesisContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentLocal
+          hypothesisExtension
+      have minorExtension : current'.LocalExtension step.minorContext :=
+        recInfoConstructorStep_minorExtension step
+      have minorRun : TypeChecker.CandidateLocalContextRun
+          step.minorContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentLocal
+          minorExtension
+      have minorDepth : step.minorContext.fuel.recDepth = whnfFuel + 1 := by
+        rw [contextLocalExtension_fuel minorExtension]
+        exact currentDepth
+      -- next semantic base and its invariants
+      have hypothesisFound : ∀ fv ∈ state.base.fvars,
+          ∃ declaration, step.hypothesisContext.lctx.find? fv =
+            some declaration := by
+        intro fv member
+        obtain ⟨declaration, found⟩ := state.baseFound fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            currentLocal hypothesisExtension found⟩
+      have newFresh : step.hypothesisContext.freshFVarId ∉ state.base.fvars :=
+        compressedFVars_fresh hypothesisRun hypothesisFound
+      have nextWF : VLCtx.WF ctorEnv recLevels.length
+          ((some (step.hypothesisContext.freshFVarId,
+              (AddInductive.consumeTypeAnnotations
+                step.minorType).fvarsList),
+            .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+            state.base) :=
+        ⟨state.baseWF,
+          fun _ _ eq => by cases eq; exact ⟨newFresh, domainTr'.fvarsList⟩,
+          targetType⟩
+      have nextShape : VLCtx.FVarLamOnly
+          ((some (step.hypothesisContext.freshFVarId,
+              (AddInductive.consumeTypeAnnotations
+                step.minorType).fvarsList),
+            .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+            state.base) := .cons state.baseShape
+      have nextFound : ∀ fv ∈ VLCtx.fvars
+            ((some (step.hypothesisContext.freshFVarId,
+                (AddInductive.consumeTypeAnnotations
+                  step.minorType).fvarsList),
+              .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+              state.base),
+          ∃ declaration, step.minorContext.lctx.find? fv =
+            some declaration :=
+        compressedFVars_push hypothesisRun hypothesisFound step.minorName
+          .default (AddInductive.consumeTypeAnnotations step.minorType)
+          ((AddInductive.consumeTypeAnnotations step.minorType).fvarsList)
+          ((generation.generatedMinorType constructor).liftN i)
+      have nextParamFound : ∀ fv ∈ oldFinal.fvars,
+          ∃ declaration, step.minorContext.lctx.find? fv =
+            some declaration := by
+        intro fv member
+        obtain ⟨declaration, found⟩ := paramFound fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            currentLocal minorExtension found⟩
+      have nextFVarsEq : VLCtx.fvars
+            ((some (step.hypothesisContext.freshFVarId,
+                (AddInductive.consumeTypeAnnotations
+                  step.minorType).fvarsList),
+              .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+              state.base) =
+          (step.hypothesisContext.freshFVarId :: state.minorFVars) ++
+            (motiveFVars.reverse ++
+              (oldFinal.instL generation.sourceLevels).fvars) := by
+        show step.hypothesisContext.freshFVarId :: state.base.fvars = _
+        rw [state.baseFVarsEq]
+        rfl
+      have nextLift : VLCtx.FVLift'
+          (oldFinal.instL generation.sourceLevels)
+          ((some (step.hypothesisContext.freshFVarId,
+              (AddInductive.consumeTypeAnnotations
+                step.minorType).fvarsList),
+            .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+            state.base) 0
+          (.consN (.skipN .refl (generation.familyCount + (i + 1))) 0) 0 := by
+        exact state.lift.skip_fvar
+          (step.hypothesisContext.freshFVarId,
+            (AddInductive.consumeTypeAnnotations step.minorType).fvarsList)
+          (.vlam ((generation.generatedMinorType constructor).liftN i))
+      have nextToCtx : VLCtx.toCtx
+            ((some (step.hypothesisContext.freshFVarId,
+                (AddInductive.consumeTypeAnnotations
+                  step.minorType).fvarsList),
+              .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+              state.base) =
+          (generation.generatedMinorTypesAux
+            (generation.flatCtors.take (i + 1)) 0).reverse ++
+            (generation.generatedMotiveTypes.reverse ++
+              generation.paramsTel.reverse) := by
+        show (generation.generatedMinorType constructor).liftN i ::
+          state.base.toCtx = _
+        rw [state.baseToCtx, generatedMinorTypesAux_take_succ generation at_i,
+          List.reverse_append]
+        rfl
+      let nextState : MinorFoldState ctorEnv recLevels generation oldFinal
+          motiveFVars step.minorContext (i + 1) := {
+        base := (some (step.hypothesisContext.freshFVarId,
+            (AddInductive.consumeTypeAnnotations step.minorType).fvarsList),
+          .vlam ((generation.generatedMinorType constructor).liftN i)) ::
+          state.base
+        minorFVars := step.hypothesisContext.freshFVarId :: state.minorFVars
+        baseWF := nextWF
+        baseShape := nextShape
+        baseFound := nextFound
+        baseFVarsEq := nextFVarsEq
+        minorLen := by simp [state.minorLen]
+        lift := nextLift
+        baseToCtx := nextToCtx }
+      -- tail invariants
+      have nextCtorDrop : generation.flatCtors.drop (i + 1) =
+          ctorsRest ++ generation.flatCtors.drop j := by
+        have dropSucc : generation.flatCtors.drop (i + 1) =
+            (generation.flatCtors.drop i).drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, ctorDrop]
+        rfl
+      have nextPosition : j = (i + 1) + ctorsRest.length := by
+        simp only [List.length_cons] at positionEq
+        omega
+      have nextMotives : (step.nextInfos.map (·.motive)).toList =
+          motiveFVars.map Expr.fvar := by
+        rw [step.nextInfos_map_motive]
+        exact motivesEq
+      obtain ⟨finalState, rest⟩ := ih pkgTail ctorRawsTail nextCtorDrop
+        nextPosition nextMotives minorRun minorDepth
+        (contextLocalExtension_trans rootExt minorExtension) nextParamFound
+        nextState targetsOnTel
+      exact ⟨⟨finalState,
+        RecInfoConstructorMinorTranslationTrace.next step tail domainTr'
+          rest⟩⟩
+
+/-- A constructor package list spans exactly its family's constructors. -/
+private theorem PhaseTwoConstructorMinorInputList.span
+    {source : VInductDecl} {blockEnv ctorEnv : VEnv} {Us recLevels : List Name}
+    {stats : AddInductive.InductiveStats}
+    {generation : BlockGenerationChecked source}
+    {parameterTypes : List VExpr} {whnfFuel : Nat}
+    {rootContext : AddInductive.Context} {dIdx : Nat}
+    {kernelSources : List Constructor}
+    {candidates : AddInductive.CandidateList
+      AddInductive.CandidateConstructor kernelSources}
+    {raws : List VConstVal}
+    {roots : CandidateConstructorSemanticListRun blockEnv Us candidates raws}
+    {shapes : CandidateConstructorSemanticGenerationShapeList source blockEnv
+      Us roots}
+    {i j : Nat}
+    (packages : PhaseTwoConstructorMinorInputList source blockEnv ctorEnv Us
+      recLevels stats generation parameterTypes whnfFuel rootContext dIdx
+      shapes i j) :
+    j = i + raws.length := by
+  induction packages with
+  | nil => rfl
+  | cons head tail ih =>
+      simp only [List.length_cons]
+      omega
+
+/-- Walk the complete retained phase-two trace in source order, translating
+every constructor minor of every family. -/
+private theorem recInfoPhaseTwoMinorTranslations_fold
+    {source : VInductDecl} {env blockEnv ctorEnv : VEnv}
+    {Us recLevels : List Name}
+    (hblockEnv : VEnv.WF blockEnv) (primitives : blockEnv.HasPrimitives)
+    (ctorEnvWF : VEnv.WF ctorEnv) (envLE : blockEnv ≤ ctorEnv)
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType}
+    {generation : BlockGenerationChecked source}
+    (levelsWF : ∀ level ∈ generation.sourceLevels,
+      level.WF recLevels.length)
+    (levels : ∀ {levelSource : Level} {levelTarget : VLevel},
+      VLevel.ofLevel Us levelSource = some levelTarget →
+        VLevel.ofLevel recLevels levelSource =
+          some (levelTarget.inst generation.sourceLevels))
+    (levelsTr : stats.levels.mapM (VLevel.ofLevel recLevels) =
+      some generation.sourceLevels)
+    (arityAll : ∀ constructor ∈ generation.flatCtors,
+      stats.levels.length = constructor.ctor.raw.toVConstant.uvars)
+    (constLookupAll : ∀ constructor ∈ generation.flatCtors,
+      ctorEnv.constants constructor.ctor.raw.name =
+        some constructor.ctor.raw.toVConstant)
+    {parameterTypes : List VExpr} {oldFinal : VLCtx}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes oldFinal)
+    (paramSourcesBase :
+      ((oldFinal.instL generation.sourceLevels).fvars).reverse.map
+          Expr.fvar = stats.params.toList)
+    (parameterFVarsLen :
+      ((oldFinal.instL generation.sourceLevels).fvars).length =
+        source.nparams)
+    (whnfFuel : Nat)
+    {kernelSuffix : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSuffix}
+    {rawsSuffix : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      rawsSuffix}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    {rootContext : AddInductive.Context}
+    {dIdx i : Nat}
+    (packages : PhaseTwoFamilyMinorInputList source env blockEnv ctorEnv Us
+      recLevels stats generation parameterTypes whnfFuel rootContext shapes
+      dIdx i)
+    {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (phase2 : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext)
+    (kernelAlign : indTypes.toList.drop dIdx = kernelSuffix)
+    (famRaw : rawsSuffix = (generation.families.drop dIdx).map (·.raw))
+    (ctorDrop : generation.flatCtors.drop i =
+      (generation.families.drop dIdx).flatMap NormalizedFamily.blockCtors)
+    {motiveFVars : List FVarId}
+    (motiveLen : motiveFVars.length = generation.familyCount)
+    (motivesEq : (recInfos.map (·.motive)).toList =
+      motiveFVars.map Expr.fvar)
+    (currentLocal : TypeChecker.CandidateLocalContextRun current)
+    (currentDepth : current.fuel.recDepth = whnfFuel + 1)
+    (rootExt : rootContext.LocalExtension current)
+    (paramFound : ∀ fv ∈ oldFinal.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    (state : MinorFoldState ctorEnv recLevels generation oldFinal motiveFVars
+      current i)
+    (typesOnTel : ctorEnv.OnTel recLevels.length state.base.toCtx
+      (generation.generatedMinorTypesAux (generation.flatCtors.drop i) i)) :
+    Nonempty (Σ' minorContext,
+      RecInfoPhaseTwoMinorTranslationTrace ctorEnv recLevels stats indTypes
+        phase2 state.base
+        (generation.generatedMinorTypesAux (generation.flatCtors.drop i) i)
+        minorContext) := by
+  induction phase2 generalizing kernelSuffix candidates rawsSuffix roots shapes i
+      with
+  | @done dIdx' recInfos' current' finished =>
+      have kernelNil : kernelSuffix = [] := by
+        rw [← kernelAlign]
+        apply List.drop_eq_nil_of_le
+        simpa using Nat.le_of_not_lt finished
+      subst kernelNil
+      cases candidates
+      cases roots
+      cases shapes
+      cases packages
+      have famNil : generation.families.drop dIdx' = [] := by
+        simpa using famRaw.symm
+      rw [famNil, List.flatMap_nil] at ctorDrop
+      rw [ctorDrop]
+      exact ⟨⟨state.base, .done finished state.base⟩⟩
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      have active := step.active
+      have suffixCons : kernelSuffix =
+          indTypes[dIdx'] :: indTypes.toList.drop (dIdx' + 1) := by
+        rw [← kernelAlign]
+        have bound : dIdx' < indTypes.toList.length := by simpa using active
+        rw [List.drop_eq_getElem_cons bound]
+        simp
+      subst suffixCons
+      cases candidates with
+      | cons candidateHead candidatesTail =>
+      cases roots with
+      | cons root rootsTail =>
+      cases shapes with
+      | cons shape shapesTail =>
+      cases packages with
+      | @cons _ _ _ _ _ _ _ _ _ _ _ _ j pkgs pkgTail =>
+      obtain ⟨familyHead, famRest, famDrop⟩ :
+          ∃ familyHead famRest,
+            generation.families.drop dIdx' = familyHead :: famRest := by
+        cases h : generation.families.drop dIdx' with
+        | nil =>
+            rw [h] at famRaw
+            simp at famRaw
+        | cons a b => exact ⟨a, b, rfl⟩
+      rw [famDrop] at famRaw ctorDrop
+      simp only [List.map_cons, List.cons.injEq] at famRaw
+      obtain ⟨rawHeadEq, famRawTail⟩ := famRaw
+      subst rawHeadEq
+      simp only [List.flatMap_cons] at ctorDrop
+      have familiesAt : generation.families[dIdx']? = some familyHead := by
+        have head0 : (generation.families.drop dIdx')[0]? =
+            some familyHead := by
+          rw [famDrop]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have familyMem : familyHead ∈ generation.families :=
+        List.mem_of_getElem? familiesAt
+      have ctorRaws : familyHead.blockCtors.map (·.ctor.raw) =
+          familyHead.raw.ctors := by
+        rw [← familyHead.ctorPairs_map_raw familyMem]
+        simp [NormalizedFamily.blockCtors, List.map_map, Function.comp_def]
+      have ctorsLen : familyHead.blockCtors.length =
+          familyHead.raw.ctors.length := by
+        rw [← ctorRaws, List.length_map]
+      have jEq : j = i + familyHead.blockCtors.length := by
+        rw [pkgs.span, ctorsLen]
+      subst jEq
+      have restDrop : generation.flatCtors.drop
+          (i + familyHead.blockCtors.length) =
+          famRest.flatMap NormalizedFamily.blockCtors := by
+        have dropAdd : generation.flatCtors.drop
+            (i + familyHead.blockCtors.length) =
+            (generation.flatCtors.drop i).drop familyHead.blockCtors.length := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropAdd, ctorDrop, List.drop_left]
+      have ctorDropFamily : generation.flatCtors.drop i =
+          familyHead.blockCtors ++
+            generation.flatCtors.drop (i + familyHead.blockCtors.length) := by
+        rw [restDrop]
+        exact ctorDrop
+      have auxSplit :
+          generation.generatedMinorTypesAux (generation.flatCtors.drop i) i =
+            generation.generatedMinorTypesAux familyHead.blockCtors i ++
+              generation.generatedMinorTypesAux
+                (generation.flatCtors.drop
+                  (i + familyHead.blockCtors.length))
+                (i + familyHead.blockCtors.length) := by
+        rw [ctorDropFamily, generatedMinorTypesAux_append]
+      rw [auxSplit] at typesOnTel
+      obtain ⟨familyOnTel, restOnTel⟩ := VEnv.OnTel.of_append typesOnTel
+      obtain ⟨nextState, familyTranslations⟩ :=
+        recInfoConstructorMinorTranslations_fold hblockEnv primitives
+          ctorEnvWF envLE levelsWF levels levelsTr arityAll constLookupAll
+          parameters paramSourcesBase parameterFVarsLen whnfFuel pkgs
+          step.constructors ctorRaws ctorDropFamily rfl motiveLen motivesEq
+          currentLocal currentDepth rootExt paramFound state familyOnTel
+      have middleToCtx := recInfoConstructorMinorTranslation_final_toCtx
+        familyTranslations
+      rw [← middleToCtx] at restOnTel
+      have familyExtension : current'.LocalExtension step.finalContext :=
+        recInfoConstructor_localExtension step.constructors
+      have familyRun : TypeChecker.CandidateLocalContextRun
+          step.finalContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentLocal
+          familyExtension
+      have familyDepth : step.finalContext.fuel.recDepth = whnfFuel + 1 := by
+        rw [contextLocalExtension_fuel familyExtension]
+        exact currentDepth
+      have nextParamFound : ∀ fv ∈ oldFinal.fvars,
+          ∃ declaration, step.finalContext.lctx.find? fv =
+            some declaration := by
+        intro fv member
+        obtain ⟨declaration, found⟩ := paramFound fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            currentLocal familyExtension found⟩
+      have nextMotives : (step.finalInfos.map (·.motive)).toList =
+          motiveFVars.map Expr.fvar := by
+        rw [step.constructors.map_motive_eq]
+        exact motivesEq
+      have nextKernelAlign : indTypes.toList.drop (dIdx' + 1) =
+          indTypes.toList.drop (dIdx' + 1) := rfl
+      have dropSucc : generation.families.drop (dIdx' + 1) =
+          (generation.families.drop dIdx').drop 1 := by
+        rw [List.drop_drop, Nat.add_comm]
+      have nextCtorDrop : generation.flatCtors.drop
+          (i + familyHead.blockCtors.length) =
+          (generation.families.drop (dIdx' + 1)).flatMap
+            NormalizedFamily.blockCtors := by
+        rw [restDrop, dropSucc, famDrop]
+        rfl
+      obtain ⟨minorContext, rest⟩ := ih pkgTail nextKernelAlign
+        (by rw [dropSucc, famDrop]; exact famRawTail)
+        nextCtorDrop nextMotives familyRun familyDepth
+        (contextLocalExtension_trans rootExt familyExtension) nextParamFound
+        nextState restOnTel
+      rw [auxSplit]
+      exact ⟨⟨minorContext,
+        RecInfoPhaseTwoMinorTranslationTrace.next step tail familyTranslations
+          rest⟩⟩
 
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
