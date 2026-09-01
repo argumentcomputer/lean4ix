@@ -1855,12 +1855,14 @@ theorem TypeChecker.State.BlockReductionSafe.insertUnfold
   { safe with unfold :=
       TypeChecker.BlockReductionCacheSafe.insert safe.unfold outputSafe }
 
-/-- Every local declaration which the checker may inspect has a block-safe
-type and unfolding payload.  For an ordinary local declaration `value'` is
-its inert free variable, so this single condition covers both local forms. -/
-def TypeChecker.Context.BlockReductionSafe
-    (source : VInductDecl) (context : TypeChecker.Context) : Prop :=
-  ∀ {fv : FVarId} {declaration : LocalDecl},
+/-- A reachable checker local context is well formed, and every declaration
+which the checker may inspect has a block-safe type and unfolding payload.
+For an ordinary local declaration `value'` is its inert free variable, so the
+support field covers both local forms. -/
+structure TypeChecker.Context.BlockReductionSafe
+    (source : VInductDecl) (context : TypeChecker.Context) : Prop where
+  wf : context.lctx.WF
+  support : ∀ {fv : FVarId} {declaration : LocalDecl},
     context.lctx.find? fv = some declaration →
       source.BlockReductionConstFree declaration.type ∧
         source.BlockReductionConstFree declaration.value'
@@ -1870,72 +1872,79 @@ of its environment and remaining configuration. -/
 theorem TypeChecker.Context.blockReductionSafe_of_lctx_eq_empty
     {source : VInductDecl} {context : TypeChecker.Context}
     (empty : context.lctx = {}) : context.BlockReductionSafe source := by
-  intro fv declaration found
-  rw [empty] at found
-  have notFound : ({} : LocalContext).find? fv = none :=
-    emptyLocalContextFindNone fv
-  rw [notFound] at found
-  contradiction
+  constructor
+  · rw [empty]
+    exact LocalContext.WF.nil
+  · intro fv declaration found
+    rw [empty] at found
+    have notFound : ({} : LocalContext).find? fv = none :=
+      emptyLocalContextFindNone fv
+    rw [notFound] at found
+    contradiction
 
 /-- Extending a block-safe checker context by a support-safe local assumption
 preserves the local lookup invariant. -/
 theorem TypeChecker.Context.BlockReductionSafe.mkLocalDecl
     {source : VInductDecl} {context : TypeChecker.Context}
     (safe : context.BlockReductionSafe source)
-    (contextWF : context.lctx.WF)
     (id : FVarId) (name : Name) (type : Expr) (binderInfo : BinderInfo)
+    (fresh : context.lctx.find? id = none)
     (typeSafe : source.BlockReductionConstFree type) :
     ({ context with lctx :=
         context.lctx.mkLocalDecl id name type binderInfo } :
       TypeChecker.Context).BlockReductionSafe source := by
-  intro fv declaration found
-  change (context.lctx.mkLocalDecl id name type binderInfo).find? fv =
-    some declaration at found
-  have mapWF := contextWF.map_wf
-  rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
-  rw [localEq] at found mapWF
-  simp only [LocalContext.mkLocalDecl, LocalContext.find?] at found
-  change (map.insert id
-      (.cdecl declarations.size id name type binderInfo .default)).find? fv =
-        some declaration at found
-  change map.WF at mapWF
-  rw [mapWF.find?_insert] at found
-  split at found
-  · cases found
-    refine ⟨typeSafe, ?_⟩
-    simp [LocalDecl.value', VInductDecl.BlockReductionConstFree,
-      Lean.Expr.ReductionConstFree]
-  · apply safe
-    simpa only [LocalContext.find?, localEq] using found
+  constructor
+  · exact safe.wf.mkLocalDecl fresh
+  · intro fv declaration found
+    change (context.lctx.mkLocalDecl id name type binderInfo).find? fv =
+      some declaration at found
+    have mapWF := safe.wf.map_wf
+    rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
+    rw [localEq] at found mapWF
+    simp only [LocalContext.mkLocalDecl, LocalContext.find?] at found
+    change (map.insert id
+        (.cdecl declarations.size id name type binderInfo .default)).find? fv =
+          some declaration at found
+    change map.WF at mapWF
+    rw [mapWF.find?_insert] at found
+    split at found
+    · cases found
+      refine ⟨typeSafe, ?_⟩
+      simp [LocalDecl.value', VInductDecl.BlockReductionConstFree,
+        Lean.Expr.ReductionConstFree]
+    · apply safe.support
+      simpa only [LocalContext.find?, localEq] using found
 
 /-- Extending a block-safe checker context by a support-safe local let
 preserves the local lookup invariant. -/
 theorem TypeChecker.Context.BlockReductionSafe.mkLetDecl
     {source : VInductDecl} {context : TypeChecker.Context}
     (safe : context.BlockReductionSafe source)
-    (contextWF : context.lctx.WF)
     (id : FVarId) (name : Name) (type value : Expr)
+    (fresh : context.lctx.find? id = none)
     (typeSafe : source.BlockReductionConstFree type)
     (valueSafe : source.BlockReductionConstFree value) :
     ({ context with lctx := context.lctx.mkLetDecl id name type value } :
       TypeChecker.Context).BlockReductionSafe source := by
-  intro fv declaration found
-  change (context.lctx.mkLetDecl id name type value).find? fv =
-    some declaration at found
-  have mapWF := contextWF.map_wf
-  rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
-  rw [localEq] at found mapWF
-  simp only [LocalContext.mkLetDecl, LocalContext.find?] at found
-  change (map.insert id
-      (.ldecl declarations.size id name type value false .default)).find? fv =
-        some declaration at found
-  change map.WF at mapWF
-  rw [mapWF.find?_insert] at found
-  split at found
-  · cases found
-    exact ⟨typeSafe, valueSafe⟩
-  · apply safe
-    simpa only [LocalContext.find?, localEq] using found
+  constructor
+  · exact safe.wf.mkLetDecl fresh
+  · intro fv declaration found
+    change (context.lctx.mkLetDecl id name type value).find? fv =
+      some declaration at found
+    have mapWF := safe.wf.map_wf
+    rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
+    rw [localEq] at found mapWF
+    simp only [LocalContext.mkLetDecl, LocalContext.find?] at found
+    change (map.insert id
+        (.ldecl declarations.size id name type value false .default)).find? fv =
+          some declaration at found
+    change map.WF at mapWF
+    rw [mapWF.find?_insert] at found
+    split at found
+    · cases found
+      exact ⟨typeSafe, valueSafe⟩
+    · apply safe.support
+      simpa only [LocalContext.find?, localEq] using found
 
 /-- Method-specific form of fresh-block support preservation on reachable
 checker states and support-safe local contexts.  Recursive type-checker
@@ -2393,7 +2402,7 @@ private theorem VInductDecl.BlockReductionConstFree.foldl_etaFields
 
 /-- The same structure-projection fold preserves the exact cached absence of
 expression metavariables. -/
-private theorem Lean.Expr.hasExprMVar_eq_false_foldl_etaFields
+private theorem _root_.Lean.Expr.hasExprMVar_eq_false_foldl_etaFields
     {typeName : Name} {expression seed : Expr}
     (seedMVarFree : seed.hasExprMVar = false)
     (expressionMVarFree : expression.hasExprMVar = false)
@@ -3430,6 +3439,42 @@ theorem TrLCtx.find?_reductionConstFree_of_absent
     run.find?_of_mem henv member
   exact ⟨typeTr.source_reductionConstFree_of_absent absent,
     valueTr.source_reductionConstFree_of_absent absent⟩
+
+/-- A strictly translated local context is safe for a complete fresh block
+whose family and constructor names are absent from the translation
+environment.  This is the semantic constructor for the reader invariant used
+by concrete checker executions. -/
+theorem TrLCtx.typeChecker_blockReductionSafe_of_absent
+    {env : VEnv} {Us : List Name} {lctx : LocalContext} {Delta : VLCtx}
+    (run : TrLCtx env Us lctx Delta) (henv : env.WF)
+    {source : VInductDecl}
+    (familyAbsent : ∀ raw ∈ source.blockTypeConstants,
+      env.constants raw.name = none)
+    (constructorAbsent : ∀ raw ∈ source.blockConstructorConstants,
+      env.constants raw.name = none)
+    (checkerContext : TypeChecker.Context)
+    (lctxEq : checkerContext.lctx = lctx) :
+    checkerContext.BlockReductionSafe source := by
+  constructor
+  · rw [lctxEq]
+    exact run.1
+  · intro fv declaration found
+    rw [lctxEq] at found
+    constructor
+    · exact ⟨
+        fun raw member =>
+          (run.find?_reductionConstFree_of_absent henv found
+            (familyAbsent raw member)).1,
+        fun raw member =>
+          (run.find?_reductionConstFree_of_absent henv found
+            (constructorAbsent raw member)).1⟩
+    · exact ⟨
+        fun raw member =>
+          (run.find?_reductionConstFree_of_absent henv found
+            (familyAbsent raw member)).2,
+        fun raw member =>
+          (run.find?_reductionConstFree_of_absent henv found
+            (constructorAbsent raw member)).2⟩
 
 /-- A literal accepted by strict translation cannot introduce a constant
 which is absent from the translated environment.  `ContainsLits` and the
