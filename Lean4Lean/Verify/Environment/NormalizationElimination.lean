@@ -36087,6 +36087,177 @@ private theorem contextLocalExtension_trans
   | push extension name binderInfo type ih =>
       exact .push ih name binderInfo type
 
+/-- Source-order free variables allocated by an exact validator index trace. -/
+private def exactIndexDomainFVars
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final) :
+    List FVarId :=
+  match trace with
+  | .done _ => []
+  | .step (context := context) _run _advance _domainTr _domainType tail =>
+      context.freshFVarId :: exactIndexDomainFVars tail
+
+/-- The operational endpoint of an exact index trace is reached only by the
+local-declaration pushes recorded by its steps. -/
+private theorem exactIndexDomain_localExtension
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final) :
+    current.LocalExtension trace.chain.endpoint.context := by
+  induction trace with
+  | done => exact .refl
+  | step run advance domainTr domainType tail ih =>
+      exact contextLocalExtension_trans
+        (.push .refl run.translation.name run.translation.binderInfo
+          (AddInductive.consumeTypeAnnotations run.translation.domain)) ih
+
+/-- Every index identifier selected by an exact trace is fresh for the
+reader context in which that trace starts. -/
+private theorem exactIndexDomainFVars_absent
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final) :
+    ∀ fv ∈ exactIndexDomainFVars trace,
+      current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | @step current rootSource i nindices rootFuel outer currentRun boundary
+      run advance base target targets final domainTr
+      domainType tail ih =>
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact boundary.localState.localContext.fresh
+      · have absent := ih fv member
+        cases found : current.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              boundary.localState.localContext.push_findOld
+                run.translation.name run.translation.binderInfo
+                (AddInductive.consumeTypeAnnotations
+                  run.translation.domain) found
+            rw [preserved] at absent
+            contradiction
+
+/-- Exact validator traces allocate pairwise-distinct index identifiers. -/
+private theorem exactIndexDomainFVars_nodup
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final) :
+    (exactIndexDomainFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | @step current rootSource i nindices rootFuel outer currentRun boundary
+      run advance base target targets final domainTr
+      domainType tail ih =>
+      refine List.nodup_cons.mpr ⟨?_, ih⟩
+      intro member
+      have absent := exactIndexDomainFVars_absent tail
+        current.freshFVarId member
+      have present := boundary.localState.localContext.push_findNew
+        run.translation.name run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain)
+      rw [present] at absent
+      contradiction
+
+/-- Erase an exact validator index trace to the compressed telescope selected
+from any implementation context extending its operational endpoint. -/
+private theorem exactIndexDomain_selection
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final)
+    {implementation : AddInductive.Context}
+    (endpointExtension : trace.chain.endpoint.context.LocalExtension
+      implementation) :
+    TypeChecker.MLCtx.SelectedForall env Us implementation.lctx base
+      (exactIndexDomainFVars trace) targets final := by
+  induction trace with
+  | done => exact .nil
+  | @step current rootSource i nindices rootFuel outer currentRun boundary
+      run advance base target targets final domainTr
+      domainType tail ih =>
+      have pushedLocal := boundary.localState.localContext.push
+        run.translation.name run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain)
+      have localFind := boundary.localState.localContext.push_findNew
+        run.translation.name run.translation.binderInfo
+        (AddInductive.consumeTypeAnnotations run.translation.domain)
+      have pushedToImplementation :
+          (current.pushLocalDecl run.translation.name
+            run.translation.binderInfo
+            (AddInductive.consumeTypeAnnotations
+              run.translation.domain)).LocalExtension implementation :=
+        contextLocalExtension_trans (exactIndexDomain_localExtension tail)
+          endpointExtension
+      have finalFind :=
+        TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+          pushedLocal pushedToImplementation localFind
+      exact .cons finalFind domainTr domainType (ih endpointExtension)
+
+/-- Package an exact validator index trace as the selected source array
+consumed by `LocalContext.mkForall`. -/
+private def exactIndexDomain_arrayRun
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {current : AddInductive.Context} {rootSource : Lean.Expr}
+    {i nindices rootFuel : Nat}
+    {outer : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      current rootSource i nindices rootFuel}
+    {currentRun : TypeChecker.CandidateContextRun current}
+    {boundary : TypeChecker.FamilyParameterIndexBoundary outer currentRun}
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {targets : List VExpr}
+    (trace : boundary.ExactIndexDomainTrace env Us base targets final)
+    {implementation : AddInductive.Context}
+    (endpointExtension : trace.chain.endpoint.context.LocalExtension
+      implementation)
+    {sources : Array Expr}
+    (sourcesEq : sources.toList =
+      (exactIndexDomainFVars trace).map Expr.fvar) :
+    TypeChecker.MLCtx.SelectedForall.ArrayRun env Us implementation.lctx base
+      sources targets final where
+  fvars := exactIndexDomainFVars trace
+  selection := exactIndexDomain_selection trace endpointExtension
+  sources_eq := sourcesEq
+  nodup := exactIndexDomainFVars_nodup trace
+
 /-- The aggregate index traversal retained by one phase-one family step
 reaches its recorded endpoint solely by local-declaration pushes. -/
 private theorem recInfoPhaseOneIndex_localExtension
