@@ -43301,742 +43301,514 @@ noncomputable def
   resultLevels := owner.singletonCanonicalFamilyResultLevels context_lctx_eq
     (produced.semanticViewParams_length semantic context_lctx_eq)
 
-/-- Strict motive translations for the single phase-one step of a singleton
-block, at generalized traversal endpoints.  The index-count agreement and
-the annotation-builder name exclusions are the recorded premises; the
-remaining inputs are recovered from the retained producer structures. -/
-private theorem singletonPhaseOneMotiveTranslations
-    {source : VInductDecl} {firstSource : InductiveType}
-    {numNested : Nat} {isUnsafe : Bool}
-    {context : AddInductive.Context}
-    {produced : ProducedBlockRecursorShapeCandidate source [firstSource]
-      numNested isUnsafe context}
-    {env blockEnv : VEnv} {Us : List Name}
-    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
-      produced.candidate source}
-    (owner : produced.FirstFamilyAnnotationSpine semantic)
-    (context_lctx_eq : context.lctx = {})
-    {generation : BlockGenerationChecked source}
-    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
-      produced.eliminationBase semantic generation)
-    (staging : NormalizationCandidateBlockStagingInput context
-      produced.execution.eliminationExecution.normalization env blockEnv Us
-      source)
-    (generatedParamsEq : generation.generatedParams =
-      (owner.singletonCanonicalFamilyAssemblySupport
-        context_lctx_eq).basis.storedTypes)
-    (generatedIndicesEq : ∀ family ∈ generation.families,
-      generation.generatedIndices family =
-        owner.annotation.storedBinders.drop source.nparams)
-    (indexCountEq : ∀ (step : AddInductive.RecInfoPhaseOneStep
-        produced.execution.eliminationExecution.normalization.stats
-        [firstSource].toArray
-        produced.execution.eliminationExecution.elimination.level 0
-        produced.execution.recursorContext)
-      (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
-        produced.execution.eliminationExecution.normalization.stats
-        step.normalizedType 0 #[]
-        produced.execution.recursorContext.fuel.inductiveFuel
-        produced.execution.recursorContext step.indices step.indexContext),
+/-! #### Mutual extension of the phase-one motive translations
+
+The mutual fold below walks an arbitrary retained phase-one trace in
+source order.  Every family-local input is recorded as one per-family
+package; the fold itself performs only the shared per-step assembly.  The
+singleton producer at the end of this section constructs the first-family
+package from the generic annotation owner; later slices construct the
+packages for the second and remaining families from the validator's
+later-family cursor. -/
+
+/-- Inductive-synthesis local pushes preserve the checker fuel
+configuration. -/
+private theorem contextLocalExtension_fuel
+    {root current : AddInductive.Context}
+    (extension : root.LocalExtension current) :
+    current.fuel = root.fuel := by
+  induction extension with
+  | refl => rfl
+  | push extension name binderInfo type ih => exact ih
+
+/-- Family-local inputs for one mutual phase-one motive translation step.
+
+The fields record exactly the facts that depend on which staging machinery
+owns the family: the strict annotation spine, its validator alignment at the
+shared parameter prefix, the whnf fuel of the retained candidate context,
+the head-constant inventory entry, and the recorded index-count agreement.
+Everything else consumed by the per-step assembly is either ambient or
+derived inside the fold. -/
+private structure PhaseOneFamilyMotiveInput
+    (source : VInductDecl) (env blockEnv : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level)
+    (generation : BlockGenerationChecked source)
+    (parameterTypes : List VExpr) (whnfFuel : Nat)
+    (rootContext : AddInductive.Context) (dIdx : Nat)
+    {kernelSource : InductiveType}
+    {candidate : AddInductive.CandidateFamily kernelSource}
+    {raw : VInductiveType}
+    (root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw)
+    (shape : CandidateBlockFamilySemanticGenerationShape source env blockEnv
+      Us root) where
+  annotation : CandidateBlockFamilyAnnotationSpine source env blockEnv Us
+    root shape
+  resultLevel : Level
+  terminalEq : candidate.familyType.type.trace.terminalResult =
+    .sort resultLevel
+  parameterBound : stats.params.size ≤
+    candidate.familyType.type.trace.spineLength
+  parameterSources : stats.params.toList =
+    candidate.familyType.type.trace.parameterList stats.params.size
+  parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+    parameterTypes (annotation.storedBinders.take stats.params.size)
+  candidateDepth : candidate.familyType.type.context.fuel.recDepth =
+    whnfFuel + 1
+  headConstEq : stats.indConsts[dIdx]? =
+    some (.const raw.name stats.levels)
+  rawNameEq : raw.name = kernelSource.name
+  indicesEq : ∀ family, generation.families[dIdx]? = some family →
+    generation.generatedIndices family =
+      annotation.storedBinders.drop stats.params.size
+  countEq : ∀ {current : AddInductive.Context},
+    rootContext.LocalExtension current →
+    ∀ (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+        current)
+      (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace stats
+        step.normalizedType 0 #[] current.fuel.inductiveFuel current
+        step.indices step.indexContext),
       (loopArgs1IndexFVars argsTrace).length =
-        (owner.annotation.storedBinders.drop source.nparams).length)
-    (notOptParam : firstSource.name ≠ ``optParam)
-    (notAutoParam : firstSource.name ≠ ``autoParam)
-    (notOutParam : firstSource.name ≠ ``outParam)
-    (notSemiOutParam : firstSource.name ≠ ``semiOutParam)
-    {oldFinal : VLCtx}
-    (oldRun : TypeChecker.MLCtx.SelectedForall.ArrayRun env Us
-      produced.execution.eliminationExecution.normalization.validationContext.lctx
-      []
-      produced.execution.eliminationExecution.normalization.stats.params
-      (owner.singletonCanonicalFamilyAssemblySupport
-        context_lctx_eq).basis.storedTypes oldFinal)
-    (oldWF : VLCtx.WF env Us.length oldFinal)
+        (annotation.storedBinders.drop stats.params.size).length
+  notOptParam : kernelSource.name ≠ ``optParam
+  notAutoParam : kernelSource.name ≠ ``autoParam
+  notOutParam : kernelSource.name ≠ ``outParam
+  notSemiOutParam : kernelSource.name ≠ ``semiOutParam
+
+/-- Source-ordered per-family motive inputs for every remaining family of a
+mutual block, indexed by the phase-one ordinal of the first entry. -/
+private inductive PhaseOneFamilyMotiveInputList
+    (source : VInductDecl) (env blockEnv : VEnv) (Us : List Name)
+    (stats : AddInductive.InductiveStats)
+    (indTypes : Array InductiveType) (elimLevel : Level)
+    (generation : BlockGenerationChecked source)
+    (parameterTypes : List VExpr) (whnfFuel : Nat)
+    (rootContext : AddInductive.Context) :
+    {kernelSources : List InductiveType} →
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSources} →
+    {raws : List VInductiveType} →
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws} →
+    CandidateBlockFamilySemanticGenerationShapeList source env blockEnv Us
+      roots →
+    Nat → Type where
+  | nil {dIdx : Nat} :
+      PhaseOneFamilyMotiveInputList source env blockEnv Us stats indTypes
+        elimLevel generation parameterTypes whnfFuel rootContext .nil dIdx
+  | cons
+      {kernelSource : InductiveType}
+      {remainingSources : List InductiveType}
+      {candidate : AddInductive.CandidateFamily kernelSource}
+      {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+        remainingSources}
+      {raw : VInductiveType} {raws : List VInductiveType}
+      {root : CandidateBlockFamilySemanticRun env blockEnv Us candidate raw}
+      {roots : CandidateBlockFamilySemanticListRun env blockEnv Us
+        candidates raws}
+      {shape : CandidateBlockFamilySemanticGenerationShape source env
+        blockEnv Us root}
+      {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+        blockEnv Us roots}
+      {dIdx : Nat}
+      (head : PhaseOneFamilyMotiveInput source env blockEnv Us stats
+        indTypes elimLevel generation parameterTypes whnfFuel rootContext
+        dIdx root shape)
+      (tail : PhaseOneFamilyMotiveInputList source env blockEnv Us stats
+        indTypes elimLevel generation parameterTypes whnfFuel rootContext
+        shapes (dIdx + 1)) :
+      PhaseOneFamilyMotiveInputList source env blockEnv Us stats indTypes
+        elimLevel generation parameterTypes whnfFuel rootContext
+        (.cons shape shapes) dIdx
+
+/-- Lifting a telescope inserts binders without changing its length. -/
+private theorem liftTelN_length (n : Nat) :
+    ∀ (targets : List VExpr) (k : Nat),
+      (VExpr.liftTelN n targets k).length = targets.length
+  | [], _ => rfl
+  | _ :: targets, k => by
+      simp only [VExpr.liftTelN, List.length_cons,
+        liftTelN_length n targets (k + 1)]
+
+/-- Walk a retained phase-one trace in source order, translating every
+family's motive domain at the growing motive-extended parameter context.
+
+Each step consumes one recorded per-family package: the index telescope is
+translated by the family's strict annotation spine at the shared parameter
+endpoint, transported into the recursor universe inventory, lifted over the
+motives already emitted, and closed into the family's exact generated motive
+type.  All operational facts about the evolving phase context are threaded
+as invariants. -/
+private theorem recInfoPhaseOneMotiveTranslations_fold
+    {source : VInductDecl} {env blockEnv ctorEnv : VEnv}
+    {Us recLevels : List Name}
+    (henvSource : VEnv.WF env) (primitives : env.HasPrimitives)
+    (ctorEnvWF : VEnv.WF ctorEnv) (envLE : env ≤ ctorEnv)
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {generation : BlockGenerationChecked source}
+    (levelsWF : ∀ level ∈ generation.sourceLevels,
+      level.WF recLevels.length)
+    (levels : ∀ {levelSource : Level} {levelTarget : VLevel},
+      VLevel.ofLevel Us levelSource = some levelTarget →
+        VLevel.ofLevel recLevels levelSource =
+          some (levelTarget.inst generation.sourceLevels))
+    (levelsTr : stats.levels.mapM (VLevel.ofLevel recLevels) =
+      some generation.sourceLevels)
+    (levelTr : VLevel.ofLevel recLevels elimLevel =
+      some generation.motiveLevel)
+    (motiveLevelWF : generation.motiveLevel.WF recLevels.length)
+    (arityAll : ∀ family ∈ generation.families,
+      stats.levels.length = family.raw.toVConstant.uvars)
+    (constLookupAll : ∀ family ∈ generation.families,
+      ctorEnv.constants family.raw.name = some family.raw.toVConstant)
+    {parameterTypes : List VExpr} {oldFinal : VLCtx}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes oldFinal)
+    (paramSourcesBase :
+      ((oldFinal.instL generation.sourceLevels).fvars).reverse.map
+          Expr.fvar = stats.params.toList)
+    (parameterFVarsLen :
+      ((oldFinal.instL generation.sourceLevels).fvars).length =
+        source.nparams)
+    (whnfFuel : Nat)
+    {kernelSuffix : List InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      kernelSuffix}
+    {rawsSuffix : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      rawsSuffix}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    {rootContext : AddInductive.Context}
+    {dIdx : Nat}
+    (packages : PhaseOneFamilyMotiveInputList source env blockEnv Us stats
+      indTypes elimLevel generation parameterTypes whnfFuel rootContext
+      shapes dIdx)
+    {familiesSuffix : List NormalizedFamily}
+    {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
     {finalInfos : Array AddInductive.RecInfo}
     {finalContext : AddInductive.Context}
-    (phase1 : AddInductive.RecInfoPhaseOneTrace
-      produced.execution.eliminationExecution.normalization.stats
-      [firstSource].toArray
-      produced.execution.eliminationExecution.elimination.level 0 #[]
-      produced.execution.recursorContext finalInfos finalContext) :
+    (phase1 : AddInductive.RecInfoPhaseOneTrace stats indTypes elimLevel
+      dIdx recInfos current finalInfos finalContext)
+    (kernelAlign : indTypes.toList.drop dIdx = kernelSuffix)
+    (famDrop : generation.families.drop dIdx = familiesSuffix)
+    (famRaw : rawsSuffix = familiesSuffix.map (·.raw))
+    (currentLocal : TypeChecker.CandidateLocalContextRun current)
+    (currentDepth : current.fuel.recDepth = whnfFuel + 1)
+    (rootExt : rootContext.LocalExtension current)
+    (paramFound : ∀ fv ∈ oldFinal.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    {base : VLCtx} {middleFVars : List FVarId}
+    (baseWF : VLCtx.WF ctorEnv recLevels.length base)
+    (baseShape : base.FVarLamOnly)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    (baseFVarsEq : base.fvars =
+      middleFVars ++ (oldFinal.instL generation.sourceLevels).fvars)
+    (middleLen : middleFVars.length = dIdx)
+    (lift : VLCtx.FVLift' (oldFinal.instL generation.sourceLevels) base 0
+      (.consN (.skipN .refl dIdx) 0) 0)
+    (typesOnTel : ctorEnv.OnTel recLevels.length base.toCtx
+      (generation.generatedMotiveTypesAux familiesSuffix dIdx)) :
     Nonempty (Σ' motiveContext,
-      RecInfoPhaseOneMotiveTranslationTrace
-        (run.declarationRun staging).constructors.ctorEnv
-        produced.execution.recursors.levelParams
-        produced.execution.eliminationExecution.normalization.stats
-        [firstSource].toArray
-        produced.execution.eliminationExecution.elimination.level phase1
-        (oldFinal.instL generation.sourceLevels)
-        generation.generatedMotiveTypes motiveContext) := by
-  cases phase1 with
-  | done finished =>
-      exact absurd (by simp) finished
-  | next step tail =>
-      cases tail with
-      | next step' tail' =>
-          have bound := step'.active
-          simp at bound
-      | done finished' =>
-          let support := owner.singletonCanonicalFamilyAssemblySupport
-            context_lctx_eq
-          let declarations := run.declarationRun staging
-          have envLE : env ≤ declarations.constructors.ctorEnv :=
-            declarations.families.addTypes.le.trans
-              declarations.constructors.addCtors.le
-          obtain ⟨levelsWF, levels⟩ := run.sourceLevels_relevel
-          have henvSource : env.WF := by
-            simpa only [support.basis.contextRun.venv_eq] using
-              support.basis.contextRun.candidate.context.Ewf
-          have primitives : env.HasPrimitives := by
-            simpa only [support.basis.contextRun.venv_eq] using
-              support.basis.contextRun.candidate.context.hasPrimitives
-          have rootLocal : TypeChecker.CandidateLocalContextRun
-              produced.execution.recursorContext :=
-            ⟨support.basis.localState.localContext.wf,
-              support.basis.localState.localContext.reserves⟩
-          obtain ⟨argsTrace⟩ := step.indicesTrace
-          have phaseFound : ∀ fv ∈ oldFinal.fvars,
-              ∃ declaration,
-                produced.execution.recursorContext.lctx.find? fv =
-                  some declaration := by
-            intro fv member
-            rw [selectedForall_final_fvars oldRun.selection] at member
-            simp only [VLCtx.fvars_nil, List.append_nil] at member
-            exact oldRun.selection.find_exists fv
-              (List.mem_reverse.mp member)
-          obtain ⟨resultLevel, terminalEq⟩ :=
-            owner.validationAnnotations.head_terminal
-          have parameterBound :
-              produced.execution.eliminationExecution.normalization.stats.params.size ≤
-                produced.candidate.families.head.familyType.type.trace.spineLength := by
-            rw [support.basis.params_size]
-            exact owner.nparams_le_spineLength context_lctx_eq
-          have normalizationProduced :=
-            produced.execution.normalization_run produced.producedExecution
-          have validationParams :
-              produced.execution.eliminationExecution.normalization.validationContext.lparams =
-                context.lparams :=
-            produced.execution.eliminationExecution.normalization.validationContext_lparams_all
-              normalizationProduced
-          have familyRun :=
-            produced.execution.eliminationExecution.normalization.familyValidationResult_run
-              normalizationProduced
-          have statsLevels :
-              produced.execution.eliminationExecution.normalization.stats.levels =
-                produced.execution.eliminationExecution.normalization.validationContext.lparams.map
-                  Level.param := by
-            calc
-              produced.execution.eliminationExecution.normalization.stats.levels =
-                  context.lparams.map Level.param := by
-                simpa only [
-                  AddInductive.NormalizationCandidateExecution.familyValidationResult]
-                  using
-                  produced.execution.eliminationExecution.normalization.familyValidationResult.stats_levels_of_run
-                    produced.kernelSources_nonempty familyRun
-              _ = produced.execution.eliminationExecution.normalization.validationContext.lparams.map
-                    Level.param := by
-                rw [validationParams]
-          have sourceUvars : source.uvars = Us.length := by
-            calc
-              source.uvars =
-                  produced.execution.eliminationExecution.normalization.validationContext.lparams.length := by
-                simpa only [
-                  ProducedBlockRecursorShapeCandidate.eliminationBase] using
-                  run.elimination.sourceUvars_eq
-              _ = Us.length := congrArg List.length run.validation_lparams_eq
-          have statsLevelsLength :
-              produced.execution.eliminationExecution.normalization.stats.levels.length =
-                Us.length := by
-            rw [statsLevels, List.length_map]
-            exact congrArg List.length run.validation_lparams_eq
-          obtain ⟨validation⟩ :=
-            owner.firstFamilyValidationState context_lctx_eq
-          have comparisonResult :
-              (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
-                normalizationProduced produced.kernelSources_nonempty).result =
-                produced.execution.eliminationExecution.normalization.familyValidationResult :=
-            AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
-              (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
-                normalizationProduced produced.kernelSources_nonempty)
-          have tailResultEq : validation.continuation.tail.result =
-              produced.execution.eliminationExecution.normalization.familyValidationResult :=
-            (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
-              validation.selected).trans comparisonResult
-          have continuationOrdinal : validation.continuation.dIdx = 0 :=
-            AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx
-              validation.selected
-          have tailLengthLe : [firstSource].toArray.size ≤
-              validation.continuation.dIdx + 1 := by
-            rw [continuationOrdinal]
-            simp
-          have nextParamsEq : validation.continuation.nextStats.params =
-              validation.continuation.telescope.result.stats.params :=
-            familyParameterComparisonBlockTrace_headContinuation_nextParams
-              validation.selected
-          have nextLocalState : TypeChecker.FamilyParameterLocalState
-              validation.continuation.nextStats
-              validation.continuation.telescope.result.context :=
-            validation.localState.of_params_eq nextParamsEq
-          have nextParameterSourcesEq :
-              validation.continuation.nextStats.params.toList =
-                produced.candidate.families.head.familyType.type.trace.parameterList
-                  source.nparams :=
-            (congrArg Array.toList nextParamsEq).trans
-              validation.parameterSources_eq
-          have nextParamsSize :
-              validation.continuation.nextStats.params.size =
-                source.nparams := by
-            calc
-              validation.continuation.nextStats.params.size =
-                  validation.continuation.telescope.result.stats.params.size :=
-                congrArg Array.size nextParamsEq
-              _ = source.nparams := validation.params_size
-          have finalParamsSize :
-              produced.execution.eliminationExecution.normalization.stats.params.size =
-                source.nparams := by
-            have sizes :=
-              produced.execution.eliminationExecution.normalization.familyValidationResult.sizes_of_run
-                produced.kernelSources_nonempty familyRun
-            simpa only [
-              AddInductive.NormalizationCandidateExecution.familyValidationResult]
-              using sizes.1
-          have tailParamsSize :
-              validation.continuation.tail.result.stats.params.size =
-                source.nparams := by
-            rw [tailResultEq]
-            simpa only [
-              AddInductive.NormalizationCandidateExecution.familyValidationResult]
-              using finalParamsSize
-          have terminalLocal :=
-            familyParameterComparisonBlockTrace_terminalLocalStateExact
-              validation.continuation.tail tailLengthLe nextLocalState
-              nextParamsSize nextParameterSourcesEq tailParamsSize
-          rw [tailResultEq] at terminalLocal
-          change TypeChecker.FamilyParameterLocalState
-              produced.execution.eliminationExecution.normalization.stats
-              produced.execution.eliminationExecution.normalization.validationContext ∧
-            produced.execution.eliminationExecution.normalization.stats.params.toList =
-              produced.candidate.families.head.familyType.type.trace.parameterList
-                source.nparams ∧
-            produced.execution.eliminationExecution.normalization.stats.params.size =
-              source.nparams at terminalLocal
-          have parameterSources :
-              produced.execution.eliminationExecution.normalization.stats.params.toList =
-                produced.candidate.families.head.familyType.type.trace.parameterList
-                  produced.execution.eliminationExecution.normalization.stats.params.size := by
-            rw [support.basis.params_size]
-            exact terminalLocal.2.1
-          have parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
-              support.basis.storedTypes
-              (owner.annotation.storedBinders.take
-                produced.execution.eliminationExecution.normalization.stats.params.size) := by
-            have storedCanonical := support.basis.storedCanonical
-            have ownerTel := owner.storedViewParameterTelescopeDefEq
-              context_lctx_eq
-            rw [← owner.singletonBlockParams_eq] at ownerTel
-            rw [support.basis.params_size]
-            exact storedCanonical.trans henvSource trivial
-              (ownerTel.symm henvSource trivial)
-          have countEq' : (loopArgs1IndexFVars argsTrace).length =
-              (owner.annotation.storedBinders.drop
-                produced.execution.eliminationExecution.normalization.stats.params.size).length := by
-            rw [support.basis.params_size]
-            exact indexCountEq step argsTrace
-          have candidateDepth :
-              produced.candidate.families.head.familyType.type.context.fuel.recDepth =
-                owner.position.semantic.type.whnfFuel + 1 :=
-            owner.position.semantic.type.whnfDepth
-          have contextFuelDepth : context.fuel.recDepth =
-              owner.position.semantic.type.whnfFuel + 1 := by
-            have depth := candidateDepth
-            rw [owner.validationAnnotations.head_context_eq] at depth
-            exact depth
-          have validationFuel :
-              produced.execution.eliminationExecution.normalization.validationContext.fuel =
-                context.fuel := by
-            have compRes :
-                (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
-                  normalizationProduced produced.kernelSources_nonempty).result =
-                  produced.execution.eliminationExecution.normalization.familyValidationResult :=
-              AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
-                (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
-                  normalizationProduced produced.kernelSources_nonempty)
-            have fuelEq :=
-              (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
-                normalizationProduced
-                produced.kernelSources_nonempty).result_fuel
-            rw [compRes] at fuelEq
-            simpa only [
-              AddInductive.NormalizationCandidateExecution.familyValidationResult]
-              using fuelEq
-          have phaseDepth :
-              produced.execution.recursorContext.fuel.recDepth =
-                owner.position.semantic.type.whnfFuel + 1 := by
-            show produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
-              _
-            rw [validationFuel]
-            exact contextFuelDepth
-          have phaseRoot :
-              produced.execution.eliminationExecution.normalization.stats.params.size <
-                produced.candidate.families.head.familyType.type.trace.spineLength →
-              step.normalizedType =
-                produced.candidate.families.head.familyType.type.trace.rootWhnf := by
-            intro hasIndexStats
-            have hasIndex : source.nparams <
-                produced.candidate.families.head.familyType.type.trace.spineLength := by
-              rw [← support.basis.params_size]
-              exact hasIndexStats
-            obtain ⟨position⟩ :=
-              AddInductive.CandidateExprTrace.annotationAt
-                owner.annotation.validation_annotations hasIndex
-            have candidateIsForall : firstSource.type.isForall = true :=
-              position.traceSource_isForall owner.shape.storedSpine
-            have candidateRootEq :
-                produced.candidate.families.head.familyType.type.trace.rootWhnf =
-                  firstSource.type :=
-              AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
-                produced.candidate.families.head.familyType.type.trace.rootWhnf_valid
-                owner.position.semantic.type.whnfFuel candidateDepth
-                candidateIsForall
-            have phaseWhnfValid : AddInductive.CandidateWhnfStep.Valid
-                ⟨produced.execution.recursorContext, firstSource.type,
-                  step.normalizedType⟩ := by
-              simpa [AddInductive.CandidateWhnfStep.Valid] using step.whnfRun
-            have phasePinned : step.normalizedType = firstSource.type :=
-              AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
-                phaseWhnfValid owner.position.semantic.type.whnfFuel
-                phaseDepth candidateIsForall
-            exact phasePinned.trans candidateRootEq.symm
-          obtain ⟨indexFinal, indexTranslations⟩ :=
-            candidateAnnotationSpine_phaseIndexTranslations henvSource
-              primitives owner.annotation argsTrace rootLocal
-              (selectedForallArrayRun_candidateParameterContext oldRun)
-              phaseFound terminalEq parameterBound parameterSources
-              parameterTel phaseRoot countEq'
-              owner.position.semantic.type.whnfFuel phaseDepth candidateDepth
-          have indexRelevelled :=
-            (indexTranslations.mono envLE).relevel levelsWF levels
-          have typesLength : source.types.length = 1 := by
-            have nameLists := semantic.families.rawHeaderNames.1
-            have lengths := congrArg List.length nameLists
-            simpa using lengths
-          have tailNil : owner.position.remainingRaws = [] := by
-            have lenEq := congrArg List.length owner.position.raws_eq
-            rw [typesLength] at lenEq
-            simp only [List.length_cons] at lenEq
-            have : owner.position.remainingRaws.length = 0 := by omega
-            exact List.eq_nil_of_length_eq_zero this
-          have typesEq : source.types = [owner.position.raw] := by
-            have rawsEq := owner.position.raws_eq
-            rw [tailNil] at rawsEq
-            exact rawsEq
-          obtain ⟨family, families_eq, family_raw⟩ : ∃ family,
-              generation.families = [family] ∧
-                family.raw = owner.position.raw := by
-            have mapped := generation.families_map_raw
-            rw [typesEq] at mapped
-            cases hf : generation.families with
-            | nil =>
-                rw [hf] at mapped
-                simp at mapped
-            | cons headFamily rest =>
-                cases rest with
-                | nil =>
-                    rw [hf] at mapped
-                    simp only [List.map_cons, List.map_nil,
-                      List.cons.injEq, and_true] at mapped
-                    exact ⟨headFamily, rfl, mapped⟩
-                | cons second rest' =>
-                    rw [hf] at mapped
-                    simp at mapped
-          have familyMem : family ∈ generation.families := by
-            rw [families_eq]
-            exact List.mem_cons_self ..
-          have rawNameEq : owner.position.raw.name = firstSource.name := by
-            have nameLists := semantic.families.rawHeaderNames.1
-            rw [typesEq] at nameLists
-            simpa using nameLists
-          have headEq :
-              produced.execution.eliminationExecution.normalization.stats.indConsts[0]! =
-                .const family.raw.name
-                  produced.execution.eliminationExecution.normalization.stats.levels := by
-            have rawAt : source.types[0]? = some owner.position.raw := by
-              have projected := congrArg
-                (fun raws : List VInductiveType => raws[0]?)
-                owner.position.raws_eq
-              simpa using projected
-            have inventory :=
-              CandidateBlockFamilySemanticListRun.rawFamilyConstantInventory
-                semantic.families (by rfl) familyRun 0 owner.position.raw
-                rawAt
-            have inventoryAt :
-                produced.execution.eliminationExecution.normalization.stats.indConsts[0]? =
-                  some (.const owner.position.raw.name
-                    produced.execution.eliminationExecution.normalization.stats.levels) := by
-              simpa only [
-                AddInductive.NormalizationCandidateExecution.familyValidationResult]
-                using inventory
-            obtain ⟨bound, valEq⟩ :=
-              Array.getElem?_eq_some_iff.mp inventoryAt
-            rw [family_raw,
-              getElem!_pos
-                produced.execution.eliminationExecution.normalization.stats.indConsts
-                0 bound,
-              valEq]
-          have constLookup : declarations.constructors.ctorEnv.constants
-              family.raw.name = some family.raw.toVConstant :=
-            declarations.generationEnv.familyConst family familyMem
-          have levelsTr :
-              produced.execution.eliminationExecution.normalization.stats.levels.mapM
-                (VLevel.ofLevel produced.execution.recursors.levelParams) =
-                some generation.sourceLevels := by
-            have levelParamsEq : produced.execution.recursors.levelParams =
-                produced.execution.eliminationExecution.recLevelParams := by
-              simpa only [
-                AddInductive.NormalizationEliminationExecution.recLevelParams,
-                AddInductive.NormalizationRecursorExecution.recursorContext]
-                using AddInductive.declareRecursors_levelParams_eq
-                  produced.execution.recursorsRun
-            have recLevelsEq :
-                produced.execution.eliminationExecution.recLevels.mapM
-                  (VLevel.ofLevel
-                    produced.execution.eliminationExecution.recLevelParams) =
-                  some generation.recLevels := by
-              simpa only [
-                ProducedBlockRecursorShapeCandidate.eliminationBase]
-                using run.elimination.recLevels_eq
-            have recUvarsEq : generation.recUvars =
-                produced.execution.eliminationExecution.recLevelParams.length := by
-              simpa only [
-                ProducedBlockRecursorShapeCandidate.eliminationBase]
-                using run.elimination.recUvars_eq
-            rw [levelParamsEq]
-            cases large :
-                produced.execution.eliminationExecution.elimination.large.result with
-            | false =>
-                have modeSmall : generation.elimination = ElimMode.small := by
-                  simpa only [
-                    ProducedBlockRecursorShapeCandidate.eliminationBase,
-                    large, ElimMode.ofBool_false] using
-                    run.elimination.mode_eq
-                have recLevelsSmall :
-                    produced.execution.eliminationExecution.recLevels =
-                      produced.execution.eliminationExecution.normalization.stats.levels := by
-                  unfold
-                    AddInductive.NormalizationEliminationExecution.recLevels
-                  exact
-                    produced.execution.eliminationExecution.elimination.recLevels_eq_small
-                      large _
-                have recParamsSmall :
-                    produced.execution.eliminationExecution.recLevelParams =
-                      produced.execution.eliminationExecution.normalization.validationContext.lparams := by
-                  unfold
-                    AddInductive.NormalizationEliminationExecution.recLevelParams
-                  exact
-                    produced.execution.eliminationExecution.elimination.recLevelParams_eq_small
-                      large _
-                have lparamsUs :
-                    produced.execution.eliminationExecution.normalization.validationContext.lparams =
-                      Us := by
-                  simpa only [
-                    ProducedBlockRecursorShapeCandidate.eliminationBase] using
-                    run.validation_lparams_eq
-                have recUvarsSmall : generation.recUvars = source.uvars := by
-                  rw [recUvarsEq, recParamsSmall, lparamsUs, sourceUvars]
-                have sourceLevelsSmall : generation.sourceLevels =
-                    VLevel.params source.uvars := by
-                  show generation.elimination.sourceLevels source.uvars = _
-                  rw [modeSmall]
-                  rfl
-                rw [← recLevelsSmall, recLevelsEq, sourceLevelsSmall,
-                  ← recUvarsSmall]
-            | true =>
-                have recLevelsLarge :
-                    produced.execution.eliminationExecution.recLevels =
-                      .param (AddInductive.getFreshElimParam
-                        produced.execution.eliminationExecution.normalization.validationContext.lparams) ::
-                        produced.execution.eliminationExecution.normalization.stats.levels := by
-                  unfold
-                    AddInductive.NormalizationEliminationExecution.recLevels
-                  exact
-                    produced.execution.eliminationExecution.elimination.recLevels_eq_large
-                      large _
-                rw [recLevelsLarge, List.mapM_cons] at recLevelsEq
-                cases hHead : VLevel.ofLevel
-                    produced.execution.eliminationExecution.recLevelParams
-                    (Level.param (AddInductive.getFreshElimParam
-                      produced.execution.eliminationExecution.normalization.validationContext.lparams)) with
-                | none =>
-                    rw [hHead] at recLevelsEq
-                    simp at recLevelsEq
-                | some headLevel =>
-                    rw [hHead] at recLevelsEq
-                    cases hTail :
-                        produced.execution.eliminationExecution.normalization.stats.levels.mapM
-                          (VLevel.ofLevel
-                            produced.execution.eliminationExecution.recLevelParams) with
-                    | none =>
-                        rw [hTail] at recLevelsEq
-                        simp at recLevelsEq
-                    | some tailLevels =>
-                        rw [hTail] at recLevelsEq
-                        simp only [Option.bind_some, Option.bind_eq_bind,
-                          Option.pure_def, Option.some.injEq] at recLevelsEq
-                        congr 1
-                        have modeLarge : generation.elimination =
-                            ElimMode.large := by
-                          simpa only [
-                            ProducedBlockRecursorShapeCandidate.eliminationBase,
-                            large, ElimMode.ofBool_true] using
-                            run.elimination.mode_eq
-                        have lparamsUs :
-                            produced.execution.eliminationExecution.normalization.validationContext.lparams =
-                              Us := by
-                          simpa only [
-                            ProducedBlockRecursorShapeCandidate.eliminationBase]
-                            using run.validation_lparams_eq
-                        have recParamsLarge :
-                            produced.execution.eliminationExecution.recLevelParams =
-                              AddInductive.getFreshElimParam
-                                produced.execution.eliminationExecution.normalization.validationContext.lparams ::
-                                produced.execution.eliminationExecution.normalization.validationContext.lparams := by
-                          unfold
-                            AddInductive.NormalizationEliminationExecution.recLevelParams
-                          exact
-                            produced.execution.eliminationExecution.elimination.recLevelParams_eq_large
-                              large _
-                        have recUvarsLarge : generation.recUvars =
-                            source.uvars + 1 := by
-                          rw [recUvarsEq, recParamsLarge]
-                          have lparamsLength :=
-                            congrArg List.length lparamsUs
-                          simp only [List.length_cons]
-                          omega
-                        have sourceLevelsLarge : generation.sourceLevels =
-                            VLevel.params' source.uvars 1 := by
-                          show generation.elimination.sourceLevels
-                            source.uvars = _
-                          rw [modeLarge]
-                          rfl
-                        have paramsSucc :
-                            VLevel.params (source.uvars + 1) =
-                              .param 0 :: VLevel.params' source.uvars 1 := by
-                          simp [VLevel.params, VLevel.params',
-                            List.range_succ_eq_map, Function.comp_def,
-                            Nat.succ_eq_add_one]
-                        have recLevelsForm : generation.recLevels =
-                            VLevel.params (source.uvars + 1) := by
-                          show VLevel.params generation.recUvars = _
-                          rw [recUvarsLarge]
-                        rw [recLevelsForm, paramsSucc] at recLevelsEq
-                        rw [sourceLevelsLarge]
-                        exact (List.cons.injEq .. |>.mp recLevelsEq).2
-          have arity :
-              produced.execution.eliminationExecution.normalization.stats.levels.length =
-                family.raw.toVConstant.uvars := by
-            show _ = family.raw.uvars
-            rw [generation.family_uvars familyMem, sourceUvars,
-              statsLevelsLength]
-          have ctorEnvWF : VEnv.WF declarations.constructors.ctorEnv :=
-            declarations.constructors.trenv.wf
-          have levelTr := run.motiveLevel_relevel
-          have motiveLevelWF : generation.motiveLevel.WF
-              produced.execution.recursors.levelParams.length :=
-            VLevel.WF.of_ofLevel levelTr
-          have instFVarLamOnly : ∀ {delta : VLCtx}, delta.FVarLamOnly →
-              (delta.instL generation.sourceLevels).FVarLamOnly := by
-            intro delta shape
-            induction shape with
-            | nil => exact .nil
-            | cons tailShape ih => exact .cons ih
-          have fvarsInstL :
-              (oldFinal.instL generation.sourceLevels).fvars =
-                oldFinal.fvars := by
-            rw [VLCtx.instL_eq_map]
-            simp [VLCtx.fvars, List.filterMap_map, Function.comp_def]
-          have baseShape :
-              (oldFinal.instL generation.sourceLevels).FVarLamOnly :=
-            instFVarLamOnly
-              (Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvarLamOnly
-                (selectedForallArrayRun_candidateParameterContext oldRun)
-                .nil)
-          have baseNoBV := baseShape.noBV
-          have sourceLevelsLength : generation.sourceLevels.length =
-              Us.length := by
-            rw [← sourceUvars]
-            show (generation.elimination.sourceLevels source.uvars).length =
-              source.uvars
-            cases generation.elimination <;>
-              simp [ElimMode.sourceLevels, VLevel.params, VLevel.params']
-          have oldWFCast : VLCtx.WF env generation.sourceLevels.length
-              oldFinal := by
-            rw [sourceLevelsLength]
-            exact oldWF
-          have baseWF : VLCtx.WF declarations.constructors.ctorEnv
-              produced.execution.recursors.levelParams.length
-              (oldFinal.instL generation.sourceLevels) :=
-            VLCtx.WF.instL levelsWF (oldWFCast.mono envLE)
-          have baseFound' :
-              ∀ fv ∈ (oldFinal.instL generation.sourceLevels).fvars,
-                ∃ declaration,
-                  produced.execution.recursorContext.lctx.find? fv =
-                    some declaration := by
-            rw [fvarsInstL]
-            exact phaseFound
-          have paramSources' :
-              ((oldFinal.instL generation.sourceLevels).fvars).reverse.map
-                  Expr.fvar =
-                produced.execution.eliminationExecution.normalization.stats.params.toList := by
-            rw [fvarsInstL, selectedForall_final_fvars oldRun.selection]
-            simp only [VLCtx.fvars_nil, List.append_nil,
-              List.reverse_reverse]
-            exact oldRun.sources_eq.symm
-          have idxTelEq : generation.generatedIdxTel family =
-              (owner.annotation.storedBinders.drop
-                produced.execution.eliminationExecution.normalization.stats.params.size).map
-                (VExpr.instL generation.sourceLevels) := by
-            show (generation.generatedIndices family).map
-              (VExpr.instL generation.sourceLevels) = _
-            rw [generatedIndicesEq family familyMem,
-              support.basis.params_size]
-          have fvarsLen :
-              ((oldFinal.instL generation.sourceLevels).fvars).length =
-                source.nparams := by
-            have lengths := congrArg List.length paramSources'
-            simp only [List.length_map, List.length_reverse,
-              Array.length_toList] at lengths
-            rw [lengths, support.basis.params_size]
-          have motiveTypesEq : generation.generatedMotiveTypes =
-              [(generation.generatedMotiveType family).liftN 0] := by
-            rw [BlockGenerationChecked.generatedMotiveTypes, families_eq]
-            rfl
-          have targetEq : (generation.generatedMotiveType family).liftN 0 =
-              VExpr.forallN
-                ((owner.annotation.storedBinders.drop
-                    produced.execution.eliminationExecution.normalization.stats.params.size).map
-                  (VExpr.instL generation.sourceLevels))
-                (.forallE
-                  (VExpr.appN (.const family.raw.name generation.sourceLevels)
-                    (VExpr.bvarRevRange
-                        (List.length ([] : List FVarId) +
-                          ((owner.annotation.storedBinders.drop
-                              produced.execution.eliminationExecution.normalization.stats.params.size).map
-                            (VExpr.instL generation.sourceLevels)).length)
-                        ((oldFinal.instL
-                            generation.sourceLevels).fvars).length ++
-                      VExpr.bvarRevRange 0
-                        ((owner.annotation.storedBinders.drop
-                            produced.execution.eliminationExecution.normalization.stats.params.size).map
-                          (VExpr.instL generation.sourceLevels)).length))
-                  (.sort generation.motiveLevel)) := by
-            rw [generatedMotiveType_liftN generation family 0]
-            simp only [idxTelEq, fvarsLen, VExpr.liftTelN_zero,
-              List.length_nil]
-          have recursorArity :
-              produced.execution.recursors.levelParams.length =
-                generation.recUvars := by
-            have recursorLevels : produced.execution.recursors.levelParams =
-                produced.execution.eliminationExecution.recLevelParams := by
-              simpa only [
-                AddInductive.NormalizationEliminationExecution.recLevelParams,
-                AddInductive.NormalizationRecursorExecution.recursorContext]
-                using AddInductive.declareRecursors_levelParams_eq
-                  produced.execution.recursorsRun
-            exact (congrArg List.length recursorLevels).trans <| by
-              simpa only [
-                ProducedBlockRecursorShapeCandidate.eliminationBase] using
-                run.elimination.recUvars_eq.symm
-          have parameterContextEq :
-              (oldFinal.instL generation.sourceLevels).toCtx =
-                generation.paramsTel.reverse := by
-            have baseCtx :=
-              Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.toCtx
-                (selectedForallArrayRun_candidateParameterContext oldRun)
-            rw [VLCtx.instL_toCtx]
-            simp only [VLCtx.toCtx, List.append_nil] at baseCtx
-            rw [baseCtx, BlockGenerationChecked.paramsTel, generatedParamsEq]
-            simp [List.map_reverse]
-          have motiveTypesOnTel :
-              declarations.constructors.ctorEnv.OnTel
-                produced.execution.recursors.levelParams.length
-                (oldFinal.instL generation.sourceLevels).toCtx
-                generation.generatedMotiveTypes := by
-            rw [parameterContextEq, recursorArity]
-            exact
-              declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
-                declarations.generationEnv.ord
-          have motiveIsType :
-              declarations.constructors.ctorEnv.IsType
-                produced.execution.recursors.levelParams.length
-                (oldFinal.instL generation.sourceLevels).toCtx
-                (VExpr.forallN
-                  ((owner.annotation.storedBinders.drop
-                      produced.execution.eliminationExecution.normalization.stats.params.size).map
-                    (VExpr.instL generation.sourceLevels))
-                  (.forallE
-                    (VExpr.appN
-                      (.const family.raw.name generation.sourceLevels)
-                      (VExpr.bvarRevRange
-                          (List.length ([] : List FVarId) +
-                            ((owner.annotation.storedBinders.drop
-                                produced.execution.eliminationExecution.normalization.stats.params.size).map
-                              (VExpr.instL generation.sourceLevels)).length)
-                          ((oldFinal.instL
-                              generation.sourceLevels).fvars).length ++
-                        VExpr.bvarRevRange 0
-                          ((owner.annotation.storedBinders.drop
-                              produced.execution.eliminationExecution.normalization.stats.params.size).map
-                            (VExpr.instL generation.sourceLevels)).length))
-                    (.sort generation.motiveLevel))) := by
-            rw [motiveTypesEq] at motiveTypesOnTel
-            rw [← targetEq]
-            exact motiveTypesOnTel.1
-          have domainTr := recInfoPhaseOneStep_motiveDomain ctorEnvWF step
-            indexRelevelled rootLocal baseWF baseShape baseNoBV baseFound'
-            (middleFVars := []) (List.nil_append _).symm paramSources' headEq
-            constLookup levelsTr arity
-            (by rw [family_raw, rawNameEq]; exact notOptParam)
-            (by rw [family_raw, rawNameEq]; exact notAutoParam)
-            (by rw [family_raw, rawNameEq]; exact notOutParam)
-            (by rw [family_raw, rawNameEq]; exact notSemiOutParam)
-            levelTr motiveLevelWF motiveIsType
-          have domainTr' : TrExprS declarations.constructors.ctorEnv
-              produced.execution.recursors.levelParams
-              (oldFinal.instL generation.sourceLevels)
-              (AddInductive.consumeTypeAnnotations step.motiveType)
-              ((generation.generatedMotiveType family).liftN 0) := by
-            rw [targetEq]
-            exact domainTr
-          refine ⟨⟨(some (step.majorContext.freshFVarId,
+      RecInfoPhaseOneMotiveTranslationTrace ctorEnv recLevels stats indTypes
+        elimLevel phase1 base
+        (generation.generatedMotiveTypesAux familiesSuffix dIdx)
+        motiveContext) := by
+  induction phase1 generalizing kernelSuffix rawsSuffix familiesSuffix base
+      middleFVars with
+  | @done dIdx' recInfos' current' finished =>
+      have kernelNil : kernelSuffix = [] := by
+        rw [← kernelAlign]
+        apply List.drop_eq_nil_of_le
+        simpa using Nat.le_of_not_lt finished
+      subst kernelNil
+      cases candidates
+      cases roots
+      have famNil : familiesSuffix = [] := by
+        cases familiesSuffix with
+        | nil => rfl
+        | cons head rest => simp at famRaw
+      subst famNil
+      exact ⟨⟨base, RecInfoPhaseOneMotiveTranslationTrace.done
+        (dIdx := dIdx') (recInfos := recInfos') (current := current')
+        finished base⟩⟩
+  | @next dIdx' current' recInfos' finalInfos' finalContext' step tail ih =>
+      have active := step.active
+      have suffixCons : kernelSuffix =
+          indTypes[dIdx'] :: indTypes.toList.drop (dIdx' + 1) := by
+        rw [← kernelAlign]
+        have bound : dIdx' < indTypes.toList.length := by simpa using active
+        rw [List.drop_eq_getElem_cons bound]
+        simp
+      subst suffixCons
+      cases candidates with
+      | cons candidateHead candidatesTail =>
+      cases roots with
+      | cons root rootsTail =>
+      cases shapes with
+      | cons shape shapesTail =>
+      cases packages with
+      | cons pkg pkgTail =>
+      cases familiesSuffix with
+      | nil => simp at famRaw
+      | cons familyHead famRest =>
+      simp only [List.map_cons, List.cons.injEq] at famRaw
+      obtain ⟨rawHeadEq, famRawTail⟩ := famRaw
+      subst rawHeadEq
+      -- position of the head family inside the full generation inventory
+      have familiesAt : generation.families[dIdx']? = some familyHead := by
+        have head0 : (generation.families.drop dIdx')[0]? = some familyHead := by
+          rw [famDrop]
+          rfl
+        rw [List.getElem?_drop] at head0
+        simpa using head0
+      have familyMem : familyHead ∈ generation.families :=
+        List.mem_of_getElem? familiesAt
+      have idxTelEq : generation.generatedIdxTel familyHead =
+          (pkg.annotation.storedBinders.drop stats.params.size).map
+            (VExpr.instL generation.sourceLevels) := by
+        show (generation.generatedIndices familyHead).map
+          (VExpr.instL generation.sourceLevels) = _
+        rw [pkg.indicesEq familyHead familiesAt]
+      have headEq : stats.indConsts[dIdx']! =
+          .const familyHead.raw.name stats.levels := by
+        obtain ⟨bound, valEq⟩ :=
+          Array.getElem?_eq_some_iff.mp pkg.headConstEq
+        rw [getElem!_pos stats.indConsts dIdx' bound, valEq]
+      -- literal whnf pinning of the phase root against the family candidate
+      obtain ⟨resultLevel', terminalEq⟩ :
+          ∃ resultLevel, candidateHead.familyType.type.trace.terminalResult =
+            .sort resultLevel := ⟨pkg.resultLevel, pkg.terminalEq⟩
+      have phaseRoot : stats.params.size <
+          candidateHead.familyType.type.trace.spineLength →
+          step.normalizedType =
+            candidateHead.familyType.type.trace.rootWhnf := by
+        intro hasIndex
+        obtain ⟨position⟩ := AddInductive.CandidateExprTrace.annotationAt
+          pkg.annotation.validation_annotations hasIndex
+        have candidateIsForall : indTypes[dIdx'].type.isForall = true :=
+          position.traceSource_isForall shape.storedSpine
+        have candidateRootEq :
+            candidateHead.familyType.type.trace.rootWhnf =
+              indTypes[dIdx'].type :=
+          AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+            candidateHead.familyType.type.trace.rootWhnf_valid
+            whnfFuel pkg.candidateDepth candidateIsForall
+        have phaseWhnfValid : AddInductive.CandidateWhnfStep.Valid
+            ⟨current', indTypes[dIdx'].type, step.normalizedType⟩ := by
+          simpa [AddInductive.CandidateWhnfStep.Valid] using step.whnfRun
+        have phasePinned : step.normalizedType = indTypes[dIdx'].type :=
+          AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+            phaseWhnfValid whnfFuel currentDepth candidateIsForall
+        exact phasePinned.trans candidateRootEq.symm
+      -- index telescope translations at the shared parameter endpoint
+      obtain ⟨argsTrace⟩ := step.indicesTrace
+      obtain ⟨indexFinal, indexTranslations⟩ :=
+        candidateAnnotationSpine_phaseIndexTranslations henvSource
+          primitives pkg.annotation argsTrace currentLocal parameters
+          paramFound terminalEq pkg.parameterBound pkg.parameterSources
+          pkg.parameterTel phaseRoot (pkg.countEq rootExt step argsTrace)
+          whnfFuel currentDepth pkg.candidateDepth
+      have indexRelevelled :=
+        (indexTranslations.mono envLE).relevel levelsWF levels
+      rw [← idxTelEq] at indexRelevelled
+      obtain ⟨liftedFinal, liftedTranslations⟩ :=
+        indexRelevelled.weakFV ctorEnvWF lift baseWF currentLocal baseFound
+      -- exact generated motive target
+      have liftLen : (VExpr.liftTelN dIdx'
+          (generation.generatedIdxTel familyHead) 0).length =
+          (generation.generatedIdxTel familyHead).length :=
+        liftTelN_length dIdx' _ 0
+      have targetEq :
+          (generation.generatedMotiveType familyHead).liftN dIdx' =
+          VExpr.forallN
+            (VExpr.liftTelN dIdx' (generation.generatedIdxTel familyHead) 0)
+            (.forallE
+              (VExpr.appN
+                (.const familyHead.raw.name generation.sourceLevels)
+                (VExpr.bvarRevRange
+                    (middleFVars.length +
+                      (VExpr.liftTelN dIdx'
+                        (generation.generatedIdxTel familyHead) 0).length)
+                    ((oldFinal.instL generation.sourceLevels).fvars).length ++
+                  VExpr.bvarRevRange 0
+                    (VExpr.liftTelN dIdx'
+                      (generation.generatedIdxTel familyHead) 0).length))
+              (.sort generation.motiveLevel)) := by
+        rw [generatedMotiveType_liftN generation familyHead dIdx']
+        rw [liftLen, middleLen, parameterFVarsLen]
+      rcases typesOnTel with ⟨targetType, targetsOnTel⟩
+      have motiveIsType := targetType
+      rw [targetEq] at motiveIsType
+      have domainTr := recInfoPhaseOneStep_motiveDomain ctorEnvWF step
+        liftedTranslations currentLocal baseWF baseShape baseShape.noBV
+        baseFound (middleFVars := middleFVars) baseFVarsEq paramSourcesBase
+        headEq (constLookupAll familyHead familyMem) levelsTr
+        (arityAll familyHead familyMem)
+        (by rw [pkg.rawNameEq]; exact pkg.notOptParam)
+        (by rw [pkg.rawNameEq]; exact pkg.notAutoParam)
+        (by rw [pkg.rawNameEq]; exact pkg.notOutParam)
+        (by rw [pkg.rawNameEq]; exact pkg.notSemiOutParam)
+        levelTr motiveLevelWF motiveIsType
+      have domainTr' : TrExprS ctorEnv recLevels base
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+          ((generation.generatedMotiveType familyHead).liftN dIdx') := by
+        rw [targetEq]
+        exact domainTr
+      -- operational context extension to the motive endpoint
+      have indexExtension : current'.LocalExtension step.indexContext :=
+        recInfoPhaseOneIndex_localExtension step
+      have indexRun : TypeChecker.CandidateLocalContextRun
+          step.indexContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentLocal
+          indexExtension
+      have majorRun : TypeChecker.CandidateLocalContextRun
+          step.majorContext :=
+        indexRun.push `t .default
+          (AddInductive.consumeTypeAnnotations step.majorType)
+      have motiveRun : TypeChecker.CandidateLocalContextRun
+          step.motiveContext :=
+        majorRun.push step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+      have motiveExtension : current'.LocalExtension step.motiveContext :=
+        contextLocalExtension_trans indexExtension
+          (.push (.push .refl `t .default
+              (AddInductive.consumeTypeAnnotations step.majorType))
+            step.motiveName .default
+            (AddInductive.consumeTypeAnnotations step.motiveType))
+      have motiveDepth : step.motiveContext.fuel.recDepth = whnfFuel + 1 := by
+        rw [contextLocalExtension_fuel motiveExtension]
+        exact currentDepth
+      -- next semantic base and its invariants
+      have majorFound : ∀ fv ∈ base.fvars,
+          ∃ declaration, step.majorContext.lctx.find? fv =
+            some declaration := by
+        intro fv member
+        obtain ⟨declaration, found⟩ := baseFound fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            currentLocal
+            (contextLocalExtension_trans indexExtension
+              (.push .refl `t .default
+                (AddInductive.consumeTypeAnnotations step.majorType)))
+            found⟩
+      have newFresh : step.majorContext.freshFVarId ∉ base.fvars :=
+        compressedFVars_fresh majorRun majorFound
+      have localFind : step.motiveContext.lctx.find?
+          step.majorContext.freshFVarId =
+          some (.cdecl step.majorContext.lctx.decls.size
+            step.majorContext.freshFVarId step.motiveName
+            (AddInductive.consumeTypeAnnotations step.motiveType)
+            .default .default) := by
+        simpa only [AddInductive.RecInfoPhaseOneStep.motiveContext] using
+          majorRun.push_findNew step.motiveName .default
+            (AddInductive.consumeTypeAnnotations step.motiveType)
+      have nextWF : VLCtx.WF ctorEnv recLevels.length
+          ((some (step.majorContext.freshFVarId,
               (AddInductive.consumeTypeAnnotations
                 step.motiveType).fvarsList),
-            .vlam ((generation.generatedMotiveType family).liftN 0)) ::
-              oldFinal.instL generation.sourceLevels, ?_⟩⟩
-          rw [motiveTypesEq]
-          exact RecInfoPhaseOneMotiveTranslationTrace.next step
-            (.done finished') domainTr'
-            (RecInfoPhaseOneMotiveTranslationTrace.done
-              (recInfos := #[].push step.info)
-              (current := step.motiveContext) finished' _)
+            .vlam ((generation.generatedMotiveType familyHead).liftN dIdx')) ::
+            base) :=
+        ⟨baseWF,
+          fun _ _ eq => by cases eq; exact ⟨newFresh, domainTr'.fvarsList⟩,
+          targetType⟩
+      have nextShape : VLCtx.FVarLamOnly
+          ((some (step.majorContext.freshFVarId,
+              (AddInductive.consumeTypeAnnotations
+                step.motiveType).fvarsList),
+            .vlam ((generation.generatedMotiveType familyHead).liftN dIdx')) ::
+            base) := .cons baseShape
+      have nextFound : ∀ fv ∈ VLCtx.fvars
+            ((some (step.majorContext.freshFVarId,
+                (AddInductive.consumeTypeAnnotations
+                  step.motiveType).fvarsList),
+              .vlam
+                ((generation.generatedMotiveType familyHead).liftN dIdx')) ::
+              base),
+          ∃ declaration, step.motiveContext.lctx.find? fv =
+            some declaration := by
+        have pushed := compressedFVars_push majorRun majorFound
+          step.motiveName .default
+          (AddInductive.consumeTypeAnnotations step.motiveType)
+          ((AddInductive.consumeTypeAnnotations step.motiveType).fvarsList)
+          ((generation.generatedMotiveType familyHead).liftN dIdx')
+        exact pushed
+      have nextParamFound : ∀ fv ∈ oldFinal.fvars,
+          ∃ declaration, step.motiveContext.lctx.find? fv =
+            some declaration := by
+        intro fv member
+        obtain ⟨declaration, found⟩ := paramFound fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            currentLocal motiveExtension found⟩
+      have nextFVarsEq : VLCtx.fvars
+            ((some (step.majorContext.freshFVarId,
+                (AddInductive.consumeTypeAnnotations
+                  step.motiveType).fvarsList),
+              .vlam
+                ((generation.generatedMotiveType familyHead).liftN dIdx')) ::
+              base) =
+          (step.majorContext.freshFVarId :: middleFVars) ++
+            (oldFinal.instL generation.sourceLevels).fvars := by
+        show step.majorContext.freshFVarId :: base.fvars = _
+        rw [baseFVarsEq]
+        rfl
+      have nextMiddleLen :
+          (step.majorContext.freshFVarId :: middleFVars).length =
+            dIdx' + 1 := by
+        simp [middleLen]
+      have nextLift : VLCtx.FVLift'
+          (oldFinal.instL generation.sourceLevels)
+          ((some (step.majorContext.freshFVarId,
+              (AddInductive.consumeTypeAnnotations
+                step.motiveType).fvarsList),
+            .vlam ((generation.generatedMotiveType familyHead).liftN dIdx')) ::
+            base) 0 (.consN (.skipN .refl (dIdx' + 1)) 0) 0 := by
+        exact lift.skip_fvar
+          (step.majorContext.freshFVarId,
+            (AddInductive.consumeTypeAnnotations step.motiveType).fvarsList)
+          (.vlam ((generation.generatedMotiveType familyHead).liftN dIdx'))
+      have nextKernelAlign : indTypes.toList.drop (dIdx' + 1) =
+          indTypes.toList.drop (dIdx' + 1) := rfl
+      have nextFamDrop : generation.families.drop (dIdx' + 1) = famRest := by
+        have dropSucc : generation.families.drop (dIdx' + 1) =
+            (generation.families.drop dIdx').drop 1 := by
+          rw [List.drop_drop, Nat.add_comm]
+        rw [dropSucc, famDrop]
+        rfl
+      obtain ⟨motiveContext, rest⟩ := ih pkgTail nextKernelAlign nextFamDrop
+        famRawTail motiveRun motiveDepth
+        (contextLocalExtension_trans rootExt motiveExtension)
+        nextParamFound nextWF nextShape nextFound nextFVarsEq nextMiddleLen
+        nextLift targetsOnTel
+      exact ⟨⟨motiveContext,
+        RecInfoPhaseOneMotiveTranslationTrace.next step tail domainTr'
+          rest⟩⟩
 
-/-- Construct the five-phase parameter and motive selections of a singleton
-block from the retained execution.  The recorded M3 premises are the
-traversal/candidate index-count agreement and the annotation-builder name
-exclusions; every other input is derived from the retained producer
-structures.  This is the first general consumer of
-`generatedRecursorMotiveSelection`. -/
+/-- Construct the five-phase parameter and motive selections of an arbitrary
+mutual block from the retained execution and one recorded input package per
+family.  The packages carry exactly the family-local staging facts — the
+strict annotation spine, the shared-parameter alignment, the candidate whnf
+fuel, the head-constant inventory entry, the index-count agreement, and the
+annotation-builder name exclusions; every block-level input is derived from
+the retained producer structures.  This extends the singleton producer to
+the mutual fold. -/
 theorem
-    ProducedBlockRecursorShapeCandidate.FirstFamilyAnnotationSpine.singletonGeneratedRecursorMotivePhase
-    {source : VInductDecl} {firstSource : InductiveType}
+    ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.generatedRecursorMotivePhase
+    {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
     {context : AddInductive.Context}
-    {produced : ProducedBlockRecursorShapeCandidate source [firstSource]
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
       numNested isUnsafe context}
     {env blockEnv : VEnv} {Us : List Name}
     {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
       produced.candidate source}
-    (owner : produced.FirstFamilyAnnotationSpine semantic)
-    (context_lctx_eq : context.lctx = {})
+    {context_lctx_eq : context.lctx = {}}
+    (support : produced.CanonicalFamilyAssemblySupport semantic
+      context_lctx_eq)
     {generation : BlockGenerationChecked source}
     (run : ProducedBlockSemanticEliminationRun env blockEnv Us
       produced.eliminationBase semantic generation)
@@ -44045,27 +43817,17 @@ theorem
       source)
     (synthesis : ProducedBlockRecursorSynthesisRun produced)
     (generatedParamsEq : generation.generatedParams =
-      (owner.singletonCanonicalFamilyAssemblySupport
-        context_lctx_eq).basis.storedTypes)
-    (generatedIndicesEq : ∀ family ∈ generation.families,
-      generation.generatedIndices family =
-        owner.annotation.storedBinders.drop source.nparams)
-    (indexCountEq : ∀ (step : AddInductive.RecInfoPhaseOneStep
-        produced.execution.eliminationExecution.normalization.stats
-        [firstSource].toArray
-        produced.execution.eliminationExecution.elimination.level 0
-        produced.execution.recursorContext)
-      (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
-        produced.execution.eliminationExecution.normalization.stats
-        step.normalizedType 0 #[]
-        produced.execution.recursorContext.fuel.inductiveFuel
-        produced.execution.recursorContext step.indices step.indexContext),
-      (loopArgs1IndexFVars argsTrace).length =
-        (owner.annotation.storedBinders.drop source.nparams).length)
-    (notOptParam : firstSource.name ≠ ``optParam)
-    (notAutoParam : firstSource.name ≠ ``autoParam)
-    (notOutParam : firstSource.name ≠ ``outParam)
-    (notSemiOutParam : firstSource.name ≠ ``semiOutParam) :
+      support.basis.storedTypes)
+    {whnfFuel : Nat}
+    (validationDepth :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
+        whnfFuel + 1)
+    (packages : PhaseOneFamilyMotiveInputList source env blockEnv Us
+      produced.execution.eliminationExecution.normalization.stats
+      kernelSources.toArray
+      produced.execution.eliminationExecution.elimination.level
+      generation support.basis.storedTypes whnfFuel
+      produced.execution.recursorContext support.generationShapes 0) :
     Nonempty (Σ' (parameterContext : VLCtx)
       (_ : TypeChecker.MLCtx.SelectedForall.ArrayRun
         (run.declarationRun staging).constructors.ctorEnv
@@ -44081,7 +43843,6 @@ theorem
         (synthesis.synthesis.recInfos.map (·.motive))
         generation.generatedMotiveTypes motiveContext) := by
   classical
-  let support := owner.singletonCanonicalFamilyAssemblySupport context_lctx_eq
   obtain ⟨oldFinal, oldRun, oldWF⟩ :=
     Classical.choice support.basis.parameterSelection
   let rootContext := produced.execution.recursorContext
@@ -44123,7 +43884,7 @@ theorem
         (run.declarationRun staging).constructors.ctorEnv
         produced.execution.recursors.levelParams
         produced.execution.eliminationExecution.normalization.stats
-        [firstSource].toArray
+        kernelSources.toArray
         produced.execution.eliminationExecution.elimination.level phase1
         (oldFinal.instL generation.sourceLevels)
         generation.generatedMotiveTypes motiveContext) by
@@ -44131,9 +43892,682 @@ theorem
     exact ⟨⟨oldFinal.instL generation.sourceLevels, parameters, motiveContext,
       generatedRecursorMotiveSelection support run staging synthesis
         parameters phase1 motiveTranslations⟩⟩
-  exact singletonPhaseOneMotiveTranslations owner context_lctx_eq run staging
-    generatedParamsEq generatedIndicesEq indexCountEq notOptParam notAutoParam
-    notOutParam notSemiOutParam oldRun oldWF phase1
+  -- ambient block-level inputs for the fold
+  have henvSource : env.WF := by
+    simpa only [support.basis.contextRun.venv_eq] using
+      support.basis.contextRun.candidate.context.Ewf
+  have primitives : env.HasPrimitives := by
+    simpa only [support.basis.contextRun.venv_eq] using
+      support.basis.contextRun.candidate.context.hasPrimitives
+  have ctorEnvWF : VEnv.WF declarations.constructors.ctorEnv :=
+    declarations.constructors.trenv.wf
+  have phaseFound : ∀ fv ∈ oldFinal.fvars,
+      ∃ declaration,
+        produced.execution.recursorContext.lctx.find? fv =
+          some declaration := by
+    intro fv member
+    rw [selectedForall_final_fvars oldRun.selection] at member
+    simp only [VLCtx.fvars_nil, List.append_nil] at member
+    exact oldRun.selection.find_exists fv (List.mem_reverse.mp member)
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  have validationParams :
+      produced.execution.eliminationExecution.normalization.validationContext.lparams =
+        context.lparams :=
+    produced.execution.eliminationExecution.normalization.validationContext_lparams_all
+      normalizationProduced
+  have familyRun :=
+    produced.execution.eliminationExecution.normalization.familyValidationResult_run
+      normalizationProduced
+  have statsLevels :
+      produced.execution.eliminationExecution.normalization.stats.levels =
+        produced.execution.eliminationExecution.normalization.validationContext.lparams.map
+          Level.param := by
+    calc
+      produced.execution.eliminationExecution.normalization.stats.levels =
+          context.lparams.map Level.param := by
+        simpa only [
+          AddInductive.NormalizationCandidateExecution.familyValidationResult]
+          using
+          produced.execution.eliminationExecution.normalization.familyValidationResult.stats_levels_of_run
+            produced.kernelSources_nonempty familyRun
+      _ = produced.execution.eliminationExecution.normalization.validationContext.lparams.map
+            Level.param := by
+        rw [validationParams]
+  have sourceUvars : source.uvars = Us.length := by
+    calc
+      source.uvars =
+          produced.execution.eliminationExecution.normalization.validationContext.lparams.length := by
+        simpa only [
+          ProducedBlockRecursorShapeCandidate.eliminationBase] using
+          run.elimination.sourceUvars_eq
+      _ = Us.length := congrArg List.length run.validation_lparams_eq
+  have statsLevelsLength :
+      produced.execution.eliminationExecution.normalization.stats.levels.length =
+        Us.length := by
+    rw [statsLevels, List.length_map]
+    exact congrArg List.length run.validation_lparams_eq
+  have levelsTr :
+      produced.execution.eliminationExecution.normalization.stats.levels.mapM
+        (VLevel.ofLevel produced.execution.recursors.levelParams) =
+        some generation.sourceLevels := by
+    have levelParamsEq : produced.execution.recursors.levelParams =
+        produced.execution.eliminationExecution.recLevelParams := by
+      simpa only [
+        AddInductive.NormalizationEliminationExecution.recLevelParams,
+        AddInductive.NormalizationRecursorExecution.recursorContext]
+        using AddInductive.declareRecursors_levelParams_eq
+          produced.execution.recursorsRun
+    have recLevelsEq :
+        produced.execution.eliminationExecution.recLevels.mapM
+          (VLevel.ofLevel
+            produced.execution.eliminationExecution.recLevelParams) =
+          some generation.recLevels := by
+      simpa only [
+        ProducedBlockRecursorShapeCandidate.eliminationBase]
+        using run.elimination.recLevels_eq
+    have recUvarsEq : generation.recUvars =
+        produced.execution.eliminationExecution.recLevelParams.length := by
+      simpa only [
+        ProducedBlockRecursorShapeCandidate.eliminationBase]
+        using run.elimination.recUvars_eq
+    rw [levelParamsEq]
+    cases large :
+        produced.execution.eliminationExecution.elimination.large.result with
+    | false =>
+        have modeSmall : generation.elimination = ElimMode.small := by
+          simpa only [
+            ProducedBlockRecursorShapeCandidate.eliminationBase,
+            large, ElimMode.ofBool_false] using
+            run.elimination.mode_eq
+        have recLevelsSmall :
+            produced.execution.eliminationExecution.recLevels =
+              produced.execution.eliminationExecution.normalization.stats.levels := by
+          unfold
+            AddInductive.NormalizationEliminationExecution.recLevels
+          exact
+            produced.execution.eliminationExecution.elimination.recLevels_eq_small
+              large _
+        have recParamsSmall :
+            produced.execution.eliminationExecution.recLevelParams =
+              produced.execution.eliminationExecution.normalization.validationContext.lparams := by
+          unfold
+            AddInductive.NormalizationEliminationExecution.recLevelParams
+          exact
+            produced.execution.eliminationExecution.elimination.recLevelParams_eq_small
+              large _
+        have lparamsUs :
+            produced.execution.eliminationExecution.normalization.validationContext.lparams =
+              Us := by
+          simpa only [
+            ProducedBlockRecursorShapeCandidate.eliminationBase] using
+            run.validation_lparams_eq
+        have recUvarsSmall : generation.recUvars = source.uvars := by
+          rw [recUvarsEq, recParamsSmall, lparamsUs, sourceUvars]
+        have sourceLevelsSmall : generation.sourceLevels =
+            VLevel.params source.uvars := by
+          show generation.elimination.sourceLevels source.uvars = _
+          rw [modeSmall]
+          rfl
+        rw [← recLevelsSmall, recLevelsEq, sourceLevelsSmall,
+          ← recUvarsSmall]
+    | true =>
+        have recLevelsLarge :
+            produced.execution.eliminationExecution.recLevels =
+              .param (AddInductive.getFreshElimParam
+                produced.execution.eliminationExecution.normalization.validationContext.lparams) ::
+                produced.execution.eliminationExecution.normalization.stats.levels := by
+          unfold
+            AddInductive.NormalizationEliminationExecution.recLevels
+          exact
+            produced.execution.eliminationExecution.elimination.recLevels_eq_large
+              large _
+        rw [recLevelsLarge, List.mapM_cons] at recLevelsEq
+        cases hHead : VLevel.ofLevel
+            produced.execution.eliminationExecution.recLevelParams
+            (Level.param (AddInductive.getFreshElimParam
+              produced.execution.eliminationExecution.normalization.validationContext.lparams)) with
+        | none =>
+            rw [hHead] at recLevelsEq
+            simp at recLevelsEq
+        | some headLevel =>
+            rw [hHead] at recLevelsEq
+            cases hTail :
+                produced.execution.eliminationExecution.normalization.stats.levels.mapM
+                  (VLevel.ofLevel
+                    produced.execution.eliminationExecution.recLevelParams) with
+            | none =>
+                rw [hTail] at recLevelsEq
+                simp at recLevelsEq
+            | some tailLevels =>
+                rw [hTail] at recLevelsEq
+                simp only [Option.bind_some, Option.bind_eq_bind,
+                  Option.pure_def, Option.some.injEq] at recLevelsEq
+                congr 1
+                have modeLarge : generation.elimination =
+                    ElimMode.large := by
+                  simpa only [
+                    ProducedBlockRecursorShapeCandidate.eliminationBase,
+                    large, ElimMode.ofBool_true] using
+                    run.elimination.mode_eq
+                have lparamsUs :
+                    produced.execution.eliminationExecution.normalization.validationContext.lparams =
+                      Us := by
+                  simpa only [
+                    ProducedBlockRecursorShapeCandidate.eliminationBase]
+                    using run.validation_lparams_eq
+                have recParamsLarge :
+                    produced.execution.eliminationExecution.recLevelParams =
+                      AddInductive.getFreshElimParam
+                        produced.execution.eliminationExecution.normalization.validationContext.lparams ::
+                        produced.execution.eliminationExecution.normalization.validationContext.lparams := by
+                  unfold
+                    AddInductive.NormalizationEliminationExecution.recLevelParams
+                  exact
+                    produced.execution.eliminationExecution.elimination.recLevelParams_eq_large
+                      large _
+                have recUvarsLarge : generation.recUvars =
+                    source.uvars + 1 := by
+                  rw [recUvarsEq, recParamsLarge]
+                  have lparamsLength :=
+                    congrArg List.length lparamsUs
+                  simp only [List.length_cons]
+                  omega
+                have sourceLevelsLarge : generation.sourceLevels =
+                    VLevel.params' source.uvars 1 := by
+                  show generation.elimination.sourceLevels
+                    source.uvars = _
+                  rw [modeLarge]
+                  rfl
+                have paramsSucc :
+                    VLevel.params (source.uvars + 1) =
+                      .param 0 :: VLevel.params' source.uvars 1 := by
+                  simp [VLevel.params, VLevel.params',
+                    List.range_succ_eq_map, Function.comp_def,
+                    Nat.succ_eq_add_one]
+                have recLevelsForm : generation.recLevels =
+                    VLevel.params (source.uvars + 1) := by
+                  show VLevel.params generation.recUvars = _
+                  rw [recUvarsLarge]
+                rw [recLevelsForm, paramsSucc] at recLevelsEq
+                rw [sourceLevelsLarge]
+                exact (List.cons.injEq .. |>.mp recLevelsEq).2
+  have arityAll : ∀ family ∈ generation.families,
+      produced.execution.eliminationExecution.normalization.stats.levels.length =
+        family.raw.toVConstant.uvars := by
+    intro family familyMem
+    show _ = family.raw.uvars
+    rw [generation.family_uvars familyMem, sourceUvars, statsLevelsLength]
+  have constLookupAll : ∀ family ∈ generation.families,
+      declarations.constructors.ctorEnv.constants family.raw.name =
+        some family.raw.toVConstant := by
+    intro family familyMem
+    exact declarations.generationEnv.familyConst family familyMem
+  have levelTr := run.motiveLevel_relevel
+  have motiveLevelWF : generation.motiveLevel.WF
+      produced.execution.recursors.levelParams.length :=
+    VLevel.WF.of_ofLevel levelTr
+  have instFVarLamOnly : ∀ {delta : VLCtx}, delta.FVarLamOnly →
+      (delta.instL generation.sourceLevels).FVarLamOnly := by
+    intro delta shape
+    induction shape with
+    | nil => exact .nil
+    | cons tailShape ih => exact .cons ih
+  have fvarsInstL :
+      (oldFinal.instL generation.sourceLevels).fvars = oldFinal.fvars := by
+    rw [VLCtx.instL_eq_map]
+    simp [VLCtx.fvars, List.filterMap_map, Function.comp_def]
+  have baseShape :
+      (oldFinal.instL generation.sourceLevels).FVarLamOnly :=
+    instFVarLamOnly
+      (Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvarLamOnly
+        (selectedForallArrayRun_candidateParameterContext oldRun) .nil)
+  have sourceLevelsLength : generation.sourceLevels.length = Us.length := by
+    rw [← sourceUvars]
+    show (generation.elimination.sourceLevels source.uvars).length =
+      source.uvars
+    cases generation.elimination <;>
+      simp [ElimMode.sourceLevels, VLevel.params, VLevel.params']
+  have oldWFCast : VLCtx.WF env generation.sourceLevels.length oldFinal := by
+    rw [sourceLevelsLength]
+    exact oldWF
+  have baseWF : VLCtx.WF declarations.constructors.ctorEnv
+      produced.execution.recursors.levelParams.length
+      (oldFinal.instL generation.sourceLevels) :=
+    VLCtx.WF.instL levelsWF (oldWFCast.mono envLE)
+  have baseFound' :
+      ∀ fv ∈ (oldFinal.instL generation.sourceLevels).fvars,
+        ∃ declaration,
+          produced.execution.recursorContext.lctx.find? fv =
+            some declaration := by
+    rw [fvarsInstL]
+    exact phaseFound
+  have paramSourcesBase :
+      ((oldFinal.instL generation.sourceLevels).fvars).reverse.map
+          Expr.fvar =
+        produced.execution.eliminationExecution.normalization.stats.params.toList := by
+    rw [fvarsInstL, selectedForall_final_fvars oldRun.selection]
+    simp only [VLCtx.fvars_nil, List.append_nil, List.reverse_reverse]
+    exact oldRun.sources_eq.symm
+  have parameterFVarsLen :
+      ((oldFinal.instL generation.sourceLevels).fvars).length =
+        source.nparams := by
+    have lengths := congrArg List.length paramSourcesBase
+    simp only [List.length_map, List.length_reverse,
+      Array.length_toList] at lengths
+    rw [lengths, support.basis.params_size]
+  have recursorArity :
+      produced.execution.recursors.levelParams.length =
+        generation.recUvars := by
+    have recursorLevels : produced.execution.recursors.levelParams =
+        produced.execution.eliminationExecution.recLevelParams := by
+      simpa only [
+        AddInductive.NormalizationEliminationExecution.recLevelParams,
+        AddInductive.NormalizationRecursorExecution.recursorContext]
+        using AddInductive.declareRecursors_levelParams_eq
+          produced.execution.recursorsRun
+    exact (congrArg List.length recursorLevels).trans <| by
+      simpa only [
+        ProducedBlockRecursorShapeCandidate.eliminationBase] using
+        run.elimination.recUvars_eq.symm
+  have parameterContextEq :
+      (oldFinal.instL generation.sourceLevels).toCtx =
+        generation.paramsTel.reverse := by
+    have baseCtx :=
+      Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.toCtx
+        (selectedForallArrayRun_candidateParameterContext oldRun)
+    rw [VLCtx.instL_toCtx]
+    simp only [VLCtx.toCtx, List.append_nil] at baseCtx
+    rw [baseCtx, BlockGenerationChecked.paramsTel, generatedParamsEq]
+    simp [List.map_reverse]
+  have motiveTypesOnTel :
+      declarations.constructors.ctorEnv.OnTel
+        produced.execution.recursors.levelParams.length
+        (oldFinal.instL generation.sourceLevels).toCtx
+        generation.generatedMotiveTypes := by
+    rw [parameterContextEq, recursorArity]
+    exact
+      declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
+        declarations.generationEnv.ord
+  have rootDepth :
+      produced.execution.recursorContext.fuel.recDepth = whnfFuel + 1 := by
+    show produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
+      _
+    exact validationDepth
+  have kernelAlign : kernelSources.toArray.toList.drop 0 = kernelSources := by
+    simp
+  have famRaw : source.types = generation.families.map (·.raw) :=
+    generation.families_map_raw.symm
+  exact recInfoPhaseOneMotiveTranslations_fold
+    (middleFVars := ([] : List FVarId)) henvSource primitives
+    ctorEnvWF envLE levelsWF levels levelsTr levelTr motiveLevelWF arityAll
+    constLookupAll
+    (selectedForallArrayRun_candidateParameterContext oldRun)
+    paramSourcesBase parameterFVarsLen whnfFuel packages phase1 kernelAlign
+    rfl famRaw rootLocal rootDepth .refl phaseFound baseWF baseShape
+    baseFound' (List.nil_append _).symm rfl .refl motiveTypesOnTel
+
+/-- Package a head-family motive input as the complete input list of a
+singleton block. -/
+private theorem singletonMotiveInputList_of_head
+    {source : VInductDecl} {env blockEnv : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {generation : BlockGenerationChecked source}
+    {parameterTypes : List VExpr} {whnfFuel : Nat}
+    {rootContext : AddInductive.Context}
+    {kernelSource : InductiveType}
+    {candidates : AddInductive.CandidateList AddInductive.CandidateFamily
+      [kernelSource]}
+    {raws : List VInductiveType}
+    {roots : CandidateBlockFamilySemanticListRun env blockEnv Us candidates
+      raws}
+    {shapes : CandidateBlockFamilySemanticGenerationShapeList source env
+      blockEnv Us roots}
+    (head : PhaseOneFamilyMotiveInput source env blockEnv Us stats indTypes
+      elimLevel generation parameterTypes whnfFuel rootContext 0
+      roots.headPosition.semantic shapes.head) :
+    Nonempty (PhaseOneFamilyMotiveInputList source env blockEnv Us stats
+      indTypes elimLevel generation parameterTypes whnfFuel rootContext
+      shapes 0) := by
+  cases candidates with
+  | cons candidate candidatesTail =>
+      cases candidatesTail
+      cases roots with
+      | cons root rootsTail =>
+          cases rootsTail
+          cases shapes with
+          | cons shape shapesTail =>
+              cases shapesTail
+              exact ⟨.cons head .nil⟩
+
+/-- Construct the first-family motive input package of a singleton block
+from the generic annotation owner.  The recorded premises are the
+index-count agreement, taken at any local extension of the retained
+recursor-synthesis root, and the annotation-builder name exclusions;
+every other field is derived from the retained producer structures. -/
+private theorem
+    ProducedBlockRecursorShapeCandidate.FirstFamilyAnnotationSpine.singletonMotiveInput
+    {source : VInductDecl} {firstSource : InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source [firstSource]
+      numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (owner : produced.FirstFamilyAnnotationSpine semantic)
+    (context_lctx_eq : context.lctx = {})
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (generatedIndicesEq : ∀ family ∈ generation.families,
+      generation.generatedIndices family =
+        owner.annotation.storedBinders.drop source.nparams)
+    (indexCountEq : ∀ {current : AddInductive.Context},
+      produced.execution.recursorContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep
+          produced.execution.eliminationExecution.normalization.stats
+          [firstSource].toArray
+          produced.execution.eliminationExecution.elimination.level 0
+          current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
+          produced.execution.eliminationExecution.normalization.stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext),
+        (loopArgs1IndexFVars argsTrace).length =
+          (owner.annotation.storedBinders.drop source.nparams).length)
+    (notOptParam : firstSource.name ≠ ``optParam)
+    (notAutoParam : firstSource.name ≠ ``autoParam)
+    (notOutParam : firstSource.name ≠ ``outParam)
+    (notSemiOutParam : firstSource.name ≠ ``semiOutParam) :
+    Nonempty (PhaseOneFamilyMotiveInput source env blockEnv Us
+      produced.execution.eliminationExecution.normalization.stats
+      [firstSource].toArray
+      produced.execution.eliminationExecution.elimination.level
+      generation
+      (owner.singletonCanonicalFamilyAssemblySupport
+        context_lctx_eq).basis.storedTypes
+      owner.position.semantic.type.whnfFuel
+      produced.execution.recursorContext 0
+      owner.position.semantic owner.shape) := by
+  classical
+  let support := owner.singletonCanonicalFamilyAssemblySupport context_lctx_eq
+  have henvSource : env.WF := by
+    simpa only [support.basis.contextRun.venv_eq] using
+      support.basis.contextRun.candidate.context.Ewf
+  obtain ⟨resultLevel, terminalEq⟩ :=
+    owner.validationAnnotations.head_terminal
+  have parameterBound :
+      produced.execution.eliminationExecution.normalization.stats.params.size ≤
+        produced.candidate.families.head.familyType.type.trace.spineLength := by
+    rw [support.basis.params_size]
+    exact owner.nparams_le_spineLength context_lctx_eq
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  have familyRun :=
+    produced.execution.eliminationExecution.normalization.familyValidationResult_run
+      normalizationProduced
+  obtain ⟨validation⟩ := owner.firstFamilyValidationState context_lctx_eq
+  have comparisonResult :
+      (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+        normalizationProduced produced.kernelSources_nonempty).result =
+        produced.execution.eliminationExecution.normalization.familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
+      (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
+        normalizationProduced produced.kernelSources_nonempty)
+  have tailResultEq : validation.continuation.tail.result =
+      produced.execution.eliminationExecution.normalization.familyValidationResult :=
+    (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+      validation.selected).trans comparisonResult
+  have continuationOrdinal : validation.continuation.dIdx = 0 :=
+    AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_dIdx
+      validation.selected
+  have tailLengthLe : [firstSource].toArray.size ≤
+      validation.continuation.dIdx + 1 := by
+    rw [continuationOrdinal]
+    simp
+  have nextParamsEq : validation.continuation.nextStats.params =
+      validation.continuation.telescope.result.stats.params :=
+    familyParameterComparisonBlockTrace_headContinuation_nextParams
+      validation.selected
+  have nextLocalState : TypeChecker.FamilyParameterLocalState
+      validation.continuation.nextStats
+      validation.continuation.telescope.result.context :=
+    validation.localState.of_params_eq nextParamsEq
+  have nextParameterSourcesEq :
+      validation.continuation.nextStats.params.toList =
+        produced.candidate.families.head.familyType.type.trace.parameterList
+          source.nparams :=
+    (congrArg Array.toList nextParamsEq).trans
+      validation.parameterSources_eq
+  have nextParamsSize :
+      validation.continuation.nextStats.params.size = source.nparams := by
+    calc
+      validation.continuation.nextStats.params.size =
+          validation.continuation.telescope.result.stats.params.size :=
+        congrArg Array.size nextParamsEq
+      _ = source.nparams := validation.params_size
+  have finalParamsSize :
+      produced.execution.eliminationExecution.normalization.stats.params.size =
+        source.nparams := by
+    have sizes :=
+      produced.execution.eliminationExecution.normalization.familyValidationResult.sizes_of_run
+        produced.kernelSources_nonempty familyRun
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using sizes.1
+  have tailParamsSize :
+      validation.continuation.tail.result.stats.params.size =
+        source.nparams := by
+    rw [tailResultEq]
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using finalParamsSize
+  have terminalLocal :=
+    familyParameterComparisonBlockTrace_terminalLocalStateExact
+      validation.continuation.tail tailLengthLe nextLocalState
+      nextParamsSize nextParameterSourcesEq tailParamsSize
+  rw [tailResultEq] at terminalLocal
+  change TypeChecker.FamilyParameterLocalState
+      produced.execution.eliminationExecution.normalization.stats
+      produced.execution.eliminationExecution.normalization.validationContext ∧
+    produced.execution.eliminationExecution.normalization.stats.params.toList =
+      produced.candidate.families.head.familyType.type.trace.parameterList
+        source.nparams ∧
+    produced.execution.eliminationExecution.normalization.stats.params.size =
+      source.nparams at terminalLocal
+  have parameterSources :
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
+        produced.candidate.families.head.familyType.type.trace.parameterList
+          produced.execution.eliminationExecution.normalization.stats.params.size := by
+    rw [support.basis.params_size]
+    exact terminalLocal.2.1
+  have parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+      support.basis.storedTypes
+      (owner.annotation.storedBinders.take
+        produced.execution.eliminationExecution.normalization.stats.params.size) := by
+    have storedCanonical := support.basis.storedCanonical
+    have ownerTel := owner.storedViewParameterTelescopeDefEq
+      context_lctx_eq
+    rw [← owner.singletonBlockParams_eq] at ownerTel
+    rw [support.basis.params_size]
+    exact storedCanonical.trans henvSource trivial
+      (ownerTel.symm henvSource trivial)
+  have typesLength : source.types.length = 1 := by
+    have nameLists := semantic.families.rawHeaderNames.1
+    have lengths := congrArg List.length nameLists
+    simpa using lengths
+  have tailNil : owner.position.remainingRaws = [] := by
+    have lenEq := congrArg List.length owner.position.raws_eq
+    rw [typesLength] at lenEq
+    simp only [List.length_cons] at lenEq
+    have : owner.position.remainingRaws.length = 0 := by omega
+    exact List.eq_nil_of_length_eq_zero this
+  have typesEq : source.types = [owner.position.raw] := by
+    have rawsEq := owner.position.raws_eq
+    rw [tailNil] at rawsEq
+    exact rawsEq
+  have rawNameEq : owner.position.raw.name = firstSource.name := by
+    have nameLists := semantic.families.rawHeaderNames.1
+    rw [typesEq] at nameLists
+    simpa using nameLists
+  have headConstEq :
+      produced.execution.eliminationExecution.normalization.stats.indConsts[0]? =
+        some (.const owner.position.raw.name
+          produced.execution.eliminationExecution.normalization.stats.levels) := by
+    have rawAt : source.types[0]? = some owner.position.raw := by
+      have projected := congrArg
+        (fun raws : List VInductiveType => raws[0]?)
+        owner.position.raws_eq
+      simpa using projected
+    have inventory :=
+      CandidateBlockFamilySemanticListRun.rawFamilyConstantInventory
+        semantic.families (by rfl) familyRun 0 owner.position.raw rawAt
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using inventory
+  have indicesEq : ∀ family, generation.families[0]? = some family →
+      generation.generatedIndices family =
+        owner.annotation.storedBinders.drop
+          produced.execution.eliminationExecution.normalization.stats.params.size := by
+    intro family famAt
+    rw [support.basis.params_size]
+    exact generatedIndicesEq family (List.mem_of_getElem? famAt)
+  have countEq' : ∀ {current : AddInductive.Context},
+      produced.execution.recursorContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep
+          produced.execution.eliminationExecution.normalization.stats
+          [firstSource].toArray
+          produced.execution.eliminationExecution.elimination.level 0
+          current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
+          produced.execution.eliminationExecution.normalization.stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext),
+        (loopArgs1IndexFVars argsTrace).length =
+          (owner.annotation.storedBinders.drop
+            produced.execution.eliminationExecution.normalization.stats.params.size).length := by
+    intro current extension step argsTrace
+    rw [support.basis.params_size]
+    exact indexCountEq extension step argsTrace
+  exact ⟨{
+    annotation := owner.annotation
+    resultLevel := resultLevel
+    terminalEq := terminalEq
+    parameterBound := parameterBound
+    parameterSources := parameterSources
+    parameterTel := parameterTel
+    candidateDepth := owner.position.semantic.type.whnfDepth
+    headConstEq := headConstEq
+    rawNameEq := rawNameEq
+    indicesEq := indicesEq
+    countEq := countEq'
+    notOptParam := notOptParam
+    notAutoParam := notAutoParam
+    notOutParam := notOutParam
+    notSemiOutParam := notSemiOutParam }⟩
+
+/-- Construct the five-phase parameter and motive selections of a singleton
+block from the retained execution.  The recorded M3 premises are the
+traversal/candidate index-count agreement, taken at any local extension of
+the retained recursor-synthesis root, and the annotation-builder name
+exclusions; every other input is derived from the retained producer
+structures.  This is now a direct instance of the mutual producer. -/
+theorem
+    ProducedBlockRecursorShapeCandidate.FirstFamilyAnnotationSpine.singletonGeneratedRecursorMotivePhase
+    {source : VInductDecl} {firstSource : InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {produced : ProducedBlockRecursorShapeCandidate source [firstSource]
+      numNested isUnsafe context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    (owner : produced.FirstFamilyAnnotationSpine semantic)
+    (context_lctx_eq : context.lctx = {})
+    {generation : BlockGenerationChecked source}
+    (run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation)
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (synthesis : ProducedBlockRecursorSynthesisRun produced)
+    (generatedParamsEq : generation.generatedParams =
+      (owner.singletonCanonicalFamilyAssemblySupport
+        context_lctx_eq).basis.storedTypes)
+    (generatedIndicesEq : ∀ family ∈ generation.families,
+      generation.generatedIndices family =
+        owner.annotation.storedBinders.drop source.nparams)
+    (indexCountEq : ∀ {current : AddInductive.Context},
+      produced.execution.recursorContext.LocalExtension current →
+      ∀ (step : AddInductive.RecInfoPhaseOneStep
+          produced.execution.eliminationExecution.normalization.stats
+          [firstSource].toArray
+          produced.execution.eliminationExecution.elimination.level 0
+          current)
+        (argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace
+          produced.execution.eliminationExecution.normalization.stats
+          step.normalizedType 0 #[] current.fuel.inductiveFuel current
+          step.indices step.indexContext),
+        (loopArgs1IndexFVars argsTrace).length =
+          (owner.annotation.storedBinders.drop source.nparams).length)
+    (notOptParam : firstSource.name ≠ ``optParam)
+    (notAutoParam : firstSource.name ≠ ``autoParam)
+    (notOutParam : firstSource.name ≠ ``outParam)
+    (notSemiOutParam : firstSource.name ≠ ``semiOutParam) :
+    Nonempty (Σ' (parameterContext : VLCtx)
+      (_ : TypeChecker.MLCtx.SelectedForall.ArrayRun
+        (run.declarationRun staging).constructors.ctorEnv
+        produced.execution.recursors.levelParams
+        synthesis.synthesis.synthesisContext.lctx []
+        produced.execution.eliminationExecution.normalization.stats.params
+        generation.paramsTel parameterContext)
+      (motiveContext : VLCtx),
+      TypeChecker.MLCtx.SelectedForall.ArrayRun
+        (run.declarationRun staging).constructors.ctorEnv
+        produced.execution.recursors.levelParams
+        synthesis.synthesis.synthesisContext.lctx parameterContext
+        (synthesis.synthesis.recInfos.map (·.motive))
+        generation.generatedMotiveTypes motiveContext) := by
+  classical
+  obtain ⟨pkg⟩ := owner.singletonMotiveInput context_lctx_eq run
+    generatedIndicesEq indexCountEq notOptParam notAutoParam notOutParam
+    notSemiOutParam
+  obtain ⟨packages⟩ := singletonMotiveInputList_of_head pkg
+  have contextFuelDepth : context.fuel.recDepth =
+      owner.position.semantic.type.whnfFuel + 1 := by
+    have depth := owner.position.semantic.type.whnfDepth
+    rw [owner.validationAnnotations.head_context_eq] at depth
+    exact depth
+  have normalizationProduced :=
+    produced.execution.normalization_run produced.producedExecution
+  have validationFuel :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel =
+        context.fuel := by
+    have compRes :
+        (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+          normalizationProduced produced.kernelSources_nonempty).result =
+          produced.execution.eliminationExecution.normalization.familyValidationResult :=
+      AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
+        (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
+          normalizationProduced produced.kernelSources_nonempty)
+    have fuelEq :=
+      (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+        normalizationProduced
+        produced.kernelSources_nonempty).result_fuel
+    rw [compRes] at fuelEq
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using fuelEq
+  have validationDepth :
+      produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
+        owner.position.semantic.type.whnfFuel + 1 := by
+    rw [validationFuel]
+    exact contextFuelDepth
+  exact (owner.singletonCanonicalFamilyAssemblySupport
+      context_lctx_eq).generatedRecursorMotivePhase run staging synthesis
+    generatedParamsEq validationDepth packages
 
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
