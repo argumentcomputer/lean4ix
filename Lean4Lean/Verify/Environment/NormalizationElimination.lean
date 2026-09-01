@@ -9,6 +9,7 @@ import Lean4Lean.Environment
 namespace Lean4Lean
 open Lean hiding Environment Exception
 open Kernel
+open private mkAppRangeAux from Lean.Expr
 
 /-- Strict translation preserves the executable syntactic nonzero test used
 by both the kernel inductive statistics and Theory elimination analysis. -/
@@ -1474,6 +1475,86 @@ theorem _root_.Lean.Expr.reductionConstFree_mkAppList_iff
       rw [Lean.Expr.mkAppList, ih]
       simp only [Lean.Expr.ReductionConstFree, List.forall_mem_cons,
         and_assoc, and_left_comm]
+
+/-- Applying an in-bounds array range preserves reduction support when the
+seed and every stored argument have that support. -/
+theorem _root_.Lean.Expr.ReductionConstFree.mkAppRange
+    {function : Expr} {arguments : Array Expr} {name : Name}
+    (functionSafe : function.ReductionConstFree name)
+    (argumentsSafe : ∀ argument ∈ arguments.toList,
+      argument.ReductionConstFree name)
+    (start stop : Nat) (stopBound : stop ≤ arguments.size) :
+    (mkAppRange function start stop arguments).ReductionConstFree name := by
+  unfold Lean.mkAppRange
+  exact loop start function functionSafe
+where
+  loop (index : Nat) (head : Expr)
+      (headSafe : head.ReductionConstFree name) :
+      (mkAppRangeAux stop arguments index head).ReductionConstFree name := by
+    rw [mkAppRangeAux.eq_def]
+    split
+    · rename_i beforeStop
+      apply loop (index + 1) (.app head arguments[index]!)
+      have indexBound : index < arguments.size :=
+        Nat.lt_of_lt_of_le beforeStop stopBound
+      rw [getElem!_pos arguments index indexBound]
+      refine ⟨headSafe, argumentsSafe arguments[index] ?_⟩
+      apply List.mem_of_getElem? (i := index)
+      simp [Array.getElem?_toList, indexBound]
+    · exact headSafe
+  termination_by stop - index
+  decreasing_by omega
+
+/-- Nullary-constructor synthesis cannot introduce an excluded name when the
+input type is reduction-safe, the selected constructor metadata excludes the
+name, and the requested parameter prefix is in bounds. -/
+theorem _root_.Lean.Expr.ReductionConstFree.mkNullaryCtor
+    {environment : Environment} {type result : Expr} {nparams : Nat}
+    {name : Name}
+    (typeSafe : type.ReductionConstFree name)
+    (payloadSafe : environment.InductiveCtorNamesFree name)
+    (parameterBound : nparams ≤ type.getAppArgs.size)
+    (produced : mkNullaryCtor environment type nparams = some result) :
+    result.ReductionConstFree name := by
+  unfold Lean4Lean.mkNullaryCtor at produced
+  simp only [Expr.withApp_eq] at produced
+  cases head : type.getAppFn with
+  | const family levels =>
+      simp only [head] at produced
+      cases selected : getFirstCtor environment family with
+      | none => simp [selected] at produced
+      | some constructor =>
+          simp at produced
+          obtain ⟨actual, actualSelected, resultEq⟩ := produced
+          rw [selected] at actualSelected
+          have actualEq : actual = constructor :=
+            Option.some.inj actualSelected.symm
+          subst actual
+          rw [← resultEq]
+          apply Lean.Expr.ReductionConstFree.mkAppRange
+          · exact payloadSafe.ne_of_getFirstCtor_eq selected
+          · intro argument member
+            exact typeSafe.getAppArgs member
+          · exact parameterBound
+  | _ => simp [head] at produced
+
+/-- Nullary-constructor synthesis preserves support for every family and
+constructor name owned by a fresh block. -/
+theorem VInductDecl.BlockReductionConstFree.mkNullaryCtor
+    {source : VInductDecl} {environment : Environment}
+    {type result : Expr} {nparams : Nat}
+    (typeSafe : source.BlockReductionConstFree type)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (parameterBound : nparams ≤ type.getAppArgs.size)
+    (produced : Lean4Lean.mkNullaryCtor environment type nparams =
+      some result) :
+    source.BlockReductionConstFree result := by
+  exact ⟨fun raw member =>
+      (typeSafe.1 raw member).mkNullaryCtor
+        (payloadSafe.1 raw member).1 parameterBound produced,
+    fun raw member =>
+      (typeSafe.2 raw member).mkNullaryCtor
+        (payloadSafe.2 raw member).1 parameterBound produced⟩
 
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
