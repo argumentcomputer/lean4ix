@@ -11005,6 +11005,199 @@ structure ConstructorDeclarationStagingRun
     finalKernelEnv.constants ctorEnv
   trenv : TrEnv' .safe finalKernelEnv.constants Q ctorEnv
 
+/-- Every family staged by the exact metadata fold was absent from the
+shared pre-family Theory environment. -/
+theorem FamilyDeclarationStagingRun.raw_name_absent
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    {raw : VConstVal} (member : raw ∈ raws) :
+    env.constants raw.name = none := by
+  have hostAbsent := run.addTypes.map_fresh pre.map_wf member
+  cases theoryFound : env.constants raw.name with
+  | none => rfl
+  | some constant =>
+      obtain ⟨info, hostFound, _safe⟩ :=
+        pre.aligned.find?_iff.mpr ⟨constant, theoryFound⟩
+      rw [hostAbsent] at hostFound
+      contradiction
+
+/-- Family staging cannot create a delta-reducible declaration.  Any
+value-bearing lookup observed after the family fold is therefore the
+identical lookup from the pre-family host environment. -/
+theorem FamilyDeclarationStagingRun.old_of_deltaValue
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    {name : Name} {info : ConstantInfo} {value : Expr}
+    (found : finalKernelEnv.find? name = some info)
+    (delta : info.deltaValue? = some value) :
+    kernelEnv.find? name = some info := by
+  have postMapWF := run.addTypes.map_wf pre.map_wf
+  change finalKernelEnv.constants.find?' name = some info at found
+  rw [postMapWF.find?'_eq_find?] at found
+  change kernelEnv.constants.find?' name = some info
+  rw [pre.map_wf.find?'_eq_find?]
+  exact run.addTypes.old_of_value pre.map_wf found delta
+
+/-- Family staging preserves every pre-existing host lookup exactly. -/
+theorem FamilyDeclarationStagingRun.preserve_find?
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    {name : Name} {info : ConstantInfo}
+    (found : kernelEnv.find? name = some info) :
+    finalKernelEnv.find? name = some info := by
+  have postMapWF := run.addTypes.map_wf pre.map_wf
+  change kernelEnv.constants.find?' name = some info at found
+  rw [pre.map_wf.find?'_eq_find?] at found
+  change finalKernelEnv.constants.find?' name = some info
+  rw [postMapWF.find?'_eq_find?]
+  exact run.addTypes.preserve_map_lookup pre.map_wf found
+
+/-- The only new metadata role at the family boundary is `inductInfo`.
+An observation incompatible with that role is reflected unchanged to the
+pre-family environment. -/
+theorem FamilyDeclarationStagingRun.old_of_not_induct
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    {name : Name} {info : ConstantInfo}
+    (found : finalKernelEnv.find? name = some info)
+    (notInduct : ¬ InductConstantKind.induct.Matches info) :
+    kernelEnv.find? name = some info := by
+  have postMapWF := run.addTypes.map_wf pre.map_wf
+  change finalKernelEnv.constants.find?' name = some info at found
+  rw [postMapWF.find?'_eq_find?] at found
+  change kernelEnv.constants.find?' name = some info
+  rw [pre.map_wf.find?'_eq_find?]
+  rcases run.addTypes.map_lookup_cases_kind pre.map_wf found with
+    old | ⟨raw, _member, _name, induct⟩
+  · exact old
+  · exact (notInduct induct).elim
+
+/-- The delta-unfolding discriminator is unchanged by family staging: old
+declarations retain their exact metadata, while every new family has no
+delta value. -/
+theorem FamilyDeclarationStagingRun.isDelta_eq
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    (expression : Expr) :
+    TypeChecker.Inner.isDelta finalKernelEnv expression =
+      TypeChecker.Inner.isDelta kernelEnv expression := by
+  unfold TypeChecker.Inner.isDelta
+  cases function : expression.getAppFn with
+  | const name levels =>
+      cases old : kernelEnv.find? name with
+      | some info =>
+          have retained := run.preserve_find? pre old
+          simp only [function, retained, old]
+      | none =>
+          cases added : finalKernelEnv.find? name with
+          | none => simp only [function, added, old]
+          | some info =>
+              cases value : info.deltaValue? with
+              | none => simp [added, old, value]
+              | some body =>
+                  have reflected := run.old_of_deltaValue pre added value
+                  rw [old] at reflected
+                  contradiction
+  | _ => simp only [function]
+
+/-- With identical method and cache state, primitive delta unfolding is
+insensitive to family staging. -/
+theorem FamilyDeclarationStagingRun.unfoldDefinitionCore_eq
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    (expression : Expr) (methods : TypeChecker.Methods)
+    (context : TypeChecker.Context) (state : TypeChecker.State) :
+    TypeChecker.Inner.unfoldDefinitionCore expression methods
+        { context with env := finalKernelEnv } state =
+      TypeChecker.Inner.unfoldDefinitionCore expression methods
+        { context with env := kernelEnv } state := by
+  cases expression <;> try rfl
+  rename_i name levels
+  unfold TypeChecker.Inner.unfoldDefinitionCore
+  simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+  rw [show (liftM TypeChecker.getEnv :
+      TypeChecker.RecM Environment) methods
+        { context with env := finalKernelEnv } state =
+          .ok (finalKernelEnv, state) by rfl]
+  rw [show (liftM TypeChecker.getEnv :
+      TypeChecker.RecM Environment) methods
+        { context with env := kernelEnv } state =
+          .ok (kernelEnv, state) by rfl]
+  simp only [Except.bind]
+  rw [run.isDelta_eq pre (.const name levels)]
+  cases TypeChecker.Inner.isDelta kernelEnv (.const name levels) with
+  | none => rfl
+  | some info =>
+      by_cases hasLevels : 0 < levels.length
+      · simp [hasLevels, Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
+          ReaderT.pure,
+          StateT.pure, Except.pure, Pure.pure,
+          get, getThe, MonadStateOf.get, StateT.get,
+          modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+          liftM, monadLift, MonadLift.monadLift, StateT.lift]
+        cases cached : state.unfold[Expr.const name levels]? <;>
+          simp [cached, Bind.bind, ReaderT.bind, StateT.bind, Except.bind,
+            ReaderT.pure, StateT.pure, Except.pure, Pure.pure,
+            modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+            liftM, monadLift, MonadLift.monadLift, StateT.lift]
+      · simp [hasLevels, ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+
+/-- Delta unfolding at an application head is likewise unchanged by family
+staging. -/
+theorem FamilyDeclarationStagingRun.unfoldDefinition_eq
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    (expression : Expr) (methods : TypeChecker.Methods)
+    (context : TypeChecker.Context) (state : TypeChecker.State) :
+    TypeChecker.Inner.unfoldDefinition expression methods
+        { context with env := finalKernelEnv } state =
+      TypeChecker.Inner.unfoldDefinition expression methods
+        { context with env := kernelEnv } state := by
+  unfold TypeChecker.Inner.unfoldDefinition
+  split
+  · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+    rw [run.unfoldDefinitionCore_eq pre expression.getAppFn methods context
+      state]
+    generalize hcore : TypeChecker.Inner.unfoldDefinitionCore
+      expression.getAppFn methods { context with env := kernelEnv } state =
+        coreResult
+    clear hcore
+    cases coreResult with
+    | error err => rfl
+    | ok resultState =>
+      rcases resultState with ⟨result, state'⟩
+      cases result <;>
+        simp [ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
+  · exact run.unfoldDefinitionCore_eq pre expression methods context state
+
 /-- Every constructor staged by the exact metadata fold was absent from the
 shared pre-constructor Theory environment.  The host fold supplies freshness
 in the family-only constant map; alignment of that map with `typeEnv` reflects
