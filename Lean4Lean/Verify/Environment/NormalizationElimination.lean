@@ -1300,6 +1300,15 @@ def VInductDecl.BlockRecursorRulesReductionConstFree
   (∀ raw ∈ source.blockConstructorConstants,
     environment.RecursorRulesReductionConstFree raw.name)
 
+/-- Every family and constructor name owned by one fresh block is absent from
+all operational metadata already stored in the host environment. -/
+def VInductDecl.BlockReductionPayloadFree
+    (source : VInductDecl) (environment : Environment) : Prop :=
+  (∀ raw ∈ source.blockTypeConstants,
+    environment.ReductionPayloadFree raw.name) ∧
+  (∀ raw ∈ source.blockConstructorConstants,
+    environment.ReductionPayloadFree raw.name)
+
 /-- Block reduction support is pointwise structural across applications. -/
 theorem VInductDecl.BlockReductionConstFree.app_iff
     {source : VInductDecl} {function argument : Expr} :
@@ -31416,6 +31425,71 @@ theorem ProducedBlockSemanticDeclarationRun.find?_eq_of_reductionConstFree
   · intro raw member
     exact (constructorSafe raw member).constName_ne_of_getAppFn_eq head |>.symm
 
+/-- The first-constructor selector sees the same inductive metadata whenever
+its constant head is reduction-safe for the staged block. -/
+theorem ProducedBlockSemanticDeclarationRun.getFirstCtor_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {expression : Expr} {name : Name} {levels : List Level}
+    (familySafe : ∀ raw ∈ source.blockTypeConstants,
+      expression.ReductionConstFree raw.name)
+    (constructorSafe : ∀ raw ∈ source.blockConstructorConstants,
+      expression.ReductionConstFree raw.name)
+    (head : expression.getAppFn = .const name levels) :
+    getFirstCtor produced.execution.constructorEnv name =
+      getFirstCtor
+        produced.execution.normalization.validationContext.env name := by
+  unfold getFirstCtor
+  rw [declarations.find?_eq_of_reductionConstFree pre familySafe
+    constructorSafe head]
+
+/-- Nullary-constructor synthesis is unchanged across family/constructor
+staging for a type whose reduction support excludes the whole fresh block. -/
+theorem ProducedBlockSemanticDeclarationRun.mkNullaryCtor_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (expression : Expr) (nparams : Nat)
+    (familySafe : ∀ raw ∈ source.blockTypeConstants,
+      expression.ReductionConstFree raw.name)
+    (constructorSafe : ∀ raw ∈ source.blockConstructorConstants,
+      expression.ReductionConstFree raw.name) :
+    mkNullaryCtor produced.execution.constructorEnv expression nparams =
+      mkNullaryCtor produced.execution.normalization.validationContext.env
+        expression nparams := by
+  unfold mkNullaryCtor
+  simp only [Expr.withApp_eq]
+  cases head : expression.getAppFn with
+  | const name levels =>
+      simp only
+      rw [declarations.getFirstCtor_eq pre familySafe constructorSafe head]
+  | _ => rfl
+
 /-- Constructor-application recognition is unchanged for an expression
 whose reduction support excludes the block's staged names. -/
 theorem ProducedBlockSemanticDeclarationRun.isConstructorApp?_eq
@@ -31764,6 +31838,97 @@ theorem
     env.constants constructor.name = none :=
   declarations.families.addTypes.le.constants_none
     (declarations.constructor_name_absent member)
+
+/-- Every staged family name was absent from the exact host environment in
+which candidate validation ran. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.host_family_name_absent_at_validation
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {family : VConstVal}
+    (member : family ∈ source.blockTypeConstants) :
+    produced.execution.normalization.validationContext.env.find? family.name =
+      none := by
+  have absent := declarations.families.addTypes.map_fresh pre.map_wf member
+  change produced.execution.normalization.validationContext.env.constants.find?'
+    family.name = none
+  rw [pre.map_wf.find?'_eq_find?]
+  exact absent
+
+/-- Constructor freshness at the family-only host boundary reflects through
+the preceding family fold to the exact validation environment. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.host_constructor_name_absent_at_validation
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {constructor : VConstVal}
+    (member : constructor ∈ source.blockConstructorConstants) :
+    produced.execution.normalization.validationContext.env.find?
+      constructor.name = none := by
+  have familyAbsent := declarations.constructors.addCtors.map_fresh
+    declarations.families.trenv.map_wf member
+  have validationAbsent :=
+    declarations.families.addTypes.input_map_none_of_output_none pre.map_wf
+      familyAbsent
+  change produced.execution.normalization.validationContext.env.constants.find?'
+    constructor.name = none
+  rw [pre.map_wf.find?'_eq_find?]
+  exact validationAbsent
+
+/-- Payload closure of the input environment specializes to every name owned
+by the fresh block, using the exact host freshness checks retained by the two
+metadata folds. -/
+theorem ProducedBlockSemanticDeclarationRun.blockReductionPayloadFree
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (closed : produced.execution.normalization.validationContext.env.ReductionPayloadClosed) :
+    source.BlockReductionPayloadFree
+      produced.execution.normalization.validationContext.env := by
+  constructor
+  · intro family member
+    exact closed (declarations.host_family_name_absent_at_validation pre member)
+  · intro constructor member
+    exact closed
+      (declarations.host_constructor_name_absent_at_validation pre member)
 
 /-- Any expression strictly translated during candidate validation is free
 of every family and constructor name subsequently staged for this block. -/
