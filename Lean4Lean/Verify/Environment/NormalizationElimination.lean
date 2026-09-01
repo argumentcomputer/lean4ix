@@ -20701,6 +20701,132 @@ private theorem familyParameterComparisonBlockTrace_headContinuation_nextParams
       at selected
     contradiction
 
+/-- A selected head continuation always records at least one interpreted
+family constant. -/
+private theorem familyParameterComparisonBlockTrace_headContinuation_nextIndConsts
+    {nparams dIdx : Nat} {indTypes : Array InductiveType}
+    {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context}
+    {trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      indTypes dIdx stats context}
+    {continuation :
+      AddInductive.FamilyParameterComparisonBlockTrace.FamilyContinuation
+        nparams indTypes}
+    (selected : trace.headContinuation? = some continuation) :
+    continuation.nextStats.indConsts.isEmpty = false := by
+  cases trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail =>
+    simp only [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?]
+      at selected
+    cases Option.some.inj selected
+    simp
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible tail =>
+    simp only [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?]
+      at selected
+    cases Option.some.inj selected
+    simp
+  | terminal =>
+    simp only [AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?]
+      at selected
+    contradiction
+
+/-- A later family's telescope traversal preserves the accumulated
+statistics record and transports the shared-parameter inventory to its
+terminal context.  Fresh-parameter allocation is impossible once a family
+constant is recorded, and shared/index branches never modify the
+statistics. -/
+private theorem familyTypeParameterComparison_later_preservation
+    {nparams : Nat} {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context} {sourceExpr : Expr}
+    {i nindices fuel : Nat}
+    (trace : AddInductive.FamilyTypeParameterComparisonTrace nparams stats
+      context sourceExpr i nindices fuel)
+    (later : stats.indConsts.isEmpty = false)
+    (localState : TypeChecker.FamilyParameterLocalState stats context) :
+    trace.result.stats = stats ∧
+      TypeChecker.FamilyParameterLocalState stats trace.result.context := by
+  induction trace with
+  | freshParameter stats context i nindices fuel name domain body view
+      binderInfo isParameter firstFamily whnf tail ih =>
+    rw [later] at firstFamily
+    contradiction
+  | sharedParameter stats context i nindices fuel name domain body
+      parameterType view binderInfo isParameter laterFamily parameterTypeRun
+      defeq whnf tail ih =>
+    exact ih later localState
+  | index stats context i nindices fuel name domain body view binderInfo
+      notParameter whnf tail ih =>
+    exact ih later (localState.pushLocal name binderInfo
+      (AddInductive.consumeTypeAnnotations domain))
+  | terminal stats context sourceExpr i nindices fuel notForall
+      parametersComplete =>
+    exact ⟨rfl, localState⟩
+
+/-- Once a family constant is recorded, the remaining outer comparison
+suffix preserves the shared parameter array exactly.  Later families only
+push index counts and family constants; the terminal wrapper preserves the
+array under the retained size agreement. -/
+private theorem familyParameterComparisonBlockTrace_later_paramsPreserved
+    {nparams dIdx : Nat} {indTypes : Array InductiveType}
+    {stats : AddInductive.InductiveStats}
+    {context : AddInductive.Context}
+    (trace : AddInductive.FamilyParameterComparisonBlockTrace nparams
+      indTypes dIdx stats context)
+    (later : stats.indConsts.isEmpty = false)
+    (sizeEq : stats.params.size = nparams)
+    (resultSize : trace.result.stats.params.size = nparams)
+    (localState : TypeChecker.FamilyParameterLocalState stats context) :
+    trace.result.stats.params = stats.params := by
+  induction trace with
+  | firstFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isFirst tail ih =>
+    have preserved := familyTypeParameterComparison_later_preservation
+      telescope later localState
+    rw [preserved.1, later] at isFirst
+    contradiction
+  | laterFamily dIdx stats context inBounds closed inferred root checkType
+      rootWhnf telescope sorted ensureSort isLater resultLevelCompatible
+      tail ih =>
+    have preserved := familyTypeParameterComparison_later_preservation
+      telescope later localState
+    have paramsEq : ({ telescope.result.stats with
+        nindices := telescope.result.stats.nindices.push
+          telescope.result.nindices
+        indConsts := telescope.result.stats.indConsts.push
+          (.const indTypes[dIdx].name telescope.result.stats.levels) } :
+        AddInductive.InductiveStats).params = stats.params := by
+      show telescope.result.stats.params = stats.params
+      rw [preserved.1]
+    have nonempty' : ({ telescope.result.stats with
+        nindices := telescope.result.stats.nindices.push
+          telescope.result.nindices
+        indConsts := telescope.result.stats.indConsts.push
+          (.const indTypes[dIdx].name telescope.result.stats.levels) } :
+        AddInductive.InductiveStats).indConsts.isEmpty = false := by
+      simp
+    have sizeEq' : ({ telescope.result.stats with
+        nindices := telescope.result.stats.nindices.push
+          telescope.result.nindices
+        indConsts := telescope.result.stats.indConsts.push
+          (.const indTypes[dIdx].name telescope.result.stats.levels) } :
+        AddInductive.InductiveStats).params.size = nparams := by
+      rw [paramsEq]
+      exact sizeEq
+    have localState' := (preserved.2).of_params_eq paramsEq
+    have final := ih nonempty' sizeEq' resultSize localState'
+    exact final.trans paramsEq
+  | terminal dIdx stats context outOfBounds =>
+    have paramsEq :=
+      AddInductive.familyValidationTerminalStats_params_eq_of_sizes stats
+        context sizeEq (by
+          simpa only [
+            AddInductive.FamilyParameterComparisonBlockTrace.result] using
+            resultSize)
+    simpa only [AddInductive.FamilyParameterComparisonBlockTrace.result]
+      using paramsEq
+
 /-- At an exhausted outer-family suffix, transport the genuine local
 parameter inventory through the validator's terminal assertion wrapper. -/
 private theorem familyParameterComparisonBlockTrace_terminalLocalStateExact
@@ -44517,13 +44643,13 @@ private theorem phaseOneFamilyMotiveInputList_ofAnnotations
 /-- Construct the complete per-family motive input package list of a
 nonempty block from its canonical family assembly support.
 
-The recorded premises are: the first-family parameter identification (the
-final validator statistics name the head candidate's exact parameter
-allocation — dischargeable by a later-family statistics-preservation walk
-over the outer comparison trace), the generated-index surface tie, the
-positional index-count agreements, and the annotation-builder name
-exclusions.  Every family-local input is derived by walking the support's
-own annotation, validation-provenance, and parameter-telescope lists. -/
+The recorded premises are: the generated-index surface tie, the positional
+index-count agreements, and the annotation-builder name exclusions.  Every
+family-local input is derived by walking the support's own annotation,
+validation-provenance, and parameter-telescope lists; the first family's
+parameter identification survives to the final validator statistics because
+later families cannot allocate parameters
+(`familyParameterComparisonBlockTrace_later_paramsPreserved`). -/
 theorem
     ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.motiveInputPackages
     {source : VInductDecl} {firstSource : InductiveType}
@@ -44543,10 +44669,6 @@ theorem
     (validationDepth :
       produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
         whnfFuel + 1)
-    (firstParams :
-      produced.execution.eliminationExecution.normalization.stats.params.toList =
-        produced.candidate.families.head.familyType.type.trace.parameterList
-          source.nparams)
     (surfaceEq : ∀ (i : Nat) (family : NormalizedFamily),
       generation.families[i]? = some family →
       support.annotations.generatedIndexSurfaces[i]? =
@@ -44580,6 +44702,7 @@ theorem
       generation support.basis.storedTypes whnfFuel
       produced.execution.recursorContext support.generationShapes 0) := by
   classical
+  obtain ⟨owner⟩ := produced.semanticFirstFamilyAnnotationSpine semantic
   have henv : VEnv.WF env := by
     simpa only [support.basis.contextRun.venv_eq] using
       support.basis.contextRun.candidate.context.Ewf
@@ -44662,9 +44785,67 @@ theorem
       AddInductive.NormalizationCandidateExecution.familyValidationResult]
       using inventory
   have firstBound : source.nparams ≤
-      produced.candidate.families.head.familyType.type.trace.spineLength := by
-    obtain ⟨owner⟩ := produced.semanticFirstFamilyAnnotationSpine semantic
-    exact owner.nparams_le_spineLength context_lctx_eq
+      produced.candidate.families.head.familyType.type.trace.spineLength :=
+    owner.nparams_le_spineLength context_lctx_eq
+  -- final validator statistics preserve the first family's parameter array
+  obtain ⟨validation⟩ := owner.firstFamilyValidationState context_lctx_eq
+  have nextParamsEq :=
+    familyParameterComparisonBlockTrace_headContinuation_nextParams
+      validation.selected
+  have nextIndConsts :=
+    familyParameterComparisonBlockTrace_headContinuation_nextIndConsts
+      validation.selected
+  have nextLocalState : TypeChecker.FamilyParameterLocalState
+      validation.continuation.nextStats
+      validation.continuation.telescope.result.context :=
+    validation.localState.of_params_eq nextParamsEq
+  have nextSize : validation.continuation.nextStats.params.size =
+      source.nparams :=
+    (congrArg Array.size nextParamsEq).trans validation.params_size
+  have comparisonResult :
+      (produced.execution.eliminationExecution.normalization.familyParameterComparisonTrace
+        normalizationProduced produced.kernelSources_nonempty).result =
+        produced.execution.eliminationExecution.normalization.familyValidationResult :=
+    AddInductive.FamilyValidationBlockRun.parameterComparisonTrace_result
+      (produced.execution.eliminationExecution.normalization.familyValidationBlockRun
+        normalizationProduced produced.kernelSources_nonempty)
+  have tailResultEq : validation.continuation.tail.result =
+      produced.execution.eliminationExecution.normalization.familyValidationResult :=
+    (AddInductive.FamilyParameterComparisonBlockTrace.headContinuation?_result
+      validation.selected).trans comparisonResult
+  have finalParamsSize :
+      produced.execution.eliminationExecution.normalization.stats.params.size =
+        source.nparams := by
+    have sizes :=
+      produced.execution.eliminationExecution.normalization.familyValidationResult.sizes_of_run
+        produced.kernelSources_nonempty familyRun
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using sizes.1
+  have resultSize :
+      validation.continuation.tail.result.stats.params.size =
+        source.nparams := by
+    rw [tailResultEq]
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using finalParamsSize
+  have walk := familyParameterComparisonBlockTrace_later_paramsPreserved
+    validation.continuation.tail nextIndConsts nextSize resultSize
+    nextLocalState
+  have firstParams :
+      produced.execution.eliminationExecution.normalization.stats.params.toList =
+        produced.candidate.families.head.familyType.type.trace.parameterList
+          source.nparams := by
+    have resultToList :
+        validation.continuation.tail.result.stats.params.toList =
+          produced.candidate.families.head.familyType.type.trace.parameterList
+            source.nparams := by
+      rw [walk, nextParamsEq]
+      exact validation.parameterSources_eq
+    rw [tailResultEq] at resultToList
+    simpa only [
+      AddInductive.NormalizationCandidateExecution.familyValidationResult]
+      using resultToList
   exact phaseOneFamilyMotiveInputList_ofAnnotations henv blockDepth
     support.basis.params_size storedCanonical
     produced.candidate.families.head.familyType.type.trace firstNgen
@@ -44677,10 +44858,9 @@ theorem
 nonempty mutual block directly from its canonical family assembly support.
 
 This composes the per-family package walk with the mutual fold.  The
-recorded premises are the generation-tie equations, the first-family
-parameter identification, the positional index-count agreements, and the
-annotation-builder name exclusions; every family-local staging input is
-derived internally. -/
+recorded premises are the generation-tie equations, the positional
+index-count agreements, and the annotation-builder name exclusions; every
+family-local staging input is derived internally. -/
 theorem
     ProducedBlockRecursorShapeCandidate.CanonicalFamilyAssemblySupport.generatedRecursorMotivePhaseOfRecorded
     {source : VInductDecl} {firstSource : InductiveType}
@@ -44708,10 +44888,6 @@ theorem
     (validationDepth :
       produced.execution.eliminationExecution.normalization.validationContext.fuel.recDepth =
         whnfFuel + 1)
-    (firstParams :
-      produced.execution.eliminationExecution.normalization.stats.params.toList =
-        produced.candidate.families.head.familyType.type.trace.parameterList
-          source.nparams)
     (surfaceEq : ∀ (i : Nat) (family : NormalizedFamily),
       generation.families[i]? = some family →
       support.annotations.generatedIndexSurfaces[i]? =
@@ -44753,8 +44929,7 @@ theorem
         (synthesis.synthesis.recInfos.map (·.motive))
         generation.generatedMotiveTypes motiveContext) := by
   obtain ⟨packages⟩ := support.motiveInputPackages validationDepth
-    firstParams surfaceEq countEq notOptParam notAutoParam notOutParam
-    notSemiOutParam
+    surfaceEq countEq notOptParam notAutoParam notOutParam notSemiOutParam
   exact support.generatedRecursorMotivePhase run staging synthesis
     generatedParamsEq validationDepth packages
 
