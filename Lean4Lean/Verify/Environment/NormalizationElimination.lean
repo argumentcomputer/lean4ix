@@ -46042,8 +46042,10 @@ private inductive LoopCtorArgsFieldTranslationTrace
       {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
       {current : AddInductive.Context}
       (notForall : type.isForall = false) (base : VLCtx) :
-      LoopCtorArgsFieldTranslationTrace env Us stats (.done notForall)
-        base [] base
+      LoopCtorArgsFieldTranslationTrace env Us stats
+        (AddInductive.mkRecInfos.LoopCtorArgsTrace.done (type := type)
+          (i := i) (bu := bu) (u := u) (fuel := fuel) (current := current)
+          notForall) base [] base
   | parameter
       {i : Nat} {bu u : Array Expr} {fuel : Nat}
       {current : AddInductive.Context} {terminal : Expr}
@@ -46160,6 +46162,958 @@ private def loopCtorArgsFieldTranslation_arrayRun
   sources_eq := by
     simpa using loopCtorArgsField_sources trace
   nodup := loopCtorArgsFieldFVars_nodup trace currentRun
+
+/-! #### Parameter prefix of a constructor traversal -/
+
+/-- Exact proof that one `loopCtorArgs` trace is obtained from another by
+prepending only shared-parameter branches.  Those branches instantiate the
+shared parameter locals and change neither the reader context nor the
+accumulated argument arrays, so the suffix remains indexed by both literal
+operational endpoints. -/
+private inductive LoopCtorArgsParameterPrefix
+    (stats : AddInductive.InductiveStats) :
+    {type : Expr} → {i : Nat} → {bu u : Array Expr} → {fuel : Nat} →
+    {current : AddInductive.Context} → {terminal : Expr} →
+    {finalBu finalU : Array Expr} → {finalContext : AddInductive.Context} →
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext) →
+    {suffixType : Expr} → {suffixFuel : Nat} →
+    AddInductive.mkRecInfos.LoopCtorArgsTrace stats suffixType
+      stats.params.size bu u suffixFuel current terminal finalBu finalU
+      finalContext → Type where
+  | refl
+      (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type
+        stats.params.size bu u fuel current terminal finalBu finalU
+        finalContext) :
+      LoopCtorArgsParameterPrefix stats trace trace
+  | parameter
+      {i : Nat} {bu u : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context} {terminal : Expr}
+      {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (param : Expr)
+      (isParameter : stats.params[i]? = some param)
+      (tail : AddInductive.mkRecInfos.LoopCtorArgsTrace stats
+        (body.instantiate1 param) (i + 1) bu u fuel current terminal
+        finalBu finalU finalContext)
+      {suffixType : Expr} {suffixFuel : Nat}
+      {suffix : AddInductive.mkRecInfos.LoopCtorArgsTrace stats suffixType
+        stats.params.size bu u suffixFuel current terminal finalBu finalU
+        finalContext}
+      (rest : LoopCtorArgsParameterPrefix stats tail suffix) :
+      LoopCtorArgsParameterPrefix stats
+        (AddInductive.mkRecInfos.LoopCtorArgsTrace.parameter
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo) param isParameter tail) suffix
+
+/-- Exact post-parameter suffix selected inside a retained `loopCtorArgs`
+decomposition, aligned with a main-spine position of the constructor's
+annotation candidate. -/
+private structure LoopCtorArgsParameterSuffix
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat}
+    (position : candidate.MainSpineAt remaining) where
+  type : Expr
+  fuel : Nat
+  suffix : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type
+    stats.params.size bu u fuel current terminal finalBu finalU finalContext
+  source_eq : type = position.position.trace.rootWhnf
+  path : LoopCtorArgsParameterPrefix stats trace suffix
+
+/-- Synchronize the shared-parameter branches of constructor traversal with
+the same strict main-spine position retained by the normalization candidate.
+The traversal instantiates each parameter binder with exactly the candidate's
+own parameter local, so the two sources stay literally equal; the strict
+position hypothesis keeps every candidate WHNF input a stored Pi. -/
+private theorem loopCtorArgs_parameterSuffix_of_candidate
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat}
+    (position : candidate.MainSpineAt remaining)
+    (complete : i + remaining = stats.params.size)
+    (strict : remaining < candidate.spineLength)
+    (stored : candidate.storedSpine = true)
+    (sourceEq : type = candidate.rootWhnf)
+    (parametersEq : stats.params.toList.drop i =
+      candidate.parameterList remaining)
+    (whnfFuel : Nat)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (LoopCtorArgsParameterSuffix trace position) := by
+  induction candidate generalizing remaining i type bu u fuel current
+      terminal finalBu finalU finalContext with
+  | terminal candidateContext candidateSource inferred result checked valid =>
+      cases position with
+      | zero _ =>
+          have indexEq : i = stats.params.size := by omega
+          subst i
+          exact ⟨{
+            type := type
+            fuel := fuel
+            suffix := trace
+            source_eq := sourceEq
+            path := .refl trace }⟩
+  | forallE candidateContext candidateSource inferred candidateName
+      candidateDomain candidateBody candidateBinderInfo candidateFresh
+      candidateAnnotations candidateAnnotationsEq candidateChecked
+      candidateNormalized candidateDomainCandidate candidateBodyCandidate
+      domainIH bodyIH =>
+      cases remaining with
+      | zero =>
+          cases position with
+          | zero _ =>
+              have indexEq : i = stats.params.size := by omega
+              subst i
+              exact ⟨{
+                type := type
+                fuel := fuel
+                suffix := trace
+                source_eq := sourceEq
+                path := .refl trace }⟩
+      | succ remaining =>
+          cases position with
+          | succ _ tailPosition =>
+              simp only [AddInductive.CandidateExprTrace.storedSpine,
+                Bool.and_eq_true] at stored
+              obtain ⟨_headStored, bodyStored⟩ := stored
+              have tailStrict :
+                  remaining < candidateBodyCandidate.spineLength := by
+                simpa only [AddInductive.CandidateExprTrace.spineLength,
+                  Nat.succ_lt_succ_iff] using strict
+              cases trace with
+              | done notForall =>
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                    Expr.forallE.injEq] at sourceEq
+                  have impossible : true = false := by
+                    calc
+                      true = (Expr.forallE candidateName candidateDomain
+                          candidateBody candidateBinderInfo).isForall := rfl
+                      _ = type.isForall := congrArg Expr.isForall sourceEq.symm
+                      _ = false := notForall
+                  exact Bool.noConfusion impossible
+              | field noParameter recursive recursiveRun tail =>
+                  have bound := Array.getElem?_eq_none_iff.mp noParameter
+                  omega
+              | @parameter _ _ _ _ _ _ _ _ _ phaseName phaseDomain phaseBody
+                  phaseBinderInfo param isParameter tail =>
+                  simp only [AddInductive.CandidateExprTrace.parameterList]
+                    at parametersEq
+                  have parameterAt : stats.params[i]? =
+                      some candidateContext.freshExpr :=
+                    array_getElem?_eq_some_of_drop_eq_cons parametersEq
+                  have parameterEq : param = candidateContext.freshExpr :=
+                    Option.some.inj (isParameter.symm.trans parameterAt)
+                  have dropped :=
+                    validation_drop_eq_cons_of_getElem?_eq_some
+                      (by simpa only [← Array.getElem?_toList] using parameterAt)
+                  rw [dropped] at parametersEq
+                  simp only [List.cons.injEq] at parametersEq
+                  have sourceParts := sourceEq
+                  simp only [AddInductive.CandidateExprTrace.rootWhnf,
+                    Expr.forallE.injEq] at sourceParts
+                  obtain ⟨_nameEq, _domainEq, bodyEq, _binderEq⟩ :=
+                    sourceParts
+                  have candidateViewEq :
+                      candidateBodyCandidate.rootWhnf =
+                        candidateBody.instantiate1
+                          candidateContext.freshExpr :=
+                    candidateBodyCandidate
+                      |>.rootWhnf_eq_source_of_spineLength_pos bodyStored
+                        (by omega) whnfFuel (by
+                          simpa [AddInductive.Context.pushLocalDecl] using
+                            candidateDepth)
+                  have nextSourceEq : phaseBody.instantiate1 param =
+                      candidateBodyCandidate.rootWhnf := by
+                    rw [candidateViewEq, parameterEq, bodyEq]
+                  obtain ⟨suffix⟩ :=
+                    bodyIH tail tailPosition (by omega) tailStrict bodyStored
+                      nextSourceEq parametersEq.2 (by
+                        simpa [AddInductive.Context.pushLocalDecl] using
+                          candidateDepth)
+                  exact ⟨{
+                    type := suffix.type
+                    fuel := suffix.fuel
+                    suffix := suffix.suffix
+                    source_eq := suffix.source_eq
+                    path := LoopCtorArgsParameterPrefix.parameter
+                      (stats := stats) (name := phaseName)
+                      (domain := phaseDomain) (body := phaseBody)
+                      (binderInfo := phaseBinderInfo)
+                      param isParameter tail suffix.path }⟩
+
+/-- Removing the shared-parameter prefix from a `loopCtorArgs` trace
+preserves its exact source-ordered field-variable inventory. -/
+private theorem LoopCtorArgsParameterSuffix.fieldFVars_eq
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat} {position : candidate.MainSpineAt remaining}
+    (suffix : LoopCtorArgsParameterSuffix trace position) :
+    loopCtorArgsFieldFVars suffix.suffix = loopCtorArgsFieldFVars trace := by
+  have whole := loopCtorArgsField_sources trace
+  have tail := loopCtorArgsField_sources suffix.suffix
+  have mapped : (loopCtorArgsFieldFVars suffix.suffix).map Expr.fvar =
+      (loopCtorArgsFieldFVars trace).map Expr.fvar := by
+    exact List.append_cancel_left (tail.symm.trans whole)
+  exact list_map_fvar_injective mapped
+
+/-- Reattach the shared-parameter branches omitted by a post-parameter
+suffix.  They introduce no semantic field domains, so the compressed
+telescope and both semantic endpoints are unchanged. -/
+private noncomputable def LoopCtorArgsParameterPrefix.prependTranslation
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {suffixType : Expr} {suffixFuel : Nat}
+    {suffix : AddInductive.mkRecInfos.LoopCtorArgsTrace stats suffixType
+      stats.params.size bu u suffixFuel current terminal finalBu finalU
+      finalContext}
+    (path : LoopCtorArgsParameterPrefix stats trace suffix)
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats suffix
+      base targets final) :
+    LoopCtorArgsFieldTranslationTrace env Us stats trace base targets
+      final := by
+  induction path with
+  | refl => exact translations
+  | parameter param isParameter tail rest ih =>
+      exact .parameter param isParameter tail (ih translations)
+
+/-- A retained `loopCtorArgs` trace with no allocated field variables has
+the empty semantic field telescope.  Parameter branches are preserved, while
+a field branch is ruled out directly by the retained inventory. -/
+private theorem loopCtorArgsFieldTranslation_empty
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext)
+    (empty : (loopCtorArgsFieldFVars trace).length = 0)
+    (base : VLCtx) :
+    Nonempty (Sigma fun final =>
+      LoopCtorArgsFieldTranslationTrace env Us stats trace base [] final) := by
+  induction trace with
+  | done notForall =>
+      exact ⟨⟨base, .done notForall base⟩⟩
+  | parameter param isParameter tail ih =>
+      obtain ⟨final, rest⟩ := ih empty
+      exact ⟨⟨final, .parameter param isParameter tail rest⟩⟩
+  | field noParameter recursive recursiveRun tail ih =>
+      simp only [loopCtorArgsFieldFVars, List.length_cons] at empty
+      omega
+
+/-- Translate every field branch of a post-parameter constructor traversal by
+walking the producer annotation spine in lockstep.  The traversal never
+normalizes, and the candidate's WHNF of each stored Pi is that Pi itself, so
+both sides advance through literal instantiated bodies; only the alpha
+relation between the two fresh-variable inventories is transported. -/
+private theorem loopCtorArgsFieldTranslation_of_candidate
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {bu u : Array Expr} {fuel : Nat}
+    {phaseCurrent : AddInductive.Context} {phaseTerminal : Expr}
+    {phaseFinalBu phaseFinalU : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    {i : Nat}
+    (phase : AddInductive.mkRecInfos.LoopCtorArgsTrace stats phaseType i bu
+      u fuel phaseCurrent phaseTerminal phaseFinalBu phaseFinalU
+      phaseFinalContext)
+    (afterParameters : stats.params.size ≤ i)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {env : VEnv} {Us : List Name}
+    {phaseBase : VLCtx}
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidateTrace : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {candidateBase candidateTerminal : VLCtx}
+    {candidateDomains : List VExpr}
+    (candidateSpine : TypeChecker.CandidateAnnotationSpine env Us
+      candidateTrace candidateBase candidateTerminal candidateDomains)
+    (candidateShape : candidateBase.FVarLamOnly)
+    (candidateStored : candidateTrace.storedSpine = true)
+    (candidateAnnotations : candidateTrace.validationAnnotations)
+    (terminalWF : VLCtx.WF env Us.length candidateTerminal)
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (phaseShape : phaseBase.FVarLamOnly)
+    (phaseCandidate : VLCtx.FVarAlpha env Us.length phaseBase candidateBase)
+    (phaseFound : ∀ fv ∈ phaseBase.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    (phaseScope : phaseType.FVarsIn (· ∈ phaseBase.fvars))
+    (phaseAlpha : Lean.Expr.abstractFVars phaseBase phaseType =
+      Lean.Expr.abstractFVars candidateBase candidateTrace.rootWhnf)
+    (phaseLength : (loopCtorArgsFieldFVars phase).length =
+      candidateDomains.length)
+    (whnfFuel : Nat)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopCtorArgsFieldTranslationTrace env Us stats phase phaseBase
+        candidateDomains final) := by
+  induction candidateSpine generalizing stats phaseType i bu u fuel
+      phaseCurrent phaseTerminal phaseFinalBu phaseFinalU phaseFinalContext
+      phaseBase whnfFuel with
+  | terminal node =>
+      cases phase with
+      | done notForall =>
+          exact ⟨⟨phaseBase, .done notForall phaseBase⟩⟩
+      | parameter param isParameter tail =>
+          rw [Array.getElem?_eq_none afterParameters] at isParameter
+          cases isParameter
+      | field noParameter recursive recursiveRun tail =>
+          simp only [loopCtorArgsFieldFVars, List.length_cons,
+            List.length_nil] at phaseLength
+          omega
+  | @forallE candidateContext candidateDomain candidateName
+      candidateBinderInfo candidateBody candidateBase candidateTerminal
+      candidateSource candidateInferred candidateFresh annotationsNode
+      annotationsEq candidateChecked candidateNormalized domainCandidate
+      bodyCandidate storedDomain candidateDomains head tail ih =>
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at candidateStored
+      rcases candidateAnnotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      have snapshotDomainEq : snapshot.domain = candidateDomain := by
+        injection snapshot.root_eq
+        symm
+        assumption
+      subst candidateBase
+      have candidateDomainTr : TrExprS env Us snapshot.Δ
+          (AddInductive.consumeTypeAnnotations candidateDomain)
+          storedDomain := by
+        simpa only [snapshot.annotation_match, snapshotDomainEq,
+          snapshotStored] using snapshot.consumed_tr
+      have candidateDomainType : env.IsType Us.length snapshot.Δ.toCtx
+          storedDomain := by
+        have annotated := snapshot.annotation_run.isDefEqU.of_l henv
+          snapshot.context_wf.toCtx snapshot.domain_type
+        exact ⟨snapshot.sort, by
+          simpa only [snapshotStored] using annotated.hasType.2⟩
+      cases phase with
+      | done notForall =>
+          simp only [loopCtorArgsFieldFVars, List.length_nil,
+            List.length_cons] at phaseLength
+          omega
+      | parameter param isParameter phaseTail =>
+          rw [Array.getElem?_eq_none afterParameters] at isParameter
+          cases isParameter
+      | @field phaseI phaseDomain phaseU phaseTailFuel phaseTerminal
+          phaseFinalBu phaseFinalU phaseFinalContext phaseName phaseBody
+          phaseBinderInfo phaseBu phaseCurrent noParameter recursive
+          recursiveRun phaseTail =>
+          have phaseRootAlpha : Lean.Expr.abstractFVars phaseBase
+              (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+              Lean.Expr.abstractFVars snapshot.Δ
+                (.forallE candidateName candidateDomain candidateBody
+                  candidateBinderInfo) := by
+            simpa only [AddInductive.CandidateExprTrace.rootWhnf] using
+              phaseAlpha
+          obtain ⟨phaseDomainTr, phaseDomainType⟩ :=
+            loopArgs1IndexDomain_of_candidate henv primitives phaseCandidate
+              phaseShape candidateShape phaseRootAlpha candidateDomainTr
+              candidateDomainType
+          have phaseFresh : phaseCurrent.freshFVarId ∉ phaseBase.fvars :=
+            compressedFVars_fresh phaseLocal phaseFound
+          have candidateTailWF := tail.terminalLift.wf henv terminalWF
+          have candidateFreshAbsent : candidateContext.freshFVarId ∉
+              snapshot.Δ.fvars :=
+            (candidateTailWF.2.1 _ _ rfl).1
+          have phaseBodyScope : phaseBody.FVarsIn
+              (· ∈ phaseBase.fvars) := phaseScope.2
+          have phaseBodyAvoid : phaseBody.FVarsIn
+              (· ≠ phaseCurrent.freshFVarId) :=
+            phaseBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact phaseFresh member)
+          have snapshotRoot := snapshot.root_eq
+          simp only [Expr.forallE.injEq] at snapshotRoot
+          obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
+            _snapshotBinder⟩ := snapshotRoot
+          have candidateBodyScope : candidateBody.FVarsIn
+              (· ∈ snapshot.Δ.fvars) := by
+            simpa only [snapshotBody] using snapshot.body_fvars
+          have candidateBodyAvoid : candidateBody.FVarsIn
+              (· ≠ candidateContext.freshFVarId) :=
+            candidateBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact candidateFreshAbsent member)
+          let phaseNextBase : VLCtx :=
+            (some (phaseCurrent.freshFVarId,
+                (AddInductive.consumeTypeAnnotations phaseDomain).fvarsList),
+              .vlam storedDomain) :: phaseBase
+          let candidateNextBase : VLCtx :=
+            (some (candidateContext.freshFVarId,
+                annotationsNode.consumed.fvarsList),
+              .vlam storedDomain) :: snapshot.Δ
+          have phaseCandidateInputAlpha :
+              Lean.Expr.abstractFVars phaseNextBase
+                  (phaseBody.instantiate1 phaseCurrent.freshExpr) =
+                Lean.Expr.abstractFVars candidateNextBase
+                  (candidateBody.instantiate1
+                    candidateContext.freshExpr) := by
+            exact forallBodyAlpha_after_fresh phaseRootAlpha
+              phaseBodyAvoid candidateBodyAvoid
+          have phaseInputScope :
+              (phaseBody.instantiate1 phaseCurrent.freshExpr).FVarsIn
+                (· ∈ phaseNextBase.fvars) := by
+            have bodyScope : phaseBody.FVarsIn
+                (· ∈ phaseNextBase.fvars) :=
+              phaseBodyScope.mono (by
+                intro fv member
+                simp only [phaseNextBase, VLCtx.fvars]
+                exact .tail _ member)
+            have freshScope : phaseCurrent.freshExpr.FVarsIn
+                (· ∈ phaseNextBase.fvars) := by
+              simp [AddInductive.Context.freshExpr, phaseNextBase,
+                VLCtx.fvars, FVarsIn]
+            simpa only [Lean.Expr.instantiate1_eq] using
+              bodyScope.instantiate1 freshScope
+          have nextPhaseShape : phaseNextBase.FVarLamOnly :=
+            .cons phaseShape
+          have nextCandidateShape : candidateNextBase.FVarLamOnly :=
+            .cons candidateShape
+          obtain ⟨targetSort, targetHasType⟩ := phaseDomainType
+          have nextRelation : VLCtx.FVarAlpha env Us.length phaseNextBase
+              candidateNextBase :=
+            .cons phaseCandidate (.vlam targetHasType)
+          have nextPhaseFound : ∀ fv ∈ phaseNextBase.fvars,
+              ∃ declaration,
+                (phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                  (AddInductive.consumeTypeAnnotations phaseDomain)).lctx.find?
+                    fv = some declaration := by
+            exact compressedFVars_push phaseLocal phaseFound phaseName
+              phaseBinderInfo
+              (AddInductive.consumeTypeAnnotations phaseDomain)
+              (AddInductive.consumeTypeAnnotations phaseDomain).fvarsList
+              storedDomain
+          have nextLength : (loopCtorArgsFieldFVars phaseTail).length =
+              candidateDomains.length := by
+            simpa only [loopCtorArgsFieldFVars, List.length_cons,
+              Nat.succ_inj] using phaseLength
+          by_cases domainsNil : candidateDomains = []
+          · subst candidateDomains
+            obtain ⟨final, rest⟩ :=
+              loopCtorArgsFieldTranslation_empty phaseTail
+                (by simpa using nextLength) phaseNextBase
+            exact ⟨⟨final, .field noParameter recursive recursiveRun
+              phaseTail phaseDomainTr ⟨targetSort, targetHasType⟩ rest⟩⟩
+          · have candidateRootEq :=
+              tail.rootWhnf_eq_source_of_domains_ne_nil candidateStored.2
+                domainsNil whnfFuel (by
+                  simpa [AddInductive.Context.pushLocalDecl] using
+                    candidateDepth)
+            have nextPhaseAlpha : Lean.Expr.abstractFVars phaseNextBase
+                (phaseBody.instantiate1 phaseCurrent.freshExpr) =
+                Lean.Expr.abstractFVars candidateNextBase
+                  bodyCandidate.rootWhnf := by
+              rw [candidateRootEq]
+              exact phaseCandidateInputAlpha
+            obtain ⟨final, rest⟩ := ih phaseTail
+              (Nat.le_succ_of_le afterParameters)
+              (phaseLocal.push phaseName phaseBinderInfo
+                (AddInductive.consumeTypeAnnotations phaseDomain))
+              nextCandidateShape candidateStored.2 tailAnnotations terminalWF
+              nextPhaseShape nextRelation nextPhaseFound phaseInputScope
+              nextPhaseAlpha nextLength whnfFuel (by
+                simpa [AddInductive.Context.pushLocalDecl] using
+                  candidateDepth)
+            exact ⟨⟨final, .field noParameter recursive recursiveRun
+              phaseTail phaseDomainTr ⟨targetSort, targetHasType⟩ rest⟩⟩
+
+/-- Translate every field branch of a complete constructor traversal by
+selecting the same post-parameter suffix in the producer annotation spine.
+The shared parameter contexts may use different kernel FVar identifiers;
+their retained telescope equality supplies the alpha relation needed by the
+strict field translator.  A constructor without fields needs no alignment at
+all: its traversal is exhausted by the parameter prefix. -/
+private theorem loopCtorArgsFieldTranslation_of_candidate_full
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {fuel : Nat}
+    {phaseCurrent : AddInductive.Context} {phaseTerminal : Expr}
+    {phaseFinalBu phaseFinalU : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    (phase : AddInductive.mkRecInfos.LoopCtorArgsTrace stats phaseType 0 #[]
+      #[] fuel phaseCurrent phaseTerminal phaseFinalBu phaseFinalU
+      phaseFinalContext)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {env : VEnv} {Us : List Name}
+    {phaseBase : VLCtx} {parameterTypes : List VExpr}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes phaseBase)
+    (phaseFound : ∀ fv ∈ phaseBase.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidateTrace : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {candidateTerminal : VLCtx} {candidateDomains : List VExpr}
+    (candidateSpine : TypeChecker.CandidateAnnotationSpine env Us
+      candidateTrace [] candidateTerminal candidateDomains)
+    (candidateStored : candidateTrace.storedSpine = true)
+    (candidateAnnotations : candidateTrace.validationAnnotations)
+    (terminalWF : VLCtx.WF env Us.length candidateTerminal)
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (parameterBound : stats.params.size ≤ candidateTrace.spineLength)
+    (domainsLength : candidateDomains.length = candidateTrace.spineLength)
+    (parameterSources : stats.params.toList =
+      candidateTrace.parameterList stats.params.size)
+    (parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+      parameterTypes (candidateDomains.take stats.params.size))
+    (phaseRoot : stats.params.size < candidateTrace.spineLength →
+      phaseType = candidateTrace.rootWhnf)
+    (phaseLength : (loopCtorArgsFieldFVars phase).length =
+      (candidateDomains.drop stats.params.size).length)
+    (whnfFuel : Nat)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopCtorArgsFieldTranslationTrace env Us stats phase phaseBase
+        (candidateDomains.drop stats.params.size) final) := by
+  by_cases hasField : stats.params.size < candidateTrace.spineLength
+  · obtain ⟨position⟩ := candidateTrace.mainSpineAt parameterBound
+    obtain ⟨annotationSuffix⟩ :=
+      candidateSpine.structuralMainPositionSuffix .nil candidateStored
+        candidateAnnotations position
+    obtain ⟨phaseSuffix⟩ :=
+      loopCtorArgs_parameterSuffix_of_candidate phase position (by simp)
+        hasField candidateStored (phaseRoot hasField)
+        (by simpa using parameterSources)
+        whnfFuel candidateDepth
+    have phaseShape : phaseBase.FVarLamOnly :=
+      Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvarLamOnly
+        parameters .nil
+    have phaseContext : phaseBase.toCtx = parameterTypes.reverse := by
+      simpa only [VLCtx.toCtx, List.append_nil] using
+        Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.toCtx
+          parameters
+    have candidateContextEq : annotationSuffix.cursor.Δ.toCtx =
+        (candidateDomains.take stats.params.size).reverse := by
+      simpa only [VLCtx.toCtx, List.append_nil] using
+        annotationSuffix.context_eq
+    have parameterContextEq : env.IsDefEqCtx Us.length [] phaseBase.toCtx
+        annotationSuffix.cursor.Δ.toCtx := by
+      rw [phaseContext, candidateContextEq]
+      simpa only [List.append_nil] using parameterTel.telDefEq.ctx
+    have relation : VLCtx.FVarAlpha env Us.length phaseBase
+        annotationSuffix.cursor.Δ :=
+      VLCtx.FVarAlpha.of_defeqCtx phaseShape annotationSuffix.cursor.shape
+        parameterContextEq
+    have mappedFVars : phaseBase.fvars.map Expr.fvar =
+        annotationSuffix.cursor.Δ.fvars.map Expr.fvar := by
+      calc
+        phaseBase.fvars.map Expr.fvar = stats.params.toList.reverse := by
+          simpa only [VLCtx.fvars_nil, List.map_nil, List.append_nil] using
+            Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvars
+              parameters
+        _ = (candidateTrace.parameterList stats.params.size).reverse :=
+          congrArg List.reverse parameterSources
+        _ = annotationSuffix.cursor.Δ.fvars.map Expr.fvar := by
+          simpa only [VLCtx.fvars_nil, List.map_nil, List.append_nil] using
+            annotationSuffix.fvars_eq.symm
+    have phaseFVars : phaseBase.fvars = annotationSuffix.cursor.Δ.fvars :=
+      list_map_fvar_injective mappedFVars
+    have suffixScope : phaseSuffix.type.FVarsIn
+        (· ∈ phaseBase.fvars) := by
+      rw [phaseSuffix.source_eq, annotationSuffix.root_eq, phaseFVars]
+      exact annotationSuffix.cursor.root_fvars
+    have suffixAlpha : Lean.Expr.abstractFVars phaseBase phaseSuffix.type =
+        Lean.Expr.abstractFVars annotationSuffix.cursor.Δ
+          annotationSuffix.cursor.trace.rootWhnf := by
+      rw [phaseSuffix.source_eq, annotationSuffix.root_eq]
+      simp only [Lean.Expr.abstractFVars, phaseFVars]
+    have suffixLength : (loopCtorArgsFieldFVars phaseSuffix.suffix).length =
+        annotationSuffix.cursor.domains.length := by
+      rw [phaseSuffix.fieldFVars_eq, annotationSuffix.domains_eq]
+      exact phaseLength
+    have suffixCandidateDepth :
+        annotationSuffix.cursor.candidateContext.fuel.recDepth =
+          whnfFuel + 1 := by
+      calc
+        annotationSuffix.cursor.candidateContext.fuel.recDepth =
+            candidateContext.fuel.recDepth :=
+          congrArg (fun candidateFuel => candidateFuel.recDepth)
+            annotationSuffix.fuel_eq
+        _ = whnfFuel + 1 := candidateDepth
+    obtain ⟨final, translations⟩ :=
+      loopCtorArgsFieldTranslation_of_candidate phaseSuffix.suffix
+        (Nat.le_refl _) phaseLocal
+        annotationSuffix.cursor.spine annotationSuffix.cursor.shape
+        annotationSuffix.cursor.stored annotationSuffix.cursor.annotations
+        terminalWF henv primitives phaseShape relation phaseFound suffixScope
+        suffixAlpha suffixLength whnfFuel suffixCandidateDepth
+    rw [annotationSuffix.domains_eq] at translations
+    exact ⟨⟨final, phaseSuffix.path.prependTranslation translations⟩⟩
+  · have dropNil : candidateDomains.drop stats.params.size = [] :=
+      List.drop_eq_nil_of_le (by omega)
+    rw [dropNil] at phaseLength ⊢
+    exact loopCtorArgsFieldTranslation_empty phase (by simpa using phaseLength)
+      phaseBase
+
+/-- Preserve a field translation trace when the Theory environment grows. -/
+private noncomputable def LoopCtorArgsFieldTranslationTrace.mono
+    {env postEnv : VEnv} (envLE : env ≤ postEnv) {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final) :
+    LoopCtorArgsFieldTranslationTrace postEnv Us stats trace base targets
+      final := by
+  induction translations with
+  | done notForall base => exact .done notForall base
+  | parameter param isParameter tail rest ih =>
+      exact .parameter param isParameter tail ih
+  | field noParameter recursive recursiveRun tail domainTr domainType rest
+      ih =>
+      exact .field noParameter recursive recursiveRun tail
+        (domainTr.mono envLE) (domainType.mono envLE) ih
+
+/-- Reindex every target in a field translation trace into a new universe
+inventory. -/
+private noncomputable def LoopCtorArgsFieldTranslationTrace.relevel
+    {env : VEnv} {ps Us : List Name} {extra : List VLevel}
+    (levelsWF : ∀ level ∈ extra, level.WF Us.length)
+    (levels : ∀ {source target},
+      VLevel.ofLevel ps source = some target →
+        VLevel.ofLevel Us source = some (target.inst extra))
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env ps stats trace
+      base targets final) :
+    LoopCtorArgsFieldTranslationTrace env Us stats trace (base.instL extra)
+      (targets.map (VExpr.instL extra)) (final.instL extra) := by
+  induction translations with
+  | done notForall base => exact .done notForall (base.instL extra)
+  | parameter param isParameter tail rest ih =>
+      exact .parameter param isParameter tail ih
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      show LoopCtorArgsFieldTranslationTrace env Us stats _ (base.instL extra)
+        (target.instL extra :: targets.map (VExpr.instL extra))
+        (final.instL extra)
+      exact .field noParameter recursive recursiveRun tail
+        (domainTr.relevel levelsWF levels)
+        (VLCtx.instL_toCtx _ ▸ domainType.instL levelsWF)
+        (by simpa [VLCtx.instL, VLocalDecl.instL] using ih)
+
+/-- Insert ambient free-variable binders below a translated field telescope.
+Each successive field target is lifted past the ambient binders at the cutoff
+determined by the preceding fields, exactly as in `VExpr.liftTelN`.  This is
+the operation needed by constructor minors: their field surface is unchanged,
+but it appears after every motive and every minor already emitted. -/
+private theorem LoopCtorArgsFieldTranslationTrace.weakFV
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    {liftedBase : VLCtx} {n k : Nat}
+    (extension : VLCtx.FVLift' base liftedBase 0
+      (.consN (.skipN .refl n) k) 0)
+    (liftedWF : VLCtx.WF env Us.length liftedBase)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (liftedFound : ∀ fv ∈ liftedBase.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    Nonempty (Sigma fun liftedFinal =>
+      LoopCtorArgsFieldTranslationTrace env Us stats trace liftedBase
+        (VExpr.liftTelN n targets k) liftedFinal) := by
+  induction translations generalizing liftedBase k with
+  | @done type i bu u fuel current notForall base =>
+      refine ⟨⟨liftedBase, ?_⟩⟩
+      simpa only [VExpr.liftTelN] using
+        (@LoopCtorArgsFieldTranslationTrace.done env Us stats type i bu u fuel
+          current notForall liftedBase)
+  | parameter param isParameter tail rest ih =>
+      obtain ⟨liftedFinal, liftedTail⟩ := ih extension liftedWF currentRun
+        liftedFound
+      exact ⟨⟨liftedFinal, .parameter param isParameter tail liftedTail⟩⟩
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      let liftedTarget := target.liftN n k
+      let deps := (AddInductive.consumeTypeAnnotations domain).fvarsList
+      let nextBase : VLCtx :=
+        (some (current.freshFVarId, deps), .vlam target) :: base
+      let liftedNextBase : VLCtx :=
+        (some (current.freshFVarId, deps), .vlam liftedTarget) :: liftedBase
+      have depsSubset : deps ⊆ base.fvars := by
+        exact domainTr.fvarsList
+      have liftedDepsSubset : deps ⊆ liftedBase.fvars := by
+        intro fv member
+        exact extension.fvars_sublist.subset (depsSubset member)
+      have liftedFresh : current.freshFVarId ∉ liftedBase.fvars :=
+        compressedFVars_fresh currentRun liftedFound
+      have liftedDomainTr : TrExprS env Us liftedBase
+          (AddInductive.consumeTypeAnnotations domain) liftedTarget := by
+        simpa only [liftedTarget, Lift.consN_consN, Nat.add_zero,
+          VExpr.lift'_consN_skipN] using
+          domainTr.weakFV' henv.ordered extension liftedWF
+      have liftedDomainType : env.IsType Us.length liftedBase.toCtx
+          liftedTarget := by
+        simpa only [liftedTarget, Lift.consN_consN, Nat.add_zero,
+          VExpr.lift'_consN_skipN] using
+          domainType.weak' henv.ordered extension.toCtx
+      have liftedNextWF : VLCtx.WF env Us.length liftedNextBase := by
+        refine ⟨liftedWF, ?_, liftedDomainType⟩
+        intro fv foundDeps equality
+        cases equality
+        exact ⟨liftedFresh, liftedDepsSubset⟩
+      have nextExtension : VLCtx.FVLift' nextBase liftedNextBase 0
+          (.consN (.skipN .refl n) (k + 1)) 0 := by
+        simpa only [nextBase, liftedNextBase, liftedTarget,
+          VLocalDecl.lift', VLocalDecl.depth, VExpr.lift'_consN_skipN,
+          Lift.consN_consN] using
+            extension.cons_fvar (current.freshFVarId, deps)
+              (.vlam target) depsSubset
+      have nextFound : ∀ fv ∈ liftedNextBase.fvars,
+          ∃ declaration,
+            (current.pushLocalDecl name binderInfo
+              (AddInductive.consumeTypeAnnotations domain)).lctx.find? fv =
+                some declaration := by
+        exact compressedFVars_push currentRun liftedFound name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) deps liftedTarget
+      obtain ⟨liftedFinal, liftedTail⟩ := ih nextExtension liftedNextWF
+        (currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) nextFound
+      refine ⟨⟨liftedFinal, ?_⟩⟩
+      show LoopCtorArgsFieldTranslationTrace env Us stats _ liftedBase
+        (liftedTarget :: VExpr.liftTelN n targets (k + 1)) liftedFinal
+      exact .field noParameter recursive recursiveRun tail liftedDomainTr
+        liftedDomainType liftedTail
+
+/-- The compressed endpoint of a translated field traversal binds exactly the
+allocated field variables above the base. -/
+private theorem loopCtorArgsFieldTranslation_final_fvars
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final) :
+    final.fvars = (loopCtorArgsFieldFVars trace).reverse ++ base.fvars := by
+  induction translations with
+  | done => simp [loopCtorArgsFieldFVars]
+  | parameter param isParameter tail rest ih =>
+      simpa only [loopCtorArgsFieldFVars] using ih
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      rw [ih]
+      simp only [loopCtorArgsFieldFVars, VLCtx.fvars_cons_some,
+        List.reverse_cons, List.append_assoc, List.singleton_append]
+
+/-- A translated field traversal preserves the lambda-only compressed
+context shape. -/
+private theorem loopCtorArgsFieldTranslation_final_fvarLamOnly
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    (baseShape : base.FVarLamOnly) : final.FVarLamOnly := by
+  induction translations with
+  | done => exact baseShape
+  | parameter param isParameter tail rest ih => exact ih baseShape
+  | field noParameter recursive recursiveRun tail domainTr domainType rest
+      ih =>
+      exact ih (.cons baseShape)
+
+/-- The compressed endpoint of a translated field traversal is well formed
+whenever its base is, its field variables are fresh for the operational
+reader context, and every base variable is declared there. -/
+private theorem loopCtorArgsFieldTranslation_final_wf
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseWF : VLCtx.WF env Us.length base)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    VLCtx.WF env Us.length final := by
+  induction translations with
+  | done => exact baseWF
+  | parameter param isParameter tail rest ih =>
+      exact ih currentRun baseWF baseFound
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      have fresh : current.freshFVarId ∉ base.fvars :=
+        compressedFVars_fresh currentRun baseFound
+      have depsSubset : (AddInductive.consumeTypeAnnotations domain).fvarsList
+          ⊆ base.fvars := domainTr.fvarsList
+      have nextWF : VLCtx.WF env Us.length
+          ((some (current.freshFVarId,
+              (AddInductive.consumeTypeAnnotations domain).fvarsList),
+            .vlam target) :: base) := by
+        refine ⟨baseWF, ?_, domainType⟩
+        intro fv foundDeps equality
+        cases equality
+        exact ⟨fresh, depsSubset⟩
+      exact ih
+        (currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain))
+        nextWF
+        (compressedFVars_push currentRun baseFound name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) _ target)
+
+/-- A translated field traversal produces exactly one semantic target per
+allocated field variable. -/
+private theorem loopCtorArgsFieldTranslation_targets_length
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final) :
+    (loopCtorArgsFieldFVars trace).length = targets.length := by
+  induction translations with
+  | done => rfl
+  | parameter param isParameter tail rest ih =>
+      simpa only [loopCtorArgsFieldFVars] using ih
+  | field noParameter recursive recursiveRun tail domainTr domainType rest
+      ih =>
+      simpa only [loopCtorArgsFieldFVars, List.length_cons] using
+        congrArg Nat.succ ih
+
+/-- The compressed endpoint of a translated field traversal extends the base
+Theory context by exactly the reversed target telescope. -/
+private theorem loopCtorArgsFieldTranslation_final_toCtx
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {bu u : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context} {terminal : Expr}
+    {finalBu finalU : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopCtorArgsTrace stats type i bu u fuel
+      current terminal finalBu finalU finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopCtorArgsFieldTranslationTrace env Us stats trace
+      base targets final) :
+    final.toCtx = targets.reverse ++ base.toCtx := by
+  induction translations with
+  | done => rfl
+  | parameter param isParameter tail rest ih => exact ih
+  | @field i bu u fuel current terminal finalBu finalU finalContext name
+      domain body binderInfo noParameter recursive recursiveRun tail base
+      final target targets domainTr domainType rest ih =>
+      rw [ih]
+      show targets.reverse ++ (target :: base.toCtx) = _
+      simp only [List.reverse_cons, List.append_assoc,
+        List.singleton_append]
+
+/-- Translate the field branches of a retained constructor traversal from the
+producer-owned constructor annotation spine.  The spine is walked after its
+shared parameter prefix; a constructor without fields needs no alignment. -/
+private theorem candidateConstructorAnnotationSpine_fieldTranslations
+    {source : VInductDecl} {env : VEnv} {Us : List Name}
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    {kernelSource : Constructor}
+    {candidate : AddInductive.CandidateConstructor kernelSource}
+    {raw : VConstVal}
+    {root : CandidateConstructorSemanticRun env Us candidate raw}
+    {shape : CandidateConstructorSemanticGenerationShape (source := source)
+      env Us root}
+    (annotation : CandidateConstructorAnnotationSpine source env Us root
+      shape)
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {phaseFuel : Nat}
+    {phaseCurrent : AddInductive.Context} {phaseTerminal : Expr}
+    {phaseFinalBu phaseFinalU : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    (phase : AddInductive.mkRecInfos.LoopCtorArgsTrace stats phaseType 0 #[]
+      #[] phaseFuel phaseCurrent phaseTerminal phaseFinalBu phaseFinalU
+      phaseFinalContext)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {parameterTypes : List VExpr} {oldFinal : VLCtx}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes oldFinal)
+    (phaseFound : ∀ fv ∈ oldFinal.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    (parameterBound : stats.params.size ≤ candidate.type.trace.spineLength)
+    (parameterSources : stats.params.toList =
+      candidate.type.trace.parameterList stats.params.size)
+    (parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+      parameterTypes (annotation.storedBinders.take stats.params.size))
+    (phaseRoot : stats.params.size < candidate.type.trace.spineLength →
+      phaseType = candidate.type.trace.rootWhnf)
+    (countEq : (loopCtorArgsFieldFVars phase).length =
+      (annotation.storedBinders.drop stats.params.size).length)
+    (whnfFuel : Nat)
+    (candidateDepth : candidate.type.context.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopCtorArgsFieldTranslationTrace env Us stats phase oldFinal
+        (annotation.storedBinders.drop stats.params.size) final) := by
+  have terminalWF : VLCtx.WF env Us.length
+      annotation.terminalRun.context.vlctx := by
+    have wf := annotation.terminalRun.context.Δwf
+    rw [annotation.terminal_venv, annotation.terminal_lparams] at wf
+    exact wf
+  have domainsLength : annotation.storedBinders.length =
+      candidate.type.trace.spineLength := by
+    rw [annotation.stored_length, shape.spineLength_eq_ctorFields]
+  exact loopCtorArgsFieldTranslation_of_candidate_full phase phaseLocal
+    parameters phaseFound annotation.annotation_spine shape.storedSpine
+    annotation.validation_annotations terminalWF henv primitives
+    parameterBound domainsLength parameterSources parameterTel phaseRoot
+    countEq whnfFuel candidateDepth
 
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
@@ -49763,8 +50717,6 @@ noncomputable def
     rw [indicesAt]
     exact indicesTel
   let paramsTel := aligned'.paramsTel henv commonResultLevelWF'
-  let constructorRuns := aligned'.constructorRuns normalizationRun'
-    commonResultLevelWF' paramsTel
   have generatedParamsTelBlock := generatedParamsTel'.mono
     (VEnv.stageInductiveTypes_le normalizationRun'.stage)
   have generatedFieldTelescopes :=
