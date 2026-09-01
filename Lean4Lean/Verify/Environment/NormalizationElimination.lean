@@ -1751,6 +1751,221 @@ def TypeChecker.Inner.BlockReductionPreserving
       operation input methods context state = .ok (output, state') →
         source.BlockReductionConstFree output
 
+/-- A checker cache does not return a fresh-block name when queried by an
+expression which itself excludes the complete block. -/
+def TypeChecker.BlockReductionCacheSafe
+    (source : VInductDecl) (cache : ExprMap Expr) : Prop :=
+  ∀ {input output : Expr}, cache[input]? = some output →
+    source.BlockReductionConstFree input →
+      source.BlockReductionConstFree output
+
+/-- The empty expression cache vacuously preserves fresh-block support. -/
+theorem TypeChecker.BlockReductionCacheSafe.empty
+    (source : VInductDecl) :
+    TypeChecker.BlockReductionCacheSafe source ({} : ExprMap Expr) := by
+  intro input output found inputSafe
+  simp at found
+
+/-- Inserting a support-safe result preserves the checker-cache invariant.
+The inserted key needs no separate premise: even if an unsafe query is equal
+to it, the invariant is only invoked for support-safe queries. -/
+theorem TypeChecker.BlockReductionCacheSafe.insert
+    {source : VInductDecl} {cache : ExprMap Expr}
+    (safe : TypeChecker.BlockReductionCacheSafe source cache)
+    {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    TypeChecker.BlockReductionCacheSafe source (cache.insert input output) := by
+  intro query result found querySafe
+  rw [Std.HashMap.getElem?_insert] at found
+  split at found
+  · cases found
+    exact outputSafe
+  · exact safe found querySafe
+
+/-- The expression-valued checker caches contain only support-preserving
+entries.  The equivalence and failure caches return no expressions, while
+the name generator is irrelevant to constant support. -/
+structure TypeChecker.State.BlockReductionSafe
+    (source : VInductDecl) (state : TypeChecker.State) : Prop where
+  inferTypeI : TypeChecker.BlockReductionCacheSafe source state.inferTypeI
+  inferTypeC : TypeChecker.BlockReductionCacheSafe source state.inferTypeC
+  whnfCore : TypeChecker.BlockReductionCacheSafe source state.whnfCoreCache
+  whnf : TypeChecker.BlockReductionCacheSafe source state.whnfCache
+  unfold : TypeChecker.BlockReductionCacheSafe source state.unfold
+
+/-- The concrete empty state used by `TypeChecker.M.run` satisfies every
+fresh-block cache invariant. -/
+theorem TypeChecker.State.BlockReductionSafe.empty
+    (source : VInductDecl) :
+    ({} : TypeChecker.State).BlockReductionSafe source where
+  inferTypeI := TypeChecker.BlockReductionCacheSafe.empty source
+  inferTypeC := TypeChecker.BlockReductionCacheSafe.empty source
+  whnfCore := TypeChecker.BlockReductionCacheSafe.empty source
+  whnf := TypeChecker.BlockReductionCacheSafe.empty source
+  unfold := TypeChecker.BlockReductionCacheSafe.empty source
+
+/-- Saving a successful inference-only result preserves state support. -/
+theorem TypeChecker.State.BlockReductionSafe.insertInferTypeI
+    {source : VInductDecl} {state : TypeChecker.State}
+    (safe : state.BlockReductionSafe source) {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    ({ state with inferTypeI := state.inferTypeI.insert input output } :
+      TypeChecker.State).BlockReductionSafe source :=
+  { safe with inferTypeI :=
+      TypeChecker.BlockReductionCacheSafe.insert safe.inferTypeI outputSafe }
+
+/-- Saving a successful checking-mode inference result preserves state
+support. -/
+theorem TypeChecker.State.BlockReductionSafe.insertInferTypeC
+    {source : VInductDecl} {state : TypeChecker.State}
+    (safe : state.BlockReductionSafe source) {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    ({ state with inferTypeC := state.inferTypeC.insert input output } :
+      TypeChecker.State).BlockReductionSafe source :=
+  { safe with inferTypeC :=
+      TypeChecker.BlockReductionCacheSafe.insert safe.inferTypeC outputSafe }
+
+/-- Saving a successful core-normalization result preserves state support. -/
+theorem TypeChecker.State.BlockReductionSafe.insertWhnfCore
+    {source : VInductDecl} {state : TypeChecker.State}
+    (safe : state.BlockReductionSafe source) {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    ({ state with whnfCoreCache := state.whnfCoreCache.insert input output } :
+      TypeChecker.State).BlockReductionSafe source :=
+  { safe with whnfCore :=
+      TypeChecker.BlockReductionCacheSafe.insert safe.whnfCore outputSafe }
+
+/-- Saving a successful full-normalization result preserves state support. -/
+theorem TypeChecker.State.BlockReductionSafe.insertWhnf
+    {source : VInductDecl} {state : TypeChecker.State}
+    (safe : state.BlockReductionSafe source) {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    ({ state with whnfCache := state.whnfCache.insert input output } :
+      TypeChecker.State).BlockReductionSafe source :=
+  { safe with whnf :=
+      TypeChecker.BlockReductionCacheSafe.insert safe.whnf outputSafe }
+
+/-- Saving a successful delta-unfolding result preserves state support. -/
+theorem TypeChecker.State.BlockReductionSafe.insertUnfold
+    {source : VInductDecl} {state : TypeChecker.State}
+    (safe : state.BlockReductionSafe source) {input output : Expr}
+    (outputSafe : source.BlockReductionConstFree output) :
+    ({ state with unfold := state.unfold.insert input output } :
+      TypeChecker.State).BlockReductionSafe source :=
+  { safe with unfold :=
+      TypeChecker.BlockReductionCacheSafe.insert safe.unfold outputSafe }
+
+/-- Every local declaration which the checker may inspect has a block-safe
+type and unfolding payload.  For an ordinary local declaration `value'` is
+its inert free variable, so this single condition covers both local forms. -/
+def TypeChecker.Context.BlockReductionSafe
+    (source : VInductDecl) (context : TypeChecker.Context) : Prop :=
+  ∀ {fv : FVarId} {declaration : LocalDecl},
+    context.lctx.find? fv = some declaration →
+      source.BlockReductionConstFree declaration.type ∧
+        source.BlockReductionConstFree declaration.value'
+
+/-- A checker reader with an empty local context is block-safe independently
+of its environment and remaining configuration. -/
+theorem TypeChecker.Context.blockReductionSafe_of_lctx_eq_empty
+    {source : VInductDecl} {context : TypeChecker.Context}
+    (empty : context.lctx = {}) : context.BlockReductionSafe source := by
+  intro fv declaration found
+  rw [empty] at found
+  have notFound : ({} : LocalContext).find? fv = none :=
+    emptyLocalContextFindNone fv
+  rw [notFound] at found
+  contradiction
+
+/-- Extending a block-safe checker context by a support-safe local assumption
+preserves the local lookup invariant. -/
+theorem TypeChecker.Context.BlockReductionSafe.mkLocalDecl
+    {source : VInductDecl} {context : TypeChecker.Context}
+    (safe : context.BlockReductionSafe source)
+    (contextWF : context.lctx.WF)
+    (id : FVarId) (name : Name) (type : Expr) (binderInfo : BinderInfo)
+    (typeSafe : source.BlockReductionConstFree type) :
+    ({ context with lctx :=
+        context.lctx.mkLocalDecl id name type binderInfo } :
+      TypeChecker.Context).BlockReductionSafe source := by
+  intro fv declaration found
+  change (context.lctx.mkLocalDecl id name type binderInfo).find? fv =
+    some declaration at found
+  have mapWF := contextWF.map_wf
+  rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
+  rw [localEq] at found mapWF
+  simp only [LocalContext.mkLocalDecl, LocalContext.find?] at found
+  change (map.insert id
+      (.cdecl declarations.size id name type binderInfo .default)).find? fv =
+        some declaration at found
+  change map.WF at mapWF
+  rw [mapWF.find?_insert] at found
+  split at found
+  · cases found
+    refine ⟨typeSafe, ?_⟩
+    simp [LocalDecl.value', VInductDecl.BlockReductionConstFree,
+      Lean.Expr.ReductionConstFree]
+  · apply safe
+    simpa only [LocalContext.find?, localEq] using found
+
+/-- Extending a block-safe checker context by a support-safe local let
+preserves the local lookup invariant. -/
+theorem TypeChecker.Context.BlockReductionSafe.mkLetDecl
+    {source : VInductDecl} {context : TypeChecker.Context}
+    (safe : context.BlockReductionSafe source)
+    (contextWF : context.lctx.WF)
+    (id : FVarId) (name : Name) (type value : Expr)
+    (typeSafe : source.BlockReductionConstFree type)
+    (valueSafe : source.BlockReductionConstFree value) :
+    ({ context with lctx := context.lctx.mkLetDecl id name type value } :
+      TypeChecker.Context).BlockReductionSafe source := by
+  intro fv declaration found
+  change (context.lctx.mkLetDecl id name type value).find? fv =
+    some declaration at found
+  have mapWF := contextWF.map_wf
+  rcases localEq : context.lctx with ⟨map, declarations, auxiliary⟩
+  rw [localEq] at found mapWF
+  simp only [LocalContext.mkLetDecl, LocalContext.find?] at found
+  change (map.insert id
+      (.ldecl declarations.size id name type value false .default)).find? fv =
+        some declaration at found
+  change map.WF at mapWF
+  rw [mapWF.find?_insert] at found
+  split at found
+  · cases found
+    exact ⟨typeSafe, valueSafe⟩
+  · apply safe
+    simpa only [LocalContext.find?, localEq] using found
+
+/-- Method-specific form of fresh-block support preservation on reachable
+checker states and support-safe local contexts.  Recursive type-checker
+executions always run against one concrete `Methods.withFuel` record; the
+state conclusion makes sequential callbacks compositional. -/
+def TypeChecker.Inner.BlockReductionPreservingAt
+    (source : VInductDecl) (methods : TypeChecker.Methods)
+    (operation : Expr → TypeChecker.RecM Expr) : Prop :=
+    ∀ {input : Expr}, source.BlockReductionConstFree input →
+    ∀ (context : TypeChecker.Context), context.BlockReductionSafe source →
+    ∀ (state : TypeChecker.State), state.BlockReductionSafe source →
+      ∀ {output : Expr} {state' : TypeChecker.State},
+      operation input methods context state = .ok (output, state') →
+        source.BlockReductionConstFree output ∧
+          state'.BlockReductionSafe source
+
+/-- Binary Boolean callbacks return no expression, but they must preserve the
+same cache invariant so a following normalization callback remains within the
+reachable-state contract. -/
+def TypeChecker.Inner.BlockReductionStatePreserving₂At
+    (source : VInductDecl) (methods : TypeChecker.Methods)
+    (operation : Expr → Expr → TypeChecker.RecM Bool) : Prop :=
+  ∀ {left right : Expr}, source.BlockReductionConstFree left →
+    source.BlockReductionConstFree right →
+    ∀ (context : TypeChecker.Context), context.BlockReductionSafe source →
+    ∀ (state : TypeChecker.State), state.BlockReductionSafe source →
+      ∀ {result : Bool} {state' : TypeChecker.State},
+        operation left right methods context state = .ok (result, state') →
+          state'.BlockReductionSafe source
+
 /-- Successful outputs of a recursive callback contain no metavariables.
 Candidate checking starts from strict translations, so this is the second
 small syntactic invariant threaded by the staging replay. -/
@@ -1783,13 +1998,13 @@ private theorem toCtorWhenK_scan_loop_result
           pure (.yield ⟨none, ()⟩)) indices ⟨none, ()⟩ suffix :
             TypeChecker.RecM _)
         methods context state = .ok (result, state')) :
-    result.1 = none ∨ result.1 = some expression := by
+    (result.1 = none ∨ result.1 = some expression) ∧ state' = state := by
   induction indices generalizing state with
   | nil =>
       simp only [List.forIn'.loop, Pure.pure, ReaderT.pure, StateT.pure,
         Except.pure] at run
       cases Except.ok.inj run
-      exact .inl rfl
+      exact ⟨.inl rfl, rfl⟩
   | cons index indices ih =>
       by_cases hasMVar :
           (arguments[index]'(bound index (by
@@ -1797,7 +2012,7 @@ private theorem toCtorWhenK_scan_loop_result
             simp))).hasExprMVar = true
       · simp [List.forIn'.loop, hasMVar] at run
         cases Except.ok.inj run
-        exact .inr rfl
+        exact ⟨.inr rfl, rfl⟩
       · have hasMVarFalse :
             (arguments[index]'(bound index (by
               obtain ⟨pre, rfl⟩ := suffix
@@ -1826,7 +2041,7 @@ private theorem toCtorWhenK_scan_list_result
         else
           pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
         methods context state = .ok (result, state')) :
-    result.1 = none ∨ result.1 = some expression := by
+    (result.1 = none ∨ result.1 = some expression) ∧ state' = state := by
   change (List.forIn' indices ⟨none, ()⟩
       (fun i h (_ : Option Expr × Unit) =>
         if (arguments[i]'(bound i h)).hasExprMVar then
@@ -1851,7 +2066,7 @@ private theorem toCtorWhenK_scan_result
         else
           pure (.yield ⟨none, ()⟩)) : TypeChecker.RecM _)
         methods context state = .ok (result, state')) :
-    result.1 = none ∨ result.1 = some expression := by
+    (result.1 = none ∨ result.1 = some expression) ∧ state' = state := by
   rw [Std.Legacy.Range.forIn'_eq_forIn'_range'] at run
   let indices := List.range' start
     (Std.Legacy.Range.size [start:arguments.size]) 1
@@ -2011,15 +2226,20 @@ theorem TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
     (expressionSafe : source.BlockReductionConstFree expression)
     (payloadSafe : source.BlockReductionPayloadFree environment)
     (defaultSafe : source.BlockReductionConstFree (default : Expr))
-    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (contextSafe : context.BlockReductionSafe source)
+    (stateSafe : state.BlockReductionSafe source)
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       TypeChecker.Inner.whnf)
-    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (inferSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       (fun expression => TypeChecker.Inner.inferType expression
         (inferOnly := true)))
+    (isDefEqSafe : TypeChecker.Inner.BlockReductionStatePreserving₂At source
+      methods TypeChecker.Inner.isDefEq)
     (run : toCtorWhenK environment TypeChecker.Inner.whnf
       TypeChecker.Inner.inferType TypeChecker.Inner.isDefEq info expression
         methods context state = .ok (result, state')) :
-    source.BlockReductionConstFree result := by
+    source.BlockReductionConstFree result ∧
+      state'.BlockReductionSafe source := by
   unfold toCtorWhenK at run
   simp only [infoK, if_true, ReaderT.bind, StateT.bind, Except.bind,
     Bind.bind] at run
@@ -2032,8 +2252,9 @@ theorem TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
       rcases inferredState with ⟨inferred, inferredState⟩
       rw [inferredRun] at run
       simp only [Except.bind] at run
-      have inferredSafe := inferSafe expressionSafe methods context state
-        inferredRun
+      obtain ⟨inferredSafe, inferredStateSafe⟩ :=
+        inferSafe expressionSafe context contextSafe state stateSafe
+          inferredRun
       cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
           inferredState with
       | error error =>
@@ -2043,13 +2264,14 @@ theorem TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
           rcases normalizedState with ⟨normalized, normalizedState⟩
           rw [normalizedRun] at run
           simp only [Except.bind] at run
-          have normalizedSafe := whnfSafe inferredSafe methods context
-            inferredState normalizedRun
+          obtain ⟨normalizedSafe, normalizedStateSafe⟩ :=
+            whnfSafe inferredSafe context contextSafe inferredState
+              inferredStateSafe normalizedRun
           cases head : normalized.getAppFn with
           | const family levels =>
               simp only [head] at run
               split at run
-              · exact ofPure expressionSafe run
+              · exact ofPure expressionSafe normalizedStateSafe run
               · split at run
                 · let arguments := normalized.getAppArgs
                   simp only [ReaderT.bind, StateT.bind, Except.bind,
@@ -2071,32 +2293,40 @@ theorem TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
                       dsimp only [arguments] at scanRun
                       rw [scanRun] at run
                       simp only [Except.bind] at run
-                      have scanShape := toCtorWhenK_scan_result arguments
-                        info.numParams expression methods context
-                        normalizedState scanRun
+                      obtain ⟨scanShape, scanStateEq⟩ :=
+                        toCtorWhenK_scan_result arguments info.numParams
+                          expression methods context normalizedState scanRun
+                      have scanStateSafe :
+                          scanState.BlockReductionSafe source := by
+                        rw [scanStateEq]
+                        exact normalizedStateSafe
                       rcases scanShape with scanNone | scanSome
                       · rw [scanNone] at run
-                        exact finish normalizedSafe run
+                        exact finish normalizedSafe scanStateSafe run
                       · rw [scanSome] at run
-                        exact ofPure expressionSafe run
-                · exact finish normalizedSafe run
+                        exact ofPure expressionSafe scanStateSafe run
+                · exact finish normalizedSafe normalizedStateSafe run
           | _ =>
               simp only [head] at run
-              exact ofPure expressionSafe run
+              exact ofPure expressionSafe normalizedStateSafe run
 where
   ofPure {value : Expr} {callbackState : TypeChecker.State}
       (valueSafe : source.BlockReductionConstFree value)
+      (callbackStateSafe : callbackState.BlockReductionSafe source)
       (run : (pure value : TypeChecker.RecM Expr) methods context
         callbackState = .ok (result, state')) :
-      source.BlockReductionConstFree result := by
+      source.BlockReductionConstFree result ∧
+        state'.BlockReductionSafe source := by
     change Except.ok (value, callbackState) =
       Except.ok (result, state') at run
-    have resultEq : value = result := by
-      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
-    exact resultEq ▸ valueSafe
+    have pairEq : (value, callbackState) = (result, state') :=
+      Except.ok.inj run
+    cases pairEq
+    exact ⟨valueSafe, callbackStateSafe⟩
 
   finish {normalized : Expr} {callbackState : TypeChecker.State}
       (normalizedSafe : source.BlockReductionConstFree normalized)
+      (callbackStateSafe : callbackState.BlockReductionSafe source)
       (run : (do
         let some newCtorApp := mkNullaryCtor environment normalized
           info.numParams | return expression
@@ -2105,10 +2335,11 @@ where
           return expression
         return newCtorApp) methods context callbackState =
           .ok (result, state')) :
-      source.BlockReductionConstFree result := by
+      source.BlockReductionConstFree result ∧
+        state'.BlockReductionSafe source := by
     cases constructorRun : mkNullaryCtor environment normalized info.numParams
     · simp [constructorRun] at run
-      exact ofPure expressionSafe run
+      exact ofPure expressionSafe callbackStateSafe run
     · rename_i constructor
       have constructorSafe := normalizedSafe.mkNullaryCtor_of_default
         payloadSafe defaultSafe constructorRun
@@ -2123,6 +2354,9 @@ where
           rcases inferredState with ⟨inferred, inferredState⟩
           rw [inferredRun] at run
           simp only [Except.bind] at run
+          obtain ⟨inferredSafe, inferredStateSafe⟩ :=
+            inferSafe constructorSafe context contextSafe callbackState
+              callbackStateSafe inferredRun
           cases equalRun : (TypeChecker.Inner.isDefEq normalized inferred)
               methods context inferredState with
           | error error =>
@@ -2131,9 +2365,11 @@ where
           | ok equalState =>
               rcases equalState with ⟨equal, equalState⟩
               rw [equalRun] at run
+              have equalStateSafe := isDefEqSafe normalizedSafe inferredSafe
+                context contextSafe inferredState inferredStateSafe equalRun
               cases equal
-              · exact ofPure expressionSafe run
-              · exact ofPure constructorSafe run
+              · exact ofPure expressionSafe equalStateSafe run
+              · exact ofPure constructorSafe equalStateSafe run
 
 /-- Appending structure projections over a source-ordered index list
 preserves reduction support for the complete fresh block. -/
@@ -2429,18 +2665,21 @@ theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
     (expressionSafe : source.BlockReductionConstFree expression)
     (payloadSafe : source.BlockReductionPayloadFree environment)
     (defaultSafe : source.BlockReductionConstFree (default : Expr))
-    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (contextSafe : context.BlockReductionSafe source)
+    (stateSafe : state.BlockReductionSafe source)
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       TypeChecker.Inner.whnf)
-    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (inferSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       (fun expression => TypeChecker.Inner.inferType expression
         (inferOnly := true)))
     (run : toCtorWhenStruct environment TypeChecker.Inner.whnf
       TypeChecker.Inner.inferType inductName expression methods context state =
         .ok (result, state')) :
-    source.BlockReductionConstFree result := by
+    source.BlockReductionConstFree result ∧
+      state'.BlockReductionSafe source := by
   unfold toCtorWhenStruct at run
   split at run
-  · exact ofPure expressionSafe run
+  · exact ofPure expressionSafe stateSafe run
   · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind] at run
     cases inferredRun : (TypeChecker.Inner.inferType expression
         (inferOnly := true)) methods context state with
@@ -2451,8 +2690,9 @@ theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
         rcases inferredState with ⟨inferred, inferredState⟩
         rw [inferredRun] at run
         simp only [Except.bind] at run
-        have inferredSafe := inferSafe expressionSafe methods context state
-          inferredRun
+        obtain ⟨inferredSafe, inferredStateSafe⟩ :=
+          inferSafe expressionSafe context contextSafe state stateSafe
+            inferredRun
         cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
             inferredState with
         | error error =>
@@ -2462,10 +2702,11 @@ theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
             rcases normalizedState with ⟨normalized, normalizedState⟩
             rw [normalizedRun] at run
             simp only [Except.bind] at run
-            have normalizedSafe := whnfSafe inferredSafe methods context
-              inferredState normalizedRun
+            obtain ⟨normalizedSafe, normalizedStateSafe⟩ :=
+              whnfSafe inferredSafe context contextSafe inferredState
+                inferredStateSafe normalizedRun
             split at run
-            · exact ofPure expressionSafe run
+            · exact ofPure expressionSafe normalizedStateSafe run
             · simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
                 at run
               cases sortInferredRun : (TypeChecker.Inner.inferType normalized
@@ -2478,8 +2719,9 @@ theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
                     ⟨sortInferred, sortInferredState⟩
                   rw [sortInferredRun] at run
                   simp only [Except.bind] at run
-                  have sortInferredSafe := inferSafe normalizedSafe methods
-                    context normalizedState sortInferredRun
+                  obtain ⟨sortInferredSafe, sortInferredStateSafe⟩ :=
+                    inferSafe normalizedSafe context contextSafe
+                      normalizedState normalizedStateSafe sortInferredRun
                   cases sortRun : (TypeChecker.Inner.whnf sortInferred) methods
                       context sortInferredState with
                   | error error =>
@@ -2489,33 +2731,37 @@ theorem TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
                       rcases sortState with ⟨sortResult, sortState⟩
                       rw [sortRun] at run
                       simp only [Except.bind] at run
-                      have sortSafe := whnfSafe sortInferredSafe methods
-                        context sortInferredState sortRun
+                      obtain ⟨sortSafe, sortStateSafe⟩ :=
+                        whnfSafe sortInferredSafe context contextSafe
+                          sortInferredState sortInferredStateSafe sortRun
                       cases sortResult with
                       | sort level =>
                           cases neverZero : level.isNeverZero with
                           | false =>
                               simp [neverZero] at run
-                              exact ofPure expressionSafe run
+                              exact ofPure expressionSafe sortStateSafe run
                           | true =>
                               simp [neverZero] at run
                               have expanded :=
                                 expandEtaStruct_reductionConstFree_of_default
                                   normalizedSafe expressionSafe payloadSafe
                                   defaultSafe
-                              exact ofPure expanded run
-                      | _ => exact ofPure defaultSafe run
+                              exact ofPure expanded sortStateSafe run
+                      | _ => exact ofPure defaultSafe sortStateSafe run
 where
   ofPure {value : Expr} {callbackState : TypeChecker.State}
       (valueSafe : source.BlockReductionConstFree value)
+      (callbackStateSafe : callbackState.BlockReductionSafe source)
       (run : (pure value : TypeChecker.RecM Expr) methods context
         callbackState = .ok (result, state')) :
-      source.BlockReductionConstFree result := by
+      source.BlockReductionConstFree result ∧
+        state'.BlockReductionSafe source := by
     change Except.ok (value, callbackState) =
       Except.ok (result, state') at run
-    have resultEq : value = result := by
-      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
-    exact resultEq ▸ valueSafe
+    have pairEq : (value, callbackState) = (result, state') :=
+      Except.ok.inj run
+    cases pairEq
+    exact ⟨valueSafe, callbackStateSafe⟩
 
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
@@ -2653,16 +2899,21 @@ theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
       source.BlockReductionConstFree (.natLitToConstructor value))
     (stringSafe : ∀ value,
       source.BlockReductionConstFree (.strLitToConstructor value))
-    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (contextSafe : context.BlockReductionSafe source)
+    (stateSafe : state.BlockReductionSafe source)
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       TypeChecker.Inner.whnf)
-    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+    (inferSafe : TypeChecker.Inner.BlockReductionPreservingAt source methods
       (fun expression => TypeChecker.Inner.inferType expression
         (inferOnly := true)))
+    (isDefEqSafe : TypeChecker.Inner.BlockReductionStatePreserving₂At source
+      methods TypeChecker.Inner.isDefEq)
     (run : inductiveReduceRec environment expression
       TypeChecker.Inner.whnf TypeChecker.Inner.inferType
       TypeChecker.Inner.isDefEq methods context state =
         .ok (some result, state')) :
-    source.BlockReductionConstFree result := by
+    source.BlockReductionConstFree result ∧
+      state'.BlockReductionSafe source := by
   unfold inductiveReduceRec at run
   cases head : expression.getAppFn with
   | const recursorName levels =>
@@ -2698,6 +2949,8 @@ theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
                     omega
                   have finish {major : Expr} {callbackState : TypeChecker.State}
                       (majorSafe : source.BlockReductionConstFree major)
+                      (callbackStateSafe :
+                        callbackState.BlockReductionSafe source)
                       (tailRun : ((do
                         let some rule := getRecRuleFor info major |
                           return none
@@ -2709,7 +2962,8 @@ theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
                           expression.getAppArgs majorArgs)) :
                             TypeChecker.RecM (Option Expr)) methods context
                             callbackState = .ok (some result, state')) :
-                      source.BlockReductionConstFree result := by
+                      source.BlockReductionConstFree result ∧
+                        state'.BlockReductionSafe source := by
                     cases selected : getRecRuleFor info major with
                     | none =>
                         simp only [selected] at tailRun
@@ -2747,19 +3001,19 @@ theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
                                 majorSafe.getAppArgs argumentMember)
                             simp [selected, fieldsOverflow, levelsMismatch]
                               at tailRun
-                            have resultEq :
-                                applyRecursorRule info rule levels
-                                    expression.getAppArgs major.getAppArgs =
-                                  result := by
-                              exact Option.some.inj (congrArg Prod.fst
-                                (Except.ok.inj tailRun))
-                            exact resultEq ▸ reductSafe
+                            have pairEq :
+                                (some (applyRecursorRule info rule levels
+                                    expression.getAppArgs major.getAppArgs),
+                                  callbackState) =
+                                (some result, state') := Except.ok.inj tailRun
+                            cases pairEq
+                            exact ⟨reductSafe, callbackStateSafe⟩
                   simp only [majorFound, ReaderT.bind, StateT.bind,
                     Except.bind, Bind.bind] at run
                   cases kFlag : info.k with
                   | false =>
                       simp only [kFlag, Bool.false_eq_true, if_false] at run
-                      exact afterK majorSafe run finish
+                      exact afterK majorSafe stateSafe run finish
                   | true =>
                       simp only [kFlag, if_true] at run
                       simp only [ReaderT.bind, StateT.bind, Except.bind,
@@ -2776,11 +3030,12 @@ theorem TypeChecker.Inner.inductiveReduceRec_reductionConstFree
                             ⟨converted, convertedState⟩
                           rw [kRun] at run
                           simp only [Except.bind] at run
-                          have convertedSafe :=
+                          obtain ⟨convertedSafe, convertedStateSafe⟩ :=
                             TypeChecker.Inner.toCtorWhenK_reductionConstFree_of_default
-                              kFlag majorSafe payloadSafe defaultSafe whnfSafe
-                                inferSafe kRun
-                          exact afterK convertedSafe run finish
+                              kFlag majorSafe payloadSafe defaultSafe contextSafe
+                                stateSafe whnfSafe inferSafe isDefEqSafe kRun
+                          exact afterK convertedSafe convertedStateSafe run
+                            finish
           | _ =>
               simp only [found] at run
               change Except.ok (none, state) =
@@ -2796,6 +3051,7 @@ where
       {major : Expr} {info : RecursorVal} {levels : List Level}
       {callbackStart : TypeChecker.State}
       (majorSafe : source.BlockReductionConstFree major)
+      (callbackStartSafe : callbackStart.BlockReductionSafe source)
       (run : ((do
         match ← TypeChecker.Inner.whnf major with
         | .lit (.natVal value) =>
@@ -2829,6 +3085,7 @@ where
                   Except.ok (some result, state'))
       (finish : ∀ {major : Expr} {callbackState : TypeChecker.State},
         source.BlockReductionConstFree major →
+        callbackState.BlockReductionSafe source →
         ((do
           let some rule := getRecRuleFor info major | return none
           let majorArgs := major.getAppArgs
@@ -2838,8 +3095,10 @@ where
             expression.getAppArgs majorArgs)) :
               TypeChecker.RecM (Option Expr)) methods context callbackState =
               Except.ok (some result, state') →
-        source.BlockReductionConstFree result) :
-      source.BlockReductionConstFree result := by
+        source.BlockReductionConstFree result ∧
+          state'.BlockReductionSafe source) :
+      source.BlockReductionConstFree result ∧
+        state'.BlockReductionSafe source := by
     simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind] at run
     cases normalizedRun : (TypeChecker.Inner.whnf major) methods context
       callbackStart with
@@ -2850,11 +3109,14 @@ where
         rcases normalizedState with ⟨normalized, normalizedState⟩
         rw [normalizedRun] at run
         simp only [Except.bind] at run
-        have normalizedSafe := whnfSafe majorSafe methods context
-          callbackStart normalizedRun
+        obtain ⟨normalizedSafe, normalizedStateSafe⟩ :=
+          whnfSafe majorSafe context contextSafe callbackStart
+            callbackStartSafe normalizedRun
         have structureCase {normalized : Expr}
             {callbackState : TypeChecker.State}
             (normalizedSafe : source.BlockReductionConstFree normalized)
+            (callbackStateSafe :
+              callbackState.BlockReductionSafe source)
             (structureTailRun : ((do
               let major ← toCtorWhenStruct environment
                 TypeChecker.Inner.whnf TypeChecker.Inner.inferType
@@ -2867,7 +3129,8 @@ where
                 expression.getAppArgs majorArgs)) :
                   TypeChecker.RecM (Option Expr)) methods context
                     callbackState = Except.ok (some result, state')) :
-            source.BlockReductionConstFree result := by
+            source.BlockReductionConstFree result ∧
+              state'.BlockReductionSafe source := by
           simp only [ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
             at structureTailRun
           cases structureRun : toCtorWhenStruct environment
@@ -2881,16 +3144,18 @@ where
               rcases structureState with ⟨structureMajor, structureState⟩
               rw [structureRun] at structureTailRun
               simp only [Except.bind] at structureTailRun
-              have structureMajorSafe :=
+              obtain ⟨structureMajorSafe, structureStateSafe⟩ :=
                 TypeChecker.Inner.toCtorWhenStruct_reductionConstFree_of_default
-                  normalizedSafe payloadSafe defaultSafe whnfSafe inferSafe
-                    structureRun
-              exact finish structureMajorSafe structureTailRun
+                  normalizedSafe payloadSafe defaultSafe contextSafe
+                    callbackStateSafe whnfSafe inferSafe structureRun
+              exact finish structureMajorSafe structureStateSafe
+                structureTailRun
         cases normalized with
         | lit literal =>
             cases literal with
             | natVal value =>
-                exact finish (natSafe value) (by simpa only using run)
+                exact finish (natSafe value) normalizedStateSafe
+                  (by simpa only using run)
             | strVal value =>
                 simp only [ReaderT.bind, StateT.bind, Except.bind,
                   Bind.bind] at run
@@ -2904,30 +3169,31 @@ where
                     rcases stringState with ⟨stringMajor, stringState⟩
                     rw [stringRun] at run
                     simp only [Except.bind] at run
-                    have stringMajorSafe := whnfSafe (stringSafe value)
-                      methods context normalizedState stringRun
-                    exact finish stringMajorSafe run
-        | bvar => exact structureCase normalizedSafe (by
+                    obtain ⟨stringMajorSafe, stringStateSafe⟩ :=
+                      whnfSafe (stringSafe value) context contextSafe
+                        normalizedState normalizedStateSafe stringRun
+                    exact finish stringMajorSafe stringStateSafe run
+        | bvar => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | fvar => exact structureCase normalizedSafe (by
+        | fvar => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | mvar => exact structureCase normalizedSafe (by
+        | mvar => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | sort => exact structureCase normalizedSafe (by
+        | sort => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | const => exact structureCase normalizedSafe (by
+        | const => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | app => exact structureCase normalizedSafe (by
+        | app => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | lam => exact structureCase normalizedSafe (by
+        | lam => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | forallE => exact structureCase normalizedSafe (by
+        | forallE => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | letE => exact structureCase normalizedSafe (by
+        | letE => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | mdata => exact structureCase normalizedSafe (by
+        | mdata => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
-        | proj => exact structureCase normalizedSafe (by
+        | proj => exact structureCase normalizedSafe normalizedStateSafe (by
             simpa only [Bind.bind, ReaderT.bind] using run)
 
 /-- Replacing a free variable by a bound variable does not change the
