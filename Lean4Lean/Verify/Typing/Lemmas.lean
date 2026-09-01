@@ -4187,6 +4187,50 @@ theorem TrExprS.mkAppList_of_spine
         simpa [Expr.mkAppList, VExpr.appN] using
           ih happ happType hspineRest
 
+/-- The head of a well-typed iterated application is itself well typed.
+This is the small inversion fact needed when the target application is
+already certified but no particular head telescope has been selected. -/
+theorem VExpr.WF.appN_head
+    (full : VExpr.WF env U Γ (VExpr.appN f args))
+    (henv : VEnv.WF env) (hΓ : OnCtx Γ (env.IsType U)) :
+    VExpr.WF env U Γ f := by
+  induction args generalizing f with
+  | nil =>
+      change VExpr.WF env U Γ f at full
+      exact full
+  | cons arg args ih =>
+      have applied : VExpr.WF env U Γ (.app f arg) := by
+        exact ih full
+      obtain ⟨A, B, functionType, _argumentType⟩ :=
+        applied.app_inv henv hΓ
+      exact ⟨.forallE A B, functionType⟩
+
+/-- Rebuild a strict translation of an iterated host application when the
+complete target application is already well typed.  Typing inversion supplies
+the intermediate function and argument judgments required by `TrExprS.app`;
+callers therefore need not reconstruct a separate expected telescope. -/
+theorem TrExprS.mkAppList_of_wf
+    (henv : VEnv.WF env) (hΔ : VLCtx.WF env Us.length Δ)
+    (hf : TrExprS env Us Δ f f')
+    (hargs : args.Forall₂ (TrExprS env Us Δ) args')
+    (hfull : VExpr.WF env Us.length Δ.toCtx (VExpr.appN f' args')) :
+    TrExprS env Us Δ (f.mkAppList args) (VExpr.appN f' args') := by
+  induction hargs generalizing f f' with
+  | nil =>
+      change TrExprS env Us Δ f f'
+      exact hf
+  | @cons arg arg' args args' harg hrest ih =>
+      have tailWF : VExpr.WF env Us.length Δ.toCtx
+          (VExpr.appN (.app f' arg') args') := by
+        simpa only [VExpr.appN] using hfull
+      have appliedWF : VExpr.WF env Us.length Δ.toCtx (.app f' arg') := by
+        exact tailWF.appN_head henv hΔ.toCtx
+      obtain ⟨A, B, functionType, argumentType⟩ :=
+        appliedWF.app_inv henv hΔ.toCtx
+      have appliedTr : TrExprS env Us Δ (.app f arg) (.app f' arg') :=
+        .app functionType argumentType hf harg
+      simpa [Expr.mkAppList, VExpr.appN] using ih appliedTr tailWF
+
 /-- Weak-translation form of `TrExprS.mkAppList_of_spine`.  This is the form
 used after host universe instantiation, whose translation is definitionally
 equal rather than necessarily strict. -/

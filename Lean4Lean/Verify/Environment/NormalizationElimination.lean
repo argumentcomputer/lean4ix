@@ -3461,6 +3461,22 @@ theorem extension
       exact ⟨(Lift.skipN Lift.refl 1).comp tailLift,
         headExtension.comp tailExtension⟩
 
+/-- Exact-count form of `extension`: a parameter-context run inserts one
+free assumption per translated target and does not alter any older binder. -/
+theorem skipExtension
+    {base final : VLCtx} {parameters : List Expr} {types : List VExpr}
+    (run : TypeChecker.CandidateParameterContext base parameters types final) :
+    VLCtx.FVLift' base final 0 (.skipN .refl types.length) 0 := by
+  induction run with
+  | nil => exact .refl
+  | @cons fv deps type base parameters types final tail ih =>
+      have head : VLCtx.FVLift' base
+          ((some (fv, deps), .vlam type) :: base) 0
+          (.skipN .refl 1) 0 :=
+        .skip_fvar _ _ .refl
+      simpa only [List.length_cons, Lift.comp_skipN, Lift.comp,
+        Lift.skipN_skipN, Nat.add_comm] using head.comp ih
+
 /-- Exact free-variable inventory accumulated by a source-ordered parameter
 context.  The verified context stores newest declarations first. -/
 theorem fvars
@@ -3514,6 +3530,51 @@ theorem sourceTranslations
     rw [toCtx run]
     simp [VLCtx.toCtx]
   simpa only [sourceEq, lengthEq] using translated
+
+/-- The variables appended by a parameter-context run translate to the
+low reverse de Bruijn range even when the run starts above an existing
+free-assumption context.  The older base variables occupy the high prefix
+of the complete canonical range and can therefore be dropped uniformly. -/
+theorem sourceTranslations_fromBase
+    {env : VEnv} {Us : List Name}
+    {base final : VLCtx} {parameters : List Expr} {types : List VExpr}
+    (run : TypeChecker.CandidateParameterContext base parameters types final)
+    (baseShape : base.FVarLamOnly) (henv : VEnv.WF env)
+    (finalWF : VLCtx.WF env Us.length final) :
+    List.Forall₂ (TrExprS env Us final) parameters
+      (VExpr.bvarRevRange 0 types.length) := by
+  have finalShape : final.FVarLamOnly := fvarLamOnly run baseShape
+  have translated := finalShape.sourceTranslations henv finalWF
+  have sourceInventory := fvars run
+  have sourcesEq : final.fvars.reverse.map Expr.fvar =
+      base.fvars.reverse.map Expr.fvar ++ parameters := by
+    have reversed := congrArg List.reverse sourceInventory
+    simpa only [List.map_reverse, List.reverse_append,
+      List.reverse_reverse] using reversed
+  have contextInventory := toCtx run
+  have contextLength : final.toCtx.length =
+      types.length + base.toCtx.length := by
+    rw [contextInventory, List.length_append, List.length_reverse]
+  have fvarContextLength : ∀ {Δ : VLCtx}, Δ.FVarLamOnly →
+      Δ.fvars.length = Δ.toCtx.length := by
+    intro Δ shape
+    induction shape with
+    | nil => rfl
+    | cons tail ih =>
+        simpa only [VLCtx.fvars_cons_some, VLCtx.toCtx,
+          List.length_cons] using congrArg Nat.succ ih
+  have baseLength := fvarContextLength baseShape
+  rw [sourcesEq, contextLength, ← VExpr.bvarRevRange_append] at translated
+  have prefixLength :
+      (base.fvars.reverse.map Expr.fvar).length =
+        (VExpr.bvarRevRange types.length base.toCtx.length).length := by
+    simp only [List.length_map, List.length_reverse,
+      VExpr.bvarRevRange_length, baseLength]
+  have trailing := Lean4Lean.List.Forall₂.drop translated
+    (base.fvars.reverse.map Expr.fvar).length
+  rw [List.drop_append_length] at trailing
+  rw [prefixLength, List.drop_append_length] at trailing
+  exact trailing
 
 end TypeChecker.CandidateParameterContext
 
@@ -37466,6 +37527,49 @@ private theorem selectedForallArrayRun_consumeMkForall
   | cons find domainTr domainType tail =>
       simp [LocalContext.mkBindingList1, find,
         AddInductive.consumeTypeAnnotations]
+
+/-- Rebuild the strict family application used as a phase-one major from its
+translated constant head and the already selected parameter/index variables.
+The generated motive telescope supplies well-typedness of the complete
+target application, so typing inversion can recover every intermediate
+application premise without selecting a second family telescope. -/
+private theorem recInfoPhaseOneStep_majorTranslation
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {current : AddInductive.Context}
+    (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+      current)
+    {context : VLCtx} (contextWF : VLCtx.WF env Us.length context)
+    {head : VExpr} {parameterTargets indexTargets : List VExpr}
+    (headTr : TrExprS env Us context stats.indConsts[dIdx]! head)
+    (parametersTr : List.Forall₂ (TrExprS env Us context)
+      stats.params.toList parameterTargets)
+    (indicesTr : List.Forall₂ (TrExprS env Us context)
+      step.indices.toList indexTargets)
+    (majorConsumed : AddInductive.consumeTypeAnnotations step.majorType =
+      step.majorType)
+    (majorWF : VExpr.WF env Us.length context.toCtx
+      (VExpr.appN head (parameterTargets ++ indexTargets))) :
+    TrExprS env Us context
+      (AddInductive.consumeTypeAnnotations step.majorType)
+      (VExpr.appN head (parameterTargets ++ indexTargets)) := by
+  have argumentsTr : List.Forall₂ (TrExprS env Us context)
+      (stats.params.toList ++ step.indices.toList)
+      (parameterTargets ++ indexTargets) :=
+    Lean4Lean.List.Forall₂.append parametersTr indicesTr
+  have applicationTr := TrExprS.mkAppList_of_wf henv contextWF headTr
+    argumentsTr majorWF
+  rw [majorConsumed, AddInductive.RecInfoPhaseOneStep.majorType]
+  simp only [Lean.mkAppN]
+  rw [← Array.foldl_toList, ← Array.foldl_toList]
+  change TrExprS env Us context
+    (List.foldl Expr.app
+      (List.foldl Expr.app stats.indConsts[dIdx]! stats.params.toList)
+      step.indices.toList)
+    (VExpr.appN head (parameterTargets ++ indexTargets))
+  rw [← Expr.mkAppList_eq_foldl, ← Expr.mkAppList_eq_foldl]
+  simpa only [Expr.mkAppList_append] using applicationTr
 
 /-- Once the index declarations selected by one phase-one family have been
 translated, the remaining motive construction is purely structural.  The
