@@ -85,8 +85,8 @@ theorem dependentRecordDecl_wf :
         VExpr.dropN, VExpr.resultOf, VExpr.appHead,
         VExpr.appArgs]
       exact ⟨
-        ⟨VLevel.succ (.param 0), by type_tac, VLevel.le_max_left⟩,
-        ⟨VLevel.succ (.param 1), by type_tac, VLevel.le_max_right⟩⟩
+        ⟨VLevel.succ (.param 0), by type_tac, .inr VLevel.le_max_left⟩,
+        ⟨VLevel.succ (.param 1), by type_tac, .inr VLevel.le_max_right⟩⟩
     · simp [dependentRecordDecl, dependentRecordType,
         dependentRecordCtor, VInductDecl.ctorFields,
         VInductDecl.recFieldIdxs, VInductDecl.sortLevel,
