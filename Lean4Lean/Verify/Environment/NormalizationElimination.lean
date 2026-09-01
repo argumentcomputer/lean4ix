@@ -45488,6 +45488,378 @@ private theorem recInfoSynthesis_minorSources
   rw [Array.toList_flatMap]
   exact base
 
+/-- The constructor-argument traversal of one retained constructor step is a
+push-only extension of its incoming context. -/
+private theorem recInfoConstructorStep_argumentExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current) :
+    current.LocalExtension step.argumentContext := by
+  exact AddInductive.mkRecInfos.loopCtorArgs_localExtension .refl
+    step.argumentsRun fun nextTerminal nextConstructorArgs nextRecursiveArgs
+      nextContext extension callbackRun => by
+      have quadEq : (nextTerminal, nextConstructorArgs, nextRecursiveArgs,
+          nextContext) =
+          (step.terminal, step.constructorArgs, step.recursiveArgs,
+            step.argumentContext) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = step.argumentContext :=
+        congrArg (fun quad => quad.2.2.2) quadEq
+      exact contextEq ▸ extension
+
+/-- The recursive-hypothesis traversal of one retained constructor step is a
+push-only extension of its argument context. -/
+private theorem recInfoConstructorStep_hypothesisExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current) :
+    step.argumentContext.LocalExtension step.hypothesisContext := by
+  exact AddInductive.mkRecInfos.loopU_localExtension .refl step.hypothesesRun
+    fun nextHypotheses nextContext extension callbackRun => by
+      have pairEq : (nextHypotheses, nextContext) =
+          (step.hypotheses, step.hypothesisContext) :=
+        Except.ok.inj callbackRun
+      have contextEq : nextContext = step.hypothesisContext :=
+        congrArg Prod.snd pairEq
+      exact contextEq ▸ extension
+
+/-- Both traversals of one constructor step compose to a push-only
+extension of the incoming context. -/
+private theorem recInfoConstructorStep_localExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current) :
+    current.LocalExtension step.hypothesisContext :=
+  contextLocalExtension_trans (recInfoConstructorStep_argumentExtension step)
+    (recInfoConstructorStep_hypothesisExtension step)
+
+/-- The minor push of one constructor step extends the incoming context. -/
+private theorem recInfoConstructorStep_minorExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current) :
+    current.LocalExtension step.minorContext :=
+  .push (recInfoConstructorStep_localExtension step) step.minorName .default
+    (AddInductive.consumeTypeAnnotations step.minorType)
+
+/-- One family's constructor traversal is a push-only extension of its
+incoming context. -/
+private theorem recInfoConstructor_localExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done => exact .refl
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      exact contextLocalExtension_trans
+        (recInfoConstructorStep_minorExtension step) ih
+
+/-- The complete second synthesis phase is a push-only extension of its
+incoming context. -/
+private theorem recInfoPhaseTwo_localExtension
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext) :
+    current.LocalExtension finalContext := by
+  induction trace with
+  | done _ => exact .refl
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      exact contextLocalExtension_trans
+        (recInfoConstructor_localExtension step.constructors) ih
+
+/-- The minor declaration pushed by one constructor step, looked up at the
+context that pushed it. -/
+private theorem recInfoConstructorStep_minorFind
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    step.minorContext.lctx.find? step.hypothesisContext.freshFVarId =
+      some (.cdecl step.hypothesisContext.lctx.decls.size
+        step.hypothesisContext.freshFVarId step.minorName
+        (AddInductive.consumeTypeAnnotations step.minorType)
+        .default .default) := by
+  have hypothesisRun : TypeChecker.CandidateLocalContextRun
+      step.hypothesisContext :=
+    TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+      (recInfoConstructorStep_localExtension step)
+  simpa only [AddInductive.RecInfoConstructorStep.minorContext] using
+    hypothesisRun.push_findNew step.minorName .default
+      (AddInductive.consumeTypeAnnotations step.minorType)
+
+/-- The minor declaration of one constructor step is preserved by every
+push-only extension of its minor context, in particular at the synthesis
+endpoint. -/
+private theorem recInfoConstructorStep_minorFind_ofLocalExtension
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctor : Constructor} {recInfos : Array AddInductive.RecInfo}
+    {current : AddInductive.Context}
+    (step : AddInductive.RecInfoConstructorStep stats indTypeName dIdx ctor
+      recInfos current)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    {implementation : AddInductive.Context}
+    (extension : step.minorContext.LocalExtension implementation) :
+    implementation.lctx.find? step.hypothesisContext.freshFVarId =
+      some (.cdecl step.hypothesisContext.lctx.decls.size
+        step.hypothesisContext.freshFVarId step.minorName
+        (AddInductive.consumeTypeAnnotations step.minorType)
+        .default .default) :=
+  TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+    (TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+      (recInfoConstructorStep_minorExtension step))
+    extension (recInfoConstructorStep_minorFind step currentRun)
+
+/-- Every minor allocated by one family's constructor traversal is fresh for
+the traversal's incoming context. -/
+private theorem recInfoConstructorMinorFVars_absent
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ recInfoConstructorMinorFVars trace,
+      current.lctx.find? fv = none := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      have hypothesisExtension :
+          current'.LocalExtension step.hypothesisContext :=
+        recInfoConstructorStep_localExtension step
+      have hypothesisRun : TypeChecker.CandidateLocalContextRun
+          step.hypothesisContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          hypothesisExtension
+      have minorExtension : current'.LocalExtension step.minorContext :=
+        recInfoConstructorStep_minorExtension step
+      have minorRun : TypeChecker.CandidateLocalContextRun
+          step.minorContext := by
+        exact hypothesisRun.push step.minorName .default
+          (AddInductive.consumeTypeAnnotations step.minorType)
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · cases found : current'.lctx.find?
+            step.hypothesisContext.freshFVarId with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+                currentRun hypothesisExtension found
+            have fresh : step.hypothesisContext.lctx.find?
+                step.hypothesisContext.freshFVarId = none :=
+              hypothesisRun.fresh
+            rw [preserved] at fresh
+            contradiction
+      · have absent := ih minorRun fv member
+        cases found : current'.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+                currentRun minorExtension found
+            rw [preserved] at absent
+            contradiction
+
+/-- Every minor allocated by one family's constructor traversal is declared
+at the traversal's final context. -/
+private theorem recInfoConstructorMinorFVars_present
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ recInfoConstructorMinorFVars trace,
+      ∃ declaration, finalContext.lctx.find? fv = some declaration := by
+  induction trace with
+  | done =>
+      intro fv member
+      nomatch member
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      have minorRun : TypeChecker.CandidateLocalContextRun
+          step.minorContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          (recInfoConstructorStep_minorExtension step)
+      intro fv member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact ⟨_, recInfoConstructorStep_minorFind_ofLocalExtension step
+          currentRun (recInfoConstructor_localExtension tail)⟩
+      · exact ih minorRun fv member
+
+/-- The minors allocated by one family's constructor traversal are pairwise
+distinct. -/
+private theorem recInfoConstructorMinorFVars_nodup
+    {stats : AddInductive.InductiveStats} {indTypeName : Name} {dIdx : Nat}
+    {ctors : List Constructor} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoConstructorTrace stats indTypeName dIdx
+      ctors recInfos current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (recInfoConstructorMinorFVars trace).Nodup := by
+  induction trace with
+  | done => exact .nil
+  | @next ctor' recInfos' current' ctors' finalInfos' finalContext' step
+      tail ih =>
+      have minorRun : TypeChecker.CandidateLocalContextRun
+          step.minorContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          (recInfoConstructorStep_minorExtension step)
+      refine List.nodup_cons.mpr ⟨?_, ih minorRun⟩
+      intro member
+      have absent := recInfoConstructorMinorFVars_absent tail minorRun
+        step.hypothesisContext.freshFVarId member
+      have present := recInfoConstructorStep_minorFind step currentRun
+      rw [present] at absent
+      contradiction
+
+/-- Every minor allocated by the second synthesis phase is fresh for the
+phase's incoming context. -/
+private theorem recInfoPhaseTwoMinorFVars_absent
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ recInfoPhaseTwoMinorFVars trace,
+      current.lctx.find? fv = none := by
+  induction trace with
+  | done _ =>
+      intro fv member
+      nomatch member
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      have familyExtension : current'.LocalExtension step.finalContext :=
+        recInfoConstructor_localExtension step.constructors
+      have familyRun : TypeChecker.CandidateLocalContextRun
+          step.finalContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          familyExtension
+      intro fv member
+      have split : fv ∈ recInfoConstructorMinorFVars step.constructors ++
+          recInfoPhaseTwoMinorFVars tail := member
+      rcases List.mem_append.mp split with member | member
+      · exact recInfoConstructorMinorFVars_absent step.constructors
+          currentRun fv member
+      · have absent := ih familyRun fv member
+        cases found : current'.lctx.find? fv with
+        | none => rfl
+        | some declaration =>
+            have preserved :=
+              TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+                currentRun familyExtension found
+            rw [preserved] at absent
+            contradiction
+
+/-- Every minor allocated by the second synthesis phase is declared at the
+phase's final context. -/
+private theorem recInfoPhaseTwoMinorFVars_present
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    ∀ fv ∈ recInfoPhaseTwoMinorFVars trace,
+      ∃ declaration, finalContext.lctx.find? fv = some declaration := by
+  induction trace with
+  | done _ =>
+      intro fv member
+      nomatch member
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      have familyExtension : current'.LocalExtension step.finalContext :=
+        recInfoConstructor_localExtension step.constructors
+      have familyRun : TypeChecker.CandidateLocalContextRun
+          step.finalContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          familyExtension
+      intro fv member
+      have split : fv ∈ recInfoConstructorMinorFVars step.constructors ++
+          recInfoPhaseTwoMinorFVars tail := member
+      rcases List.mem_append.mp split with member | member
+      · obtain ⟨declaration, found⟩ :=
+          recInfoConstructorMinorFVars_present step.constructors currentRun
+            fv member
+        exact ⟨declaration,
+          TypeChecker.CandidateLocalContextRun.findOld_ofLocalExtension
+            familyRun (recInfoPhaseTwo_localExtension tail) found⟩
+      · exact ih familyRun fv member
+
+/-- The minors allocated by the complete second synthesis phase are pairwise
+distinct: the minors of one family are declared before any later family
+allocates, and later allocations are fresh for that context. -/
+private theorem recInfoPhaseTwoMinorFVars_nodup
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {dIdx : Nat} {recInfos finalInfos : Array AddInductive.RecInfo}
+    {current finalContext : AddInductive.Context}
+    (trace : AddInductive.RecInfoPhaseTwoTrace stats indTypes dIdx recInfos
+      current finalInfos finalContext)
+    (currentRun : TypeChecker.CandidateLocalContextRun current) :
+    (recInfoPhaseTwoMinorFVars trace).Nodup := by
+  induction trace with
+  | done _ => exact .nil
+  | @next dIdx' recInfos' current' finalInfos' finalContext' step tail ih =>
+      have familyExtension : current'.LocalExtension step.finalContext :=
+        recInfoConstructor_localExtension step.constructors
+      have familyRun : TypeChecker.CandidateLocalContextRun
+          step.finalContext :=
+        TypeChecker.CandidateLocalContextRun.ofLocalExtension currentRun
+          familyExtension
+      show (recInfoConstructorMinorFVars step.constructors ++
+        recInfoPhaseTwoMinorFVars tail).Nodup
+      refine List.nodup_append.mpr
+        ⟨recInfoConstructorMinorFVars_nodup step.constructors currentRun,
+          ih familyRun, ?_⟩
+      intro fv familyMember other tailMember equal
+      cases equal
+      obtain ⟨declaration, found⟩ :=
+        recInfoConstructorMinorFVars_present step.constructors currentRun fv
+          familyMember
+      have absent := recInfoPhaseTwoMinorFVars_absent tail familyRun fv
+        tailMember
+      rw [found] at absent
+      contradiction
+
+/-- At the retained synthesis endpoint, the source-ordered minor inventory is
+duplicate-free and every entry is declared in the synthesis context. -/
+private theorem recInfoSynthesis_minorFVars
+    {stats : AddInductive.InductiveStats} {indTypes : Array InductiveType}
+    {elimLevel : Level}
+    {rootContext synthesisContext : AddInductive.Context}
+    {recInfos : Array AddInductive.RecInfo}
+    (trace : AddInductive.RecInfoSynthesisTrace stats indTypes elimLevel
+      rootContext recInfos synthesisContext)
+    (phase2 : AddInductive.RecInfoPhaseTwoTrace stats indTypes 0
+      trace.phase1Infos trace.phase1Context recInfos synthesisContext)
+    (rootRun : TypeChecker.CandidateLocalContextRun rootContext) :
+    (recInfoPhaseTwoMinorFVars phase2).Nodup ∧
+      ∀ fv ∈ recInfoPhaseTwoMinorFVars phase2,
+        ∃ declaration, synthesisContext.lctx.find? fv = some declaration := by
+  have phase1Run : TypeChecker.CandidateLocalContextRun trace.phase1Context :=
+    TypeChecker.CandidateLocalContextRun.ofLocalExtension rootRun
+      trace.phase1_localExtension
+  exact ⟨recInfoPhaseTwoMinorFVars_nodup phase2 phase1Run,
+    recInfoPhaseTwoMinorFVars_present phase2 phase1Run⟩
+
 set_option linter.defProp false in
 /-- Reducible semantic-evidence value selected by the legacy exact
 constructor audit.  Keeping the value transparent lets compatibility
