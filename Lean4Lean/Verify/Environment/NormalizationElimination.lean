@@ -36857,6 +36857,107 @@ private noncomputable def LoopArgs1IndexTranslationTrace.relevel
         (VLCtx.instL_toCtx _ ▸ domainType.instL levelsWF)
         (by simpa [VLCtx.instL, VLocalDecl.instL] using ih)
 
+/-- Insert ambient free-variable binders below a translated phase-one index
+telescope.  Each successive index target is lifted past the ambient binders
+at the cutoff determined by the preceding indices, exactly as in
+`VExpr.liftTelN`.  This is the operation needed by later mutual motives:
+their family index surface is unchanged, but it appears after every motive
+already emitted by phase one. -/
+private theorem LoopArgs1IndexTranslationTrace.weakFV
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final)
+    {liftedBase : VLCtx} {n k : Nat}
+    (extension : VLCtx.FVLift' base liftedBase 0
+      (.consN (.skipN .refl n) k) 0)
+    (liftedWF : VLCtx.WF env Us.length liftedBase)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (liftedFound : ∀ fv ∈ liftedBase.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    Nonempty (Sigma fun liftedFinal =>
+      LoopArgs1IndexTranslationTrace env Us stats trace liftedBase
+        (VExpr.liftTelN n targets k) liftedFinal) := by
+  induction translations generalizing liftedBase k with
+  | @done outerI outerIndices outerFuel outerCurrent type i indices fuel
+      current notForall base =>
+      refine ⟨⟨liftedBase, ?_⟩⟩
+      simpa only [VExpr.liftTelN] using
+        (@LoopArgs1IndexTranslationTrace.done env Us stats outerI
+          outerIndices outerFuel outerCurrent type i indices fuel current
+          notForall liftedBase)
+  | @parameter outerName outerBody outerBinderInfo i indices fuel current
+      finalIndices finalContext name domain body binderInfo isParameter
+      nextType whnfRun tail base final targets rest ih =>
+      obtain ⟨liftedFinal, liftedTail⟩ := ih extension liftedWF currentRun
+        liftedFound
+      exact ⟨⟨liftedFinal,
+        @LoopArgs1IndexTranslationTrace.parameter env Us stats outerName
+          outerBody outerBinderInfo i indices fuel current finalIndices
+          finalContext name domain body binderInfo isParameter nextType
+          whnfRun tail liftedBase liftedFinal
+          (VExpr.liftTelN n targets k) liftedTail⟩⟩
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      let liftedTarget := target.liftN n k
+      let deps := (AddInductive.consumeTypeAnnotations domain).fvarsList
+      let nextBase : VLCtx :=
+        (some (current.freshFVarId, deps), .vlam target) :: base
+      let liftedNextBase : VLCtx :=
+        (some (current.freshFVarId, deps), .vlam liftedTarget) :: liftedBase
+      have depsSubset : deps ⊆ base.fvars := by
+        exact domainTr.fvarsList
+      have liftedDepsSubset : deps ⊆ liftedBase.fvars := by
+        intro fv member
+        exact extension.fvars_sublist.subset (depsSubset member)
+      have liftedFresh : current.freshFVarId ∉ liftedBase.fvars :=
+        compressedFVars_fresh currentRun liftedFound
+      have liftedDomainTr : TrExprS env Us liftedBase
+          (AddInductive.consumeTypeAnnotations domain) liftedTarget := by
+        simpa only [liftedTarget, Lift.consN_consN, Nat.add_zero,
+          VExpr.lift'_consN_skipN] using
+          domainTr.weakFV' henv.ordered extension liftedWF
+      have liftedDomainType : env.IsType Us.length liftedBase.toCtx
+          liftedTarget := by
+        simpa only [liftedTarget, Lift.consN_consN, Nat.add_zero,
+          VExpr.lift'_consN_skipN] using
+          domainType.weak' henv.ordered extension.toCtx
+      have liftedNextWF : VLCtx.WF env Us.length liftedNextBase := by
+        refine ⟨liftedWF, ?_, liftedDomainType⟩
+        intro fv foundDeps equality
+        cases equality
+        exact ⟨liftedFresh, liftedDepsSubset⟩
+      have nextExtension : VLCtx.FVLift' nextBase liftedNextBase 0
+          (.consN (.skipN .refl n) (k + 1)) 0 := by
+        simpa only [nextBase, liftedNextBase, liftedTarget,
+          VLocalDecl.lift', VLocalDecl.depth, VExpr.lift'_consN_skipN,
+          Lift.consN_consN] using
+            extension.cons_fvar (current.freshFVarId, deps)
+              (.vlam target) depsSubset
+      have nextFound : ∀ fv ∈ liftedNextBase.fvars,
+          ∃ declaration,
+            (current.pushLocalDecl name binderInfo
+              (AddInductive.consumeTypeAnnotations domain)).lctx.find? fv =
+                some declaration := by
+        exact compressedFVars_push currentRun liftedFound name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) deps liftedTarget
+      obtain ⟨liftedFinal, liftedTail⟩ := ih nextExtension liftedNextWF
+        (currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain)) nextFound
+      refine ⟨⟨liftedFinal, ?_⟩⟩
+      exact @LoopArgs1IndexTranslationTrace.index env Us stats i indices fuel
+        current finalIndices finalContext name domain body binderInfo
+        notParameter nextType whnfRun tail liftedBase liftedFinal liftedTarget
+        (VExpr.liftTelN n targets (k + 1)) liftedDomainTr liftedDomainType
+        liftedTail
+
 /-- Transport a validator-owned exact index suffix onto the index branches
 retained by phase one.  The producer annotation spine is the common syntactic
 clock: while another domain remains, its next source is a stored Pi, so both
