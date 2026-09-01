@@ -72,14 +72,23 @@ inductive VEnv.WF' : List VDecl → VEnv → Prop where
 
 def VEnv.WF (env : VEnv) : Prop := ∃ ds, VEnv.WF' ds env
 
-/-- A constant head classified by a genuine completed inductive declaration.
+/-- Placement of an exact constructor header relative to its completed
+inductive declaration.
 
-The exact constructor is retained as a member of the declaration's source
-inventory.  In particular, an ordinary axiom with a constructor-shaped type
-and a definition which unfolds to a constructor do not inhabit this
-predicate.  The completed declaration may precede the current environment;
-the final `LE` witness makes the classification persistent under later
-extensions. -/
+The usual public case has already reached the declaration output.  Internal
+kernel staging may instead sit between the declaration input and output: in
+that case the current environment must contain the declaration's literal
+constructor constant.  This admits the family/constructor prefix used while
+Lean synthesizes recursors, but still excludes definition aliases and merely
+constructor-shaped types. -/
+def VEnv.ConstructorHeadPlacement (env before after : VEnv)
+    (constructor : VConstVal) : Prop :=
+  after ≤ env ∨
+    before ≤ env ∧
+      env.constants constructor.name = some constructor.toVConstant
+
+/-- A constant head classified by a genuine completed inductive declaration
+or by its exact producer-owned constructor-staging prefix. -/
 def VEnv.ConstructorHead (env : VEnv) (name : Name) : Prop :=
   ∃ (source : VInductDecl) (before after : VEnv)
       (constructor : VConstVal),
@@ -87,15 +96,15 @@ def VEnv.ConstructorHead (env : VEnv) (name : Name) : Prop :=
       VDecl.WF before (.induct source) after ∧
       constructor ∈ source.blockConstructorConstants ∧
       constructor.name = name ∧
-      after ≤ env
+      env.ConstructorHeadPlacement before after constructor
 
-/-- A genuine completed inductive constructor together with the shared
-parameter count of the transaction which installed it.
+/-- A completed or exactly staged inductive constructor together with the
+shared parameter count of the transaction which installs it.
 
 This is the metadata-sensitive form of `ConstructorHead`.  Keeping the count
-attached to the completed declaration avoids quantifying over unrelated
-structure views in arbitrary future extensions: typed head inversion is the
-single place which must align this retained count with a selected view. -/
+attached to the same completed declaration avoids quantifying over unrelated
+structure views: typed head inversion is the single place which must align
+this retained count with a selected view. -/
 def VEnv.ConstructorHeadArity (env : VEnv) (name : Name)
     (numParams : Nat) : Prop :=
   ∃ (source : VInductDecl) (before after : VEnv)
@@ -105,7 +114,21 @@ def VEnv.ConstructorHeadArity (env : VEnv) (name : Name)
       source.nparams = numParams ∧
       constructor ∈ source.blockConstructorConstants ∧
       constructor.name = name ∧
-      after ≤ env
+      env.ConstructorHeadPlacement before after constructor
+
+namespace VEnv.ConstructorHeadPlacement
+
+/-- Exact constructor placement persists under Theory-environment
+extension, both after completion and inside a producer-owned staging prefix. -/
+theorem mono {env env' before after : VEnv} {constructor : VConstVal}
+    (self : env.ConstructorHeadPlacement before after constructor)
+    (henv : env ≤ env') :
+    env'.ConstructorHeadPlacement before after constructor := by
+  rcases self with completed | ⟨started, present⟩
+  · exact .inl (completed.trans henv)
+  · exact .inr ⟨started.trans henv, henv.constants present⟩
+
+end VEnv.ConstructorHeadPlacement
 
 namespace VEnv.ConstructorHead
 
@@ -115,9 +138,9 @@ theorem mono {env env' : VEnv} (self : env.ConstructorHead name)
     (henv : env ≤ env') : env'.ConstructorHead name := by
   rcases self with
     ⟨source, before, after, constructor, hbefore, hdecl, hconstructor,
-      hname, hle⟩
+      hname, hplacement⟩
   exact ⟨source, before, after, constructor, hbefore, hdecl,
-    hconstructor, hname, hle.trans henv⟩
+    hconstructor, hname, hplacement.mono henv⟩
 
 end VEnv.ConstructorHead
 
@@ -129,9 +152,9 @@ theorem toConstructorHead
     _root_.Lean4Lean.VEnv.ConstructorHead env name := by
   rcases self with
     ⟨source, before, after, constructor, hbefore, hdecl, _hnparams,
-      hconstructor, hname, hle⟩
+      hconstructor, hname, hplacement⟩
   exact ⟨source, before, after, constructor, hbefore, hdecl,
-    hconstructor, hname, hle⟩
+    hconstructor, hname, hplacement⟩
 
 /-- Constructor-head arity classification persists under Theory-environment
 extension. -/
@@ -141,9 +164,9 @@ theorem mono {env env' : VEnv}
     _root_.Lean4Lean.VEnv.ConstructorHeadArity env' name numParams := by
   rcases self with
     ⟨source, before, after, constructor, hbefore, hdecl, hnparams,
-      hconstructor, hname, hle⟩
+      hconstructor, hname, hplacement⟩
   exact ⟨source, before, after, constructor, hbefore, hdecl, hnparams,
-    hconstructor, hname, hle.trans henv⟩
+    hconstructor, hname, hplacement.mono henv⟩
 
 end VEnv.ConstructorHeadArity
 

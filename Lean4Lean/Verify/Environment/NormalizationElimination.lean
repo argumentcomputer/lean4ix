@@ -1,6 +1,7 @@
 import Lean4Lean.Verify.Environment.Normalization
 import Lean4Lean.Verify.Environment.ConstructorValidation
 import Lean4Lean.Verify.Environment.Elimination
+import Lean4Lean.Verify.Environment.Extension
 import Lean4Lean.Verify.Environment.Lemmas
 import Lean4Lean.Verify.Environment.Readiness
 import Lean4Lean.Theory.Typing.InductiveCertificate
@@ -32605,13 +32606,15 @@ theorem
     rw [recursorFound] at absent
     contradiction
 
-/-- Projection readiness at the incomplete host constructor boundary, using
-the completed semantic block as its Theory model.
+/-- Projection readiness at the exact incomplete host/Theory constructor
+boundary.
 
 No new block family can satisfy the host readiness test before recursor
 metadata is installed.  An old family cannot be activated by a fresh block
 constructor because `ReductionPayloadClosed` excludes that name from its
-stored constructor inventory. -/
+stored constructor inventory.  New constructor heads use the completed
+semantic block only as their declaration certificate; their literal headers
+remain in the exact staged Theory environment consumed by the checker. -/
 theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -32631,10 +32634,10 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
     (payloadClosed :
       produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
     {completedEnv : VEnv}
-    (completion : env.addInductBlockGeneration generation = some completedEnv)
-    (constructorLE : declarations.constructors.ctorEnv ≤ completedEnv) :
+    (completion : env.addInductBlockGeneration generation = some completedEnv) :
     ProjectionResolutionReady
-      produced.execution.eliminationExecution.constructorEnv completedEnv := by
+      produced.execution.eliminationExecution.constructorEnv
+        declarations.constructors.ctorEnv := by
   let normalization :=
     produced.execution.eliminationExecution.normalization
   have familyMapWF : normalization.familyEnv.constants.WF :=
@@ -32643,8 +32646,11 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
       produced.execution.eliminationExecution.constructorEnv.constants.WF := by
     simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
       declarations.constructors.addCtors.map_wf familyMapWF
-  have theoryLE : blockEnv ≤ completedEnv :=
-    declarations.constructors.addCtors.le.trans constructorLE
+  have theoryLE : blockEnv ≤ declarations.constructors.ctorEnv :=
+    declarations.constructors.addCtors.le
+  have preLE : env ≤ declarations.constructors.ctorEnv :=
+    declarations.families.addTypes.le.trans
+      declarations.constructors.addCtors.le
   have preserveConstructor : ∀ {name info},
       normalization.familyEnv.find? name = some (.ctorInfo info) →
         produced.execution.eliminationExecution.constructorEnv.find? name =
@@ -32746,10 +32752,12 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
       have declarationWF : VDecl.WF env (.induct source) completedEnv :=
         .inductBlock run.block.wf completion
       exact ⟨source, env, completedEnv, raw, preWF, declarationWF,
-        sourceParams, rawMember, rawName, .rfl⟩
+        sourceParams, rawMember, rawName,
+        .inr ⟨preLE, declarations.constructors.addCtors.lookup raw rawMember⟩⟩
 
-/-- Structure-eta readiness at the incomplete host constructor boundary,
-using the completed semantic block as its Theory model. -/
+/-- Structure-eta readiness at the exact incomplete host/Theory constructor
+boundary.  Every ready family is necessarily old at this point, so its
+registered artifact retargets directly across the constructor fold. -/
 theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
     {source : VInductDecl} {kernelSources : List InductiveType}
     {numNested : Nat} {isUnsafe : Bool}
@@ -32768,11 +32776,9 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
     (declarations : ProducedBlockSemanticDeclarationRun run)
     (payloadClosed :
       produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
-    {completedEnv : VEnv}
-    (completion : env.addInductBlockGeneration generation = some completedEnv)
-    (constructorLE : declarations.constructors.ctorEnv ≤ completedEnv) :
-    StructureEtaReady
-      produced.execution.eliminationExecution.constructorEnv completedEnv := by
+    : StructureEtaReady
+      produced.execution.eliminationExecution.constructorEnv
+        declarations.constructors.ctorEnv := by
   let normalization :=
     produced.execution.eliminationExecution.normalization
   have familyMapWF : normalization.familyEnv.constants.WF :=
@@ -32781,13 +32787,10 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
       produced.execution.eliminationExecution.constructorEnv.constants.WF := by
     simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
       declarations.constructors.addCtors.map_wf familyMapWF
-  have theoryLE : blockEnv ≤ completedEnv :=
-    declarations.constructors.addCtors.le.trans constructorLE
-  have preOrdered : env.Ordered := by
-    simpa only [staging.preFamily.venv_eq] using
-      staging.preFamily.contextRun.context.Ewf.ordered
-  have completedOrdered : completedEnv.Ordered :=
-    VEnv.addInductBlockGeneration_WF preOrdered run.block.wf completion
+  have theoryLE : blockEnv ≤ declarations.constructors.ctorEnv :=
+    declarations.constructors.addCtors.le
+  have constructorOrdered : declarations.constructors.ctorEnv.Ordered :=
+    declarations.constructors.trenv.wf.ordered
   have preserveConstructor : ∀ {name info},
       normalization.familyEnv.find? name = some (.ctorInfo info) →
         produced.execution.eliminationExecution.constructorEnv.find? name =
@@ -32845,11 +32848,164 @@ theorem ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
     obtain ⟨artifact⟩ := staging.structureEtaReady.resolve familyName
       familyInfo constructorName constructorInfo familyOld constructorOld
         oldReady
-    exact ⟨artifact.retarget_of_preserved theoryLE completedOrdered
+    exact ⟨artifact.retarget_of_preserved theoryLE constructorOrdered
       preserveConstructor preserveRecursor⟩
   · exact (declarations.newReadyConstructor_impossible staging
       payloadClosed familyFound recursorFound ctorsEq constructorMember
         constructorNameEq).elim
+
+/-- Rebase the validator's complete local telescope onto the exact
+post-constructor host/Theory pair used by recursor synthesis.
+
+The local declarations, fuel, safety mode, and name generator are unchanged.
+Only the two environments are replaced by the producer-owned constructor
+fold.  Primitive preservation follows from the same nonprimitive name checks
+which justified the host insertions, while projection and structure-eta
+readiness are supplied by the exact staging lemmas above. -/
+noncomputable def
+    ProducedBlockSemanticDeclarationRun.constructorPrefix_contextRun
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockRecursorShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us
+      produced.eliminationBase semantic generation}
+    (staging : NormalizationCandidateBlockStagingInput context
+      produced.execution.eliminationExecution.normalization env blockEnv Us
+      source)
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (root : TypeChecker.CandidateContextRun
+      produced.execution.eliminationExecution.normalization.validationContext)
+    (rootVenv : root.context.venv = env)
+    (payloadClosed :
+      produced.execution.eliminationExecution.normalization.validationContext.env.ReductionPayloadClosed)
+    (allowPrimitive_eq :
+      produced.execution.eliminationExecution.normalization.validationContext.allowPrimitive =
+        false) :
+    TypeChecker.CandidateContextRun produced.execution.recursorContext := by
+  let normalization :=
+    produced.execution.eliminationExecution.normalization
+  have validationMapWF : normalization.validationContext.env.constants.WF :=
+    staging.preTr.map_wf
+  have familyMapWF : normalization.familyEnv.constants.WF :=
+    declarations.families.addTypes.map_wf validationMapWF
+  have constructorMapWF :
+      produced.execution.eliminationExecution.constructorEnv.constants.WF := by
+    simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+      declarations.constructors.addCtors.map_wf familyMapWF
+  have familyNames := declarations.families.raw_names_not_primitive
+    allowPrimitive_eq validationMapWF
+  have constructorAllowPrimitive :
+      produced.execution.eliminationExecution.constructorContext.allowPrimitive =
+        false := by
+    simpa only [
+      AddInductive.NormalizationEliminationExecution.constructorContext] using
+      allowPrimitive_eq
+  have constructorNames :=
+    declarations.constructors.raw_names_not_primitive
+      constructorAllowPrimitive familyMapWF
+  have rootHasPrimitives : env.HasPrimitives := by
+    simpa only [rootVenv] using root.context.hasPrimitives
+  have familyHasPrimitives : blockEnv.HasPrimitives :=
+    declarations.families.addTypes.hasPrimitives rootHasPrimitives
+      (fun raw member => (familyNames raw member).1)
+  have constructorHasPrimitives :
+      declarations.constructors.ctorEnv.HasPrimitives :=
+    declarations.constructors.addCtors.hasPrimitives familyHasPrimitives
+      (fun raw member => (constructorNames raw member).1)
+  have rootSafePrimitives :
+      ConstMapSafePrimitives normalization.validationContext.env.constants :=
+    ConstMapSafePrimitives.ofEnvironment validationMapWF (by
+      intro name info found primitive
+      apply root.context.safePrimitives
+      · simpa only [TypeChecker.CandidateContextRun.context_env] using found
+      · exact primitive)
+  have familySafePrimitives :
+      ConstMapSafePrimitives normalization.familyEnv.constants :=
+    declarations.families.addTypes.safePrimitivesMap validationMapWF
+      rootSafePrimitives (fun raw member => (familyNames raw member).2)
+  have constructorSafePrimitives : ConstMapSafePrimitives
+      produced.execution.eliminationExecution.constructorEnv.constants := by
+    change ConstMapSafePrimitives
+      produced.eliminationBase.execution.constructorEnv.constants
+    exact declarations.constructors.addCtors.safePrimitivesMap familyMapWF
+      familySafePrimitives
+      (fun raw member => (constructorNames raw member).2)
+  have rootSafety : root.context.safety = .safe := by
+    calc
+      root.context.safety = normalization.validationContext.safety :=
+        root.context_safety
+      _ = .safe := by
+        simpa only [normalization,
+          ProducedBlockRecursorShapeCandidate.eliminationBase] using
+            run.validation_safety_eq
+  have projectionReady : ProjectionResolutionReady
+      produced.execution.eliminationExecution.constructorEnv
+        declarations.constructors.ctorEnv := by
+    obtain ⟨completedEnv, completion, _constructorLE⟩ :=
+      declarations.semanticCompletion
+    exact
+      ProducedBlockSemanticDeclarationRun.constructorPrefix_projectionReady
+        staging declarations payloadClosed completion
+  have constructorQuotInit :
+      produced.execution.eliminationExecution.constructorEnv.quotInit =
+        normalization.validationContext.env.quotInit := by
+    calc
+      produced.execution.eliminationExecution.constructorEnv.quotInit =
+          normalization.familyEnv.quotInit := by
+        simpa only [ProducedBlockRecursorShapeCandidate.eliminationBase] using
+          declarations.constructors.kernelTrace.quotInit
+      _ = normalization.validationContext.env.quotInit :=
+        normalization.familyEnv_quotInit
+  let newContext : TypeChecker.VContext :=
+    { root.context with
+      env := produced.execution.eliminationExecution.constructorEnv
+      venv := declarations.constructors.ctorEnv
+      hasPrimitives := constructorHasPrimitives
+      safePrimitives :=
+        constructorSafePrimitives.toEnvironment constructorMapWF
+      trenv := by
+        unfold TrEnv
+        rw [rootSafety, constructorQuotInit]
+        exact declarations.constructors.trenv
+      projectionReady := projectionReady
+      structureEtaReady :=
+        ProducedBlockSemanticDeclarationRun.constructorPrefix_structureEtaReady
+          staging declarations payloadClosed
+      mlctx_wf := by
+        have rootMLCtxWF := root.context.mlctx_wf
+        rw [rootVenv] at rootMLCtxWF
+        exact rootMLCtxWF.mono
+          (declarations.families.addTypes.le.trans
+            declarations.constructors.addCtors.le) }
+  have newContextEq : newContext.toContext =
+      produced.execution.recursorContext.toTypeChecker := by
+    calc
+      newContext.toContext =
+          { root.context.toContext with
+            env := produced.execution.eliminationExecution.constructorEnv } :=
+        rfl
+      _ = { normalization.validationContext.toTypeChecker with
+            env := produced.execution.eliminationExecution.constructorEnv } :=
+        congrArg (fun candidateContext : TypeChecker.Context =>
+          { candidateContext with
+            env := produced.execution.eliminationExecution.constructorEnv })
+          root.context_eq
+      _ = produced.execution.recursorContext.toTypeChecker := by
+        rfl
+  refine TypeChecker.CandidateContextRun.ofVContext _ newContext newContextEq
+    ?_ ?_
+  · exact TypeChecker.VState.WF.empty_of_reserves newContext (by
+      intro fv member
+      apply root.state_wf.ngen_wf fv
+      simpa only [newContext] using member)
+  · simpa only [AddInductive.NormalizationRecursorExecution.recursorContext]
+      using root.namePrefix_ne
 
 /-- The actual `mkRecInfos` callback retained by the ordinary recursor
 producer, together with the exact generated type inventory it emitted.  This
