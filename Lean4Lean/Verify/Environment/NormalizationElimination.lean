@@ -42724,6 +42724,369 @@ theorem
   exact declarations.generationEnv.motiveTypes_generated_defeq.view_onTel
     declarations.generationEnv.ord
 
+/-! #### General inputs for the phase-one motive translations -/
+
+/-- Annotation consumption is inert on any constant-headed application spine
+whose head constant is not one of the four kernel annotation builders. -/
+private theorem consumeTypeAnnotations_of_getAppFn_const
+    {e : Expr} {name : Name} {levels : List Level}
+    (head : e.getAppFn = .const name levels)
+    (notOptParam : name ≠ ``optParam) (notAutoParam : name ≠ ``autoParam)
+    (notOutParam : name ≠ ``outParam)
+    (notSemiOutParam : name ≠ ``semiOutParam) :
+    AddInductive.consumeTypeAnnotations e = e := by
+  unfold AddInductive.consumeTypeAnnotations
+  split
+  · rename_i innerName innerLevels type defaultValue
+    have reduced : (Expr.app (.app (.const innerName innerLevels) type)
+        defaultValue).getAppFn = .const innerName innerLevels := rfl
+    rw [reduced] at head
+    cases head
+    rw [if_neg notOptParam, if_neg notAutoParam]
+  · rename_i innerName innerLevels type
+    have reduced : (Expr.app (.const innerName innerLevels) type).getAppFn =
+        .const innerName innerLevels := rfl
+    rw [reduced] at head
+    cases head
+    rw [if_neg notOutParam, if_neg notSemiOutParam]
+  · rfl
+
+/-- Iterated Pi inversion: the innermost body of a typed telescope is a type
+in the context extended by the reversed binder list. -/
+private theorem isType_forallN_inv
+    {env : VEnv} (ord : VEnv.Ordered env) {U : Nat} :
+    ∀ (types : List VExpr) {gamma : List VExpr} {body : VExpr},
+      env.IsType U gamma (VExpr.forallN types body) →
+        env.IsType U (types.reverse ++ gamma) body
+  | [], _, _, h => h
+  | type :: types, gamma, body, h => by
+      have telescoped : env.IsType U gamma
+          (VExpr.forallE type (VExpr.forallN types body)) := h
+      have inverted := (telescoped.forallE_inv ord).2
+      have tail := isType_forallN_inv ord types inverted
+      simpa only [List.reverse_cons, List.append_assoc,
+        List.singleton_append] using tail
+
+/-- The compressed endpoint of a selected telescope conses exactly its
+selected identifiers, most recent first, onto the incoming base. -/
+private theorem selectedForall_final_fvars
+    {env : VEnv} {Us : List Name} {lctx : LocalContext}
+    {base final : VLCtx} {fvars : List FVarId} {types : List VExpr}
+    (selection : TypeChecker.MLCtx.SelectedForall env Us lctx base fvars
+      types final) :
+    final.fvars = fvars.reverse ++ base.fvars := by
+  induction selection with
+  | nil => rfl
+  | @cons fv index name type binderInfo kind base type' deps fvars types
+      final find domainTr domainType tail ih =>
+      rw [ih]
+      simp only [VLCtx.fvars_cons_some, List.reverse_cons,
+        List.append_assoc, List.singleton_append]
+
+/-- The compressed endpoint of a translated index traversal conses exactly
+its index variables, most recent first, onto the incoming base. -/
+private theorem loopArgs1IndexTranslation_final_fvars
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final) :
+    final.fvars = (loopArgs1IndexFVars trace).reverse ++ base.fvars := by
+  induction translations with
+  | done => simp [loopArgs1IndexFVars]
+  | parameter isParameter nextType whnfRun tail rest ih =>
+      simpa only [loopArgs1IndexFVars] using ih
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      rw [ih]
+      simp only [loopArgs1IndexFVars, VLCtx.fvars_cons_some,
+        List.reverse_cons, List.append_assoc, List.singleton_append]
+
+/-- A translated index traversal preserves the lambda-only compressed
+context shape. -/
+private theorem loopArgs1IndexTranslation_final_fvarLamOnly
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final)
+    (baseShape : base.FVarLamOnly) : final.FVarLamOnly := by
+  induction translations with
+  | done => exact baseShape
+  | parameter isParameter nextType whnfRun tail rest ih => exact ih baseShape
+  | index notParameter nextType whnfRun tail domainTr domainType rest ih =>
+      exact ih (.cons baseShape)
+
+/-- The compressed endpoint of a translated index traversal is well formed
+whenever its base is, its index variables are fresh for the operational
+reader context, and every base variable is declared there. -/
+private theorem loopArgs1IndexTranslation_final_wf
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseWF : VLCtx.WF env Us.length base)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration) :
+    VLCtx.WF env Us.length final := by
+  induction translations with
+  | done => exact baseWF
+  | parameter isParameter nextType whnfRun tail rest ih =>
+      exact ih currentRun baseWF baseFound
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      have fresh : current.freshFVarId ∉ base.fvars :=
+        compressedFVars_fresh currentRun baseFound
+      have depsSubset : (AddInductive.consumeTypeAnnotations domain).fvarsList
+          ⊆ base.fvars := domainTr.fvarsList
+      have nextWF : VLCtx.WF env Us.length
+          ((some (current.freshFVarId,
+              (AddInductive.consumeTypeAnnotations domain).fvarsList),
+            .vlam target) :: base) := by
+        refine ⟨baseWF, ?_, domainType⟩
+        intro fv foundDeps equality
+        cases equality
+        exact ⟨fresh, depsSubset⟩
+      exact ih
+        (currentRun.push name binderInfo
+          (AddInductive.consumeTypeAnnotations domain))
+        nextWF
+        (compressedFVars_push currentRun baseFound name binderInfo
+          (AddInductive.consumeTypeAnnotations domain) _ target)
+
+/-- A translated index traversal produces exactly one semantic target per
+allocated index variable. -/
+private theorem loopArgs1IndexTranslation_targets_length
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final) :
+    (loopArgs1IndexFVars trace).length = targets.length := by
+  induction translations with
+  | done => rfl
+  | parameter isParameter nextType whnfRun tail rest ih =>
+      simpa only [loopArgs1IndexFVars] using ih
+  | index notParameter nextType whnfRun tail domainTr domainType rest ih =>
+      simpa only [loopArgs1IndexFVars, List.length_cons] using
+        congrArg Nat.succ ih
+
+/-- The compressed endpoint of a translated index traversal extends the base
+Theory context by exactly the reversed target telescope. -/
+private theorem loopArgs1IndexTranslation_final_toCtx
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {base final : VLCtx} {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats trace base
+      targets final) :
+    final.toCtx = targets.reverse ++ base.toCtx := by
+  induction translations with
+  | done => rfl
+  | parameter isParameter nextType whnfRun tail rest ih => exact ih
+  | @index i indices fuel current finalIndices finalContext name domain body
+      binderInfo notParameter nextType whnfRun tail base final target targets
+      domainTr domainType rest ih =>
+      rw [ih]
+      show targets.reverse ++ (target :: base.toCtx) = _
+      simp only [List.reverse_cons, List.append_assoc,
+        List.singleton_append]
+
+/-- A lambda-only compressed context binds exactly its free variables. -/
+private theorem fvarLamOnly_toCtx_length
+    {base : VLCtx} (shape : base.FVarLamOnly) :
+    base.toCtx.length = base.fvars.length := by
+  induction shape with
+  | nil => rfl
+  | cons tailShape ih =>
+      show _ + 1 = _ + 1
+      exact congrArg (· + 1) ih
+
+/-- The application head of a completed host spine is the head of its
+seed. -/
+private theorem getAppFn_mkAppN (f : Expr) (args : Array Expr) :
+    (mkAppN f args).getAppFn = f.getAppFn := by
+  rw [Lean.mkAppN, ← Array.foldl_toList]
+  change (List.foldl Expr.app f args.toList).getAppFn = f.getAppFn
+  rw [← Expr.mkAppList_eq_foldl]
+  induction args.toList generalizing f with
+  | nil => rfl
+  | cons arg args ih =>
+      rw [Expr.mkAppList, ih]
+      rfl
+
+/-- Assemble one strict phase-one motive translation from a translated index
+traversal, the decomposed compressed base, and the family head constant.  The
+compressed base lists the shared parameters innermost and the already emitted
+motives above them, so the resulting bound-variable ranges are exactly those
+of the lifted generated motive surface. -/
+private theorem recInfoPhaseOneStep_motiveDomain
+    {env : VEnv} {Us : List Name} (henv : VEnv.WF env)
+    {stats : AddInductive.InductiveStats}
+    {indTypes : Array InductiveType} {elimLevel : Level}
+    {dIdx : Nat} {current : AddInductive.Context}
+    (step : AddInductive.RecInfoPhaseOneStep stats indTypes elimLevel dIdx
+      current)
+    {argsTrace : AddInductive.mkRecInfos.LoopArgs1Trace stats
+      step.normalizedType 0 #[] current.fuel.inductiveFuel current
+      step.indices step.indexContext}
+    {base indexFinal : VLCtx} {indexTypes : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats argsTrace
+      base indexTypes indexFinal)
+    (currentRun : TypeChecker.CandidateLocalContextRun current)
+    (baseWF : VLCtx.WF env Us.length base)
+    (baseShape : base.FVarLamOnly)
+    (baseNoBV : base.NoBV)
+    (baseFound : ∀ fv ∈ base.fvars,
+      ∃ declaration, current.lctx.find? fv = some declaration)
+    {middleFVars paramFVars : List FVarId}
+    (baseFVarsEq : base.fvars = middleFVars ++ paramFVars)
+    (paramSources : paramFVars.reverse.map Expr.fvar = stats.params.toList)
+    {cname : Name} {clevels : List Level}
+    (headEq : stats.indConsts[dIdx]! = .const cname clevels)
+    {ci : VConstant} (constLookup : env.constants cname = some ci)
+    {targetLevels : List VLevel}
+    (levelsTr : clevels.mapM (VLevel.ofLevel Us) = some targetLevels)
+    (arity : clevels.length = ci.uvars)
+    (notOptParam : cname ≠ ``optParam) (notAutoParam : cname ≠ ``autoParam)
+    (notOutParam : cname ≠ ``outParam)
+    (notSemiOutParam : cname ≠ ``semiOutParam)
+    {motiveLevel : VLevel}
+    (levelTr : VLevel.ofLevel Us elimLevel = some motiveLevel)
+    (motiveLevelWF : motiveLevel.WF Us.length)
+    (motiveIsType : env.IsType Us.length base.toCtx
+      (VExpr.forallN indexTypes
+        (.forallE
+          (VExpr.appN (.const cname targetLevels)
+            (VExpr.bvarRevRange (middleFVars.length + indexTypes.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange 0 indexTypes.length))
+          (.sort motiveLevel)))) :
+    TrExprS env Us base
+      (AddInductive.consumeTypeAnnotations step.motiveType)
+      (VExpr.forallN indexTypes
+        (.forallE
+          (VExpr.appN (.const cname targetLevels)
+            (VExpr.bvarRevRange (middleFVars.length + indexTypes.length)
+                paramFVars.length ++
+              VExpr.bvarRevRange 0 indexTypes.length))
+          (.sort motiveLevel))) := by
+  have ord := henv.ordered
+  have finalFVars := loopArgs1IndexTranslation_final_fvars translations
+  have finalWF := loopArgs1IndexTranslation_final_wf translations currentRun
+    baseWF baseFound
+  have finalShape := loopArgs1IndexTranslation_final_fvarLamOnly translations
+    baseShape
+  have finalToCtx := loopArgs1IndexTranslation_final_toCtx translations
+  have idxLen := loopArgs1IndexTranslation_targets_length translations
+  have baseLen : base.toCtx.length =
+      middleFVars.length + paramFVars.length := by
+    rw [fvarLamOnly_toCtx_length baseShape, baseFVarsEq,
+      List.length_append]
+  -- Complete source-variable spine at the traversal endpoint.
+  have spine := finalShape.sourceTranslations henv finalWF
+  have finalLen : indexFinal.toCtx.length =
+      indexTypes.length + (middleFVars.length + paramFVars.length) := by
+    rw [finalToCtx, List.length_append, List.length_reverse, baseLen]
+  have sourcesEq : indexFinal.fvars.reverse.map Expr.fvar =
+      stats.params.toList ++
+        (middleFVars.reverse.map Expr.fvar ++
+          (loopArgs1IndexFVars argsTrace).map Expr.fvar) := by
+    rw [finalFVars, baseFVarsEq]
+    simp only [List.reverse_append, List.reverse_reverse, List.map_append,
+      List.append_assoc, paramSources]
+  have targetsEq : VExpr.bvarRevRange 0 indexFinal.toCtx.length =
+      VExpr.bvarRevRange (middleFVars.length + indexTypes.length)
+          paramFVars.length ++
+        (VExpr.bvarRevRange indexTypes.length middleFVars.length ++
+          VExpr.bvarRevRange 0 indexTypes.length) := by
+    rw [VExpr.bvarRevRange_append middleFVars.length indexTypes.length,
+      Nat.add_comm indexTypes.length middleFVars.length,
+      VExpr.bvarRevRange_append paramFVars.length
+        (middleFVars.length + indexTypes.length)]
+    have arrange : middleFVars.length + indexTypes.length +
+        paramFVars.length = indexFinal.toCtx.length := by
+      rw [finalLen]
+      omega
+    rw [arrange]
+  rw [sourcesEq, targetsEq] at spine
+  have splitA := (List.Forall₂.append_of_left (by
+    simpa using (congrArg List.length paramSources).symm)).1 spine
+  have parametersTr := splitA.1
+  have splitB := (List.Forall₂.append_of_left (by
+    simp [List.length_reverse])).1 splitA.2
+  have indicesTrRaw := splitB.2
+  have indexSources : step.indices.toList =
+      (loopArgs1IndexFVars argsTrace).map Expr.fvar := by
+    simpa using loopArgs1Index_sources argsTrace
+  have indicesTr : List.Forall₂ (TrExprS env Us indexFinal)
+      step.indices.toList (VExpr.bvarRevRange 0 indexTypes.length) := by
+    rw [indexSources]
+    exact indicesTrRaw
+  have headGetAppFn : step.majorType.getAppFn = .const cname clevels := by
+    rw [AddInductive.RecInfoPhaseOneStep.majorType, getAppFn_mkAppN,
+      getAppFn_mkAppN, headEq]
+    rfl
+  have majorConsumed : AddInductive.consumeTypeAnnotations step.majorType =
+      step.majorType :=
+    consumeTypeAnnotations_of_getAppFn_const headGetAppFn notOptParam
+      notAutoParam notOutParam notSemiOutParam
+  have peeled := isType_forallN_inv ord indexTypes motiveIsType
+  have majorSortIsType : env.IsType Us.length indexFinal.toCtx
+      (VExpr.forallE
+        (VExpr.appN (.const cname targetLevels)
+          (VExpr.bvarRevRange (middleFVars.length + indexTypes.length)
+              paramFVars.length ++
+            VExpr.bvarRevRange 0 indexTypes.length))
+        (.sort motiveLevel)) := by
+    rw [finalToCtx]
+    exact peeled
+  have majorIsType := (majorSortIsType.forallE_inv ord).1
+  have majorWF : VExpr.WF env Us.length indexFinal.toCtx
+      (VExpr.appN (.const cname targetLevels)
+        (VExpr.bvarRevRange (middleFVars.length + indexTypes.length)
+            paramFVars.length ++
+          VExpr.bvarRevRange 0 indexTypes.length)) := by
+    obtain ⟨sortLevel, hasType⟩ := majorIsType
+    exact ⟨_, hasType⟩
+  have headTr : TrExprS env Us indexFinal stats.indConsts[dIdx]!
+      (.const cname targetLevels) := by
+    rw [headEq]
+    exact .const constLookup levelsTr arity
+  have majorTr := recInfoPhaseOneStep_majorTranslation henv step finalWF
+    headTr parametersTr indicesTr majorConsumed majorWF
+  exact recInfoPhaseOneStep_motiveTranslation_of_indexTrace step argsTrace
+    translations currentRun majorTr majorIsType levelTr motiveLevelWF
+    baseNoBV
+
 /-- Turn the retained phase-one trace and its strict per-family motive
 translations into the exact common motive selection consumed by every
 generated recursor telescope. -/
