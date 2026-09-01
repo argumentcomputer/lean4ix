@@ -1330,6 +1330,20 @@ theorem _root_.Lean.Expr.reductionConstFree_abstractFVars
   exact Lean.Expr.reductionConstFree_abstractFVarsAux 0 context.fvars
     expression name
 
+/-- Alpha-related source expressions have exactly the same
+reduction-relevant constant inventory.  Stating the transport directly keeps
+later freshness proofs independent of the particular free-variable names
+chosen by the validator and recursor-synthesis contexts. -/
+theorem _root_.Lean.Expr.reductionConstFree_iff_of_abstractFVars_eq
+    {left right : VLCtx} {leftExpr rightExpr : Expr} {name : Name}
+    (alpha : Lean.Expr.abstractFVars left leftExpr =
+      Lean.Expr.abstractFVars right rightExpr) :
+    leftExpr.ReductionConstFree name ↔
+      rightExpr.ReductionConstFree name := by
+  rw [← Lean.Expr.reductionConstFree_abstractFVars left leftExpr name,
+    ← Lean.Expr.reductionConstFree_abstractFVars right rightExpr name,
+    alpha]
+
 /-- Shifting loose bound variables changes no constant names. -/
 theorem _root_.Lean.Expr.reductionConstFree_liftLooseBVars'
     (expression : Expr) (start amount : Nat) (name : Name) :
@@ -10990,6 +11004,63 @@ structure ConstructorDeclarationStagingRun
   addCtors : AddInductConstants .ctor kernelEnv.constants typeEnv raws
     finalKernelEnv.constants ctorEnv
   trenv : TrEnv' .safe finalKernelEnv.constants Q ctorEnv
+
+/-- Every constructor staged by the exact metadata fold was absent from the
+shared pre-constructor Theory environment.  The host fold supplies freshness
+in the family-only constant map; alignment of that map with `typeEnv` reflects
+any hypothetical Theory lookup back to a contradictory host lookup. -/
+theorem ConstructorDeclarationStagingRun.raw_name_absent
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : ConstructorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q typeEnv)
+    {raw : VConstVal} (member : raw ∈ raws) :
+    typeEnv.constants raw.name = none := by
+  have hostAbsent := run.addCtors.map_fresh pre.map_wf member
+  cases theoryFound : typeEnv.constants raw.name with
+  | none => rfl
+  | some constant =>
+      obtain ⟨info, hostFound, _safe⟩ :=
+        pre.aligned.find?_iff.mpr ⟨constant, theoryFound⟩
+      rw [hostAbsent] at hostFound
+      contradiction
+
+/-- Constructor staging cannot create a delta-reducible declaration.  Any
+value-bearing lookup observed at the post-constructor boundary is therefore
+the identical lookup from the family-only host environment. -/
+theorem ConstructorDeclarationStagingRun.old_of_deltaValue
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : ConstructorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q typeEnv)
+    {name : Name} {info : ConstantInfo} {value : Expr}
+    (found : finalKernelEnv.constants.find? name = some info)
+    (delta : info.deltaValue? = some value) :
+    kernelEnv.constants.find? name = some info := by
+  exact run.addCtors.old_of_value pre.map_wf found delta
+
+/-- More generally, the only new metadata role at the constructor boundary
+is `ctorInfo`.  An observation whose shape is incompatible with that role is
+reflected unchanged to the family-only environment. -/
+theorem ConstructorDeclarationStagingRun.old_of_not_ctor
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : ConstructorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q typeEnv)
+    {name : Name} {info : ConstantInfo}
+    (found : finalKernelEnv.constants.find? name = some info)
+    (notCtor : ¬ InductConstantKind.ctor.Matches info) :
+    kernelEnv.constants.find? name = some info := by
+  rcases run.addCtors.map_lookup_cases_kind pre.map_wf found with
+    old | ⟨raw, _member, _name, ctor⟩
+  · exact old
+  · exact (notCtor ctor).elim
 
 /-- Interpret the ordinary constructor-declaration equation itself.  Every
 successful `checkName` becomes both implementation-map freshness and, via
@@ -30627,6 +30698,27 @@ structure ProducedBlockSemanticDeclarationRun
     produced.execution.declaredConstructorInfos
     blockEnv source.blockConstructorConstants
     produced.execution.normalization.validationContext.env.quotInit
+
+/-- Every constructor name owned by the semantic block is fresh in the
+family-only Theory environment shared by validation and constructor staging. -/
+theorem ProducedBlockSemanticDeclarationRun.constructor_name_absent
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    {constructor : VConstVal}
+    (member : constructor ∈ source.blockConstructorConstants) :
+    blockEnv.constants constructor.name = none :=
+  declarations.constructors.raw_name_absent declarations.families.trenv
+    member
 
 /-- Assemble both declaration folds at the producer's exact family and
 constructor endpoints. -/
