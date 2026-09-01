@@ -36830,6 +36830,27 @@ private theorem loopArgs1Index_sources
       rw [List.append_assoc]
       rfl
 
+/-- The retained final index array contains its incoming prefix followed by
+exactly one entry for every index branch.  This is the cardinality form of
+`loopArgs1Index_sources`; unlike the source equation it is convenient at the
+normalization/recursor count boundary. -/
+private theorem loopArgs1Index_size
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext) :
+    finalIndices.size = indices.size + (loopArgs1IndexFVars trace).length := by
+  have sources := congrArg List.length (loopArgs1Index_sources trace)
+  simpa only [Array.length_toList, List.length_append, List.length_map] using
+    sources
+
+/-- A phase-one traversal starts with the empty index array, so its retained
+index-variable inventory has exactly the size of the resulting array. -/
+private theorem loopArgs1IndexFVars_length_of_empty
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i #[] fuel
+      current finalIndices finalContext) :
+    (loopArgs1IndexFVars trace).length = finalIndices.size := by
+  have size := loopArgs1Index_size trace
+  simpa using size.symm
+
 /-- Removing the shared-parameter prefix from a `loopArgs1` trace preserves
 its exact source-ordered index-variable inventory. -/
 private theorem LoopArgs1ParameterSuffix.indexFVars_eq
