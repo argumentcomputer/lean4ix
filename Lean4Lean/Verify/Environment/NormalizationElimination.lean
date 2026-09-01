@@ -31032,6 +31032,179 @@ structure ProducedBlockSemanticDeclarationRun
     blockEnv source.blockConstructorConstants
     produced.execution.normalization.validationContext.env.quotInit
 
+/-- The complete family/constructor declaration prefix preserves every
+lookup already present at validation. -/
+theorem ProducedBlockSemanticDeclarationRun.preserve_find?
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {name : Name} {info : ConstantInfo}
+    (found : produced.execution.normalization.validationContext.env.find?
+      name = some info) :
+    produced.execution.constructorEnv.find? name = some info :=
+  declarations.constructors.preserve_find? declarations.families.trenv
+    (declarations.families.preserve_find? pre found)
+
+/-- Any delta-reducible declaration observed after family and constructor
+staging is the identical pre-block declaration. -/
+theorem ProducedBlockSemanticDeclarationRun.old_of_deltaValue
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {name : Name} {info : ConstantInfo} {value : Expr}
+    (found : produced.execution.constructorEnv.find? name = some info)
+    (delta : info.deltaValue? = some value) :
+    produced.execution.normalization.validationContext.env.find? name =
+      some info := by
+  have familyFound := declarations.constructors.old_of_deltaValue
+    declarations.families.trenv found delta
+  exact declarations.families.old_of_deltaValue pre familyFound delta
+
+/-- A post-prefix lookup which is neither family nor constructor metadata is
+reflected unchanged to validation. -/
+theorem ProducedBlockSemanticDeclarationRun.old_of_not_induct_or_ctor
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {name : Name} {info : ConstantInfo}
+    (found : produced.execution.constructorEnv.find? name = some info)
+    (notInduct : ¬ InductConstantKind.induct.Matches info)
+    (notCtor : ¬ InductConstantKind.ctor.Matches info) :
+    produced.execution.normalization.validationContext.env.find? name =
+      some info := by
+  have familyFound := declarations.constructors.old_of_not_ctor
+    declarations.families.trenv found notCtor
+  exact declarations.families.old_of_not_induct pre familyFound notInduct
+
+/-- Family and constructor insertion together leave the delta-unfolding
+discriminator unchanged. -/
+theorem ProducedBlockSemanticDeclarationRun.isDelta_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (expression : Expr) :
+    TypeChecker.Inner.isDelta produced.execution.constructorEnv expression =
+      TypeChecker.Inner.isDelta
+        produced.execution.normalization.validationContext.env expression := by
+  rw [declarations.constructors.isDelta_eq declarations.families.trenv]
+  exact declarations.families.isDelta_eq pre expression
+
+/-- Primitive delta unfolding is identical at the constructor endpoint and
+the original validation environment. -/
+theorem ProducedBlockSemanticDeclarationRun.unfoldDefinitionCore_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (expression : Expr) (methods : TypeChecker.Methods)
+    (checkerContext : TypeChecker.Context) (state : TypeChecker.State) :
+    TypeChecker.Inner.unfoldDefinitionCore expression methods
+        { checkerContext with env := produced.execution.constructorEnv } state =
+      TypeChecker.Inner.unfoldDefinitionCore expression methods
+        { checkerContext with env :=
+            produced.execution.normalization.validationContext.env } state := by
+  calc
+    _ = TypeChecker.Inner.unfoldDefinitionCore expression methods
+        { checkerContext with env :=
+            produced.execution.normalization.familyEnv } state :=
+      declarations.constructors.unfoldDefinitionCore_eq
+        declarations.families.trenv expression methods checkerContext state
+    _ = _ := declarations.families.unfoldDefinitionCore_eq pre expression
+      methods checkerContext state
+
+/-- Delta unfolding at an application head is identical across the complete
+family/constructor declaration prefix. -/
+theorem ProducedBlockSemanticDeclarationRun.unfoldDefinition_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (expression : Expr) (methods : TypeChecker.Methods)
+    (checkerContext : TypeChecker.Context) (state : TypeChecker.State) :
+    TypeChecker.Inner.unfoldDefinition expression methods
+        { checkerContext with env := produced.execution.constructorEnv } state =
+      TypeChecker.Inner.unfoldDefinition expression methods
+        { checkerContext with env :=
+            produced.execution.normalization.validationContext.env } state := by
+  calc
+    _ = TypeChecker.Inner.unfoldDefinition expression methods
+        { checkerContext with env :=
+            produced.execution.normalization.familyEnv } state :=
+      declarations.constructors.unfoldDefinition_eq
+        declarations.families.trenv expression methods checkerContext state
+    _ = _ := declarations.families.unfoldDefinition_eq pre expression methods
+      checkerContext state
+
 /-- Every constructor name owned by the semantic block is fresh in the
 family-only Theory environment shared by validation and constructor staging. -/
 theorem ProducedBlockSemanticDeclarationRun.constructor_name_absent
