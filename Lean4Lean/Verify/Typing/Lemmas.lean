@@ -3531,6 +3531,103 @@ theorem TrExprS.trLiteral (wf : env.Ordered) (henv : env.HasPrimitives)
     have b := TrExprS.listCharLit wf henv H (Us := Us) (Δ := Δ) s.toList
     exact ⟨.lit H (.app a.2 b.2 a.1 (String.foldr_eq .. ▸ b.1)), a.2.app b.2⟩
 
+/-- Restore a free-variable slot from its abstracted bound-variable position
+while preserving the literal strict-translation endpoint.  This is the
+converse of `TrExprS.abstract` for a fixed source expression; in particular,
+the projection case transports the retained resolved projector across the
+definitionally identical Theory context. -/
+theorem TrExprS.unabstract
+    (henv : env.Ordered) (primitives : env.HasPrimitives)
+    (W : VLCtx.Abstract Δ₀ v₀ d₀ dk k Δ₁ Δ)
+    (H : TrExprS env Us Δ (e.abstract1 v₀ dk) e') :
+    TrExprS env Us Δ₁ e e' := by
+  induction e generalizing Δ₁ Δ dk k e' with
+  | bvar i =>
+      simp only [Expr.abstract1] at H
+      split at H
+      · rename_i below
+        cases H with
+        | bvar found =>
+          have transferred :=
+            (W.find? (v := .inl i) (by nofun)).symm.trans found
+          exact .bvar (by simpa [below] using transferred)
+      · rename_i notBelow
+        cases H with
+        | bvar found =>
+          have transferred :=
+            (W.find? (v := .inl (i + 1)) (by nofun)).symm.trans found
+          have notSuccessorBelow : ¬ i + 1 < dk := by omega
+          have notSuccessorEqual : ¬ i + 1 = dk := by omega
+          exact .bvar (by
+            simpa [notSuccessorBelow, notSuccessorEqual] using transferred)
+  | fvar fv =>
+      if equal : fv = v₀ then
+        subst fv
+        rw [Expr.abstract1, if_pos (by simp)] at H
+        cases H with
+        | bvar found =>
+          have transferred :=
+            (W.find? (v := .inl dk) (by nofun)).symm.trans found
+          exact .fvar (by simpa using transferred)
+      else
+        rw [Expr.abstract1, if_neg] at H
+        · cases H with
+          | fvar found =>
+            have transferred :=
+              (W.find? (v := .inr fv) (by
+                rintro ⟨⟩
+                exact equal rfl)).symm.trans found
+            exact .fvar transferred
+        · simp only [beq_iff_eq]
+          exact fun reversed => equal reversed.symm
+  | mvar id =>
+      simp only [Expr.abstract1] at H
+      nomatch H
+  | sort level =>
+      cases H with
+      | sort levelTr => exact .sort levelTr
+  | const name levels =>
+      cases H with
+      | const present levelTr arity => exact .const present levelTr arity
+  | app function argument functionIH argumentIH =>
+      cases H with
+      | app functionType argumentType functionTr argumentTr =>
+          exact .app (W.toCtx.symm ▸ functionType)
+            (W.toCtx.symm ▸ argumentType)
+            (functionIH W functionTr) (argumentIH W argumentTr)
+  | lam name type body binderInfo typeIH bodyIH =>
+      cases H with
+      | lam typeType typeTr bodyTr =>
+          exact .lam (W.toCtx.symm ▸ typeType)
+            (typeIH W typeTr) (bodyIH W.succ bodyTr)
+  | forallE name type body binderInfo typeIH bodyIH =>
+      cases H with
+      | forallE typeType bodyType typeTr bodyTr =>
+          exact .forallE (W.toCtx.symm ▸ typeType)
+            (W.toCtx.symm ▸ bodyType)
+            (typeIH W typeTr) (bodyIH W.succ bodyTr)
+  | letE name type value body nondep typeIH valueIH bodyIH =>
+      cases H with
+      | letE valueType typeTr valueTr bodyTr =>
+          exact .letE (W.toCtx.symm ▸ valueType)
+            (typeIH W typeTr) (valueIH W valueTr)
+            (bodyIH W.succ bodyTr)
+  | lit literal =>
+      cases H with
+      | lit contains innerTr =>
+          have canonical :=
+            (TrExprS.trLiteral henv primitives literal contains
+              (Us := Us) (Δ := Δ₁)).1
+          rw [innerTr.toConstructor_eq]
+          exact canonical
+  | mdata data expression expressionIH =>
+      cases H with
+      | mdata innerTr => exact .mdata (expressionIH W innerTr)
+  | proj structName index major majorIH =>
+      cases H with
+      | proj majorTr projection =>
+          exact .proj (majorIH W majorTr) (W.toCtx.symm ▸ projection)
+
 def VLCtx.Closed : VLCtx → Prop
   | [] => True
   | (none, _) :: _ => False

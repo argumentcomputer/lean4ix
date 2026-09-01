@@ -5948,6 +5948,46 @@ theorem TrExprS.abstractFVars
   simpa [Lean.Expr.abstractFVars] using
     TrExprS.abstractFVarsAux VLCtx.BVarLamOnly.nil shape run
 
+private theorem TrExprS.unabstractFVarsAux
+    {env : VEnv} {Us : List Name}
+    {pre suffix : VLCtx} {source : Lean.Expr} {target : VExpr}
+    (henv : env.Ordered) (primitives : env.HasPrimitives)
+    (preShape : pre.BVarLamOnly)
+    (suffixShape : suffix.FVarLamOnly)
+    (run : TrExprS env Us (pre ++ VLCtx.bvarize suffix)
+      (Lean.Expr.abstractFVarsAux pre.length suffix.fvars source) target) :
+    TrExprS env Us (pre ++ suffix) source target := by
+  induction suffixShape generalizing pre source with
+  | nil =>
+      simpa [VLCtx.bvarize, Lean.Expr.abstractFVarsAux] using run
+  | @cons suffix fv deps type suffixShape ih =>
+      have tail := ih (preShape.snoc (type := type)) (by
+          simpa [VLCtx.bvarize, VLCtx.fvars,
+            Lean.Expr.abstractFVarsAux, List.append_assoc] using run)
+      have tail' : TrExprS env Us
+          (pre ++ (none, VLocalDecl.vlam type) :: suffix)
+          (source.abstract1 fv pre.length) target := by
+        simpa only [List.append_assoc, List.singleton_append] using tail
+      have restored : TrExprS env Us
+          (pre ++ (some (fv, deps), VLocalDecl.vlam type) :: suffix)
+          source target :=
+        tail'.unabstract henv primitives
+          (VLCtx.Abstract.underBVarLams (deps := deps) preShape)
+      simpa only [List.append_assoc, List.singleton_append] using restored
+
+/-- Restore every producer free-variable slot after positional alpha
+normalization while retaining the exact strict Theory endpoint. -/
+theorem TrExprS.unabstractFVars
+    {env : VEnv} {Us : List Name}
+    {Δ : VLCtx} {source : Lean.Expr} {target : VExpr}
+    (henv : env.Ordered) (primitives : env.HasPrimitives)
+    (shape : Δ.FVarLamOnly)
+    (run : TrExprS env Us (VLCtx.bvarize Δ)
+      (Lean.Expr.abstractFVars Δ source) target) :
+    TrExprS env Us Δ source target := by
+  simpa [Lean.Expr.abstractFVars] using
+    TrExprS.unabstractFVarsAux henv primitives VLCtx.BVarLamOnly.nil shape run
+
 theorem VLCtx.bvarize_toCtx (Δ : VLCtx) :
     (VLCtx.bvarize Δ).toCtx = Δ.toCtx := by
   induction Δ with
@@ -5981,6 +6021,17 @@ theorem VLCtx.FVarAlpha.defeqCtx
     (relation : VLCtx.FVarAlpha env U left right) :
     env.IsDefEqCtx U [] left.toCtx right.toCtx := by
   simpa only [VLCtx.bvarize_toCtx] using relation.bvarize.defeqCtx
+
+/-- Alpha-related free-assumption contexts become value-identical after
+erasing their kernel identifiers.  The reverse orientation is the one needed
+to relocate a candidate-owned strict derivation back to the validator. -/
+private theorem VLCtx.FVarAlpha.bvarizeUniqueReverse :
+    (relation : VLCtx.FVarAlpha env U left right) →
+    left.FVarLamOnly → right.FVarLamOnly →
+      TrExprS.IsUniqueCtx (VLCtx.bvarize right) (VLCtx.bvarize left)
+  | .nil, .nil, .nil => .base
+  | .cons relation _declaration, .cons leftShape, .cons rightShape =>
+      .cons (relation.bvarizeUniqueReverse leftShape rightShape) .vlam
 
 /-- Corresponding free-assumption contexts are alpha-related whenever their
 Theory declarations are pointwise definitionally equal. -/
@@ -6022,6 +6073,30 @@ theorem TrExprS.uniqAlpha
   rw [← sourceAlpha] at rightAbstract
   have result := leftAbstract.uniq henv relation.bvarize rightAbstract
   simpa only [VLCtx.bvarize_toCtx] using result
+
+/-- Relocate a strict translation across positional alpha equivalence while
+preserving its literal Theory endpoint.  Both sources are normalized into
+the shared bound-variable presentation; the candidate derivation is moved
+between value-identical bvarized contexts and then restored to the left
+free-variable context. -/
+theorem TrExprS.ofAlpha
+    {env : VEnv} {Us : List Name}
+    {left right : VLCtx} {leftSource rightSource : Lean.Expr}
+    {target : VExpr}
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (relation : VLCtx.FVarAlpha env Us.length left right)
+    (leftShape : left.FVarLamOnly)
+    (rightShape : right.FVarLamOnly)
+    (rightRun : TrExprS env Us right rightSource target)
+    (sourceAlpha : Lean.Expr.abstractFVars left leftSource =
+      Lean.Expr.abstractFVars right rightSource) :
+    TrExprS env Us left leftSource target := by
+  have rightAbstract := rightRun.abstractFVars rightShape
+  rw [← sourceAlpha] at rightAbstract
+  have leftAbstract := rightAbstract.defeqDFC_same henv
+    (relation.bvarize.symm henv.ordered)
+    (relation.bvarizeUniqueReverse leftShape rightShape)
+  exact leftAbstract.unabstractFVars henv.ordered primitives leftShape
 
 /--
 info: 'Lean4Lean.TrExprS.abstractFVars' depends on axioms: [propext, Classical.choice, Quot.sound]
