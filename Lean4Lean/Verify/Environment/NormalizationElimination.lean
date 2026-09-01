@@ -31166,6 +31166,28 @@ private def generatedRecursorIndexTypes
   VExpr.liftTelN (generation.familyCount + generation.minorCount)
     (generation.generatedIdxTel family) 0
 
+/-- Expose the head of the generated motive inventory after it has been
+weakened past the motives of all preceding families.  The family indices stay
+below the lifting cutoff; only the shared parameter range moves outward. -/
+private theorem generatedMotiveType_liftN
+    {source : VInductDecl} (generation : BlockGenerationChecked source)
+    (family : NormalizedFamily) (d : Nat) :
+    (generation.generatedMotiveType family).liftN d =
+      VExpr.forallN
+        (VExpr.liftTelN d (generation.generatedIdxTel family) 0)
+        (.forallE
+          (VExpr.appN (.const family.raw.name generation.sourceLevels)
+            (VExpr.bvarRevRange
+                (d + (generation.generatedIdxTel family).length)
+                source.nparams ++
+              VExpr.bvarRevRange 0
+                (generation.generatedIdxTel family).length))
+          (.sort generation.motiveLevel)) := by
+  simp [BlockGenerationChecked.generatedMotiveType,
+    VExpr.liftN_forallN, VExpr.liftN_appN, List.map_append,
+    bvarRevRange_liftN_ge, VExpr.bvarRevRange_liftN_high,
+    VExpr.liftN]
+
 /-- The major-premise domain of one block recursor after all preceding
 binders have been introduced. -/
 private def generatedRecursorMajorType
@@ -36426,6 +36448,60 @@ private theorem loopArgs1IndexDomain_of_exact
       (relation.defeqCtx.symm henv.ordered)⟩
   exact ⟨phaseTr, phaseType⟩
 
+/-- Relocate one annotation-owned candidate index domain onto an
+alpha-equivalent phase-one Pi.  Unlike `loopArgs1IndexDomain_of_exact`, this
+form does not retain the parallel family-validator cursor: the candidate
+annotation snapshot already owns the strict consumed-domain translation and
+its target typing derivation. -/
+private theorem loopArgs1IndexDomain_of_candidate
+    {env : VEnv} {Us : List Name}
+    {phaseBase candidateBase : VLCtx}
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (relation : VLCtx.FVarAlpha env Us.length phaseBase candidateBase)
+    (phaseShape : phaseBase.FVarLamOnly)
+    (candidateShape : candidateBase.FVarLamOnly)
+    {phaseName candidateName : Name}
+    {phaseDomain phaseBody candidateDomain candidateBody : Expr}
+    {phaseBinderInfo candidateBinderInfo : BinderInfo}
+    (sourceAlpha : Lean.Expr.abstractFVars phaseBase
+        (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+      Lean.Expr.abstractFVars candidateBase
+        (.forallE candidateName candidateDomain candidateBody
+          candidateBinderInfo))
+    {target : VExpr}
+    (domainTr : TrExprS env Us candidateBase
+      (AddInductive.consumeTypeAnnotations candidateDomain) target)
+    (domainType : env.IsType Us.length candidateBase.toCtx target) :
+    TrExprS env Us phaseBase
+        (AddInductive.consumeTypeAnnotations phaseDomain) target ∧
+      env.IsType Us.length phaseBase.toCtx target := by
+  rw [Lean.Expr.abstractFVars_forallE,
+    Lean.Expr.abstractFVars_forallE] at sourceAlpha
+  simp only [Lean.Expr.forallE.injEq] at sourceAlpha
+  obtain ⟨_nameAlpha, domainAlpha, _bodyAlpha, _binderAlpha⟩ :=
+    sourceAlpha
+  have consumedAlpha : Lean.Expr.abstractFVars phaseBase
+      (AddInductive.consumeTypeAnnotations phaseDomain) =
+      Lean.Expr.abstractFVars candidateBase
+        (AddInductive.consumeTypeAnnotations candidateDomain) := by
+    calc
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars phaseBase phaseDomain) :=
+          (AddInductive.consumeTypeAnnotations_abstractFVars
+            phaseBase phaseDomain).symm
+      _ = AddInductive.consumeTypeAnnotations
+            (Lean.Expr.abstractFVars candidateBase candidateDomain) :=
+          congrArg AddInductive.consumeTypeAnnotations domainAlpha
+      _ = _ := AddInductive.consumeTypeAnnotations_abstractFVars
+        candidateBase candidateDomain
+  have phaseTr := domainTr.ofAlpha henv primitives relation phaseShape
+    candidateShape consumedAlpha
+  obtain ⟨sort, targetType⟩ := domainType
+  have phaseType : env.IsType Us.length phaseBase.toCtx target :=
+    ⟨sort, targetType.defeqDFC henv.ordered
+      (relation.defeqCtx.symm henv.ordered)⟩
+  exact ⟨phaseTr, phaseType⟩
+
 /-- Positional alpha-equivalence of two Pi roots survives instantiation by
 the distinct fresh variables allocated on each side.  The new declarations
 may carry different dependency metadata, since `abstractFVars` observes only
@@ -36509,6 +36585,48 @@ private def loopArgs1IndexFVars :
   | .index (current := current) _ _ _ tail =>
       current.freshFVarId :: loopArgs1IndexFVars tail
 
+/-- Exact proof that one `loopArgs1` trace is obtained from another by
+prepending only shared-parameter branches.  Those branches preserve the
+operational context and accumulated index array, which makes the suffix a
+valid semantic-telescope boundary. -/
+private inductive LoopArgs1ParameterPrefix
+    (stats : AddInductive.InductiveStats) :
+    {type : Expr} → {i : Nat} → {indices : Array Expr} → {fuel : Nat} →
+    {current : AddInductive.Context} → {finalIndices : Array Expr} →
+    {finalContext : AddInductive.Context} →
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext) →
+    {suffixType : Expr} → {suffixFuel : Nat} →
+    AddInductive.mkRecInfos.LoopArgs1Trace stats suffixType stats.params.size
+      indices suffixFuel current finalIndices finalContext → Type where
+  | refl
+      (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type
+        stats.params.size indices fuel current finalIndices finalContext) :
+      LoopArgs1ParameterPrefix stats trace trace
+  | parameter
+      {i : Nat} {indices : Array Expr} {fuel : Nat}
+      {current : AddInductive.Context}
+      {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+      {name : Name} {domain body : Expr} {binderInfo : BinderInfo}
+      (isParameter : i < stats.params.size)
+      (nextType : Expr)
+      (whnfRun :
+        (liftM (TypeChecker.whnf <|
+          body.instantiate1 stats.params[i]!) : AddInductive.M Expr) current =
+            .ok nextType)
+      (tail : AddInductive.mkRecInfos.LoopArgs1Trace stats nextType (i + 1)
+        indices fuel current finalIndices finalContext)
+      {suffixType : Expr} {suffixFuel : Nat}
+      {suffix : AddInductive.mkRecInfos.LoopArgs1Trace stats suffixType
+        stats.params.size indices suffixFuel current finalIndices
+        finalContext}
+      (rest : LoopArgs1ParameterPrefix stats tail suffix) :
+      LoopArgs1ParameterPrefix stats
+        (AddInductive.mkRecInfos.LoopArgs1Trace.parameter
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo)
+          isParameter nextType whnfRun tail) suffix
+
 /-- Exact post-parameter suffix selected inside a retained `loopArgs1`
 decomposition.  Parameter branches do not change either the reader context
 or the accumulated index array, so the suffix remains indexed by both
@@ -36530,6 +36648,7 @@ private structure LoopArgs1ParameterSuffix
   suffix : AddInductive.mkRecInfos.LoopArgs1Trace stats type
     stats.params.size indices fuel current finalIndices finalContext
   source_eq : type = position.position.trace.rootWhnf
+  path : LoopArgs1ParameterPrefix stats trace suffix
 
 /-- Synchronize the shared-parameter branches of recursor synthesis with the
 same strict main-spine position retained by the normalization candidate.
@@ -36572,7 +36691,8 @@ private theorem loopArgs1_parameterSuffix_of_candidate
             type := type
             fuel := fuel
             suffix := trace
-            source_eq := sourceEq }⟩
+            source_eq := sourceEq
+            path := .refl trace }⟩
   | forallE candidateContext candidateSource inferred candidateName
       candidateDomain candidateBody candidateBinderInfo candidateFresh
       candidateAnnotations candidateAnnotationsEq candidateChecked
@@ -36588,7 +36708,8 @@ private theorem loopArgs1_parameterSuffix_of_candidate
                 type := type
                 fuel := fuel
                 suffix := trace
-                source_eq := sourceEq }⟩
+                source_eq := sourceEq
+                path := .refl trace }⟩
       | succ remaining =>
           cases position with
           | succ _ tailPosition =>
@@ -36685,7 +36806,12 @@ private theorem loopArgs1_parameterSuffix_of_candidate
                     type := suffix.type
                     fuel := suffix.fuel
                     suffix := suffix.suffix
-                    source_eq := suffix.source_eq }⟩
+                    source_eq := suffix.source_eq
+                    path := LoopArgs1ParameterPrefix.parameter
+                      (stats := stats) (name := phaseName)
+                      (domain := phaseDomain) (body := phaseBody)
+                      (binderInfo := phaseBinderInfo)
+                      isParameter nextType whnfRun tail suffix.path }⟩
 
 /-- The final index array retained by `loopArgs1` is its incoming array
 followed by exactly the fresh variables exposed by its index branches. -/
@@ -36703,6 +36829,28 @@ private theorem loopArgs1Index_sources
       simp only [loopArgs1IndexFVars, List.map_cons]
       rw [List.append_assoc]
       rfl
+
+/-- Removing the shared-parameter prefix from a `loopArgs1` trace preserves
+its exact source-ordered index-variable inventory. -/
+private theorem LoopArgs1ParameterSuffix.indexFVars_eq
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidate : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {remaining : Nat} {position : candidate.MainSpineAt remaining}
+    (suffix : LoopArgs1ParameterSuffix trace position) :
+    loopArgs1IndexFVars suffix.suffix = loopArgs1IndexFVars trace := by
+  have whole := loopArgs1Index_sources trace
+  have tail := loopArgs1Index_sources suffix.suffix
+  have mapped : (loopArgs1IndexFVars suffix.suffix).map Expr.fvar =
+      (loopArgs1IndexFVars trace).map Expr.fvar := by
+    exact List.append_cancel_left (tail.symm.trans whole)
+  exact list_map_fvar_injective mapped
 
 /-- A retained `loopArgs1` decomposition changes its reader context only at
 its index branches, and each such change is the recorded local push. -/
@@ -36806,7 +36954,10 @@ private inductive LoopArgs1IndexTranslationTrace
       (rest : LoopArgs1IndexTranslationTrace env Us stats tail base targets
         final) :
       LoopArgs1IndexTranslationTrace env Us stats
-        (.parameter isParameter nextType whnfRun tail) base targets final
+        (AddInductive.mkRecInfos.LoopArgs1Trace.parameter
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo)
+          isParameter nextType whnfRun tail) base targets final
   | index
       {i : Nat} {indices : Array Expr} {fuel : Nat}
       {current : AddInductive.Context}
@@ -36833,8 +36984,69 @@ private inductive LoopArgs1IndexTranslationTrace
             (AddInductive.consumeTypeAnnotations domain).fvarsList),
           .vlam target) :: base) targets final) :
       LoopArgs1IndexTranslationTrace env Us stats
-        (.index notParameter nextType whnfRun tail) base
+        (AddInductive.mkRecInfos.LoopArgs1Trace.index
+          (name := name) (domain := domain) (body := body)
+          (binderInfo := binderInfo)
+          notParameter nextType whnfRun tail) base
         (target :: targets) final
+
+/-- Reattach the shared-parameter branches omitted by a post-parameter
+suffix.  They introduce no semantic index domains, so the compressed
+telescope and both semantic endpoints are unchanged. -/
+private noncomputable def LoopArgs1ParameterPrefix.prependTranslation
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    {trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext}
+    {suffixType : Expr} {suffixFuel : Nat}
+    {suffix : AddInductive.mkRecInfos.LoopArgs1Trace stats suffixType
+      stats.params.size indices suffixFuel current finalIndices finalContext}
+    (path : LoopArgs1ParameterPrefix stats trace suffix)
+    {env : VEnv} {Us : List Name} {base final : VLCtx}
+    {targets : List VExpr}
+    (translations : LoopArgs1IndexTranslationTrace env Us stats suffix base
+      targets final) :
+    LoopArgs1IndexTranslationTrace env Us stats trace base targets final := by
+  induction path with
+  | refl => exact translations
+  | parameter isParameter nextType whnfRun tail rest ih =>
+      exact .parameter isParameter nextType whnfRun tail (ih translations)
+
+/-- A retained `loopArgs1` trace with no allocated index variables has the
+empty semantic index telescope.  Parameter branches are preserved, while an
+index branch is ruled out directly by the retained source-order inventory. -/
+private theorem loopArgs1IndexTranslation_empty
+    {env : VEnv} {Us : List Name}
+    {stats : AddInductive.InductiveStats}
+    {type : Expr} {i : Nat} {indices : Array Expr} {fuel : Nat}
+    {current : AddInductive.Context}
+    {finalIndices : Array Expr} {finalContext : AddInductive.Context}
+    (trace : AddInductive.mkRecInfos.LoopArgs1Trace stats type i indices fuel
+      current finalIndices finalContext)
+    (empty : (loopArgs1IndexFVars trace).length = 0)
+    (base : VLCtx) :
+    Nonempty (Sigma fun final =>
+      LoopArgs1IndexTranslationTrace env Us stats trace base [] final) := by
+  induction trace with
+  | @done doneType doneI doneIndices doneFuel doneCurrent notForall =>
+      refine ⟨⟨base, ?_⟩⟩
+      exact @LoopArgs1IndexTranslationTrace.done env Us stats doneI
+        doneIndices doneFuel doneCurrent doneType doneI doneIndices doneFuel
+        doneCurrent notForall base
+  | @parameter stepI stepIndices stepFuel stepCurrent stepFinalIndices
+      stepFinalContext stepName stepDomain stepBody stepBinderInfo
+      isParameter nextType whnfRun tail ih =>
+      obtain ⟨final, rest⟩ := ih empty
+      refine ⟨⟨final, ?_⟩⟩
+      exact LoopArgs1IndexTranslationTrace.parameter
+        (env := env) (Us := Us) (stats := stats)
+        (name := stepName) (domain := stepDomain) (body := stepBody)
+        (binderInfo := stepBinderInfo) isParameter nextType whnfRun tail rest
+  | index notParameter nextType whnfRun tail ih =>
+      simp only [loopArgs1IndexFVars, List.length_cons] at empty
+      omega
 
 /-- Preserve a phase-one index translation trace when the Theory
 environment grows.  The operational source trace and compressed contexts are
@@ -36857,13 +37069,12 @@ private noncomputable def LoopArgs1IndexTranslationTrace.mono
       exact @LoopArgs1IndexTranslationTrace.done postEnv Us stats outerI
         outerIndices outerFuel outerCurrent type i indices fuel current
         notForall base
-  | @parameter outerName outerBody outerBinderInfo i indices fuel current
-      finalIndices finalContext name domain body binderInfo isParameter
+  | @parameter i indices fuel current finalIndices finalContext name domain
+      body binderInfo isParameter
       nextType whnfRun tail base final targets rest ih =>
       exact @LoopArgs1IndexTranslationTrace.parameter postEnv Us stats
-        outerName outerBody outerBinderInfo i indices fuel current finalIndices
-        finalContext name domain body binderInfo isParameter nextType whnfRun
-        tail base final targets ih
+        i indices fuel current finalIndices finalContext name domain body
+        binderInfo isParameter nextType whnfRun tail base final targets ih
   | @index i indices fuel current finalIndices finalContext name domain body
       binderInfo notParameter nextType whnfRun tail base final target targets
       domainTr domainType rest ih =>
@@ -36898,13 +37109,12 @@ private noncomputable def LoopArgs1IndexTranslationTrace.relevel
       exact @LoopArgs1IndexTranslationTrace.done env Us stats outerI
         outerIndices outerFuel outerCurrent type i indices fuel current
         notForall (base.instL extra)
-  | @parameter outerName outerBody outerBinderInfo i indices fuel current
-      finalIndices finalContext name domain body binderInfo isParameter
+  | @parameter i indices fuel current finalIndices finalContext name domain
+      body binderInfo isParameter
       nextType whnfRun tail base final targets rest ih =>
-      exact @LoopArgs1IndexTranslationTrace.parameter env Us stats outerName
-        outerBody outerBinderInfo i indices fuel current finalIndices
-        finalContext name domain body binderInfo isParameter nextType whnfRun
-        tail (base.instL extra) (final.instL extra)
+      exact @LoopArgs1IndexTranslationTrace.parameter env Us stats i indices
+        fuel current finalIndices finalContext name domain body binderInfo
+        isParameter nextType whnfRun tail (base.instL extra) (final.instL extra)
         (targets.map (VExpr.instL extra)) ih
   | @index i indices fuel current finalIndices finalContext name domain body
       binderInfo notParameter nextType whnfRun tail base final target targets
@@ -36953,16 +37163,15 @@ private theorem LoopArgs1IndexTranslationTrace.weakFV
         (@LoopArgs1IndexTranslationTrace.done env Us stats outerI
           outerIndices outerFuel outerCurrent type i indices fuel current
           notForall liftedBase)
-  | @parameter outerName outerBody outerBinderInfo i indices fuel current
-      finalIndices finalContext name domain body binderInfo isParameter
+  | @parameter i indices fuel current finalIndices finalContext name domain
+      body binderInfo isParameter
       nextType whnfRun tail base final targets rest ih =>
       obtain ⟨liftedFinal, liftedTail⟩ := ih extension liftedWF currentRun
         liftedFound
       exact ⟨⟨liftedFinal,
-        @LoopArgs1IndexTranslationTrace.parameter env Us stats outerName
-          outerBody outerBinderInfo i indices fuel current finalIndices
-          finalContext name domain body binderInfo isParameter nextType
-          whnfRun tail liftedBase liftedFinal
+        @LoopArgs1IndexTranslationTrace.parameter env Us stats i indices fuel
+          current finalIndices finalContext name domain body binderInfo
+          isParameter nextType whnfRun tail liftedBase liftedFinal
           (VExpr.liftTelN n targets k) liftedTail⟩⟩
   | @index i indices fuel current finalIndices finalContext name domain body
       binderInfo notParameter nextType whnfRun tail base final target targets
@@ -37018,6 +37227,390 @@ private theorem LoopArgs1IndexTranslationTrace.weakFV
         notParameter nextType whnfRun tail liftedBase liftedFinal liftedTarget
         (VExpr.liftTelN n targets (k + 1)) liftedDomainTr liftedDomainType
         liftedTail
+
+/-- Transport a producer-owned annotation suffix onto the index branches
+retained by phase one.  The annotation spine is the sole syntactic clock: its
+head supplies the strict consumed-domain semantics, while alpha-equivalence
+identifies the corresponding phase-one Pi and is preserved after each pair of
+fresh local declarations. -/
+private theorem loopArgs1IndexTranslation_of_candidate
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {indices : Array Expr} {fuel : Nat}
+    {phaseCurrent : AddInductive.Context}
+    {phaseFinalIndices : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    (phase : AddInductive.mkRecInfos.LoopArgs1Trace stats phaseType
+      stats.params.size indices fuel phaseCurrent phaseFinalIndices
+      phaseFinalContext)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {env : VEnv} {Us : List Name}
+    {phaseBase : VLCtx}
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidateTrace : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {candidateBase candidateTerminal : VLCtx}
+    {candidateDomains : List VExpr}
+    (candidateSpine : TypeChecker.CandidateAnnotationSpine env Us
+      candidateTrace candidateBase candidateTerminal candidateDomains)
+    (candidateShape : candidateBase.FVarLamOnly)
+    (candidateStored : candidateTrace.storedSpine = true)
+    (candidateAnnotations : candidateTrace.validationAnnotations)
+    (terminalWF : VLCtx.WF env Us.length candidateTerminal)
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (phaseShape : phaseBase.FVarLamOnly)
+    (phaseCandidate : VLCtx.FVarAlpha env Us.length phaseBase candidateBase)
+    (phaseFound : ∀ fv ∈ phaseBase.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    (phaseScope : phaseType.FVarsIn (· ∈ phaseBase.fvars))
+    (phaseAlpha : Lean.Expr.abstractFVars phaseBase phaseType =
+      Lean.Expr.abstractFVars candidateBase candidateTrace.rootWhnf)
+    (phaseLength : (loopArgs1IndexFVars phase).length =
+      candidateDomains.length)
+    (whnfFuel : Nat)
+    (phaseDepth : phaseCurrent.fuel.recDepth = whnfFuel + 1)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopArgs1IndexTranslationTrace env Us stats phase phaseBase
+        candidateDomains final) := by
+  induction candidateSpine generalizing stats phaseType indices fuel
+      phaseCurrent phaseFinalIndices phaseFinalContext phaseBase whnfFuel with
+  | terminal node =>
+      cases phase with
+      | done notForall =>
+          refine ⟨⟨phaseBase, ?_⟩⟩
+          exact LoopArgs1IndexTranslationTrace.done
+            (env := env) (Us := Us) (stats := stats)
+            (type := phaseType) (i := stats.params.size)
+            (indices := indices) (fuel := fuel)
+            (current := phaseCurrent) notForall phaseBase
+      | parameter isParameter nextType whnfRun tail =>
+          exact (Nat.lt_irrefl _ isParameter).elim
+      | index notParameter nextType whnfRun tail =>
+          simp only [loopArgs1IndexFVars, List.length_cons,
+            List.length_nil] at phaseLength
+          omega
+  | @forallE candidateContext candidateDomain candidateName
+      candidateBinderInfo candidateBody candidateBase candidateTerminal
+      candidateSource candidateInferred candidateFresh annotationsNode
+      annotationsEq candidateChecked candidateNormalized domainCandidate
+      bodyCandidate storedDomain candidateDomains head tail ih =>
+      simp only [AddInductive.CandidateExprTrace.storedSpine,
+        Bool.and_eq_true] at candidateStored
+      rcases candidateAnnotations with ⟨annotationMatch, tailAnnotations⟩
+      obtain ⟨snapshot, snapshotContext, snapshotStored⟩ :=
+        head annotationMatch
+      have snapshotDomainEq : snapshot.domain = candidateDomain := by
+        injection snapshot.root_eq
+        symm
+        assumption
+      subst candidateBase
+      have candidateDomainTr : TrExprS env Us snapshot.Δ
+          (AddInductive.consumeTypeAnnotations candidateDomain)
+          storedDomain := by
+        simpa only [snapshot.annotation_match, snapshotDomainEq,
+          snapshotStored] using snapshot.consumed_tr
+      have candidateDomainType : env.IsType Us.length snapshot.Δ.toCtx
+          storedDomain := by
+        have annotated := snapshot.annotation_run.isDefEqU.of_l henv
+          snapshot.context_wf.toCtx snapshot.domain_type
+        exact ⟨snapshot.sort, by
+          simpa only [snapshotStored] using annotated.hasType.2⟩
+      cases phase with
+      | done notForall =>
+          simp only [loopArgs1IndexFVars, List.length_nil,
+            List.length_cons] at phaseLength
+          omega
+      | parameter isParameter nextType whnfRun phaseTail =>
+          exact (Nat.lt_irrefl _ isParameter).elim
+      | @index phaseI phaseTailFuel phaseFinalIndices phaseFinalContext
+          phaseName phaseDomain phaseBody phaseBinderInfo phaseIndices
+          phaseCurrent notParameter phaseNextType phaseWhnf phaseTail =>
+          have phaseRootAlpha : Lean.Expr.abstractFVars phaseBase
+              (.forallE phaseName phaseDomain phaseBody phaseBinderInfo) =
+              Lean.Expr.abstractFVars snapshot.Δ
+                (.forallE candidateName candidateDomain candidateBody
+                  candidateBinderInfo) := by
+            simpa only [AddInductive.CandidateExprTrace.rootWhnf] using
+              phaseAlpha
+          obtain ⟨phaseDomainTr, phaseDomainType⟩ :=
+            loopArgs1IndexDomain_of_candidate henv primitives phaseCandidate
+              phaseShape candidateShape phaseRootAlpha candidateDomainTr
+              candidateDomainType
+          have phaseFresh : phaseCurrent.freshFVarId ∉ phaseBase.fvars :=
+            compressedFVars_fresh phaseLocal phaseFound
+          have candidateTailWF := tail.terminalLift.wf henv terminalWF
+          have candidateFreshAbsent : candidateContext.freshFVarId ∉
+              snapshot.Δ.fvars :=
+            (candidateTailWF.2.1 _ _ rfl).1
+          have phaseBodyScope : phaseBody.FVarsIn
+              (· ∈ phaseBase.fvars) := phaseScope.2
+          have phaseBodyAvoid : phaseBody.FVarsIn
+              (· ≠ phaseCurrent.freshFVarId) :=
+            phaseBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact phaseFresh member)
+          have snapshotRoot := snapshot.root_eq
+          simp only [Expr.forallE.injEq] at snapshotRoot
+          obtain ⟨_snapshotName, _snapshotDomain, snapshotBody,
+            _snapshotBinder⟩ := snapshotRoot
+          have candidateBodyScope : candidateBody.FVarsIn
+              (· ∈ snapshot.Δ.fvars) := by
+            simpa only [snapshotBody] using snapshot.body_fvars
+          have candidateBodyAvoid : candidateBody.FVarsIn
+              (· ≠ candidateContext.freshFVarId) :=
+            candidateBodyScope.mono (by
+              intro fv member equal
+              subst fv
+              exact candidateFreshAbsent member)
+          let phaseNextBase : VLCtx :=
+            (some (phaseCurrent.freshFVarId,
+                (AddInductive.consumeTypeAnnotations phaseDomain).fvarsList),
+              .vlam storedDomain) :: phaseBase
+          let candidateNextBase : VLCtx :=
+            (some (candidateContext.freshFVarId,
+                annotationsNode.consumed.fvarsList),
+              .vlam storedDomain) :: snapshot.Δ
+          have phaseCandidateInputAlpha :
+              Lean.Expr.abstractFVars phaseNextBase
+                  (phaseBody.instantiate1 phaseCurrent.freshExpr) =
+                Lean.Expr.abstractFVars candidateNextBase
+                  (candidateBody.instantiate1
+                    candidateContext.freshExpr) := by
+            exact forallBodyAlpha_after_fresh phaseRootAlpha
+              phaseBodyAvoid candidateBodyAvoid
+          have phaseInputScope :
+              (phaseBody.instantiate1 phaseCurrent.freshExpr).FVarsIn
+                (· ∈ phaseNextBase.fvars) := by
+            have bodyScope : phaseBody.FVarsIn
+                (· ∈ phaseNextBase.fvars) :=
+              phaseBodyScope.mono (by
+                intro fv member
+                simp only [phaseNextBase, VLCtx.fvars]
+                exact .tail _ member)
+            have freshScope : phaseCurrent.freshExpr.FVarsIn
+                (· ∈ phaseNextBase.fvars) := by
+              simp [AddInductive.Context.freshExpr, phaseNextBase,
+                VLCtx.fvars, FVarsIn]
+            simpa only [Lean.Expr.instantiate1_eq] using
+              bodyScope.instantiate1 freshScope
+          have nextPhaseShape : phaseNextBase.FVarLamOnly :=
+            .cons phaseShape
+          have nextCandidateShape : candidateNextBase.FVarLamOnly :=
+            .cons candidateShape
+          obtain ⟨targetSort, targetHasType⟩ := phaseDomainType
+          have nextRelation : VLCtx.FVarAlpha env Us.length phaseNextBase
+              candidateNextBase :=
+            .cons phaseCandidate (.vlam targetHasType)
+          have nextPhaseFound : ∀ fv ∈ phaseNextBase.fvars,
+              ∃ declaration,
+                (phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                  (AddInductive.consumeTypeAnnotations phaseDomain)).lctx.find?
+                    fv = some declaration := by
+            exact compressedFVars_push phaseLocal phaseFound phaseName
+              phaseBinderInfo
+              (AddInductive.consumeTypeAnnotations phaseDomain)
+              (AddInductive.consumeTypeAnnotations phaseDomain).fvarsList
+              storedDomain
+          have nextLength : (loopArgs1IndexFVars phaseTail).length =
+              candidateDomains.length := by
+            simpa only [loopArgs1IndexFVars, List.length_cons,
+              Nat.succ_inj] using phaseLength
+          by_cases domainsNil : candidateDomains = []
+          · subst candidateDomains
+            cases phaseTail with
+            | done tailNotForall =>
+                refine ⟨⟨phaseNextBase, .index notParameter phaseNextType
+                  phaseWhnf _ phaseDomainTr
+                  ⟨targetSort, targetHasType⟩ ?_⟩⟩
+                exact LoopArgs1IndexTranslationTrace.done
+                  (env := env) (Us := Us) (stats := stats)
+                  (type := phaseNextType) (i := stats.params.size)
+                  (indices := indices.push phaseCurrent.freshExpr)
+                  (fuel := phaseTailFuel)
+                  (current := phaseCurrent.pushLocalDecl phaseName
+                    phaseBinderInfo
+                    (AddInductive.consumeTypeAnnotations phaseDomain))
+                  tailNotForall phaseNextBase
+            | parameter tailIsParameter nextType whnfRun tail =>
+                exact (Nat.lt_irrefl _ tailIsParameter).elim
+            | index tailNotParameter nextType whnfRun tail =>
+                simp only [loopArgs1IndexFVars, List.length_cons,
+                  List.length_nil] at nextLength
+                omega
+          · have candidateRootEq :=
+              tail.rootWhnf_eq_source_of_domains_ne_nil candidateStored.2
+                domainsNil whnfFuel (by
+                  simpa [AddInductive.Context.pushLocalDecl] using
+                    candidateDepth)
+            have candidateInputForall :
+                (candidateBody.instantiate1
+                  candidateContext.freshExpr).isForall = true := by
+              rw [← candidateRootEq]
+              cases tail with
+              | terminal => exact (domainsNil rfl).elim
+              | forallE => rfl
+            have phaseInputForall :
+                (phaseBody.instantiate1
+                  phaseCurrent.freshExpr).isForall = true := by
+              have shapeEq := congrArg Expr.isForall
+                phaseCandidateInputAlpha
+              simpa only [Lean.Expr.abstractFVars_isForall,
+                candidateInputForall] using shapeEq
+            have nextPhaseDepth :
+                (phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                  (AddInductive.consumeTypeAnnotations phaseDomain)).fuel.recDepth =
+                    whnfFuel + 1 := by
+              simpa [AddInductive.Context.pushLocalDecl] using phaseDepth
+            have phaseWhnfValid : AddInductive.CandidateWhnfStep.Valid
+                ⟨phaseCurrent.pushLocalDecl phaseName phaseBinderInfo
+                    (AddInductive.consumeTypeAnnotations phaseDomain),
+                  phaseBody.instantiate1 phaseCurrent.freshExpr,
+                  phaseNextType⟩ := by
+              simpa [AddInductive.CandidateWhnfStep.Valid] using phaseWhnf
+            have phaseViewEq : phaseNextType =
+                phaseBody.instantiate1 phaseCurrent.freshExpr :=
+              AddInductive.CandidateWhnfStep.result_eq_of_source_isForall
+                phaseWhnfValid whnfFuel nextPhaseDepth phaseInputForall
+            have nextPhaseAlpha : Lean.Expr.abstractFVars phaseNextBase
+                phaseNextType =
+                Lean.Expr.abstractFVars candidateNextBase
+                  bodyCandidate.rootWhnf := by
+              rw [phaseViewEq, candidateRootEq]
+              exact phaseCandidateInputAlpha
+            have nextPhaseScope : phaseNextType.FVarsIn
+                (· ∈ phaseNextBase.fvars) := by
+              rw [phaseViewEq]
+              exact phaseInputScope
+            obtain ⟨final, rest⟩ := ih phaseTail
+              (phaseLocal.push phaseName phaseBinderInfo
+                (AddInductive.consumeTypeAnnotations phaseDomain))
+              nextCandidateShape candidateStored.2 tailAnnotations terminalWF
+              nextPhaseShape nextRelation nextPhaseFound nextPhaseScope
+              nextPhaseAlpha nextLength whnfFuel nextPhaseDepth (by
+                simpa [AddInductive.Context.pushLocalDecl] using
+                  candidateDepth)
+            exact ⟨⟨final, .index notParameter phaseNextType phaseWhnf
+              phaseTail phaseDomainTr ⟨targetSort, targetHasType⟩ rest⟩⟩
+
+/-- Translate every index branch of the original phase-one traversal by
+selecting the same post-parameter suffix in the producer annotation spine.
+The shared parameter contexts may use different kernel FVar identifiers;
+their retained telescope equality supplies the alpha relation needed by the
+strict index translator. -/
+private theorem loopArgs1IndexTranslation_of_candidate_full
+    {stats : AddInductive.InductiveStats}
+    {phaseType : Expr} {fuel : Nat}
+    {phaseCurrent : AddInductive.Context}
+    {phaseFinalIndices : Array Expr}
+    {phaseFinalContext : AddInductive.Context}
+    (phase : AddInductive.mkRecInfos.LoopArgs1Trace stats phaseType 0 #[] fuel
+      phaseCurrent phaseFinalIndices phaseFinalContext)
+    (phaseLocal : TypeChecker.CandidateLocalContextRun phaseCurrent)
+    {env : VEnv} {Us : List Name}
+    {phaseBase : VLCtx} {parameterTypes : List VExpr}
+    (parameters : TypeChecker.CandidateParameterContext []
+      stats.params.toList parameterTypes phaseBase)
+    (phaseFound : ∀ fv ∈ phaseBase.fvars,
+      ∃ declaration, phaseCurrent.lctx.find? fv = some declaration)
+    {candidateContext : AddInductive.Context} {candidateSource : Expr}
+    {candidateTrace : AddInductive.CandidateExprTrace candidateContext
+      candidateSource}
+    {candidateTerminal : VLCtx} {candidateDomains : List VExpr}
+    (candidateSpine : TypeChecker.CandidateAnnotationSpine env Us
+      candidateTrace [] candidateTerminal candidateDomains)
+    (candidateStored : candidateTrace.storedSpine = true)
+    (candidateAnnotations : candidateTrace.validationAnnotations)
+    {resultLevel : Level}
+    (terminalEq : candidateTrace.terminalResult = .sort resultLevel)
+    (terminalWF : VLCtx.WF env Us.length candidateTerminal)
+    (henv : VEnv.WF env) (primitives : env.HasPrimitives)
+    (parameterBound : stats.params.size ≤ candidateTrace.spineLength)
+    (hasIndex : stats.params.size < candidateTrace.spineLength)
+    (parameterSources : stats.params.toList =
+      candidateTrace.parameterList stats.params.size)
+    (parameterTel : TypeChecker.TelDefEqEvidence env Us.length []
+      parameterTypes (candidateDomains.take stats.params.size))
+    (phaseRoot : phaseType = candidateTrace.rootWhnf)
+    (phaseLength : (loopArgs1IndexFVars phase).length =
+      (candidateDomains.drop stats.params.size).length)
+    (whnfFuel : Nat)
+    (phaseDepth : phaseCurrent.fuel.recDepth = whnfFuel + 1)
+    (candidateDepth : candidateContext.fuel.recDepth = whnfFuel + 1) :
+    Nonempty (Sigma fun final =>
+      LoopArgs1IndexTranslationTrace env Us stats phase phaseBase
+        (candidateDomains.drop stats.params.size) final) := by
+  obtain ⟨position⟩ := candidateTrace.mainSpineAt parameterBound
+  obtain ⟨annotationSuffix⟩ :=
+    candidateSpine.mainPositionSuffix .nil candidateStored
+      candidateAnnotations terminalEq position
+  obtain ⟨phaseSuffix⟩ :=
+    loopArgs1_parameterSuffix_of_candidate phase position (by simp) hasIndex
+      candidateStored phaseRoot (by simpa using parameterSources) whnfFuel
+      phaseDepth candidateDepth
+  have phaseShape : phaseBase.FVarLamOnly :=
+    Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvarLamOnly
+      parameters .nil
+  have phaseContext : phaseBase.toCtx = parameterTypes.reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using
+      Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.toCtx
+        parameters
+  have candidateContextEq : annotationSuffix.cursor.Δ.toCtx =
+      (candidateDomains.take stats.params.size).reverse := by
+    simpa only [VLCtx.toCtx, List.append_nil] using
+      annotationSuffix.context_eq
+  have parameterContextEq : env.IsDefEqCtx Us.length [] phaseBase.toCtx
+      annotationSuffix.cursor.Δ.toCtx := by
+    rw [phaseContext, candidateContextEq]
+    simpa only [List.append_nil] using parameterTel.telDefEq.ctx
+  have relation : VLCtx.FVarAlpha env Us.length phaseBase
+      annotationSuffix.cursor.Δ :=
+    VLCtx.FVarAlpha.of_defeqCtx phaseShape annotationSuffix.cursor.shape
+      parameterContextEq
+  have mappedFVars : phaseBase.fvars.map Expr.fvar =
+      annotationSuffix.cursor.Δ.fvars.map Expr.fvar := by
+    calc
+      phaseBase.fvars.map Expr.fvar = stats.params.toList.reverse := by
+        simpa only [VLCtx.fvars_nil, List.map_nil, List.append_nil] using
+          Lean4Lean.VInductDecl.TypeChecker.CandidateParameterContext.fvars
+            parameters
+      _ = (candidateTrace.parameterList stats.params.size).reverse :=
+        congrArg List.reverse parameterSources
+      _ = annotationSuffix.cursor.Δ.fvars.map Expr.fvar := by
+        simpa only [VLCtx.fvars_nil, List.map_nil, List.append_nil] using
+          annotationSuffix.fvars_eq.symm
+  have phaseFVars : phaseBase.fvars = annotationSuffix.cursor.Δ.fvars :=
+    list_map_fvar_injective mappedFVars
+  have suffixScope : phaseSuffix.type.FVarsIn
+      (· ∈ phaseBase.fvars) := by
+    rw [phaseSuffix.source_eq, annotationSuffix.root_eq, phaseFVars]
+    exact annotationSuffix.cursor.root_fvars
+  have suffixAlpha : Lean.Expr.abstractFVars phaseBase phaseSuffix.type =
+      Lean.Expr.abstractFVars annotationSuffix.cursor.Δ
+        annotationSuffix.cursor.trace.rootWhnf := by
+    rw [phaseSuffix.source_eq, annotationSuffix.root_eq]
+    simp only [Lean.Expr.abstractFVars, phaseFVars]
+  have suffixLength : (loopArgs1IndexFVars phaseSuffix.suffix).length =
+      annotationSuffix.cursor.domains.length := by
+    rw [phaseSuffix.indexFVars_eq, annotationSuffix.domains_eq]
+    exact phaseLength
+  have suffixCandidateDepth :
+      annotationSuffix.cursor.candidateContext.fuel.recDepth =
+        whnfFuel + 1 := by
+    calc
+      annotationSuffix.cursor.candidateContext.fuel.recDepth =
+          candidateContext.fuel.recDepth :=
+        congrArg (fun candidateFuel => candidateFuel.recDepth)
+          annotationSuffix.fuel_eq
+      _ = whnfFuel + 1 := candidateDepth
+  obtain ⟨final, translations⟩ :=
+    loopArgs1IndexTranslation_of_candidate phaseSuffix.suffix phaseLocal
+      annotationSuffix.cursor.spine annotationSuffix.cursor.shape
+      annotationSuffix.cursor.stored annotationSuffix.cursor.annotations
+      terminalWF henv primitives phaseShape relation phaseFound suffixScope
+      suffixAlpha suffixLength whnfFuel phaseDepth suffixCandidateDepth
+  rw [annotationSuffix.domains_eq] at translations
+  exact ⟨⟨final, phaseSuffix.path.prependTranslation translations⟩⟩
 
 /-- Transport a validator-owned exact index suffix onto the index branches
 retained by phase one.  The producer annotation spine is the common syntactic
