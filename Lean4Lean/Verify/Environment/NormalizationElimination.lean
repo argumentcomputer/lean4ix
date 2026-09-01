@@ -1308,6 +1308,25 @@ def VInductDecl.BlockReductionConstFree
   (∀ raw ∈ source.blockConstructorConstants,
     expression.ReductionConstFree raw.name)
 
+/-- Every rule carried by an implementation recursor is reduction-safe for
+one name.  `TrConstVal` intentionally models only a constant header, so this
+operational payload invariant is stated separately rather than smuggled into
+header translation. -/
+def _root_.Lean.Kernel.Environment.RecursorRulesReductionConstFree
+    (environment : Environment) (name : Name) : Prop :=
+  ∀ recursorName recursor,
+    environment.find? recursorName = some (.recInfo recursor) →
+      ∀ rule ∈ recursor.rules, rule.rhs.ReductionConstFree name
+
+/-- Pointwise recursor-rule support for all names introduced by one mutual
+block. -/
+def VInductDecl.BlockRecursorRulesReductionConstFree
+    (source : VInductDecl) (environment : Environment) : Prop :=
+  (∀ raw ∈ source.blockTypeConstants,
+    environment.RecursorRulesReductionConstFree raw.name) ∧
+  (∀ raw ∈ source.blockConstructorConstants,
+    environment.RecursorRulesReductionConstFree raw.name)
+
 /-- Block reduction support is pointwise structural across applications. -/
 theorem VInductDecl.BlockReductionConstFree.app_iff
     {source : VInductDecl} {function argument : Expr} :
@@ -1325,6 +1344,85 @@ theorem VInductDecl.BlockReductionConstFree.app_iff
         ⟨functionSafe.1 raw member, argumentSafe.1 raw member⟩,
       fun raw member =>
         ⟨functionSafe.2 raw member, argumentSafe.2 raw member⟩⟩
+
+/-- Application to a source-ordered argument list is reduction-safe exactly
+when its head and every argument are reduction-safe. -/
+theorem _root_.Lean.Expr.reductionConstFree_mkAppList_iff
+    {function : Expr} {arguments : List Expr} {name : Name} :
+    (function.mkAppList arguments).ReductionConstFree name ↔
+      function.ReductionConstFree name ∧
+        ∀ argument ∈ arguments, argument.ReductionConstFree name := by
+  induction arguments generalizing function with
+  | nil => simp [Lean.Expr.mkAppList]
+  | cons argument arguments ih =>
+      rw [Lean.Expr.mkAppList, ih]
+      simp only [Lean.Expr.ReductionConstFree, List.forall_mem_cons,
+        and_assoc, and_left_comm]
+
+/-- Universe substitution changes levels but never changes constant names or
+the reduction-relevant expression spine. -/
+theorem _root_.Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
+    (expression : Expr) (parameters : List Name) (levels : List Level)
+    (name : Name) :
+    (expression.instantiateLevelParamsCpp parameters levels
+      |>.ReductionConstFree name) ↔ expression.ReductionConstFree name := by
+  rw [Lean.Expr.instantiateLevelParamsCpp_eq]
+  induction expression <;>
+    simp_all [Lean.Expr.instantiateLevelParamsCoreCpp',
+      Lean.Expr.ReductionConstFree]
+
+/-- The pure recursor-rule tail preserves reduction support when its selected
+rule and every supplied argument have that support. -/
+theorem _root_.Lean4Lean.TypeChecker.Inner.applyRecursorRule_reductionConstFree
+    {info : RecursorVal} {rule : RecursorRule}
+    {levels : List Level} {recArgs majorArgs : Array Expr} {name : Name}
+    (firstIndexBound : info.getFirstIndexIdx ≤ recArgs.size)
+    (ruleSafe : rule.rhs.ReductionConstFree name)
+    (recArgsSafe : ∀ argument ∈ recArgs.toList,
+      argument.ReductionConstFree name)
+    (majorArgsSafe : ∀ argument ∈ majorArgs.toList,
+      argument.ReductionConstFree name) :
+    (applyRecursorRule info rule levels recArgs majorArgs
+      |>.ReductionConstFree name) := by
+  rw [TypeChecker.Inner.applyRecursorRule_eq_slices firstIndexBound,
+    Lean.Expr.reductionConstFree_mkAppList_iff]
+  refine ⟨(Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
+      rule.rhs info.levelParams levels name).2 ruleSafe, ?_⟩
+  intro argument member
+  simp only [List.mem_append] at member
+  rcases member with (member | member) | member
+  · exact recArgsSafe argument (List.mem_of_mem_take member)
+  · exact majorArgsSafe argument (List.mem_of_mem_drop member)
+  · exact recArgsSafe argument (List.mem_of_mem_drop member)
+
+/-- Applying a recursor rule preserves support for the complete fresh block
+when the rule body and both argument inventories have that support. -/
+theorem VInductDecl.BlockReductionConstFree.applyRecursorRule
+    {source : VInductDecl} {info : RecursorVal} {rule : RecursorRule}
+    {levels : List Level} {recArgs majorArgs : Array Expr}
+    (firstIndexBound : info.getFirstIndexIdx ≤ recArgs.size)
+    (ruleSafe : source.BlockReductionConstFree rule.rhs)
+    (recArgsSafe : ∀ argument ∈ recArgs.toList,
+      source.BlockReductionConstFree argument)
+    (majorArgsSafe : ∀ argument ∈ majorArgs.toList,
+      source.BlockReductionConstFree argument) :
+    source.BlockReductionConstFree
+      (applyRecursorRule info rule levels recArgs majorArgs) := by
+  constructor
+  · intro raw member
+    exact TypeChecker.Inner.applyRecursorRule_reductionConstFree
+      firstIndexBound (ruleSafe.1 raw member)
+      (fun argument argumentMember =>
+        (recArgsSafe argument argumentMember).1 raw member)
+      (fun argument argumentMember =>
+        (majorArgsSafe argument argumentMember).1 raw member)
+  · intro raw member
+    exact TypeChecker.Inner.applyRecursorRule_reductionConstFree
+      firstIndexBound (ruleSafe.2 raw member)
+      (fun argument argumentMember =>
+        (recArgsSafe argument argumentMember).2 raw member)
+      (fun argument argumentMember =>
+        (majorArgsSafe argument argumentMember).2 raw member)
 
 /-- Replacing a free variable by a bound variable does not change the
 reduction-relevant constant inventory. -/
@@ -31355,6 +31453,79 @@ theorem ProducedBlockSemanticDeclarationRun.old_of_not_induct_or_ctor
   have familyFound := declarations.constructors.old_of_not_ctor
     declarations.families.trenv found notCtor
   exact declarations.families.old_of_not_induct pre familyFound notInduct
+
+/-- Recursor-rule support from the validation environment survives the
+family/constructor prefix.  Neither staging phase inserts recursor metadata,
+so every recursor lookup at the constructor endpoint reflects to the exact
+pre-block record. -/
+theorem
+    ProducedBlockSemanticDeclarationRun.blockRecursorRulesReductionConstFree
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (rulesSafe : source.BlockRecursorRulesReductionConstFree
+      produced.execution.normalization.validationContext.env) :
+    source.BlockRecursorRulesReductionConstFree
+      produced.execution.constructorEnv := by
+  constructor
+  · intro raw member recursorName recursor found rule ruleMember
+    have old := declarations.old_of_not_induct_or_ctor pre found
+      (by simp [InductConstantKind.Matches])
+      (by simp [InductConstantKind.Matches])
+    exact rulesSafe.1 raw member recursorName recursor old rule ruleMember
+  · intro raw member recursorName recursor found rule ruleMember
+    have old := declarations.old_of_not_induct_or_ctor pre found
+      (by simp [InductConstantKind.Matches])
+      (by simp [InductConstantKind.Matches])
+    exact rulesSafe.2 raw member recursorName recursor old rule ruleMember
+
+/-- Selecting any rule from a post-staging recursor yields an RHS that is
+safe for the complete block inventory. -/
+theorem
+    VInductDecl.BlockRecursorRulesReductionConstFree.rule_rhs
+    {source : VInductDecl} {environment : Environment}
+    (safe : source.BlockRecursorRulesReductionConstFree environment)
+    {recursorName : Name} {recursor : RecursorVal}
+    (found : environment.find? recursorName = some (.recInfo recursor))
+    {rule : RecursorRule} (member : rule ∈ recursor.rules) :
+    source.BlockReductionConstFree rule.rhs :=
+  ⟨fun raw rawMember =>
+      safe.1 raw rawMember recursorName recursor found rule member,
+    fun raw rawMember =>
+      safe.2 raw rawMember recursorName recursor found rule member⟩
+
+/-- A rule selected from a block-safe recursor environment can be applied
+without introducing any family or constructor owned by the fresh block. -/
+theorem
+    VInductDecl.BlockRecursorRulesReductionConstFree.applyRecursorRule
+    {source : VInductDecl} {environment : Environment}
+    (safe : source.BlockRecursorRulesReductionConstFree environment)
+    {recursorName : Name} {info : RecursorVal}
+    (found : environment.find? recursorName = some (.recInfo info))
+    {rule : RecursorRule} (member : rule ∈ info.rules)
+    {levels : List Level} {recArgs majorArgs : Array Expr}
+    (firstIndexBound : info.getFirstIndexIdx ≤ recArgs.size)
+    (recArgsSafe : ∀ argument ∈ recArgs.toList,
+      source.BlockReductionConstFree argument)
+    (majorArgsSafe : ∀ argument ∈ majorArgs.toList,
+      source.BlockReductionConstFree argument) :
+    source.BlockReductionConstFree
+      (applyRecursorRule info rule levels recArgs majorArgs) := by
+  exact
+    (VInductDecl.BlockRecursorRulesReductionConstFree.rule_rhs safe found
+      member).applyRecursorRule firstIndexBound recArgsSafe majorArgsSafe
 
 /-- Family and constructor insertion together leave the delta-unfolding
 discriminator unchanged. -/
