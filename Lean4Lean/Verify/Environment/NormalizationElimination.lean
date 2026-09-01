@@ -1637,6 +1637,256 @@ theorem VInductDecl.BlockReductionConstFree.mkNullaryCtor_of_default
             · exact defaultSafe.2 raw member
   | _ => simp [head] at produced
 
+/-- Every argument exposed from an application with a clear expression-mvar
+cache bit has the same clear bit. -/
+theorem _root_.Lean.Expr.hasExprMVar_eq_false_getAppArgsRevList
+    {expression argument : Expr}
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (member : argument ∈ expression.getAppArgsRevList) :
+    argument.hasExprMVar = false := by
+  induction expression with
+  | app function supplied functionIH suppliedIH =>
+      have partsMVarFree : function.hasExprMVar = false ∧
+          supplied.hasExprMVar = false := by
+        simpa only [Lean.Expr.app_hasExprMVar, Bool.or_eq_false_iff] using
+          expressionMVarFree
+      simp only [Lean.Expr.getAppArgsRevList, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact partsMVarFree.2
+      · exact functionIH partsMVarFree.1 member
+  | _ => simp only [Lean.Expr.getAppArgsRevList, List.not_mem_nil] at member
+
+/-- Source-ordered application arguments inherit a clear expression-mvar
+cache bit from the complete application. -/
+theorem _root_.Lean.Expr.hasExprMVar_eq_false_getAppArgsList
+    {expression argument : Expr}
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (member : argument ∈ expression.getAppArgsList) :
+    argument.hasExprMVar = false := by
+  exact Lean.Expr.hasExprMVar_eq_false_getAppArgsRevList expressionMVarFree (by
+    simpa [← Lean.Expr.getAppArgsList_reverse] using member)
+
+/-- Array-valued application decomposition preserves a clear expression-mvar
+cache bit. -/
+theorem _root_.Lean.Expr.hasExprMVar_eq_false_getAppArgs
+    {expression argument : Expr}
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (member : argument ∈ expression.getAppArgs.toList) :
+    argument.hasExprMVar = false := by
+  rw [Lean.Expr.getAppArgs_toList] at member
+  exact Lean.Expr.hasExprMVar_eq_false_getAppArgsList expressionMVarFree member
+
+/-- Applying an arbitrary array range preserves a clear expression-mvar cache
+bit.  Unlike reduction support, the out-of-bounds default needs no premise:
+Lean's default expression is a constant and hence contains no metavariable. -/
+theorem _root_.Lean.Expr.hasExprMVar_eq_false_mkAppRange
+    {function : Expr} {arguments : Array Expr}
+    (functionMVarFree : function.hasExprMVar = false)
+    (argumentsMVarFree : ∀ argument ∈ arguments.toList,
+      argument.hasExprMVar = false)
+    (start stop : Nat) :
+    (mkAppRange function start stop arguments).hasExprMVar = false := by
+  unfold Lean.mkAppRange
+  exact loop start function functionMVarFree
+where
+  loop (index : Nat) (head : Expr)
+      (headMVarFree : head.hasExprMVar = false) :
+      (mkAppRangeAux stop arguments index head).hasExprMVar = false := by
+    rw [mkAppRangeAux.eq_def]
+    split
+    · rename_i beforeStop
+      apply loop (index + 1) (.app head arguments[index]!)
+      rw [Lean.Expr.app_hasExprMVar, Bool.or_eq_false_iff]
+      refine ⟨headMVarFree, ?_⟩
+      by_cases indexBound : index < arguments.size
+      · rw [getElem!_pos arguments index indexBound]
+        exact argumentsMVarFree arguments[index] (by
+          apply List.mem_of_getElem? (i := index)
+          simp [Array.getElem?_toList, indexBound])
+      · rw [getElem!_neg arguments index indexBound]
+        exact Lean.Expr.const_hasExprMVar _ _
+    · exact headMVarFree
+  termination_by stop - index
+  decreasing_by omega
+
+/-- Nullary-constructor synthesis preserves the absence of expression
+metavariables, including Lean's total out-of-bounds parameter range. -/
+theorem mkNullaryCtor_hasExprMVar_eq_false
+    {environment : Environment} {type result : Expr} {nparams : Nat}
+    (typeMVarFree : type.hasExprMVar = false)
+    (produced : Lean4Lean.mkNullaryCtor environment type nparams =
+      some result) :
+    result.hasExprMVar = false := by
+  unfold Lean4Lean.mkNullaryCtor at produced
+  simp only [Expr.withApp_eq] at produced
+  cases head : type.getAppFn with
+  | const family levels =>
+      simp only [head] at produced
+      cases selected : getFirstCtor environment family with
+      | none => simp [selected] at produced
+      | some constructor =>
+          simp at produced
+          obtain ⟨actual, actualSelected, resultEq⟩ := produced
+          rw [selected] at actualSelected
+          have actualEq : actual = constructor :=
+            Option.some.inj actualSelected.symm
+          subst actual
+          rw [← resultEq]
+          apply Lean.Expr.hasExprMVar_eq_false_mkAppRange
+          · exact Lean.Expr.const_hasExprMVar _ _
+          · intro argument member
+            exact Lean.Expr.hasExprMVar_eq_false_getAppArgs typeMVarFree member
+  | _ => simp [head] at produced
+
+/-- A recursive type-checker callback preserves reduction support for the
+complete fresh block at every successful stateful execution.  Stating this
+small operational contract independently of semantic soundness lets the
+environment-staging replay compose the mutually recursive callbacks without
+depending on the admitted general recursor verifier. -/
+def TypeChecker.Inner.BlockReductionPreserving
+    (source : VInductDecl) (operation : Expr → TypeChecker.RecM Expr) : Prop :=
+  ∀ {input : Expr}, source.BlockReductionConstFree input →
+    ∀ (methods : TypeChecker.Methods) (context : TypeChecker.Context)
+      (state : TypeChecker.State) {output : Expr} {state' : TypeChecker.State},
+      operation input methods context state = .ok (output, state') →
+        source.BlockReductionConstFree output
+
+/-- Successful outputs of a recursive callback contain no metavariables.
+Candidate checking starts from strict translations, so this is the second
+small syntactic invariant threaded by the staging replay. -/
+def TypeChecker.Inner.MVarFreePreserving
+    (operation : Expr → TypeChecker.RecM Expr) : Prop :=
+  ∀ (input : Expr), input.hasExprMVar = false →
+    ∀ (methods : TypeChecker.Methods)
+    (context : TypeChecker.Context) (state : TypeChecker.State)
+    {output : Expr} {state' : TypeChecker.State},
+    operation input methods context state = .ok (output, state') →
+      output.hasExprMVar = false
+
+/-- A successful K-style constructor conversion preserves the two syntactic
+invariants needed by the environment-staging replay.  The callback premises
+account for the inferred and normalized types; the explicit default premise
+is exactly the remaining `getElem!` underflow case in `mkNullaryCtor`. -/
+theorem TypeChecker.Inner.toCtorWhenK_reductionInvariant_of_default
+    {source : VInductDecl} {environment : Environment}
+    {info : RecursorVal} {expression result : Expr}
+    {methods : TypeChecker.Methods} {context : TypeChecker.Context}
+    {state state' : TypeChecker.State}
+    (infoK : info.k = true)
+    (expressionSafe : source.BlockReductionConstFree expression)
+    (expressionMVarFree : expression.hasExprMVar = false)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (whnfSafe : TypeChecker.Inner.BlockReductionPreserving source
+      TypeChecker.Inner.whnf)
+    (whnfMVarFree : TypeChecker.Inner.MVarFreePreserving
+      TypeChecker.Inner.whnf)
+    (inferSafe : TypeChecker.Inner.BlockReductionPreserving source
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (inferMVarFree : TypeChecker.Inner.MVarFreePreserving
+      (fun expression => TypeChecker.Inner.inferType expression
+        (inferOnly := true)))
+    (run : toCtorWhenK environment TypeChecker.Inner.whnf
+      TypeChecker.Inner.inferType TypeChecker.Inner.isDefEq info expression
+        methods context state = .ok (result, state')) :
+    source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+  unfold toCtorWhenK at run
+  simp only [infoK, if_true, ReaderT.bind, StateT.bind, Except.bind,
+    Bind.bind] at run
+  cases inferredRun : (TypeChecker.Inner.inferType expression
+      (inferOnly := true)) methods context state with
+  | error error =>
+      rw [inferredRun] at run
+      contradiction
+  | ok inferredState =>
+      rcases inferredState with ⟨inferred, inferredState⟩
+      rw [inferredRun] at run
+      simp only [Except.bind] at run
+      have inferredSafe := inferSafe expressionSafe methods context state
+        inferredRun
+      have inferredMVarFree := inferMVarFree expression expressionMVarFree
+        methods context state inferredRun
+      cases normalizedRun : (TypeChecker.Inner.whnf inferred) methods context
+          inferredState with
+      | error error =>
+          rw [normalizedRun] at run
+          contradiction
+      | ok normalizedState =>
+          rcases normalizedState with ⟨normalized, normalizedState⟩
+          rw [normalizedRun] at run
+          simp only [Except.bind] at run
+          have normalizedSafe := whnfSafe inferredSafe methods context
+            inferredState normalizedRun
+          have normalizedMVarFree := whnfMVarFree inferred inferredMVarFree
+            methods context inferredState normalizedRun
+          cases head : normalized.getAppFn with
+          | const family levels =>
+              simp only [head] at run
+              split at run
+              · exact ofPure expressionSafe expressionMVarFree run
+              · rename_i familyMatches
+                simp only [normalizedMVarFree] at run
+                exact finish normalizedSafe normalizedMVarFree run
+          | _ =>
+              simp only [head] at run
+              exact ofPure expressionSafe expressionMVarFree run
+where
+  ofPure {value : Expr} {callbackState : TypeChecker.State}
+      (valueSafe : source.BlockReductionConstFree value)
+      (valueMVarFree : value.hasExprMVar = false)
+      (run : (pure value : TypeChecker.RecM Expr) methods context
+        callbackState = .ok (result, state')) :
+      source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+    change Except.ok (value, callbackState) =
+      Except.ok (result, state') at run
+    have resultEq : value = result := by
+      simpa only [Prod.fst] using congrArg Prod.fst (Except.ok.inj run)
+    exact resultEq ▸ ⟨valueSafe, valueMVarFree⟩
+
+  finish {normalized : Expr} {callbackState : TypeChecker.State}
+      (normalizedSafe : source.BlockReductionConstFree normalized)
+      (normalizedMVarFree : normalized.hasExprMVar = false)
+      (run : (do
+        let some newCtorApp := mkNullaryCtor environment normalized
+          info.numParams | return expression
+        unless ← TypeChecker.Inner.isDefEq normalized
+            (← TypeChecker.Inner.inferType newCtorApp) do
+          return expression
+        return newCtorApp) methods context callbackState =
+          .ok (result, state')) :
+      source.BlockReductionConstFree result ∧ result.hasExprMVar = false := by
+    cases constructorRun : mkNullaryCtor environment normalized info.numParams
+    · simp [constructorRun] at run
+      exact ofPure expressionSafe expressionMVarFree run
+    · rename_i constructor
+      have constructorSafe := normalizedSafe.mkNullaryCtor_of_default
+        payloadSafe defaultSafe constructorRun
+      have constructorMVarFree := mkNullaryCtor_hasExprMVar_eq_false
+        normalizedMVarFree constructorRun
+      simp only [constructorRun, ReaderT.bind, StateT.bind, Except.bind,
+        Bind.bind] at run
+      cases inferredRun : (TypeChecker.Inner.inferType constructor
+          (inferOnly := true)) methods context callbackState with
+      | error error =>
+          rw [inferredRun] at run
+          contradiction
+      | ok inferredState =>
+          rcases inferredState with ⟨inferred, inferredState⟩
+          rw [inferredRun] at run
+          simp only [Except.bind] at run
+          cases equalRun : (TypeChecker.Inner.isDefEq normalized inferred)
+              methods context inferredState with
+          | error error =>
+              rw [equalRun] at run
+              contradiction
+          | ok equalState =>
+              rcases equalState with ⟨equal, equalState⟩
+              rw [equalRun] at run
+              cases equal
+              · exact ofPure expressionSafe expressionMVarFree run
+              · exact ofPure constructorSafe constructorMVarFree run
+
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
 theorem _root_.Lean.Expr.reductionConstFree_instantiateLevelParamsCpp
