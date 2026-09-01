@@ -1327,6 +1327,16 @@ theorem _root_.Lean.Kernel.Environment.InductiveCtorNamesFree.ne_of_getFirstCtor
           exact safe family value found constructor member
       | _ => simp_all [getFirstCtor]
 
+/-- A rule returned by the executable recursor selector belongs to the
+recursor metadata list from which it was selected. -/
+theorem getRecRuleFor_mem
+    {info : RecursorVal} {major : Expr} {rule : RecursorRule}
+    (selected : getRecRuleFor info major = some rule) :
+    rule ∈ info.rules := by
+  cases head : major.getAppFn <;>
+    simp_all [getRecRuleFor]
+  exact List.mem_of_find?_eq_some selected
+
 /-- Block reduction support is pointwise structural across applications. -/
 theorem VInductDecl.BlockReductionConstFree.app_iff
     {source : VInductDecl} {function argument : Expr} :
@@ -31679,6 +31689,90 @@ theorem ProducedBlockSemanticDeclarationRun.old_of_not_induct_or_ctor
   have familyFound := declarations.constructors.old_of_not_ctor
     declarations.families.trenv found notCtor
   exact declarations.families.old_of_not_induct pre familyFound notInduct
+
+/-- A recursor already present at validation retains the same structure-like
+classification for its major family after family/constructor staging.
+
+The post-prefix recursor lookup reflects to validation because neither stage
+inserts recursor metadata.  Payload freedom then excludes every fresh block
+name from that old recursor's recorded major family. -/
+theorem ProducedBlockSemanticDeclarationRun.isNonRecStructure_eq_of_recursor
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (payloadSafe : source.BlockReductionPayloadFree
+      produced.execution.normalization.validationContext.env)
+    {recursorName : Name} {info : RecursorVal}
+    (found : produced.execution.constructorEnv.find? recursorName =
+      some (.recInfo info)) :
+    produced.execution.constructorEnv.isNonRecStructure
+        info.getMajorInduct =
+      produced.execution.normalization.validationContext.env.isNonRecStructure
+        info.getMajorInduct := by
+  have old :
+      produced.execution.normalization.validationContext.env.find?
+          recursorName = some (.recInfo info) :=
+    declarations.old_of_not_induct_or_ctor pre found
+      (by simp [InductConstantKind.Matches])
+      (by simp [InductConstantKind.Matches])
+  apply declarations.isNonRecStructure_eq_of_name_ne pre
+  · intro raw member
+    exact ((payloadSafe.1 raw member).2.1 recursorName info old).1.symm
+  · intro raw member
+    exact ((payloadSafe.2 raw member).2.1 recursorName info old).1.symm
+
+/-- Every constructor key carried by a pre-existing recursor remains outside
+the fresh block inventory.  This is the metadata counterpart of rule-RHS
+reduction safety: selecting the rule cannot make a newly staged constructor
+look like an old recursor's reduction case. -/
+theorem ProducedBlockSemanticDeclarationRun.recursorRule_ctor_fresh
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (payloadSafe : source.BlockReductionPayloadFree
+      produced.execution.normalization.validationContext.env)
+    {recursorName : Name} {info : RecursorVal}
+    (found : produced.execution.constructorEnv.find? recursorName =
+      some (.recInfo info))
+    {rule : RecursorRule} (member : rule ∈ info.rules) :
+    (∀ raw ∈ source.blockTypeConstants, raw.name ≠ rule.ctor) ∧
+      ∀ raw ∈ source.blockConstructorConstants, raw.name ≠ rule.ctor := by
+  have old :
+      produced.execution.normalization.validationContext.env.find?
+          recursorName = some (.recInfo info) :=
+    declarations.old_of_not_induct_or_ctor pre found
+      (by simp [InductConstantKind.Matches])
+      (by simp [InductConstantKind.Matches])
+  exact ⟨fun raw rawMember =>
+      ((payloadSafe.1 raw rawMember).2.1 recursorName info old).2 rule
+        member |>.symm,
+    fun raw rawMember =>
+      ((payloadSafe.2 raw rawMember).2.1 recursorName info old).2 rule
+        member |>.symm⟩
 
 /-- Recursor-rule support from the validation environment survives the
 family/constructor prefix.  Neither staging phase inserts recursor metadata,
