@@ -1506,6 +1506,41 @@ where
   termination_by stop - index
   decreasing_by omega
 
+/-- Applying an arbitrary array range preserves reduction support when the
+seed, every stored argument, and Lean's out-of-bounds default expression have
+that support.  This is the exact total counterpart of `mkAppRange`: the
+executable uses `getElem!`, so an out-of-bounds range contributes `default`
+rather than silently stopping at the end of the array. -/
+theorem _root_.Lean.Expr.ReductionConstFree.mkAppRange_of_default
+    {function : Expr} {arguments : Array Expr} {name : Name}
+    (functionSafe : function.ReductionConstFree name)
+    (argumentsSafe : ∀ argument ∈ arguments.toList,
+      argument.ReductionConstFree name)
+    (defaultSafe : (default : Expr).ReductionConstFree name)
+    (start stop : Nat) :
+    (mkAppRange function start stop arguments).ReductionConstFree name := by
+  unfold Lean.mkAppRange
+  exact loop start function functionSafe
+where
+  loop (index : Nat) (head : Expr)
+      (headSafe : head.ReductionConstFree name) :
+      (mkAppRangeAux stop arguments index head).ReductionConstFree name := by
+    rw [mkAppRangeAux.eq_def]
+    split
+    · rename_i beforeStop
+      apply loop (index + 1) (.app head arguments[index]!)
+      refine ⟨headSafe, ?_⟩
+      by_cases indexBound : index < arguments.size
+      · rw [getElem!_pos arguments index indexBound]
+        exact argumentsSafe arguments[index] (by
+          apply List.mem_of_getElem? (i := index)
+          simp [Array.getElem?_toList, indexBound])
+      · rw [getElem!_neg arguments index indexBound]
+        exact defaultSafe
+    · exact headSafe
+  termination_by stop - index
+  decreasing_by omega
+
 /-- Nullary-constructor synthesis cannot introduce an excluded name when the
 input type is reduction-safe, the selected constructor metadata excludes the
 name, and the requested parameter prefix is in bounds. -/
@@ -1556,6 +1591,51 @@ theorem VInductDecl.BlockReductionConstFree.mkNullaryCtor
     fun raw member =>
       (typeSafe.2 raw member).mkNullaryCtor
         (payloadSafe.2 raw member).1 parameterBound produced⟩
+
+/-- Nullary-constructor synthesis preserves support without an argument bound
+when Lean's actual out-of-bounds default expression is itself safe for the
+complete fresh block.  Keeping this case separate makes the exceptional
+internal-dummy-name collision explicit for the later reducer simulation. -/
+theorem VInductDecl.BlockReductionConstFree.mkNullaryCtor_of_default
+    {source : VInductDecl} {environment : Environment}
+    {type result : Expr} {nparams : Nat}
+    (typeSafe : source.BlockReductionConstFree type)
+    (payloadSafe : source.BlockReductionPayloadFree environment)
+    (defaultSafe : source.BlockReductionConstFree (default : Expr))
+    (produced : Lean4Lean.mkNullaryCtor environment type nparams =
+      some result) :
+    source.BlockReductionConstFree result := by
+  unfold Lean4Lean.mkNullaryCtor at produced
+  simp only [Expr.withApp_eq] at produced
+  cases head : type.getAppFn with
+  | const family levels =>
+      simp only [head] at produced
+      cases selected : getFirstCtor environment family with
+      | none => simp [selected] at produced
+      | some constructor =>
+          simp at produced
+          obtain ⟨actual, actualSelected, resultEq⟩ := produced
+          rw [selected] at actualSelected
+          have actualEq : actual = constructor :=
+            Option.some.inj actualSelected.symm
+          subst actual
+          rw [← resultEq]
+          constructor
+          · intro raw member
+            apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+            · exact (payloadSafe.1 raw member).1.ne_of_getFirstCtor_eq
+                selected
+            · intro argument argumentMember
+              exact (typeSafe.1 raw member).getAppArgs argumentMember
+            · exact defaultSafe.1 raw member
+          · intro raw member
+            apply Lean.Expr.ReductionConstFree.mkAppRange_of_default
+            · exact (payloadSafe.2 raw member).1.ne_of_getFirstCtor_eq
+                selected
+            · intro argument argumentMember
+              exact (typeSafe.2 raw member).getAppArgs argumentMember
+            · exact defaultSafe.2 raw member
+  | _ => simp [head] at produced
 
 /-- Universe substitution changes levels but never changes constant names or
 the reduction-relevant expression spine. -/
