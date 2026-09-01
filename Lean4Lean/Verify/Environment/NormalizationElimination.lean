@@ -1277,6 +1277,28 @@ def _root_.Lean.Expr.ReductionConstFree (name : Name) : Expr → Prop
       expression.ReductionConstFree name
   | _ => True
 
+/-- If a reduction-safe expression has a constant application head, that
+head is not the excluded name. -/
+theorem _root_.Lean.Expr.ReductionConstFree.constName_ne_of_getAppFn_eq
+    {expression : Expr} {excluded name : Name} {levels : List Level}
+    (safe : expression.ReductionConstFree excluded)
+    (head : expression.getAppFn = .const name levels) :
+    name ≠ excluded := by
+  induction expression with
+  | bvar => cases head
+  | fvar => cases head
+  | mvar => cases head
+  | sort => cases head
+  | const => cases head; exact safe
+  | app function argument functionIH argumentIH =>
+      exact functionIH safe.1 head
+  | lam => cases head
+  | forallE => cases head
+  | letE => cases head
+  | lit => cases head
+  | mdata => cases head
+  | proj => cases head
+
 /-- Replacing a free variable by a bound variable does not change the
 reduction-relevant constant inventory. -/
 theorem _root_.Lean.Expr.reductionConstFree_abstract1
@@ -11005,6 +11027,23 @@ structure ConstructorDeclarationStagingRun
     finalKernelEnv.constants ctorEnv
   trenv : TrEnv' .safe finalKernelEnv.constants Q ctorEnv
 
+/-- Exact metadata insertion changes no host lookup away from the names in
+its source-ordered raw inventory. -/
+private theorem environment_find?_eq_of_addInductConstants_name_ne
+    {kind : InductConstantKind}
+    {kernelEnv finalKernelEnv : Environment}
+    {theoryEnv finalTheoryEnv : VEnv} {raws : List VConstVal} {Q : Bool}
+    (adds : AddInductConstants kind kernelEnv.constants theoryEnv raws
+      finalKernelEnv.constants finalTheoryEnv)
+    (pre : TrEnv' .safe kernelEnv.constants Q theoryEnv)
+    {name : Name} (fresh : ∀ raw ∈ raws, raw.name ≠ name) :
+    finalKernelEnv.find? name = kernelEnv.find? name := by
+  have postMapWF := adds.map_wf pre.map_wf
+  change finalKernelEnv.constants.find?' name =
+    kernelEnv.constants.find?' name
+  rw [postMapWF.find?'_eq_find?, pre.map_wf.find?'_eq_find?]
+  exact adds.map_lookup_eq_of_name_ne pre.map_wf fresh
+
 /-- Every family staged by the exact metadata fold was absent from the
 shared pre-family Theory environment. -/
 theorem FamilyDeclarationStagingRun.raw_name_absent
@@ -11063,6 +11102,18 @@ theorem FamilyDeclarationStagingRun.preserve_find?
   change finalKernelEnv.constants.find?' name = some info
   rw [postMapWF.find?'_eq_find?]
   exact run.addTypes.preserve_map_lookup pre.map_wf found
+
+/-- Host lookup is pointwise unchanged away from the staged family names. -/
+theorem FamilyDeclarationStagingRun.find?_eq_of_name_ne
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List InductiveVal} {env finalEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : FamilyDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos env finalEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q env)
+    {name : Name} (fresh : ∀ raw ∈ raws, raw.name ≠ name) :
+    finalKernelEnv.find? name = kernelEnv.find? name :=
+  environment_find?_eq_of_addInductConstants_name_ne run.addTypes pre fresh
 
 /-- The only new metadata role at the family boundary is `inductInfo`.
 An observation incompatible with that role is reflected unchanged to the
@@ -11258,6 +11309,19 @@ theorem ConstructorDeclarationStagingRun.preserve_find?
   change finalKernelEnv.constants.find?' name = some info
   rw [postMapWF.find?'_eq_find?]
   exact run.addCtors.preserve_map_lookup pre.map_wf found
+
+/-- Host lookup is pointwise unchanged away from the staged constructor
+names. -/
+theorem ConstructorDeclarationStagingRun.find?_eq_of_name_ne
+    {allowPrimitive : Bool} {kernelEnv finalKernelEnv : Environment}
+    {infos : List ConstructorVal} {typeEnv : VEnv}
+    {raws : List VConstVal} {Q : Bool}
+    (run : ConstructorDeclarationStagingRun allowPrimitive kernelEnv
+      finalKernelEnv infos typeEnv raws Q)
+    (pre : TrEnv' .safe kernelEnv.constants Q typeEnv)
+    {name : Name} (fresh : ∀ raw ∈ raws, raw.name ≠ name) :
+    finalKernelEnv.find? name = kernelEnv.find? name :=
+  environment_find?_eq_of_addInductConstants_name_ne run.addCtors pre fresh
 
 /-- More generally, the only new metadata role at the constructor boundary
 is `ctorInfo`.  An observation whose shape is incompatible with that role is
@@ -31056,6 +31120,130 @@ theorem ProducedBlockSemanticDeclarationRun.preserve_find?
     produced.execution.constructorEnv.find? name = some info :=
   declarations.constructors.preserve_find? declarations.families.trenv
     (declarations.families.preserve_find? pre found)
+
+/-- At every name outside the block's family and constructor inventories,
+the constructor endpoint has exactly the validation lookup. -/
+theorem ProducedBlockSemanticDeclarationRun.find?_eq_of_name_ne
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {name : Name}
+    (familyFresh : ∀ raw ∈ source.blockTypeConstants, raw.name ≠ name)
+    (constructorFresh : ∀ raw ∈ source.blockConstructorConstants,
+      raw.name ≠ name) :
+    produced.execution.constructorEnv.find? name =
+      produced.execution.normalization.validationContext.env.find? name := by
+  calc
+    _ = produced.execution.normalization.familyEnv.find? name :=
+      declarations.constructors.find?_eq_of_name_ne
+        declarations.families.trenv constructorFresh
+    _ = _ := declarations.families.find?_eq_of_name_ne pre familyFresh
+
+/-- A constant application head whose reduction support excludes every new
+family and constructor observes the same metadata lookup at both endpoints. -/
+theorem ProducedBlockSemanticDeclarationRun.find?_eq_of_reductionConstFree
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {expression : Expr} {name : Name} {levels : List Level}
+    (familySafe : ∀ raw ∈ source.blockTypeConstants,
+      expression.ReductionConstFree raw.name)
+    (constructorSafe : ∀ raw ∈ source.blockConstructorConstants,
+      expression.ReductionConstFree raw.name)
+    (head : expression.getAppFn = .const name levels) :
+    produced.execution.constructorEnv.find? name =
+      produced.execution.normalization.validationContext.env.find? name := by
+  apply declarations.find?_eq_of_name_ne pre
+  · intro raw member
+    exact (familySafe raw member).constName_ne_of_getAppFn_eq head |>.symm
+  · intro raw member
+    exact (constructorSafe raw member).constName_ne_of_getAppFn_eq head |>.symm
+
+/-- Constructor-application recognition is unchanged for an expression
+whose reduction support excludes the block's staged names. -/
+theorem ProducedBlockSemanticDeclarationRun.isConstructorApp?_eq
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    (expression : Expr)
+    (familySafe : ∀ raw ∈ source.blockTypeConstants,
+      expression.ReductionConstFree raw.name)
+    (constructorSafe : ∀ raw ∈ source.blockConstructorConstants,
+      expression.ReductionConstFree raw.name) :
+    expression.isConstructorApp?' produced.execution.constructorEnv =
+      expression.isConstructorApp?'
+        produced.execution.normalization.validationContext.env := by
+  unfold Lean.Expr.isConstructorApp?'
+  cases head : expression.getAppFn with
+  | const name levels =>
+      simp only
+      rw [declarations.find?_eq_of_reductionConstFree pre familySafe
+        constructorSafe head]
+  | _ => simp only
+
+/-- Nonrecursive-structure recognition is pointwise unchanged away from the
+block's staged names. -/
+theorem ProducedBlockSemanticDeclarationRun.isNonRecStructure_eq_of_name_ne
+    {source : VInductDecl} {kernelSources : List InductiveType}
+    {numNested : Nat} {isUnsafe : Bool}
+    {context : AddInductive.Context}
+    {env blockEnv : VEnv} {Us : List Name}
+    {produced : ProducedBlockEliminationShapeCandidate source kernelSources
+      numNested isUnsafe context}
+    {semantic : NormalizationCandidateBlockSemanticRun env blockEnv Us
+      produced.candidate source}
+    {generation : BlockGenerationChecked source}
+    {run : ProducedBlockSemanticEliminationRun env blockEnv Us produced
+      semantic generation}
+    (declarations : ProducedBlockSemanticDeclarationRun run)
+    (pre : TrEnv' .safe
+      produced.execution.normalization.validationContext.env.constants
+      produced.execution.normalization.validationContext.env.quotInit env)
+    {name : Name}
+    (familyFresh : ∀ raw ∈ source.blockTypeConstants, raw.name ≠ name)
+    (constructorFresh : ∀ raw ∈ source.blockConstructorConstants,
+      raw.name ≠ name) :
+    produced.execution.constructorEnv.isNonRecStructure name =
+      produced.execution.normalization.validationContext.env.isNonRecStructure
+        name := by
+  unfold Kernel.Environment.isNonRecStructure
+  rw [declarations.find?_eq_of_name_ne pre familyFresh constructorFresh]
 
 /-- Any delta-reducible declaration observed after family and constructor
 staging is the identical pre-block declaration. -/

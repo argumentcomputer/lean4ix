@@ -242,6 +242,27 @@ theorem AddInductConstants.map_lookup_cases
         · exact .inr ⟨_, .head _, nameEq⟩
       · exact .inr ⟨inserted, .tail _ member, nameEq⟩
 
+/-- Away from the source-ordered inserted-name inventory, a metadata fold
+leaves the input constant-map lookup unchanged. -/
+theorem AddInductConstants.map_lookup_eq_of_name_ne
+    {kind : InductConstantKind} {C₁ C₂ : ConstMap} {env₁ env₂ : VEnv}
+    {raws : List VConstVal} {name : Name}
+    (H : AddInductConstants kind C₁ env₁ raws C₂ env₂)
+    (wf : C₁.WF) (fresh : ∀ raw ∈ raws, raw.name ≠ name) :
+    C₂.find? name = C₁.find? name := by
+  cases input : C₁.find? name with
+  | some found =>
+      rw [H.preserve_map_lookup wf input]
+  | none =>
+      cases output : C₂.find? name with
+      | none => rfl
+      | some found =>
+          rcases H.map_lookup_cases wf output with
+            old | ⟨raw, member, nameEq⟩
+          · rw [input] at old
+            contradiction
+          · exact (fresh raw member nameEq).elim
+
 /-- The inserted branch of `map_lookup_cases` also recovers the exact role
 tag of the final host metadata. -/
 theorem AddInductConstants.map_lookup_cases_kind
