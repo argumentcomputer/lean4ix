@@ -20,7 +20,8 @@ jobs:
   # but are not built here, so they never gate CI.
   nix-test:
     name: Nix Tests
-    runs-on: warp-ubuntu-latest-x64-8x
+    # /nix lives on the root volume; Cachix is the binary cache, so no sticky disk
+    runs-on: runs-on=${{ github.run_id }}-nix-test-${{ github.run_attempt }}/cpu=8/family=r7i+r8i+r7a+r8a/image=ubuntu26-full-x64/volume=100gb
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
@@ -42,9 +43,15 @@ jobs:
   # Verify the dev shell provides a working Lake toolchain.
   nix-devshell:
     name: Nix devShell
-    runs-on: warp-ubuntu-latest-x64-8x
+    # `lake build` below runs outside the Nix sandbox, so `.lake` can persist
+    # on a sticky disk like ci.yml's
+    runs-on: runs-on=${{ github.run_id }}-nix-devshell-${{ github.run_attempt }}/cpu=8/family=r7i+r8i+r7a+r8a/image=ubuntu26-full-x64/volume=100gb/sticky=nix-devshell:50gb
     steps:
       - uses: actions/checkout@v7
+      - uses: runs-on/action@v2
+        with:
+          sticky_cache: |
+            custom,path=.lake
       - uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable

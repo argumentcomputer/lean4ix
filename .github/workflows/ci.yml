@@ -16,10 +16,20 @@ concurrency:
 jobs:
   build:
     name: Build and test
-    runs-on: warp-ubuntu-latest-x64-8x
+    # `sticky=` keeps `.lake` on a RunsOn sticky disk across runs, so Lake's
+    # incremental build state survives instead of round-tripping through the
+    # GitHub cache. Snapshots are per Git ref: a PR starts from `main`'s latest
+    # snapshot without writing back to it, so the `push` runs on `main` are
+    # what keep the shared baseline warm.
+    # https://runs-on.com/docs/runners/capabilities/sticky-disks/
+    runs-on: runs-on=${{ github.run_id }}-build-${{ github.run_attempt }}/cpu=8/family=r7i+r8i+r7a+r8a/image=ubuntu26-full-x64/volume=100gb/sticky=ci-build:50gb
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: runs-on/action@v2
+        with:
+          sticky_cache: |
+            custom,path=.lake
 
       # Installs the toolchain pinned in `lean-toolchain` and runs `lake build`,
       # i.e. the `defaultTargets`: the `Lean4Lean` library, the `lean4lean` exe,
@@ -31,6 +41,7 @@ jobs:
         uses: leanprover/lean-action@v1
         with:
           build-args: --wfail
+          use-github-cache: false
 
       # `Lean4Lean.Experimental` is WIP and deliberately not a default target, but it still has to
       # compile. No `--wfail`: this is parked proof work outside the audited surface, so its
