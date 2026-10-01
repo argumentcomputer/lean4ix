@@ -25,8 +25,10 @@ jobs:
     runs-on: runs-on=${{ github.run_id }}-build-${{ github.run_attempt }}/cpu=8/family=r7i+r8i+r7a+r8a/image=ubuntu26-full-x64/volume=100gb/sticky=ci-build:50gb
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: runs-on/action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: runs-on/action@dfae4d98c5537a0dc7bbb7e6b9211f30ba240f6d # v2.4.0
         with:
           sticky_cache: |
             custom,path=.lake
@@ -38,7 +40,7 @@ jobs:
       # the frontier `sorry`s are annotated at their declarations, so they no
       # longer count. `Lean4Lean.Experimental` is not a default target.
       - name: Build
-        uses: leanprover/lean-action@v1
+        uses: leanprover/lean-action@50fcf42d2e460296f1a34b402e990d1b24f8b596 # v1.6.0
         with:
           build-args: --wfail
           use-github-cache: false
@@ -79,3 +81,14 @@ jobs:
       # support loose bound variables" (digama0/lean4lean#17).
       - name: Recheck Init.System.IO and its imports from scratch
         run: lake exe lean4lean --fresh Init.System.IO
+
+  lints:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actionlint, shellcheck over composite action scripts, pinact (actions
+      # must be SHA-pinned with a matching version comment) and zizmor
+      - uses: argumentcomputer/ci-workflows/.github/actions/lint-workflows@main
