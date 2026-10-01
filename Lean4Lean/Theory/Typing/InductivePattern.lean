@@ -450,7 +450,7 @@ theorem families_name_inj {t t' : Nat} {family family' : NormalizedFamily}
   have hm' : (source.types.map (·.name))[t']? = some family.raw.name := by
     rw [List.getElem?_map, h1', Option.map_some, hname]
   obtain ⟨hlt, -⟩ := List.getElem?_eq_some_iff.1 hm
-  exact (List.getElem?_inj hlt gen.nodup_parts.1).1 (hm.trans hm'.symm)
+  exact (List.Nodup.getElem?_inj hlt gen.nodup_parts.1).1 (hm.trans hm'.symm)
 
 /-- Flattened positions are recoverable from raw constructor names. -/
 theorem flatCtors_name_inj {i i' : Nat} {c c' : NormalizedBlockCtor}
@@ -469,7 +469,7 @@ theorem flatCtors_name_inj {i i' : Nat} {c c' : NormalizedBlockCtor}
       hname]
     rfl
   obtain ⟨hlt, -⟩ := List.getElem?_eq_some_iff.1 hm
-  have hii : i = i' := (List.getElem?_inj hlt hnodup).1 (hm.trans hm'.symm)
+  have hii : i = i' := (List.Nodup.getElem?_inj hlt hnodup).1 (hm.trans hm'.symm)
   subst hii
   exact ⟨rfl, Option.some.inj (h.symm.trans h')⟩
 

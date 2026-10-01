@@ -4472,7 +4472,7 @@ theorem LR.constDefEq
             ih x₀ y₀ hmem hchildLe hchildLeaf
               hchildTerm ⟨v, hchildType⟩ hchildSpineX hchildSpineY
               houtK hAK hy
-        rw [dif_pos hg]
+        rw [dite_eq_left hg]
         refine (LRS.DefEq.lam_forallE
           (M := xs.foldr (fun a f => f.app a) (.const c ls))
           (N := ys.foldr (fun a f => f.app a) (.const c ls))
@@ -4491,7 +4491,7 @@ theorem LR.constDefEq
             evalChild (Nat.max_eq_right (Nat.le_succ q))
               hleaf.aligned hterm hspineX hspineY
               hp hxy hv hmem hx hy⟩)
-      · rw [dif_neg hg]
+      · rw [dite_eq_right hg]
         exact (LR Γ₀).bot hout.isType
     | ctor => exact (TShape.ctor_not_le_lam' hlam').elim
     | indTy => exact (TShape.indTy_not_le_lam' hlam').elim

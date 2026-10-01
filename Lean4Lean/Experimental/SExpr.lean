@@ -69,7 +69,7 @@ theorem mk_of_wf (h : l.WF univs) :
   have hm : mk l = if h' : l.WF univs then
       (⟨_, l, h', rfl⟩ : SLevel) else SLevel.zero := rfl
   rw [hm]
-  exact dif_pos h
+  exact dite_eq_left h
 
 @[simp] theorem mk_reify (l : SLevel) : mk (reify l) = l := by
   rw [mk_of_wf (reify_wf l)]

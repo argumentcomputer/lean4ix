@@ -302,7 +302,7 @@ theorem Shape.lift_le_lift {s t : Shape n} (le : n ≤ m) : (s.lift : Shape m) �
         ShapeFun.ble ble s t := by
       simp only [ShapeFun.ble, ShapeFun.lift, List.all_map, List.any_map, Function.comp_def, ih]
     -- have sif {i} (h : i ≤ n) : (if h : i ≤ m then .sort i h else .bot : Shape (m+1)) =
-    --     .sort i (Nat.le_trans h le) := dif_pos _
+    --     .sort i (Nat.le_trans h le) := dite_eq_left _
     cases s <;> cases t <;> simp [ble, lift, *]
 
 theorem Shape.lift_mono {s t : Shape n} : s ≤ t → (s.lift : Shape m) ≤ t.lift := by

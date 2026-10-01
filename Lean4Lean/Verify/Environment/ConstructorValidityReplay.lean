@@ -2905,7 +2905,7 @@ theorem prbSelfDefEq (source : Expr) fuel context state :
     TypeChecker.Inner.isDefEq source source
       (TypeChecker.Methods.withFuel fuel) context state = .ok (true, state) := by
   unfold TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl _)]
+  rw [ite_eq_left (Expr.eqv_refl _)]
   rfl
 
 @[simp] theorem prbConstBeqFVar (name : Name) (levels : List Level)
@@ -5297,10 +5297,10 @@ theorem prbSafetyRunDirect :
       · rename_i nonrecursive
         rw [prbPreFamilyNextDomainHasIndOccReplay] at nonrecursive
         contradiction
-      · rw [dif_pos recursiveIndependent]
+      · rw [dite_eq_left recursiveIndependent]
         rw [recursiveFieldRunAtContext]
         simp only [Bind.bind, Except.bind]
-        rw [dif_pos prbPreFamilyAFreshReplay]
+        rw [dite_eq_left prbPreFamilyAFreshReplay]
         rw [recursiveViewTailRunExact]
         rfl
   obtain ⟨afterATrace, afterARun⟩ :
@@ -5384,13 +5384,13 @@ theorem prbSafetyRunDirect :
       rw [noParameterOne] at parameterAt
       contradiction
     · split
-      · rw [dif_pos rootIndependent]
+      · rw [dite_eq_left rootIndependent]
         rw [rootAlpha.check_eq, rootAlphaEnsure.observe_eq,
           rootAlphaConsumed.check_eq]
         simp only [Bind.bind, Except.bind]
         rw [rootAlphaAnnotations.observe_eq]
         simp only []
-        rw [dif_pos prbPreFamilyRootFreshReplay]
+        rw [dite_eq_left prbPreFamilyRootFreshReplay]
         have ordinaryTailRun' :
             AddInductive.ConstructorPreFamilyViewTrace.build
                 prbStagedUniverseInput.staged.family.validation.stats 0
@@ -5560,7 +5560,7 @@ theorem prbSafetyRunDirect :
       propRecursiveBoundaryKernelType, propRecursiveBoundaryKernelCtor,
       propRecursiveBoundaryInfo, propRecursiveBoundaryMkInfo,
       ConstantInfo.type, ConstantInfo.toConstantVal]
-  rw [if_pos translationUnique]
+  rw [ite_eq_left translationUnique]
   rw [parametersRun]
   simp only [Bind.bind, Except.bind]
   rw [listRun]
@@ -10429,13 +10429,13 @@ theorem cvmPreFamilyOrdinaryBuildEqTest
     rw [noParameter] at parameterAt
     contradiction
   · split
-    · rw [dif_pos independent]
+    · rw [dite_eq_left independent]
       rw [domainCheck.check_eq, ensureType.observe_eq,
         consumedCheck.check_eq]
       simp only [Bind.bind, Except.bind]
       rw [annotations.observe_eq]
       simp only []
-      rw [dif_pos fresh, tailRun]
+      rw [dite_eq_left fresh, tailRun]
       rfl
     · rename_i recursive
       rw [nonrecursive] at recursive
@@ -10474,9 +10474,9 @@ theorem cvmPreFamilyRecursiveBuildEqTest
     · rename_i nonrecursive
       rw [isRecursive] at nonrecursive
       contradiction
-    · rw [dif_pos independent, fieldRun]
+    · rw [dite_eq_left independent, fieldRun]
       simp only [Bind.bind, Except.bind]
-      rw [dif_pos fresh, tailRun]
+      rw [dite_eq_left fresh, tailRun]
       rfl
 
 theorem cvmPreFamilyParameterAtZeroTest :
@@ -11296,7 +11296,7 @@ theorem cvmSafetyRunDirectTest :
       constructorValidityMatrixInfo, constructorValidityMatrixMkInfo,
       ConstantInfo.type, ConstantInfo.toConstantVal]
   unfold AddInductive.checkConstructorPreFamilySafety
-  rw [if_pos translationUnique]
+  rw [ite_eq_left translationUnique]
   rw [cvmPreFamilyParametersRunTest]
   simp only [Bind.bind, Except.bind]
   rw [listRun]

@@ -168,7 +168,7 @@ theorem Shape.lift_self {s : Shape n} : s.lift = s := by
   have {α} {lift : α → α} (IH : ∀ {s}, lift s = s) {s} : ShapeFun.lift lift s = s := by
     simp [ShapeFun.lift]; apply List.map_id''; simp [IH]
   unfold lift <;> split <;> (try rfl) <;> dsimp
-  -- · rw [dif_pos ‹_›]
+  -- · rw [dite_eq_left ‹_›]
   · rw [Shape.lift_self, this Shape.lift_self]
   · rw [this Shape.lift_self]
 
@@ -198,7 +198,7 @@ theorem Shape.lift_le_lift {s t : Shape n} (le : n ≤ m) : (s.lift : Shape m) �
         ShapeFun.ble ble s t := by
       simp only [ShapeFun.ble, ShapeFun.lift, List.all_map, List.any_map, Function.comp_def, ih]
     -- have sif {i} (h : i ≤ n) : (if h : i ≤ m then .sort i h else .bot : Shape (m+1)) =
-    --     .sort i (Nat.le_trans h le) := dif_pos _
+    --     .sort i (Nat.le_trans h le) := dite_eq_left _
     cases s <;> cases t <;> simp [ble, lift, *]
 
 omit [Params] in

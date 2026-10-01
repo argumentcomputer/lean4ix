@@ -581,7 +581,7 @@ theorem tryEtaStructCore.WF_of_structureEta {c : VContext} {s : VState}
       simp only [bind_assoc]
       refine (isDefEq.WF hprojTr hargTr').bind fun b next _ hb => ?_
       by_cases hbtrue : b = true
-      · simp only [hbtrue, if_pos, pure_bind]
+      · simp only [hbtrue, ite_eq_left, pure_bind]
         have hcur : FieldEq (i - ctorInfo.numParams) :=
           ⟨fields[i - ctorInfo.numParams], code,
             List.getElem?_eq_getElem hj, hcode, hb hbtrue⟩

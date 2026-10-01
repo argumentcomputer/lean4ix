@@ -136,9 +136,9 @@ theorem addConst_le_of_le {e₁ e₂ s₁ s₂ : VEnv} {n : Name} {ci : VConstan
     have h' : (if n = n' then some ci else e₁.constants n') = some a := h
     show (if n = n' then some ci else e₂.constants n') = some a
     by_cases hn : n = n'
-    · rw [if_pos hn] at h' ⊢
+    · rw [ite_eq_left hn] at h' ⊢
       exact h'
-    · rw [if_neg hn] at h' ⊢
+    · rw [ite_eq_right hn] at h' ⊢
       exact hle.constants h'
   · exact fun h => hle.defeqs h
   · exact fun h => hle.structEtas h
@@ -1024,7 +1024,7 @@ theorem foldlM_addConst_constants_old {α : Type _} (name : α → Name)
     · cases hx
     · cases hx
       show (if name x = c then some (ci x) else _) = _
-      rw [if_neg (hne x (.head _))]
+      rw [ite_eq_right (hne x (.head _))]
 
 theorem foldl_addDefEq_constants :
     ∀ (dfs : List VDefEq) (env : VEnv) (c : Name),
@@ -1739,7 +1739,7 @@ theorem d2Imax_pos (univs : Nat) (u v : @SLevel (d2Params univs))
   have hw := hv w
   show 0 < Lean.Nat.imax (u.1 w) (v.1 w)
   simp only [Lean.Nat.imax]
-  rw [if_neg (by omega)]
+  rw [ite_eq_right (by omega)]
   exact Nat.lt_of_lt_of_le hw (Nat.le_max_right _ _)
 
 theorem d2Succ_pos (univs : Nat) (u : @SLevel (d2Params univs)) :

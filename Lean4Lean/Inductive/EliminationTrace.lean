@@ -104,25 +104,25 @@ theorem run
       rw [isLargeEliminator.loop.eq_2, withLocalDecl_apply]
       have notField : ¬ argIdx ≥ stats.params.size :=
         Nat.not_le.mpr isParameter
-      simp only [notField, if_false, Bind.bind]
+      simp only [notField, ite_false, Bind.bind]
       exact ih
   | proofField context fuel argIdx toCheck name domain body binderInfo
       sortResult isField ensureStep isProp tail ih =>
       rw [show fuel + 1 = Nat.succ fuel by omega]
       rw [isLargeEliminator.loop.eq_2, withLocalDecl_apply]
-      simp only [isField, if_true, ReaderT.bind, Bind.bind,
+      simp only [isField, ite_true, ReaderT.bind, Bind.bind,
         liftTypeChecker_apply]
       rw [ensureStep]
-      simp only [Except.bind, isProp, Bool.not_true, Bool.false_eq_true, if_false]
+      simp only [Except.bind, isProp, Bool.not_true, Bool.false_eq_true, ite_false]
       exact ih
   | dataField context fuel argIdx toCheck name domain body binderInfo
       sortResult isField ensureStep isProp tail ih =>
       rw [show fuel + 1 = Nat.succ fuel by omega]
       rw [isLargeEliminator.loop.eq_2, withLocalDecl_apply]
-      simp only [isField, if_true, ReaderT.bind, Bind.bind,
+      simp only [isField, ite_true, ReaderT.bind, Bind.bind,
         liftTypeChecker_apply]
       rw [ensureStep]
-      simp only [Except.bind, isProp, Bool.not_false, if_true]
+      simp only [Except.bind, isProp, Bool.not_false, ite_true]
       exact ih
   | terminal context source fuel argIdx toCheck notForall =>
       cases source <;>

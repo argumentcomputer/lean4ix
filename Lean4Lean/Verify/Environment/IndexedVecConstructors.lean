@@ -172,7 +172,7 @@ theorem selfDefEq (e : Expr) fuel context state :
     TypeChecker.Inner.isDefEq e e (TypeChecker.Methods.withFuel fuel)
       context state = .ok (true, state) := by
   unfold TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl _)]
+  rw [ite_eq_left (Expr.eqv_refl _)]
   rfl
 
 @[simp] theorem constBeqFVar (name : Name) (levels : List Level)
@@ -906,7 +906,7 @@ theorem nilCandidateReduceRecursor
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [show (tcContext nilCandidateAlphaLctx).env = ctorEnv by rfl]
   rw [hquot]
-  simp only [Bool.false_eq_true, if_false, nilRecMBind]
+  simp only [Bool.false_eq_true, ite_false, nilRecMBind]
   rw [nilCandidateInductiveReduceRec methods state]
   rfl
 
@@ -1002,7 +1002,7 @@ theorem nilCandidateUnfoldBody
   rw [show nilCandidateBody.isApp = true by
     rw [nilCandidateBodyShape]
     rfl]
-  simp only [if_true]
+  simp only [ite_true]
   rw [nilCandidateBodyGetAppFn]
   simp only [nilRecMBind]
   rw [nilCandidateUnfoldFamily]
@@ -1677,7 +1677,7 @@ theorem ctorIndexedVecReduceRecursor
   simp only [nilRecMBind, nilRecMGetEnv]
   rw [show (tcContext lctx).env = ctorEnv by rfl]
   rw [hquot]
-  simp only [Bool.false_eq_true, if_false, nilRecMBind]
+  simp only [Bool.false_eq_true, ite_false, nilRecMBind]
   rw [ctorIndexedVecInductiveReduceRec]
   rfl
 
@@ -1748,7 +1748,7 @@ theorem ctorIndexedVecUnfold
       methods (tcContext lctx) state = .ok (none, state) := by
   unfold TypeChecker.Inner.unfoldDefinition
   rw [show (ctorIndexedVecApp alpha index).isApp = true by rfl]
-  simp only [if_true]
+  simp only [ite_true]
   rw [ctorIndexedVecAppGetAppFn]
   simp only [nilRecMBind]
   rw [ctorIndexedVecUnfoldFamily]

@@ -2521,9 +2521,9 @@ private theorem indexedVecPreFamilySafetyRun :
       · rename_i nonrecursive
         rw [indexedVecValidationTailHasIndOcc] at nonrecursive
         contradiction
-      · rw [dif_pos recursiveIndependent, recursiveFieldRun]
+      · rw [dite_eq_left recursiveIndependent, recursiveFieldRun]
         simp only [Bind.bind, Except.bind]
-        rw [dif_pos headFresh]
+        rw [dite_eq_left headFresh]
         rw [explicitResultTailRun]
         exact ⟨_, rfl⟩
   obtain ⟨consHeadTailTrace, consHeadTailRun⟩ :
@@ -2605,12 +2605,12 @@ private theorem indexedVecPreFamilySafetyRun :
     · split
       · rw [alphaChecked.check_eq, alphaEnsure.observe_eq,
           alphaConsumed.check_eq]
-        rw [dif_pos (by
+        rw [dite_eq_left (by
           simp [AddInductive.constructorIndependentOf])]
         simp only [Bind.bind, Except.bind]
         rw [alphaAnnotations.observe_eq]
         simp only []
-        rw [dif_pos nFresh]
+        rw [dite_eq_left nFresh]
         rw [explicitHeadTailRun]
         exact ⟨_, rfl⟩
       · rename_i recursive
@@ -2694,12 +2694,12 @@ private theorem indexedVecPreFamilySafetyRun :
     · split
       · rw [baseNat.check_eq, baseNatEnsure.observe_eq,
           baseNatConsumed.check_eq]
-        rw [dif_pos (by
+        rw [dite_eq_left (by
           simp [AddInductive.constructorIndependentOf])]
         simp only [Bind.bind, Except.bind]
         rw [baseNatAnnotations.observe_eq]
         simp only []
-        rw [dif_pos baseFresh]
+        rw [dite_eq_left baseFresh]
         rw [explicitNTailRun]
         exact ⟨_, rfl⟩
       · rename_i recursive
@@ -2836,7 +2836,7 @@ private theorem indexedVecPreFamilySafetyRun :
     simp [AddInductive.theoryTranslationUnique, vecFamilyTail,
       nilCtorTypeRaw, nilCtorBodyRaw, consCtorTypeRaw, consNTypeRaw,
       consHeadTypeRaw, consTailTypeRaw, consTerminalRaw]
-  rw [if_pos translationUnique]
+  rw [ite_eq_left translationUnique]
   rw [parametersRun]
   simp only [Bind.bind, Except.bind]
   rw [constructorListRun]

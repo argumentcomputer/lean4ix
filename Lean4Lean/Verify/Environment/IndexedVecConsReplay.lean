@@ -656,12 +656,12 @@ theorem consAfterHeadCheckFirstCache :
     simpa only [consTailDomain, ctorIndexedVecApp,
       consAlphaExprShape, consNExprShape] using
       replayTailDomainBeqFirstApp]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consHeadNState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show (consNExpr == replayFirstApp (.fvar consAlphaId)) = false by
     simp [consNExprShape, replayFirstApp]]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consHeadFirstAppState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show (replayFirstApp consAlphaExpr ==
@@ -680,7 +680,7 @@ theorem consAfterHeadCheckNCache :
       (replayAppBeqFVar
         ((.const ``IndexedVec [.param `u] : Expr).app
           (.fvar consAlphaId)) (.fvar consNId) consNId)]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consHeadNState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show (consNExpr == (.fvar consNId : Expr)) = true by simp]
@@ -933,7 +933,7 @@ theorem consAfterNCheckTailFirstCache :
   unfold consAfterNCheckTailDomainState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [replayTailDomainBeqFirstApp]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterNCheckNState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show ((.fvar consNId : Expr) ==
@@ -941,7 +941,7 @@ theorem consAfterNCheckTailFirstCache :
     simpa only [replayFirstApp] using
       (replayFVarBeqApp consNId
         (.const ``IndexedVec [.param `u]) (.fvar consAlphaId))]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterNCheckFirstAppState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
@@ -960,7 +960,7 @@ theorem consAfterNCheckTailNCache :
       (replayAppBeqFVar
         ((.const ``IndexedVec [.param `u] : Expr).app
           (.fvar consAlphaId)) (.fvar consNId) consNId)]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterNCheckNState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
@@ -1420,14 +1420,14 @@ theorem consAfterAlphaCheckTailFirstCache :
   unfold consAfterAlphaCheckTailDomainState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [replayIndexedVecAppBeqFirstApp]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterAlphaCheckNInferState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show ((.fvar consAfterAlphaCheckNId : Expr) ==
       replayFirstApp (.fvar consAlphaId)) = false by
     exact replayFVarBeqApp consAfterAlphaCheckNId
       (.const ``IndexedVec [.param `u]) (.fvar consAlphaId)]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterAlphaCheckFirstAppState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
@@ -1449,7 +1449,7 @@ theorem consAfterAlphaCheckTailNCache :
       ((.const ``IndexedVec [.param `u] : Expr).app
         (.fvar consAlphaId))
       (.fvar consAfterAlphaCheckNId) consAfterAlphaCheckNId]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consAfterAlphaCheckNInferState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
@@ -1929,7 +1929,7 @@ theorem consRootCheckTailFirstCache :
   unfold consRootCheckTailDomainState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [replayIndexedVecAppBeqFirstApp]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consRootCheckNInferState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [show ((.fvar consRootCheckNId : Expr) ==
@@ -1937,7 +1937,7 @@ theorem consRootCheckTailFirstCache :
     exact replayFVarBeqApp consRootCheckNId
       (.const ``IndexedVec [.param `u])
       (.fvar consRootCheckAlphaId)]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consRootCheckFirstAppState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
@@ -1957,7 +1957,7 @@ theorem consRootCheckTailNCache :
       ((.const ``IndexedVec [.param `u] : Expr).app
         (.fvar consRootCheckAlphaId))
       (.fvar consRootCheckNId) consRootCheckNId]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   unfold consRootCheckNInferState replayInsert
   rw [Std.HashMap.getElem?_insert]
   rw [beq_self_eq_true]
