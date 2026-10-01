@@ -3082,7 +3082,7 @@ private theorem annotatedPiIsDefEqSort
         (TypeChecker.Methods.withFuel fuel) context initial =
       .ok (true, initial) := by
   unfold TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl _)]
+  rw [ite_eq_left (Expr.eqv_refl _)]
   rfl
 
 private def annotatedPiCtorExpectedView : Expr :=
@@ -4076,7 +4076,7 @@ private theorem unfoldAliasRecFieldInitial (methods) :
         (.const ``AliasRec [])), recAliasUnfoldState {}) := by
   rw [aliasRecFieldKernelExpr_eq]
   unfold TypeChecker.Inner.unfoldDefinition
-  rw [if_pos (show (Expr.app (.const ``RecAlias [.succ .zero])
+  rw [ite_eq_left (show (Expr.app (.const ``RecAlias [.succ .zero])
     (.const ``AliasRec [])).isApp = true from rfl)]
   rw [show
     (Expr.app (.const ``RecAlias [.succ .zero])
@@ -4334,7 +4334,7 @@ private theorem annotatedPiReduceRecursorDomain
       .ok (none, state) := by
   unfold TypeChecker.Inner.reduceRecursor
   simp only [normalizationRecMBind, normalizationRecMGetEnv]
-  rw [if_neg (show
+  rw [ite_eq_right (show
     ¬(annotatedPiCtorCandidateContext.toTypeChecker.env.quotInit = true) by
       simp [annotatedPiCtorCandidateContext,
         AddInductive.Context.toTypeChecker, annotatedPiType_quotInit])]
@@ -4412,7 +4412,7 @@ private theorem annotatedPiUnfoldDomainInitial (methods) :
       .ok (some annotatedPiDomainBetaKernel,
         annotatedPiOutParamUnfoldState {})
   unfold TypeChecker.Inner.unfoldDefinition
-  rw [if_pos (show (Expr.app (.const ``outParam [.succ .zero])
+  rw [ite_eq_left (show (Expr.app (.const ``outParam [.succ .zero])
     (.sort .zero)).isApp = true from rfl)]
   rw [show
     (Expr.app (.const ``outParam [.succ .zero])
@@ -4899,7 +4899,7 @@ private theorem annotatedPiUnfoldDomainOfMiss
       .ok (some annotatedPiDomainBetaKernel,
         annotatedPiOutParamUnfoldState state)
   unfold TypeChecker.Inner.unfoldDefinition
-  rw [if_pos (show (Expr.app (.const ``outParam [.succ .zero])
+  rw [ite_eq_left (show (Expr.app (.const ``outParam [.succ .zero])
     (.sort .zero)).isApp = true from rfl)]
   rw [show
     (Expr.app (.const ``outParam [.succ .zero])
@@ -5105,7 +5105,7 @@ private theorem annotatedPiLazyDeltaLoopDomain
   rw [annotatedPiIsDefEqOffsetDomain fuel]
   simp only
   rw [show (LBool.undef != LBool.undef) = false by rfl]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   rw [normalizationRecMBind]
   rw [normalizationRecMReadContext]
   simp only
@@ -5116,7 +5116,7 @@ private theorem annotatedPiLazyDeltaLoopDomain
     by
       simp [Expr.hasFVar_eq, Expr.hasFVar',
         annotatedPiRawDomainKernel]]
-  simp only [if_true]
+  simp only [ite_true]
   rw [normalizationRecMBind]
   rw [annotatedPiReduceNatDomain]
   simp only
@@ -5201,17 +5201,17 @@ private theorem annotatedPiIsDefEqCoreDomain
   · subst r
     simp only
     rw [show (LBool.true != LBool.undef) = true by rfl]
-    simp only [if_true]
+    simp only [ite_true]
     exact ⟨({ success := m } : TypeChecker.State), rfl⟩
   · subst r
     simp only
     rw [show (LBool.undef != LBool.undef) = false by rfl]
-    simp only [Bool.false_eq_true, if_false]
+    simp only [Bool.false_eq_true, ite_false]
     rw [normalizationRecMBind]
     rw [normalizationRecMReadContext]
     simp only
     rw [show ((.sort .zero : Expr).isConstOf ``true) = false by rfl]
-    simp only [Bool.and_false, Bool.false_eq_true, if_false]
+    simp only [Bool.and_false, Bool.false_eq_true, ite_false]
     rw [normalizationRecMBind]
     rw [annotatedPiWhnfCoreDomainCheap fuel]
     simp only
@@ -5221,12 +5221,12 @@ private theorem annotatedPiIsDefEqCoreDomain
     cases hptr :
         (!(ptrEqExpr annotatedPiRawDomainKernel annotatedPiRawDomainKernel &&
           ptrEqExpr (.sort .zero) (.sort .zero)))
-    · simp only [Bool.false_eq_true, if_false]
+    · simp only [Bool.false_eq_true, ite_false]
       rw [normalizationRecMBind]
       rw [annotatedPiIsDefEqProofIrrelDomain fuel]
       simp only
       rw [show (LBool.undef != LBool.undef) = false by rfl]
-      simp only [Bool.false_eq_true, if_false]
+      simp only [Bool.false_eq_true, ite_false]
       rw [normalizationRecMBind]
       obtain ⟨m'', hlazy⟩ := annotatedPiLazyDeltaDomain fuel m
       rw [hlazy]
@@ -5234,7 +5234,7 @@ private theorem annotatedPiIsDefEqCoreDomain
         (annotatedPiOutParamUnfoldState
           (annotatedPiSortOneInferOnlyState m)) m'', ?_⟩
       rfl
-    · simp only [if_true]
+    · simp only [ite_true]
       obtain ⟨r, m', hquick', hr⟩ :=
         annotatedPiQuickIsDefEqDomainAny fuel m
       rw [normalizationRecMBind]
@@ -5243,17 +5243,17 @@ private theorem annotatedPiIsDefEqCoreDomain
       rcases hr with htrue | hundef
       · subst r
         rw [show (LBool.true != LBool.undef) = true by rfl]
-        simp only [if_true]
+        simp only [ite_true]
         refine ⟨({ success := m' } : TypeChecker.State), ?_⟩
         rfl
       · subst r
         rw [show (LBool.undef != LBool.undef) = false by rfl]
-        simp only [Bool.false_eq_true, if_false]
+        simp only [Bool.false_eq_true, ite_false]
         rw [normalizationRecMBind]
         rw [annotatedPiIsDefEqProofIrrelDomain fuel]
         simp only
         rw [show (LBool.undef != LBool.undef) = false by rfl]
-        simp only [Bool.false_eq_true, if_false]
+        simp only [Bool.false_eq_true, ite_false]
         rw [normalizationRecMBind]
         obtain ⟨m'', hlazy⟩ := annotatedPiLazyDeltaDomain fuel m'
         rw [hlazy]
@@ -5290,7 +5290,7 @@ private theorem annotatedPiDomain_isDefEqInner
   rw [show
     (annotatedPiRawDomainKernel == (.sort .zero : Expr)) = false by
       exact annotatedPiApp_beq_sort _ _ _]
-  simp only [Bool.false_eq_true, if_false, normalizationRecMBind]
+  simp only [Bool.false_eq_true, ite_false, normalizationRecMBind]
   rw [hcore']
   exact ⟨_, rfl⟩
 
@@ -5376,7 +5376,7 @@ private theorem annotatedPiInner_isDefEqM :
         annotatedPiCtorCandidateContext.toTypeChecker
         ({} : TypeChecker.State)) = .ok true
   unfold TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl _)]
+  rw [ite_eq_left (Expr.eqv_refl _)]
   rfl
 
 private theorem annotatedPiConst_checkTypeM (lctx : LocalContext) :
@@ -6114,13 +6114,13 @@ private theorem annotatedPi_checkPositivity :
   rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
       annotatedPiInnerKernel = true by
     exact annotatedPiInner_stats_hasIndOcc]
-  simp only [Bool.not_true, Bool.false_eq_true, if_false, Pure.pure]
+  simp only [Bool.not_true, Bool.false_eq_true, ite_false, Pure.pure]
   unfold annotatedPiInnerKernel
   simp only
   rw [show AddInductive.hasIndOcc annotatedPiInductiveStats.indConsts
       annotatedPiRawDomainKernel = false by
     exact annotatedPiRawDomain_hasIndOcc_false]
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   simpa [withLocalDecl, annotatedPiInnerBodyCandidateContext,
     withFreshId, MonadLocalNameGenerator.withFreshId,
     MonadWithReader.withReader, withTheReader,
@@ -6309,7 +6309,7 @@ private theorem annotatedPi_checkConstructors :
   rw [AddInductive.liftTypeChecker_apply]
   rw [annotatedPiInner_ensureTypeM_expanded]
   simp only [Except.bind]
-  rw [if_pos (show AddInductive.levelStructGe
+  rw [ite_eq_left (show AddInductive.levelStructGe
       annotatedPiInductiveStats.resultLevel
       (Expr.sort (.succ .zero)).sortLevel! = true from rfl)]
   simp only [Bool.not_false, ↓reduceIte, ReaderT.bind, Bind.bind, Except.bind]
@@ -7085,7 +7085,7 @@ private theorem isDefEqSort
         .ok (true, state) := by
   refine ⟨initial, ?_⟩
   unfold TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl _)]
+  rw [ite_eq_left (Expr.eqv_refl _)]
   rfl
 
 private theorem inferTypeRecAliasInitial :
@@ -7124,7 +7124,7 @@ theorem aliasRecField_checkType :
       .ok (.sort (.succ .zero), state)
   rw [aliasRecFieldKernelExpr_eq]
   unfold TypeChecker.Inner.inferType'
-  simp only [aliasRecField_noLooseBVars, Bool.false_eq_true, if_false, cond, normalizationRecMGet,
+  simp only [aliasRecField_noLooseBVars, Bool.false_eq_true, ite_false, cond, normalizationRecMGet,
     Std.HashMap.getElem?_empty, normalizationRecMBind]
   rw [inferTypeRecAliasInitial]
   simp only
@@ -7135,7 +7135,7 @@ theorem aliasRecField_checkType :
     isDefEqSort aliasRecNormalizationRawContext
       (aliasRecFieldArgState (aliasRecFieldFnState {}))
   dsimp only
-  rw [if_neg (show ¬((Expr.const ``AliasRec []).isAppOfArity
+  rw [ite_eq_right (show ¬((Expr.const ``AliasRec []).isAppOfArity
       `eagerReduce 2 = true) from by
     simp [aliasRecFamily_notEagerReduce])]
   simp only [aliasRecFieldFnType_bindingDomain,
@@ -7678,7 +7678,7 @@ private theorem aliasFormerPreFamilySafetyRun :
           aliasFormerCandidateContext (.sort (.succ .zero)) [] =
         .ok spineTrace := by
     unfold AddInductive.ConstructorPreFamilyIndexSpineTrace.build
-    rw [dif_pos sortTerminal, sortCheckedRun]
+    rw [dite_eq_left sortTerminal, sortCheckedRun]
     rfl
   obtain ⟨targetSpineTrace, targetSpineRun⟩ :
       ∃ targetSpineTrace : AddInductive.ConstructorPreFamilyIndexSpineTrace
@@ -7706,7 +7706,7 @@ private theorem aliasFormerPreFamilySafetyRun :
     rw [inductiveFuel]
     rw [show 1000 = 999 + 1 by rfl]
     simp only [AddInductive.ConstructorPreFamilyViewTrace.build]
-    rw [dif_pos valid, dif_pos independent]
+    rw [dite_eq_left valid, dite_eq_left independent]
     rw [targetSpineRun]
     exact ⟨_, rfl⟩
   obtain ⟨listTrace, listRun⟩ : ∃ listTrace,
@@ -7726,7 +7726,7 @@ private theorem aliasFormerPreFamilySafetyRun :
             AddInductive.CandidateConstructor [])).viewTranslationUnique) =
         true := by
     rfl
-  rw [if_pos translationUnique]
+  rw [ite_eq_left translationUnique]
   simp [parametersRun, listRun, Bind.bind, Except.bind,
     Except.pure, Pure.pure]
 
@@ -8747,7 +8747,7 @@ private theorem annotatedPiInnerView_isDefEqForall
   rw [show
     (annotatedPiRawDomainKernel == (.sort .zero : Expr)) = false by
       exact annotatedPiApp_beq_sort _ _ _]
-  simp only [Bool.false_eq_true, if_false, pure_bind,
+  simp only [Bool.false_eq_true, ite_false, pure_bind,
     normalizationRecMBind]
   rw [domainRun']
   simp [TypeChecker.Inner.isDefEqForall, TypeChecker.Inner.isDefEq, Expr.hasLooseBVars,
@@ -8814,7 +8814,7 @@ private theorem annotatedPiInnerView_isDefEqInner :
           (.const ``AnnotatedPi []) .default) = false
       rw [Expr.eqv_eq]
       rfl]
-  simp only [Bool.false_eq_true, if_false, normalizationRecMBind]
+  simp only [Bool.false_eq_true, ite_false, normalizationRecMBind]
   rw [coreRun]
   exact ⟨_, rfl⟩
 
@@ -9711,7 +9711,7 @@ private theorem annotatedPiPreFamilySafetyRun :
           annotatedPiInductiveStats 0 (.sort (.succ .zero)) nestedContext
           (.const ``AnnotatedPi []) 999 = .ok targetTrace := by
     simp only [AddInductive.ConstructorPreFamilyRecursiveTrace.build]
-    rw [dif_pos valid, nestedTargetSpineRun]
+    rw [dite_eq_left valid, nestedTargetSpineRun]
     rfl
   obtain ⟨recursiveTailTrace, recursiveTailRun⟩ :
       ∃ recursiveTailTrace :
@@ -9751,7 +9751,7 @@ private theorem annotatedPiPreFamilySafetyRun :
     simp only [Bind.bind, Except.bind]
     rw [annotations.observe_eq]
     simp only []
-    rw [dif_pos rootFresh]
+    rw [dite_eq_left rootFresh]
     rw [recursiveTailRun]
     rfl
   have resultIndependent : AddInductive.constructorIndependentOf
@@ -9785,7 +9785,7 @@ private theorem annotatedPiPreFamilySafetyRun :
           [annotatedPiFamilyCandidateContext.freshFVarId] true 999 =
         .ok terminalTrace := by
     simp only [AddInductive.ConstructorPreFamilyViewTrace.build]
-    rw [dif_pos valid, dif_pos resultIndependent, resultTargetSpineRun]
+    rw [dite_eq_left valid, dite_eq_left resultIndependent, resultTargetSpineRun]
     rfl
   obtain ⟨viewTailTrace, viewTailRun⟩ :
       ∃ viewTailTrace : AddInductive.ConstructorPreFamilyViewTrace
@@ -9833,10 +9833,10 @@ private theorem annotatedPiPreFamilySafetyRun :
       · rename_i nonrecursive
         rw [recursive] at nonrecursive
         contradiction
-      · rw [dif_pos fieldIndependent]
+      · rw [dite_eq_left fieldIndependent]
         rw [recursiveRun]
         simp only [Bind.bind, Except.bind]
-        rw [dif_pos rootFresh]
+        rw [dite_eq_left rootFresh]
         rw [viewTailRun]
         rfl
   have candidateViewEq : annotatedPiConstructorCandidate.type.view =
@@ -9890,7 +9890,7 @@ private theorem annotatedPiPreFamilySafetyRun :
       annotatedPiDomainCandidateTrace, annotatedPiInnerBodyCandidateTrace,
       annotatedPiOuterBodyCandidateTrace,
       annotatedPiConst_abstract_singleton]
-  rw [if_pos translationUnique]
+  rw [ite_eq_left translationUnique]
   rw [parametersRun]
   simp only [Bind.bind, Except.bind]
   rw [listRun]

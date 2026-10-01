@@ -116,7 +116,7 @@ theorem inst_liftN1 : ∀ (e a : VExpr) (k : Nat), (e.liftN 1 k).inst a k = e :=
     split
     · rfl
     · next h =>
-      rw [if_neg (by omega), if_neg (by omega)]
+      rw [ite_eq_right (by omega), ite_eq_right (by omega)]
       congr 1; omega
   | sort | const => rfl
   | app f b ihf ihb => simp [liftN, inst, ihf, ihb]
@@ -353,7 +353,7 @@ theorem instRev_bvar_ge : ∀ (es : List VExpr) {i : Nat}, es.length ≤ i →
     rw [show (VExpr.bvar i).inst e es.length = .bvar (i-1) from by
         show VExpr.instVar i e es.length = _
         unfold VExpr.instVar
-        rw [if_neg (by omega), if_neg (by omega)],
+        rw [ite_eq_right (by omega), ite_eq_right (by omega)],
       instRev_bvar_ge es (by omega)]
     congr 1
     simp only [List.length_cons]
@@ -376,7 +376,7 @@ theorem instRev_bvar_lt_cons (es : List VExpr) (e : VExpr) {i : Nat} (hi : i < e
   congr 1
   show VExpr.instVar i e es.length = .bvar i
   unfold VExpr.instVar
-  rw [if_pos hi]
+  rw [ite_eq_left hi]
 
 theorem mem_bvarRevRange : ∀ {m off : Nat} {x : VExpr}, x ∈ bvarRevRange off m →
     ∃ i, x = .bvar i ∧ off ≤ i ∧ i < off + m
@@ -399,7 +399,7 @@ theorem map_instRev_bvarRevRange : ∀ (es : List VExpr),
         show (VExpr.bvar es.length).inst e es.length = e.liftN es.length from by
           show VExpr.instVar es.length e es.length = _
           unfold VExpr.instVar
-          rw [if_neg (Nat.lt_irrefl _), if_pos rfl]]
+          rw [ite_eq_right (Nat.lt_irrefl _), ite_eq_left rfl]]
       exact instRev_liftN_len es e
     · rw [List.map_congr_left fun x hx => ?_, map_instRev_bvarRevRange es]
       obtain ⟨i, rfl, -, h2⟩ := mem_bvarRevRange hx
@@ -1582,17 +1582,17 @@ theorem _root_.Lean4Lean.VExpr.liftN_succ_inst_bvar (e : VExpr) :
     show VExpr.instVar (liftVar (s+1) j (k+1)) (.bvar s) k = .bvar (liftVar s j k)
     unfold liftVar
     rcases Nat.lt_trichotomy j k with h | rfl | h
-    · rw [if_pos (Nat.lt_succ_of_lt h), if_pos h]
+    · rw [ite_eq_left (Nat.lt_succ_of_lt h), ite_eq_left h]
       simp [VExpr.instVar, h]
-    · rw [if_pos (Nat.lt_succ_self _), if_neg (Nat.lt_irrefl _)]
+    · rw [ite_eq_left (Nat.lt_succ_self _), ite_eq_right (Nat.lt_irrefl _)]
       show VExpr.instVar j (.bvar s) j = _
       rw [show VExpr.instVar j (.bvar s) j = (VExpr.bvar s).liftN j from by
-        unfold VExpr.instVar; rw [if_neg (Nat.lt_irrefl _), if_pos rfl]]
+        unfold VExpr.instVar; rw [ite_eq_right (Nat.lt_irrefl _), ite_eq_left rfl]]
       show VExpr.bvar (liftVar j s) = _
       rw [liftVar_base, Nat.add_comm]
-    · rw [if_neg (by omega), if_neg (by omega)]
+    · rw [ite_eq_right (by omega), ite_eq_right (by omega)]
       simp only [VExpr.instVar]
-      rw [if_neg (by omega), if_neg (by omega)]
+      rw [ite_eq_right (by omega), ite_eq_right (by omega)]
       congr 1; omega
   | sort | const => intros; rfl
   | app f a ihf iha => simp [VExpr.liftN, VExpr.inst, ihf, iha]

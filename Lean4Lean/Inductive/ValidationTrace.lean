@@ -131,11 +131,11 @@ theorem run
       rw [whnf]
       simp only [Except.bind]
       rw [occurs]
-      simp only [Bool.not_true, Bool.false_eq_true, if_false,
+      simp only [Bool.not_true, Bool.false_eq_true, ite_false,
         ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
         Except.bind, Except.pure]
       rw [domainFree]
-      simp only [Bool.false_eq_true, if_false, withLocalDecl_apply]
+      simp only [Bool.false_eq_true, ite_false, withLocalDecl_apply]
       exact ih
   | target context source result fuel targetIdx whnf occurs terminal valid =>
       unfold checkPositivity.loop
@@ -143,7 +143,7 @@ theorem run
       rw [whnf]
       simp only [Except.bind]
       rw [occurs]
-      simp only [Bool.not_true, Bool.false_eq_true, if_false,
+      simp only [Bool.not_true, Bool.false_eq_true, ite_false,
         ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
         Except.bind, Except.pure]
       cases result <;>
@@ -174,7 +174,7 @@ theorem exists_of_run
           | false => exact ⟨.absent context source result fuel hwhnf hocc⟩
           | true =>
             rw [hocc] at success
-            simp only [Bool.not_true, Bool.false_eq_true, if_false,
+            simp only [Bool.not_true, Bool.false_eq_true, ite_false,
               ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
               Except.bind, Except.pure] at success
             cases result
@@ -183,7 +183,7 @@ theorem exists_of_run
                 cases hdomain : hasIndOcc stats.indConsts domain with
                 | false =>
                   rw [hdomain] at success
-                  simp only [Bool.false_eq_true, if_false,
+                  simp only [Bool.false_eq_true, ite_false,
                     withLocalDecl_apply] at success
                   obtain ⟨tail⟩ := ih success
                   exact ⟨.forallE context source fuel name domain body
@@ -272,7 +272,7 @@ theorem buildExecution_ok_of_run
         next hoccurs => exact ⟨_, rfl⟩
         next hoccurs =>
           rw [hoccurs] at success
-          simp only [Bool.not_true, Bool.false_eq_true, if_false,
+          simp only [Bool.not_true, Bool.false_eq_true, ite_false,
             ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
             Except.bind, Except.pure] at success
           cases result <;> simp only [Expr.isForall] <;> simp only at success
@@ -347,7 +347,7 @@ theorem run
   cases trace with
   | skipped h => simp [h, ReaderT.pure, Pure.pure, Except.pure]
   | safe h trace =>
-      simp only [h, Bool.not_false, if_true]
+      simp only [h, Bool.not_false, ite_true]
       unfold checkPositivity
       simpa only [readThe, MonadReaderOf.read, ReaderT.read,
         ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
@@ -386,7 +386,7 @@ theorem exists_of_run
       stats isUnsafe ctor argIdx context source) := by
   cases hUnsafe : isUnsafe with
   | false =>
-      simp only [hUnsafe, Bool.not_false, if_true] at success
+      simp only [hUnsafe, Bool.not_false, ite_true] at success
       unfold checkPositivity at success
       simp only [readThe, MonadReaderOf.read, ReaderT.read,
         ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
@@ -420,7 +420,7 @@ theorem buildExecution_ok_of_run
   cases isUnsafe with
   | true => exact ⟨_, rfl⟩
   | false =>
-      simp only [Bool.not_false, if_true] at success
+      simp only [Bool.not_false, ite_true] at success
       unfold checkPositivity at success
       simp only [readThe, MonadReaderOf.read, ReaderT.read,
         ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
@@ -520,7 +520,7 @@ theorem run
       rw [parameterTypeRun]
       simp only [Except.bind, liftTypeChecker_apply]
       rw [defeq]
-      simp only [if_true, ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
+      simp only [ite_true, ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
         Except.bind, Except.pure]
       exact ih
   | ordinary context fuel argIdx name domain body binderInfo sortResult noParameter
@@ -546,12 +546,12 @@ theorem run
       cases universeTrace with
       | structural valid =>
           rw [valid]
-          simp only [if_true, ReaderT.pure, Pure.pure,
+          simp only [ite_true, ReaderT.pure, Pure.pure,
             ReaderT.bind, Bind.bind, Except.bind, Except.pure]
           exact restRun
       | fallback structuralFailed valid =>
           rw [structuralFailed, valid]
-          simp only [Bool.true_eq_false, Bool.not_true, if_false,
+          simp only [Bool.true_eq_false, Bool.not_true, ite_false,
             Bool.false_eq_true,
             ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
             Except.bind, Except.pure]
@@ -602,7 +602,7 @@ theorem exists_of_run
                         change Except.error _ = Except.ok () at success
                         contradiction
                     | true =>
-                        simp only [if_true, ReaderT.pure, Pure.pure,
+                        simp only [ite_true, ReaderT.pure, Pure.pure,
                           ReaderT.bind, Bind.bind, Except.bind,
                           Except.pure] at success
                         obtain ⟨tail⟩ := ih success
@@ -636,7 +636,7 @@ theorem exists_of_run
                       (.forallE name domain body binderInfo) argIdx (fuel + 1)) := by
                   cases isUnsafe with
                   | false =>
-                      simp only [Bool.not_false, if_true,
+                      simp only [Bool.not_false, ite_true,
                         ReaderT.bind, Bind.bind] at restSuccess
                       cases hpos : checkPositivity stats domain ctor argIdx context with
                       | error err => simp_all [Except.bind]
@@ -658,7 +658,7 @@ theorem exists_of_run
                             binderInfo sortResult hparam hensure universeTrace
                             (.safe rfl positivityTrace) tail⟩
                   | true =>
-                      simp only [Bool.not_true, if_false,
+                      simp only [Bool.not_true, ite_false,
                         ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
                         Except.bind, Except.pure,
                         withLocalDecl_apply] at restSuccess
@@ -670,13 +670,13 @@ theorem exists_of_run
                     sortResult.sortLevel! with
                 | true =>
                     rw [hstruct] at success
-                    simp only [if_true, ReaderT.pure, Pure.pure,
+                    simp only [ite_true, ReaderT.pure, Pure.pure,
                       ReaderT.bind, Bind.bind, Except.bind,
                       Except.pure] at success
                     exact finish (.structural hstruct) success
                 | false =>
                     rw [hstruct] at success
-                    simp only [Bool.false_eq_true, if_false] at success
+                    simp only [Bool.false_eq_true, ite_false] at success
                     cases hfallback :
                         (stats.resultLevel.isAlwaysZero ||
                           stats.resultLevel.geq sortResult.sortLevel!) with
@@ -686,7 +686,7 @@ theorem exists_of_run
                         contradiction
                     | true =>
                         rw [hfallback] at success
-                        simp only [Bool.true_eq_false, Bool.not_true, if_false,
+                        simp only [Bool.true_eq_false, Bool.not_true, ite_false,
                           ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
                           Except.bind, Except.pure] at success
                         exact finish (.fallback hstruct hfallback) success
@@ -817,7 +817,7 @@ theorem buildExecution_ok_of_run
               contradiction
             next heq2 =>
               rw [heq2] at success
-              simp only [Except.bind, if_true, ReaderT.pure, Pure.pure,
+              simp only [Except.bind, ite_true, ReaderT.pure, Pure.pure,
                 ReaderT.bind, Bind.bind, Except.pure] at success
               obtain ⟨tail, htail⟩ := ih success
               rw [htail]
@@ -852,7 +852,7 @@ theorem buildExecution_ok_of_run
               intro restSuccess
               cases isUnsafe with
               | false =>
-                  simp only [Bool.not_false, if_true,
+                  simp only [Bool.not_false, ite_true,
                     ReaderT.bind, Bind.bind] at restSuccess
                   cases hpos : checkPositivity stats domain ctor argIdx
                       context with
@@ -870,7 +870,7 @@ theorem buildExecution_ok_of_run
                       exact ⟨ConstructorPositivityModeTrace.buildExecution_ok_of_run
                         hpmSuccess, ih restSuccess⟩
               | true =>
-                  simp only [Bool.not_true, if_false,
+                  simp only [Bool.not_true, ite_false,
                     ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
                     Except.bind, Except.pure,
                     withLocalDecl_apply] at restSuccess
@@ -884,14 +884,14 @@ theorem buildExecution_ok_of_run
             split
             next hstruct =>
               rw [hstruct] at success
-              simp only [if_true, ReaderT.pure, Pure.pure,
+              simp only [ite_true, ReaderT.pure, Pure.pure,
                 ReaderT.bind, Bind.bind, Except.bind, Except.pure] at success
               obtain ⟨⟨positivity, hpm⟩, tail, htail⟩ := finish success
               rw [hpm, htail]
               exact ⟨_, rfl⟩
             next hstruct =>
               rw [hstruct] at success
-              simp only [Bool.false_eq_true, if_false] at success
+              simp only [Bool.false_eq_true, ite_false] at success
               split
               next hfallback =>
                 rw [hfallback] at success
@@ -899,7 +899,7 @@ theorem buildExecution_ok_of_run
                 contradiction
               next hfallback =>
                 rw [hfallback] at success
-                simp only [Bool.true_eq_false, Bool.not_true, if_false,
+                simp only [Bool.true_eq_false, Bool.not_true, ite_false,
                   ReaderT.pure, Pure.pure, ReaderT.bind, Bind.bind,
                   Except.bind, Except.pure] at success
                 obtain ⟨⟨positivity, hpm⟩, tail, htail⟩ := finish success
@@ -1157,7 +1157,7 @@ theorem fold_run
       unfold checkConstructorFold
       simp only
       rw [fresh]
-      simp only [Bool.false_eq_true, if_false,
+      simp only [Bool.false_eq_true, ite_false,
         ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
         Except.bind, Except.pure]
       rw [closed]
@@ -1193,7 +1193,7 @@ theorem exists_of_fold_run
           contradiction
       | false =>
           rw [hfresh] at success
-          simp only [Bool.false_eq_true, if_false,
+          simp only [Bool.false_eq_true, ite_false,
             ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
             Except.bind, Except.pure] at success
           cases hclosed : context.env.checkNoMVarNoFVar
@@ -1261,7 +1261,7 @@ theorem buildExecution_ok_of_fold_run
         contradiction
       next hfresh =>
         rw [hfresh] at success
-        simp only [Bool.false_eq_true, if_false,
+        simp only [Bool.false_eq_true, ite_false,
           ReaderT.bind, Bind.bind, ReaderT.pure, Pure.pure,
           Except.bind, Except.pure] at success
         split

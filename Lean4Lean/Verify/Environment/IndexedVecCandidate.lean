@@ -103,7 +103,7 @@ theorem candidateIsDefEqSelfValid
         (Lean4Lean.TypeChecker.Methods.withFuel (fuel + 1))
         context.toTypeChecker ({} : Lean4Lean.TypeChecker.State)) = .ok true
   unfold Lean4Lean.TypeChecker.Inner.isDefEq
-  rw [if_pos (Expr.eqv_refl e)]
+  rw [ite_eq_left (Expr.eqv_refl e)]
   rfl
 
 def indexedVecTypeCheckerContext

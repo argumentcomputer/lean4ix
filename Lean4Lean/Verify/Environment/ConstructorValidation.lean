@@ -478,7 +478,7 @@ theorem checkConstructorAlignedExpr.exists_of_run
     ∃ checked : ConstructorCheckedExpr context source,
       checkConstructorAlignedExpr context source = .ok checked := by
   unfold checkConstructorAlignedExpr
-  rw [dif_pos hfvars, dif_pos hmvars]
+  rw [dite_eq_left hfvars, dite_eq_left hmvars]
   rw [observeCandidateCheckType_of_run context source inferred hrun]
   exact ⟨_, rfl⟩
 
@@ -497,7 +497,7 @@ theorem ConstructorCheckedExpr.check_eq
   have hmvars : source.hasMVar = false :=
     fvarsIn_iff_hasMVar.mp (fvarsIn_iff.mp checked.fvars).2
   unfold checkConstructorAlignedExpr
-  rw [dif_pos hfvars, dif_pos hmvars]
+  rw [dite_eq_left hfvars, dite_eq_left hmvars]
   rw [observeCandidateCheckType_of_run context source
     checked.observation.inferred checked.observation.valid]
   cases checked
@@ -2349,7 +2349,7 @@ theorem ConstructorPreFamilyIndexSpineTrace.build_eq
   induction trace with
   | nil expected expectedCheck terminal =>
       simp only [ConstructorPreFamilyIndexSpineTrace.build]
-      rw [dif_pos terminal, expectedCheck.check_eq]
+      rw [dite_eq_left terminal, expectedCheck.check_eq]
       rfl
   | cons name domain body binderInfo argument arguments
       expectedCheck step tail ih =>
@@ -2666,7 +2666,7 @@ theorem ConstructorPreFamilyRecursiveTrace.forallE_build_eq
   simp only [Bind.bind, Except.bind]
   rw [annotations.observe_eq]
   simp only []
-  rw [dif_pos fresh, tailRun]
+  rw [dite_eq_left fresh, tailRun]
   rfl
 
 theorem ConstructorPreFamilyRecursiveTrace.target_build_eq
@@ -2680,7 +2680,7 @@ theorem ConstructorPreFamilyRecursiveTrace.target_build_eq
   cases source <;> simp only [ConstructorPreFamilyRecursiveTrace.build]
   case forallE => simp [Expr.isForall] at terminal
   all_goals
-    rw [dif_pos valid, spine.build_eq]
+    rw [dite_eq_left valid, spine.build_eq]
     rfl
 
 /-!
@@ -3091,7 +3091,7 @@ theorem ConstructorPreFamilyViewTrace.terminal_build_eq
   cases source <;> simp only [ConstructorPreFamilyViewTrace.build]
   case forallE => simp [Expr.isForall] at terminal
   all_goals
-    rw [dif_pos valid, dif_pos independent, spine.build_eq]
+    rw [dite_eq_left valid, dite_eq_left independent, spine.build_eq]
     rfl
 
 /-!

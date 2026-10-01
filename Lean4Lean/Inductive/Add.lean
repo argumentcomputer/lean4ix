@@ -1130,7 +1130,7 @@ theorem checkInductiveTypes_loop_of_candidate
         .ok bodyCandidate.rootWhnf at hvalid
       rw [show fuel = (fuel - 1) + 1 by omega]
       simp only [rootWhnf, checkInductiveTypes.loopInd.loop,
-        Nat.lt_irrefl, if_false, withLocalDecl_apply]
+        Nat.lt_irrefl, ite_false, withLocalDecl_apply]
       rw [← hmatch]
       simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
       rw [hvalid]
@@ -1152,7 +1152,7 @@ theorem checkInductiveTypes_loop_of_candidate
           (TypeChecker.whnf (body.instantiate1 context.freshExpr)) =
         .ok bodyCandidate.rootWhnf at hvalid
       rw [show fuel = (fuel - 1) + 1 by omega]
-      simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil, if_true,
+      simp only [rootWhnf, checkInductiveTypes.loopInd.loop, hil, ite_true,
         hempty, withLocalDecl_apply]
       rw [← hmatch]
       simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
@@ -1223,7 +1223,7 @@ theorem checkInductiveTypes_singleton_of_candidate
     ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
   rw [checkInductiveTypes.loopInd.eq_1]
   have hsize : 0 < #[indType].size := by simp
-  rw [dif_pos hsize]
+  rw [dite_eq_left hsize]
   rw [show #[indType][0] = indType by rfl]
   simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
     ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind,
@@ -1239,14 +1239,14 @@ theorem checkInductiveTypes_singleton_of_candidate
   simp only [ReaderT.bind, Bind.bind, liftTypeChecker_apply]
   rw [hensure]
   simp only [Except.bind]
-  rw [if_pos (show ((InductiveStats.initial
+  rw [ite_eq_left (show ((InductiveStats.initial
       (List.map Level.param context.lparams)).indConsts).isEmpty = true from
     rfl)]
   simp only [Expr.sortLevel!, InductiveStats.initial, Nat.zero_add]
   simp only [ReaderT.bind, Bind.bind, Except.pure, Except.bind]
   rw [checkInductiveTypes.loopInd.eq_1]
   have hdone : ¬1 < #[indType].size := by simp
-  rw [dif_neg hdone]
+  rw [dite_eq_right hdone]
   simp only [readThe, MonadReader.read, MonadReaderOf.read, ReaderT.read,
     ReaderT.bind, Bind.bind, Pure.pure, Except.pure, Except.bind]
   simp [singletonCandidateInductiveStats, hterminalLparams,

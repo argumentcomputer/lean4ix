@@ -369,7 +369,7 @@ private theorem candidateReduceNatFVarAppFVar_none
   have hfn : (.app (.fvar fnId) (.fvar argId) : Expr).appFn! =
       .fvar fnId := by rfl
   rw [hnargs, hfn]
-  simp only [show (1 == 1) = true by decide, if_true]
+  simp only [show (1 == 1) = true by decide, ite_true]
   rw [show Expr.structuralEq (.fvar fnId) (.const ``Nat.succ []) = false by
     rfl]
   rfl
@@ -594,7 +594,7 @@ private theorem candidateUnfoldDefinitionConstFVarFVar_none
         (.fvar arg2) : Expr).getAppFn = .const constName levels := by
     rfl
   rw [hisApp, hfn]
-  simp only [if_true, ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
+  simp only [ite_true, ReaderT.bind, StateT.bind, Except.bind, Bind.bind]
   rw [candidateUnfoldDefinitionCoreConst_none context constName levels
     state info hfind]
   simp [ReaderT.pure, StateT.pure, Except.pure, Pure.pure]
